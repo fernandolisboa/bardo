@@ -21,7 +21,7 @@ Automatic publishing depends on each platform's API access rules, which are outs
 
 ## Consequences
 
-- Actions for the owner, to start in parallel with development because they gate public posting:
+- Actions for the owner, which gate public posting. Deferred until creation and editing are usable (see ADR-0002):
   1. Google Cloud project with YouTube Data API v3 enabled, OAuth consent screen, then the YouTube API audit request.
   2. TikTok for Developers app with Content Posting API, then the audit request.
   3. Instagram Professional account and a Meta app with Instagram publishing; add the owner's account as an app role (no App Review needed for own use).

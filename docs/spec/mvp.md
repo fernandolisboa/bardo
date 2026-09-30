@@ -124,4 +124,5 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 4. Secrets store over Windows Credential Manager.
 5. ffmpeg spike: proxy generation, preview frames, render of a two-clip, two-track timeline. Biggest technical risk; start early.
 6. GPUI spike (after Context7 docs check): timeline view driven by `app` state.
-7. YouTube adapter: OAuth, upload, `publishAt`, metrics. Start the audit request in parallel.
+
+Publishing work (network adapters, OAuth, platform audit requests) starts only once creation and editing are at least usable end to end (owner decision, 2026-09-30). Until then, export covers getting a video out.
