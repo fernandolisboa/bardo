@@ -40,11 +40,11 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Templates: versioned, editable templates for script, title, description, image prompt, video prompt, narration direction and music prompt. Each generation records the template version used.
 - Generation, each step reviewable and editable before the next:
   1. Script (Claude) from niche + theme + persona + channel aesthetic.
-  2. Narration (ElevenLabs) from the approved script with the persona's voice.
-  3. Transcript with word timestamps (Whisper) from the narration.
-  4. Scene plan and prompts (Claude), one per scene.
-  5. Images (Nano Banana) and video clips (one video provider in the MVP, behind the video adapter).
-  6. Music: prompt generated; audio imported by the user.
+  2. Narration (ElevenLabs) from the approved script with the persona's voice. The same call returns the word timings of the script text, so generated narration needs no speech-to-text.
+  3. Scene plan and prompts (Claude), one per scene.
+  4. Images (Nano Banana) and video clips (one video provider in the MVP, behind the video adapter).
+  5. Music: prompt generated; audio imported by the user.
+- Imported narration (e.g. the user's own recording) gets word timings from the alignment adapter: forced alignment when the script text is known, speech-to-text with timestamps otherwise. Not on the critical path; can land late in the MVP.
 - Regenerate any single asset without redoing the rest.
 
 **Not in the MVP**
@@ -53,7 +53,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Music generation API.
 
 **Acceptance**
-- From an approved theme, the user reaches a project with script, narration, transcript and one asset per scene, editing any of them in between.
+- From an approved theme, the user reaches a project with script, narration with word timings and one asset per scene, editing any of them in between.
 - Every generated asset records provider, model, prompt and template version.
 - A provider failure on one asset leaves the rest intact and the job resumable.
 
@@ -61,12 +61,12 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 
 **In the MVP**
 - Timeline with one video track and three audio tracks (narration, music, SFX).
-- Manual cuts: split, trim, reorder, delete, with snapping to transcript words.
+- Manual cuts: split, trim, reorder, delete, with snapping to narration words.
 - Audio: per-track gain, mute/solo, fade in/out, ducking of music under narration with an adjustable amount.
-- Captions from the transcript: editable text and timing, a few burned-in styles per channel.
+- Captions from the word timings: editable text and timing, a few burned-in styles per channel.
 - Framing: 9:16 and 16:9 with per-clip crop/reframe position.
 - Preview playback from low-resolution proxies.
-- AI suggestions: JEV scores candidate cut points from the transcript; the user accepts or rejects each.
+- AI suggestions: JEV scores candidate cut points from the script and word timings; the user accepts or rejects each.
 - Render presets per network; final render as a job after a review screen (duration, resolution, loudness, captions on/off, target networks).
 
 **Not in the MVP**
@@ -112,7 +112,6 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 | Question | Default |
 | --- | --- |
 | Which video provider first (Higgsfield, Veo or Kling)? | Decide by a short spike comparing quality, cost and API access. |
-| Whisper: local (whisper.cpp) or API? | Local, to stay offline-first; API as a fallback adapter. |
 | Reference machine for performance targets | The owner's Windows PC; specs to be recorded. |
 | Default personas shipped with the app | Two per language (en-US, pt-BR) using provider stock voices. |
 

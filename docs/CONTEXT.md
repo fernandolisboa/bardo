@@ -12,6 +12,7 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Voice reference** | A pointer to a voice held by a voice provider (e.g. an ElevenLabs voice id). The voice itself never lives in Bardo. |
 | **Niche** | A content market (e.g. "space history"). Scored for competition and trend. |
 | **Theme** | A specific video idea inside a niche. |
+| **Word timings** | When each word of the narration is spoken. Comes with generated narration; computed by alignment for imported audio. Drives captions and cut snapping. |
 | **Template** | A versioned, editable prompt/plan used to generate a script, title, description or media prompt. |
 | **Video project** | One video in production: script, generated assets, timeline, per-network metadata and publications. |
 | **Asset** | Any media file in a project: generated image, video clip, narration, music, SFX or imported file. |
