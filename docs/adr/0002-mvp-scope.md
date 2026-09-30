@@ -16,4 +16,5 @@ The MVP includes **all four pillars**. Scope is controlled by the **depth** of e
 - The value of the product (the whole workflow in one place) is present from the first release.
 - The MVP is larger; the depth cuts in the spec are the main scope lever and must be defended in review.
 - Decisions that could otherwise wait (market data source, publishing networks, scheduling) had to be made up front: see ADR-0003 to ADR-0006.
-- The biggest technical risk (timeline + ffmpeg + GPUI) and the biggest external risk (platform audits) are both on the MVP path and should be started first.
+- The biggest technical risk (timeline + ffmpeg + GPUI) is on the MVP path and is started first.
+- Build order (owner decision, 2026-09-30): creation and editing first; publishing adapters and platform audit requests start once creation and editing are at least usable. Scope is unchanged, only the order.
