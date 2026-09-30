@@ -27,7 +27,7 @@ Bardo is a native Windows desktop app, single-user and offline-first. It orchest
 - **AI roles**:
   - JEV: typed decisions only (rank themes, score cut candidates, pick presets, quality gates). Text in, typed result out. Never generates content.
   - Claude API: scripts, titles, descriptions and prompts for media models.
-  - Image: Nano Banana (Gemini). Video: Higgsfield, Veo, Kling. Voice: ElevenLabs. STT: Whisper with timestamps.
+  - Image: Nano Banana (Gemini). Video: Higgsfield API first (it aggregates Kling, Seedance, Wan, MiniMax and others); direct Veo or Kling adapters possible later. Voice: ElevenLabs. STT: Whisper with timestamps.
 - **Secrets** live in Windows Credential Manager under the user's account. Never in files, the database or logs.
 - **Long jobs** (generation, render, upload, metrics sync) run in a persistent queue with progress, cancel and resume. Nothing blocks the UI thread.
 - **Performance** work targets ffmpeg, I/O and job concurrency, and only with measurements.

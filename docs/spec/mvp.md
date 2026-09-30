@@ -42,14 +42,14 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
   1. Script (Claude) from niche + theme + persona + channel aesthetic.
   2. Narration (ElevenLabs) from the approved script with the persona's voice. The same call returns the word timings of the script text, so generated narration needs no speech-to-text.
   3. Scene plan and prompts (Claude), one per scene.
-  4. Images (Nano Banana) and video clips (one video provider in the MVP, behind the video adapter).
+  4. Images (Nano Banana) and video clips through the Higgsfield API, the first video adapter. Higgsfield aggregates several models (Kling, Seedance, Wan, MiniMax and its own), so the model is a setting per channel with a per-scene override, and the scene screen shows the estimated cost before generating.
   5. Music: prompt generated; audio imported by the user.
 - Imported narration (e.g. the user's own recording) gets word timings from the alignment adapter: forced alignment when the script text is known, speech-to-text with timestamps otherwise. Not on the critical path; can land late in the MVP.
 - Regenerate any single asset without redoing the rest.
 
 **Not in the MVP**
 - In-app voice cloning (done in the provider's own flow).
-- More than one video provider wired up at once (the adapter interface supports all three).
+- Video providers other than Higgsfield (e.g. Veo through the Gemini API); the adapter interface allows adding them later.
 - Music generation API.
 
 **Acceptance**
@@ -111,7 +111,6 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 
 | Question | Default |
 | --- | --- |
-| Which video provider first (Higgsfield, Veo or Kling)? | Decide by a short spike comparing quality, cost and API access. |
 | Reference machine for performance targets | The owner's Windows PC; specs to be recorded. |
 | Default personas shipped with the app | Two per language (en-US, pt-BR) using provider stock voices. |
 
