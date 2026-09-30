@@ -74,7 +74,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Multiple video tracks / picture-in-picture.
 
 **Acceptance**
-- Timeline edits never block the UI; preview starts within one second on a 60 s project on the reference machine.
+- Timeline edits never block the UI; preview starts within one second on a 60 s project on the reference machine (proposed target, to confirm after the ffmpeg spike).
 - A render matches the preset's resolution, codec and duration limit, and integrated loudness is within the preset target.
 - Render can be cancelled and resumed.
 

@@ -1,4 +1,4 @@
-# ADR-0006: Scheduling scheduled publications
+# ADR-0006: Running scheduled publications
 
 - Status: Accepted
 - Date: 2026-09-30
