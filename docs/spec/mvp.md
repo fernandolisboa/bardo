@@ -1,6 +1,6 @@
 # MVP spec
 
-- Status: Draft, pending owner review
+- Status: Accepted (owner review closed 2026-10-01)
 - Date: 2026-09-30
 - Decisions: [ADR-0001](../adr/0001-architecture-and-stack.md) to [ADR-0006](../adr/0006-scheduling.md)
 
@@ -21,7 +21,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 **In the MVP**
 - Channels: create/edit with niche, themes, aesthetic notes, language, target country, default persona and network accounts.
 - Niche research: the user enters seed niches or keywords; a job queries the YouTube Data API and computes, per niche, competition (recent upload volume, median views, channel size spread) and trend (view velocity of recent uploads). Results are cached with their fetch date.
-- Theme suggestions: Claude proposes themes for a niche and channel; JEV ranks them with typed reasons (competition, trend, fit with channel, past performance when available). The user picks, edits or discards.
+- Theme suggestions: Claude proposes themes for a niche and channel; the decision engine ranks them with typed reasons (competition, trend, fit with channel, past performance when available). The user picks, edits or discards.
 - Manual publications: after posting an export by hand, the user marks it as posted and pastes the post URL. This creates a publication without an upload.
 - Metrics tracking (ADR-0004), in two steps:
   1. Public YouTube statistics (views, likes, comments) for every YouTube publication, manual or uploaded, through the Data API key. No OAuth; available during the creation phase.
@@ -70,7 +70,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Captions from the word timings: editable text and timing, a few burned-in styles per channel.
 - Framing: 9:16 and 16:9 with per-clip crop/reframe position.
 - Preview playback from low-resolution proxies.
-- AI suggestions: JEV scores candidate cut points from the script and word timings; the user accepts or rejects each.
+- AI suggestions: the decision engine scores candidate cut points from the script and word timings; the user accepts or rejects each.
 - Render presets per network; final render as a job after a review screen (duration, resolution, loudness, captions on/off, target networks).
 
 **Not in the MVP**
@@ -111,6 +111,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - ffmpeg bundled with the app; version pinned.
 - i18n: pt-BR and en-US resource files; no hard-coded UI strings.
 - Dependency lint: only `ui` depends on GPUI.
+- Decision engine: one domain interface with three typed questions (choice, score, yes/no), each answer with probabilities and confidence. The MVP adapter is JEV (TypeSafe HTTP API). Right after the MVP, a spike compares Laya (open weights, run locally through ONNX, no Python) against JEV on Bardo's own tasks and in pt-BR; if Laya wins it becomes the default and decisions run offline. Laya's short context means long scripts are scored in chunks.
 
 ## Reference machine
 

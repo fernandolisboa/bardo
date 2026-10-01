@@ -25,4 +25,4 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Budget** | A monthly spending limit the user sets per AI provider. Reaching it makes new jobs for that provider ask for confirmation. |
 | **Job** | A long-running task (generation, render, upload, metrics sync) in the queue, with progress, cancel and resume. |
 | **Metrics snapshot** | Post-publication statistics for one publication at a point in time (views, retention, engagement and, on YouTube, estimated revenue/CPM/RPM). |
-| **JEV** | Typed decision engine: ranks, scores and gates; never generates content. |
+| **Decision engine** | Answers typed questions (choice, score, yes/no) about a piece of content, with probabilities and confidence. Ranks, scores and gates; never generates content. Implemented by JEV (hosted) and, later, Laya (local). |
