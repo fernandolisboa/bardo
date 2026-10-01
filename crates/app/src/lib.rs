@@ -1,11 +1,19 @@
 //! Application state and use cases. The UI talks to Bardo only through this
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
+mod channels;
 pub mod i18n;
 
-use bardo_domain::{ProfileRepository, RepositoryError, UiLanguage, UserProfile};
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use bardo_domain::{
+    ChannelRepository, ProfileRepository, RepositoryError, UiLanguage, UserProfile,
+};
+use bardo_storage::Database;
 
 pub use bardo_domain;
+pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -14,9 +22,28 @@ pub enum AppError {
     Repository(#[from] RepositoryError),
 }
 
+/// The storage ports the app runs on. Each slice that adds a repository adds
+/// a field here; tests swap any of them for a fake.
+pub struct Repositories {
+    pub profiles: Box<dyn ProfileRepository>,
+    pub channels: Box<dyn ChannelRepository>,
+}
+
+impl Repositories {
+    /// Every port served by one SQLite database.
+    pub fn sqlite(db: Database) -> Self {
+        let db = Arc::new(db);
+        Self {
+            profiles: Box::new(Arc::clone(&db)),
+            channels: Box::new(db),
+        }
+    }
+}
+
 /// The running app for the local user profile.
 pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
+    channels: Box<dyn ChannelRepository>,
     profile: UserProfile,
     catalog: Catalog,
 }
@@ -25,9 +52,10 @@ impl Bardo {
     /// Loads the local profile, creating it on first start (no login).
     /// `system_locale` (e.g. `pt-BR`) picks the language of a new profile.
     pub fn start(
-        profiles: Box<dyn ProfileRepository>,
+        repositories: Repositories,
         system_locale: Option<&str>,
     ) -> Result<Self, AppError> {
+        let Repositories { profiles, channels } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
             None => {
@@ -39,6 +67,7 @@ impl Bardo {
         let catalog = Catalog::load(profile.ui_language);
         Ok(Self {
             profiles,
+            channels,
             profile,
             catalog,
         })
@@ -68,7 +97,7 @@ impl Bardo {
         Ok(())
     }
 
-    pub fn text(&self, text: Text) -> &str {
+    pub fn text(&self, text: Text) -> Cow<'_, str> {
         self.catalog.get(text)
     }
 }
@@ -112,7 +141,11 @@ mod tests {
     }
 
     fn start(profiles: &FakeProfiles, locale: Option<&str>) -> Bardo {
-        Bardo::start(Box::new(profiles.clone()), locale).unwrap()
+        let repositories = Repositories {
+            profiles: Box::new(profiles.clone()),
+            channels: Box::new(Arc::new(Database::open_in_memory().unwrap())),
+        };
+        Bardo::start(repositories, locale).unwrap()
     }
 
     #[test]
@@ -149,7 +182,7 @@ mod tests {
     #[test]
     fn switching_language_changes_every_string_without_restart() {
         let mut app = start(&FakeProfiles::default(), Some("en-US"));
-        let english = app.text(Text::AppTagline).to_owned();
+        let english = app.text(Text::AppTagline).into_owned();
 
         app.set_ui_language(UiLanguage::PtBr).unwrap();
 
@@ -189,8 +222,8 @@ mod tests {
 
     #[test]
     fn works_against_real_sqlite() {
-        let db = bardo_storage::Database::open_in_memory().unwrap();
-        let mut app = Bardo::start(Box::new(db), Some("en-US")).unwrap();
+        let db = Database::open_in_memory().unwrap();
+        let mut app = Bardo::start(Repositories::sqlite(db), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();
         assert_eq!(app.ui_language(), UiLanguage::PtBr);
     }

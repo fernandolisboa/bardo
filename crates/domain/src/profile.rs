@@ -1,7 +1,10 @@
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use uuid::Uuid;
+
+use crate::RepositoryError;
 
 /// Identifies a user profile. Every entity carries the owning profile so more
 /// profiles can exist later without a migration (ADR-0005).
@@ -93,10 +96,6 @@ impl UserProfile {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("profile storage failed: {0}")]
-pub struct RepositoryError(#[from] pub Box<dyn std::error::Error + Send + Sync>);
-
 /// Persistence port for user profiles.
 pub trait ProfileRepository {
     /// The profile the app starts with, if one was created before.
@@ -104,6 +103,17 @@ pub trait ProfileRepository {
 
     /// Inserts or updates the profile.
     fn save(&self, profile: &UserProfile) -> Result<(), RepositoryError>;
+}
+
+/// One storage adapter can serve several ports through a shared handle.
+impl<T: ProfileRepository + ?Sized> ProfileRepository for Arc<T> {
+    fn load_default(&self) -> Result<Option<UserProfile>, RepositoryError> {
+        (**self).load_default()
+    }
+
+    fn save(&self, profile: &UserProfile) -> Result<(), RepositoryError> {
+        (**self).save(profile)
+    }
 }
 
 #[cfg(test)]

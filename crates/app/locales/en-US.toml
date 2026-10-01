@@ -13,3 +13,60 @@ pt-BR = "Português (Brasil)"
 
 [error]
 language_not_saved = "Could not save the interface language. Try again."
+
+[content_language]
+en = "English"
+pt = "Portuguese"
+es = "Spanish"
+de = "German"
+fr = "French"
+
+[country]
+US = "United States"
+BR = "Brazil"
+CA = "Canada"
+GB = "United Kingdom"
+AU = "Australia"
+NZ = "New Zealand"
+IE = "Ireland"
+DE = "Germany"
+FR = "France"
+ES = "Spain"
+MX = "Mexico"
+PT = "Portugal"
+
+[channels]
+title = "Channels"
+empty = "No channels yet. Create one to aim research and generation at its audience."
+not_loaded = "Could not load your channels. Restart Bardo to try again."
+new = "New channel"
+
+[channel]
+new_title = "New channel"
+edit_title = "Edit channel"
+name = "Name"
+name_placeholder = "e.g. Space Archives"
+niche = "Niche"
+niche_placeholder = "e.g. space history"
+themes = "Themes"
+themes_placeholder = "Apollo program\nCold War space race"
+themes_hint = "One theme per line."
+aesthetic_notes = "Aesthetic notes"
+aesthetic_notes_placeholder = "Look, mood, pacing and references for this channel."
+language = "Content language"
+country = "Target country"
+country_search = "Search countries"
+create = "Create channel"
+save = "Save changes"
+saved = "Channel saved."
+
+[channel.error]
+name_required = "Give the channel a name."
+name_too_long = "Use at most 100 characters."
+niche_too_long = "Use at most 100 characters."
+too_many_themes = "Use at most 30 themes."
+theme_too_long = "Keep each theme to at most 100 characters."
+aesthetic_notes_too_long = "Use at most 2,000 characters."
+name_taken = "You already have a channel with this name."
+not_found = "This channel no longer exists."
+not_saved = "Could not save the channel. Try again."

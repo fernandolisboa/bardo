@@ -1,7 +1,10 @@
 use rusqlite::Connection;
 
 /// Ordered schema migrations. Append only: never edit a released migration.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_user_profile.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_user_profile.sql"),
+    include_str!("../migrations/0002_channel.sql"),
+];
 
 /// Applies every migration newer than the database's `user_version`, each in
 /// its own transaction.
@@ -33,6 +36,26 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         run(&mut conn).unwrap();
         assert_eq!(user_version(&conn), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn upgrading_keeps_existing_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'pt-BR')",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        assert_eq!(user_version(&conn), MIGRATIONS.len());
+        let language: String = conn
+            .query_row("SELECT ui_language FROM user_profile", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(language, "pt-BR");
     }
 
     #[test]
