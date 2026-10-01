@@ -13,3 +13,60 @@ pt-BR = "Português (Brasil)"
 
 [error]
 language_not_saved = "Não foi possível salvar o idioma da interface. Tente de novo."
+
+[content_language]
+en = "Inglês"
+pt = "Português"
+es = "Espanhol"
+de = "Alemão"
+fr = "Francês"
+
+[country]
+US = "Estados Unidos"
+BR = "Brasil"
+CA = "Canadá"
+GB = "Reino Unido"
+AU = "Austrália"
+NZ = "Nova Zelândia"
+IE = "Irlanda"
+DE = "Alemanha"
+FR = "França"
+ES = "Espanha"
+MX = "México"
+PT = "Portugal"
+
+[channels]
+title = "Canais"
+empty = "Nenhum canal ainda. Crie um para direcionar pesquisa e geração ao público dele."
+not_loaded = "Não foi possível carregar seus canais. Reinicie o Bardo para tentar de novo."
+new = "Novo canal"
+
+[channel]
+new_title = "Novo canal"
+edit_title = "Editar canal"
+name = "Nome"
+name_placeholder = "ex.: Arquivos do Espaço"
+niche = "Nicho"
+niche_placeholder = "ex.: história espacial"
+themes = "Temas"
+themes_placeholder = "Programa Apollo\nCorrida espacial na Guerra Fria"
+themes_hint = "Um tema por linha."
+aesthetic_notes = "Notas de estética"
+aesthetic_notes_placeholder = "Visual, clima, ritmo e referências deste canal."
+language = "Idioma do conteúdo"
+country = "País-alvo"
+country_search = "Buscar países"
+create = "Criar canal"
+save = "Salvar alterações"
+saved = "Canal salvo."
+
+[channel.error]
+name_required = "Dê um nome ao canal."
+name_too_long = "Use no máximo 100 caracteres."
+niche_too_long = "Use no máximo 100 caracteres."
+too_many_themes = "Use no máximo 30 temas."
+theme_too_long = "Cada tema pode ter no máximo 100 caracteres."
+aesthetic_notes_too_long = "Use no máximo 2.000 caracteres."
+name_taken = "Você já tem um canal com este nome."
+not_found = "Este canal não existe mais."
+not_saved = "Não foi possível salvar o canal. Tente de novo."

@@ -1,12 +1,14 @@
 //! SQLite persistence and migrations. Secrets access (Windows Credential
 //! Manager) lands with the provider keys slice.
 
+mod channel;
 mod migrations;
 mod profile;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
+use bardo_domain::RepositoryError;
 use rusqlite::Connection;
 
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +62,11 @@ impl Database {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
+
+/// Wraps an adapter error for the domain's repository ports.
+pub(crate) fn boxed(error: impl std::error::Error + Send + Sync + 'static) -> RepositoryError {
+    RepositoryError(Box::new(error))
 }
 
 /// `%APPDATA%\Bardo\bardo.db` on Windows (the platform's per-user data

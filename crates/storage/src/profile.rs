@@ -2,11 +2,7 @@ use bardo_domain::{ProfileId, ProfileRepository, RepositoryError, UiLanguage, Us
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
-use crate::Database;
-
-fn boxed(error: impl std::error::Error + Send + Sync + 'static) -> RepositoryError {
-    RepositoryError(Box::new(error))
-}
+use crate::{Database, boxed};
 
 impl ProfileRepository for Database {
     fn load_default(&self) -> Result<Option<UserProfile>, RepositoryError> {
