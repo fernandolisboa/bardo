@@ -20,6 +20,7 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Render preset** | Output format per network (aspect ratio, resolution, codec, bitrate, duration limits). |
 | **Render** | Producing the final media file from a timeline. Irreversible in cost/time; requires review. |
 | **Publication** | A render sent (or scheduled) to one network account, with its metadata and status. Requires review. |
+| **Manual publication** | A publication the user posted by hand from an export, linked to Bardo by its post URL so its metrics can be tracked. |
 | **Export** | A ready-to-post package (file in the network preset + metadata to copy) for manual posting. |
 | **Job** | A long-running task (generation, render, upload, metrics sync) in the queue, with progress, cancel and resume. |
 | **Metrics snapshot** | Post-publication statistics for one publication at a point in time (views, retention, engagement and, on YouTube, estimated revenue/CPM/RPM). |

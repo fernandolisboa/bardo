@@ -22,7 +22,10 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Channels: create/edit with niche, themes, aesthetic notes, language, target country, default persona and network accounts.
 - Niche research: the user enters seed niches or keywords; a job queries the YouTube Data API and computes, per niche, competition (recent upload volume, median views, channel size spread) and trend (view velocity of recent uploads). Results are cached with their fetch date.
 - Theme suggestions: Claude proposes themes for a niche and channel; JEV ranks them with typed reasons (competition, trend, fit with channel, past performance when available). The user picks, edits or discards.
-- Metrics tracking: a sync job pulls metrics snapshots for each publication (see ADR-0004) and shows them per video and per channel.
+- Manual publications: after posting an export by hand, the user marks it as posted and pastes the post URL. This creates a publication without an upload.
+- Metrics tracking (ADR-0004), in two steps:
+  1. Public YouTube statistics (views, likes, comments) for every YouTube publication, manual or uploaded, through the Data API key. No OAuth; available during the creation phase.
+  2. Owner metrics that need the network account's sign-in (YouTube Analytics revenue/CPM/RPM, retention; TikTok and Instagram metrics), shipped with the publishing work at the end of the MVP or right after it.
 
 **Not in the MVP**
 - Data sources other than YouTube for trend and competition.
@@ -31,7 +34,8 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 **Acceptance**
 - Given seed keywords, the user sees a ranked niche list with the numbers behind each score and when they were fetched.
 - Re-running research within the cache window costs no API quota.
-- A published YouTube video shows views and, for a monetized channel, estimated revenue/CPM/RPM after the next sync.
+- A YouTube video posted by hand and linked by URL shows views, likes and comments after the next sync.
+- Once owner metrics land, a monetized channel's videos also show estimated revenue/CPM/RPM.
 
 ## Pillar 2: Production
 
