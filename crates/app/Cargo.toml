@@ -13,6 +13,8 @@ bardo-media.workspace = true
 bardo-ai.workspace = true
 bardo-publish.workspace = true
 bardo-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 

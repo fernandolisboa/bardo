@@ -70,3 +70,41 @@ aesthetic_notes_too_long = "Use at most 2,000 characters."
 name_taken = "You already have a channel with this name."
 not_found = "This channel no longer exists."
 not_saved = "Could not save the channel. Try again."
+
+[jobs]
+title = "Jobs"
+empty = "No jobs yet. Long work such as generation and rendering shows up here."
+running = "Running"
+queued = "Queued"
+failed = "Failed"
+finished = "Finished"
+
+[jobs.test]
+title = "Test jobs"
+hint = "A ten-second countdown to try progress, cancel, retry and resuming after a restart."
+start = "Start test job"
+start_failing = "Start failing test job"
+
+[job]
+retry_scheduled = "Attempt {attempt} of {max} failed. Retrying automatically."
+failed_after = "Stopped after {attempts} attempts."
+cancel = "Cancel"
+retry = "Retry"
+
+[job.kind]
+countdown = "Test countdown"
+
+[job.state]
+queued = "Queued"
+running = "Running"
+failed = "Failed"
+cancelled = "Cancelled"
+done = "Done"
+
+[job.failure]
+simulated = "The test job failed on purpose."
+unexpected = "Something went wrong inside Bardo."
+
+[job.error]
+not_updated = "Could not update the job. Try again."
+not_started = "Could not start the job. Try again."

@@ -2,6 +2,7 @@
 //! Manager) lands with the provider keys slice.
 
 mod channel;
+mod job;
 mod migrations;
 mod profile;
 
