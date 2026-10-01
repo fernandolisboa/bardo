@@ -8,19 +8,40 @@ use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::channels::ChannelsScreen;
 use crate::jobs::JobsPanel;
+use crate::settings::SettingsScreen;
 
 /// A UI string in the active language.
 pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
     SharedString::from(bardo.text(text).into_owned())
 }
 
-/// The main window: top bar with the jobs toggle and the interface language
-/// switch, the channels screen below and the jobs panel on the right when
-/// open. `Bardo` lives in an entity so screens re-render when it changes
-/// (e.g. the language).
+/// The screens the top bar switches between.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Channels,
+    Settings,
+}
+
+impl Screen {
+    const ALL: [Screen; 2] = [Screen::Channels, Screen::Settings];
+
+    fn title(self) -> Text {
+        match self {
+            Screen::Channels => Text::ChannelsTitle,
+            Screen::Settings => Text::SettingsTitle,
+        }
+    }
+}
+
+/// The main window: top bar with the screen switch, the jobs toggle and the
+/// interface language switch, the current screen below and the jobs panel
+/// on the right when open. `Bardo` lives in an entity so screens re-render
+/// when it changes (e.g. the language).
 pub struct Shell {
     bardo: Entity<Bardo>,
+    screen: Screen,
     channels: Entity<ChannelsScreen>,
+    settings: Entity<SettingsScreen>,
     /// Kept alive while closed, so the toggle's count stays current.
     jobs: Entity<JobsPanel>,
     jobs_open: bool,
@@ -32,11 +53,14 @@ impl Shell {
     pub fn new(bardo: Bardo, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bardo = cx.new(|_| bardo);
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
+        let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let subscriptions = vec![cx.observe(&jobs, |_, _, cx| cx.notify())];
         Self {
             bardo,
+            screen: Screen::Channels,
             channels,
+            settings,
             jobs,
             jobs_open: false,
             error: None,
@@ -78,6 +102,21 @@ impl Render for Shell {
                 }
             }));
 
+        let screen_switch = ButtonGroup::new("screen")
+            .small()
+            .ghost()
+            .children(Screen::ALL.map(|screen| {
+                Button::new(("screen", screen as usize))
+                    .label(tr(bardo, screen.title()))
+                    .selected(screen == self.screen)
+            }))
+            .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
+                if let Some(screen) = clicked.first().and_then(|&i| Screen::ALL.get(i)) {
+                    this.screen = *screen;
+                    cx.notify();
+                }
+            }));
+
         let top_bar = h_flex()
             .h(px(48.))
             .px_4()
@@ -85,13 +124,19 @@ impl Render for Shell {
             .border_b_1()
             .border_color(cx.theme().border)
             .child(div().text_lg().child(tr(bardo, Text::AppName)))
+            .child(screen_switch)
+            // The tagline yields its space first on narrow windows.
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(bardo, Text::AppTagline)),
             )
-            .child(div().flex_1())
             .children(
                 self.error
                     .map(|error| div().text_color(cx.theme().danger).child(tr(bardo, error))),
@@ -132,7 +177,10 @@ impl Render for Shell {
                             .flex_1()
                             .h_full()
                             .min_w_0()
-                            .child(self.channels.clone()),
+                            .map(|main| match self.screen {
+                                Screen::Channels => main.child(self.channels.clone()),
+                                Screen::Settings => main.child(self.settings.clone()),
+                            }),
                     )
                     .when(self.jobs_open, |row| row.child(self.jobs.clone())),
             )

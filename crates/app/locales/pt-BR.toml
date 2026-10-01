@@ -6,6 +6,7 @@ tagline = "Crie e opere canais dark, com IA ajudando em cada etapa."
 
 [settings]
 ui_language = "Idioma da interface"
+title = "Configurações"
 
 [language]
 en-US = "English (US)"
@@ -108,3 +109,66 @@ unexpected = "Algo deu errado dentro do Bardo."
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
 not_started = "Não foi possível iniciar a tarefa. Tente de novo."
+
+[provider_keys]
+title = "Chaves de provedor"
+hint = "O Bardo chama cada provedor com a sua própria chave. As chaves ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
+not_set = "Nenhuma chave salva"
+saved = "Chave salva, terminada em {hint}"
+unreadable = "Não foi possível ler esta chave do Gerenciador de Credenciais do Windows."
+save = "Salvar chave"
+replace = "Trocar chave"
+test = "Testar chave"
+testing = "Testando…"
+remove = "Remover"
+
+[provider_keys.error]
+not_set = "Salve uma chave antes de testá-la."
+store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
+
+[provider.claude]
+name = "Claude"
+purpose = "Roteiros, títulos, descrições e prompts para modelos de imagem e vídeo."
+placeholder = "sk-ant-…"
+
+[provider.elevenlabs]
+name = "ElevenLabs"
+purpose = "Narração e as suas vozes. A chave precisa de acesso de leitura de vozes."
+placeholder = "Sua chave de API da ElevenLabs"
+
+[provider.gemini]
+name = "Gemini"
+purpose = "Imagens (Nano Banana) e vídeo (Veo), pelo Google AI Studio."
+placeholder = "AIza…"
+
+[provider.higgsfield]
+name = "Higgsfield"
+purpose = "Clipes de vídeo pelos modelos que a Higgsfield oferece."
+placeholder = "ID da chave:segredo"
+
+[provider.typesafe]
+name = "TypeSafe (JEV)"
+purpose = "O motor de decisão que ranqueia temas e pontua cortes."
+placeholder = "Sua chave de API da TypeSafe"
+
+[provider.youtube-data]
+name = "YouTube Data API"
+purpose = "Pesquisa de nicho e estatísticas públicas de vídeos. Cada teste usa 1 unidade da sua cota diária."
+placeholder = "AIza…"
+
+[key_check]
+valid = "A chave funciona."
+rejected = "O provedor recusou esta chave. Confira se ela foi copiada inteira e se ainda está ativa."
+not_allowed = "A chave é válida, mas não tem o acesso de que o Bardo precisa: uma permissão, uma API não ativada no projeto ou uma restrição de IP."
+limit_reached = "A chave é válida, mas um limite de uso, cota ou saldo de créditos a está bloqueando agora."
+provider_down = "O provedor está com problemas. Tente mais tarde."
+unreachable = "Não foi possível falar com o provedor. Confira a conexão com a internet ou o proxy."
+unexpected = "O provedor deu uma resposta que o Bardo não entende."
+detail = "O provedor diz: {detail}"
+
+[api_key.error]
+required = "Cole uma chave primeiro."
+too_short = "Isto é curto demais para ser uma chave de API."
+too_long = "Use no máximo 512 caracteres."
+invalid_characters = "Chaves não têm espaços, quebras de linha nem acentos."
+not_id_and_secret = "Cole o ID da chave e o segredo unidos por dois-pontos: KEY_ID:KEY_SECRET."

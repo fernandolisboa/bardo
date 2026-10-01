@@ -1,0 +1,5 @@
+HTTP/2 401 
+server: uvicorn
+content-type: application/json
+
+{"detail":{"type":"authentication_error","code":"unauthorized","message":"Invalid API key","status":"invalid_api_key","request_id":"8cada08a20a4d21cc32b6453467ec1fe"}}

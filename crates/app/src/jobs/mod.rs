@@ -111,10 +111,10 @@ mod tests {
     use std::time::{Duration, Instant, SystemTime};
 
     use bardo_domain::{
-        JobFailure, JobFailureKind, JobRepository, ProfileId, ProfileRepository, Progress,
-        RepositoryError, RetryPolicy, UiLanguage, UserProfile,
+        ApiKey, JobFailure, JobFailureKind, JobRepository, ProfileId, ProfileRepository, Progress,
+        Provider, Redactor, RepositoryError, RetryPolicy, UiLanguage, UserProfile,
     };
-    use bardo_storage::Database;
+    use bardo_storage::{Database, MemorySecretStore};
 
     use super::*;
     use crate::Repositories;
@@ -182,6 +182,7 @@ mod tests {
             owner,
             handlers,
             settings,
+            Redactor::new(),
         )
         .unwrap()
     }
@@ -312,6 +313,44 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(runs.load(Ordering::SeqCst), 1);
         assert_eq!(q.jobs()[1].state(), JobState::Cancelled);
+    }
+
+    #[test]
+    fn known_keys_are_masked_in_failures_before_they_are_stored() {
+        let (db, owner) = memory_db();
+        let redactor = Redactor::new();
+        redactor.add(&ApiKey::parse(Provider::Claude, "sk-ant-job-secret-0001").unwrap());
+        let q = JobQueue::start(
+            Arc::clone(&db) as Arc<dyn JobRepository>,
+            owner,
+            handlers(|_, _| {
+                Err(JobFailure::new(
+                    JobFailureKind::Simulated,
+                    "401 for x-api-key sk-ant-job-secret-0001",
+                ))
+            }),
+            JobSettings {
+                retry: RetryPolicy {
+                    max_attempts: 1,
+                    ..settings().retry
+                },
+                ..settings()
+            },
+            redactor,
+        )
+        .unwrap();
+        let id = enqueue(&q, owner);
+
+        let failed = wait_for(|| q.jobs(), id, |j| j.state() == JobState::Failed);
+        assert_eq!(
+            failed.failure().unwrap().detail,
+            "401 for x-api-key [redacted]"
+        );
+        let stored = JobRepository::list(&*db, owner).unwrap();
+        assert_eq!(
+            stored[0].failure().unwrap().detail,
+            "401 for x-api-key [redacted]"
+        );
     }
 
     #[test]
@@ -558,6 +597,7 @@ mod tests {
             ProfileId::new(),
             handlers(|_, _| Ok(())),
             settings(),
+            Redactor::new(),
         )
         .unwrap();
         assert!(
@@ -582,8 +622,15 @@ mod tests {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
+            secrets: Box::new(MemorySecretStore::default()),
         };
-        Bardo::start_with(repositories, Some("en-US"), settings()).unwrap()
+        Bardo::start_with(
+            repositories,
+            crate::testing::providers(),
+            Some("en-US"),
+            settings(),
+        )
+        .unwrap()
     }
 
     #[test]

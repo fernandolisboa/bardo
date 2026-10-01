@@ -4,12 +4,15 @@
 mod channels;
 pub mod i18n;
 mod jobs;
+pub mod logging;
+mod provider_keys;
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use bardo_domain::{
-    ChannelRepository, JobRepository, ProfileRepository, RepositoryError, UiLanguage, UserProfile,
+    ChannelRepository, JobRepository, KeyChecker, ProfileRepository, Redactor, RepositoryError,
+    SecretStore, UiLanguage, UserProfile,
 };
 use bardo_storage::Database;
 
@@ -17,8 +20,10 @@ pub use bardo_domain;
 pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 
 use crate::jobs::JobQueue;
+use crate::provider_keys::ProviderKeys;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -33,16 +38,34 @@ pub struct Repositories {
     pub channels: Box<dyn ChannelRepository>,
     /// Shared with the job queue's worker threads.
     pub jobs: Arc<dyn JobRepository>,
+    /// Provider keys. Never the database (ADR-0001).
+    pub secrets: Box<dyn SecretStore>,
 }
 
 impl Repositories {
-    /// Every port served by one SQLite database.
-    pub fn sqlite(db: Database) -> Self {
+    /// Every data port served by one SQLite database, and keys by `secrets`.
+    pub fn local(db: Database, secrets: Box<dyn SecretStore>) -> Self {
         let db = Arc::new(db);
         Self {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Arc::clone(&db)),
             jobs: db,
+            secrets,
+        }
+    }
+}
+
+/// The external services the app calls. Each slice that adds a provider
+/// adapter adds a field here; tests swap any of them for a fake.
+pub struct Providers {
+    pub key_checker: Arc<dyn KeyChecker>,
+}
+
+impl Providers {
+    /// The real providers, over HTTPS.
+    pub fn live() -> Self {
+        Self {
+            key_checker: Arc::new(bardo_ai::HttpKeyChecker::new()),
         }
     }
 }
@@ -52,6 +75,7 @@ pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
     channels: Box<dyn ChannelRepository>,
     jobs: JobQueue,
+    provider_keys: ProviderKeys,
     profile: UserProfile,
     catalog: Catalog,
 }
@@ -62,14 +86,21 @@ impl Bardo {
     /// `system_locale` (e.g. `pt-BR`) picks the language of a new profile.
     pub fn start(
         repositories: Repositories,
+        providers: Providers,
         system_locale: Option<&str>,
     ) -> Result<Self, AppError> {
-        Self::start_with(repositories, system_locale, JobSettings::default())
+        Self::start_with(
+            repositories,
+            providers,
+            system_locale,
+            JobSettings::default(),
+        )
     }
 
     /// `start` with explicit job queue settings.
     pub fn start_with(
         repositories: Repositories,
+        providers: Providers,
         system_locale: Option<&str>,
         job_settings: JobSettings,
     ) -> Result<Self, AppError> {
@@ -77,6 +108,7 @@ impl Bardo {
             profiles,
             channels,
             jobs,
+            secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -87,19 +119,30 @@ impl Bardo {
             }
         };
         let catalog = Catalog::load(profile.ui_language);
+        let redactor = Redactor::new();
+        let provider_keys =
+            ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
             jobs,
             profile.id,
             crate::jobs::built_in_handlers(),
             job_settings,
+            redactor,
         )?;
         Ok(Self {
             profiles,
             channels,
             jobs,
+            provider_keys,
             profile,
             catalog,
         })
+    }
+
+    /// Masks every key the app knows. Hand it to the log (`logging::init`)
+    /// and to anything else that writes text out of the app.
+    pub fn redactor(&self) -> Redactor {
+        self.provider_keys.redactor().clone()
     }
 
     pub fn profile(&self) -> &UserProfile {
@@ -145,10 +188,51 @@ fn language_for_locale(locale: Option<&str>) -> UiLanguage {
     }
 }
 
+/// Test doubles shared by the use case tests.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::sync::{Arc, Mutex};
+
+    use bardo_domain::{ApiKey, KeyCheck, KeyCheckOutcome, KeyChecker, Provider};
+
+    use crate::Providers;
+
+    /// Answers every check with `answer`, and remembers which keys it was
+    /// asked about.
+    #[derive(Default)]
+    pub(crate) struct FakeKeyChecker {
+        pub(crate) answer: Mutex<Option<KeyCheck>>,
+        pub(crate) asked: Mutex<Vec<(Provider, String)>>,
+    }
+
+    impl KeyChecker for FakeKeyChecker {
+        fn check(&self, provider: Provider, key: &ApiKey) -> KeyCheck {
+            self.asked
+                .lock()
+                .unwrap()
+                .push((provider, key.expose().to_owned()));
+            self.answer
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or(KeyCheck::new(KeyCheckOutcome::Valid, None))
+        }
+    }
+
+    /// Providers that never touch the network.
+    pub(crate) fn providers() -> Providers {
+        Providers {
+            key_checker: Arc::new(FakeKeyChecker::default()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+
+    use bardo_storage::MemorySecretStore;
 
     use super::*;
 
@@ -180,8 +264,9 @@ mod tests {
             profiles: Box::new(profiles.clone()),
             channels: Box::new(Arc::clone(&db)),
             jobs: db,
+            secrets: Box::new(MemorySecretStore::default()),
         };
-        Bardo::start(repositories, locale).unwrap()
+        Bardo::start(repositories, testing::providers(), locale).unwrap()
     }
 
     #[test]
@@ -259,7 +344,8 @@ mod tests {
     #[test]
     fn works_against_real_sqlite() {
         let db = Database::open_in_memory().unwrap();
-        let mut app = Bardo::start(Repositories::sqlite(db), Some("en-US")).unwrap();
+        let repositories = Repositories::local(db, Box::new(MemorySecretStore::default()));
+        let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();
         assert_eq!(app.ui_language(), UiLanguage::PtBr);
     }

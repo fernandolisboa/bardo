@@ -6,6 +6,7 @@ tagline = "Create and run faceless channels, with AI assisting every step."
 
 [settings]
 ui_language = "Interface language"
+title = "Settings"
 
 [language]
 en-US = "English (US)"
@@ -108,3 +109,66 @@ unexpected = "Something went wrong inside Bardo."
 [job.error]
 not_updated = "Could not update the job. Try again."
 not_started = "Could not start the job. Try again."
+
+[provider_keys]
+title = "Provider keys"
+hint = "Bardo calls each provider with your own key. Keys are kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
+not_set = "No key saved"
+saved = "Key saved, ending in {hint}"
+unreadable = "Could not read this key from Windows Credential Manager."
+save = "Save key"
+replace = "Replace key"
+test = "Test key"
+testing = "Testing…"
+remove = "Remove"
+
+[provider_keys.error]
+not_set = "Save a key before testing it."
+store_failed = "Could not reach Windows Credential Manager. Try again."
+
+[provider.claude]
+name = "Claude"
+purpose = "Scripts, titles, descriptions and prompts for image and video models."
+placeholder = "sk-ant-…"
+
+[provider.elevenlabs]
+name = "ElevenLabs"
+purpose = "Narration and your voices. The key needs voice read access."
+placeholder = "Your ElevenLabs API key"
+
+[provider.gemini]
+name = "Gemini"
+purpose = "Images (Nano Banana) and video (Veo), from Google AI Studio."
+placeholder = "AIza…"
+
+[provider.higgsfield]
+name = "Higgsfield"
+purpose = "Video clips through the models Higgsfield offers."
+placeholder = "Key ID:Key secret"
+
+[provider.typesafe]
+name = "TypeSafe (JEV)"
+purpose = "The decision engine that ranks themes and scores cuts."
+placeholder = "Your TypeSafe API key"
+
+[provider.youtube-data]
+name = "YouTube Data API"
+purpose = "Niche research and public video statistics. Each test uses 1 unit of your daily quota."
+placeholder = "AIza…"
+
+[key_check]
+valid = "The key works."
+rejected = "The provider rejected this key. Check that it was copied in full and is still active."
+not_allowed = "The key is genuine but lacks access Bardo needs: a permission, an API not enabled for the project or an IP restriction."
+limit_reached = "The key is genuine, but a rate limit, quota or credit balance is blocking it right now."
+provider_down = "The provider is having problems. Try again later."
+unreachable = "Could not reach the provider. Check your internet connection or proxy."
+unexpected = "The provider gave an answer Bardo does not understand."
+detail = "Provider says: {detail}"
+
+[api_key.error]
+required = "Paste a key first."
+too_short = "This is too short to be an API key."
+too_long = "Use at most 512 characters."
+invalid_characters = "Keys have no spaces, line breaks or accented characters."
+not_id_and_secret = "Paste the key ID and the secret joined by a colon: KEY_ID:KEY_SECRET."
