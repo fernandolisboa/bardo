@@ -3,18 +3,22 @@
 
 mod channels;
 pub mod i18n;
+mod jobs;
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use bardo_domain::{
-    ChannelRepository, ProfileRepository, RepositoryError, UiLanguage, UserProfile,
+    ChannelRepository, JobRepository, ProfileRepository, RepositoryError, UiLanguage, UserProfile,
 };
 use bardo_storage::Database;
 
 pub use bardo_domain;
 pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
+pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+
+use crate::jobs::JobQueue;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -27,6 +31,8 @@ pub enum AppError {
 pub struct Repositories {
     pub profiles: Box<dyn ProfileRepository>,
     pub channels: Box<dyn ChannelRepository>,
+    /// Shared with the job queue's worker threads.
+    pub jobs: Arc<dyn JobRepository>,
 }
 
 impl Repositories {
@@ -35,7 +41,8 @@ impl Repositories {
         let db = Arc::new(db);
         Self {
             profiles: Box::new(Arc::clone(&db)),
-            channels: Box::new(db),
+            channels: Box::new(Arc::clone(&db)),
+            jobs: db,
         }
     }
 }
@@ -44,18 +51,33 @@ impl Repositories {
 pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
     channels: Box<dyn ChannelRepository>,
+    jobs: JobQueue,
     profile: UserProfile,
     catalog: Catalog,
 }
 
 impl Bardo {
-    /// Loads the local profile, creating it on first start (no login).
+    /// Loads the local profile, creating it on first start (no login), and
+    /// starts the job queue, resuming jobs the last session left running.
     /// `system_locale` (e.g. `pt-BR`) picks the language of a new profile.
     pub fn start(
         repositories: Repositories,
         system_locale: Option<&str>,
     ) -> Result<Self, AppError> {
-        let Repositories { profiles, channels } = repositories;
+        Self::start_with(repositories, system_locale, JobSettings::default())
+    }
+
+    /// `start` with explicit job queue settings.
+    pub fn start_with(
+        repositories: Repositories,
+        system_locale: Option<&str>,
+        job_settings: JobSettings,
+    ) -> Result<Self, AppError> {
+        let Repositories {
+            profiles,
+            channels,
+            jobs,
+        } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
             None => {
@@ -65,9 +87,16 @@ impl Bardo {
             }
         };
         let catalog = Catalog::load(profile.ui_language);
+        let jobs = JobQueue::start(
+            jobs,
+            profile.id,
+            crate::jobs::built_in_handlers(),
+            job_settings,
+        )?;
         Ok(Self {
             profiles,
             channels,
+            jobs,
             profile,
             catalog,
         })
@@ -99,6 +128,11 @@ impl Bardo {
 
     pub fn text(&self, text: Text) -> Cow<'_, str> {
         self.catalog.get(text)
+    }
+
+    /// `text` with its `{name}` placeholders filled in.
+    pub fn text_with(&self, text: Text, args: &[(&str, &str)]) -> String {
+        self.catalog.format(text, args)
     }
 }
 
@@ -141,9 +175,11 @@ mod tests {
     }
 
     fn start(profiles: &FakeProfiles, locale: Option<&str>) -> Bardo {
+        let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
             profiles: Box::new(profiles.clone()),
-            channels: Box::new(Arc::new(Database::open_in_memory().unwrap())),
+            channels: Box::new(Arc::clone(&db)),
+            jobs: db,
         };
         Bardo::start(repositories, locale).unwrap()
     }

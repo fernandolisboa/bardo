@@ -102,6 +102,7 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
+            jobs: Arc::clone(db) as _,
         };
         Bardo::start(repositories, Some("en-US")).unwrap()
     }
@@ -257,9 +258,11 @@ mod tests {
             }
         }
 
+        let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
-            profiles: Box::new(Arc::new(Database::open_in_memory().unwrap())),
+            profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Broken),
+            jobs: db,
         };
         let app = Bardo::start(repositories, None).unwrap();
         let error = app.create_channel(draft("Space Archives")).unwrap_err();

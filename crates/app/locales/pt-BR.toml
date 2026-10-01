@@ -70,3 +70,41 @@ aesthetic_notes_too_long = "Use no máximo 2.000 caracteres."
 name_taken = "Você já tem um canal com este nome."
 not_found = "Este canal não existe mais."
 not_saved = "Não foi possível salvar o canal. Tente de novo."
+
+[jobs]
+title = "Tarefas"
+empty = "Nenhuma tarefa ainda. Trabalhos longos, como geração e renderização, aparecem aqui."
+running = "Em execução"
+queued = "Na fila"
+failed = "Com falha"
+finished = "Encerradas"
+
+[jobs.test]
+title = "Tarefas de teste"
+hint = "Uma contagem de dez segundos para testar progresso, cancelamento, nova tentativa e retomada depois de reiniciar."
+start = "Iniciar tarefa de teste"
+start_failing = "Iniciar tarefa de teste com falha"
+
+[job]
+retry_scheduled = "A tentativa {attempt} de {max} falhou. Tentando de novo automaticamente."
+failed_after = "Parou depois de {attempts} tentativas."
+cancel = "Cancelar"
+retry = "Tentar de novo"
+
+[job.kind]
+countdown = "Contagem de teste"
+
+[job.state]
+queued = "Na fila"
+running = "Em execução"
+failed = "Falhou"
+cancelled = "Cancelada"
+done = "Concluída"
+
+[job.failure]
+simulated = "A tarefa de teste falhou de propósito."
+unexpected = "Algo deu errado dentro do Bardo."
+
+[job.error]
+not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
+not_started = "Não foi possível iniciar a tarefa. Tente de novo."

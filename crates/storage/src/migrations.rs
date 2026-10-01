@@ -4,6 +4,7 @@ use rusqlite::Connection;
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_user_profile.sql"),
     include_str!("../migrations/0002_channel.sql"),
+    include_str!("../migrations/0003_job.sql"),
 ];
 
 /// Applies every migration newer than the database's `user_version`, each in

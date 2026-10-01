@@ -3,7 +3,9 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use bardo_domain::{ChannelFieldError, ContentLanguage, Country, UiLanguage};
+use bardo_domain::{
+    ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState, UiLanguage,
+};
 
 /// Every string the UI shows. Adding a variant without adding its key to all
 /// resource files fails the catalog tests.
@@ -41,6 +43,27 @@ pub enum Text {
     ChannelNotFound,
     ChannelNotSaved,
     ChannelFieldError(ChannelFieldError),
+    JobsTitle,
+    JobsEmpty,
+    JobsRunning,
+    JobsQueued,
+    JobsFailed,
+    JobsFinished,
+    JobKindName(JobKind),
+    JobStateName(JobState),
+    JobFailureKindName(JobFailureKind),
+    /// Placeholders: `{attempt}`, `{max}`.
+    JobRetryScheduled,
+    /// Placeholder: `{attempts}`.
+    JobFailedAfter,
+    CancelJob,
+    RetryJob,
+    JobNotUpdated,
+    JobNotStarted,
+    TestJobsTitle,
+    TestJobsHint,
+    StartTestJob,
+    StartFailingTestJob,
 }
 
 impl Text {
@@ -90,6 +113,27 @@ impl Text {
                     "channel.error.aesthetic_notes_too_long"
                 }
             },
+            Text::JobsTitle => "jobs.title",
+            Text::JobsEmpty => "jobs.empty",
+            Text::JobsRunning => "jobs.running",
+            Text::JobsQueued => "jobs.queued",
+            Text::JobsFailed => "jobs.failed",
+            Text::JobsFinished => "jobs.finished",
+            Text::JobKindName(kind) => return format!("job.kind.{}", kind.code()).into(),
+            Text::JobStateName(state) => return format!("job.state.{}", state.code()).into(),
+            Text::JobFailureKindName(kind) => {
+                return format!("job.failure.{}", kind.code()).into();
+            }
+            Text::JobRetryScheduled => "job.retry_scheduled",
+            Text::JobFailedAfter => "job.failed_after",
+            Text::CancelJob => "job.cancel",
+            Text::RetryJob => "job.retry",
+            Text::JobNotUpdated => "job.error.not_updated",
+            Text::JobNotStarted => "job.error.not_started",
+            Text::TestJobsTitle => "jobs.test.title",
+            Text::TestJobsHint => "jobs.test.hint",
+            Text::StartTestJob => "jobs.test.start",
+            Text::StartFailingTestJob => "jobs.test.start_failing",
         };
         Cow::Borrowed(key)
     }
@@ -133,6 +177,14 @@ impl Catalog {
             Some(text) => Cow::Borrowed(text.as_str()),
             None => Cow::Owned(key.into_owned()),
         }
+    }
+
+    /// The string for `text` with each `{name}` replaced by its value.
+    pub fn format(&self, text: Text, args: &[(&str, &str)]) -> String {
+        args.iter()
+            .fold(self.get(text).into_owned(), |out, (name, value)| {
+                out.replace(&format!("{{{name}}}"), value)
+            })
     }
 }
 
@@ -190,8 +242,27 @@ mod tests {
             Text::ChannelNameTaken,
             Text::ChannelNotFound,
             Text::ChannelNotSaved,
+            Text::JobsTitle,
+            Text::JobsEmpty,
+            Text::JobsRunning,
+            Text::JobsQueued,
+            Text::JobsFailed,
+            Text::JobsFinished,
+            Text::JobRetryScheduled,
+            Text::JobFailedAfter,
+            Text::CancelJob,
+            Text::RetryJob,
+            Text::JobNotUpdated,
+            Text::JobNotStarted,
+            Text::TestJobsTitle,
+            Text::TestJobsHint,
+            Text::StartTestJob,
+            Text::StartFailingTestJob,
         ];
         texts.extend(UiLanguage::ALL.map(Text::LanguageName));
+        texts.extend(JobKind::ALL.map(Text::JobKindName));
+        texts.extend(JobState::ALL.map(Text::JobStateName));
+        texts.extend(JobFailureKind::ALL.map(Text::JobFailureKindName));
         texts.extend(ContentLanguage::ALL.map(Text::ContentLanguageName));
         texts.extend(Country::ALL.map(Text::CountryName));
         texts.extend(ChannelFieldError::ALL.map(Text::ChannelFieldError));
@@ -245,6 +316,18 @@ mod tests {
         ] {
             let message = catalog.get(Text::ChannelFieldError(error));
             assert!(message.contains(&limit.to_string()), "{message}");
+        }
+    }
+
+    #[test]
+    fn placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            let text = catalog.format(Text::JobRetryScheduled, &[("attempt", "2"), ("max", "4")]);
+            assert!(text.contains('2') && text.contains('4'), "{text}");
+            assert!(!text.contains('{'), "{text}");
+            let text = catalog.format(Text::JobFailedAfter, &[("attempts", "4")]);
+            assert!(text.contains('4') && !text.contains('{'), "{text}");
         }
     }
 
