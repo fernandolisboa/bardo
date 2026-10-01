@@ -8,6 +8,7 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 - Architecture decisions: [`docs/adr/`](docs/adr/)
 - Specs: [`docs/spec/`](docs/spec/)
 - PRD: [`docs/prd/`](docs/prd/)
+- Design handoffs: [`docs/design/`](docs/design/)
 
 ## Development
 
