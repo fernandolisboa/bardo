@@ -1,0 +1,15 @@
+# Textos da interface em pt-BR. Toda chave aqui precisa existir em en-US.toml.
+
+[app]
+name = "Bardo"
+tagline = "Crie e opere canais dark, com IA ajudando em cada etapa."
+
+[settings]
+ui_language = "Idioma da interface"
+
+[language]
+en-US = "English (US)"
+pt-BR = "Português (Brasil)"
+
+[error]
+language_not_saved = "Não foi possível salvar o idioma da interface. Tente de novo."

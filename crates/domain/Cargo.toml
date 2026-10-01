@@ -1,0 +1,15 @@
+[package]
+name = "bardo-domain"
+description = "Entities, value objects and provider interfaces. No I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

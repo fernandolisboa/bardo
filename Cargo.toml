@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+bardo-domain = { path = "crates/domain" }
+bardo-media = { path = "crates/media" }
+bardo-ai = { path = "crates/ai" }
+bardo-publish = { path = "crates/publish" }
+bardo-storage = { path = "crates/storage" }
+bardo-app = { path = "crates/app" }
+
+# GPUI family: pinned exactly (see issue #5). Only `bardo-ui` may depend on it;
+# `cargo xtask lint-deps` enforces that in CI.
+gpui-kit = "=0.7.0"
+
+anyhow = "1"
+dirs = "6"
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.9"
+uuid = { version = "1", features = ["v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

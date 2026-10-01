@@ -1,0 +1,15 @@
+# UI strings for en-US. Every key here must also exist in pt-BR.toml.
+
+[app]
+name = "Bardo"
+tagline = "Create and run faceless channels, with AI assisting every step."
+
+[settings]
+ui_language = "Interface language"
+
+[language]
+en-US = "English (US)"
+pt-BR = "Português (Brasil)"
+
+[error]
+language_not_saved = "Could not save the interface language. Try again."
