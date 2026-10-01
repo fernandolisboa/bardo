@@ -15,7 +15,7 @@ Bardo is a native Windows desktop app, single-user and offline-first. It orchest
   | --- | --- | --- |
   | `domain` | Entities, value objects, domain services, provider interfaces (traits). No I/O. | nothing internal |
   | `media` | ffmpeg-based probing, proxies, preview, render. | `domain` |
-  | `ai` | Adapters for the decision engine (JEV, Laya), Claude, image, video, voice, STT providers. | `domain` |
+  | `ai` | Adapters for the decision engine (JEV, Laya), Claude, image, video, voice, alignment/STT providers. | `domain` |
   | `publish` | Adapters per network (upload, schedule, metrics, export). | `domain` |
   | `storage` | SQLite persistence, migrations, secrets access (Windows Credential Manager). | `domain` |
   | `app` | Application state, use cases, job queue, orchestration. The UI's only entry point. | all of the above |
@@ -27,7 +27,7 @@ Bardo is a native Windows desktop app, single-user and offline-first. It orchest
 - **AI roles**:
   - Decision engine (JEV first, Laya local later): typed decisions only (rank themes, score cut candidates, pick presets, quality gates). Text in, typed result out. Never generates content.
   - Claude API: scripts, titles, descriptions and prompts for media models.
-  - Image: Nano Banana (Gemini). Video: Higgsfield API (aggregates Kling, Seedance, Wan, MiniMax and others) and Google via the Gemini API (Veo, Gemini Omni Flash). Voice: ElevenLabs. STT: Whisper with timestamps.
+  - Image: Nano Banana (Gemini). Video: Higgsfield API (aggregates Kling, Seedance, Wan, MiniMax and others) and Google via the Gemini API (Veo, Gemini Omni Flash). Voice: ElevenLabs (returns word timings with the narration). Alignment/STT (e.g. Whisper, ElevenLabs forced alignment): only for imported audio.
 - **Secrets** live in Windows Credential Manager under the user's account. Never in files, the database or logs.
 - **Long jobs** (generation, render, upload, metrics sync) run in a persistent queue with progress, cancel and resume. Nothing blocks the UI thread.
 - **Performance** work targets ffmpeg, I/O and job concurrency, and only with measurements.
