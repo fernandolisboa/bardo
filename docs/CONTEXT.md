@@ -22,6 +22,7 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Publication** | A render sent (or scheduled) to one network account, with its metadata and status. Requires review. |
 | **Manual publication** | A publication the user posted by hand from an export, linked to Bardo by its post URL so its metrics can be tracked. |
 | **Export** | A ready-to-post package (file in the network preset + metadata to copy) for manual posting. |
+| **Budget** | A monthly spending limit the user sets per AI provider. Reaching it makes new jobs for that provider ask for confirmation. |
 | **Job** | A long-running task (generation, render, upload, metrics sync) in the queue, with progress, cancel and resume. |
 | **Metrics snapshot** | Post-publication statistics for one publication at a point in time (views, retention, engagement and, on YouTube, estimated revenue/CPM/RPM). |
 | **JEV** | Typed decision engine: ranks, scores and gates; never generates content. |

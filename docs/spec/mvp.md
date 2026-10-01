@@ -107,6 +107,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Storage: SQLite with versioned migrations; project media in a user-chosen folder.
 - Secrets: API keys and OAuth tokens in Windows Credential Manager only; redacted from logs and errors.
 - Job queue: persistent, with progress, cancel, retry with backoff and resume after restart.
+- Generation cost: every generation records its cost (as reported by the provider, else estimated from the published rate). Spend is shown per video, per channel and per month. The user sets a monthly budget per provider: a warning at 80%, and at 100% new jobs for that provider need explicit confirmation instead of starting.
 - ffmpeg bundled with the app; version pinned.
 - i18n: pt-BR and en-US resource files; no hard-coded UI strings.
 - Dependency lint: only `ui` depends on GPUI.
