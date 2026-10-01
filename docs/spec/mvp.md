@@ -42,14 +42,14 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
   1. Script (Claude) from niche + theme + persona + channel aesthetic.
   2. Narration (ElevenLabs) from the approved script with the persona's voice. The same call returns the word timings of the script text, so generated narration needs no speech-to-text.
   3. Scene plan and prompts (Claude), one per scene.
-  4. Images (Nano Banana) and video clips through the Higgsfield API, the first video adapter. Higgsfield aggregates several models (Kling, Seedance, Wan, MiniMax and its own), so the model is a setting per channel with a per-scene override, and the scene screen shows the estimated cost before generating.
+  4. Images (Nano Banana) and video clips through two video adapters: Higgsfield first (it aggregates Kling, Seedance, Wan, MiniMax and its own models), then Google through the Gemini API (Veo 3.1 and Gemini Omni Flash, sharing the Nano Banana key). Provider and model are a setting per channel with a per-scene override, and the scene screen shows the estimated cost before generating.
   5. Music: prompt generated; audio imported by the user.
 - Imported narration (e.g. the user's own recording) gets word timings from the alignment adapter: forced alignment when the script text is known, speech-to-text with timestamps otherwise. Not on the critical path; can land late in the MVP.
 - Regenerate any single asset without redoing the rest.
 
 **Not in the MVP**
 - In-app voice cloning (done in the provider's own flow).
-- Video providers other than Higgsfield (e.g. Veo through the Gemini API); the adapter interface allows adding them later.
+- Video providers other than Higgsfield and Google (e.g. Kling direct); the adapter interface allows adding them later.
 - Music generation API.
 
 **Acceptance**
@@ -74,7 +74,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Multiple video tracks / picture-in-picture.
 
 **Acceptance**
-- Timeline edits never block the UI; preview starts within one second on a 60 s project on the reference machine (proposed target, to confirm after the ffmpeg spike).
+- Timeline edits never block the UI; preview starts within one second on a 60 s project on the reference machine (target to confirm after the ffmpeg spike).
 - A render matches the preset's resolution, codec and duration limit, and integrated loudness is within the preset target.
 - Render can be cancelled and resumed.
 
@@ -107,11 +107,14 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - i18n: pt-BR and en-US resource files; no hard-coded UI strings.
 - Dependency lint: only `ui` depends on GPUI.
 
+## Reference machine
+
+Performance targets are measured on the owner's PC: AMD Ryzen 9 9950X3D, NVIDIA RTX 3080 Ti, 32 GB DDR5-5600 (one module, single channel), NVMe system and project disk, plus SATA SSD and HDD. Hardware encode uses NVENC (H.264/HEVC; this GPU has no AV1 encode) with a software fallback for machines without it.
+
 ## Open questions (defaults in use until decided)
 
 | Question | Default |
 | --- | --- |
-| Reference machine for performance targets | The owner's Windows PC; specs to be recorded. |
 | Default personas shipped with the app | Two per language (en-US, pt-BR) using provider stock voices. |
 
 ## First tickets, in order
