@@ -7,3 +7,4 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 - Domain vocabulary: [`docs/CONTEXT.md`](docs/CONTEXT.md)
 - Architecture decisions: [`docs/adr/`](docs/adr/)
 - Specs: [`docs/spec/`](docs/spec/)
+- PRD: [`docs/prd/`](docs/prd/)

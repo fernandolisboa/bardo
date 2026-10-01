@@ -117,13 +117,6 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 
 Performance targets are measured on the owner's PC: AMD Ryzen 9 9950X3D, NVIDIA RTX 3080 Ti, 32 GB DDR5-5600 (one module, single channel), NVMe system and project disk, plus SATA SSD and HDD. Hardware encode uses NVENC (H.264/HEVC; this GPU has no AV1 encode) with a software fallback for machines without it. Planned upgrades (a second identical RAM module, an RTX 50-series GPU) will be recorded here when they happen; targets are set on the current configuration.
 
-## First tickets, in order
+## Implementation plan
 
-1. Workspace skeleton with the seven crates, CI (fmt, clippy, tests) and the GPUI dependency lint.
-2. Domain model for user profile, channel, persona, network account, video project; SQLite schema and migrations.
-3. Job queue with progress, cancel, resume and persistence.
-4. Secrets store over Windows Credential Manager.
-5. ffmpeg spike: proxy generation, preview frames, render of a two-clip, two-track timeline. Biggest technical risk; start early.
-6. GPUI spike (after Context7 docs check): timeline view driven by `app` state.
-
-Publishing work (network adapters, OAuth, platform audit requests) starts only once creation and editing are at least usable end to end (owner decision, 2026-09-30). Until then, export covers getting a video out.
+The PRD ([`docs/prd/mvp.md`](../prd/mvp.md)) turns this spec into user stories, and GitHub Issues break it into vertical slices. Creation and editing come first. Publishing work (network adapters, OAuth, platform audit requests) starts only once creation and editing are usable end to end (owner decision, 2026-09-30). Until then, export covers getting a video out.
