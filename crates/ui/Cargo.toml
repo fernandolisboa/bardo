@@ -1,0 +1,23 @@
+[package]
+name = "bardo-ui"
+description = "GPUI views and components. The only crate allowed to depend on GPUI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+default-run = "bardo"
+
+[[bin]]
+name = "bardo"
+path = "src/main.rs"
+
+[dependencies]
+bardo-app.workspace = true
+bardo-storage.workspace = true
+anyhow.workspace = true
+gpui-kit.workspace = true
+sys-locale = "0.3"
+
+[lints]
+workspace = true

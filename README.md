@@ -8,3 +8,17 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 - Architecture decisions: [`docs/adr/`](docs/adr/)
 - Specs: [`docs/spec/`](docs/spec/)
 - PRD: [`docs/prd/`](docs/prd/)
+
+## Development
+
+Requires Windows 10/11 and the stable Rust toolchain (MSVC).
+
+```sh
+cargo run                 # opens the app (crate bardo-ui)
+cargo test --workspace
+cargo xtask lint-deps     # fails if any crate other than bardo-ui depends on GPUI
+```
+
+Workspace layout follows [ADR-0001](docs/adr/0001-architecture-and-stack.md): `crates/{domain,media,ai,publish,storage,app,ui}`, plus `xtask` for repository checks. The local profile and its settings live in `%APPDATA%\Bardo\bardo.db`.
+
+UI strings live in `crates/app/locales/{en-US,pt-BR}.toml`; tests fail if a key is missing from either file.
