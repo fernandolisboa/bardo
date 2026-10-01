@@ -36,7 +36,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 ## Pillar 2: Production
 
 **In the MVP**
-- Personas (ADR-0005): library with default personas; create/edit; pick the voice from the user's ElevenLabs voices (including clones made there); export/import persona packages.
+- Personas (ADR-0005): library with four default personas, two per language (en-US, pt-BR): a sober documentary narrator and a dramatic storyteller, one male and one female voice, using ElevenLabs default voices available to every account; create/edit; pick the voice from the user's ElevenLabs voices (including clones made there); export/import persona packages.
 - Templates: versioned, editable templates for script, title, description, image prompt, video prompt, narration direction and music prompt. Each generation records the template version used.
 - Generation, each step reviewable and editable before the next:
   1. Script (Claude) from niche + theme + persona + channel aesthetic.
@@ -109,13 +109,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 
 ## Reference machine
 
-Performance targets are measured on the owner's PC: AMD Ryzen 9 9950X3D, NVIDIA RTX 3080 Ti, 32 GB DDR5-5600 (one module, single channel), NVMe system and project disk, plus SATA SSD and HDD. Hardware encode uses NVENC (H.264/HEVC; this GPU has no AV1 encode) with a software fallback for machines without it.
-
-## Open questions (defaults in use until decided)
-
-| Question | Default |
-| --- | --- |
-| Default personas shipped with the app | Two per language (en-US, pt-BR) using provider stock voices. |
+Performance targets are measured on the owner's PC: AMD Ryzen 9 9950X3D, NVIDIA RTX 3080 Ti, 32 GB DDR5-5600 (one module, single channel), NVMe system and project disk, plus SATA SSD and HDD. Hardware encode uses NVENC (H.264/HEVC; this GPU has no AV1 encode) with a software fallback for machines without it. Planned upgrades (a second identical RAM module, an RTX 50-series GPU) will be recorded here when they happen; targets are set on the current configuration.
 
 ## First tickets, in order
 
