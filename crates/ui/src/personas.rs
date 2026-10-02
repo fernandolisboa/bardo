@@ -1,5 +1,5 @@
-//! Personas screen: the library on the left, the create/edit form on the
-//! right with the ElevenLabs voice picker and the generation presets.
+//! Personas screen: the library as a collection, the create/edit form with
+//! the ElevenLabs voice picker and the generation presets as its inspector.
 //! Personas are exported to and imported from package files through the
 //! system's file dialogs; an imported persona whose voice is not (yet)
 //! seen in the user's account shows a flag and how to fix it.
@@ -10,7 +10,9 @@ use bardo_app::bardo_domain::{
     Channel, ChannelId, GenerationPresets, Persona, PersonaDraft, PersonaFieldError, PersonaId,
     Voice, VoiceFlag, VoiceRef,
 };
-use bardo_app::{Bardo, PersonaError, Text, VoiceStatus, persona_package_folder};
+use std::rc::Rc;
+
+use bardo_app::{Bardo, Destination, PersonaError, Text, VoiceStatus, persona_package_folder};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
@@ -24,6 +26,8 @@ use gpui_kit::{
 };
 
 use crate::kit::{self, Tone};
+use crate::layout;
+use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 
 /// Field errors each control shows, and clears once the user edits it.
@@ -527,101 +531,50 @@ impl PersonasScreen {
         self.touched(cx);
     }
 
-    fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-
-        let rows: Vec<AnyElement> = self
+    fn collection(&self, cx: &mut Context<Self>) -> Collection {
+        let mut collection = Collection::new(CollectionKind::List, "persona-list");
+        let tiles: Vec<Tile> = self
             .personas
             .iter()
             .enumerate()
             .map(|(ix, persona)| {
                 let id = persona.id;
-                let selected = self.editing == Some(id);
-                kit::list_row(("persona", ix), selected, cx)
-                    .child(div().child(SharedString::from(persona.details.name().to_owned())))
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        SharedString::from(persona.details.voice().name().to_owned()),
-                    ))
-                    .children(persona.voice_flag.map(|flag| {
-                        h_flex().child(kit::status(
-                            Tone::Warning,
-                            tr(bardo, Text::VoiceFlagTag(flag)),
-                            cx,
-                        ))
-                    }))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                let mut tile = Tile::new(
+                    ("persona", ix),
+                    Rc::new(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.edit(id, window, cx)
-                    }))
+                    })),
+                );
+                tile.selected = self.editing == Some(id);
+                tile.title = Some(SharedString::from(persona.details.name().to_owned()));
+                tile.text = Some(SharedString::from(
+                    persona.details.voice().name().to_owned(),
+                ));
+                tile.status = persona.voice_flag.map(|flag| {
+                    kit::status(
+                        Tone::Warning,
+                        tr(self.bardo.read(cx), Text::VoiceFlagTag(flag)),
+                        cx,
+                    )
                     .into_any_element()
+                });
+                tile
             })
             .collect();
-
-        let body: AnyElement = if self.load_failed {
+        let bardo = self.bardo.read(cx);
+        collection.empty = Some(if self.load_failed {
+            kit::notice(Tone::Danger, tr(bardo, Text::PersonasNotLoaded), cx).into_any_element()
+        } else {
             div()
-                .p_3()
-                .child(kit::notice(
-                    Tone::Danger,
-                    tr(bardo, Text::PersonasNotLoaded),
-                    cx,
-                ))
-                .into_any_element()
-        } else if rows.is_empty() {
-            div()
-                .p_3()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(cx.theme().muted_foreground)
                 .child(tr(bardo, Text::PersonasEmpty))
                 .into_any_element()
-        } else {
-            v_flex()
-                .id("persona-list")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .p_2()
-                .gap_1()
-                .children(rows)
-                .into_any_element()
-        };
-
-        kit::side_panel(cx)
-            .w(px(280.))
-            .h_full()
-            .child(
-                h_flex()
-                    .p_3()
-                    .justify_between()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(div().font_semibold().child(tr(bardo, Text::PersonasTitle)))
-                            .child(kit::info(
-                                "personas-info",
-                                None,
-                                tr(bardo, Text::PersonasHint),
-                            )),
-                    )
-                    .child(
-                        Button::new("new-persona")
-                            .small()
-                            .label(tr(bardo, Text::NewPersona))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.start_new(window, cx)
-                            })),
-                    ),
-            )
-            .child(
-                h_flex().px_3().pb_2().child(
-                    Button::new("import-persona")
-                        .small()
-                        .outline()
-                        .label(tr(bardo, Text::ImportPersona))
-                        .disabled(self.dialog.is_some())
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.import(cx))),
-                ),
-            )
-            .child(body)
+        });
+        if !self.load_failed {
+            collection.tiles = tiles;
+        }
+        collection
     }
 
     fn render_voice(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1093,96 +1046,111 @@ impl PersonasScreen {
             kit::notice(tone, text, cx)
         });
 
-        v_flex()
-            .id("persona-form")
-            .flex_1()
-            .h_full()
-            .overflow_y_scroll()
-            .child(
-                v_flex()
-                    .max_w(px(720.))
-                    .p_6()
-                    .gap_4()
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(kit::title(tr(bardo, title)))
-                            .children(usage),
-                    )
-                    .children(flag)
-                    .child(
-                        kit::card(cx)
-                            .p_4()
-                            .gap_4()
-                            .child(field(
-                                Text::PersonaName,
-                                Input::new(&self.name).into_any_element(),
-                                error_for(NAME_ERRORS),
-                            ))
-                            .child(voice)
-                            .child(field(
-                                Text::PersonaTone,
-                                Textarea::new(&self.tone).into_any_element(),
-                                error_for(TONE_ERRORS),
-                            ))
-                            .child(field(
-                                Text::PersonaScriptStyle,
-                                Textarea::new(&self.script_style).into_any_element(),
-                                error_for(SCRIPT_STYLE_ERRORS),
-                            ))
-                            .child(presets),
-                    )
-                    .children(confirm)
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                Button::new("save-persona")
-                                    .primary()
-                                    .label(tr(bardo, action))
-                                    .disabled(self.confirm.is_some())
+        div().child(
+            v_flex()
+                .max_w(px(720.))
+                .gap_4()
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(kit::title(tr(bardo, title)))
+                        .children(usage),
+                )
+                .children(flag)
+                .child(
+                    kit::card(cx)
+                        .p_4()
+                        .gap_4()
+                        .child(field(
+                            Text::PersonaName,
+                            Input::new(&self.name).into_any_element(),
+                            error_for(NAME_ERRORS),
+                        ))
+                        .child(voice)
+                        .child(field(
+                            Text::PersonaTone,
+                            Textarea::new(&self.tone).into_any_element(),
+                            error_for(TONE_ERRORS),
+                        ))
+                        .child(field(
+                            Text::PersonaScriptStyle,
+                            Textarea::new(&self.script_style).into_any_element(),
+                            error_for(SCRIPT_STYLE_ERRORS),
+                        ))
+                        .child(presets),
+                )
+                .children(confirm)
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            Button::new("save-persona")
+                                .primary()
+                                .label(tr(bardo, action))
+                                .disabled(self.confirm.is_some())
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.save(&[], window, cx)
+                                })),
+                        )
+                        .when(self.editing.is_some(), |row| {
+                            row.child(
+                                Button::new("duplicate-persona")
+                                    .outline()
+                                    .label(tr(bardo, Text::DuplicatePersona))
                                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                        this.save(&[], window, cx)
+                                        this.duplicate(window, cx)
                                     })),
                             )
-                            .when(self.editing.is_some(), |row| {
-                                row.child(
-                                    Button::new("duplicate-persona")
-                                        .outline()
-                                        .label(tr(bardo, Text::DuplicatePersona))
-                                        .on_click(cx.listener(
-                                            |this, _: &ClickEvent, window, cx| {
-                                                this.duplicate(window, cx)
-                                            },
-                                        )),
-                                )
-                                .child(
-                                    Button::new("export-persona")
-                                        .outline()
-                                        .label(tr(bardo, Text::ExportPersona))
-                                        .disabled(self.dialog.is_some())
-                                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                            this.export(cx)
-                                        })),
-                                )
-                                .child(kit::info(
-                                    "persona-export-info",
-                                    None,
-                                    tr(bardo, Text::PersonaExportHint),
-                                ))
-                            })
-                            .children(notice.map(|notice| notice.flex_1())),
-                    ),
-            )
+                            .child(
+                                Button::new("export-persona")
+                                    .outline()
+                                    .label(tr(bardo, Text::ExportPersona))
+                                    .disabled(self.dialog.is_some())
+                                    .on_click(
+                                        cx.listener(|this, _: &ClickEvent, _, cx| this.export(cx)),
+                                    ),
+                            )
+                            .child(kit::info(
+                                "persona-export-info",
+                                None,
+                                tr(bardo, Text::PersonaExportHint),
+                            ))
+                        })
+                        .children(notice.map(|notice| notice.flex_1())),
+                ),
+        )
     }
 }
 
 impl Render for PersonasScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(self.render_list(cx))
-            .child(self.render_form(cx))
+        let collection = self.collection(cx);
+        let form = self.render_form(cx).into_any_element();
+        let bardo = self.bardo.read(cx);
+        let mut header = Header::place(bardo, Destination::Personas);
+        header.info = Some(
+            kit::info("personas-info", None, tr(bardo, Text::PersonasHint)).into_any_element(),
+        );
+        header.actions = vec![
+            Button::new("import-persona")
+                .small()
+                .outline()
+                .label(tr(bardo, Text::ImportPersona))
+                .disabled(self.dialog.is_some())
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.import(cx)))
+                .into_any_element(),
+            Button::new("new-persona")
+                .small()
+                .primary()
+                .label(tr(bardo, Text::NewPersona))
+                .on_click(
+                    cx.listener(|this, _: &ClickEvent, window, cx| this.start_new(window, cx)),
+                )
+                .into_any_element(),
+        ];
+        let mut parts = ScreenParts::new(header);
+        parts.collection = Some(collection);
+        parts.inspector = Some(Inspector::new(vec![form]));
+        layout::screen(parts, cx)
     }
 }

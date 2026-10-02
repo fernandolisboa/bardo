@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{Channel, ChannelId, JobState, NicheScores, NicheSeedError, Score};
-use bardo_app::{Bardo, NicheResearchView, NicheResult, NicheRow, Text};
+use bardo_app::{Bardo, Destination, NicheResearchView, NicheResult, NicheRow, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::progress::Progress;
@@ -16,10 +16,12 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div,
 };
 
 use crate::kit::{self, Tone};
+use crate::layout;
+use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts};
 use crate::shell::tr;
 
 /// How often the screen checks the job queue for changes.
@@ -303,15 +305,8 @@ impl ResearchScreen {
             .map(|text| kit::notice(Tone::Danger, text, cx).into_any_element())
             .collect();
 
-        kit::side_panel(cx)
-            .id("research-editor")
-            .w(px(340.))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .p_4()
+        v_flex()
             .gap_3()
-            .child(kit::title(tr(bardo, Text::ResearchTitle)))
             .child(
                 v_flex()
                     .gap_1()
@@ -441,32 +436,27 @@ impl ResearchScreen {
         }
     }
 
-    fn render_results(&self, cx: &App) -> impl IntoElement {
+    /// The niches, ranked, as a feed of result cards.
+    fn collection(&self, cx: &App) -> Collection {
         let bardo = self.bardo.read(cx);
-        let rows: Vec<AnyElement> = self
+        let mut collection = Collection::new(CollectionKind::Feed, "research-results");
+        collection.controls = vec![
+            kit::section_heading(tr(bardo, Text::ResearchResultsTitle))
+                .child(kit::info(
+                    "research-scores-info",
+                    None,
+                    tr(bardo, Text::ResearchScoresHint),
+                ))
+                .into_any_element(),
+        ];
+        collection.cards = self
             .view
             .iter()
             .flat_map(|view| view.rows.iter())
             .enumerate()
             .map(|(ix, row)| self.render_row(ix, row, cx))
             .collect();
-
-        v_flex()
-            .id("research-results")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_3()
-            .child(
-                kit::section_heading(tr(bardo, Text::ResearchResultsTitle)).child(kit::info(
-                    "research-scores-info",
-                    None,
-                    tr(bardo, Text::ResearchScoresHint),
-                )),
-            )
-            .children(rows)
+        collection
     }
 
     fn render_row(&self, ix: usize, row: &NicheRow, cx: &App) -> AnyElement {
@@ -634,20 +624,18 @@ fn score_tags(bardo: &Bardo, scores: NicheScores) -> impl IntoElement {
 
 impl Render for ResearchScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bardo = self.bardo.read(cx);
+        let header = Header::place(bardo, Destination::Research);
         if self.channels.is_empty() {
-            let bardo = self.bardo.read(cx);
-            return h_flex()
-                .size_full()
-                .p_6()
-                .items_start()
-                .child(muted(cx, tr(bardo, Text::ResearchNoChannels)))
-                .into_any_element();
+            let mut parts = ScreenParts::new(header);
+            parts.content = vec![muted(cx, tr(bardo, Text::ResearchNoChannels))];
+            return layout::screen(parts, cx);
         }
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(self.render_editor(cx))
-            .child(self.render_results(cx))
-            .into_any_element()
+        let mut parts = ScreenParts::new(header);
+        parts.collection = Some(self.collection(cx));
+        parts.inspector = Some(Inspector::new(vec![
+            self.render_editor(cx).into_any_element(),
+        ]));
+        layout::screen(parts, cx)
     }
 }

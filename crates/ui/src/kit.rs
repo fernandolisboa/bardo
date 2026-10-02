@@ -62,7 +62,12 @@ pub fn status(tone: Tone, label: impl Into<SharedString>, cx: &App) -> Div {
 }
 
 /// [`status`] with an icon of its own.
-pub fn status_with(tone: Tone, icon: IconName, label: impl Into<SharedString>, cx: &App) -> Div {
+pub fn status_with(
+    tone: Tone,
+    icon: impl Into<Icon>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> Div {
     let (ink, tint) = tone.colors(cx);
     let look = look(cx);
     // High contrast outlines chips so they hold without their tint.
@@ -85,7 +90,7 @@ pub fn status_with(tone: Tone, icon: IconName, label: impl Into<SharedString>, c
         .when(outlined, |chip| {
             chip.border(look.tokens.border_width).border_color(ink)
         })
-        .child(Icon::new(icon).size(px(13.)).text_color(ink))
+        .child(icon.into().size(px(13.)).text_color(ink))
         .child(div().whitespace_nowrap().child(label.into()))
 }
 
@@ -193,17 +198,7 @@ pub fn section_heading(text: impl Into<SharedString>) -> Div {
     )
 }
 
-/// A side panel (list of channels, projects, …): a surface beside the app
-/// ground.
-pub fn side_panel(cx: &App) -> Div {
-    let t = &look(cx).tokens;
-    v_flex()
-        .bg(t.surface)
-        .border_r(t.border_width)
-        .border_color(t.border)
-}
-
-/// A row of a side panel's list; the selected one is tinted and edged.
+/// A row of a list of records; the selected one is tinted and edged.
 pub fn list_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> {
     let t = look(cx).tokens;
     v_flex()

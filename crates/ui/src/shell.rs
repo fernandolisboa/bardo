@@ -1,16 +1,18 @@
-use bardo_app::bardo_domain::VideoProjectId;
-use bardo_app::{Bardo, Text};
-use gpui_kit::component::badge::Badge;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Selectable as _, Sizable as _, h_flex, v_flex};
+use bardo_app::bardo_domain::{BudgetLevel, VideoProjectId};
+use bardo_app::{Bardo, Destination, SpendSummary, Text};
+use gpui_kit::component::h_flex;
 use gpui_kit::prelude::*;
-use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
+use gpui_kit::{Entity, SharedString, Subscription, Window, div};
 
-use crate::appearance::{self, look};
+use crate::accounts::AccountsScreen;
+use crate::appearance;
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
 use crate::editor::{EditorEvent, EditorScreen};
 use crate::jobs::JobsPanel;
+use crate::kit::Tone;
+use crate::layout;
+use crate::parts::{BudgetMeter, Navigation};
 use crate::personas::PersonasScreen;
 use crate::projects::{OpenEditor, ProjectsScreen};
 use crate::research::ResearchScreen;
@@ -23,53 +25,15 @@ pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
     SharedString::from(bardo.text(text).into_owned())
 }
 
-/// The screens the top bar switches between.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Screen {
-    Channels,
-    Personas,
-    Research,
-    Themes,
-    Projects,
-    Templates,
-    Costs,
-    Settings,
-}
-
-impl Screen {
-    const ALL: [Screen; 8] = [
-        Screen::Channels,
-        Screen::Personas,
-        Screen::Research,
-        Screen::Themes,
-        Screen::Projects,
-        Screen::Templates,
-        Screen::Costs,
-        Screen::Settings,
-    ];
-
-    fn title(self) -> Text {
-        match self {
-            Screen::Channels => Text::ChannelsTitle,
-            Screen::Personas => Text::PersonasTitle,
-            Screen::Research => Text::ResearchTitle,
-            Screen::Themes => Text::ThemesTitle,
-            Screen::Projects => Text::ProjectsNav,
-            Screen::Templates => Text::TemplatesTitle,
-            Screen::Costs => Text::CostsTitle,
-            Screen::Settings => Text::SettingsTitle,
-        }
-    }
-}
-
-/// The main window: top bar with the screen switch and the jobs toggle,
-/// the current screen below and the jobs panel on the right when open.
-/// `Bardo` lives in an entity so screens re-render when it changes (e.g.
-/// the language, set in Settings).
+/// The main window: the navigation, the current screen, and the jobs panel
+/// beside it when open; where each goes is the layout's
+/// ([`crate::layout`]). `Bardo` lives in an entity so screens re-render
+/// when it changes (e.g. the language, set in Settings).
 pub struct Shell {
     bardo: Entity<Bardo>,
-    screen: Screen,
+    screen: Destination,
     channels: Entity<ChannelsScreen>,
+    accounts: Entity<AccountsScreen>,
     personas: Entity<PersonasScreen>,
     research: Entity<ResearchScreen>,
     themes: Entity<ThemesScreen>,
@@ -77,9 +41,13 @@ pub struct Shell {
     templates: Entity<TemplatesScreen>,
     costs: Entity<CostsScreen>,
     settings: Entity<SettingsScreen>,
-    /// Kept alive while closed, so the toggle's count stays current.
+    /// Kept alive while closed, so the navigation's count stays current.
     jobs: Entity<JobsPanel>,
     jobs_open: bool,
+    /// This month's spend for the navigation, and the job revision it was
+    /// read at.
+    spend: Option<SpendSummary>,
+    spend_revision: u64,
     /// The editor, open over the whole window in place of the screens.
     editor: Option<(Entity<EditorScreen>, Subscription)>,
     _subscriptions: Vec<Subscription>,
@@ -89,6 +57,7 @@ impl Shell {
     pub fn new(bardo: Bardo, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bardo = cx.new(|_| bardo);
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
+        let accounts = cx.new(|cx| AccountsScreen::new(bardo.clone(), window, cx));
         let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
@@ -105,7 +74,18 @@ impl Shell {
             cx,
         );
         let subscriptions = vec![
-            cx.observe(&jobs, |_, _, cx| cx.notify()),
+            // A job that moved may have spent something.
+            cx.observe(&jobs, |this, _, cx| {
+                if this.bardo.read(cx).jobs_revision() != this.spend_revision {
+                    this.refresh_spend(cx);
+                }
+                cx.notify();
+            }),
+            // Budgets change on the costs screen.
+            cx.observe(&costs, |this, _, cx| {
+                this.refresh_spend(cx);
+                cx.notify();
+            }),
             // The title follows the interface language.
             cx.observe_in(&bardo, window, |_, bardo, window, cx| {
                 window.set_window_title(&bardo.read(cx).text(Text::AppName));
@@ -123,10 +103,11 @@ impl Shell {
                 },
             ),
         ];
-        Self {
+        let mut shell = Self {
             bardo,
-            screen: Screen::Channels,
+            screen: Destination::START,
             channels,
+            accounts,
             personas,
             research,
             themes,
@@ -136,40 +117,62 @@ impl Shell {
             settings,
             jobs,
             jobs_open: false,
+            spend: None,
+            spend_revision: 0,
             editor: None,
             _subscriptions: subscriptions,
-        }
+        };
+        shell.refresh_spend(cx);
+        shell
     }
 
-    fn show(&mut self, screen: Screen, window: &mut Window, cx: &mut Context<Self>) {
-        // Channels may have changed on the channels screen, personas on the
-        // personas screen, niches on the research screen, and projects on
-        // the themes screen.
-        if screen != self.screen {
-            match screen {
-                Screen::Channels => self
+    fn refresh_spend(&mut self, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        self.spend_revision = bardo.jobs_revision();
+        self.spend = bardo
+            .costs(bardo.current_month())
+            .ok()
+            .map(|view| view.summary());
+    }
+
+    /// Goes to `place`; Jobs opens or closes its panel beside the screen.
+    fn pick(&mut self, place: Destination, window: &mut Window, cx: &mut Context<Self>) {
+        if place == Destination::Jobs {
+            self.jobs_open = !self.jobs_open;
+            cx.notify();
+            return;
+        }
+        // What a screen lists may have changed on another one: channels,
+        // personas, niches, projects started from themes.
+        if place != self.screen {
+            match place {
+                Destination::Channels => self
                     .channels
                     .update(cx, |channels, cx| channels.reload_personas(window, cx)),
-                Screen::Personas => self
+                Destination::Accounts => self
+                    .accounts
+                    .update(cx, |accounts, cx| accounts.reload(window, cx)),
+                Destination::Personas => self
                     .personas
                     .update(cx, |personas, cx| personas.reload(window, cx)),
-                Screen::Research => self
+                Destination::Research => self
                     .research
                     .update(cx, |research, cx| research.reload_channels(window, cx)),
-                Screen::Themes => self
+                Destination::Themes => self
                     .themes
                     .update(cx, |themes, cx| themes.reload_channels(window, cx)),
-                Screen::Projects => self
+                Destination::Projects => self
                     .projects
                     .update(cx, |projects, cx| projects.reload(window, cx)),
-                Screen::Templates => self
+                Destination::Templates => self
                     .templates
                     .update(cx, |templates, cx| templates.reload(window, cx)),
-                Screen::Costs => self.costs.update(cx, |costs, cx| costs.reload(cx)),
-                Screen::Settings => {}
+                Destination::Costs => self.costs.update(cx, |costs, cx| costs.reload(cx)),
+                Destination::Settings | Destination::Jobs => {}
             }
         }
-        self.screen = screen;
+        self.screen = place;
+        self.refresh_spend(cx);
         cx.notify();
     }
 
@@ -203,6 +206,31 @@ impl Shell {
         self.editor = Some((editor, subscription));
         cx.notify();
     }
+
+    fn navigation(&self, cx: &mut Context<Self>) -> Navigation {
+        let shell = cx.entity().downgrade();
+        let bardo = self.bardo.read(cx);
+        let mut navigation = Navigation::new(bardo, self.screen, move |place, window, cx| {
+            let _ = shell.update(cx, |shell, cx| shell.pick(place, window, cx));
+        });
+        navigation.jobs_open = self.jobs_open;
+        navigation.jobs = self.jobs.read(cx).active();
+        if let Some(spend) = &self.spend {
+            navigation.spent = Some(SharedString::from(bardo.money(spend.total)));
+            navigation.budgets = spend.budget_percent.map(|percent| BudgetMeter {
+                percent,
+                tone: match spend.level() {
+                    BudgetLevel::Reached => Tone::Danger,
+                    BudgetLevel::Warning => Tone::Warning,
+                    BudgetLevel::Under => Tone::Accent,
+                },
+                line: SharedString::from(
+                    bardo.text_with(Text::NavBudgetsUsed, &[("percent", &percent.to_string())]),
+                ),
+            });
+        }
+        navigation
+    }
 }
 
 impl Render for Shell {
@@ -215,94 +243,19 @@ impl Render for Shell {
                 .when(self.jobs_open, |row| row.child(self.jobs.clone()))
                 .into_any_element();
         }
-        let bardo = self.bardo.read(cx);
-        let t = look(cx).tokens;
-        let nav = h_flex().gap_0p5().children(Screen::ALL.map(|screen| {
-            let on = screen == self.screen;
-            div()
-                .id(("screen", screen as usize))
-                .px_2p5()
-                .py_1()
-                .rounded(t.radius)
-                .text_sm()
-                .font_weight(gpui_kit::FontWeight::MEDIUM)
-                .cursor_pointer()
-                .border_b_2()
-                .map(|item| {
-                    if on {
-                        item.bg(t.selected)
-                            .text_color(t.text)
-                            .border_color(t.accent)
-                    } else {
-                        item.text_color(t.text2)
-                            .border_color(gpui_kit::transparent_black())
-                            .hover(|item| item.bg(t.hover).text_color(t.text))
-                    }
-                })
-                .child(tr(bardo, screen.title()))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.show(screen, window, cx);
-                }))
-        }));
-
-        let top_bar = h_flex()
-            .h(px(48.))
-            .px_4()
-            .gap_3()
-            .bg(t.surface)
-            .border_b(t.border_width)
-            .border_color(t.border)
-            .child(
-                div()
-                    .text_lg()
-                    .font_weight(gpui_kit::FontWeight::BOLD)
-                    .mr_2()
-                    .child(tr(bardo, Text::AppName)),
-            )
-            .child(nav)
-            .child(div().flex_1())
-            .child(
-                Badge::new().count(self.jobs.read(cx).active()).child(
-                    Button::new("toggle-jobs")
-                        .small()
-                        .ghost()
-                        .selected(self.jobs_open)
-                        .label(tr(bardo, Text::JobsTitle))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.jobs_open = !this.jobs_open;
-                            cx.notify();
-                        })),
-                ),
-            );
-
-        v_flex()
-            .size_full()
-            .bg(t.app)
-            .text_color(t.text)
-            .child(top_bar)
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .items_start()
-                    .child(
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .min_w_0()
-                            .map(|main| match self.screen {
-                                Screen::Channels => main.child(self.channels.clone()),
-                                Screen::Personas => main.child(self.personas.clone()),
-                                Screen::Research => main.child(self.research.clone()),
-                                Screen::Themes => main.child(self.themes.clone()),
-                                Screen::Projects => main.child(self.projects.clone()),
-                                Screen::Templates => main.child(self.templates.clone()),
-                                Screen::Costs => main.child(self.costs.clone()),
-                                Screen::Settings => main.child(self.settings.clone()),
-                            }),
-                    )
-                    .when(self.jobs_open, |row| row.child(self.jobs.clone())),
-            )
-            .into_any_element()
+        let navigation = self.navigation(cx);
+        let screen = match self.screen {
+            Destination::Channels => self.channels.clone().into_any_element(),
+            Destination::Accounts => self.accounts.clone().into_any_element(),
+            Destination::Personas => self.personas.clone().into_any_element(),
+            Destination::Research => self.research.clone().into_any_element(),
+            Destination::Themes => self.themes.clone().into_any_element(),
+            Destination::Projects | Destination::Jobs => self.projects.clone().into_any_element(),
+            Destination::Templates => self.templates.clone().into_any_element(),
+            Destination::Costs => self.costs.clone().into_any_element(),
+            Destination::Settings => self.settings.clone().into_any_element(),
+        };
+        let jobs = self.jobs_open.then(|| self.jobs.clone().into_any_element());
+        layout::shell(navigation, screen, jobs, cx)
     }
 }

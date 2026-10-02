@@ -1,11 +1,15 @@
 //! Templates screen: the prompts Bardo sends to the AI, one template per
-//! kind (the script, the scene plan's image prompts). The editor holds the current version's text; picking an older
-//! version loads its text, and saving always creates the next version.
+//! kind (the script, the scene plan's image prompts). The versions are the
+//! collection and the editor its inspector: it holds the current version's
+//! text; picking an older version loads its text, and saving always creates
+//! the next version.
 
 use bardo_app::bardo_domain::{
     TemplateField, TemplateFieldError, TemplateKind, TemplateVersion, TemplateVersionId,
 };
-use bardo_app::{Bardo, Text, default_template};
+use std::rc::Rc;
+
+use bardo_app::{Bardo, Destination, Text, default_template};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::{
@@ -16,6 +20,8 @@ use gpui_kit::{AnyElement, ClickEvent, Entity, SharedString, Window, div, px};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
+use crate::layout;
+use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 
 pub struct TemplatesScreen {
@@ -128,93 +134,70 @@ impl TemplatesScreen {
         cx.notify();
     }
 
-    fn render_versions(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        let rows: Vec<AnyElement> =
-            self.versions
-                .iter()
-                .enumerate()
-                .map(|(ix, version)| {
-                    let picked = version.clone();
-                    let selected = self.base == Some(version.id);
-                    kit::list_row(("template-version", ix), selected, cx)
-                        .flex_row()
-                        .gap_2()
-                        .justify_between()
-                        .child(SharedString::from(bardo.text_with(
-                            Text::TemplateVersionLabel,
-                            &[("n", &version.number.to_string())],
-                        )))
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .when(ix == 0, |row| {
-                                    row.child(kit::status_with(
-                                        Tone::Accent,
-                                        IconName::Check,
-                                        tr(bardo, Text::TemplateCurrent),
-                                        cx,
-                                    ))
-                                })
-                                .child(
-                                    div().text_xs().text_color(theme.muted_foreground).child(
-                                        SharedString::from(bardo.time_ago(version.created_at)),
-                                    ),
-                                ),
-                        )
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            this.notice = None;
-                            this.load(&picked, window, cx);
-                        }))
-                        .into_any_element()
-                })
-                .collect();
-
-        kit::side_panel(cx)
-            .id("templates-versions")
-            .w(px(300.))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_3()
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(kit::title(tr(bardo, Text::TemplatesTitle)))
-                    .child(kit::info(
-                        "templates-info",
-                        None,
-                        tr(bardo, Text::TemplatesHint),
-                    )),
-            )
-            .child(
-                h_flex()
-                    .gap_1()
-                    .flex_wrap()
-                    .children(TemplateKind::ALL.map(|kind| {
-                        Button::new(SharedString::from(format!("template-kind-{kind}")))
-                            .small()
-                            .outline()
-                            .selected(kind == self.kind)
-                            .label(tr(bardo, Text::TemplateKindName(kind)))
-                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                if this.kind != kind {
-                                    this.kind = kind;
-                                    this.notice = None;
-                                    this.reload(window, cx);
-                                }
-                            }))
+    /// The template's versions, newest first, under the kind buttons.
+    fn collection(&self, cx: &mut Context<Self>) -> Collection {
+        let mut collection = Collection::new(CollectionKind::List, "template-versions");
+        collection.tiles = self
+            .versions
+            .iter()
+            .enumerate()
+            .map(|(ix, version)| {
+                let picked = version.clone();
+                let mut tile = Tile::new(
+                    ("template-version", ix),
+                    Rc::new(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.notice = None;
+                        this.load(&picked, window, cx);
                     })),
-            )
-            .child(
+                );
+                let bardo = self.bardo.read(cx);
+                tile.selected = self.base == Some(version.id);
+                tile.title = Some(SharedString::from(bardo.text_with(
+                    Text::TemplateVersionLabel,
+                    &[("n", &version.number.to_string())],
+                )));
+                tile.text = Some(SharedString::from(bardo.time_ago(version.created_at)));
+                tile.status = (ix == 0).then(|| {
+                    kit::status_with(
+                        Tone::Accent,
+                        IconName::Check,
+                        tr(bardo, Text::TemplateCurrent),
+                        cx,
+                    )
+                    .into_any_element()
+                });
+                tile
+            })
+            .collect();
+        let bardo = self.bardo.read(cx);
+        collection.controls = TemplateKind::ALL
+            .map(|kind| {
+                Button::new(SharedString::from(format!("template-kind-{kind}")))
+                    .small()
+                    .outline()
+                    .selected(kind == self.kind)
+                    .label(tr(bardo, Text::TemplateKindName(kind)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        if this.kind != kind {
+                            this.kind = kind;
+                            this.notice = None;
+                            this.reload(window, cx);
+                        }
+                    }))
+                    .into_any_element()
+            })
+            .into_iter()
+            .chain(std::iter::once(
                 div()
+                    .w_full()
+                    .pt_1()
                     .text_sm()
                     .font_medium()
-                    .child(tr(bardo, Text::TemplateVersionsTitle)),
-            )
-            .children(rows)
+                    .child(tr(bardo, Text::TemplateVersionsTitle))
+                    .into_any_element(),
+            ))
+            .collect();
+        collection
     }
 
     fn render_editor(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -272,12 +255,6 @@ impl TemplatesScreen {
             .collect();
 
         v_flex()
-            .id("templates-editor")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_4()
             .gap_3()
             .child(kit::section_heading(tr(
                 bardo,
@@ -388,10 +365,16 @@ fn field(label: SharedString, hint: SharedString, input: AnyElement) -> gpui_kit
 
 impl Render for TemplatesScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(self.render_versions(cx))
-            .child(self.render_editor(cx))
+        let collection = self.collection(cx);
+        let editor = self.render_editor(cx).into_any_element();
+        let bardo = self.bardo.read(cx);
+        let mut header = Header::place(bardo, Destination::Templates);
+        header.info = Some(
+            kit::info("templates-info", None, tr(bardo, Text::TemplatesHint)).into_any_element(),
+        );
+        let mut parts = ScreenParts::new(header);
+        parts.collection = Some(collection);
+        parts.inspector = Some(Inspector::new(vec![editor]));
+        layout::screen(parts, cx)
     }
 }

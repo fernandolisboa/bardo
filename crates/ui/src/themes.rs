@@ -10,7 +10,8 @@ use bardo_app::bardo_domain::{
     ThemeStatus,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, SUGGESTIONS_PER_RUN, SpendEstimate, Text, ThemeError, ThemesView,
+    Bardo, BudgetConsent, Destination, SUGGESTIONS_PER_RUN, SpendEstimate, Text, ThemeError,
+    ThemesView,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
@@ -21,10 +22,12 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div,
 };
 
 use crate::kit::{self, Tone};
+use crate::layout;
+use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
@@ -359,15 +362,8 @@ impl ThemesScreen {
         let running = self.running();
         let unranked = view.map_or(0, |view| view.unranked);
 
-        kit::side_panel(cx)
-            .id("themes-controls")
-            .w(px(340.))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .p_4()
+        v_flex()
             .gap_3()
-            .child(kit::title(tr(bardo, Text::ThemesTitle)))
             .child(field(
                 tr(bardo, Text::ThemesChannel),
                 Select::new(&self.channel_select).into_any_element(),
@@ -525,31 +521,24 @@ impl ThemesScreen {
         }
     }
 
-    fn render_ideas(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        let discarded = self.view.as_ref().map_or(0, |view| view.discarded);
+    /// The channel's ideas, ranked, as a feed of cards.
+    fn collection(&self, cx: &mut Context<Self>) -> Collection {
         let themes: Vec<Theme> = self
             .view
             .iter()
             .flat_map(|view| view.themes.iter().cloned())
             .collect();
-        let empty = themes.is_empty();
         let cards: Vec<AnyElement> = themes
             .iter()
             .enumerate()
             .map(|(ix, idea)| self.render_theme(ix, idea, cx))
             .collect();
-
-        v_flex()
-            .id("themes-ideas")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_3()
-            .child(
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let discarded = self.view.as_ref().map_or(0, |view| view.discarded);
+        let mut collection = Collection::new(CollectionKind::Feed, "themes-ideas");
+        collection.controls =
+            vec![
                 kit::section_heading(tr(bardo, Text::ThemesListTitle))
                     .child(kit::info(
                         "themes-ranking-info",
@@ -563,20 +552,12 @@ impl ThemesScreen {
                                 &[("n", &discarded.to_string())],
                             )),
                         ))
-                    }),
-            )
-            .children(self.started.as_ref().map(|title| {
-                kit::notice(
-                    Tone::Success,
-                    bardo.text_with(Text::ProjectStarted, &[("title", title)]),
-                    cx,
-                )
-            }))
-            .when(empty, |list| {
-                list.child(muted(cx, tr(bardo, Text::ThemesEmpty)))
-            })
-            .children(cards)
-            .child(self.render_projects(cx))
+                    })
+                    .into_any_element(),
+            ];
+        collection.empty = Some(muted(cx, tr(bardo, Text::ThemesEmpty)));
+        collection.cards = cards;
+        collection
     }
 
     fn render_theme(&self, ix: usize, idea: &Theme, cx: &Context<Self>) -> AnyElement {
@@ -828,8 +809,7 @@ impl ThemesScreen {
         let empty = rows.is_empty();
 
         v_flex()
-            .pt_4()
-            .mt_2()
+            .pt_3()
             .gap_2()
             .border_t_1()
             .border_color(theme.border)
@@ -912,20 +892,31 @@ fn research_tags(bardo: &Bardo, scores: NicheScores) -> impl IntoElement {
 
 impl Render for ThemesScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bardo = self.bardo.read(cx);
+        let header = Header::place(bardo, Destination::Themes);
+        let mut parts = ScreenParts::new(header);
         if self.channels.is_empty() {
-            let bardo = self.bardo.read(cx);
-            return h_flex()
-                .size_full()
-                .p_6()
-                .items_start()
-                .child(muted(cx, tr(bardo, Text::ThemesNoChannels)))
-                .into_any_element();
+            parts.content = vec![muted(cx, tr(bardo, Text::ThemesNoChannels))];
+            return layout::screen(parts, cx);
         }
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(self.render_controls(cx))
-            .child(self.render_ideas(cx))
-            .into_any_element()
+        parts.notices = self
+            .started
+            .as_ref()
+            .map(|title| {
+                kit::notice(
+                    Tone::Success,
+                    bardo.text_with(Text::ProjectStarted, &[("title", title)]),
+                    cx,
+                )
+                .into_any_element()
+            })
+            .into_iter()
+            .collect();
+        parts.collection = Some(self.collection(cx));
+        parts.inspector = Some(Inspector::new(vec![
+            self.render_controls(cx).into_any_element(),
+            self.render_projects(cx).into_any_element(),
+        ]));
+        layout::screen(parts, cx)
     }
 }

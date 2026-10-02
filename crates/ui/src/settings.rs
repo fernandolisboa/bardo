@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use bardo_app::bardo_domain::{
     KeyCheckOutcome, Provider, ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
-use bardo_app::{Bardo, KeyState, ProviderKeyStatus, Text};
+use bardo_app::{Bardo, Destination, KeyState, ProviderKeyStatus, Text};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -25,6 +25,8 @@ use gpui_kit::{
 
 use crate::appearance::{self, look};
 use crate::kit::{self, Tone};
+use crate::layout;
+use crate::parts::{Header, ScreenParts};
 use crate::shell::tr;
 
 /// The settings tabs.
@@ -760,18 +762,9 @@ impl Render for SettingsScreen {
                 cx.notify();
             }));
 
-        v_flex()
-            .id("settings")
-            .size_full()
-            .overflow_y_scroll()
-            .child(
-                v_flex()
-                    .max_w(px(1040.))
-                    .p_6()
-                    .gap_4()
-                    .child(kit::title(tr(bardo, Text::SettingsTitle)))
-                    .child(tabs)
-                    .child(body),
-            )
+        let mut parts = ScreenParts::new(Header::place(bardo, Destination::Settings));
+        parts.toolbar = Some(tabs.into_any_element());
+        parts.content = vec![body];
+        layout::screen(parts, cx)
     }
 }

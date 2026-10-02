@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 
 use std::time::Duration;
 
+use crate::{Destination, Pillar, Stage};
+
 use bardo_domain::{
     ApiKeyError, AspectRatio, CaptionStyle, ChannelFieldError, ContentLanguage, Country, Decibels,
     JobFailureKind, JobKind, JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month,
@@ -793,6 +795,53 @@ pub enum Text {
     UiThemeKind(UiTheme),
     ProviderKeysInfo,
     Details,
+    NavBudgetsUsed,
+    StageScriptMissing,
+    StageScriptToReview,
+    StageScriptWords,
+    StageNarrationMissing,
+    StageNarrationStale,
+    StageScenesMissing,
+    StageScenesStale,
+    StageToReview,
+    StageImages,
+    StageClips,
+    StageEditorReady,
+    StageWorking,
+    StageNotYet,
+    FilterAll,
+    FilterPending,
+    FilterPendingEmpty,
+    SceneCardReview,
+    SceneCardFailed,
+    SceneCardToDraw,
+    SceneCardToAnimate,
+    SceneCardAnimating,
+    SceneImagePrompt,
+    SceneCurrentImage,
+    SceneNewImage,
+    ProjectSwitch,
+    GenerationDetails,
+    CostsOverview,
+    CostsAcrossProviders,
+    CostsBudgetsTile,
+    CostsBudgetsInAlert,
+    CostsNoBudgets,
+    CostsUnpricedTitle,
+    CostsUnpricedModel,
+    CostsUnpricedModels,
+    CostsUnpricedNone,
+    AddPrice,
+    CostsColumnProvider,
+    CostsColumnUsage,
+    CostsColumnSpent,
+    CostsColumnBudget,
+    CostsColumnState,
+    PillarName(Pillar),
+    DestinationName(Destination),
+    StageName(Stage),
+    /// Why a stage is locked: it waits on that stage.
+    StageAfter(Stage),
 }
 
 impl Text {
@@ -1627,6 +1676,83 @@ impl Text {
             },
             Text::ProviderKeysInfo => "provider_keys.info",
             Text::Details => "app.details",
+            Text::NavBudgetsUsed => "nav.budgets_used",
+            Text::StageScriptMissing => "stage.note.script_missing",
+            Text::StageScriptToReview => "stage.note.script_to_review",
+            Text::StageScriptWords => "stage.note.script_words",
+            Text::StageNarrationMissing => "stage.note.narration_missing",
+            Text::StageNarrationStale => "stage.note.narration_stale",
+            Text::StageScenesMissing => "stage.note.scenes_missing",
+            Text::StageScenesStale => "stage.note.scenes_stale",
+            Text::StageToReview => "stage.note.to_review",
+            Text::StageImages => "stage.note.images",
+            Text::StageClips => "stage.note.clips",
+            Text::StageEditorReady => "stage.note.editor_ready",
+            Text::StageWorking => "stage.note.working",
+            Text::StageNotYet => "stage.note.not_yet",
+            Text::FilterAll => "scenes.filter.all",
+            Text::FilterPending => "scenes.filter.pending",
+            Text::FilterPendingEmpty => "scenes.filter.pending_empty",
+            Text::SceneCardReview => "scenes.card.review",
+            Text::SceneCardFailed => "scenes.card.failed",
+            Text::SceneCardToDraw => "scenes.card.to_draw",
+            Text::SceneCardToAnimate => "scenes.card.to_animate",
+            Text::SceneCardAnimating => "scenes.card.animating",
+            Text::SceneImagePrompt => "scenes.inspector.image_prompt",
+            Text::SceneCurrentImage => "scenes.inspector.current",
+            Text::SceneNewImage => "scenes.inspector.new",
+            Text::ProjectSwitch => "projects.switch",
+            Text::GenerationDetails => "scenes.inspector.generation_details",
+            Text::CostsOverview => "costs.overview",
+            Text::CostsAcrossProviders => "costs.across_providers",
+            Text::CostsBudgetsTile => "costs.budgets_tile",
+            Text::CostsBudgetsInAlert => "costs.budgets_in_alert",
+            Text::CostsNoBudgets => "costs.no_budgets",
+            Text::CostsUnpricedTitle => "costs.unpriced_title",
+            Text::CostsUnpricedModel => "costs.unpriced_model",
+            Text::CostsUnpricedModels => "costs.unpriced_models",
+            Text::CostsUnpricedNone => "costs.unpriced_none",
+            Text::AddPrice => "costs.add_price",
+            Text::CostsColumnProvider => "costs.column.provider",
+            Text::CostsColumnUsage => "costs.column.usage",
+            Text::CostsColumnSpent => "costs.column.spent",
+            Text::CostsColumnBudget => "costs.column.budget",
+            Text::CostsColumnState => "costs.column.state",
+            Text::PillarName(pillar) => match pillar {
+                Pillar::Strategy => "nav.pillar.strategy",
+                Pillar::Production => "nav.pillar.production",
+                Pillar::Publishing => "nav.pillar.publishing",
+            },
+            Text::DestinationName(place) => match place {
+                Destination::Research => "nav.place.research",
+                Destination::Themes => "nav.place.themes",
+                Destination::Projects => "nav.place.projects",
+                Destination::Personas => "nav.place.personas",
+                Destination::Templates => "nav.place.templates",
+                Destination::Channels => "nav.place.channels",
+                Destination::Accounts => "nav.place.accounts",
+                Destination::Jobs => "nav.place.jobs",
+                Destination::Costs => "nav.place.costs",
+                Destination::Settings => "nav.place.settings",
+            },
+            Text::StageName(stage) => match stage {
+                Stage::Script => "stage.name.script",
+                Stage::Narration => "stage.name.narration",
+                Stage::Scenes => "stage.name.scenes",
+                Stage::Clips => "stage.name.clips",
+                Stage::Edit => "stage.name.edit",
+                Stage::Render => "stage.name.render",
+                Stage::Publish => "stage.name.publish",
+            },
+            Text::StageAfter(stage) => match stage {
+                Stage::Script => "stage.after.script",
+                Stage::Narration => "stage.after.narration",
+                Stage::Scenes => "stage.after.scenes",
+                Stage::Clips => "stage.after.clips",
+                Stage::Edit => "stage.after.edit",
+                Stage::Render => "stage.after.render",
+                Stage::Publish => "stage.after.publish",
+            },
         };
         Cow::Borrowed(key)
     }
@@ -2526,6 +2652,52 @@ mod tests {
         texts.extend(UiTheme::ALL.map(Text::UiThemeKind));
         texts.push(Text::ProviderKeysInfo);
         texts.push(Text::Details);
+        texts.push(Text::NavBudgetsUsed);
+        texts.push(Text::StageScriptMissing);
+        texts.push(Text::StageScriptToReview);
+        texts.push(Text::StageScriptWords);
+        texts.push(Text::StageNarrationMissing);
+        texts.push(Text::StageNarrationStale);
+        texts.push(Text::StageScenesMissing);
+        texts.push(Text::StageScenesStale);
+        texts.push(Text::StageToReview);
+        texts.push(Text::StageImages);
+        texts.push(Text::StageClips);
+        texts.push(Text::StageEditorReady);
+        texts.push(Text::StageWorking);
+        texts.push(Text::StageNotYet);
+        texts.push(Text::FilterAll);
+        texts.push(Text::FilterPending);
+        texts.push(Text::FilterPendingEmpty);
+        texts.push(Text::SceneCardReview);
+        texts.push(Text::SceneCardFailed);
+        texts.push(Text::SceneCardToDraw);
+        texts.push(Text::SceneCardToAnimate);
+        texts.push(Text::SceneCardAnimating);
+        texts.push(Text::SceneImagePrompt);
+        texts.push(Text::SceneCurrentImage);
+        texts.push(Text::SceneNewImage);
+        texts.push(Text::ProjectSwitch);
+        texts.push(Text::GenerationDetails);
+        texts.push(Text::CostsOverview);
+        texts.push(Text::CostsAcrossProviders);
+        texts.push(Text::CostsBudgetsTile);
+        texts.push(Text::CostsBudgetsInAlert);
+        texts.push(Text::CostsNoBudgets);
+        texts.push(Text::CostsUnpricedTitle);
+        texts.push(Text::CostsUnpricedModel);
+        texts.push(Text::CostsUnpricedModels);
+        texts.push(Text::CostsUnpricedNone);
+        texts.push(Text::AddPrice);
+        texts.push(Text::CostsColumnProvider);
+        texts.push(Text::CostsColumnUsage);
+        texts.push(Text::CostsColumnSpent);
+        texts.push(Text::CostsColumnBudget);
+        texts.push(Text::CostsColumnState);
+        texts.extend(Pillar::ALL.map(Text::PillarName));
+        texts.extend(Destination::ALL.map(Text::DestinationName));
+        texts.extend(Stage::ALL.map(Text::StageName));
+        texts.extend(Stage::ALL.map(Text::StageAfter));
         texts
     }
 

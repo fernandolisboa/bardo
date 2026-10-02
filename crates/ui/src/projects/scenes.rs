@@ -1,33 +1,40 @@
-//! The scenes panel of the projects screen: plan the narration's scenes,
-//! read and edit each scene's image prompt, draw the images, draw one again
-//! and choose between the current image and the new one. Then animate the
-//! images into clips: pick each scene's video model, edit how it moves,
-//! and play, keep or discard each new clip. Clips play in the system's
+//! The Scenes and Clips stages of the projects screen: plan the
+//! narration's scenes, read and edit each scene's image prompt, draw the
+//! images, draw one again and choose between the current image and the new
+//! one. Then animate the images into clips: pick each scene's video model,
+//! edit how it moves, and play, keep or discard each new clip. The scenes
+//! are a grid of cards; the picked one opens in the inspector. Clips play in the system's
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
     ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip, SceneImage, TemplateKind,
     VideoProjectId,
 };
-use bardo_app::{BudgetConsent, SceneClipView, SceneError, ScenesView, Text};
+use std::rc::Rc;
+
+use bardo_app::{
+    Bardo, BudgetConsent, SceneClipView, SceneError, SceneState, ScenesView, Stage, Text,
+    scene_states,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div, img, px};
 
 use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::appearance::look;
+use crate::icons::Lucide;
 use crate::kit::{self, Tone};
+use crate::parts::{Collection, CollectionKind, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
-
-/// Thumbnails are 16:9, like the images.
-const THUMB_WIDTH: f32 = 192.;
-const THUMB_HEIGHT: f32 = 108.;
 
 /// A scene action that starts a paid job.
 #[derive(Clone, Copy)]
@@ -174,54 +181,91 @@ impl ProjectsScreen {
         }
     }
 
-    /// The scenes: plan them, edit their prompts, draw their images, and
-    /// review a new image of one scene.
-    pub(super) fn render_scenes(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let view = self.scenes.as_ref()?;
-        let job = view
-            .job
+    /// The Scenes and Clips stages: the toolbar, what happened, the scenes
+    /// as a grid of cards, and the picked scene in the inspector.
+    pub(super) fn scene_parts(
+        &self,
+        stage: Stage,
+        parts: &mut ScreenParts,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.scenes.as_ref() else {
+            let bardo = self.bardo.read(cx);
+            parts.notices.extend(
+                self.scenes_error.map(|error| {
+                    kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()
+                }),
+            );
+            return;
+        };
+        let states = scene_states(view, stage);
+        // The picked scene, else the first with something left, else the
+        // first.
+        let selected = self
+            .selected_scene
+            .filter(|index| *index < states.len())
+            .or_else(|| states.iter().position(|state| state.is_pending()))
+            .or((!states.is_empty()).then_some(0));
+        parts.toolbar = Some(self.scenes_toolbar(stage, view, &states, cx));
+        parts.notices.extend(self.scenes_notices(view, cx));
+        parts.collection = Some(self.scene_grid(view, &states, selected, cx));
+        parts.inspector = view
+            .plan
             .as_ref()
-            .and_then(|job| self.render_scenes_job(job, cx));
-        let busy = view.is_busy();
-        let plan = view.plan.as_ref();
-        let cards: Vec<AnyElement> = plan
-            .map(|plan| {
-                plan.scenes()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, scene)| {
-                        self.render_scene(index, scene, view.clips.scenes.get(index), busy, cx)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let animate = plan
-            .filter(|plan| plan.scenes().iter().any(Scene::can_animate))
-            .map(|_| self.render_animate_all(view, cx));
-        let provenance = plan.map(|plan| {
-            self.render_provenance(
+            .and(selected)
+            .map(|index| self.scene_inspector(stage, index, cx));
+        if let Some(plan) = &view.plan {
+            parts.content.push(self.render_provenance(
                 &plan.generation,
                 TemplateKind::ImagePrompt,
                 PromptShown::ScenePlan,
                 cx,
-            )
-        });
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
+            ));
+        }
+    }
 
-        let title_row = h_flex()
+    /// The filter, then what the stage does to every scene: plan them and
+    /// draw the missing images, or animate the missing clips.
+    fn scenes_toolbar(
+        &self,
+        stage: Stage,
+        view: &ScenesView,
+        states: &[SceneState],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (actions, estimate) = if stage == Stage::Clips {
+            self.clips_actions(view, cx)
+        } else {
+            self.scenes_actions(view, cx)
+        };
+        let bardo = self.bardo.read(cx);
+        let pending = states.iter().filter(|state| state.is_pending()).count();
+        let row = h_flex();
+        let filter = (!states.is_empty()).then(|| {
+            TabBar::new("scene-filter")
+                .segmented()
+                .small()
+                .selected_index(usize::from(self.pending_only))
+                .child(Tab::new().label(SharedString::from(format!(
+                    "{} ({})",
+                    bardo.text(Text::FilterAll),
+                    states.len()
+                ))))
+                .child(Tab::new().label(SharedString::from(format!(
+                    "{} ({pending})",
+                    bardo.text(Text::FilterPending)
+                ))))
+                .on_click(cx.listener(|this, index: &usize, _, cx| {
+                    this.pending_only = *index == 1;
+                    cx.notify();
+                }))
+        });
+        let row = row
             .gap_2()
+            .flex_wrap()
             .items_center()
-            .child(kit::section_heading(tr(bardo, Text::ScenesTitle)))
-            .children(plan.map(|plan| {
-                Tag::secondary()
-                    .small()
-                    .child(SharedString::from(bardo.text_with(
-                        Text::ScenesCount,
-                        &[("n", &plan.scenes().len().to_string())],
-                    )))
-            }))
-            .when(view.stale, |row| {
+            .children(filter)
+            .when(stage == Stage::Scenes && view.stale, |row| {
                 row.child(kit::status(
                     Tone::Warning,
                     tr(bardo, Text::ScenesStaleTag),
@@ -232,18 +276,47 @@ impl ProjectsScreen {
                     None,
                     tr(bardo, Text::ScenesStale),
                 ))
-            });
+            })
+            .child(div().flex_1())
+            .children(actions);
+        // The leading action's estimate, under it.
+        v_flex()
+            .gap_1()
+            .child(row)
+            .children(estimate.map(|estimate| h_flex().justify_end().child(estimate)))
+            .into_any_element()
+    }
 
-        let plan_button = Button::new("plan-scenes")
-            .small()
-            .label(tr(
+    /// Plan (again) and draw the missing images, and the leading one's
+    /// estimate.
+    fn scenes_actions(
+        &self,
+        view: &ScenesView,
+        cx: &mut Context<Self>,
+    ) -> (Vec<AnyElement>, Option<AnyElement>) {
+        let bardo = self.bardo.read(cx);
+        let busy = view.is_busy();
+        let plan = view.plan.as_ref();
+        let missing = view.missing_images();
+        let stale = view.stale;
+        // Only the leading button is primary: planning while there is no
+        // plan or it is stale, else drawing the missing images.
+        let plans_first = plan.is_none() || stale;
+        let can_plan = !busy && !view.is_animating() && view.narration.is_some();
+        let plan_button = can_plan.then(|| {
+            let button = Button::new("plan-scenes").small().label(tr(
                 bardo,
                 if plan.is_some() {
                     Text::ReplanScenes
                 } else {
                     Text::PlanScenes
                 },
-            ))
+            ));
+            if plans_first {
+                button.primary()
+            } else {
+                button.outline()
+            }
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 this.run_scene(
                     SceneAction::Plan {
@@ -253,22 +326,12 @@ impl ProjectsScreen {
                     window,
                     cx,
                 )
-            }));
-        // Only the leading button is primary; drawing the missing images
-        // leads once a plan exists.
-        let missing = view.missing_images();
-        let plan_button = if plan.is_none() || view.stale {
-            plan_button.primary()
-        } else {
-            plan_button.outline()
-        };
-        let can_plan = !busy && !view.is_animating() && view.narration.is_some();
-        let plan_button = can_plan.then_some(plan_button);
-        let stale = view.stale;
+            }))
+            .into_any_element()
+        });
         let draw_button = (missing > 0 && !busy).then(|| {
             let button = Button::new("generate-scene-images").small();
-            // A stale plan leads with planning again.
-            if stale {
+            if plans_first {
                 button.outline()
             } else {
                 button.primary()
@@ -280,8 +343,84 @@ impl ProjectsScreen {
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 this.run_scene(SceneAction::DrawMissing, BudgetConsent::Ask, window, cx);
             }))
+            .into_any_element()
         });
-        let files = plan.map_or(0, |plan| plan.files().count());
+        let hint = match (view.narration, plan) {
+            (None, _) => tr(bardo, Text::ScenesNoNarration),
+            (Some(_), None) => SharedString::from(bardo.text_with(
+                Text::PlanScenesHint,
+                &[("n", &view.template.number.to_string())],
+            )),
+            (Some(_), Some(_)) => tr(bardo, Text::SceneImagesHint),
+        };
+        // The estimate of the button that leads.
+        let estimate = if plan_button.is_none() && draw_button.is_none() {
+            None
+        } else if plans_first {
+            view.plan_estimate.as_ref()
+        } else if missing > 0 {
+            view.images_estimate.as_ref()
+        } else {
+            None
+        }
+        .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx));
+        let actions = plan_button
+            .into_iter()
+            .chain(draw_button)
+            .chain(Some(
+                kit::info("scenes-info", None, hint).into_any_element(),
+            ))
+            .collect();
+        (actions, estimate)
+    }
+
+    /// Animate every scene without a clip, and its estimate.
+    fn clips_actions(
+        &self,
+        view: &ScenesView,
+        cx: &mut Context<Self>,
+    ) -> (Vec<AnyElement>, Option<AnyElement>) {
+        let bardo = self.bardo.read(cx);
+        let missing = view.clips.missing.len();
+        let button = (missing > 0 && !view.is_busy()).then(|| {
+            Button::new("animate-missing-clips")
+                .primary()
+                .small()
+                .label(SharedString::from(bardo.text_with(
+                    Text::AnimateMissingClips,
+                    &[("n", &missing.to_string())],
+                )))
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.run_scene(SceneAction::AnimateMissing, BudgetConsent::Ask, window, cx);
+                }))
+                .into_any_element()
+        });
+        let estimate = button.as_ref().and_then(|_| {
+            view.clips
+                .missing_estimate
+                .as_ref()
+                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
+        });
+        let actions = button
+            .into_iter()
+            .chain(Some(
+                kit::info("clips-info", None, tr(bardo, Text::ClipsHint)).into_any_element(),
+            ))
+            .collect();
+        (actions, estimate)
+    }
+
+    /// What happened to the scenes: an error, the job, why nothing can be
+    /// planned yet, and the questions before discarding images or going
+    /// past a budget.
+    fn scenes_notices(&self, view: &ScenesView, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let job = view
+            .job
+            .as_ref()
+            .and_then(|job| self.render_scenes_job(job, cx));
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let files = view.plan.as_ref().map_or(0, |plan| plan.files().count());
         let confirm = self.confirm_replan.then(|| {
             kit::card(cx)
                 .p_3()
@@ -320,31 +459,8 @@ impl ProjectsScreen {
                                 })),
                         ),
                 )
+                .into_any_element()
         });
-        let no_narration = view.narration.is_none();
-        let hint = match (view.narration, plan) {
-            (None, _) => tr(bardo, Text::ScenesNoNarration),
-            (Some(_), None) => SharedString::from(bardo.text_with(
-                Text::PlanScenesHint,
-                &[("n", &view.template.number.to_string())],
-            )),
-            (Some(_), Some(_)) => tr(bardo, Text::SceneImagesHint),
-        };
-        // The estimate of the button that leads: planning, drawing the
-        // missing images, or drawing one scene again.
-        let estimate = if plan.is_none() || view.stale {
-            view.plan_estimate
-                .as_ref()
-                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
-        } else if missing > 0 {
-            view.images_estimate
-                .as_ref()
-                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
-        } else {
-            view.image_estimate
-                .as_ref()
-                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateRedraw, cx))
-        };
         let ask = self.scenes_ask.as_ref().map(|(action, estimate)| {
             let action = *action;
             budget_question(
@@ -361,86 +477,358 @@ impl ProjectsScreen {
                 }),
             )
         });
-
-        Some(
-            v_flex()
-                .pt_3()
-                .gap_2()
-                .border_t_1()
-                .border_color(theme.border)
-                .child(title_row)
-                .children(
-                    self.scenes_error
-                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
-                )
-                .children(job)
-                .when(plan.is_none(), |panel| {
-                    panel.child(muted(cx, tr(bardo, Text::ScenesEmpty)))
-                })
-                .when(no_narration, |panel| {
-                    panel.child(kit::notice(Tone::Info, hint.clone(), cx))
-                })
-                .when(draw_button.is_some() || plan_button.is_some(), |panel| {
-                    panel.child(
-                        v_flex().gap_1().children(estimate).child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .children(draw_button)
-                                .children(plan_button)
-                                .child(kit::info("scenes-info", None, hint)),
-                        ),
-                    )
-                })
-                .children(animate)
-                .children(confirm)
-                .children(ask)
-                .children(cards)
-                .children(provenance)
-                .into_any_element(),
-        )
+        let no_narration = view.narration.is_none().then(|| {
+            kit::notice(Tone::Info, tr(bardo, Text::ScenesNoNarration), cx).into_any_element()
+        });
+        self.scenes_error
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element())
+            .into_iter()
+            .chain(job)
+            .chain(no_narration)
+            .chain(confirm)
+            .chain(ask)
+            .collect()
     }
 
-    /// The hint, estimate and button that animate every scene without a
-    /// clip.
-    fn render_animate_all(&self, view: &ScenesView, cx: &mut Context<Self>) -> AnyElement {
+    /// The scenes as cards, every one or only those with something left.
+    fn scene_grid(
+        &self,
+        view: &ScenesView,
+        states: &[SceneState],
+        selected: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> Collection {
         let bardo = self.bardo.read(cx);
-        let missing = view.clips.missing.len();
-        let estimate = view
-            .clips
-            .missing_estimate
-            .as_ref()
-            .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx));
-        if missing == 0 {
-            return div().into_any_element();
-        }
-        v_flex()
-            .gap_1()
-            .children(estimate)
+        let t = look(cx).tokens;
+        let mut collection = Collection::new(CollectionKind::Grid, "scene-grid");
+        let scenes = view.plan.as_ref().map_or(&[][..], |plan| plan.scenes());
+        // What a scene has, shown by its icon; what it lacks is its chip's
+        // to say, so no mark tells by color alone.
+        let mark = |icon: Lucide, present: bool| {
+            present.then(|| {
+                Icon::new(icon)
+                    .size(px(14.))
+                    .text_color(t.text2)
+                    .into_any_element()
+            })
+        };
+        collection.tiles = scenes
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.pending_only || states[*index].is_pending())
+            .map(|(index, scene)| {
+                let state = states[index];
+                let mut tile = Tile::new(
+                    ("scene-card", index),
+                    Rc::new(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.selected_scene = Some(index);
+                        cx.notify();
+                    })),
+                );
+                tile.selected = selected == Some(index);
+                tile.picture = scene.image().map(|image| {
+                    img(bardo.scene_image_path(image))
+                        .size_full()
+                        .object_fit(ObjectFit::Cover)
+                        .into_any_element()
+                });
+                tile.number = Some(SharedString::from((index + 1).to_string()));
+                tile.time = Some(SharedString::from(format!(
+                    "{}–{}",
+                    clock(scene.start),
+                    clock(scene.end)
+                )));
+                tile.text = Some(SharedString::from(scene.text.clone()));
+                tile.status = scene_chip(bardo, state, cx);
+                tile.marks = mark(Lucide::Image, scene.image().is_some())
+                    .into_iter()
+                    .chain(mark(Lucide::Film, scene.clip().is_some()))
+                    .collect();
+                tile.attention = state == SceneState::Review;
+                tile.failed = state == SceneState::Failed;
+                tile
+            })
+            .collect();
+        let empty = if scenes.is_empty() {
+            Text::ScenesEmpty
+        } else {
+            Text::FilterPendingEmpty
+        };
+        collection.empty = Some(muted(cx, tr(bardo, empty)));
+        collection
+    }
+
+    /// The picked scene: its narration, then its image and prompt (Scenes)
+    /// or how it moves and its clip (Clips); provenance behind "Generation
+    /// details".
+    fn scene_inspector(&self, stage: Stage, index: usize, cx: &mut Context<Self>) -> Inspector {
+        let Some(view) = self.scenes.as_ref() else {
+            return Inspector::new(Vec::new());
+        };
+        let Some(scene) = view.plan.as_ref().and_then(|plan| plan.scenes().get(index)) else {
+            return Inspector::new(Vec::new());
+        };
+        let open = self
+            .editing_scene
+            .filter(|(_, editing, _)| *editing == index)
+            .map(|(_, _, field)| field);
+        let busy = view.is_busy();
+        let stage_body: Vec<AnyElement> = if stage == Stage::Clips {
+            let clip = view
+                .clips
+                .scenes
+                .get(index)
+                .filter(|_| scene.can_animate())
+                .map(|clip| self.render_scene_clip(index, scene, clip, open, cx));
+            let bardo = self.bardo.read(cx);
+            std::iter::once(scene_picture(bardo, scene.image(), cx))
+                .chain(clip.or_else(|| Some(muted(cx, tr(bardo, Text::SceneNoImage)))))
+                .collect()
+        } else {
+            self.scene_image_body(index, scene, open, busy, cx)
+        };
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+
+        let title = h_flex()
+            .gap_2()
+            .items_center()
             .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(
-                        Button::new("animate-missing-clips")
-                            .outline()
-                            .small()
-                            .label(SharedString::from(bardo.text_with(
-                                Text::AnimateMissingClips,
-                                &[("n", &missing.to_string())],
-                            )))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.run_scene(
-                                    SceneAction::AnimateMissing,
-                                    BudgetConsent::Ask,
-                                    window,
-                                    cx,
-                                );
-                            })),
-                    )
-                    .child(kit::info("clips-info", None, tr(bardo, Text::ClipsHint))),
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(SharedString::from(bardo.text_with(
+                        Text::SceneLabel,
+                        &[
+                            ("n", &(index + 1).to_string()),
+                            ("start", &clock(scene.start)),
+                            ("end", &clock(scene.end)),
+                        ],
+                    ))),
+            )
+            .when(scene.is_edited(), |row| {
+                row.child(kit::status(Tone::Info, tr(bardo, Text::SceneEdited), cx))
+            })
+            .into_any_element();
+        let narration = v_flex()
+            .gap_1()
+            .child(field_label(tr(bardo, Text::NarrationTitle)))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(SharedString::from(scene.text.clone())),
+            )
+            .into_any_element();
+
+        // Provenance: the image and the clip.
+        let models = &view.clips.models;
+        let lines: Vec<SharedString> = scene
+            .image()
+            .map(|image| {
+                let generation = &image.generation;
+                let usage = generation.usage;
+                SharedString::from(bardo.text_with(
+                    Text::SceneImageRecord,
+                    &[
+                        ("model", &generation.model),
+                        (
+                            "tokens",
+                            &(usage.input_tokens + usage.output_tokens).to_string(),
+                        ),
+                        ("n", &generation.template.number.to_string()),
+                    ],
+                ))
+            })
+            .into_iter()
+            .chain(scene.clip().map(|clip| clip_record(bardo, models, clip)))
+            .collect();
+        let footer = (!lines.is_empty()).then(|| {
+            kit::details(
+                ("scene-details", index),
+                tr(bardo, Text::GenerationDetails),
+                lines,
             )
             .into_any_element()
+        });
+
+        let mut inspector = Inspector::new(std::iter::once(narration).chain(stage_body).collect());
+        inspector.title = Some(title);
+        inspector.footer = footer;
+        inspector
+    }
+
+    /// The Scenes stage of the inspector: why the image failed, the image
+    /// (or the current one beside a new one to review), its prompt, and
+    /// drawing it again.
+    fn scene_image_body(
+        &self,
+        index: usize,
+        scene: &Scene,
+        open: Option<ScenePromptField>,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let editor = (open == Some(ScenePromptField::Image))
+            .then(|| self.render_prompt_editor(index, None, cx));
+        let bardo = self.bardo.read(cx);
+        let redraw_estimate = self
+            .scenes
+            .as_ref()
+            .and_then(|view| view.image_estimate.as_ref());
+
+        let failure = scene.failure().map(|kind| {
+            kit::notice(
+                Tone::Danger,
+                format!(
+                    "{} {}",
+                    bardo.text(Text::SceneFailed),
+                    bardo.text(Text::JobFailureKindName(kind))
+                ),
+                cx,
+            )
+            .text_xs()
+            .into_any_element()
+        });
+
+        let picture = match scene.pending() {
+            None => scene_picture(bardo, scene.image(), cx),
+            Some(pending) => v_flex()
+                .gap_2()
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_medium()
+                                .child(tr(bardo, Text::ScenePendingTitle)),
+                        )
+                        .child(kit::info(
+                            ("pending-image-info", index),
+                            None,
+                            tr(bardo, Text::ScenePendingHint),
+                        )),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .child(field_label(tr(bardo, Text::SceneCurrentImage)))
+                                .child(scene_picture(bardo, scene.image(), cx)),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_1()
+                                .child(field_label(tr(bardo, Text::SceneNewImage)))
+                                .child(scene_picture(bardo, Some(pending), cx)),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new(("accept-scene-image", index))
+                                .primary()
+                                .xsmall()
+                                .label(tr(bardo, Text::AcceptSceneImage))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.scene_action(window, cx, |bardo, id| {
+                                        bardo.accept_scene_image(id, index)
+                                    });
+                                })),
+                        )
+                        .child(
+                            Button::new(("reject-scene-image", index))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::RejectSceneImage))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.scene_action(window, cx, |bardo, id| {
+                                        bardo.reject_scene_image(id, index)
+                                    });
+                                })),
+                        ),
+                )
+                .into_any_element(),
+        };
+
+        let prompt_label = h_flex()
+            .gap_2()
+            .items_center()
+            .child(field_label(tr(bardo, Text::SceneImagePrompt)))
+            .child(div().flex_1())
+            // Drawing while the prompt is open would draw the saved
+            // prompt, not the one being typed, so the actions wait for the
+            // editor to close.
+            .when(open.is_none(), |row| {
+                row.child(
+                    Button::new(("edit-scene-prompt", index))
+                        .ghost()
+                        .xsmall()
+                        .label(tr(bardo, Text::EditScenePrompt))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.edit_scene(index, ScenePromptField::Image, window, cx)
+                        })),
+                )
+            })
+            .into_any_element();
+        let prompt: AnyElement = match editor {
+            Some(editor) => editor,
+            None => kit::well(cx)
+                .text_xs()
+                .child(SharedString::from(scene.prompt().as_str().to_owned()))
+                .into_any_element(),
+        };
+        let redraw =
+            (open.is_none() && scene.image().is_some() && !busy && scene.pending().is_none()).then(
+                || {
+                    v_flex()
+                        .gap_1()
+                        .children(redraw_estimate.and_then(|estimate| {
+                            estimate_note(bardo, estimate, Text::EstimateRedraw, cx)
+                        }))
+                        .child(
+                            h_flex().child(
+                                Button::new(("regenerate-scene-image", index))
+                                    .outline()
+                                    .small()
+                                    .label(tr(bardo, Text::RegenerateSceneImage))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.run_scene(
+                                                SceneAction::Redraw(index),
+                                                BudgetConsent::Ask,
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    )),
+                            ),
+                        )
+                        .into_any_element()
+                },
+            );
+
+        failure
+            .into_iter()
+            .chain(Some(picture))
+            .chain(Some(
+                v_flex()
+                    .gap_1()
+                    .child(prompt_label)
+                    .child(prompt)
+                    .into_any_element(),
+            ))
+            .chain(redraw)
+            .collect()
     }
 
     /// A plan or image job running, or why the last one stopped.
@@ -493,187 +881,6 @@ impl ProjectsScreen {
             }
             JobState::Cancelled | JobState::Done => None,
         }
-    }
-
-    /// The image of a scene, or a box saying why there is none.
-    fn render_thumbnail(&self, image: Option<&SceneImage>, cx: &App) -> AnyElement {
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        let frame = div()
-            .w(px(THUMB_WIDTH))
-            .h(px(THUMB_HEIGHT))
-            .flex_none()
-            .rounded_md()
-            .overflow_hidden()
-            .bg(theme.muted);
-        match image {
-            Some(image) => frame
-                .child(
-                    img(bardo.scene_image_path(image))
-                        .size_full()
-                        .object_fit(ObjectFit::Cover),
-                )
-                .into_any_element(),
-            None => frame
-                .flex()
-                .items_center()
-                .justify_center()
-                .p_2()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(tr(bardo, Text::SceneNoImage))
-                .into_any_element(),
-        }
-    }
-
-    fn render_scene(
-        &self,
-        index: usize,
-        scene: &Scene,
-        clip: Option<&SceneClipView>,
-        busy: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let open = self
-            .editing_scene
-            .filter(|(_, editing, _)| *editing == index)
-            .map(|(_, _, field)| field);
-        let editing = open == Some(ScenePromptField::Image);
-        let clip = clip
-            .filter(|_| scene.can_animate())
-            .map(|clip| self.render_scene_clip(index, scene, clip, open, cx));
-        let thumbnail = self.render_thumbnail(scene.image(), cx);
-        let pending = scene
-            .pending()
-            .map(|pending| self.render_pending_image(index, pending, cx));
-        let editor = editing.then(|| self.render_prompt_editor(index, None, cx));
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-
-        let label = h_flex()
-            .gap_2()
-            .items_center()
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(SharedString::from(bardo.text_with(
-                        Text::SceneLabel,
-                        &[
-                            ("n", &(index + 1).to_string()),
-                            ("start", &clock(scene.start)),
-                            ("end", &clock(scene.end)),
-                        ],
-                    ))),
-            )
-            .when(scene.is_edited(), |row| {
-                row.child(kit::status(Tone::Info, tr(bardo, Text::SceneEdited), cx))
-            });
-
-        let failure = scene.failure().map(|kind| {
-            kit::notice(
-                Tone::Danger,
-                format!(
-                    "{} {}",
-                    bardo.text(Text::SceneFailed),
-                    bardo.text(Text::JobFailureKindName(kind))
-                ),
-                cx,
-            )
-            .text_xs()
-        });
-
-        let prompt: AnyElement = if let Some(editor) = editor {
-            editor
-        } else {
-            kit::well(cx)
-                .text_xs()
-                .child(SharedString::from(scene.prompt().as_str().to_owned()))
-                .into_any_element()
-        };
-
-        let record = scene.image().map(|image| {
-            let generation = &image.generation;
-            let usage = generation.usage;
-            kit::details(
-                ("scene-image-details", index),
-                tr(bardo, Text::Details),
-                vec![SharedString::from(bardo.text_with(
-                    Text::SceneImageRecord,
-                    &[
-                        ("model", &generation.model),
-                        (
-                            "tokens",
-                            &(usage.input_tokens + usage.output_tokens).to_string(),
-                        ),
-                        ("n", &generation.template.number.to_string()),
-                    ],
-                ))],
-            )
-        });
-
-        // Drawing while the prompt is open would draw the saved prompt, not
-        // the one being typed, so the actions wait for the editor to close.
-        let actions = open.is_none().then(|| {
-            h_flex()
-                .gap_2()
-                .child(
-                    Button::new(("edit-scene-prompt", index))
-                        .ghost()
-                        .xsmall()
-                        .label(tr(bardo, Text::EditScenePrompt))
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            this.edit_scene(index, ScenePromptField::Image, window, cx)
-                        })),
-                )
-                .when(
-                    scene.image().is_some() && !busy && scene.pending().is_none(),
-                    |row| {
-                        row.child(
-                            Button::new(("regenerate-scene-image", index))
-                                .outline()
-                                .xsmall()
-                                .label(tr(bardo, Text::RegenerateSceneImage))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.run_scene(
-                                        SceneAction::Redraw(index),
-                                        BudgetConsent::Ask,
-                                        window,
-                                        cx,
-                                    );
-                                })),
-                        )
-                    },
-                )
-        });
-
-        kit::card(cx)
-            .id(("scene", index))
-            .p_3()
-            .gap_2()
-            .child(
-                h_flex().gap_3().items_start().child(thumbnail).child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_1p5()
-                        .child(label)
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child(SharedString::from(scene.text.clone())),
-                        )
-                        .child(prompt)
-                        .children(failure)
-                        // Provenance stays one click away, even while a
-                        // prompt is being edited.
-                        .child(h_flex().gap_2().children(actions).children(record)),
-                ),
-            )
-            .children(pending)
-            .children(clip)
-            .into_any_element()
     }
 
     /// The open prompt editor of scene `index`, with `hint` above its
@@ -965,21 +1172,12 @@ impl ProjectsScreen {
                 )
         });
 
-        // A clip names its model as people call it, while still offered.
-        let record = |clip: &SceneClip| {
-            let model = models
-                .iter()
-                .find(|model| model.id.model() == clip.generation.model)
-                .map_or(clip.generation.model.as_str(), |model| model.name.as_str());
-            SharedString::from(bardo.text_with(
-                Text::SceneClipRecord,
-                &[("seconds", &clip.seconds.to_string()), ("model", model)],
-            ))
-        };
+        let record = |clip: &SceneClip| clip_record(bardo, &models, clip);
         let current = scene.clip().map(|clip| {
             let played = clip.clone();
             h_flex()
                 .gap_2()
+                .flex_wrap()
                 .items_center()
                 .child(Tag::secondary().small().child(record(clip)))
                 .when(scene.is_clip_stale(), |row| {
@@ -1022,6 +1220,7 @@ impl ProjectsScreen {
                 .child(
                     h_flex()
                         .gap_2()
+                        .flex_wrap()
                         .items_center()
                         .child(
                             div()
@@ -1074,15 +1273,13 @@ impl ProjectsScreen {
         });
 
         v_flex()
-            .pt_2()
             .gap_1p5()
-            .border_t_1()
-            .border_color(theme.border)
             .child(motion_label)
             .child(motion)
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_x_2()
+                    .flex_wrap()
                     .items_center()
                     .child(
                         div()
@@ -1100,72 +1297,84 @@ impl ProjectsScreen {
             .children(pending)
             .into_any_element()
     }
+}
 
-    /// A scene's new image beside the choice to use it or keep the current.
-    fn render_pending_image(
-        &self,
-        index: usize,
-        image: &SceneImage,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let thumbnail = self.render_thumbnail(Some(image), cx);
-        let bardo = self.bardo.read(cx);
-        kit::card(cx)
-            .flex_row()
-            .p_2()
-            .gap_3()
-            .items_start()
-            .border_color(look(cx).tokens.accent_edge)
-            .child(thumbnail)
+/// A scene's image filling a 16:9 box, or the box saying there is none.
+fn scene_picture(bardo: &Bardo, image: Option<&SceneImage>, cx: &App) -> AnyElement {
+    let t = look(cx).tokens;
+    let frame = div()
+        .w_full()
+        .aspect_ratio(16. / 9.)
+        .rounded(t.radius)
+        .overflow_hidden()
+        .bg(t.sunken);
+    match image {
+        Some(image) => frame
             .child(
-                v_flex()
-                    .gap_1p5()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_medium()
-                                    .child(tr(bardo, Text::ScenePendingTitle)),
-                            )
-                            .child(kit::info(
-                                ("pending-image-info", index),
-                                None,
-                                tr(bardo, Text::ScenePendingHint),
-                            )),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Button::new(("accept-scene-image", index))
-                                    .primary()
-                                    .xsmall()
-                                    .label(tr(bardo, Text::AcceptSceneImage))
-                                    .on_click(cx.listener(
-                                        move |this, _: &ClickEvent, window, cx| {
-                                            this.scene_action(window, cx, |bardo, id| {
-                                                bardo.accept_scene_image(id, index)
-                                            });
-                                        },
-                                    )),
-                            )
-                            .child(
-                                Button::new(("reject-scene-image", index))
-                                    .ghost()
-                                    .xsmall()
-                                    .label(tr(bardo, Text::RejectSceneImage))
-                                    .on_click(cx.listener(
-                                        move |this, _: &ClickEvent, window, cx| {
-                                            this.scene_action(window, cx, |bardo, id| {
-                                                bardo.reject_scene_image(id, index)
-                                            });
-                                        },
-                                    )),
-                            ),
-                    ),
+                img(bardo.scene_image_path(image))
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
             )
-            .into_any_element()
+            .into_any_element(),
+        None => frame
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_2()
+            .text_xs()
+            .text_color(t.text2)
+            .child(tr(bardo, Text::SceneNoImage))
+            .into_any_element(),
     }
+}
+
+/// A scene card's state chip; a scene with nothing left shows none.
+fn scene_chip(bardo: &Bardo, state: SceneState, cx: &App) -> Option<AnyElement> {
+    let (tone, icon, text): (Tone, Icon, Text) = match state {
+        SceneState::Done => return None,
+        SceneState::ToDraw => (
+            Tone::Neutral,
+            Icon::new(Lucide::Image),
+            Text::SceneCardToDraw,
+        ),
+        SceneState::ToAnimate => (
+            Tone::Neutral,
+            Icon::new(Lucide::Film),
+            Text::SceneCardToAnimate,
+        ),
+        SceneState::Animating => (
+            Tone::Info,
+            Icon::new(IconName::LoaderCircle),
+            Text::SceneCardAnimating,
+        ),
+        SceneState::Review => (
+            Tone::Accent,
+            Icon::new(IconName::Eye),
+            Text::SceneCardReview,
+        ),
+        SceneState::Failed => (
+            Tone::Danger,
+            Icon::new(Tone::Danger.icon()),
+            Text::SceneCardFailed,
+        ),
+    };
+    Some(kit::status_with(tone, icon, tr(bardo, text), cx).into_any_element())
+}
+
+/// A small label over a field of the inspector.
+fn field_label(text: SharedString) -> gpui_kit::Div {
+    div().text_xs().font_semibold().child(text)
+}
+
+/// A clip's length and model, the model named as people call it while it
+/// is still offered.
+fn clip_record(bardo: &Bardo, models: &[ClipModel], clip: &SceneClip) -> SharedString {
+    let model = models
+        .iter()
+        .find(|model| model.id.model() == clip.generation.model)
+        .map_or(clip.generation.model.as_str(), |model| model.name.as_str());
+    SharedString::from(bardo.text_with(
+        Text::SceneClipRecord,
+        &[("seconds", &clip.seconds.to_string()), ("model", model)],
+    ))
 }

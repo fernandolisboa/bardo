@@ -1,9 +1,12 @@
 //! Video projects screen: pick a channel and one of its projects, choose
 //! who narrates it (the channel's default persona or one for this video),
-//! then generate, edit and review the project's script, generate (or import
-//! a recording of) and play its narration with the spoken word highlighted,
-//! plan its scenes and draw their images, and get a prompt for the
-//! video's music. Generation runs as jobs in
+//! then work through its stages one at a time: generate, edit and review
+//! the script and get a prompt for the video's music; generate (or import
+//! a recording of) and play the narration with the spoken word highlighted;
+//! plan the scenes and draw their images; animate them into clips; open
+//! the editor. The stages and where each stands come from `bardo_app`
+//! ([`project_stages`]); the screen hands its parts to the layout
+//! ([`crate::layout`]). Generation runs as jobs in
 //! `bardo_app`; this view polls the job revision and re-reads the script,
 //! narration and scenes when it moves, and re-renders while the narration
 //! plays.
@@ -17,16 +20,20 @@ use bardo_app::bardo_domain::{
     SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, MusicPromptView, NarrationError, NarrationPlayer, NarrationView,
-    Recording, ScenesView, ScriptError, ScriptView, SpendEstimate, Text,
+    Bardo, BudgetConsent, Destination, MusicPromptView, NarrationError, NarrationPlayer,
+    NarrationView, Recording, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage,
+    StageState, StageStatus, Text, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString,
@@ -35,6 +42,8 @@ use gpui_kit::{
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
+use crate::layout;
+use crate::parts::{Header, ScreenParts, Stages};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
@@ -89,6 +98,12 @@ pub struct ProjectsScreen {
     channel: Option<ChannelId>,
     projects: Vec<VideoProject>,
     project: Option<VideoProjectId>,
+    /// The stage on screen.
+    stage: Stage,
+    /// The scene open in the inspector at the Scenes and Clips stages.
+    selected_scene: Option<usize>,
+    /// Whether the scene grid shows only the scenes with something left.
+    pending_only: bool,
     view: Option<ScriptView>,
     narration: Option<NarrationView>,
     /// The narration loaded for playback, once the user plays it.
@@ -201,6 +216,9 @@ impl ProjectsScreen {
             channel: None,
             projects: Vec::new(),
             project: None,
+            stage: Stage::Script,
+            selected_scene: None,
+            pending_only: false,
             view: None,
             narration: None,
             player: None,
@@ -338,9 +356,35 @@ impl ProjectsScreen {
         self.music_error = None;
         self.music_notice = None;
         self.music_ask = None;
+        self.selected_scene = None;
+        self.pending_only = false;
         self.load(window, cx);
+        self.stage = self
+            .stages()
+            .map_or(Stage::Script, |stages| opening_stage(&stages));
         self.fill_narrator(window, cx);
         cx.notify();
+    }
+
+    /// Every stage of the open project and where it stands.
+    fn stages(&self) -> Option<Vec<StageStatus>> {
+        Some(project_stages(
+            self.view.as_ref()?,
+            self.narration.as_ref()?,
+            self.scenes.as_ref()?,
+        ))
+    }
+
+    /// Shows a stage; Edit opens the project in the editor instead.
+    fn pick_stage(&mut self, stage: Stage, cx: &mut Context<Self>) {
+        if stage == Stage::Edit {
+            if let Some(id) = self.project {
+                cx.emit(OpenEditor(id));
+            }
+        } else if stage.is_page() {
+            self.stage = stage;
+            cx.notify();
+        }
     }
 
     /// The narrator choices: the channel's default (named), then every
@@ -708,141 +752,134 @@ impl ProjectsScreen {
         cx.notify();
     }
 
-    fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The header: Projects › channel, the project and its switcher, its
+    /// line, and who narrates it.
+    fn header(&self, cx: &mut Context<Self>) -> Header {
+        let screen = cx.entity().downgrade();
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        let rows: Vec<AnyElement> = self
+        let Some(project) = self.view.as_ref().map(|view| &view.project) else {
+            let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Projects)));
+            header.trail = vec![
+                div()
+                    .w(px(200.))
+                    .child(Select::new(&self.channel_select).xsmall())
+                    .into_any_element(),
+            ];
+            return header;
+        };
+        let current = project.id;
+        let projects: Vec<(VideoProjectId, SharedString)> = self
             .projects
             .iter()
-            .enumerate()
-            .map(|(ix, project)| {
-                let id = project.id;
-                let selected = self.project == Some(id);
-                kit::list_row(("project", ix), selected, cx)
-                    .child(SharedString::from(project.title.clone()))
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        SharedString::from(format!(
-                            "{} · {}",
-                            project.niche.label(),
-                            bardo.time_ago(project.created_at)
-                        )),
-                    ))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        if this.project != Some(id) {
-                            this.select_project(Some(id), window, cx);
-                        }
-                    }))
-                    .into_any_element()
-            })
+            .map(|project| (project.id, SharedString::from(project.title.clone())))
             .collect();
-        let empty = rows.is_empty();
-
-        kit::side_panel(cx)
-            .id("projects-list")
-            .w(px(300.))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_3()
-            .child(kit::title(tr(bardo, Text::ProjectsTitle)))
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_medium()
-                            .child(tr(bardo, Text::ThemesChannel)),
-                    )
-                    .child(Select::new(&self.channel_select)),
-            )
-            .when(empty, |list| {
-                list.child(muted(cx, tr(bardo, Text::ProjectsEmpty)))
-            })
-            .children(rows)
+        let switcher = Button::new("project-switcher")
+            .ghost()
+            .small()
+            .icon(IconName::ChevronsUpDown)
+            .tooltip(tr(bardo, Text::ProjectSwitch))
+            .dropdown_menu(move |menu, _, _| {
+                projects
+                    .iter()
+                    .fold(menu.scrollable(true), |menu, (id, title)| {
+                        let id = *id;
+                        let screen = screen.clone();
+                        menu.item(
+                            PopupMenuItem::new(title.clone())
+                                .checked(id == current)
+                                .on_click(move |_, window, cx| {
+                                    let _ = screen.update(cx, |this, cx| {
+                                        if this.project != Some(id) {
+                                            this.select_project(Some(id), window, cx);
+                                        }
+                                    });
+                                }),
+                        )
+                    })
+            });
+        let mut header = Header::new(
+            h_flex()
+                .gap_1()
+                .min_w_0()
+                .items_center()
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(SharedString::from(project.title.clone())),
+                )
+                .child(switcher),
+        );
+        header.trail = vec![
+            tr(bardo, Text::DestinationName(Destination::Projects)).into_any_element(),
+            div()
+                .w(px(200.))
+                .child(Select::new(&self.channel_select).xsmall())
+                .into_any_element(),
+        ];
+        let mut meta = format!(
+            "{} · {}",
+            project.niche.label(),
+            bardo.time_ago(project.created_at)
+        );
+        if let Some(view) = self.view.as_ref().filter(|view| !view.spent.is_zero()) {
+            meta.push_str(" · ");
+            meta.push_str(
+                &bardo.text_with(Text::ProjectSpent, &[("amount", &bardo.money(view.spent))]),
+            );
+        }
+        header.meta = Some(SharedString::from(meta));
+        header.actions = vec![
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(bardo, Text::ProjectNarrator)),
+                )
+                .child(
+                    div().w(px(260.)).child(
+                        Select::new(&self.narrator_select)
+                            .small()
+                            .search_placeholder(tr(bardo, Text::PersonasTitle)),
+                    ),
+                )
+                .child(kit::info(
+                    "project-narrator-info",
+                    None,
+                    tr(bardo, Text::ProjectNarratorHint),
+                ))
+                .into_any_element(),
+        ];
+        header
     }
 
-    fn render_script(&self, cx: &mut Context<Self>) -> AnyElement {
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
+    /// The Script stage: the script, a new version to review, where it
+    /// came from, and the music prompt.
+    fn script_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(view) = &self.view else {
-            return v_flex()
-                .flex_1()
-                .p_4()
-                .children(
-                    self.error
-                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
-                )
-                .into_any_element();
+            return Vec::new();
         };
+        let job = self.render_job(cx);
+        let pending = view
+            .script
+            .as_ref()
+            .and_then(|script| script.pending())
+            .map(|pending| self.render_pending(pending.text().as_str(), pending.generation(), cx));
+        let provenance = view.script.as_ref().map(|script| {
+            self.render_provenance(
+                script.source().generation(),
+                TemplateKind::Script,
+                PromptShown::Source,
+                cx,
+            )
+        });
+        let music = self.render_music(cx);
+        let bardo = self.bardo.read(cx);
         let running = self.running();
-        let project = &view.project;
         let script = view.script.as_ref();
-
-        let header =
-            v_flex()
-                .gap_0p5()
-                .child(
-                    h_flex()
-                        .gap_3()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_xl()
-                                .font_semibold()
-                                .child(SharedString::from(project.title.clone())),
-                        )
-                        .child({
-                            let id = project.id;
-                            Button::new("open-editor")
-                                .small()
-                                .outline()
-                                .label(tr(bardo, Text::OpenEditor))
-                                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                    cx.emit(OpenEditor(id));
-                                }))
-                        }),
-                )
-                .child(div().text_xs().text_color(theme.muted_foreground).child(
-                    SharedString::from(format!(
-                        "{} · {}",
-                        project.niche.label(),
-                        bardo.time_ago(project.created_at)
-                    )),
-                ))
-                .when(!view.spent.is_zero(), |header| {
-                    header.child(div().text_xs().text_color(theme.muted_foreground).child(
-                        SharedString::from(bardo.text_with(
-                            Text::ProjectSpent,
-                            &[("amount", &bardo.money(view.spent))],
-                        )),
-                    ))
-                })
-                .child(
-                    h_flex()
-                        .pt_2()
-                        .gap_2()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_medium()
-                                .child(tr(bardo, Text::ProjectNarrator)),
-                        )
-                        .child(
-                            div().w(px(440.)).child(
-                                Select::new(&self.narrator_select)
-                                    .small()
-                                    .search_placeholder(tr(bardo, Text::PersonasTitle)),
-                            ),
-                        )
-                        .child(kit::info(
-                            "project-narrator-info",
-                            None,
-                            tr(bardo, Text::ProjectNarratorHint),
-                        )),
-                );
 
         let title_row = h_flex()
             .gap_2()
@@ -943,56 +980,31 @@ impl ProjectsScreen {
                 .into_any_element(),
         };
 
-        v_flex()
-            .id("projects-script")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_3()
-            .child(header)
-            .child(title_row)
-            .children(
-                self.notice
-                    .map(|notice| kit::notice(Tone::Success, tr(bardo, notice), cx)),
+        let ask = self.script_ask.as_ref().map(|estimate| {
+            budget_question(
+                "script-budget",
+                bardo,
+                estimate,
+                cx,
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.generate(BudgetConsent::Confirmed, window, cx)
+                }),
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.script_ask = None;
+                    cx.notify();
+                }),
             )
-            .children(
-                self.error
-                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
-            )
-            .children(self.render_job(cx))
-            .children(self.script_ask.as_ref().map(|estimate| {
-                budget_question(
-                    "script-budget",
-                    bardo,
-                    estimate,
-                    cx,
-                    cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.generate(BudgetConsent::Confirmed, window, cx)
-                    }),
-                    cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.script_ask = None;
-                        cx.notify();
-                    }),
-                )
-            }))
-            .children(script.and_then(|s| s.pending()).map(|pending| {
-                self.render_pending(pending.text().as_str(), pending.generation(), cx)
-            }))
-            .child(body)
-            .children(script.map(|script| {
-                self.render_provenance(
-                    script.source().generation(),
-                    TemplateKind::Script,
-                    PromptShown::Source,
-                    cx,
-                )
-            }))
-            .children(self.render_narration(cx))
-            .children(self.render_scenes(cx))
-            .children(self.render_music(cx))
             .into_any_element()
+        });
+
+        std::iter::once(title_row.into_any_element())
+            .chain(job)
+            .chain(ask)
+            .chain(pending)
+            .chain(Some(body))
+            .chain(provenance)
+            .chain(music)
+            .collect()
     }
 
     /// A running generation, or why the last one stopped.
@@ -1230,7 +1242,6 @@ impl ProjectsScreen {
             .and_then(|job| self.render_narration_job(job, cx));
         let record = narration.map(|narration| self.render_narration_record(narration, cx));
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         let running = self.narration_running();
 
         let title_row = h_flex()
@@ -1309,10 +1320,7 @@ impl ProjectsScreen {
 
         Some(
             v_flex()
-                .pt_3()
                 .gap_2()
-                .border_t_1()
-                .border_color(theme.border)
                 .child(title_row)
                 .children(
                     self.narration_error
@@ -1661,18 +1669,57 @@ impl Render for ProjectsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.channels.is_empty() {
             let bardo = self.bardo.read(cx);
-            return h_flex()
-                .size_full()
-                .p_6()
-                .items_start()
-                .child(muted(cx, tr(bardo, Text::ProjectsNoChannels)))
-                .into_any_element();
+            let mut parts = ScreenParts::new(Header::place(bardo, Destination::Projects));
+            parts
+                .content
+                .push(muted(cx, tr(bardo, Text::ProjectsNoChannels)));
+            return layout::screen(parts, cx);
         }
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(self.render_list(cx))
-            .child(self.render_script(cx))
-            .into_any_element()
+        let mut parts = ScreenParts::new(self.header(cx));
+        let Some(stages) = self.stages() else {
+            let bardo = self.bardo.read(cx);
+            match self.error {
+                Some(error) => parts
+                    .notices
+                    .push(kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()),
+                None if self.project.is_none() => parts
+                    .content
+                    .push(muted(cx, tr(bardo, Text::ProjectsEmpty))),
+                None => {}
+            }
+            return layout::screen(parts, cx);
+        };
+        // A stage that locked since it was picked (the scenes planned
+        // again) gives way to the one the project would open on.
+        let current = if stages
+            .iter()
+            .any(|status| status.stage == self.stage && status.state != StageState::Locked)
+        {
+            self.stage
+        } else {
+            opening_stage(&stages)
+        };
+        match current {
+            Stage::Script => parts.content = self.script_page(cx),
+            Stage::Narration => parts.content.extend(self.render_narration(cx)),
+            Stage::Scenes | Stage::Clips => self.scene_parts(current, &mut parts, cx),
+            Stage::Edit | Stage::Render | Stage::Publish => {}
+        }
+        let screen = cx.entity().downgrade();
+        let bardo = self.bardo.read(cx);
+        parts.stages = Some(Stages::new(bardo, &stages, current, move |stage, _, cx| {
+            let _ = screen.update(cx, |this, cx| this.pick_stage(stage, cx));
+        }));
+        // What happened to the project as a whole leads.
+        let general: Vec<AnyElement> =
+            self.notice
+                .map(|notice| kit::notice(Tone::Success, tr(bardo, notice), cx).into_any_element())
+                .into_iter()
+                .chain(self.error.map(|error| {
+                    kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()
+                }))
+                .collect();
+        parts.notices.splice(0..0, general);
+        layout::screen(parts, cx)
     }
 }

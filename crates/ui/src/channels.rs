@@ -1,4 +1,5 @@
-//! Channels screen: the list on the left, the create/edit form on the right.
+//! Channels screen: the channels as a collection, the create/edit form as
+//! its inspector.
 //! Rules and persistence live in `bardo_app`; this file only maps the form to
 //! a `ChannelDraft` and errors back to fields.
 
@@ -6,19 +7,20 @@ use bardo_app::bardo_domain::{
     CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModelRef,
     ContentLanguage, Country, PersonaId,
 };
-use bardo_app::{Bardo, ChannelError, Text};
+use std::rc::Rc;
+
+use bardo_app::{Bardo, ChannelError, Destination, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectState};
-use gpui_kit::component::{
-    ActiveTheme as _, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::kit::{self, Tone};
-use crate::network_accounts::NetworkAccountsPanel;
+use crate::layout;
+use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 
 /// One option of a select: a domain value and its translated name.
@@ -143,8 +145,6 @@ pub struct ChannelsScreen {
     persona: ChoiceSelect<Option<PersonaId>>,
     clip_model: ChoiceSelect<Option<ClipModelRef>>,
     caption_style: ChoiceSelect<CaptionStyle>,
-    /// The edited channel's network accounts, under the form.
-    accounts: Entity<NetworkAccountsPanel>,
     field_errors: Vec<ChannelFieldError>,
     notice: Option<Notice>,
     _subscriptions: Vec<Subscription>,
@@ -191,8 +191,6 @@ impl ChannelsScreen {
             SelectState::new(caption_styles, selected, window, cx)
         });
 
-        let accounts = cx.new(|cx| NetworkAccountsPanel::new(bardo.clone(), window, cx));
-
         let subscriptions = vec![
             cx.subscribe(&name, |this, _, event, cx| {
                 this.edited(NAME_ERRORS, event, cx)
@@ -225,7 +223,6 @@ impl ChannelsScreen {
             persona,
             clip_model,
             caption_style,
-            accounts,
             field_errors: Vec::new(),
             notice: None,
             _subscriptions: subscriptions,
@@ -400,7 +397,6 @@ impl ChannelsScreen {
         self.field_errors.clear();
         self.notice = None;
         self.fill(&ChannelDraft::default(), window, cx);
-        self.show_accounts(None, window, cx);
         cx.notify();
     }
 
@@ -409,12 +405,10 @@ impl ChannelsScreen {
             return;
         };
         let draft = ChannelDraft::from(&channel.details);
-        let language = channel.details.language();
         self.editing = Some(id);
         self.field_errors.clear();
         self.notice = None;
         self.fill(&draft, window, cx);
-        self.show_accounts(Some((id, language)), window, cx);
         cx.notify();
     }
 
@@ -439,7 +433,6 @@ impl ChannelsScreen {
                 self.field_errors.clear();
                 // Show the normalized values (trimmed, deduplicated themes).
                 self.fill(&ChannelDraft::from(&saved.details), window, cx);
-                self.show_accounts(Some((saved.id, saved.details.language())), window, cx);
                 self.notice = Some(Notice::Saved);
             }
             Err(error) => self.show_error(&error),
@@ -447,98 +440,51 @@ impl ChannelsScreen {
         cx.notify();
     }
 
-    fn show_accounts(
-        &mut self,
-        channel: Option<(ChannelId, ContentLanguage)>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.accounts
-            .update(cx, |accounts, cx| accounts.set_channel(channel, window, cx));
-    }
-
     fn show_error(&mut self, error: &ChannelError) {
         self.field_errors = error.field_errors().to_vec();
         self.notice = error.form_message().map(Notice::Error);
     }
 
-    fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-
-        let rows: Vec<AnyElement> = self
+    fn collection(&self, cx: &mut Context<Self>) -> Collection {
+        let mut collection = Collection::new(CollectionKind::List, "channel-list");
+        let tiles: Vec<Tile> = self
             .channels
             .iter()
             .enumerate()
             .map(|(ix, channel)| {
                 let id = channel.id;
-                let selected = self.editing == Some(id);
                 let details = &channel.details;
+                let bardo = self.bardo.read(cx);
                 let mut summary = vec![tr(bardo, Text::CountryName(details.country())).to_string()];
                 if !details.niche().is_empty() {
                     summary.insert(0, details.niche().to_owned());
                 }
-                kit::list_row(("channel", ix), selected, cx)
-                    .child(div().child(SharedString::from(details.name().to_owned())))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(SharedString::from(summary.join(" · "))),
-                    )
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                let mut tile = Tile::new(
+                    ("channel", ix),
+                    Rc::new(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.edit(id, window, cx)
-                    }))
-                    .into_any_element()
+                    })),
+                );
+                tile.selected = self.editing == Some(id);
+                tile.title = Some(SharedString::from(details.name().to_owned()));
+                tile.text = Some(SharedString::from(summary.join(" · ")));
+                tile
             })
             .collect();
-
-        let body: AnyElement = if self.load_failed {
+        let bardo = self.bardo.read(cx);
+        collection.empty = Some(if self.load_failed {
+            kit::notice(Tone::Danger, tr(bardo, Text::ChannelsNotLoaded), cx).into_any_element()
+        } else {
             div()
-                .p_3()
-                .child(kit::notice(
-                    Tone::Danger,
-                    tr(bardo, Text::ChannelsNotLoaded),
-                    cx,
-                ))
-                .into_any_element()
-        } else if rows.is_empty() {
-            div()
-                .p_3()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(cx.theme().muted_foreground)
                 .child(tr(bardo, Text::ChannelsEmpty))
                 .into_any_element()
-        } else {
-            v_flex()
-                .id("channel-list")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .p_2()
-                .gap_1()
-                .children(rows)
-                .into_any_element()
-        };
-
-        kit::side_panel(cx)
-            .w(px(280.))
-            .h_full()
-            .child(
-                h_flex()
-                    .p_3()
-                    .justify_between()
-                    .child(div().font_semibold().child(tr(bardo, Text::ChannelsTitle)))
-                    .child(
-                        Button::new("new-channel")
-                            .small()
-                            .label(tr(bardo, Text::NewChannel))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.start_new(window, cx)
-                            })),
-                    ),
-            )
-            .child(body)
+        });
+        if !self.load_failed {
+            collection.tiles = tiles;
+        }
+        collection
     }
 
     fn render_form(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -574,119 +520,121 @@ impl ChannelsScreen {
                 .into_any_element()
         };
 
-        let (title, action) = match self.editing {
-            Some(_) => (Text::EditChannelTitle, Text::SaveChannel),
-            None => (Text::NewChannelTitle, Text::CreateChannel),
+        let action = match self.editing {
+            Some(_) => Text::SaveChannel,
+            None => Text::CreateChannel,
         };
         let notice = self.notice.as_ref().map(|notice| match notice {
             Notice::Saved => kit::notice(Tone::Success, tr(bardo, Text::ChannelSaved), cx),
             Notice::Error(text) => kit::notice(Tone::Danger, tr(bardo, *text), cx),
         });
 
-        v_flex()
-            .id("channel-form")
-            .flex_1()
-            .h_full()
-            .overflow_y_scroll()
-            .child(
-                v_flex()
-                    .max_w(px(640.))
-                    .p_6()
-                    .gap_4()
-                    .child(kit::title(tr(bardo, title)))
-                    .child(
-                        kit::card(cx)
-                            .p_4()
-                            .gap_4()
-                            .child(field(
-                                Text::ChannelName,
-                                Input::new(&self.name).into_any_element(),
-                                error_for(NAME_ERRORS),
-                            ))
-                            .child(field(
-                                Text::ChannelNiche,
-                                Input::new(&self.niche).into_any_element(),
-                                error_for(NICHE_ERRORS),
-                            ))
-                            .child(field(
-                                Text::ChannelThemes,
-                                Textarea::new(&self.themes).into_any_element(),
-                                error_for(THEME_ERRORS)
-                                    .or_else(|| Some(hint(Text::ChannelThemesHint))),
-                            ))
-                            .child(field(
-                                Text::ChannelAestheticNotes,
-                                Textarea::new(&self.aesthetic_notes).into_any_element(),
-                                error_for(AESTHETIC_NOTES_ERRORS),
-                            ))
-                            .child(
-                                h_flex()
-                                    .gap_4()
-                                    .child(div().flex_1().child(field(
-                                        Text::ChannelLanguage,
-                                        Select::new(&self.language).into_any_element(),
-                                        None,
-                                    )))
-                                    .child(
-                                        div().flex_1().child(field(
-                                            Text::ChannelCountry,
-                                            Select::new(&self.country)
-                                                .search_placeholder(tr(
-                                                    bardo,
-                                                    Text::ChannelCountrySearch,
-                                                ))
-                                                .into_any_element(),
-                                            None,
-                                        )),
-                                    ),
-                            )
-                            .child(explained(
-                                "channel-persona-info",
-                                Text::ChannelPersona,
-                                Text::ChannelPersonaHint,
-                                Select::new(&self.persona)
-                                    .search_placeholder(tr(bardo, Text::PersonasTitle))
+        v_flex().max_w(px(640.)).child(
+            kit::card(cx)
+                .p_4()
+                .gap_4()
+                .child(field(
+                    Text::ChannelName,
+                    Input::new(&self.name).into_any_element(),
+                    error_for(NAME_ERRORS),
+                ))
+                .child(field(
+                    Text::ChannelNiche,
+                    Input::new(&self.niche).into_any_element(),
+                    error_for(NICHE_ERRORS),
+                ))
+                .child(field(
+                    Text::ChannelThemes,
+                    Textarea::new(&self.themes).into_any_element(),
+                    error_for(THEME_ERRORS).or_else(|| Some(hint(Text::ChannelThemesHint))),
+                ))
+                .child(field(
+                    Text::ChannelAestheticNotes,
+                    Textarea::new(&self.aesthetic_notes).into_any_element(),
+                    error_for(AESTHETIC_NOTES_ERRORS),
+                ))
+                .child(
+                    h_flex()
+                        .gap_4()
+                        .child(div().flex_1().child(field(
+                            Text::ChannelLanguage,
+                            Select::new(&self.language).into_any_element(),
+                            None,
+                        )))
+                        .child(
+                            div().flex_1().child(field(
+                                Text::ChannelCountry,
+                                Select::new(&self.country)
+                                    .search_placeholder(tr(bardo, Text::ChannelCountrySearch))
                                     .into_any_element(),
-                            ))
-                            .child(explained(
-                                "channel-clip-model-info",
-                                Text::ChannelClipModel,
-                                Text::ChannelClipModelHint,
-                                Select::new(&self.clip_model).into_any_element(),
-                            ))
-                            .child(explained(
-                                "channel-caption-style-info",
-                                Text::ChannelCaptionStyle,
-                                Text::ChannelCaptionStyleHint,
-                                Select::new(&self.caption_style).into_any_element(),
-                            ))
-                            .child(
-                                h_flex()
-                                    .gap_3()
-                                    .child(
-                                        Button::new("save-channel")
-                                            .primary()
-                                            .label(tr(bardo, action))
-                                            .on_click(cx.listener(
-                                                |this, _: &ClickEvent, window, cx| {
-                                                    this.save(window, cx)
-                                                },
-                                            )),
-                                    )
-                                    .children(notice),
-                            ),
-                    )
-                    .child(self.accounts.clone()),
-            )
+                                None,
+                            )),
+                        ),
+                )
+                .child(explained(
+                    "channel-persona-info",
+                    Text::ChannelPersona,
+                    Text::ChannelPersonaHint,
+                    Select::new(&self.persona)
+                        .search_placeholder(tr(bardo, Text::PersonasTitle))
+                        .into_any_element(),
+                ))
+                .child(explained(
+                    "channel-clip-model-info",
+                    Text::ChannelClipModel,
+                    Text::ChannelClipModelHint,
+                    Select::new(&self.clip_model).into_any_element(),
+                ))
+                .child(explained(
+                    "channel-caption-style-info",
+                    Text::ChannelCaptionStyle,
+                    Text::ChannelCaptionStyleHint,
+                    Select::new(&self.caption_style).into_any_element(),
+                ))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            Button::new("save-channel")
+                                .primary()
+                                .label(tr(bardo, action))
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.save(window, cx)
+                                })),
+                        )
+                        .children(notice),
+                ),
+        )
     }
 }
 
 impl Render for ChannelsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .size_full()
-            .items_start()
-            .child(self.render_list(cx))
-            .child(self.render_form(cx))
+        let collection = self.collection(cx);
+        let form = self.render_form(cx).into_any_element();
+        let bardo = self.bardo.read(cx);
+        let mut header = Header::place(bardo, Destination::Channels);
+        header.actions.push(
+            Button::new("new-channel")
+                .small()
+                .primary()
+                .label(tr(bardo, Text::NewChannel))
+                .on_click(
+                    cx.listener(|this, _: &ClickEvent, window, cx| this.start_new(window, cx)),
+                )
+                .into_any_element(),
+        );
+        let title = match self.editing {
+            Some(_) => Text::EditChannelTitle,
+            None => Text::NewChannelTitle,
+        };
+        let mut parts = ScreenParts::new(header);
+        parts.collection = Some(collection);
+        parts.inspector = Some(Inspector {
+            title: Some(kit::section_heading(tr(bardo, title)).into_any_element()),
+            body: vec![form],
+            footer: None,
+        });
+        layout::screen(parts, cx)
     }
 }
