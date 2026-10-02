@@ -30,8 +30,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, PathPromptOptions, SharedString, Subscription, Task,
-    Window, div, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString,
+    Subscription, Task, Window, div, px,
 };
 
 use crate::shell::tr;
@@ -71,6 +71,11 @@ enum PromptShown {
     Pending,
     ScenePlan,
 }
+
+/// Asks the window to open a project in the editor.
+pub struct OpenEditor(pub VideoProjectId);
+
+impl EventEmitter<OpenEditor> for ProjectsScreen {}
 
 pub struct ProjectsScreen {
     bardo: Entity<Bardo>,
@@ -771,10 +776,25 @@ impl ProjectsScreen {
             v_flex()
                 .gap_0p5()
                 .child(
-                    div()
-                        .text_xl()
-                        .font_semibold()
-                        .child(SharedString::from(project.title.clone())),
+                    h_flex()
+                        .gap_3()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_xl()
+                                .font_semibold()
+                                .child(SharedString::from(project.title.clone())),
+                        )
+                        .child({
+                            let id = project.id;
+                            Button::new("open-editor")
+                                .small()
+                                .outline()
+                                .label(tr(bardo, Text::OpenEditor))
+                                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                                    cx.emit(OpenEditor(id));
+                                }))
+                        }),
                 )
                 .child(div().text_xs().text_color(theme.muted_foreground).child(
                     SharedString::from(format!(

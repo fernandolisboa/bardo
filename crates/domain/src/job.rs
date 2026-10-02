@@ -76,10 +76,14 @@ pub enum JobKind {
     /// each to the video provider, then polls them all, saving each clip as
     /// it is ready. A scene that fails does not stop the others.
     SceneClips,
+    /// Builds the editor's preview proxies of a project's media (small
+    /// copies of clips and images, waveform peaks of the narration), one
+    /// file after another. A file that fails does not stop the others.
+    Proxies,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 10] = [
+    pub const ALL: [JobKind; 11] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -90,6 +94,7 @@ impl JobKind {
         JobKind::ScenePlan,
         JobKind::SceneImages,
         JobKind::SceneClips,
+        JobKind::Proxies,
     ];
 
     /// Stable name stored in the database.
@@ -105,6 +110,7 @@ impl JobKind {
             JobKind::ScenePlan => "scene_plan",
             JobKind::SceneImages => "scene_images",
             JobKind::SceneClips => "scene_clips",
+            JobKind::Proxies => "proxies",
         }
     }
 }
@@ -253,10 +259,13 @@ pub enum JobFailureKind {
     UnexpectedAnswer,
     /// The provider's safety rules declined the request.
     Declined,
+    /// ffmpeg could not read or write a media file (a broken or missing
+    /// file, or no ffmpeg). Retrying fails the same way until that changes.
+    Media,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 9] = [
+    pub const ALL: [JobFailureKind; 10] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -266,6 +275,7 @@ impl JobFailureKind {
         JobFailureKind::ProviderUnavailable,
         JobFailureKind::UnexpectedAnswer,
         JobFailureKind::Declined,
+        JobFailureKind::Media,
     ];
 
     /// Stable name stored in the database.
@@ -280,6 +290,7 @@ impl JobFailureKind {
             JobFailureKind::ProviderUnavailable => "provider_unavailable",
             JobFailureKind::UnexpectedAnswer => "unexpected_answer",
             JobFailureKind::Declined => "declined",
+            JobFailureKind::Media => "media",
         }
     }
 
@@ -293,7 +304,8 @@ impl JobFailureKind {
             | JobFailureKind::NotAllowed
             | JobFailureKind::LimitReached
             | JobFailureKind::UnexpectedAnswer
-            | JobFailureKind::Declined => false,
+            | JobFailureKind::Declined
+            | JobFailureKind::Media => false,
         }
     }
 }

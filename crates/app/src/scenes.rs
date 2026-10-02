@@ -411,7 +411,7 @@ impl SceneHandler {
         // The replaced plan's images go with it. A file that will not go
         // (open in a viewer) only costs disk space.
         for file in current.iter().flat_map(ScenePlan::files) {
-            let _ = self.files.remove(project, file);
+            crate::proxies::remove_media(self.files.as_ref(), project, file);
         }
         Ok(())
     }
@@ -509,7 +509,7 @@ impl SceneHandler {
                     // Read again: the user may have changed the scene while
                     // it was drawn, and their change must survive.
                     let Some(mut plan) = self.saved_plan(project, plan_id)? else {
-                        let _ = self.files.remove(project, &file);
+                        crate::proxies::remove_media(self.files.as_ref(), project, &file);
                         return Ok(());
                     };
                     let pushed = plan
@@ -518,7 +518,7 @@ impl SceneHandler {
                         .add_image(image);
                     self.plans.save_scene(&plan, index).map_err(unexpected)?;
                     if let Some(pushed) = pushed {
-                        let _ = self.files.remove(project, &pushed.file);
+                        crate::proxies::remove_media(self.files.as_ref(), project, &pushed.file);
                     }
                 }
                 Err(failure) => {
@@ -790,7 +790,7 @@ impl Bardo {
         let replaced = plan.scene_mut(index, SystemTime::now())?.accept_image()?;
         self.scene_plans.save_scene(&plan, index)?;
         if let Some(replaced) = replaced {
-            let _ = self.files.remove(plan.project, &replaced.file);
+            crate::proxies::remove_media(self.files.as_ref(), plan.project, &replaced.file);
         }
         Ok(plan)
     }
@@ -804,7 +804,7 @@ impl Bardo {
         let mut plan = self.own_plan(project)?;
         let dropped = plan.scene_mut(index, SystemTime::now())?.reject_image()?;
         self.scene_plans.save_scene(&plan, index)?;
-        let _ = self.files.remove(plan.project, &dropped.file);
+        crate::proxies::remove_media(self.files.as_ref(), plan.project, &dropped.file);
         Ok(plan)
     }
 
@@ -858,13 +858,21 @@ pub(crate) mod tests {
         /// Video providers after the fake one.
         pub(crate) more_clips: Vec<Arc<dyn bardo_domain::ClipGenerator>>,
         pub(crate) secrets: Arc<MemorySecretStore>,
+        /// Writes its proxies into `files`.
+        pub(crate) media: Arc<crate::editor::testing::FakeMedia>,
+        pub(crate) audio: Arc<crate::narrations::testing::FakeAudioOutput>,
     }
 
     impl Harness {
         pub(crate) fn new() -> Self {
+            let files: Arc<MemoryProjectFiles> = Arc::default();
             Self {
                 db: Arc::new(Database::open_in_memory().unwrap()),
-                files: Arc::default(),
+                media: Arc::new(crate::editor::testing::FakeMedia::writing_to(Arc::clone(
+                    &files,
+                ))),
+                audio: Arc::default(),
+                files,
                 text: Arc::default(),
                 images: Arc::default(),
                 clips: Arc::default(),
@@ -886,7 +894,8 @@ pub(crate) mod tests {
                 clips: std::iter::once(Arc::clone(&self.clips) as _)
                     .chain(self.more_clips.iter().cloned())
                     .collect(),
-                audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
+                audio: Arc::clone(&self.audio) as _,
+                media: Arc::clone(&self.media) as _,
             };
             let mut app = Bardo::start_with(
                 Repositories::shared_with_files(

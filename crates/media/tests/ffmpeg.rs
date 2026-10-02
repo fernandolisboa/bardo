@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, Ffmpeg, FrameSize, Framing, LoudnessTarget, MIN_VERSION, MediaError,
-    Monitor, Output, ProxyCodec, ProxySettings, RenderPlan, VideoClip, VideoEncoder,
+    AudioClip, AudioTrack, ClipSource, Ffmpeg, FrameSize, Framing, LoudnessTarget, MIN_VERSION,
+    MediaError, Monitor, Output, ProxyCodec, ProxySettings, RenderPlan, VideoClip, VideoEncoder,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -58,13 +58,13 @@ fn short_plan() -> RenderPlan {
     RenderPlan {
         video: vec![
             VideoClip {
-                source: fixture("clip-a.mp4"),
+                source: ClipSource::Video(fixture("clip-a.mp4")),
                 start: secs(0.5),
                 duration: secs(1.5),
                 framing: Framing::Crop { x: 0.5, y: 0.5 },
             },
             VideoClip {
-                source: fixture("clip-b.mp4"),
+                source: ClipSource::Video(fixture("clip-b.mp4")),
                 start: Duration::ZERO,
                 duration: secs(2.0),
                 framing: Framing::Crop { x: 0.0, y: 0.5 },
@@ -329,4 +329,94 @@ fn previews_the_timeline_from_the_playhead() {
     let rest = stream.count();
     // 2.5 s of timeline left at 30 fps.
     assert!((73..=76).contains(&(rest + 1)), "{} frames", rest + 1);
+}
+
+#[test]
+fn a_still_proxy_is_a_small_jpeg_of_the_image() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("still-proxy");
+    let destination = dir.join("proxy-still.jpg");
+    ffmpeg
+        .build_still_proxy(&fixture("still-640x360.png"), &destination, 180)
+        .unwrap();
+    let video = ffmpeg.probe(&destination).unwrap().video.unwrap();
+    assert_eq!(
+        (video.codec.as_str(), video.width, video.height),
+        ("mjpeg", 320, 180)
+    );
+    assert!(!dir.join("proxy-still.partial.jpg").exists());
+}
+
+/// A rough cut: a still, a clip asked to run longer than it is (2 s of
+/// clip for 3 s), and a stretch with nothing to show.
+fn rough_cut_plan() -> RenderPlan {
+    RenderPlan {
+        video: vec![
+            VideoClip {
+                source: ClipSource::Still(fixture("still-640x360.png")),
+                start: Duration::ZERO,
+                duration: secs(1.0),
+                framing: Framing::Fit,
+            },
+            VideoClip {
+                source: ClipSource::Video(fixture("clip-b.mp4")),
+                start: Duration::ZERO,
+                duration: secs(3.0),
+                framing: Framing::Fit,
+            },
+            VideoClip {
+                source: ClipSource::Black,
+                start: Duration::ZERO,
+                duration: secs(0.5),
+                framing: Framing::Fit,
+            },
+        ],
+        audio: vec![AudioTrack {
+            clips: vec![AudioClip {
+                source: fixture("voice-3s.mp3"),
+                start: Duration::ZERO,
+                duration: secs(3.0),
+                at: Duration::ZERO,
+                gain_db: 0.0,
+            }],
+            gain_db: 0.0,
+        }],
+    }
+}
+
+#[test]
+fn preview_holds_a_short_clip_and_keeps_every_frame_in_time() {
+    let size = FrameSize::new(160, 90);
+    let stream = ffmpeg()
+        .preview(&rough_cut_plan(), Duration::ZERO, size, (30, 1))
+        .unwrap();
+    let frames: Vec<_> = stream.collect();
+    // 1 s + 3 s + 0.5 s at 30 fps, exactly: a clip that ends early holds
+    // its last frame instead of pulling the rest of the cut forward.
+    assert_eq!(frames.len(), 135);
+    let last = frames.last().unwrap();
+    assert!(last.bgra.chunks(4).all(|pixel| pixel[..3] == [0, 0, 0]));
+    let held = &frames[100];
+    assert!(held.bgra.chunks(4).any(|pixel| pixel[..3] != [0, 0, 0]));
+}
+
+#[test]
+fn preview_audio_streams_the_mix_from_the_playhead() {
+    let stream = ffmpeg()
+        .preview_audio(&rough_cut_plan(), secs(2.5))
+        .unwrap();
+    assert_eq!((stream.channels, stream.sample_rate), (2, 48_000));
+    let mut samples = 0u64;
+    let mut loudest = 0.0f32;
+    while let Some(chunk) = stream.next_chunk() {
+        assert_eq!(chunk.len() % 2, 0);
+        samples += chunk.len() as u64;
+        loudest = chunk.iter().fold(loudest, |peak, s| peak.max(s.abs()));
+    }
+    // The 4.5 s cut from 2.5 s on: 2 s of stereo at 48 kHz.
+    assert!(
+        close(stream.duration_of(samples), 2.0, 0.03),
+        "{samples} samples"
+    );
+    assert!(loudest > 0.01, "the voice is heard");
 }

@@ -152,6 +152,73 @@ pub(super) fn collect_stderr(child: &mut Child) -> thread::JoinHandle<String> {
     })
 }
 
+/// A child process killed when this is dropped: a stream's producer.
+pub(super) struct ChildGuard(pub Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Starts `command`, which writes interleaved f32 samples to stdout, and
+/// streams them in chunks of about 50 ms, two seconds ahead at most.
+pub(super) fn spawn_pcm(
+    mut command: Command,
+    channels: u16,
+    sample_rate: u32,
+) -> Result<crate::PcmStream, MediaError> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let program = program_name(&command);
+    let mut child = command
+        .spawn()
+        .map_err(|source| MediaError::Spawn { program, source })?;
+    // Nobody reads the log of a stream; draining it keeps ffmpeg from
+    // stalling on a full pipe.
+    let _ = collect_stderr(&mut child);
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    let (stream, sender) =
+        crate::PcmStream::channel(channels, sample_rate, 40, Some(Box::new(ChildGuard(child))));
+    let frame_bytes = usize::from(channels.max(1)) * 4;
+    let chunk_bytes = (sample_rate as usize / 20).max(1) * frame_bytes;
+    thread::spawn(move || {
+        let mut leftover: Vec<u8> = Vec::new();
+        let mut buffer = vec![0u8; chunk_bytes];
+        loop {
+            let read = match stdout.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => read,
+            };
+            leftover.extend_from_slice(&buffer[..read]);
+            if leftover.len() < chunk_bytes {
+                continue;
+            }
+            let whole = leftover.len() - leftover.len() % frame_bytes;
+            let samples = samples_of(&leftover[..whole]);
+            leftover.drain(..whole);
+            if !sender.send(samples) {
+                return;
+            }
+        }
+        let whole = leftover.len() - leftover.len() % frame_bytes;
+        if whole > 0 {
+            sender.send(samples_of(&leftover[..whole]));
+        }
+    });
+    Ok(stream)
+}
+
+/// Little-endian f32 samples.
+fn samples_of(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|sample| f32::from_le_bytes(*sample))
+        .collect()
+}
+
 pub(super) fn program_name(command: &Command) -> String {
     std::path::Path::new(command.get_program())
         .file_stem()

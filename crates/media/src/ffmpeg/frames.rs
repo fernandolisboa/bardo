@@ -109,7 +109,8 @@ pub(super) fn scale_to_bgra(size: FrameSize, fps: Option<(u32, u32)>) -> String 
 /// on the full pipe when the reader falls behind, so a paused preview costs
 /// no decoding. Dropping the stream kills the child.
 pub struct FrameStream {
-    child: Child,
+    /// `None` for frames made in memory.
+    child: Option<Child>,
     frames: mpsc::Receiver<VideoFrame>,
     stderr: Option<thread::JoinHandle<String>>,
 }
@@ -150,10 +151,23 @@ impl FrameStream {
             }
         });
         Ok(FrameStream {
-            child,
+            child: Some(child),
             frames,
             stderr: Some(stderr),
         })
+    }
+
+    /// A stream of frames already decoded (tests, other decoders).
+    pub fn from_frames(frames: Vec<VideoFrame>) -> FrameStream {
+        let (sender, receiver) = mpsc::sync_channel(frames.len().max(1));
+        for frame in frames {
+            let _ = sender.send(frame);
+        }
+        FrameStream {
+            child: None,
+            frames: receiver,
+            stderr: None,
+        }
     }
 
     /// The next frame, waiting for ffmpeg; `None` at the end.
@@ -170,7 +184,10 @@ impl FrameStream {
     /// failed run (a broken file, a missing input) with ffmpeg's message.
     pub fn finish(mut self) -> Result<(), MediaError> {
         while self.frames.recv().is_ok() {}
-        let status = self.child.wait()?;
+        let Some(child) = self.child.as_mut() else {
+            return Ok(());
+        };
+        let status = child.wait()?;
         let log = self
             .stderr
             .take()
@@ -198,8 +215,10 @@ impl Iterator for FrameStream {
 
 impl Drop for FrameStream {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -215,6 +234,23 @@ mod tests {
              pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1,format=bgra"
         );
         assert!(scale_to_bgra(FrameSize::new(2, 2), None).starts_with("scale=2:2"));
+    }
+
+    #[test]
+    fn frames_made_in_memory_stream_in_order_then_end() {
+        let frame = |ms| VideoFrame {
+            size: FrameSize::new(2, 2),
+            at: Duration::from_millis(ms),
+            bgra: vec![0; 16],
+        };
+        let stream = FrameStream::from_frames(vec![frame(0), frame(33)]);
+        assert_eq!(stream.try_next_frame().map(|f| f.at), Some(Duration::ZERO));
+        assert_eq!(
+            stream.next_frame().map(|f| f.at),
+            Some(Duration::from_millis(33))
+        );
+        assert!(stream.next_frame().is_none());
+        assert!(stream.finish().is_ok());
     }
 
     #[test]

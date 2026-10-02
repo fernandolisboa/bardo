@@ -194,6 +194,7 @@ narration_import = "Importação de narração"
 scene_plan = "Plano de cenas"
 scene_images = "Imagens das cenas"
 scene_clips = "Clipes das cenas"
+proxies = "Proxies de pré-visualização"
 
 [job.state]
 queued = "Na fila"
@@ -212,6 +213,7 @@ limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
 declined = "O provedor recusou este pedido pelas regras de segurança dele. Mude o que foi pedido (o prompt, o canal ou o nicho) e tente de novo."
+media = "O ffmpeg não conseguiu ler ou gravar um arquivo de mídia. Confira o arquivo indicado e tente de novo."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -824,3 +826,89 @@ reached_line = "{provider}: {spent} do orçamento de {budget} gastos este mês, 
 question = "Gerar mesmo assim?"
 confirm = "Gerar mesmo assim"
 cancel = "Cancelar"
+
+[editor]
+open = "Abrir editor"
+back = "Projetos"
+duration = "{duration} · {fps} fps"
+undo = "Desfazer"
+redo = "Refazer"
+review_render = "Revisar e renderizar"
+jobs_proxies = "Proxies {ready}/{total}"
+jobs_idle = "Tarefas"
+job_failed = "1 tarefa falhou"
+scene = "Cena {n}"
+proxy_badge = "Proxy"
+play = "Reproduzir"
+pause = "Pausar"
+previous_frame = "Quadro anterior"
+next_frame = "Próximo quadro"
+building = "Gerando proxies de pré-visualização… {ready} de {total} clipes"
+keep_editing = "Você pode continuar editando enquanto isso roda"
+stale = "A narração mudou depois que as cenas foram planejadas. Planeje-as de novo para acompanhar."
+
+[editor.bin]
+scenes = "Cenas"
+media = "Mídia"
+caption_styles = "Estilos de legenda"
+
+[editor.inspector]
+empty = "Selecione um clipe para editar as propriedades"
+clip = "Clipe"
+source_image = "Imagem {provider} · {model}"
+source_clip = "Animada com {provider} · {model}"
+source_still = "Imagem parada"
+source_none = "Ainda sem imagem"
+in = "Entrada"
+out = "Saída"
+length = "Duração"
+file = "Arquivo"
+narration = "Narração"
+
+[editor.tool]
+select = "Selecionar (V)"
+split = "Dividir (S)"
+snap_words = "Encaixar nas palavras"
+ai_cuts = "Sugestões de corte da IA"
+duck_music = "Abafar música sob a narração"
+zoom_in = "Aproximar"
+zoom_out = "Afastar"
+
+[editor.track]
+captions = "Legendas"
+video = "Vídeo"
+narration = "Narração"
+music = "Música"
+sfx = "Efeitos"
+
+[editor.empty]
+title = "Nada para cortar ainda."
+no_narration = "O corte bruto é montado a partir das cenas e da narração. Gere a narração para começar."
+no_scenes = "O corte bruto é montado a partir das cenas e da narração. Planeje as cenas para começar."
+back = "Voltar ao projeto"
+
+[editor.clip]
+missing = "Mídia ausente"
+proxy_failed = "Proxy falhou"
+proxy_cancelled = "Proxy interrompido"
+proxy_building = "Gerando proxy"
+
+[editor.problems]
+one = "1 clipe precisa de atenção"
+many = "{count} clipes precisam de atenção"
+line = "Cena {n} · {file}: {reason}"
+no_image = "a cena ainda não tem imagem"
+file_gone = "o arquivo sumiu da pasta do projeto"
+cancelled = "a geração do proxy foi cancelada"
+retry = "Tentar o proxy de novo"
+
+[editor.preview]
+offline = "Mídia offline"
+
+[editor.error]
+building = "A pré-visualização toca quando os proxies ficarem prontos."
+nothing_to_retry = "Todos os proxies estão prontos ou sendo gerados."
+ffmpeg_missing = "O ffmpeg não foi encontrado, então não há pré-visualização. Reinstale o Bardo para recuperá-lo."
+preview_failed = "A pré-visualização não pôde começar."
+not_loaded = "Não foi possível carregar o editor."
+no_sound = "Sem dispositivo de som: a pré-visualização toca sem áudio."

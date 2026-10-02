@@ -286,7 +286,7 @@ impl NarrationImportHandler {
         // A file that will not go (open in a player) stays rather than
         // failing a finished import.
         if let Some(previous) = previous.filter(|p| p.audio_file != narration.audio_file) {
-            let _ = self.files.remove(project, &previous.audio_file);
+            crate::proxies::remove_media(self.files.as_ref(), project, &previous.audio_file);
         }
         Ok(())
     }

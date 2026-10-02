@@ -392,7 +392,7 @@ impl NarrationHandler {
             let _ = self.files.remove(project, &part_record(id, index));
         }
         if let Some(previous) = previous.filter(|p| p.audio_file != narration.audio_file) {
-            let _ = self.files.remove(project, &previous.audio_file);
+            crate::proxies::remove_media(self.files.as_ref(), project, &previous.audio_file);
         }
         Ok(())
     }
@@ -667,7 +667,60 @@ pub(crate) mod testing {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use bardo_media::{AudioOutput, Playback, PlaybackError};
+    use bardo_media::{AudioOutput, PcmStream, Playback, PlaybackError, StreamPlayback};
+
+    /// The last stream played, as the test sees it.
+    #[derive(Debug)]
+    pub(crate) struct FakeStreamState {
+        pub(crate) position: Duration,
+        pub(crate) playing: bool,
+        pub(crate) buffered: bool,
+        pub(crate) ended: bool,
+        /// How many streams were played.
+        pub(crate) streams: u32,
+    }
+
+    impl Default for FakeStreamState {
+        fn default() -> Self {
+            Self {
+                position: Duration::ZERO,
+                playing: false,
+                buffered: true,
+                ended: false,
+                streams: 0,
+            }
+        }
+    }
+
+    struct FakeStream(Arc<Mutex<FakeStreamState>>);
+
+    impl StreamPlayback for FakeStream {
+        fn play(&mut self) {
+            self.0.lock().unwrap().playing = true;
+        }
+
+        fn pause(&mut self) {
+            self.0.lock().unwrap().playing = false;
+        }
+
+        fn is_buffered(&self) -> bool {
+            self.0.lock().unwrap().buffered
+        }
+
+        fn position(&self) -> Duration {
+            self.0.lock().unwrap().position
+        }
+
+        fn has_ended(&self) -> bool {
+            self.0.lock().unwrap().ended
+        }
+    }
+
+    impl Drop for FakeStream {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().playing = false;
+        }
+    }
 
     #[derive(Debug, Default)]
     pub(crate) struct FakePlaybackState {
@@ -682,6 +735,7 @@ pub(crate) mod testing {
         pub(crate) opened: Mutex<Vec<PathBuf>>,
         pub(crate) state: Arc<Mutex<FakePlaybackState>>,
         pub(crate) failure: Mutex<Option<PlaybackError>>,
+        pub(crate) stream: Arc<Mutex<FakeStreamState>>,
     }
 
     impl FakeAudioOutput {
@@ -724,6 +778,21 @@ pub(crate) mod testing {
             self.opened.lock().unwrap().push(path.to_owned());
             *self.state.lock().unwrap() = FakePlaybackState::default();
             Ok(Box::new(FakePlayback(Arc::clone(&self.state))))
+        }
+
+        fn stream(&self, _stream: PcmStream) -> Result<Box<dyn StreamPlayback>, PlaybackError> {
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let mut state = self.stream.lock().unwrap();
+            let streams = state.streams + 1;
+            let buffered = state.buffered;
+            *state = FakeStreamState {
+                streams,
+                buffered,
+                ..FakeStreamState::default()
+            };
+            Ok(Box::new(FakeStream(Arc::clone(&self.stream))))
         }
     }
 }
@@ -792,6 +861,7 @@ pub(crate) mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::clone(&self.audio) as _,
+                media: Arc::new(crate::editor::testing::FakeMedia::default()),
             };
             let mut app = Bardo::start_with(
                 Repositories::shared_with_files(

@@ -16,22 +16,39 @@ pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 use crate::clips::ClipHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
+use crate::proxies::ProxyHandler;
 use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
 use crate::{AppError, Bardo, Text};
 
+/// The handlers of the job kinds Bardo ships, as `Bardo::open` builds them.
+pub(crate) struct BuiltInHandlers {
+    pub(crate) research: NicheResearchHandler,
+    pub(crate) themes: ThemeHandler,
+    pub(crate) scripts: ScriptHandler,
+    pub(crate) narrations: NarrationHandler,
+    pub(crate) imports: NarrationImportHandler,
+    pub(crate) scenes: SceneHandler,
+    pub(crate) clips: ClipHandler,
+    pub(crate) proxies: ProxyHandler,
+}
+
 /// The handler of every job kind Bardo ships.
 pub(crate) fn built_in_handlers(
-    research: NicheResearchHandler,
-    themes: ThemeHandler,
-    scripts: ScriptHandler,
-    narrations: NarrationHandler,
-    imports: NarrationImportHandler,
-    scenes: SceneHandler,
-    clips: ClipHandler,
+    built_in: BuiltInHandlers,
 ) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+    let BuiltInHandlers {
+        research,
+        themes,
+        scripts,
+        narrations,
+        imports,
+        scenes,
+        clips,
+        proxies,
+    } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
     handlers.insert(JobKind::Countdown, Arc::new(countdown::Countdown));
@@ -45,6 +62,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);
     handlers.insert(JobKind::SceneClips, Arc::new(clips));
+    handlers.insert(JobKind::Proxies, Arc::new(proxies));
     handlers
 }
 

@@ -64,6 +64,7 @@ mod speech;
 mod template;
 mod text;
 mod theme;
+mod timeline;
 mod voice;
 
 pub use budget::{Budget, BudgetLevel, Month};
@@ -144,5 +145,8 @@ pub use theme::{
     Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,
     rank_themes,
+};
+pub use timeline::{
+    AudioItem, FPS, Timeline, VideoItem, VideoSource, frame_at, frame_time, nearest_frame, timecode,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

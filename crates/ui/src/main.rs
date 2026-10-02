@@ -5,6 +5,7 @@
 
 mod channels;
 mod costs;
+mod editor;
 mod jobs;
 mod network_accounts;
 mod personas;
