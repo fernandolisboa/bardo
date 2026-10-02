@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use bardo_domain::{
     ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, NicheSeedError, Provider, UiLanguage,
+    KeyCheckOutcome, NicheSeedError, Provider, ThemeFieldError, UiLanguage,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -123,6 +123,53 @@ pub enum Text {
     ResearchNotFetched,
     ResearchNoUploads,
     ResearchStale,
+    ThemesTitle,
+    ThemesNoChannels,
+    ThemesChannel,
+    ThemesNiche,
+    ThemesNoNiche,
+    /// Placeholder: `{n}`.
+    SuggestThemesHint,
+    SuggestThemes,
+    RankThemes,
+    /// Placeholder: `{n}`.
+    ThemesUnranked,
+    ThemesRunning,
+    ThemesStopped,
+    ThemesListTitle,
+    ThemesRankingHint,
+    ThemesEmpty,
+    /// Placeholder: `{n}`.
+    ThemesDiscarded,
+    ThemePriority,
+    ThemeConfidence,
+    ThemeFit,
+    ThemeTrend,
+    ThemeCompetition,
+    ThemeNotRanked,
+    /// Placeholder: `{model}`.
+    ThemeRankedBy,
+    ThemeTitle,
+    ThemeAngle,
+    EditTheme,
+    SaveTheme,
+    CancelThemeEdit,
+    DiscardTheme,
+    ApproveTheme,
+    ThemeApproved,
+    ProjectsTitle,
+    ProjectsEmpty,
+    /// Placeholder: `{title}`.
+    ProjectStarted,
+    ThemeNotSaved,
+    ThemeFieldError(ThemeFieldError),
+    ThemesPickNiche,
+    ThemeNotFound,
+    /// Only Claude and TypeSafe have a message.
+    ThemesMissingKey(Provider),
+    ThemesBusy,
+    ThemesNothingToRank,
+    ThemesNotLoaded,
     FetchedJustNow,
     /// Placeholder: `{n}`.
     FetchedMinutesAgo,
@@ -276,6 +323,53 @@ impl Text {
             Text::ResearchNotFetched => "research.not_fetched",
             Text::ResearchNoUploads => "research.no_uploads",
             Text::ResearchStale => "research.stale",
+            Text::ThemesTitle => "themes.title",
+            Text::ThemesNoChannels => "themes.no_channels",
+            Text::ThemesChannel => "themes.channel",
+            Text::ThemesNiche => "themes.niche",
+            Text::ThemesNoNiche => "themes.no_niche",
+            Text::SuggestThemesHint => "themes.suggest_hint",
+            Text::SuggestThemes => "themes.suggest",
+            Text::RankThemes => "themes.rank",
+            Text::ThemesUnranked => "themes.unranked",
+            Text::ThemesRunning => "themes.running",
+            Text::ThemesStopped => "themes.stopped",
+            Text::ThemesListTitle => "themes.list",
+            Text::ThemesRankingHint => "themes.ranking_hint",
+            Text::ThemesEmpty => "themes.empty",
+            Text::ThemesDiscarded => "themes.discarded",
+            Text::ThemePriority => "theme.priority",
+            Text::ThemeConfidence => "theme.confidence",
+            Text::ThemeFit => "theme.fit",
+            Text::ThemeTrend => "theme.trend",
+            Text::ThemeCompetition => "theme.competition",
+            Text::ThemeNotRanked => "theme.not_ranked",
+            Text::ThemeRankedBy => "theme.ranked_by",
+            Text::ThemeTitle => "theme.title",
+            Text::ThemeAngle => "theme.angle",
+            Text::EditTheme => "theme.edit",
+            Text::SaveTheme => "theme.save",
+            Text::CancelThemeEdit => "theme.cancel",
+            Text::DiscardTheme => "theme.discard",
+            Text::ApproveTheme => "theme.approve",
+            Text::ThemeApproved => "theme.approved",
+            Text::ProjectsTitle => "projects.title",
+            Text::ProjectsEmpty => "projects.empty",
+            Text::ProjectStarted => "projects.started",
+            Text::ThemeNotSaved => "theme.error.not_saved",
+            Text::ThemeFieldError(error) => match error {
+                ThemeFieldError::TitleRequired => "theme.error.title_required",
+                ThemeFieldError::TitleTooLong => "theme.error.title_too_long",
+                ThemeFieldError::AngleTooLong => "theme.error.angle_too_long",
+            },
+            Text::ThemesPickNiche => "themes.error.pick_niche",
+            Text::ThemeNotFound => "theme.error.not_found",
+            Text::ThemesMissingKey(provider) => {
+                return format!("themes.error.missing_key.{}", provider.code()).into();
+            }
+            Text::ThemesBusy => "themes.error.busy",
+            Text::ThemesNothingToRank => "themes.error.nothing_to_rank",
+            Text::ThemesNotLoaded => "themes.error.not_loaded",
             Text::FetchedJustNow => "age.just_now",
             Text::FetchedMinutesAgo => "age.minutes",
             Text::FetchedHoursAgo => "age.hours",
@@ -489,6 +583,47 @@ mod tests {
             Text::ResearchNotFetched,
             Text::ResearchNoUploads,
             Text::ResearchStale,
+            Text::ThemesTitle,
+            Text::ThemesNoChannels,
+            Text::ThemesChannel,
+            Text::ThemesNiche,
+            Text::ThemesNoNiche,
+            Text::SuggestThemesHint,
+            Text::SuggestThemes,
+            Text::RankThemes,
+            Text::ThemesUnranked,
+            Text::ThemesRunning,
+            Text::ThemesStopped,
+            Text::ThemesListTitle,
+            Text::ThemesRankingHint,
+            Text::ThemesEmpty,
+            Text::ThemesDiscarded,
+            Text::ThemePriority,
+            Text::ThemeConfidence,
+            Text::ThemeFit,
+            Text::ThemeTrend,
+            Text::ThemeCompetition,
+            Text::ThemeNotRanked,
+            Text::ThemeRankedBy,
+            Text::ThemeTitle,
+            Text::ThemeAngle,
+            Text::EditTheme,
+            Text::SaveTheme,
+            Text::CancelThemeEdit,
+            Text::DiscardTheme,
+            Text::ApproveTheme,
+            Text::ThemeApproved,
+            Text::ProjectsTitle,
+            Text::ProjectsEmpty,
+            Text::ProjectStarted,
+            Text::ThemeNotSaved,
+            Text::ThemesPickNiche,
+            Text::ThemeNotFound,
+            Text::ThemesMissingKey(Provider::Claude),
+            Text::ThemesMissingKey(Provider::TypeSafe),
+            Text::ThemesBusy,
+            Text::ThemesNothingToRank,
+            Text::ThemesNotLoaded,
             Text::FetchedJustNow,
             Text::FetchedMinutesAgo,
             Text::FetchedHoursAgo,
@@ -511,6 +646,7 @@ mod tests {
         texts.extend(ContentLanguage::ALL.map(Text::ContentLanguageName));
         texts.extend(Country::ALL.map(Text::CountryName));
         texts.extend(ChannelFieldError::ALL.map(Text::ChannelFieldError));
+        texts.extend(ThemeFieldError::ALL.map(Text::ThemeFieldError));
         texts
     }
 
@@ -621,6 +757,40 @@ mod tests {
                     Text::ResearchSample,
                     &[("videos", "47"), ("channels", "38")][..],
                 ),
+            ] {
+                let filled = catalog.format(text, args);
+                assert!(!filled.contains('{'), "{filled}");
+                for (_, value) in args {
+                    assert!(filled.contains(value), "{filled}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn theme_limit_messages_match_the_domain_limits() {
+        use bardo_domain::ThemeIdea;
+
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        for (error, limit) in [
+            (ThemeFieldError::TitleTooLong, ThemeIdea::MAX_TITLE_CHARS),
+            (ThemeFieldError::AngleTooLong, ThemeIdea::MAX_ANGLE_CHARS),
+        ] {
+            let message = catalog.get(Text::ThemeFieldError(error));
+            assert!(message.contains(&limit.to_string()), "{message}");
+        }
+    }
+
+    #[test]
+    fn theme_placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for (text, args) in [
+                (Text::SuggestThemesHint, &[("n", "10")][..]),
+                (Text::ThemesUnranked, &[("n", "3")][..]),
+                (Text::ThemesDiscarded, &[("n", "4")][..]),
+                (Text::ThemeRankedBy, &[("model", "jev-1.13.0")][..]),
+                (Text::ProjectStarted, &[("title", "The Lost Probe")][..]),
             ] {
                 let filled = catalog.format(text, args);
                 assert!(!filled.contains('{'), "{filled}");

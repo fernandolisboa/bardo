@@ -3,7 +3,9 @@
 
 use std::time::Duration;
 
-use bardo_domain::{ApiKey, KeyCheck, KeyCheckOutcome, KeyChecker, Provider};
+use bardo_domain::{
+    ApiKey, KeyCheck, KeyCheckOutcome, KeyChecker, Provider, ProviderFailure, ProviderFailureKind,
+};
 use serde_json::Value;
 
 use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
@@ -75,6 +77,25 @@ pub fn classify(provider: Provider, response: &HttpResponse) -> KeyCheck {
         (outcome == KeyCheckOutcome::Unexpected).then(|| format!("HTTP {}", response.status))
     });
     KeyCheck::new(outcome, detail)
+}
+
+/// A failed call's answer as a provider failure. Providers report a bad
+/// key, a missing permission or a spent quota the same way on every
+/// endpoint, so calls classify like key checks.
+pub fn failure(provider: Provider, response: &HttpResponse) -> ProviderFailure {
+    let check = classify(provider, response);
+    let kind = match check.outcome {
+        KeyCheckOutcome::Rejected => ProviderFailureKind::Rejected,
+        KeyCheckOutcome::NotAllowed => ProviderFailureKind::NotAllowed,
+        KeyCheckOutcome::LimitReached => ProviderFailureKind::LimitReached,
+        KeyCheckOutcome::ProviderDown => ProviderFailureKind::ProviderDown,
+        KeyCheckOutcome::Unreachable => ProviderFailureKind::Unreachable,
+        KeyCheckOutcome::Valid | KeyCheckOutcome::Unexpected => ProviderFailureKind::Unexpected,
+    };
+    let detail = check
+        .detail
+        .unwrap_or_else(|| format!("HTTP {}", response.status));
+    ProviderFailure::new(kind, detail)
 }
 
 /// Google APIs name the cause in `error.details[].reason` (ErrorInfo) and,

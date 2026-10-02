@@ -8,6 +8,7 @@ mod jobs;
 mod research;
 mod settings;
 mod shell;
+mod themes;
 
 use anyhow::Context as _;
 use bardo_app::{Bardo, Providers, Repositories};

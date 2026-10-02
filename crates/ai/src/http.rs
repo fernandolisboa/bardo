@@ -4,18 +4,38 @@
 use std::fmt;
 use std::time::Duration;
 
-/// A GET request. Header values may hold keys, so `Debug` shows only the
-/// header names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Get,
+    Post,
+}
+
+/// A request. Header values may hold keys and bodies may hold user content,
+/// so `Debug` shows only the header names and the body size.
 pub struct HttpRequest {
+    pub method: Method,
     pub url: String,
     pub headers: Vec<(&'static str, String)>,
+    pub body: Option<String>,
 }
 
 impl HttpRequest {
     pub fn get(url: impl Into<String>) -> Self {
         Self {
+            method: Method::Get,
             url: url.into(),
             headers: Vec::new(),
+            body: None,
+        }
+    }
+
+    /// A POST with a JSON body.
+    pub fn post_json(url: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            method: Method::Post,
+            url: url.into(),
+            headers: vec![("content-type", "application/json".to_owned())],
+            body: Some(body.into()),
         }
     }
 
@@ -37,8 +57,10 @@ impl fmt::Debug for HttpRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let names: Vec<_> = self.headers.iter().map(|(name, _)| *name).collect();
         f.debug_struct("HttpRequest")
+            .field("method", &self.method)
             .field("url", &self.url)
             .field("headers", &names)
+            .field("body_bytes", &self.body.as_ref().map(String::len))
             .finish()
     }
 }
@@ -47,7 +69,51 @@ impl fmt::Debug for HttpRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
+    /// Names in lowercase.
+    pub headers: Vec<(String, String)>,
     pub body: String,
+}
+
+impl HttpResponse {
+    pub fn new(status: u16, body: impl Into<String>) -> Self {
+        Self {
+            status,
+            headers: Vec::new(),
+            body: body.into(),
+        }
+    }
+
+    pub fn with_header(mut self, name: &str, value: impl Into<String>) -> Self {
+        self.headers.push((name.to_ascii_lowercase(), value.into()));
+        self
+    }
+
+    /// The value of the first header with this name, ignoring case.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(header, _)| header.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Parses a recorded response, as adapter test fixtures store them: the
+    /// status line (`HTTP/x <status>`), headers, a blank line, the body.
+    /// Line endings may be CRLF (Windows checkouts).
+    pub fn from_recording(raw: &str) -> Option<Self> {
+        let raw = raw.replace("\r\n", "\n");
+        let (head, body) = raw.split_once("\n\n")?;
+        let mut lines = head.lines();
+        let status = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
+            .collect();
+        Some(Self {
+            status,
+            headers,
+            body: body.to_owned(),
+        })
+    }
 }
 
 /// No answer: DNS, connection, TLS, proxy or timeout.
@@ -68,8 +134,9 @@ pub struct UreqTransport {
 }
 
 impl UreqTransport {
-    /// Bodies bigger than this are cut; key checks only read error messages.
-    const MAX_BODY_BYTES: u64 = 256 * 1024;
+    /// Bodies bigger than this are cut. Generated text and decisions stay
+    /// far below it.
+    const MAX_BODY_BYTES: u64 = 1024 * 1024;
 
     pub fn new(timeout: Duration) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
@@ -100,14 +167,31 @@ impl UreqTransport {
 
 impl Transport for UreqTransport {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
-        let mut call = self.agent.get(&request.url);
-        for (name, value) in &request.headers {
-            call = call.header(*name, value.as_str());
-        }
-        let mut response = call
-            .call()
-            .map_err(|error| TransportError(error.to_string()))?;
+        let sent = match (request.method, &request.body) {
+            (Method::Get, _) => {
+                let mut call = self.agent.get(&request.url);
+                for (name, value) in &request.headers {
+                    call = call.header(*name, value.as_str());
+                }
+                call.call()
+            }
+            (Method::Post, body) => {
+                let mut call = self.agent.post(&request.url);
+                for (name, value) in &request.headers {
+                    call = call.header(*name, value.as_str());
+                }
+                call.send(body.as_deref().unwrap_or_default())
+            }
+        };
+        let mut response = sent.map_err(|error| TransportError(error.to_string()))?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+            })
+            .collect();
         // An unreadable body still tells the status; the body is only detail.
         let body = response
             .body_mut()
@@ -115,6 +199,10 @@ impl Transport for UreqTransport {
             .limit(Self::MAX_BODY_BYTES)
             .read_to_string()
             .unwrap_or_default();
-        Ok(HttpResponse { status, body })
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
     }
 }

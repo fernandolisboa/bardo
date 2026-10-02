@@ -95,6 +95,8 @@ retry = "Retry"
 [job.kind]
 countdown = "Test countdown"
 niche_research = "Niche research"
+theme_suggestion = "Theme suggestion"
+theme_ranking = "Theme ranking"
 
 [job.state]
 queued = "Queued"
@@ -112,6 +114,7 @@ not_allowed = "The key lacks access this needs, such as an API not enabled for t
 limit_reached = "A quota or rate limit stopped the provider. YouTube quotas reset daily at midnight Pacific time."
 provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
 unexpected_answer = "The provider gave an answer Bardo does not understand."
+declined = "The provider declined to answer this request. Change the channel or niche and try again."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -217,6 +220,62 @@ not_loaded = "Could not load research results."
 seed_required = "Enter at least one niche or keyword."
 too_many_seeds = "Use at most 20 niches per run."
 seed_too_long = "Keep each niche to at most 100 characters."
+
+[themes]
+title = "Themes"
+no_channels = "Create a channel first. Ideas are written for its niche, audience and style."
+channel = "Channel"
+niche = "Niche"
+no_niche = "Give the channel a niche, or research niches for it first."
+suggest_hint = "Claude proposes {n} video ideas for the niche; the decision engine then ranks them by fit, trend and competition."
+suggest = "Suggest themes"
+rank = "Rank again"
+unranked = "{n} waiting for a ranking"
+running = "Proposing and ranking ideas…"
+stopped = "The last run stopped:"
+list = "Ideas"
+ranking_hint = "Priority weighs fit (40%), trend (35%) and room left by competition (25%). Confidence is how sure the decision engine was of its least certain answer."
+empty = "No ideas for this niche yet."
+discarded = "{n} discarded"
+
+[themes.error]
+pick_niche = "Pick a niche first."
+busy = "Ideas are still being proposed or ranked for this channel."
+nothing_to_rank = "Every idea of this niche already has a ranking."
+not_loaded = "Could not load the ideas."
+
+[themes.error.missing_key]
+claude = "Save a Claude key under Settings to have ideas proposed."
+typesafe = "Save a TypeSafe key under Settings to have ideas ranked."
+
+[theme]
+priority = "Priority"
+confidence = "Confidence"
+fit = "Fit"
+trend = "Trend"
+competition = "Competition"
+not_ranked = "Not ranked yet. Use Rank again to rank it."
+ranked_by = "Ranked by {model}"
+title = "Title"
+angle = "Angle"
+edit = "Edit"
+save = "Save"
+cancel = "Cancel"
+discard = "Discard"
+approve = "Approve"
+approved = "Approved"
+
+[theme.error]
+not_saved = "Could not save the idea. Try again."
+not_found = "This idea is gone or can no longer change."
+title_required = "Give the idea a title."
+title_too_long = "Keep the title to at most 120 characters."
+angle_too_long = "Keep the angle to at most 500 characters."
+
+[projects]
+title = "Video projects"
+empty = "Approve an idea to start a video project."
+started = "Video project started: {title}"
 
 [age]
 just_now = "just now"

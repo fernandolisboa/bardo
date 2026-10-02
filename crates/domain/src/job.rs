@@ -53,16 +53,28 @@ pub enum JobKind {
     /// Fetches market data for a channel's seed niches, one checkpoint per
     /// niche.
     NicheResearch,
+    /// Has Claude propose themes for a niche, then ranks them with the
+    /// decision engine.
+    ThemeSuggestion,
+    /// Ranks a channel's themes that have no ranking (e.g. after an edit).
+    ThemeRanking,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 2] = [JobKind::Countdown, JobKind::NicheResearch];
+    pub const ALL: [JobKind; 4] = [
+        JobKind::Countdown,
+        JobKind::NicheResearch,
+        JobKind::ThemeSuggestion,
+        JobKind::ThemeRanking,
+    ];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             JobKind::Countdown => "countdown",
             JobKind::NicheResearch => "niche_research",
+            JobKind::ThemeSuggestion => "theme_suggestion",
+            JobKind::ThemeRanking => "theme_ranking",
         }
     }
 }
@@ -209,10 +221,12 @@ pub enum JobFailureKind {
     ProviderUnavailable,
     /// The provider answered in a way Bardo does not understand.
     UnexpectedAnswer,
+    /// The provider's safety rules declined the request.
+    Declined,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 8] = [
+    pub const ALL: [JobFailureKind; 9] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -221,6 +235,7 @@ impl JobFailureKind {
         JobFailureKind::LimitReached,
         JobFailureKind::ProviderUnavailable,
         JobFailureKind::UnexpectedAnswer,
+        JobFailureKind::Declined,
     ];
 
     /// Stable name stored in the database.
@@ -234,6 +249,7 @@ impl JobFailureKind {
             JobFailureKind::LimitReached => "limit_reached",
             JobFailureKind::ProviderUnavailable => "provider_unavailable",
             JobFailureKind::UnexpectedAnswer => "unexpected_answer",
+            JobFailureKind::Declined => "declined",
         }
     }
 
@@ -246,7 +262,8 @@ impl JobFailureKind {
             | JobFailureKind::KeyRejected
             | JobFailureKind::NotAllowed
             | JobFailureKind::LimitReached
-            | JobFailureKind::UnexpectedAnswer => false,
+            | JobFailureKind::UnexpectedAnswer
+            | JobFailureKind::Declined => false,
         }
     }
 }
@@ -261,6 +278,7 @@ impl From<ProviderFailureKind> for JobFailureKind {
                 JobFailureKind::ProviderUnavailable
             }
             ProviderFailureKind::Unexpected => JobFailureKind::UnexpectedAnswer,
+            ProviderFailureKind::Declined => JobFailureKind::Declined,
         }
     }
 }

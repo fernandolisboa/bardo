@@ -7,6 +7,7 @@ mod migrations;
 mod profile;
 mod research;
 mod secrets;
+mod theme;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};

@@ -16,10 +16,11 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Competition** | 0–100 score of how hard a niche is to stand out in: upload volume, channel size and few views per upload push it up. |
 | **Trend** | 0–100 score of how fast a niche's recent uploads gather views (median views per day). |
 | **Opportunity** | The average of trend and room left by competition (100 − competition). Research results rank by it. |
-| **Theme** | A specific video idea inside a niche. |
+| **Theme** | A specific video idea inside a niche: a title and an angle. Claude suggests themes, the decision engine ranks them, and the user edits, discards or approves each one. |
+| **Theme ranking** | The decision engine's reasons for a theme: fit (with the channel), trend (demand now) and competition (how crowded the angle is), each a 0–100 score with a confidence. Priority weighs fit 40%, trend 35% and room left by competition 25%; the ranking's confidence is its least certain reason. Editing a theme's text drops its ranking until it is ranked again. |
 | **Word timings** | When each word of the narration is spoken. Comes with generated narration; computed by alignment for imported audio. Drives captions and cut snapping. |
 | **Template** | A versioned, editable prompt/plan used to generate a script, title, description or media prompt. |
-| **Video project** | One video in production: script, generated assets, timeline, per-network metadata and publications. |
+| **Video project** | One video in production: script, generated assets, timeline, per-network metadata and publications. Starts when the user approves a theme and stays linked to its channel, niche and theme. |
 | **Asset** | Any media file in a project: generated image, video clip, narration, music, SFX or imported file. |
 | **Timeline** | Ordered clips on video and audio tracks, with cuts, gain, fades and captions. |
 | **Render preset** | Output format per network (aspect ratio, resolution, codec, bitrate, duration limits). |
@@ -33,3 +34,4 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Job** | A long-running task (generation, render, upload, metrics sync) in the queue, with progress, cancel and resume. |
 | **Metrics snapshot** | Post-publication statistics for one publication at a point in time (views, retention, engagement and, on YouTube, estimated revenue/CPM/RPM). |
 | **Decision engine** | Answers typed questions (choice, score, yes/no) about a piece of content, with probabilities and confidence. Ranks, scores and gates; never generates content. Implemented by JEV (hosted) and, later, Laya (local). |
+| **Text generator** | Writes text (ideas, scripts, prompts) from instructions and a prompt, as prose or JSON in a given schema. Implemented by the Claude API. |
