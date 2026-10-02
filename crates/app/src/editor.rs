@@ -632,7 +632,7 @@ impl Editor {
                 };
                 VideoClip {
                     source,
-                    start: item.start,
+                    start: item.source_start(),
                     duration: item.duration,
                     framing,
                 }
@@ -988,7 +988,7 @@ impl Bardo {
                     }
                     _ => ClipMedia::Missing,
                 };
-                let is_clip = matches!(item.source, VideoSource::Clip(_));
+                let is_clip = matches!(item.source, VideoSource::Clip { .. });
                 clips.push(ClipView {
                     scene: item.scene,
                     file: item.source.file().map(str::to_owned),
@@ -1128,15 +1128,32 @@ impl Bardo {
 
     /// Reads the editor's view again (after jobs moved), queueing proxies
     /// for media that entered the timeline. A timeline changed from outside
-    /// (new scenes or narration) can no longer be undone.
+    /// (new scenes or narration) can no longer be undone; a cut they left
+    /// behind starts over from the rough cut, as on opening.
     pub fn refresh_editor(&self, editor: &mut Editor) -> Result<(), EditorError> {
-        let view = self.editor_view(editor.project())?;
+        let project = editor.project();
+        let view = self.editor_view(project)?;
+        if let (true, Some(timeline), Some(basis)) = (view.cut_outdated, &view.timeline, view.basis)
+        {
+            self.save_cut(project, timeline, basis)?;
+            editor.cut_reset = true;
+        }
         let view = self.queue_missing_proxies(view, false)?;
         if view.timeline != editor.view.timeline {
             editor.history.clear();
         }
         editor.update(view);
         Ok(())
+    }
+
+    /// The scene plan and narration a cut of `project` is made on now.
+    fn cut_basis(&self, project: VideoProjectId) -> Result<Option<CutBasis>, EditorError> {
+        let plan = self.scene_plans.scene_plan(project)?;
+        let narration = self.narrations.narration(project)?;
+        Ok(plan.zip(narration).map(|(plan, narration)| CutBasis {
+            scene_plan: plan.id,
+            narration: narration.id,
+        }))
     }
 
     fn save_cut(
@@ -1156,7 +1173,13 @@ impl Bardo {
 
     /// Makes `action` on the editor's timeline and saves the cut. An edit
     /// that changes nothing (a trim already at its limit) is no error.
+    /// Scenes or narration redone since the editor last read them take the
+    /// cut the action aimed at away: the editor starts over and says so.
     pub fn edit(&self, editor: &mut Editor, action: EditAction) -> Result<(), EditorError> {
+        let project = editor.project();
+        if self.cut_basis(project)? != editor.view.basis {
+            return self.refresh_editor(editor);
+        }
         let (Some(mut timeline), Some(basis)) = (editor.view.timeline.clone(), editor.view.basis)
         else {
             return Err(EditorError::NothingToCut);
@@ -1181,7 +1204,6 @@ impl Bardo {
                 return Err(error.into());
             }
         };
-        let project = editor.project();
         self.save_cut(project, &timeline, basis)
             .map_err(EditorError::NotSaved)?;
         let view = self.editor_view(project)?;
@@ -2376,6 +2398,35 @@ mod tests {
         assert!(
             !app.open_editor(project.id).unwrap().cut_reset(),
             "said once"
+        );
+    }
+
+    #[test]
+    fn an_edit_after_the_scenes_were_redone_starts_the_cut_over_instead() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        editor.select(Some(ItemRef::video(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+
+        // Redone while the editor is open, before it reads the jobs again.
+        h.answer(crate::scenes::tests::plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, true, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: 2 })
+            .unwrap();
+
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let rough = editor.view().clips.iter().map(|clip| clip.scene);
+        assert!(rough.eq(0..plan.scenes().len()), "the rough cut, as it was");
+        assert!(editor.cut_reset());
+        assert!(!editor.can_undo(), "nothing of the old cut to undo");
+        assert!(
+            !app.open_editor(project.id).unwrap().cut_reset(),
+            "the rough cut was saved"
         );
     }
 

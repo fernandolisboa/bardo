@@ -897,7 +897,9 @@ impl EditorScreen {
         let zoom = timeline.zoom;
         let peaks = narration.peaks.clone();
         let source_start = piece.start.as_secs_f32();
-        // Drawn from the piece's own left edge, which may be off screen.
+        // Drawn from the piece's own left edge, which may be off screen;
+        // only the bars on screen are painted.
+        let (from_x, to_x) = ((-left).max(0.), (timeline.width() - left).min(width));
         let waveform = canvas(
             |_, _, _| {},
             move |bounds, (), window, _| {
@@ -908,13 +910,12 @@ impl EditorScreen {
                 let height: f32 = bounds.size.height.into();
                 // On a whole pixel, so every piece's bars look alike.
                 let origin = f32::from(bounds.origin.x).round();
-                let visible: f32 = bounds.size.width.into();
                 let middle = top + height / 2.;
                 let per_pixel = per_second as f32 / zoom;
                 let first = source_start * per_second as f32;
                 // One bar every 2 px of what is on screen.
-                let mut x = 0.;
-                while x < visible {
+                let mut x = (from_x / 2.).floor() * 2.;
+                while x < to_x {
                     let from = (first + x * per_pixel) as usize;
                     let to = ((first + (x + 2.) * per_pixel) as usize).max(from + 1);
                     let peak = peaks

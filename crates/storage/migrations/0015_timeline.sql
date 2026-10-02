@@ -19,7 +19,8 @@ CREATE TABLE timeline (
 -- file of the project folder.
 CREATE TABLE timeline_item (
     project_id  TEXT NOT NULL REFERENCES timeline (project_id) ON DELETE CASCADE,
-    track       TEXT NOT NULL CHECK (track IN ('video', 'narration')),
+    -- 'video' or 'narration' for now; later tracks add their own names.
+    track       TEXT NOT NULL,
     position    INTEGER NOT NULL CHECK (position >= 0),
     scene       INTEGER CHECK (scene >= 0),
     file        TEXT,

@@ -62,8 +62,9 @@ pub fn timecode(time: Duration) -> String {
 /// What a stretch of the video track shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VideoSource {
-    /// A video clip in the project folder.
-    Clip(String),
+    /// A video clip in the project folder, and its length (as asked of
+    /// the model that made it).
+    Clip { file: String, length: Duration },
     /// A still image in the project folder, shown for the whole stretch.
     Still(String),
     /// Nothing to show yet: the scene has no image.
@@ -75,7 +76,10 @@ impl VideoSource {
     /// or its clip animates an image the scene no longer shows.
     pub fn of(scene: &Scene) -> VideoSource {
         match (scene.clip(), scene.image()) {
-            (Some(clip), _) if !scene.is_clip_stale() => VideoSource::Clip(clip.file.clone()),
+            (Some(clip), _) if !scene.is_clip_stale() => VideoSource::Clip {
+                file: clip.file.clone(),
+                length: Duration::from_secs(clip.seconds.into()),
+            },
             (_, Some(image)) => VideoSource::Still(image.file.clone()),
             _ => VideoSource::Missing,
         }
@@ -84,7 +88,7 @@ impl VideoSource {
     /// The file in the project folder, if there is one.
     pub fn file(&self) -> Option<&str> {
         match self {
-            VideoSource::Clip(file) | VideoSource::Still(file) => Some(file),
+            VideoSource::Clip { file, .. } | VideoSource::Still(file) => Some(file),
             VideoSource::Missing => None,
         }
     }
@@ -97,7 +101,8 @@ pub struct VideoItem {
     pub scene: usize,
     pub source: VideoSource,
     /// Where in the clip it starts. A still has no time of its own: its
-    /// start stays where it was.
+    /// start only moves on a split, so the pieces of a still that gets
+    /// animated later play on from each other.
     pub start: Duration,
     /// Where it starts on the timeline.
     pub at: Duration,
@@ -112,7 +117,16 @@ impl VideoItem {
     /// Whether its source plays through time (a clip), so cutting into it
     /// moves where in the source it starts.
     pub fn has_source_time(&self) -> bool {
-        matches!(self.source, VideoSource::Clip(_))
+        matches!(self.source, VideoSource::Clip { .. })
+    }
+
+    /// Where playing starts in the source: never past the clip's last
+    /// frame, which a piece cut beyond the clip's end holds.
+    pub fn source_start(&self) -> Duration {
+        match &self.source {
+            VideoSource::Clip { length, .. } => self.start.min(length.saturating_sub(min_length())),
+            _ => self.start,
+        }
     }
 }
 
@@ -213,7 +227,13 @@ impl Timeline {
     /// cut on another scene plan or narration, or does not hold together:
     /// the editor then starts over from the rough cut.
     pub fn restore(saved: &SavedTimeline, plan: &ScenePlan, narration: &Narration) -> Option<Self> {
-        if saved.scene_plan != plan.id || saved.narration != narration.id {
+        if saved.scene_plan != plan.id
+            || saved.narration != narration.id
+            || saved
+                .narration_items
+                .iter()
+                .any(|item| item.file != narration.audio_file)
+        {
             return None;
         }
         let video = saved
@@ -638,7 +658,10 @@ pub(crate) mod tests {
         let timeline = Timeline::rough_cut(&plan(vec![animated, redrawn]), &narration(2_000));
         assert_eq!(
             timeline.video()[0].source,
-            VideoSource::Clip("clip-a.mp4".into())
+            VideoSource::Clip {
+                file: "clip-a.mp4".into(),
+                length: Duration::from_secs(5),
+            }
         );
         assert_eq!(
             timeline.video()[1].source,
@@ -859,6 +882,14 @@ pub(crate) mod tests {
             Timeline::restore(&saved, &plan, &narration),
             None,
             "overlapping"
+        );
+        let mut saved = saved.clone();
+        saved.narration_items.truncate(1);
+        saved.narration_items[0].file = "../elsewhere.mp3".into();
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration),
+            None,
+            "another file"
         );
     }
 }

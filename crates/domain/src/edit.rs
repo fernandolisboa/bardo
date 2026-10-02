@@ -5,11 +5,13 @@
 //! Edits are exact: they cut where they are told, and the caller snaps the
 //! time first (to a frame, and to a word when snapping is on). Trims and
 //! moves stop where the item runs out: at one frame long, at the start or
-//! end of its file, at the item beside it on an audio track.
+//! end of its file, at the item beside it on an audio track. A video clip
+//! is the one exception at its end: played past it, it holds its last
+//! frame, as the rough cut does with a clip shorter than its scene.
 
 use std::time::Duration;
 
-use crate::{AudioItem, Timeline, VideoItem, min_length};
+use crate::{AudioItem, Timeline, VideoItem, VideoSource, min_length};
 
 /// A track of the timeline that edits reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -209,12 +211,15 @@ impl Timeline {
         Ok(match (item.track, edge) {
             (Track::Video, Edge::Start) => {
                 let video = &self.video[item.index];
-                let earliest = if video.has_source_time() {
-                    Shift::earlier(video.start)
-                } else {
-                    -Shift::FAR
-                };
-                (earliest, shrink)
+                match &video.source {
+                    // A clip's start stays a frame short of its end.
+                    VideoSource::Clip { length, .. } => {
+                        let last = length.saturating_sub(min_length());
+                        let room = Shift::between(video.start, last.max(video.start));
+                        (Shift::earlier(video.start), shrink.min(room))
+                    }
+                    _ => (-Shift::FAR, shrink),
+                }
             }
             (Track::Video, Edge::End) => (-shrink, Shift::FAR),
             (Track::Narration, Edge::Start) => {
@@ -283,9 +288,7 @@ impl Timeline {
         match track {
             Track::Video => {
                 let mut second = self.video[index].clone();
-                if second.has_source_time() {
-                    second.start += first;
-                }
+                second.start += first;
                 second.at = at;
                 second.duration = end - at;
                 self.video[index].duration = first;
@@ -310,12 +313,10 @@ impl Timeline {
         let at = match track {
             Track::Video => {
                 let (first, second) = (&self.video[index], &self.video[index + 1]);
-                let resumes = if first.has_source_time() {
-                    second.start == first.start + first.duration
-                } else {
-                    second.start == first.start
-                };
-                if first.scene != second.scene || first.source != second.source || !resumes {
+                if first.scene != second.scene
+                    || first.source != second.source
+                    || second.start != first.start + first.duration
+                {
                     return Err(EditError::CannotJoin);
                 }
                 let second = self.video.remove(index + 1);
@@ -526,7 +527,7 @@ impl History {
 mod tests {
     use super::*;
     use crate::timeline::tests::{image, ms, narration, plan, scene};
-    use crate::{SceneClip, VideoSource, frame_time};
+    use crate::{SceneClip, frame_time};
 
     /// Three scenes over a 4 s narration: a still (0-1 s), a clip (1-3 s)
     /// and a still (3-4 s).
@@ -588,7 +589,9 @@ mod tests {
         assert_eq!((video[0].at, video[0].duration), (ms(0), ms(400)));
         assert_eq!((video[1].at, video[1].duration), (ms(400), ms(600)));
         assert_eq!(video[1].source, VideoSource::Still("a.png".into()));
-        assert_eq!(video[1].start, Duration::ZERO, "a still has no time");
+        // Shown the same either way, but an animation added later plays on
+        // from the first piece.
+        assert_eq!(video[1].start, ms(400));
         assert_eq!(after.duration(), ms(4_000));
     }
 
@@ -605,6 +608,65 @@ mod tests {
         assert_eq!(after.video()[2].start, ms(1_500));
         assert_eq!(after.video()[2].at, ms(2_500));
         assert_eq!(after.video()[3].at, ms(3_000));
+    }
+
+    #[test]
+    fn a_clip_start_trim_stops_a_frame_short_of_the_file_end() {
+        // The clip (5 s file) plays 2 s; stretch it to 8 s, then cut its
+        // start as late as it goes.
+        let mut timeline = timeline();
+        let clip = ItemRef::video(1);
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 1,
+                edge: Edge::End,
+                by: Shift::later(ms(6_000)),
+            })
+            .unwrap();
+        let (_, latest) = timeline.trim_limits(clip, Edge::Start).unwrap();
+        assert_eq!(
+            latest,
+            Shift::between(Duration::ZERO, ms(5_000) - frame_time(1))
+        );
+        let after = round_trip(
+            &timeline,
+            Edit::Trim {
+                track: Track::Video,
+                index: 1,
+                edge: Edge::Start,
+                by: Shift::FAR,
+            },
+        );
+        assert_eq!(after.video()[1].start, ms(5_000) - frame_time(1));
+        assert_eq!(
+            after.video()[1].duration,
+            ms(8_000) - after.video()[1].start
+        );
+    }
+
+    #[test]
+    fn a_piece_cut_past_the_clip_end_holds_its_last_frame() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 1,
+                edge: Edge::End,
+                by: Shift::later(ms(6_000)),
+            })
+            .unwrap();
+        let after = round_trip(
+            &timeline,
+            Edit::Split {
+                track: Track::Video,
+                index: 1,
+                at: ms(8_000),
+            },
+        );
+        let piece = &after.video()[2];
+        assert_eq!(piece.start, ms(7_000));
+        assert_eq!(piece.source_start(), ms(5_000) - frame_time(1));
     }
 
     #[test]
