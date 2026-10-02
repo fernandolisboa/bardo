@@ -70,6 +70,9 @@ pub struct ProjectsScreen {
     narration: Option<NarrationView>,
     /// The narration loaded for playback, once the user plays it.
     player: Option<NarrationPlayer>,
+    /// Whether the player was playing at the last poll, so the view also
+    /// redraws once when playback reaches the end on its own.
+    was_playing: bool,
     narration_error: Option<Text>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
@@ -122,6 +125,7 @@ impl ProjectsScreen {
             view: None,
             narration: None,
             player: None,
+            was_playing: false,
             narration_error: None,
             editor,
             loaded: None,
@@ -280,8 +284,12 @@ impl ProjectsScreen {
             self.revision = revision;
             self.load(window, cx);
             cx.notify();
-        } else if self.player.as_ref().is_some_and(|p| p.is_playing()) {
-            cx.notify();
+        } else {
+            let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
+            if playing || playing != self.was_playing {
+                cx.notify();
+            }
+            self.was_playing = playing;
         }
     }
 
