@@ -1,0 +1,17 @@
+# The ffmpeg build Bardo bundles and tests against (ADR-0007).
+#
+# LGPL (v3), shared libraries, from BtbN/FFmpeg-Builds. The month-end
+# autobuild is kept for two years upstream; Bardo mirrors it before the
+# first installer ships. `cargo xtask fetch-ffmpeg` downloads the archive
+# for this platform, checks its SHA-256 and unpacks `bin/` into `.ffmpeg/`.
+version = "8.1.3"
+
+[windows-x86_64]
+url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-shared-8.1.zip"
+sha256 = "3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a"
+
+# Development in Linux containers only; Bardo ships for Windows. Static,
+# because the shared Linux build needs its lib/ folder on the loader path.
+[linux-x86_64]
+url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-lgpl-8.1.tar.xz"
+sha256 = "dfa863a00ca81f1bdf58a372b18cff4820f0017e55de32778de8ecd8ed92a02e"

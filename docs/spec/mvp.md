@@ -78,7 +78,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Multiple video tracks / picture-in-picture.
 
 **Acceptance**
-- Timeline edits never block the UI; preview starts within one second on a 60 s project on the reference machine (target to confirm after the ffmpeg spike).
+- Timeline edits never block the UI; preview starts within one second on a 60 s project on the reference machine. The ffmpeg spike measured about 0.1 s from proxies on a 4-core Linux container (`docs/spikes/ffmpeg.md`); the reference-machine number is recorded with the creation-phase validations (#51).
 - A render matches the preset's resolution, codec and duration limit, and integrated loudness is within the preset target.
 - Render can be cancelled and resumed.
 
@@ -108,7 +108,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Secrets: API keys and OAuth tokens in Windows Credential Manager only; redacted from logs and errors.
 - Job queue: persistent, with progress, cancel, retry with backoff and resume after restart.
 - Generation cost: every generation records its cost (as reported by the provider, else estimated from the published rate). Spend is shown per video, per channel and per month. The user sets a monthly budget per provider: a warning at 80%, and at 100% new jobs for that provider need explicit confirmation instead of starting.
-- ffmpeg bundled with the app; version pinned.
+- ffmpeg bundled with the app as sidecar executables (LGPL build, version and checksum pinned in `crates/media/ffmpeg.toml`), per ADR-0007.
 - i18n: pt-BR and en-US resource files; no hard-coded UI strings.
 - Dependency lint: only `ui` depends on GPUI.
 - Decision engine: one domain interface with three typed questions (choice, score, yes/no), each answer with probabilities and confidence. The MVP adapter is JEV (TypeSafe HTTP API). Right after the MVP, a spike compares Laya (open weights, run locally through ONNX, no Python) against JEV on Bardo's own tasks and in pt-BR; if Laya wins it becomes the default and decisions run offline. Laya's short context means long scripts are scored in chunks.

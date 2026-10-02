@@ -1,0 +1,332 @@
+//! The ffmpeg sidecar against the short clips in `tests/fixtures`. Needs
+//! the pinned build: `cargo xtask fetch-ffmpeg` (CI does it).
+
+use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use bardo_media::ffmpeg::{
+    AudioClip, AudioTrack, Ffmpeg, FrameSize, Framing, LoudnessTarget, MIN_VERSION, MediaError,
+    Monitor, Output, ProxyCodec, ProxySettings, RenderPlan, VideoClip, VideoEncoder,
+};
+
+fn ffmpeg() -> Ffmpeg {
+    Ffmpeg::locate().expect("ffmpeg not found: run `cargo xtask fetch-ffmpeg`")
+}
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+fn secs(seconds: f64) -> Duration {
+    Duration::from_secs_f64(seconds)
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("bardo-media-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn close(actual: Duration, expected: f64, tolerance: f64) -> bool {
+    (actual.as_secs_f64() - expected).abs() <= tolerance
+}
+
+/// Records progress and stops once asked.
+#[derive(Default)]
+struct Recorder {
+    progress: RefCell<Vec<f32>>,
+    stop: Cell<bool>,
+}
+
+impl Monitor for Recorder {
+    fn should_stop(&self) -> bool {
+        self.stop.get()
+    }
+
+    fn progress(&self, fraction: f32) {
+        self.progress.borrow_mut().push(fraction);
+    }
+}
+
+/// Two clips with sound, a voice and a quieter music bed: the shape of a
+/// short with narration, in 3.5 seconds.
+fn short_plan() -> RenderPlan {
+    RenderPlan {
+        video: vec![
+            VideoClip {
+                source: fixture("clip-a.mp4"),
+                start: secs(0.5),
+                duration: secs(1.5),
+                framing: Framing::Crop { x: 0.5, y: 0.5 },
+            },
+            VideoClip {
+                source: fixture("clip-b.mp4"),
+                start: Duration::ZERO,
+                duration: secs(2.0),
+                framing: Framing::Crop { x: 0.0, y: 0.5 },
+            },
+        ],
+        audio: vec![
+            AudioTrack {
+                clips: vec![AudioClip {
+                    source: fixture("voice-3s.mp3"),
+                    start: Duration::ZERO,
+                    duration: secs(3.0),
+                    at: secs(0.25),
+                    gain_db: 0.0,
+                }],
+                gain_db: 0.0,
+            },
+            AudioTrack {
+                clips: vec![AudioClip {
+                    source: fixture("music-4s.mp3"),
+                    start: Duration::ZERO,
+                    duration: secs(4.0),
+                    at: Duration::ZERO,
+                    gain_db: 0.0,
+                }],
+                gain_db: -12.0,
+            },
+        ],
+    }
+}
+
+fn vertical(encoder: VideoEncoder) -> Output {
+    Output {
+        size: FrameSize::new(360, 640),
+        fps: (30, 1),
+        encoder,
+        video_bitrate: 2_000_000,
+        audio_bitrate: 128_000,
+    }
+}
+
+const TARGET: LoudnessTarget = LoudnessTarget {
+    integrated: -14.0,
+    true_peak: -1.5,
+    range: 11.0,
+};
+
+#[test]
+fn finds_a_recent_enough_build() {
+    assert!(ffmpeg().version() >= MIN_VERSION);
+}
+
+#[test]
+fn probes_streams_and_duration() {
+    let info = ffmpeg().probe(&fixture("clip-a.mp4")).unwrap();
+    assert!(close(info.duration, 2.0, 0.05), "{:?}", info.duration);
+    let video = info.video.unwrap();
+    assert_eq!(
+        (video.codec.as_str(), video.width, video.height),
+        ("h264", 320, 180)
+    );
+    assert_eq!(video.frame_rate, (30, 1));
+    assert_eq!(info.audio.unwrap().codec, "aac");
+
+    let voice = ffmpeg().probe(&fixture("voice-3s.mp3")).unwrap();
+    assert!(voice.video.is_none());
+    assert!(close(voice.duration, 3.0, 0.1));
+}
+
+#[test]
+fn probing_a_missing_file_fails_with_ffprobes_message() {
+    let error = ffmpeg().probe(&fixture("missing.mp4")).unwrap_err();
+    assert!(matches!(error, MediaError::Failed { .. }), "{error}");
+}
+
+#[test]
+fn grabs_one_frame_scaled() {
+    let size = FrameSize::new(160, 90);
+    let frame = ffmpeg()
+        .frame_at(&fixture("clip-a.mp4"), secs(1.0), size)
+        .unwrap();
+    assert_eq!(frame.bgra.len(), size.bgra_len());
+    assert!(frame.bgra.chunks(4).any(|pixel| pixel[..3] != [0, 0, 0]));
+    assert!(frame.bgra.chunks(4).all(|pixel| pixel[3] == 255));
+}
+
+#[test]
+fn streams_frames_from_a_point_at_a_steady_rate() {
+    let stream = ffmpeg()
+        .frames(
+            &fixture("clip-a.mp4"),
+            secs(0.5),
+            FrameSize::new(160, 90),
+            (10, 1),
+        )
+        .unwrap();
+    let frames: Vec<_> = stream.collect();
+    assert!((14..=16).contains(&frames.len()), "{} frames", frames.len());
+    assert_eq!(frames[0].at, secs(0.5));
+    assert_eq!(frames[1].at, secs(0.6));
+}
+
+#[test]
+fn waveform_follows_the_audio() {
+    let waveform = ffmpeg().waveform(&fixture("voice-3s.mp3"), 10).unwrap();
+    assert_eq!(waveform.peaks_per_second, 10);
+    assert!(
+        (29..=31).contains(&waveform.peaks.len()),
+        "{}",
+        waveform.peaks.len()
+    );
+    // The fixture is ffmpeg's test tone (1/8 of full scale) at half volume.
+    let middle = waveform.peaks[15];
+    assert!((0.05..=0.07).contains(&middle), "{middle}");
+}
+
+#[test]
+fn builds_proxies_in_both_codecs() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("proxy");
+    for (codec, name, expected) in [
+        (ProxyCodec::Mjpeg, "a-mjpeg.mkv", "mjpeg"),
+        (
+            ProxyCodec::H264(VideoEncoder::OpenH264),
+            "a-h264.mkv",
+            "h264",
+        ),
+    ] {
+        let destination = dir.join(name);
+        let recorder = Recorder::default();
+        ffmpeg
+            .build_proxy(
+                &fixture("clip-a.mp4"),
+                &destination,
+                ProxySettings { height: 90, codec },
+                &recorder,
+            )
+            .unwrap();
+        let info = ffmpeg.probe(&destination).unwrap();
+        let video = info.video.unwrap();
+        assert_eq!(
+            (video.codec.as_str(), video.width, video.height),
+            (expected, 160, 90)
+        );
+        assert!(info.audio.is_some());
+        assert!(close(info.duration, 2.0, 0.1));
+        assert!(!dir.join(name.replace(".mkv", ".partial.mkv")).exists());
+    }
+}
+
+#[test]
+fn software_encoding_always_works() {
+    let encoders = ffmpeg().detect_encoders();
+    assert!(
+        encoders.working.contains(&VideoEncoder::OpenH264),
+        "{encoders:?}"
+    );
+    assert!(!encoders.software().unwrap().is_hardware());
+}
+
+#[test]
+fn renders_a_vertical_short_at_the_loudness_target() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("render");
+    let destination = dir.join("short.mp4");
+    let recorder = Recorder::default();
+    ffmpeg
+        .render(
+            &short_plan(),
+            &vertical(VideoEncoder::OpenH264),
+            Some(TARGET),
+            &destination,
+            &recorder,
+        )
+        .unwrap();
+
+    let info = ffmpeg.probe(&destination).unwrap();
+    assert!(close(info.duration, 3.5, 0.1), "{:?}", info.duration);
+    let video = info.video.unwrap();
+    assert_eq!(
+        (video.codec.as_str(), video.width, video.height),
+        ("h264", 360, 640)
+    );
+    assert_eq!(video.frame_rate, (30, 1));
+    let audio = info.audio.unwrap();
+    assert_eq!(
+        (audio.codec.as_str(), audio.sample_rate, audio.channels),
+        ("aac", 48_000, 2)
+    );
+
+    let loudness = ffmpeg.measure_loudness(&destination, &()).unwrap();
+    assert!(
+        (loudness.integrated - TARGET.integrated).abs() <= 1.0,
+        "integrated {} LUFS",
+        loudness.integrated
+    );
+    assert!(
+        loudness.true_peak <= TARGET.true_peak + 0.5,
+        "true peak {}",
+        loudness.true_peak
+    );
+
+    let progress = recorder.progress.borrow();
+    assert!(
+        progress.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{progress:?}"
+    );
+    assert!(
+        progress.last().is_some_and(|last| *last > 0.9),
+        "{progress:?}"
+    );
+}
+
+#[test]
+fn renders_with_every_working_encoder() {
+    // NVENC, AMF, QSV and Media Foundation join on machines that have them;
+    // OpenH264 everywhere.
+    let ffmpeg = ffmpeg();
+    let dir = scratch("encoders");
+    for encoder in ffmpeg.detect_encoders().working {
+        let destination = dir.join(format!("{}.mp4", encoder.name()));
+        ffmpeg
+            .render(&short_plan(), &vertical(encoder), None, &destination, &())
+            .unwrap_or_else(|error| panic!("{}: {error}", encoder.name()));
+        let video = ffmpeg.probe(&destination).unwrap().video.unwrap();
+        assert_eq!(
+            (video.codec.as_str(), video.height),
+            ("h264", 640),
+            "{}",
+            encoder.name()
+        );
+    }
+}
+
+#[test]
+fn cancelling_a_render_leaves_no_file() {
+    let dir = scratch("cancel");
+    let destination = dir.join("short.mp4");
+    let recorder = Recorder::default();
+    recorder.stop.set(true);
+    let error = ffmpeg()
+        .render(
+            &short_plan(),
+            &vertical(VideoEncoder::OpenH264),
+            None,
+            &destination,
+            &recorder,
+        )
+        .unwrap_err();
+    assert!(matches!(error, MediaError::Cancelled), "{error}");
+    assert!(std::fs::read_dir(&dir).unwrap().next().is_none());
+}
+
+#[test]
+fn previews_the_timeline_from_the_playhead() {
+    let size = FrameSize::new(180, 320);
+    let stream = ffmpeg()
+        .preview(&short_plan(), secs(1.0), size, (30, 1))
+        .unwrap();
+    let first = stream.next_frame().unwrap();
+    assert_eq!(first.at, secs(1.0));
+    assert_eq!(first.bgra.len(), size.bgra_len());
+    let rest = stream.count();
+    // 2.5 s of timeline left at 30 fps.
+    assert!((73..=76).contains(&(rest + 1)), "{} frames", rest + 1);
+}

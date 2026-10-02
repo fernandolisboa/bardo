@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --quiet --package xtask --"
+
+[env]
+# Where `cargo xtask fetch-ffmpeg` unpacks the pinned ffmpeg build.
+# `bardo-media` looks here first when run through cargo (tests, `cargo run`).
+BARDO_FFMPEG_DIR = { value = ".ffmpeg/bin", relative = true }

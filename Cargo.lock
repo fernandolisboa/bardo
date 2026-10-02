@@ -621,6 +621,8 @@ version = "0.1.0"
 dependencies = [
  "bardo-domain",
  "rodio",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -651,8 +653,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bardo-app",
+ "bardo-media",
  "bardo-storage",
+ "cpu-time",
  "gpui-kit",
+ "image",
  "sys-locale",
 ]
 
@@ -1424,6 +1429,16 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "cpu-time"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9e393a7668fe1fad3075085b86c781883000b4ede868f43627b34a87c8b7ded"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -9242,6 +9257,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
+ "serde",
+ "sha2 0.10.9",
+ "toml 0.9.12+spec-1.1.0",
+ "ureq",
 ]
 
 [[package]]

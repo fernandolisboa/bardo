@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 bardo-domain.workspace = true
 rodio = { version = "0.22", default-features = false, features = ["playback", "mp3", "wav"] }
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [lints]
