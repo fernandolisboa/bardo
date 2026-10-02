@@ -56,7 +56,7 @@ pub use editor::{
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
-pub use music_prompts::MusicPromptError;
+pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use network_accounts::NetworkAccountError;

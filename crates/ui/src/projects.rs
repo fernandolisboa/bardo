@@ -2,7 +2,8 @@
 //! who narrates it (the channel's default persona or one for this video),
 //! then generate, edit and review the project's script, generate (or import
 //! a recording of) and play its narration with the spoken word highlighted,
-//! and plan its scenes and draw their images. Generation runs as jobs in
+//! plan its scenes and draw their images, and get a prompt for the
+//! video's music. Generation runs as jobs in
 //! `bardo_app`; this view polls the job revision and re-reads the script,
 //! narration and scenes when it moves, and re-renders while the narration
 //! plays.
@@ -16,8 +17,8 @@ use bardo_app::bardo_domain::{
     SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, NarrationError, NarrationPlayer, NarrationView, Recording, ScenesView,
-    ScriptError, ScriptView, SpendEstimate, Text,
+    Bardo, BudgetConsent, MusicPromptView, NarrationError, NarrationPlayer, NarrationView,
+    Recording, ScenesView, ScriptError, ScriptView, SpendEstimate, Text,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -37,6 +38,7 @@ use gpui_kit::{
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
+mod music;
 mod scenes;
 
 /// How often the screen checks the job queue for changes, and moves the
@@ -70,6 +72,7 @@ enum PromptShown {
     Source,
     Pending,
     ScenePlan,
+    MusicPrompt,
 }
 
 /// Asks the window to open a project in the editor.
@@ -120,6 +123,15 @@ pub struct ProjectsScreen {
     recording: Option<(Recording, SpendEstimate)>,
     /// An import held back at a budget.
     import_ask: Option<SpendEstimate>,
+    /// The music prompt card, and the prompt as the user types it.
+    music: Option<MusicPromptView>,
+    music_editor: Entity<TextareaState>,
+    /// The prompt text the field was last filled with.
+    music_loaded: Option<String>,
+    music_error: Option<Text>,
+    music_notice: Option<Text>,
+    /// The music prompt waiting on a budget answer.
+    music_ask: Option<SpendEstimate>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -141,6 +153,7 @@ impl ProjectsScreen {
         });
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+        let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -206,6 +219,12 @@ impl ProjectsScreen {
             reading_recording: false,
             recording: None,
             import_ask: None,
+            music: None,
+            music_editor,
+            music_loaded: None,
+            music_error: None,
+            music_notice: None,
+            music_ask: None,
             editor,
             loaded: None,
             field_error: None,
@@ -315,6 +334,10 @@ impl ProjectsScreen {
         self.reading_recording = false;
         self.recording = None;
         self.import_ask = None;
+        self.music_loaded = None;
+        self.music_error = None;
+        self.music_notice = None;
+        self.music_ask = None;
         self.load(window, cx);
         self.fill_narrator(window, cx);
         cx.notify();
@@ -393,10 +416,12 @@ impl ProjectsScreen {
             self.narration = None;
             self.player = None;
             self.scenes = None;
+            self.music = None;
             return;
         };
         self.load_narration(id, cx);
         self.load_scenes(id, cx);
+        self.load_music(id, window, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -994,6 +1019,7 @@ impl ProjectsScreen {
             }))
             .children(self.render_narration(cx))
             .children(self.render_scenes(cx))
+            .children(self.render_music(cx))
             .into_any_element()
     }
 
@@ -1200,6 +1226,7 @@ impl ProjectsScreen {
                         PromptShown::Source => "toggle-source-prompt",
                         PromptShown::Pending => "toggle-pending-prompt",
                         PromptShown::ScenePlan => "toggle-scene-plan-prompt",
+                        PromptShown::MusicPrompt => "toggle-music-prompt",
                     })
                     .ghost()
                     .xsmall()
