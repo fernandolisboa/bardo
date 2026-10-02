@@ -60,15 +60,19 @@ pub enum JobKind {
     ThemeRanking,
     /// Has Claude write a video project's script from the script template.
     ScriptGeneration,
+    /// Reads a video project's script aloud with the persona's voice, one
+    /// checkpoint per part of the text.
+    Narration,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 5] = [
+    pub const ALL: [JobKind; 6] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
         JobKind::ThemeRanking,
         JobKind::ScriptGeneration,
+        JobKind::Narration,
     ];
 
     /// Stable name stored in the database.
@@ -79,6 +83,7 @@ impl JobKind {
             JobKind::ThemeSuggestion => "theme_suggestion",
             JobKind::ThemeRanking => "theme_ranking",
             JobKind::ScriptGeneration => "script_generation",
+            JobKind::Narration => "narration",
         }
     }
 }

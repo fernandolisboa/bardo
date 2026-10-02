@@ -125,6 +125,8 @@ mod tests {
             templates: Arc::clone(db) as _,
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
+            narrations: Arc::clone(db) as _,
+            files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
         };
@@ -292,6 +294,8 @@ mod tests {
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
             personas: Arc::clone(&db) as _,
+            narrations: Arc::clone(&db) as _,
+            files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };

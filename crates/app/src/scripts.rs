@@ -433,6 +433,8 @@ mod tests {
                 text: Arc::clone(&self.text) as _,
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
+                speech: Arc::new(crate::testing::FakeSpeech::default()),
+                audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             Bardo::start_with(
                 Repositories::shared(Arc::clone(&self.db), Arc::clone(&self.secrets) as _),

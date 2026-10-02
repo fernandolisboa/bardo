@@ -1,0 +1,5 @@
+HTTP/2 429
+server: uvicorn
+content-type: application/json
+
+{"detail":{"status":"too_many_concurrent_requests","message":"Too many concurrent requests. Your current subscription is associated with a maximum of 2 concurrent requests."}}

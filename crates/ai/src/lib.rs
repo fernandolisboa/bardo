@@ -10,7 +10,7 @@ pub mod market;
 pub mod retry;
 
 pub use claude::ClaudeTextGenerator;
-pub use elevenlabs::ElevenLabsVoices;
+pub use elevenlabs::{ElevenLabsSpeech, ElevenLabsVoices};
 pub use jev::JevDecisionEngine;
 pub use key_check::HttpKeyChecker;
 pub use market::YouTubeMarketData;

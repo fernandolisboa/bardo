@@ -102,6 +102,7 @@ niche_research = "Pesquisa de nicho"
 theme_suggestion = "Sugestão de temas"
 theme_ranking = "Ranqueamento de temas"
 script_generation = "Geração de roteiro"
+narration = "Narração"
 
 [job.state]
 queued = "Na fila"
@@ -318,6 +319,34 @@ busy = "Já há um roteiro sendo escrito para este projeto."
 not_saved = "Não foi possível salvar o roteiro. Tente de novo."
 text_required = "O roteiro não pode ficar vazio."
 text_too_long = "Use no máximo 60000 caracteres no roteiro."
+
+[narration]
+title = "Narração"
+empty = "Ainda não há narração."
+generate = "Gerar narração"
+generate_hint = "{persona} lê o roteiro atual com a voz {voice}: {n} caracteres, cobrados pela ElevenLabs."
+regenerate = "Gerar de novo"
+running = "Gravando a narração…"
+stopped = "A última narração parou:"
+stale = "O roteiro mudou depois que esta narração foi gravada. Gere de novo para que batam."
+stale_tag = "Desatualizada"
+play = "Tocar"
+pause = "Pausar"
+words_hint = "A palavra falada fica destacada. Clique numa palavra para tocar a partir dela."
+voice = "Voz"
+cost = "Cobrado"
+cost_value = "{n} caracteres"
+duration = "Duração"
+
+[narration.error]
+no_script = "Gere o roteiro primeiro; a narração lê o roteiro."
+no_persona = "Escolha uma persona padrão para este canal na tela Canais; é ela que lê a narração."
+missing_key = "Salve uma chave da ElevenLabs em Configurações para gerar narração."
+busy = "Já há uma narração sendo gravada para este projeto."
+missing = "Gere a narração primeiro."
+audio_missing = "O arquivo de áudio da narração sumiu da pasta do projeto. Gere de novo."
+cannot_play = "Não foi possível tocar a narração: não há saída de áudio disponível ou o arquivo não pode ser lido."
+not_loaded = "Não foi possível carregar a narração. Tente de novo."
 
 [provenance]
 title = "Procedência"

@@ -102,6 +102,7 @@ niche_research = "Niche research"
 theme_suggestion = "Theme suggestion"
 theme_ranking = "Theme ranking"
 script_generation = "Script generation"
+narration = "Narration"
 
 [job.state]
 queued = "Queued"
@@ -318,6 +319,34 @@ busy = "A script is already being written for this project."
 not_saved = "Could not save the script. Try again."
 text_required = "The script cannot be empty."
 text_too_long = "Keep the script to at most 60000 characters."
+
+[narration]
+title = "Narration"
+empty = "No narration yet."
+generate = "Generate narration"
+generate_hint = "{persona} reads the current script with the voice {voice}: {n} characters, billed by ElevenLabs."
+regenerate = "Generate again"
+running = "Recording the narration…"
+stopped = "The last narration stopped:"
+stale = "The script changed after this narration was recorded. Generate it again so they match."
+stale_tag = "Out of date"
+play = "Play"
+pause = "Pause"
+words_hint = "The word being spoken is highlighted. Click a word to play from there."
+voice = "Voice"
+cost = "Billed"
+cost_value = "{n} characters"
+duration = "Length"
+
+[narration.error]
+no_script = "Generate the script first; the narration reads it."
+no_persona = "Choose a default persona for this channel on the Channels screen; it reads the narration."
+missing_key = "Save an ElevenLabs key under Settings to generate narration."
+busy = "A narration is already being recorded for this project."
+missing = "Generate the narration first."
+audio_missing = "The narration's audio file is missing from the project folder. Generate it again."
+cannot_play = "Could not play the narration: no audio output is available or the file is unreadable."
+not_loaded = "Could not load the narration. Try again."
 
 [provenance]
 title = "Provenance"

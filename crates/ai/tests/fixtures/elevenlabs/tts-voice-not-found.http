@@ -1,0 +1,5 @@
+HTTP/2 404
+server: uvicorn
+content-type: application/json
+
+{"detail":{"status":"voice_not_found","message":"A voice with the voice_id FrS6cKLB1wg4WYgPa9GW was not found."}}

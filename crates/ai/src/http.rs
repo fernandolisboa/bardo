@@ -131,12 +131,13 @@ pub trait Transport: Send + Sync {
 /// proxy set in the standard environment variables.
 pub struct UreqTransport {
     agent: ureq::Agent,
+    max_body_bytes: u64,
 }
 
 impl UreqTransport {
-    /// Bodies bigger than this are cut. Generated text and decisions stay
-    /// far below it.
-    const MAX_BODY_BYTES: u64 = 1024 * 1024;
+    /// Bodies bigger than this are cut, unless an adapter allows more.
+    /// Generated text and decisions stay far below it.
+    pub const MAX_BODY_BYTES: u64 = 1024 * 1024;
 
     pub fn new(timeout: Duration) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
@@ -149,7 +150,16 @@ impl UreqTransport {
             .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
             .build()
             .new_agent();
-        Self { agent }
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
+    }
+
+    /// Accepts bodies up to `bytes` (audio comes back inside JSON).
+    pub fn with_max_body(mut self, bytes: u64) -> Self {
+        self.max_body_bytes = bytes;
+        self
     }
 
     /// For tests against a local server: plain HTTP, no proxy.
@@ -161,7 +171,10 @@ impl UreqTransport {
             .proxy(None)
             .build()
             .new_agent();
-        Self { agent }
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
     }
 }
 
@@ -196,7 +209,7 @@ impl Transport for UreqTransport {
         let body = response
             .body_mut()
             .with_config()
-            .limit(Self::MAX_BODY_BYTES)
+            .limit(self.max_body_bytes)
             .read_to_string()
             .unwrap_or_default();
         Ok(HttpResponse {
