@@ -10,7 +10,8 @@ use bardo_domain::{
     JobFailureKind, JobKind, JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month,
     MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError, PersonaFieldError,
     Provider, RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFieldError, UiLanguage, Visibility, VoiceCategory, VoiceFlag,
+    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
+    VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -778,6 +779,20 @@ pub enum Text {
     MusicPromptBusy,
     MusicPromptNotSaved,
     MusicPromptFieldError(MusicPromptFieldError),
+    SettingsKeysTab,
+    SettingsAppearanceTab,
+    AppearanceTheme,
+    AppearanceFollowSystem,
+    AppearanceFollowSystemHint,
+    AppearanceLight,
+    AppearanceDark,
+    AppearanceFixed,
+    AppearanceFixedHint,
+    AppearanceContrast,
+    UiThemeNotSaved,
+    UiThemeName(UiTheme),
+    UiThemeKind(UiTheme),
+    ProviderKeysInfo,
 }
 
 impl Text {
@@ -1581,6 +1596,37 @@ impl Text {
                 MusicPromptFieldError::TextRequired => "music.error.text_required",
                 MusicPromptFieldError::TextTooLong => "music.error.text_too_long",
             },
+            Text::SettingsKeysTab => "settings.keys_tab",
+            Text::SettingsAppearanceTab => "settings.appearance_tab",
+            Text::AppearanceTheme => "appearance.theme",
+            Text::AppearanceFollowSystem => "appearance.follow_system",
+            Text::AppearanceFollowSystemHint => "appearance.follow_system_hint",
+            Text::AppearanceLight => "appearance.light",
+            Text::AppearanceDark => "appearance.dark",
+            Text::AppearanceFixed => "appearance.fixed",
+            Text::AppearanceFixedHint => "appearance.fixed_hint",
+            Text::AppearanceContrast => "appearance.contrast",
+            Text::UiThemeNotSaved => "error.ui_theme_not_saved",
+            Text::UiThemeName(theme) => match theme {
+                UiTheme::Paper => "ui_theme.paper",
+                UiTheme::Sand => "ui_theme.sand",
+                UiTheme::Graphite => "ui_theme.graphite",
+                UiTheme::Slate => "ui_theme.slate",
+                UiTheme::HighContrastLight => "ui_theme.hc-light",
+                UiTheme::HighContrastDark => "ui_theme.hc-dark",
+                UiTheme::BlackGold => "ui_theme.black-gold",
+                UiTheme::Brass => "ui_theme.brass",
+                UiTheme::Phosphor => "ui_theme.phosphor",
+                UiTheme::PhosphorLight => "ui_theme.phosphor-light",
+            },
+            Text::UiThemeKind(theme) => match (theme.family(), theme.mode()) {
+                (ThemeFamily::HighContrast, _) => "ui_theme_kind.high_contrast",
+                (ThemeFamily::Terminal, ThemeMode::Light) => "ui_theme_kind.terminal_light",
+                (ThemeFamily::Terminal, ThemeMode::Dark) => "ui_theme_kind.terminal_dark",
+                (ThemeFamily::Base, ThemeMode::Light) => "ui_theme_kind.light",
+                (ThemeFamily::Base, ThemeMode::Dark) => "ui_theme_kind.dark",
+            },
+            Text::ProviderKeysInfo => "provider_keys.info",
         };
         Cow::Borrowed(key)
     }
@@ -2466,6 +2512,20 @@ mod tests {
         texts.extend((1..=12).map(Text::MonthName));
         texts.extend(Meter::ALL.map(Text::MeterName));
         texts.extend(Meter::ALL.map(Text::MeterUnit));
+        texts.push(Text::SettingsKeysTab);
+        texts.push(Text::SettingsAppearanceTab);
+        texts.push(Text::AppearanceTheme);
+        texts.push(Text::AppearanceFollowSystem);
+        texts.push(Text::AppearanceFollowSystemHint);
+        texts.push(Text::AppearanceLight);
+        texts.push(Text::AppearanceDark);
+        texts.push(Text::AppearanceFixed);
+        texts.push(Text::AppearanceFixedHint);
+        texts.push(Text::AppearanceContrast);
+        texts.push(Text::UiThemeNotSaved);
+        texts.extend(UiTheme::ALL.map(Text::UiThemeName));
+        texts.extend(UiTheme::ALL.map(Text::UiThemeKind));
+        texts.push(Text::ProviderKeysInfo);
         texts
     }
 

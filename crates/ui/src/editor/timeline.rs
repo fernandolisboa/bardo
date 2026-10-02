@@ -38,6 +38,7 @@ use gpui_kit::{
 
 use super::tokens::*;
 use super::{EditorScreen, clip_name, color, icon, label, tool_button};
+use crate::appearance::EditorColor;
 use crate::shell::tr;
 
 /// The track header column, shared with the toolbar's timecode.
@@ -162,7 +163,7 @@ impl Track {
         }
     }
 
-    fn tint(self) -> u32 {
+    fn tint(self) -> EditorColor {
         match self {
             Track::Captions => CAPTIONS,
             Track::Video => VIDEO_EDGE,
@@ -178,9 +179,9 @@ impl Track {
 struct PieceLook {
     /// The element id's prefix.
     id: &'static str,
-    fill: u32,
+    fill: EditorColor,
     /// The waveform's and the outline's color.
-    wave: u32,
+    wave: EditorColor,
 }
 
 /// Zoom and scroll: view state the domain has no say in.

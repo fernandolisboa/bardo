@@ -3,10 +3,12 @@
 // No console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod appearance;
 mod channels;
 mod costs;
 mod editor;
 mod jobs;
+mod kit;
 mod network_accounts;
 mod personas;
 mod projects;
@@ -51,6 +53,7 @@ fn main() -> anyhow::Result<()> {
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
+            appearance::init(bardo.ui_theme(), cx);
             let title = SharedString::from(bardo.text(bardo_app::Text::AppName).into_owned());
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
