@@ -6,6 +6,7 @@ mod files;
 mod job;
 mod migrations;
 mod narration;
+mod network_account;
 mod persona;
 mod profile;
 mod research;

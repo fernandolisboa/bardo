@@ -6,6 +6,7 @@ pub mod i18n;
 mod jobs;
 pub mod logging;
 mod narrations;
+mod network_accounts;
 mod personas;
 mod provider_keys;
 mod research;
@@ -20,10 +21,10 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ChannelRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker, MarketData,
-    NarrationRepository, NicheResearchRepository, Persona, PersonaRepository, ProfileRepository,
-    ProjectFiles, Redactor, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
-    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
-    VoiceLibrary,
+    NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
+    PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
+    ScenePlanRepository, ScriptRepository, SecretStore, SpeechSynthesizer, TemplateRepository,
+    TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
 };
 use bardo_media::AudioOutput;
 use bardo_storage::{Database, MemoryProjectFiles};
@@ -33,6 +34,7 @@ pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
+pub use network_accounts::NetworkAccountError;
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
@@ -76,6 +78,8 @@ pub struct Repositories {
     pub narrations: Arc<dyn NarrationRepository>,
     /// Scene plans, their prompts and images. Shared with the job queue.
     pub scene_plans: Arc<dyn ScenePlanRepository>,
+    /// Each channel's network accounts.
+    pub network_accounts: Arc<dyn NetworkAccountRepository>,
     /// Each video project's media folder. Shared with the job queue.
     pub files: Arc<dyn ProjectFiles>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
@@ -116,6 +120,7 @@ impl Repositories {
             personas: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
+            network_accounts: Arc::clone(&db) as _,
             research: db,
             files,
             secrets,
@@ -170,6 +175,7 @@ pub struct Bardo {
     personas: Arc<dyn PersonaRepository>,
     narrations: Arc<dyn NarrationRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
+    network_accounts: Arc<dyn NetworkAccountRepository>,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
     market_data: Arc<dyn MarketData>,
@@ -218,6 +224,7 @@ impl Bardo {
             personas,
             narrations,
             scene_plans,
+            network_accounts,
             files,
             secrets,
         } = repositories;
@@ -294,6 +301,7 @@ impl Bardo {
             personas,
             narrations,
             scene_plans,
+            network_accounts,
             files,
             audio: providers.audio,
             market_data: providers.market_data,
@@ -893,6 +901,7 @@ mod tests {
             personas: Arc::new(FakePersonas::default()),
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
+            network_accounts: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),

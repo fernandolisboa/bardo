@@ -47,6 +47,8 @@ mod image;
 mod job;
 mod market;
 mod narration;
+mod network;
+mod network_account;
 mod persona;
 mod profile;
 mod provider_key;
@@ -82,6 +84,15 @@ pub use market::{
 pub use narration::{
     InvalidWordTimings, Narration, NarrationId, NarrationRepository, WordTiming, WordTimings,
     spoken_words,
+};
+pub use network::{
+    AspectRatio, Bitrate, Loudness, MaxDuration, Network, OutOfRange, PresetOverrides,
+    RenderPreset, Resolution, UnknownAspectRatio, UnknownNetwork, UnknownVideoCodec,
+    UnknownVisibility, VideoCodec, Visibility,
+};
+pub use network_account::{
+    MetadataDefaults, NetworkAccount, NetworkAccountDetails, NetworkAccountDraft,
+    NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository,
 };
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,

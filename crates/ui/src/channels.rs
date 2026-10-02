@@ -16,6 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
+use crate::network_accounts::NetworkAccountsPanel;
 use crate::shell::tr;
 
 /// One option of a select: a domain value and its translated name.
@@ -106,6 +107,8 @@ pub struct ChannelsScreen {
     language: ChoiceSelect<ContentLanguage>,
     country: ChoiceSelect<Country>,
     persona: ChoiceSelect<Option<PersonaId>>,
+    /// The edited channel's network accounts, under the form.
+    accounts: Entity<NetworkAccountsPanel>,
     field_errors: Vec<ChannelFieldError>,
     notice: Option<Notice>,
     _subscriptions: Vec<Subscription>,
@@ -144,6 +147,8 @@ impl ChannelsScreen {
             SelectState::new(personas, Some(IndexPath::new(0)), window, cx).searchable(true)
         });
 
+        let accounts = cx.new(|cx| NetworkAccountsPanel::new(bardo.clone(), window, cx));
+
         let subscriptions = vec![
             cx.subscribe(&name, |this, _, event, cx| {
                 this.edited(NAME_ERRORS, event, cx)
@@ -174,6 +179,7 @@ impl ChannelsScreen {
             language,
             country,
             persona,
+            accounts,
             field_errors: Vec::new(),
             notice: None,
             _subscriptions: subscriptions,
@@ -316,6 +322,7 @@ impl ChannelsScreen {
         self.field_errors.clear();
         self.notice = None;
         self.fill(&ChannelDraft::default(), window, cx);
+        self.show_accounts(None, window, cx);
         cx.notify();
     }
 
@@ -324,10 +331,12 @@ impl ChannelsScreen {
             return;
         };
         let draft = ChannelDraft::from(&channel.details);
+        let language = channel.details.language();
         self.editing = Some(id);
         self.field_errors.clear();
         self.notice = None;
         self.fill(&draft, window, cx);
+        self.show_accounts(Some((id, language)), window, cx);
         cx.notify();
     }
 
@@ -352,11 +361,22 @@ impl ChannelsScreen {
                 self.field_errors.clear();
                 // Show the normalized values (trimmed, deduplicated themes).
                 self.fill(&ChannelDraft::from(&saved.details), window, cx);
+                self.show_accounts(Some((saved.id, saved.details.language())), window, cx);
                 self.notice = Some(Notice::Saved);
             }
             Err(error) => self.show_error(&error),
         }
         cx.notify();
+    }
+
+    fn show_accounts(
+        &mut self,
+        channel: Option<(ChannelId, ContentLanguage)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.accounts
+            .update(cx, |accounts, cx| accounts.set_channel(channel, window, cx));
     }
 
     fn show_error(&mut self, error: &ChannelError) {
@@ -562,7 +582,8 @@ impl ChannelsScreen {
                                     })),
                             )
                             .children(notice),
-                    ),
+                    )
+                    .child(self.accounts.clone()),
             )
     }
 }

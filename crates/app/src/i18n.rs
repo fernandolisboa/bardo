@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, NicheSeedError, PersonaFieldError, Provider, SceneFieldError,
-    ScriptFieldError, TemplateKind, TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage,
-    VoiceCategory,
+    ApiKeyError, AspectRatio, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind,
+    JobState, KeyCheckOutcome, Network, NetworkAccountFieldError, NicheSeedError,
+    PersonaFieldError, Provider, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
+    TemplateVariable, ThemeFieldError, UiLanguage, Visibility, VoiceCategory,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -52,6 +52,68 @@ pub enum Text {
     ChannelPersonaNone,
     ChannelPersonaHint,
     ChannelPersonaNotFound,
+    ChannelAccountsTitle,
+    ChannelAccountsHint,
+    ChannelAccountsSaveFirst,
+    ChannelAccountsEmpty,
+    ChannelAccountsNotLoaded,
+    AllNetworksAdded,
+    /// Placeholder: `{network}`.
+    AddNetworkAccount,
+    /// Placeholder: `{network}`.
+    NewNetworkAccountTitle,
+    /// Placeholder: `{network}`.
+    EditNetworkAccountTitle,
+    AccountHandle,
+    AccountHandlePlaceholder,
+    AccountMetadataTitle,
+    AccountMetadataHint,
+    AccountLanguage,
+    /// Placeholder: `{language}`.
+    AccountLanguageChannel,
+    AccountTags,
+    AccountTagsPlaceholder,
+    AccountTagsHint,
+    AccountFooter,
+    AccountFooterPlaceholder,
+    AccountVisibility,
+    /// Placeholder: `{network}`.
+    AccountVisibilityOnlyPublic,
+    RenderPresetTitle,
+    RenderPresetHint,
+    RenderPresetAspect,
+    RenderPresetResolution,
+    RenderPresetCodec,
+    RenderPresetBitrate,
+    RenderPresetMaxDuration,
+    RenderPresetMaxDurationHint,
+    RenderPresetLoudness,
+    /// Placeholder: `{value}`.
+    RenderPresetNetworkDefault,
+    /// Placeholders: `{aspect}`, `{width}`, `{height}`, `{codec}`, `{bitrate}`, `{duration}`, `{loudness}`.
+    RenderPresetSummary,
+    RenderPresetCustom,
+    RenderPresetDefault,
+    /// Placeholder: `{summary}`.
+    RenderPresetEffective,
+    CreateNetworkAccount,
+    SaveNetworkAccount,
+    CancelNetworkAccount,
+    EditNetworkAccount,
+    RemoveNetworkAccount,
+    /// Placeholder: `{network}`.
+    NetworkAccountRemoveConfirm,
+    ConfirmRemoveNetworkAccount,
+    KeepNetworkAccount,
+    NetworkAccountSaved,
+    NetworkAccountRemoved,
+    NetworkAccountTaken,
+    NetworkAccountNotFound,
+    NetworkAccountNotSaved,
+    NetworkName(Network),
+    VisibilityName(Visibility),
+    AspectRatioName(AspectRatio),
+    NetworkAccountFieldError(NetworkAccountFieldError),
     PersonasTitle,
     PersonasHint,
     PersonasEmpty,
@@ -436,6 +498,91 @@ impl Text {
             Text::ChannelPersonaNone => "channel.persona_none",
             Text::ChannelPersonaHint => "channel.persona_hint",
             Text::ChannelPersonaNotFound => "channel.error.persona_not_found",
+            Text::ChannelAccountsTitle => "network_accounts.title",
+            Text::ChannelAccountsHint => "network_accounts.hint",
+            Text::ChannelAccountsSaveFirst => "network_accounts.save_first",
+            Text::ChannelAccountsEmpty => "network_accounts.empty",
+            Text::ChannelAccountsNotLoaded => "network_accounts.not_loaded",
+            Text::AllNetworksAdded => "network_accounts.all_added",
+            Text::AddNetworkAccount => "network_accounts.add",
+            Text::NewNetworkAccountTitle => "network_account.new_title",
+            Text::EditNetworkAccountTitle => "network_account.edit_title",
+            Text::AccountHandle => "network_account.handle",
+            Text::AccountHandlePlaceholder => "network_account.handle_placeholder",
+            Text::AccountMetadataTitle => "network_account.metadata_title",
+            Text::AccountMetadataHint => "network_account.metadata_hint",
+            Text::AccountLanguage => "network_account.language",
+            Text::AccountLanguageChannel => "network_account.language_channel",
+            Text::AccountTags => "network_account.tags",
+            Text::AccountTagsPlaceholder => "network_account.tags_placeholder",
+            Text::AccountTagsHint => "network_account.tags_hint",
+            Text::AccountFooter => "network_account.footer",
+            Text::AccountFooterPlaceholder => "network_account.footer_placeholder",
+            Text::AccountVisibility => "network_account.visibility",
+            Text::AccountVisibilityOnlyPublic => "network_account.visibility_only_public",
+            Text::RenderPresetTitle => "render_preset.title",
+            Text::RenderPresetHint => "render_preset.hint",
+            Text::RenderPresetAspect => "render_preset.aspect",
+            Text::RenderPresetResolution => "render_preset.resolution",
+            Text::RenderPresetCodec => "render_preset.codec",
+            Text::RenderPresetBitrate => "render_preset.bitrate",
+            Text::RenderPresetMaxDuration => "render_preset.max_duration",
+            Text::RenderPresetMaxDurationHint => "render_preset.max_duration_hint",
+            Text::RenderPresetLoudness => "render_preset.loudness",
+            Text::RenderPresetNetworkDefault => "render_preset.network_default",
+            Text::RenderPresetSummary => "render_preset.summary",
+            Text::RenderPresetCustom => "render_preset.custom",
+            Text::RenderPresetDefault => "render_preset.default",
+            Text::RenderPresetEffective => "render_preset.effective",
+            Text::CreateNetworkAccount => "network_account.create",
+            Text::SaveNetworkAccount => "network_account.save",
+            Text::CancelNetworkAccount => "network_account.cancel",
+            Text::EditNetworkAccount => "network_account.edit",
+            Text::RemoveNetworkAccount => "network_account.remove",
+            Text::NetworkAccountRemoveConfirm => "network_account.remove_confirm",
+            Text::ConfirmRemoveNetworkAccount => "network_account.confirm_remove",
+            Text::KeepNetworkAccount => "network_account.keep",
+            Text::NetworkAccountSaved => "network_account.saved",
+            Text::NetworkAccountRemoved => "network_account.removed",
+            Text::NetworkAccountTaken => "network_account.error.taken",
+            Text::NetworkAccountNotFound => "network_account.error.not_found",
+            Text::NetworkAccountNotSaved => "network_account.error.not_saved",
+            Text::NetworkName(network) => match network {
+                Network::YouTube => "network.youtube",
+                Network::TikTok => "network.tiktok",
+                Network::InstagramReels => "network.instagram_reels",
+                Network::X => "network.x",
+                Network::Kick => "network.kick",
+            },
+            Text::VisibilityName(visibility) => match visibility {
+                Visibility::Public => "visibility.public",
+                Visibility::Unlisted => "visibility.unlisted",
+                Visibility::Private => "visibility.private",
+            },
+            Text::AspectRatioName(aspect) => match aspect {
+                AspectRatio::Vertical => "aspect_ratio.vertical",
+                AspectRatio::Landscape => "aspect_ratio.landscape",
+            },
+            Text::NetworkAccountFieldError(error) => match error {
+                NetworkAccountFieldError::HandleRequired => "network_account.error.handle_required",
+                NetworkAccountFieldError::HandleTooLong => "network_account.error.handle_too_long",
+                NetworkAccountFieldError::HandleInvalid => "network_account.error.handle_invalid",
+                NetworkAccountFieldError::TooManyTags => "network_account.error.too_many_tags",
+                NetworkAccountFieldError::TagTooLong => "network_account.error.tag_too_long",
+                NetworkAccountFieldError::DescriptionFooterTooLong => {
+                    "network_account.error.footer_too_long"
+                }
+                NetworkAccountFieldError::VisibilityNotOffered => {
+                    "network_account.error.visibility_not_offered"
+                }
+                NetworkAccountFieldError::BitrateInvalid => "network_account.error.bitrate_invalid",
+                NetworkAccountFieldError::MaxDurationInvalid => {
+                    "network_account.error.max_duration_invalid"
+                }
+                NetworkAccountFieldError::LoudnessInvalid => {
+                    "network_account.error.loudness_invalid"
+                }
+            },
             Text::PersonasTitle => "personas.title",
             Text::PersonasHint => "personas.hint",
             Text::PersonasEmpty => "personas.empty",
@@ -952,6 +1099,55 @@ mod tests {
             Text::ChannelPersonaNone,
             Text::ChannelPersonaHint,
             Text::ChannelPersonaNotFound,
+            Text::ChannelAccountsTitle,
+            Text::ChannelAccountsHint,
+            Text::ChannelAccountsSaveFirst,
+            Text::ChannelAccountsEmpty,
+            Text::ChannelAccountsNotLoaded,
+            Text::AllNetworksAdded,
+            Text::AddNetworkAccount,
+            Text::NewNetworkAccountTitle,
+            Text::EditNetworkAccountTitle,
+            Text::AccountHandle,
+            Text::AccountHandlePlaceholder,
+            Text::AccountMetadataTitle,
+            Text::AccountMetadataHint,
+            Text::AccountLanguage,
+            Text::AccountLanguageChannel,
+            Text::AccountTags,
+            Text::AccountTagsPlaceholder,
+            Text::AccountTagsHint,
+            Text::AccountFooter,
+            Text::AccountFooterPlaceholder,
+            Text::AccountVisibility,
+            Text::AccountVisibilityOnlyPublic,
+            Text::RenderPresetTitle,
+            Text::RenderPresetHint,
+            Text::RenderPresetAspect,
+            Text::RenderPresetResolution,
+            Text::RenderPresetCodec,
+            Text::RenderPresetBitrate,
+            Text::RenderPresetMaxDuration,
+            Text::RenderPresetMaxDurationHint,
+            Text::RenderPresetLoudness,
+            Text::RenderPresetNetworkDefault,
+            Text::RenderPresetSummary,
+            Text::RenderPresetCustom,
+            Text::RenderPresetDefault,
+            Text::RenderPresetEffective,
+            Text::CreateNetworkAccount,
+            Text::SaveNetworkAccount,
+            Text::CancelNetworkAccount,
+            Text::EditNetworkAccount,
+            Text::RemoveNetworkAccount,
+            Text::NetworkAccountRemoveConfirm,
+            Text::ConfirmRemoveNetworkAccount,
+            Text::KeepNetworkAccount,
+            Text::NetworkAccountSaved,
+            Text::NetworkAccountRemoved,
+            Text::NetworkAccountTaken,
+            Text::NetworkAccountNotFound,
+            Text::NetworkAccountNotSaved,
             Text::PersonasTitle,
             Text::PersonasHint,
             Text::PersonasEmpty,
@@ -1252,6 +1448,10 @@ mod tests {
         texts.extend(Country::ALL.map(Text::CountryName));
         texts.extend(ChannelFieldError::ALL.map(Text::ChannelFieldError));
         texts.extend(PersonaFieldError::ALL.map(Text::PersonaFieldError));
+        texts.extend(Network::ALL.map(Text::NetworkName));
+        texts.extend(Visibility::ALL.map(Text::VisibilityName));
+        texts.extend(AspectRatio::ALL.map(Text::AspectRatioName));
+        texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
         texts.extend(ThemeFieldError::ALL.map(Text::ThemeFieldError));
         texts.extend(ScriptFieldError::ALL.map(Text::ScriptFieldError));
@@ -1541,6 +1741,58 @@ mod tests {
                     assert!(filled.contains(value), "{filled}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn network_account_limit_messages_match_the_domain_limits() {
+        use bardo_domain::NetworkAccountDetails;
+
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        for (error, limit) in [
+            (
+                NetworkAccountFieldError::HandleTooLong,
+                NetworkAccountDetails::MAX_HANDLE_CHARS.to_string(),
+            ),
+            (
+                NetworkAccountFieldError::TooManyTags,
+                NetworkAccountDetails::MAX_TAGS.to_string(),
+            ),
+            (
+                NetworkAccountFieldError::TagTooLong,
+                NetworkAccountDetails::MAX_TAG_CHARS.to_string(),
+            ),
+            (
+                NetworkAccountFieldError::DescriptionFooterTooLong,
+                "1,000".to_owned(),
+            ),
+        ] {
+            let message = catalog.get(Text::NetworkAccountFieldError(error));
+            assert!(message.contains(&limit), "{message}");
+        }
+        assert_eq!(NetworkAccountDetails::MAX_DESCRIPTION_FOOTER_CHARS, 1_000);
+    }
+
+    #[test]
+    fn network_account_placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for text in [
+                Text::AddNetworkAccount,
+                Text::NewNetworkAccountTitle,
+                Text::EditNetworkAccountTitle,
+                Text::AccountVisibilityOnlyPublic,
+                Text::NetworkAccountRemoveConfirm,
+            ] {
+                let text = catalog.format(text, &[("network", "TikTok")]);
+                assert!(text.contains("TikTok") && !text.contains('{'), "{text}");
+            }
+            let text = catalog.format(Text::AccountLanguageChannel, &[("language", "Inglês")]);
+            assert!(text.contains("Inglês") && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::RenderPresetNetworkDefault, &[("value", "3:00")]);
+            assert!(text.contains("3:00") && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::RenderPresetEffective, &[("summary", "9:16")]);
+            assert!(text.contains("9:16") && !text.contains('{'), "{text}");
         }
     }
 
