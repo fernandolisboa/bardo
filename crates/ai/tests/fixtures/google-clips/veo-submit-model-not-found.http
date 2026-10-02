@@ -1,0 +1,10 @@
+HTTP/2 404
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 404,
+    "message": "models/veo-3.1-fast-generate-preview is not found for API version v1beta, or is not supported for predictLongRunning.",
+    "status": "NOT_FOUND"
+  }
+}

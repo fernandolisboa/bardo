@@ -74,7 +74,7 @@ fn persona_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<PersonaId>>> {
 }
 
 /// The provider's default model first (a channel that keeps it follows the
-/// default), then every model by name.
+/// default), then every model by name and provider.
 fn clip_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef>>> {
     let models = bardo.clip_models();
     let default = models.first().map(|model| Choice {
@@ -87,8 +87,12 @@ fn clip_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef
         default
             .into_iter()
             .chain(models.into_iter().map(|model| Choice {
+                title: SharedString::from(format!(
+                    "{} · {}",
+                    model.name,
+                    bardo.text(Text::ProviderName(model.id.provider()))
+                )),
                 value: Some(model.id),
-                title: SharedString::from(model.name),
             }))
             .collect::<Vec<_>>(),
     )

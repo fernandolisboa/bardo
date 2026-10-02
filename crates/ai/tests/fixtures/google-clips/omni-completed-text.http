@@ -1,0 +1,20 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+
+{
+  "steps": [
+    {
+      "type": "model_output",
+      "content": [
+        {
+          "type": "text",
+          "text": "I can't create a video from this image because it may violate the usage policies."
+        }
+      ]
+    }
+  ],
+  "id": "v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx",
+  "status": "completed",
+  "model": "gemini-omni-1.1-flash",
+  "object": "interaction"
+}

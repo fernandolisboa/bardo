@@ -65,7 +65,7 @@ persona_none = "Sem persona padrão"
 persona_hint = "O narrador dos roteiros e narrações deste canal. Gerencie as personas na tela Personas."
 clip_model = "Modelo de vídeo"
 clip_model_default = "{model} (padrão)"
-clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield. Qualquer cena pode escolher outro."
+clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield ou pelo Google. Qualquer cena pode escolher outro."
 
 [channel.error]
 name_required = "Dê um nome ao canal."
@@ -244,7 +244,7 @@ placeholder = "Sua chave de API da ElevenLabs"
 
 [provider.gemini]
 name = "Gemini"
-purpose = "Imagens (Nano Banana) e vídeo (Veo), pelo Google AI Studio."
+purpose = "Imagens (Nano Banana) e clipes de vídeo (Veo, Gemini Omni Flash), pelo Google AI Studio."
 placeholder = "AIza…"
 
 [provider.higgsfield]
@@ -472,7 +472,7 @@ accept = "Usar a nova imagem"
 reject = "Manter a atual"
 
 [scenes.clip]
-hint = "Os clipes animam a imagem de cada cena com o prompt de movimento dela, com a duração da narração da cena dentro do que o modelo permite; o Higgsfield cobra cada segundo. Uma cena sem clipe mantém a imagem parada."
+hint = "Os clipes animam a imagem de cada cena com o prompt de movimento dela, com a duração da narração da cena dentro do que o modelo permite; o provedor cobra cada segundo. Uma cena sem clipe mantém a imagem parada."
 animate_missing = "Animar cenas sem clipe ({n})"
 animate = "Animar"
 animate_again = "Animar de novo"
@@ -501,7 +501,7 @@ no_narration = "Gere a narração primeiro; as cenas são cronometradas por ela.
 no_plan = "Planeje as cenas primeiro."
 scene_not_found = "Essa cena não existe mais; as cenas podem ter sido planejadas de novo."
 missing_claude_key = "Salve uma chave do Claude em Configurações para planejar cenas."
-missing_gemini_key = "Salve uma chave do Gemini em Configurações para gerar imagens."
+missing_gemini_key = "Salve uma chave do Gemini em Configurações para gerar imagens e clipes do Google."
 busy = "Já há cenas, imagens ou clipes sendo gerados para este projeto."
 would_discard_images = "Planejar de novo descarta as imagens e os clipes destas cenas. Confirme para continuar."
 nothing_to_generate = "Todas as cenas já têm imagem."

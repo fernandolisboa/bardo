@@ -448,7 +448,8 @@ impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
         }
     }
 
-    fn download(&self, video: &str) -> Result<GeneratedClip, ProviderFailure> {
+    /// The CDN gets no key.
+    fn download(&self, _key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure> {
         let response = self
             .transport
             .send_for_bytes(&HttpRequest::get(video), MAX_CLIP_BYTES)

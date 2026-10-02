@@ -123,7 +123,9 @@ pub struct ClipImage {
 
 /// An image handed to the provider ahead of a submission (Higgsfield reads
 /// it from a URL it gives out), as the provider refers to it. Saved with
-/// the job, so a resubmission sends the very same request.
+/// the job, so a resubmission sends the very same request. Providers that
+/// take the image inline with the submission (Google) stage nothing and
+/// read `ClipRequest::first_frame` instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedImage(pub String);
 
@@ -135,6 +137,8 @@ pub struct ClipRequest {
     /// How the image moves: subject, action, camera.
     pub prompt: String,
     pub image: StagedImage,
+    /// The image itself, for providers that take it inline.
+    pub first_frame: ClipImage,
     pub seconds: u32,
 }
 
@@ -194,8 +198,10 @@ pub trait ClipGenerator: Send + Sync {
 
     fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure>;
 
-    /// Downloads a finished clip from where `ClipStatus::Done` said.
-    fn download(&self, video: &str) -> Result<GeneratedClip, ProviderFailure>;
+    /// Downloads a finished clip from where `ClipStatus::Done` said. Some
+    /// providers serve it only with the key (Google); others must never
+    /// see it (Higgsfield's CDN).
+    fn download(&self, key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure>;
 
     /// How long to wait before status check number `polls` (from 0).
     fn poll_delay(&self, polls: u32) -> Duration {
@@ -231,8 +237,8 @@ impl<T: ClipGenerator + ?Sized> ClipGenerator for Arc<T> {
         (**self).status(key, handle)
     }
 
-    fn download(&self, video: &str) -> Result<GeneratedClip, ProviderFailure> {
-        (**self).download(video)
+    fn download(&self, key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure> {
+        (**self).download(key, video)
     }
 
     fn poll_delay(&self, polls: u32) -> Duration {
@@ -317,7 +323,7 @@ mod tests {
             fn status(&self, _: &ApiKey, _: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
                 unreachable!()
             }
-            fn download(&self, _: &str) -> Result<GeneratedClip, ProviderFailure> {
+            fn download(&self, _: &ApiKey, _: &str) -> Result<GeneratedClip, ProviderFailure> {
                 unreachable!()
             }
         }

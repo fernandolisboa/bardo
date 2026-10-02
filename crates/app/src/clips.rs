@@ -393,7 +393,7 @@ impl ClipJob<'_> {
         };
         match generator.status(&key, &ClipHandle(request)) {
             Ok(ClipStatus::Queued | ClipStatus::Running) => Ok(Step::Waiting),
-            Ok(ClipStatus::Done { video }) => match generator.download(&video) {
+            Ok(ClipStatus::Done { video }) => match generator.download(&key, &video) {
                 Ok(clip) => {
                     self.save_clip(order, &clip.bytes)?;
                     Ok(Step::Saved)
@@ -432,10 +432,18 @@ impl ClipJob<'_> {
             .run_of(order.scene)
             .expect("staging adds the scene's run")
             .clone();
+        let format = image_format(&run.image_file)
+            .ok_or_else(|| unexpected(format!("{} is not an image", run.image_file)))?;
+        let bytes = self
+            .handler
+            .files
+            .read(self.project, &run.image_file)
+            .map_err(unexpected)?;
         let request = ClipRequest {
             model: order.model.clone(),
             prompt: run.prompt.clone(),
             image: StagedImage(staged),
+            first_frame: ClipImage { bytes, format },
             seconds: run.seconds,
         };
         let submission = format!("{}-{}-{}", self.job, order.scene, run.submission);
@@ -1038,9 +1046,14 @@ mod tests {
                 model: "fake/range".into(),
                 prompt: scene.prompt().as_str().into(),
                 image: StagedImage("https://fake/image-1".into()),
+                first_frame: ClipImage {
+                    bytes: SCENE_IMAGE.to_vec(),
+                    format: ImageFormat::Png,
+                },
                 seconds,
             }],
-            "the image prompt moves the image until a motion prompt is written"
+            "the image prompt moves the image until a motion prompt is written; \
+             the image also goes inline for providers that take it so"
         );
 
         let plan = plan_of(&app, &project);
@@ -1081,6 +1094,126 @@ mod tests {
         let plan = app.accept_scene_clip(project.id, 0).unwrap();
         assert_eq!(plan.scenes()[0].clip(), Some(&clip));
         assert_eq!(plan.scenes()[0].pending_clip(), None);
+    }
+
+    /// One request Google got: URL, key header and body.
+    type Sent = (String, Option<String>, Vec<u8>);
+
+    /// Google's API as recorded: a Veo operation that is done on the
+    /// first check, and its clip.
+    #[derive(Default, Clone)]
+    struct GoogleApi {
+        sent: Arc<std::sync::Mutex<Vec<Sent>>>,
+    }
+
+    impl bardo_ai::http::Transport for GoogleApi {
+        fn send(
+            &self,
+            request: &bardo_ai::http::HttpRequest,
+        ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
+            self.sent.lock().unwrap().push((
+                request.url.clone(),
+                request.header_value("x-goog-api-key").map(str::to_owned),
+                request.body.clone().unwrap_or_default(),
+            ));
+            const OPERATION: &str = "models/veo-3.1-lite-generate-preview/operations/op1";
+            const VIDEO: &str =
+                "https://generativelanguage.googleapis.com/v1beta/files/f1:download?alt=media";
+            let body = if request.url.ends_with(":predictLongRunning") {
+                serde_json::json!({ "name": OPERATION }).to_string()
+            } else if request.url.ends_with(OPERATION) {
+                serde_json::json!({
+                    "name": OPERATION,
+                    "done": true,
+                    "response": { "generateVideoResponse": {
+                        "generatedSamples": [{ "video": { "uri": VIDEO } }],
+                    } },
+                })
+                .to_string()
+            } else if request.url == VIDEO {
+                String::from_utf8(CLIP.to_vec()).unwrap()
+            } else {
+                return Ok(bardo_ai::http::HttpResponse::new(404, "{}"));
+            };
+            Ok(bardo_ai::http::HttpResponse::new(200, body))
+        }
+    }
+
+    #[test]
+    fn a_scene_animated_with_veo_goes_through_google_on_the_gemini_key() {
+        let mut h = Harness::new();
+        let google = GoogleApi::default();
+        h.more_clips.push(Arc::new(
+            bardo_ai::GoogleClips::with_transport(google.clone()).with_sleeper(Arc::new(|_| {})),
+        ));
+        let app = h.start();
+        let (project, drawn) = h.drawn_project(&app);
+        let veo =
+            ClipModelRef::new(Provider::Gemini, "veo-3.1-lite-generate-preview/720p").unwrap();
+        let models = app.clip_models();
+        assert!(
+            models.iter().any(|offered| offered.id == veo),
+            "Google's models are offered"
+        );
+        assert_eq!(
+            models[0].id,
+            model("fake/range"),
+            "the first provider's default leads"
+        );
+        channel_uses(&app, &project, Some(veo.clone()));
+
+        let view = app.scenes(project.id).unwrap().clips;
+        let scene = &view.scenes[0];
+        assert_eq!(scene.model.as_ref().unwrap().id, veo);
+        let seconds = scene.seconds.unwrap();
+        assert!([4, 6, 8].contains(&seconds));
+        let price = Money::from_micros(50_000 * u64::from(seconds));
+        assert_eq!(
+            scene.price,
+            Some(price),
+            "Veo 3.1 Lite 720p at $0.05 a second"
+        );
+
+        let job = done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+
+        assert!(h.clips.submissions().is_empty(), "not the other provider");
+        let sent = google.sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 3, "submit, one status check, download");
+        assert!(
+            sent.iter()
+                .all(|(_, key, _)| key.as_deref() == Some(crate::scenes::tests::GEMINI_KEY))
+        );
+        let body: serde_json::Value = serde_json::from_slice(&sent[0].2).unwrap();
+        let image = &body["instances"][0]["image"]["inlineData"];
+        assert_eq!(image["mimeType"], "image/png");
+        assert!(
+            !image["data"].as_str().unwrap().is_empty(),
+            "the scene image, inline"
+        );
+        assert_eq!(body["parameters"]["durationSeconds"], seconds);
+        assert_eq!(
+            body["instances"][0]["prompt"],
+            drawn.scenes()[0].prompt().as_str()
+        );
+
+        let plan = plan_of(&app, &project);
+        let clip = plan.scenes()[0].pending_clip().unwrap().clone();
+        assert_eq!(h.files.read(project.id, &clip.file).unwrap(), CLIP);
+        assert_eq!(clip.generation.provider, Provider::Gemini);
+        assert_eq!(clip.generation.model, veo.model());
+        let record =
+            h.db.project_costs(project.id)
+                .unwrap()
+                .into_iter()
+                .find(|record| record.purpose == CostPurpose::SceneClip)
+                .unwrap();
+        assert_eq!(record.provider, Provider::Gemini);
+        assert_eq!(record.cost, Cost::Estimated(price), "Google quotes nothing");
+        assert_eq!(record.job, Some(job.id()));
     }
 
     #[test]

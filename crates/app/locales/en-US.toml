@@ -65,7 +65,7 @@ persona_none = "No default persona"
 persona_hint = "The narrator of this channel's scripts and narration. Manage personas on the Personas screen."
 clip_model = "Video model"
 clip_model_default = "{model} (default)"
-clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield. Any scene can pick another."
+clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield or Google. Any scene can pick another."
 
 [channel.error]
 name_required = "Give the channel a name."
@@ -244,7 +244,7 @@ placeholder = "Your ElevenLabs API key"
 
 [provider.gemini]
 name = "Gemini"
-purpose = "Images (Nano Banana) and video (Veo), from Google AI Studio."
+purpose = "Images (Nano Banana) and video clips (Veo, Gemini Omni Flash), from Google AI Studio."
 placeholder = "AIza…"
 
 [provider.higgsfield]
@@ -472,7 +472,7 @@ accept = "Use new image"
 reject = "Keep current"
 
 [scenes.clip]
-hint = "Clips animate each scene's image with its motion prompt, as long as the scene is narrated within what the model allows; Higgsfield bills each second. A scene without a clip keeps its still image."
+hint = "Clips animate each scene's image with its motion prompt, as long as the scene is narrated within what the model allows; the provider bills each second. A scene without a clip keeps its still image."
 animate_missing = "Animate scenes without a clip ({n})"
 animate = "Animate"
 animate_again = "Animate again"
@@ -501,7 +501,7 @@ no_narration = "Generate the narration first; scenes are timed on it."
 no_plan = "Plan the scenes first."
 scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
-missing_gemini_key = "Save a Gemini key under Settings to generate images."
+missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."
 busy = "Scenes, images or clips are already being made for this project."
 would_discard_images = "Planning again discards the images and clips of these scenes. Confirm to go ahead."
 nothing_to_generate = "Every scene already has an image."
