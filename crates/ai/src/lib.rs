@@ -3,6 +3,7 @@
 
 pub mod claude;
 pub mod elevenlabs;
+pub mod gemini;
 pub mod http;
 pub mod jev;
 pub mod key_check;
@@ -11,6 +12,7 @@ pub mod retry;
 
 pub use claude::ClaudeTextGenerator;
 pub use elevenlabs::{ElevenLabsSpeech, ElevenLabsVoices};
+pub use gemini::GeminiImages;
 pub use jev::JevDecisionEngine;
 pub use key_check::HttpKeyChecker;
 pub use market::YouTubeMarketData;

@@ -1,5 +1,5 @@
 //! Templates screen: the prompts Bardo sends to the AI, one template per
-//! kind. The editor holds the current version's text; picking an older
+//! kind (the script, the scene plan's image prompts). The editor holds the current version's text; picking an older
 //! version loads its text, and saving always creates the next version.
 
 use bardo_app::bardo_domain::{
@@ -198,11 +198,23 @@ impl TemplatesScreen {
                     .child(tr(bardo, Text::TemplatesHint)),
             )
             .child(
-                Button::new("template-kind-script")
-                    .small()
-                    .outline()
-                    .selected(true)
-                    .label(tr(bardo, Text::TemplateKindName(self.kind))),
+                h_flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .children(TemplateKind::ALL.map(|kind| {
+                        Button::new(SharedString::from(format!("template-kind-{kind}")))
+                            .small()
+                            .outline()
+                            .selected(kind == self.kind)
+                            .label(tr(bardo, Text::TemplateKindName(kind)))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                if this.kind != kind {
+                                    this.kind = kind;
+                                    this.notice = None;
+                                    this.reload(window, cx);
+                                }
+                            }))
+                    })),
             )
             .child(
                 div()

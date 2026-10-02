@@ -103,6 +103,8 @@ theme_suggestion = "Sugestão de temas"
 theme_ranking = "Ranqueamento de temas"
 script_generation = "Geração de roteiro"
 narration = "Narração"
+scene_plan = "Plano de cenas"
+scene_images = "Imagens das cenas"
 
 [job.state]
 queued = "Na fila"
@@ -120,7 +122,7 @@ not_allowed = "A chave não tem o acesso necessário, como uma API não ativada 
 limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube renovam todo dia à meia-noite do horário do Pacífico."
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
-declined = "O provedor se recusou a responder este pedido. Mude o canal ou o nicho e tente de novo."
+declined = "O provedor recusou este pedido pelas regras de segurança dele. Mude o que foi pedido (o prompt, o canal ou o nicho) e tente de novo."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -348,6 +350,53 @@ audio_missing = "O arquivo de áudio da narração sumiu da pasta do projeto. Ge
 cannot_play = "Não foi possível tocar a narração: não há saída de áudio disponível ou o arquivo não pode ser lido."
 not_loaded = "Não foi possível carregar a narração. Tente de novo."
 
+[scenes]
+title = "Cenas e imagens"
+empty = "Nenhuma cena ainda."
+plan = "Planejar cenas"
+plan_hint = "O Claude divide a narração em cenas pelas frases e escreve um prompt de imagem por cena, com a versão {n} do template de prompts de imagem."
+replan = "Planejar de novo"
+replan_confirm = "Planejar de novo substitui estas cenas e as {n} imagens delas."
+replan_confirm_button = "Planejar de novo e descartar as imagens"
+replan_cancel = "Manter estas cenas"
+planning = "Planejando as cenas…"
+drawing = "Desenhando as imagens…"
+stopped = "A última execução parou:"
+stale = "A narração foi gerada de novo depois que estas cenas foram planejadas, então os tempos não batem mais. Planeje de novo."
+stale_tag = "Desatualizadas"
+count = "{n} cenas"
+generate_images = "Gerar {n} imagens"
+images_hint = "O Nano Banana desenha cada cena como imagem 16:9 em 2K; o Gemini cobra cada uma. Uma cena recusada pelo provedor não interrompe as outras."
+scene = "Cena {n} · {start}–{end}"
+edited = "Editado"
+edit_prompt = "Editar prompt"
+save_prompt = "Salvar prompt"
+cancel_prompt = "Cancelar"
+regenerate_image = "Desenhar de novo"
+no_image = "Sem imagem ainda"
+failed = "Não desenhada:"
+image_record = "{model} · {tokens} tokens · versão {n} do template de prompts de imagem"
+
+[scenes.pending]
+title = "Nova imagem para revisar"
+hint = "Usá-la substitui a imagem atual."
+accept = "Usar a nova imagem"
+reject = "Manter a atual"
+
+[scenes.error]
+no_narration = "Gere a narração primeiro; as cenas são cronometradas por ela."
+no_plan = "Planeje as cenas primeiro."
+scene_not_found = "Essa cena não existe mais; as cenas podem ter sido planejadas de novo."
+missing_claude_key = "Salve uma chave do Claude em Configurações para planejar cenas."
+missing_gemini_key = "Salve uma chave do Gemini em Configurações para gerar imagens."
+busy = "Já há cenas ou imagens sendo geradas para este projeto."
+would_discard_images = "Planejar de novo descarta as imagens destas cenas. Confirme para continuar."
+nothing_to_generate = "Todas as cenas já têm imagem."
+nothing_to_review = "Não há imagem nova para revisar."
+not_loaded = "Não foi possível carregar as cenas. Tente de novo."
+prompt_required = "O prompt não pode ficar vazio."
+prompt_too_long = "Use no máximo 4000 caracteres no prompt."
+
 [provenance]
 title = "Procedência"
 provider = "Provedor"
@@ -383,6 +432,7 @@ unchanged = "Nada mudou, então nenhuma versão foi criada."
 
 [templates.kind]
 script = "Roteiro"
+image_prompt = "Prompts de imagem"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -395,6 +445,7 @@ persona = "O narrador: voz, tom e estilo de roteiro."
 niche = "O nicho do projeto de vídeo."
 theme_title = "O título provisório do vídeo."
 theme_angle = "O ângulo do tema aprovado."
+narration_sentences = "A narração, uma frase numerada por linha com o momento em que é falada."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."

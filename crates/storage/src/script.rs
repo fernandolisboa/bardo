@@ -67,8 +67,8 @@ impl GenerationRow {
         })
     }
 
-    fn into_generated_script(self) -> Result<GeneratedScript, RepositoryError> {
-        let generation = Generation {
+    fn into_generation(self) -> Result<Generation, RepositoryError> {
+        Ok(Generation {
             id: GenerationId::from(uuid(&self.id)?),
             owner: ProfileId::from(uuid(&self.profile_id)?),
             project: VideoProjectId::from(uuid(&self.project_id)?),
@@ -92,23 +92,30 @@ impl GenerationRow {
                 .map(uuid)
                 .transpose()?
                 .map(JobId::from),
-        };
-        GeneratedScript::new(generation).map_err(|error| invalid(format!("{error:?}")))
+        })
     }
 }
 
-fn generated_script(conn: &Connection, id: &str) -> Result<GeneratedScript, RepositoryError> {
+/// The saved generation `id`.
+pub(crate) fn generation(conn: &Connection, id: &str) -> Result<Generation, RepositoryError> {
     conn.query_row(
         &format!("{SELECT_GENERATION} WHERE g.id = ?1"),
         [id],
         GenerationRow::read,
     )
     .map_err(boxed)?
-    .into_generated_script()
+    .into_generation()
+}
+
+fn generated_script(conn: &Connection, id: &str) -> Result<GeneratedScript, RepositoryError> {
+    GeneratedScript::new(generation(conn, id)?).map_err(|error| invalid(format!("{error:?}")))
 }
 
 /// Saves the generation unless it already is: generations never change.
-fn insert_generation(tx: &Transaction<'_>, generation: &Generation) -> Result<(), RepositoryError> {
+pub(crate) fn insert_generation(
+    tx: &Transaction<'_>,
+    generation: &Generation,
+) -> Result<(), RepositoryError> {
     let count = |n: u64| i64::try_from(n).map_err(boxed);
     tx.execute(
         "INSERT INTO generation (id, profile_id, project_id, provider, model,

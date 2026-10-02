@@ -1,0 +1,25 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "inlineData": {
+              "mimeType": "application/pdf",
+              "data": "JVBERi0="
+            }
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-3.1-flash-image",
+  "responseId": "p1"
+}

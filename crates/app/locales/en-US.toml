@@ -103,6 +103,8 @@ theme_suggestion = "Theme suggestion"
 theme_ranking = "Theme ranking"
 script_generation = "Script generation"
 narration = "Narration"
+scene_plan = "Scene plan"
+scene_images = "Scene images"
 
 [job.state]
 queued = "Queued"
@@ -120,7 +122,7 @@ not_allowed = "The key lacks access this needs, such as an API not enabled for t
 limit_reached = "A quota or rate limit stopped the provider. YouTube quotas reset daily at midnight Pacific time."
 provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
 unexpected_answer = "The provider gave an answer Bardo does not understand."
-declined = "The provider declined to answer this request. Change the channel or niche and try again."
+declined = "The provider declined this request under its safety rules. Change what was asked (the prompt, the channel or the niche) and try again."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -348,6 +350,53 @@ audio_missing = "The narration's audio file is missing from the project folder. 
 cannot_play = "Could not play the narration: no audio output is available or the file is unreadable."
 not_loaded = "Could not load the narration. Try again."
 
+[scenes]
+title = "Scenes and images"
+empty = "No scenes yet."
+plan = "Plan scenes"
+plan_hint = "Claude splits the narration into scenes on its sentences and writes one image prompt per scene, with image prompt template version {n}."
+replan = "Plan again"
+replan_confirm = "Planning again replaces these scenes and their {n} images."
+replan_confirm_button = "Plan again and discard the images"
+replan_cancel = "Keep these scenes"
+planning = "Planning the scenes…"
+drawing = "Drawing the images…"
+stopped = "The last run stopped:"
+stale = "The narration was generated again after these scenes were planned, so their times no longer match. Plan them again."
+stale_tag = "Out of date"
+count = "{n} scenes"
+generate_images = "Generate {n} images"
+images_hint = "Nano Banana draws each scene as a 16:9 image at 2K; Gemini bills each one. A scene the provider declines does not stop the others."
+scene = "Scene {n} · {start}–{end}"
+edited = "Edited"
+edit_prompt = "Edit prompt"
+save_prompt = "Save prompt"
+cancel_prompt = "Cancel"
+regenerate_image = "Draw again"
+no_image = "No image yet"
+failed = "Not drawn:"
+image_record = "{model} · {tokens} tokens · image prompt template version {n}"
+
+[scenes.pending]
+title = "New image to review"
+hint = "Using it replaces the current image."
+accept = "Use new image"
+reject = "Keep current"
+
+[scenes.error]
+no_narration = "Generate the narration first; scenes are timed on it."
+no_plan = "Plan the scenes first."
+scene_not_found = "That scene is gone; the scenes may have been planned again."
+missing_claude_key = "Save a Claude key under Settings to plan scenes."
+missing_gemini_key = "Save a Gemini key under Settings to generate images."
+busy = "Scenes or images are already being generated for this project."
+would_discard_images = "Planning again discards the images of these scenes. Confirm to go ahead."
+nothing_to_generate = "Every scene already has an image."
+nothing_to_review = "There is no new image to review."
+not_loaded = "Could not load the scenes. Try again."
+prompt_required = "The prompt cannot be empty."
+prompt_too_long = "Keep the prompt to at most 4000 characters."
+
 [provenance]
 title = "Provenance"
 provider = "Provider"
@@ -383,6 +432,7 @@ unchanged = "Nothing changed, so no version was added."
 
 [templates.kind]
 script = "Script"
+image_prompt = "Image prompts"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -395,6 +445,7 @@ persona = "The narrator: voice, tone and script style."
 niche = "The niche of the video project."
 theme_title = "The video's working title."
 theme_angle = "The approved theme's angle."
+narration_sentences = "The narration, one numbered sentence per line with when it is spoken."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."

@@ -16,21 +16,25 @@ uuid_id!(
     TemplateVersionId
 );
 
-/// What a template generates. The script is the first; titles,
-/// descriptions and media prompts reuse the same mechanism.
+/// What a template generates. Titles, descriptions and the other media
+/// prompts reuse the same mechanism.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TemplateKind {
     /// The narration script of a video project.
     Script,
+    /// The scene plan of a narrated video: where each scene starts and the
+    /// image prompt for each one.
+    ImagePrompt,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 1] = [TemplateKind::Script];
+    pub const ALL: [TemplateKind; 2] = [TemplateKind::Script, TemplateKind::ImagePrompt];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             TemplateKind::Script => "script",
+            TemplateKind::ImagePrompt => "image_prompt",
         }
     }
 
@@ -48,6 +52,16 @@ impl TemplateKind {
                 TemplateVariable::Niche,
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::ThemeAngle,
+            ],
+            TemplateKind::ImagePrompt => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::AestheticNotes,
+                TemplateVariable::Language,
+                TemplateVariable::Niche,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::NarrationSentences,
             ],
         }
     }
@@ -95,10 +109,13 @@ pub enum TemplateVariable {
     ThemeTitle,
     /// The approved theme's angle.
     ThemeAngle,
+    /// The narration, one numbered sentence per line with when it is
+    /// spoken.
+    NarrationSentences,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 10] = [
+    pub const ALL: [TemplateVariable; 11] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -109,6 +126,7 @@ impl TemplateVariable {
         TemplateVariable::Niche,
         TemplateVariable::ThemeTitle,
         TemplateVariable::ThemeAngle,
+        TemplateVariable::NarrationSentences,
     ];
 
     /// The name written between the braces.
@@ -124,6 +142,7 @@ impl TemplateVariable {
             TemplateVariable::Niche => "niche",
             TemplateVariable::ThemeTitle => "theme_title",
             TemplateVariable::ThemeAngle => "theme_angle",
+            TemplateVariable::NarrationSentences => "narration_sentences",
         }
     }
 
@@ -527,6 +546,27 @@ mod tests {
             assert_eq!(kind.code().parse::<TemplateKind>(), Ok(kind));
         }
         assert!("title".parse::<TemplateKind>().is_err());
+    }
+
+    #[test]
+    fn each_kind_accepts_only_its_own_variables() {
+        assert!(
+            TemplateBody::new(TemplateKind::ImagePrompt, "", "{{narration_sentences}}").is_ok()
+        );
+        assert_eq!(
+            TemplateBody::new(TemplateKind::Script, "", "{{narration_sentences}}").unwrap_err(),
+            [error(
+                TemplateField::Prompt,
+                TemplateProblem::UnknownVariable
+            )]
+        );
+        assert_eq!(
+            TemplateBody::new(TemplateKind::ImagePrompt, "", "{{persona}}").unwrap_err(),
+            [error(
+                TemplateField::Prompt,
+                TemplateProblem::UnknownVariable
+            )]
+        );
     }
 
     #[test]

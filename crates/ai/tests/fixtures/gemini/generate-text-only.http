@@ -1,0 +1,27 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Here is a description of the lighthouse instead."
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 12,
+    "candidatesTokenCount": 10,
+    "totalTokenCount": 22
+  },
+  "modelVersion": "gemini-3.1-flash-image",
+  "responseId": "t1"
+}

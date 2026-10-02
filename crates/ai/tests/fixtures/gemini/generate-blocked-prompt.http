@@ -1,0 +1,15 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "promptFeedback": {
+    "blockReason": "PROHIBITED_CONTENT"
+  },
+  "usageMetadata": {
+    "promptTokenCount": 11,
+    "totalTokenCount": 11
+  },
+  "modelVersion": "gemini-3.1-flash-image",
+  "responseId": "b1"
+}

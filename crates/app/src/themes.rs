@@ -840,6 +840,7 @@ mod tests {
                 scripts: Arc::clone(&self.db) as _,
                 personas: Arc::clone(&self.db) as _,
                 narrations: Arc::clone(&self.db) as _,
+                scene_plans: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
@@ -851,6 +852,7 @@ mod tests {
                 decisions: Arc::clone(&self.decisions) as _,
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
+                images: Arc::new(crate::testing::FakeImages::default()),
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             Bardo::start_with(

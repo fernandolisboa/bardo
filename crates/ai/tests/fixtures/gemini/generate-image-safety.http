@@ -1,0 +1,25 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": []
+      },
+      "finishReason": "IMAGE_SAFETY",
+      "finishMessage": "Unable to show the generated image. The image was filtered out because it violated Google's Generative AI Prohibited Use policy.",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 12,
+    "candidatesTokenCount": 0,
+    "totalTokenCount": 140,
+    "thoughtsTokenCount": 128
+  },
+  "modelVersion": "gemini-3.1-flash-image",
+  "responseId": "s1"
+}
