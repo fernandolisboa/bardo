@@ -82,8 +82,10 @@ impl<T: Transport> VideoStats for YouTubeStats<T> {
                     continue;
                 }
                 let statistics = &item["statistics"];
+                // A video YouTube reports no views for (one not public yet)
+                // has no numbers to keep; the other posts still sync.
                 let Some(views) = count(&statistics["viewCount"]) else {
-                    return Err(unexpected(&format!("video {id} without a view count")));
+                    continue;
                 };
                 found.push(VideoStatistics {
                     post_id: id.to_owned(),

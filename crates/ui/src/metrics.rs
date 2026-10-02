@@ -184,7 +184,7 @@ pub fn history(bardo: &Bardo, post: &PublishedPost, cx: &App) -> Option<Div> {
         .map(|(ix, snapshot)| {
             let delta = ix
                 .checked_sub(1)
-                .map(|before| snapshot.views as i64 - post.history[before].views as i64);
+                .map(|before| post.history[before].views_to(snapshot));
             h_flex()
                 .gap_3()
                 .text_xs()

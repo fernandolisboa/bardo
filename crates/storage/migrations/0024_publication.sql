@@ -27,8 +27,8 @@ CREATE TABLE publication (
     UNIQUE (project_id, network)
 ) STRICT;
 
--- A post links to one project.
-CREATE UNIQUE INDEX publication_post ON publication (network, post_id);
+-- A post links to one project of a profile.
+CREATE UNIQUE INDEX publication_post ON publication (profile_id, network, post_id);
 
 -- One publication's statistics at one sync. Likes and comments are NULL
 -- when the owner hides them.

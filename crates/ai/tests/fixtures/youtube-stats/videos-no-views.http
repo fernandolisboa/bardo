@@ -3,6 +3,7 @@ content-type: application/json; charset=UTF-8
 
 {
   "items": [
-    { "id": "Qm4f1rT8vXa", "snippet": { "publishedAt": "2026-09-27T14:00:08Z" }, "statistics": {} }
+    { "id": "Qm4f1rT8vXa", "snippet": { "publishedAt": "2026-09-27T14:00:08Z" }, "statistics": {} },
+    { "id": "dQw4w9WgXcQ", "snippet": { "publishedAt": "2026-09-25T09:30:00Z" }, "statistics": { "viewCount": "1204", "likeCount": "88", "commentCount": "7" } }
   ]
 }

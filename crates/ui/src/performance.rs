@@ -8,7 +8,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use bardo_app::bardo_domain::{Channel, ChannelId, PublicationId};
+use bardo_app::bardo_domain::{Channel, ChannelId, Job, PublicationId};
 use bardo_app::{Bardo, ChannelMetricsView, ChannelPost, Destination, Text};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -60,6 +60,8 @@ pub struct PerformanceScreen {
     picked: Option<PublicationId>,
     error: Option<Text>,
     revision: u64,
+    /// The metrics sync as last read: the numbers change only with it.
+    sync_job: Option<Job>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -98,6 +100,7 @@ impl PerformanceScreen {
             picked: None,
             error: None,
             revision,
+            sync_job: None,
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -157,11 +160,17 @@ impl PerformanceScreen {
         }
     }
 
-    /// Numbers change while a sync runs.
+    /// Numbers change while a sync runs; other jobs leave them alone.
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let revision = self.bardo.read(cx).jobs_revision();
-        if revision != self.revision {
-            self.revision = revision;
+        let bardo = self.bardo.read(cx);
+        let revision = bardo.jobs_revision();
+        if revision == self.revision {
+            return;
+        }
+        self.revision = revision;
+        let job = bardo.latest_sync_job();
+        if job != self.sync_job {
+            self.sync_job = job;
             self.load(cx);
             cx.notify();
         }

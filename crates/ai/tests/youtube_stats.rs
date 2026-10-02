@@ -107,10 +107,13 @@ fn ids_nobody_asked_for_are_ignored() {
 }
 
 #[test]
-fn a_video_without_a_view_count_is_an_unexpected_answer() {
+fn a_video_without_a_view_count_is_left_out_without_failing_the_others() {
     let stats = answers(&["videos-no-views"]);
-    let failure = stats.statistics(&key(), &["Qm4f1rT8vXa"]).unwrap_err();
-    assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    let found = stats
+        .statistics(&key(), &["Qm4f1rT8vXa", "dQw4w9WgXcQ"])
+        .unwrap();
+    let ids: Vec<&str> = found.iter().map(|s| s.post_id.as_str()).collect();
+    assert_eq!(ids, ["dQw4w9WgXcQ"]);
 }
 
 #[test]

@@ -1438,7 +1438,6 @@ change = "{change} desde a sincronização anterior"
 
 [performance]
 info = "Como as publicações do canal se saem. Vincule publicações na etapa Publicação de um projeto; as do YouTube sincronizam os números públicos, as das outras redes guardam o link até a publicação automática trazer as métricas."
-channel = "Canal"
 empty = "Nenhuma publicação vinculada neste canal ainda. Marque uma exportação como publicada na etapa Publicação de um projeto."
 no_channels = "Crie um canal para acompanhar as publicações dele aqui."
 history_title = "Visualizações do canal ao longo do tempo"

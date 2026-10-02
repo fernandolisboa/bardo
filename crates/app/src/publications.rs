@@ -10,6 +10,7 @@
 //! oldest check is older than the profile's setting. The other networks
 //! keep their link until publishing brings their metrics.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -118,8 +119,7 @@ impl PublishedPost {
         let [.., before, last] = self.history.as_slice() else {
             return None;
         };
-        let signed = |n: u64| i64::try_from(n).unwrap_or(i64::MAX);
-        Some(signed(last.views) - signed(before.views))
+        Some(before.views_to(last))
     }
 }
 
@@ -184,10 +184,15 @@ struct SyncPayload {
     publications: Vec<String>,
 }
 
-/// How many batches of the payload a sync job has saved.
+/// How many batches of the payload a sync job has saved, and the time
+/// its snapshots carry: one per job, so a channel's history gets one
+/// point per sync however many batches it reads, a resumed job included.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct SyncCheckpoint {
     batches: usize,
+    /// Unix time in milliseconds.
+    #[serde(default)]
+    taken_at: Option<u64>,
 }
 
 /// Runs metrics syncs.
@@ -225,6 +230,16 @@ impl JobHandler for MetricsSyncHandler {
             return Ok(());
         }
         let key = self.key()?;
+        let taken_at = match checkpoint.taken_at {
+            Some(millis) => SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis),
+            None => whole_millis(SystemTime::now()),
+        };
+        checkpoint.taken_at = Some(
+            taken_at
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        );
         for batch in &batches[checkpoint.batches..] {
             if cx.should_stop() {
                 return Ok(());
@@ -248,15 +263,14 @@ impl JobHandler for MetricsSyncHandler {
                 let found = self.stats.statistics(&key, &ids).map_err(|failure| {
                     JobFailure::new(failure.kind.into(), format!("YouTube: {}", failure.detail))
                 })?;
-                let now = SystemTime::now();
                 let mut snapshots = Vec::new();
                 for post in &mut posts {
                     let statistics = found
                         .iter()
                         .find(|statistics| statistics.post_id == post.link.post_id());
-                    post.checked(statistics, now);
+                    post.checked(statistics, taken_at);
                     if let Some(statistics) = statistics {
-                        snapshots.push(MetricsSnapshot::of(post.id, statistics, now));
+                        snapshots.push(MetricsSnapshot::of(post.id, statistics, taken_at));
                     }
                 }
                 self.publications
@@ -276,7 +290,7 @@ impl JobHandler for MetricsSyncHandler {
 
 impl Bardo {
     /// The latest metrics sync job.
-    fn latest_sync_job(&self) -> Option<Job> {
+    pub fn latest_sync_job(&self) -> Option<Job> {
         self.jobs()
             .into_iter()
             .rev()
@@ -284,7 +298,10 @@ impl Bardo {
     }
 
     fn youtube_key_saved(&self) -> bool {
-        self.provider_key(Provider::YouTubeData).state != KeyState::NotSet
+        matches!(
+            self.provider_key(Provider::YouTubeData).state,
+            KeyState::Saved { .. }
+        )
     }
 
     /// Where metrics syncing stands for `publications`.
@@ -489,7 +506,7 @@ impl Bardo {
     }
 
     /// When a start syncs metrics by itself.
-    pub fn metrics_sync_on_start(&self) -> MetricsSyncOnStart {
+    pub fn metrics_sync_setting(&self) -> MetricsSyncOnStart {
         self.profile.metrics_sync
     }
 
@@ -523,14 +540,17 @@ impl Bardo {
         let publications = self.publications.channel_publications(channel.id)?;
         let snapshots = self.publications.channel_snapshots(channel.id)?;
         let status = self.metrics_status(&publications);
+        let mut histories: HashMap<PublicationId, Vec<MetricsSnapshot>> = HashMap::new();
+        for snapshot in &snapshots {
+            histories
+                .entry(snapshot.publication)
+                .or_default()
+                .push(*snapshot);
+        }
         let posts = publications
             .into_iter()
             .map(|publication| {
-                let history = snapshots
-                    .iter()
-                    .filter(|snapshot| snapshot.publication == publication.id)
-                    .copied()
-                    .collect();
+                let history = histories.remove(&publication.id).unwrap_or_default();
                 ChannelPost {
                     project: publication.project,
                     project_title: projects
@@ -934,7 +954,7 @@ mod tests {
         let id = s.app.sync_metrics_on_start().expect("never checked");
         done(&s.app, id);
         assert_eq!(s.app.sync_metrics_on_start(), None, "checked just now");
-        assert_eq!(s.app.metrics_sync_on_start(), MetricsSyncOnStart::Daily);
+        assert_eq!(s.app.metrics_sync_setting(), MetricsSyncOnStart::Daily);
     }
 
     #[test]

@@ -1063,7 +1063,6 @@ pub enum Text {
     MetricsHistory,
     MetricsChange,
     PerformanceInfo,
-    PerformanceChannel,
     PerformanceEmpty,
     PerformanceNoChannels,
     PerformanceHistoryTitle,
@@ -2196,7 +2195,6 @@ impl Text {
             Text::MetricsHistory => "metrics.history",
             Text::MetricsChange => "metrics.change",
             Text::PerformanceInfo => "performance.info",
-            Text::PerformanceChannel => "performance.channel",
             Text::PerformanceEmpty => "performance.empty",
             Text::PerformanceNoChannels => "performance.no_channels",
             Text::PerformanceHistoryTitle => "performance.history_title",
@@ -3411,7 +3409,6 @@ mod tests {
         texts.push(Text::MetricsHistory);
         texts.push(Text::MetricsChange);
         texts.push(Text::PerformanceInfo);
-        texts.push(Text::PerformanceChannel);
         texts.push(Text::PerformanceEmpty);
         texts.push(Text::PerformanceNoChannels);
         texts.push(Text::PerformanceHistoryTitle);

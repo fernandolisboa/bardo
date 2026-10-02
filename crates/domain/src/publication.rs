@@ -371,6 +371,13 @@ pub struct MetricsSnapshot {
 }
 
 impl MetricsSnapshot {
+    /// Views gained (or lost, when YouTube recounts) from this snapshot
+    /// to `later`.
+    pub fn views_to(&self, later: &MetricsSnapshot) -> i64 {
+        let signed = |n: u64| i64::try_from(n).unwrap_or(i64::MAX);
+        signed(later.views) - signed(self.views)
+    }
+
     pub fn of(publication: PublicationId, statistics: &VideoStatistics, at: SystemTime) -> Self {
         Self {
             publication,
@@ -558,19 +565,21 @@ pub fn channel_history(snapshots: &[MetricsSnapshot]) -> Vec<ChannelPoint> {
     ordered.sort_by_key(|snapshot| snapshot.taken_at);
     let mut latest: HashMap<PublicationId, MetricsSnapshot> = HashMap::new();
     let mut points: Vec<ChannelPoint> = Vec::new();
-    for snapshot in ordered {
-        latest.insert(snapshot.publication, *snapshot);
-        let mut totals = MetricsTotals::default();
-        for kept in latest.values() {
-            totals.add(kept);
-        }
-        match points.last_mut() {
-            // One sync takes every post at nearly the same time.
-            Some(last) if last.at == snapshot.taken_at => last.totals = totals,
-            _ => points.push(ChannelPoint {
+    // A sync stamps every post with the same time: one point per sync.
+    for (ix, snapshot) in ordered.iter().enumerate() {
+        latest.insert(snapshot.publication, **snapshot);
+        let last_of_its_time = ordered
+            .get(ix + 1)
+            .is_none_or(|next| next.taken_at != snapshot.taken_at);
+        if last_of_its_time {
+            let mut totals = MetricsTotals::default();
+            for kept in latest.values() {
+                totals.add(kept);
+            }
+            points.push(ChannelPoint {
                 at: snapshot.taken_at,
                 totals,
-            }),
+            });
         }
     }
     points

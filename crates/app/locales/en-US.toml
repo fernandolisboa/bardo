@@ -1438,7 +1438,6 @@ change = "{change} since the sync before"
 
 [performance]
 info = "How the channel's posts perform. Link posts at a project's Publish stage; YouTube posts sync their public numbers, the other networks keep their link until automatic publishing brings their metrics."
-channel = "Channel"
 empty = "No post linked on this channel yet. Mark an export as posted at a project's Publish stage."
 no_channels = "Create a channel to follow its posts here."
 history_title = "Channel views over time"

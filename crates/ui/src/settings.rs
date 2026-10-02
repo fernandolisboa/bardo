@@ -202,7 +202,7 @@ impl SettingsScreen {
             let choices = sync_choices(bardo);
             let at = MetricsSyncOnStart::ALL
                 .iter()
-                .position(|setting| *setting == bardo.metrics_sync_on_start())
+                .position(|setting| *setting == bardo.metrics_sync_setting())
                 .unwrap_or(0);
             cx.new(|cx| SelectState::new(choices, Some(IndexPath::new(at)), window, cx))
         };
@@ -261,7 +261,7 @@ impl SettingsScreen {
             });
         }
         let bardo = self.bardo.read(cx);
-        let (choices, setting) = (sync_choices(bardo), bardo.metrics_sync_on_start());
+        let (choices, setting) = (sync_choices(bardo), bardo.metrics_sync_setting());
         self.metrics_sync.update(cx, |select, cx| {
             select.set_items(choices, window, cx);
             select.set_selected_value(&setting, window, cx);

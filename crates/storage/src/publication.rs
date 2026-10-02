@@ -123,6 +123,9 @@ fn stored(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
+/// Saves a link. A publication saved before keeps its post, its dates and
+/// what syncs found (they belong to `save_sync`); only its account,
+/// render and address change.
 fn upsert(conn: &Connection, publication: &Publication) -> Result<(), RepositoryError> {
     // Another post linked for the same project and network goes, with its
     // snapshots.
@@ -142,12 +145,7 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
          ON CONFLICT (id) DO UPDATE SET
              account_id = excluded.account_id,
              render_id = excluded.render_id,
-             post_id = excluded.post_id,
-             url = excluded.url,
-             posted_at = excluded.posted_at,
-             linked_at = excluded.linked_at,
-             checked_at = excluded.checked_at,
-             missing_since = excluded.missing_since",
+             url = excluded.url",
         params![
             publication.id.to_string(),
             publication.project.to_string(),
