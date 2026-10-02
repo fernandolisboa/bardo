@@ -372,7 +372,10 @@ mod tests {
             db.theme(approved.id).unwrap().unwrap().status(),
             ThemeStatus::Approved
         );
-        assert_eq!(db.projects(channel.id).unwrap(), std::slice::from_ref(&project));
+        assert_eq!(
+            db.projects(channel.id).unwrap(),
+            std::slice::from_ref(&project)
+        );
 
         // One project per theme: a second one fails and changes nothing.
         let mut again = project.clone();
