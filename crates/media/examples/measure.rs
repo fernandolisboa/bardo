@@ -250,8 +250,12 @@ fn plan(clips: &[PathBuf], sources: &Sources) -> RenderPlan {
             duration: total,
             at: Duration::ZERO,
             gain_db: 0.0,
+            fade_in: Duration::ZERO,
+            fade_out: Duration::ZERO,
+            skipped: Duration::ZERO,
         }],
         gain_db,
+        duck: None,
     };
     RenderPlan {
         video: clips

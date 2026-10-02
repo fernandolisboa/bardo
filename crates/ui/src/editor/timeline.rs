@@ -8,12 +8,19 @@
 //! shows where the item will land (snapped, and clamped as the domain
 //! will), and a line marks the word it snapped to. Alt frees it from the
 //! words.
+//!
+//! Each audio lane's header carries its mute and solo buttons and its
+//! level; clicking the header picks the lane, and the inspector shows its
+//! mix. The music lane draws how the music ducks under the narration.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use bardo_app::bardo_domain::{AudioItem, Edge, ItemRef, Track as Lane, timecode};
+use bardo_app::bardo_domain::{
+    AudioItem, AudioLane, DUCK_RANGE, Decibels, DuckEnvelope, Ducking, Edge, ItemRef, LaneMix,
+    Track as Lane, timecode,
+};
 use bardo_app::{ClipMedia, ClipView, EditAction, Editor, EditorView, NarrationTrack, Text};
 use gpui_kit::component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -125,6 +132,16 @@ impl Track {
             Track::Narration => Text::EditorTrackNarration,
             Track::Music => Text::EditorTrackMusic,
             Track::Sfx => Text::EditorTrackSfx,
+        }
+    }
+
+    /// The audio lane it is, for the mix.
+    fn lane(self) -> Option<AudioLane> {
+        match self {
+            Track::Narration => Some(AudioLane::Narration),
+            Track::Music => Some(AudioLane::Music),
+            Track::Sfx => Some(AudioLane::Sfx),
+            Track::Captions | Track::Video => None,
         }
     }
 
@@ -245,7 +262,6 @@ impl EditorScreen {
             self.timeline.layout(view.duration());
         }
         let toolbar = self.render_timeline_toolbar(cx);
-        let bardo = self.bardo.read(cx);
         let headers = v_flex()
             .w(px(HEADER))
             .flex_none()
@@ -258,26 +274,7 @@ impl EditorScreen {
                     .border_b_1()
                     .border_color(color(HAIRLINE)),
             )
-            .children(Track::ALL.map(|track| {
-                h_flex()
-                    .h(px(track.height()))
-                    .px_2()
-                    .gap_2()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(color(HAIRLINE))
-                    .child(
-                        div()
-                            .px_1()
-                            .rounded(px(3.))
-                            .border_1()
-                            .border_color(color(track.tint()))
-                            .text_size(px(10.))
-                            .text_color(color(track.tint()))
-                            .child(track.chip()),
-                    )
-                    .child(label(tr(bardo, track.name()), TEXT_2))
-            }));
+            .children(Track::ALL.map(|track| self.render_track_header(view, track, cx)));
 
         let lanes_bounds = self.timeline.lanes.clone();
         let measure = canvas(
@@ -308,6 +305,7 @@ impl EditorScreen {
                 .collect::<Vec<_>>(),
         );
         let mut narration = Some(self.render_narration(view, selection, cx));
+        let mut music = Some(self.render_music(view, cx));
         let (mut video_ghost, mut narration_ghost, snap_line) = self.render_drag(view);
         let lanes = Track::ALL.map(|track| {
             let lane = div()
@@ -323,6 +321,7 @@ impl EditorScreen {
                 Track::Narration => lane
                     .children(narration.take().into_iter().flatten())
                     .children(narration_ghost.take().into_iter().flatten()),
+                Track::Music => lane.children(music.take().into_iter().flatten()),
                 _ => lane,
             }
         });
@@ -421,7 +420,7 @@ impl EditorScreen {
             .editor
             .as_ref()
             .map_or(Duration::ZERO, |editor| editor.playhead());
-        // The other toggles arrive with #22 and #30.
+        // The AI toggle arrives with #30.
         let toggle = |id: &'static str, text: Text| {
             tool_button(id, false, false)
                 .border_1()
@@ -446,6 +445,33 @@ impl EditorScreen {
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.with_editor(cx, |editor| editor.set_snapping(!editor.snapping()));
             }));
+        let ducking = self
+            .editor
+            .as_ref()
+            .and_then(|editor| editor.view().timeline.as_ref())
+            .map(|timeline| timeline.mix().ducking);
+        let ducking_on = ducking.is_some_and(|ducking| ducking.on);
+        let duck = tool_button("toggle-duck", editing, ducking_on)
+            .when(!ducking_on, |button| {
+                button.border_1().border_color(color(HAIRLINE))
+            })
+            .child(div().size(px(6.)).rounded_full().bg(color(if ducking_on {
+                MUSIC
+            } else {
+                OUTLINE
+            })))
+            .child(tr(bardo, Text::EditorDuckMusic))
+            .when_some(ducking, |button, ducking| {
+                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(
+                        EditAction::SetDucking(Ducking {
+                            on: !ducking.on,
+                            ..ducking
+                        }),
+                        cx,
+                    );
+                }))
+            });
         h_flex()
             .h(px(36.))
             .flex_none()
@@ -481,7 +507,7 @@ impl EditorScreen {
                     .child(div().w(px(1.)).h(px(18.)).mx_1().bg(color(HAIRLINE)))
                     .child(snap)
                     .child(toggle("toggle-ai", Text::EditorAiCuts))
-                    .child(toggle("toggle-duck", Text::EditorDuckMusic))
+                    .child(duck)
                     .child(div().flex_1())
                     .child(
                         tool_button("zoom-out", true, false)
@@ -501,6 +527,195 @@ impl EditorScreen {
                     ),
             )
             .into_any_element()
+    }
+
+    /// A track's header: its chip and name, and for an audio lane its mute
+    /// and solo buttons and its level (with the ducking on the music).
+    /// Clicking an audio lane's header picks it for the inspector.
+    fn render_track_header(
+        &self,
+        view: &EditorView,
+        track: Track,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let mono = cx.theme().mono_font_family.clone();
+        let chip = div()
+            .px_1()
+            .rounded(px(3.))
+            .border_1()
+            .border_color(color(track.tint()))
+            .text_size(px(10.))
+            .text_color(color(track.tint()))
+            .child(track.chip());
+        let header = h_flex()
+            .h(px(track.height()))
+            .px_2()
+            .gap_2()
+            .items_center()
+            .border_b_1()
+            .border_color(color(HAIRLINE));
+        let (Some(lane), Some(mix)) = (track.lane(), view.timeline.as_ref().map(|t| *t.mix()))
+        else {
+            return header
+                .child(chip)
+                .child(label(tr(bardo, track.name()), TEXT_2))
+                .into_any_element();
+        };
+        let lane_mix = mix.lane(lane);
+        let picked = self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.selected_lane() == Some(lane));
+        let switch = |id: &'static str, short: Text, on: bool, set: LaneMix| {
+            div()
+                .id((id, lane as usize))
+                .w(px(18.))
+                .h(px(16.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(3.))
+                .text_size(px(10.))
+                .cursor_pointer()
+                .border_1()
+                .border_color(color(if on { TEXT_2 } else { OUTLINE }))
+                .when(on, |button| button.bg(color(TEXT_2)).text_color(color(APP)))
+                .when(!on, |button| {
+                    button
+                        .text_color(color(TEXT_3))
+                        .hover(|style| style.bg(color(RAISED_HOVER)))
+                })
+                .child(tr(bardo, short))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::SetLane { lane, mix: set }, cx);
+                }))
+        };
+        let mute = switch(
+            "lane-mute",
+            Text::EditorMuteShort,
+            lane_mix.muted,
+            LaneMix {
+                muted: !lane_mix.muted,
+                ..lane_mix
+            },
+        );
+        let solo = switch(
+            "lane-solo",
+            Text::EditorSoloShort,
+            lane_mix.solo,
+            LaneMix {
+                solo: !lane_mix.solo,
+                ..lane_mix
+            },
+        );
+        let readout = |text: String| {
+            label(text, TEXT_3)
+                .text_size(px(10.))
+                .font_family(mono.clone())
+                .overflow_hidden()
+                .text_ellipsis()
+        };
+        let ducked = (lane == AudioLane::Music && mix.ducking.on).then(|| {
+            let depth = bardo.decibels(Decibels::from_tenths(-mix.ducking.depth.tenths()));
+            readout(bardo.text_with(Text::EditorDuckReadout, &[("depth", &depth)]))
+        });
+        let silent = !mix.is_audible(lane);
+        header
+            .id(("lane-header", lane as usize))
+            .cursor_pointer()
+            .relative()
+            .when(picked, |header| {
+                header.bg(color(RAISED)).child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(2.))
+                        .bg(color(ACCENT)),
+                )
+            })
+            .hover(|style| style.bg(color(RAISED)))
+            .child(chip)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        label(
+                            tr(bardo, track.name()),
+                            if silent { TEXT_3 } else { TEXT_2 },
+                        )
+                        .overflow_hidden()
+                        .text_ellipsis(),
+                    )
+                    .child(readout(bardo.decibels(lane_mix.gain)))
+                    .children(ducked),
+            )
+            .child(mute)
+            .child(solo)
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.with_editor(cx, |editor| editor.select_lane(Some(lane)));
+            }))
+            .into_any_element()
+    }
+
+    /// The music lane: empty until music can be placed there, with the
+    /// ducking envelope drawn where it will lower it.
+    fn render_music(&self, view: &EditorView, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let mut elements = vec![
+            div()
+                .absolute()
+                .left(px(8.))
+                .bottom(px(4.))
+                .child(label(tr(bardo, Text::EditorNoMusic), TEXT_3).text_size(px(11.)))
+                .into_any_element(),
+        ];
+        if let Some(envelope) = view.ducking.clone() {
+            elements.push(self.envelope(envelope));
+        }
+        elements
+    }
+
+    /// The ducking envelope across the lane: a line at the top that dips as
+    /// deep, in proportion, as the music will go.
+    fn envelope(&self, envelope: DuckEnvelope) -> AnyElement {
+        let timeline = &self.timeline;
+        let (zoom, scroll, width) = (timeline.zoom, timeline.scroll, timeline.width());
+        let depth = envelope.depth.db() / DUCK_RANGE.1.db();
+        canvas(
+            |_, _, _| {},
+            move |bounds, (), window, _| {
+                let top = f32::from(bounds.origin.y) + 6.;
+                let room = f32::from(bounds.size.height) - 16.;
+                let origin = f32::from(bounds.origin.x);
+                let level = |x: f32| {
+                    let time = Duration::from_secs_f32(((x + scroll) / zoom).max(0.));
+                    top + envelope.amount_at(time) * depth * room
+                };
+                // Each step spans from the previous level so steep ramps stay joined.
+                let (mut x, mut last) = (0., level(0.));
+                while x < width {
+                    let y = level(x);
+                    let (high, low) = (y.min(last), y.max(last));
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(px(origin + x), px(high)),
+                            size(px(2.), px(low - high + 1.5)),
+                        ),
+                        color(MUSIC),
+                    ));
+                    last = y;
+                    x += 2.;
+                }
+            },
+        )
+        .absolute()
+        .inset_0()
+        .into_any_element()
     }
 
     fn render_ruler(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -843,13 +1058,14 @@ impl EditorScreen {
         let (Some(narration), Some(timeline)) = (&view.narration, &view.timeline) else {
             return Vec::new();
         };
+        let silent = !timeline.mix().is_audible(AudioLane::Narration);
         let mut elements: Vec<AnyElement> = timeline
             .narration()
             .iter()
             .enumerate()
             .filter_map(|(index, piece)| {
                 let item = ItemRef::narration(index);
-                self.render_piece(item, piece, narration, selection == Some(item), cx)
+                self.render_piece(item, piece, narration, selection == Some(item), silent, cx)
             })
             .collect();
         let state = &self.timeline;
@@ -886,6 +1102,7 @@ impl EditorScreen {
         piece: &AudioItem,
         narration: &NarrationTrack,
         selected: bool,
+        silent: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let timeline = &self.timeline;
@@ -897,41 +1114,66 @@ impl EditorScreen {
         let zoom = timeline.zoom;
         let peaks = narration.peaks.clone();
         let source_start = piece.start.as_secs_f32();
+        let (fade_in, fade_out) = piece.fades();
+        let (fade_in, fade_out) = (fade_in.as_secs_f32() * zoom, fade_out.as_secs_f32() * zoom);
         // Drawn from the piece's own left edge, which may be off screen;
         // only the bars on screen are painted.
         let (from_x, to_x) = ((-left).max(0.), (timeline.width() - left).min(width));
         let waveform = canvas(
             |_, _, _| {},
             move |bounds, (), window, _| {
-                let Some((per_second, peaks)) = peaks else {
-                    return;
-                };
                 let top: f32 = bounds.origin.y.into();
                 let height: f32 = bounds.size.height.into();
                 // On a whole pixel, so every piece's bars look alike.
                 let origin = f32::from(bounds.origin.x).round();
-                let middle = top + height / 2.;
-                let per_pixel = per_second as f32 / zoom;
-                let first = source_start * per_second as f32;
-                // One bar every 2 px of what is on screen.
-                let mut x = (from_x / 2.).floor() * 2.;
-                while x < to_x {
-                    let from = (first + x * per_pixel) as usize;
-                    let to = ((first + (x + 2.) * per_pixel) as usize).max(from + 1);
-                    let peak = peaks
-                        .get(from..to.min(peaks.len()))
-                        .unwrap_or_default()
-                        .iter()
-                        .fold(0f32, |max, peak| max.max(*peak));
-                    let bar = (peak.clamp(0., 1.) * height * 0.9).max(1.);
-                    window.paint_quad(fill(
-                        Bounds::new(
-                            point(px(origin + x), px(middle - bar / 2.)),
-                            size(px(1.), px(bar)),
-                        ),
-                        color(NARRATION),
-                    ));
-                    x += 2.;
+                if let Some((per_second, peaks)) = peaks {
+                    let middle = top + height / 2.;
+                    let per_pixel = per_second as f32 / zoom;
+                    let first = source_start * per_second as f32;
+                    // One bar every 2 px of what is on screen.
+                    let mut x = (from_x / 2.).floor() * 2.;
+                    while x < to_x {
+                        let from = (first + x * per_pixel) as usize;
+                        let to = ((first + (x + 2.) * per_pixel) as usize).max(from + 1);
+                        let peak = peaks
+                            .get(from..to.min(peaks.len()))
+                            .unwrap_or_default()
+                            .iter()
+                            .fold(0f32, |max, peak| max.max(*peak));
+                        let bar = (peak.clamp(0., 1.) * height * 0.9).max(1.);
+                        window.paint_quad(fill(
+                            Bounds::new(
+                                point(px(origin + x), px(middle - bar / 2.)),
+                                size(px(1.), px(bar)),
+                            ),
+                            color(NARRATION),
+                        ));
+                        x += 2.;
+                    }
+                }
+                // The fades: a line rising from the bottom corner, and one
+                // falling to the other.
+                let bottom = top + height - 2.;
+                let mut ramp = |from: f32, length: f32, rising: bool| {
+                    let mut x = from.max(from_x);
+                    while x < (from + length).min(to_x) {
+                        let level = (x - from) / length;
+                        let level = if rising { level } else { 1. - level };
+                        window.paint_quad(fill(
+                            Bounds::new(
+                                point(px(origin + x), px(bottom - level * (height - 4.))),
+                                size(px(2.), px(1.5)),
+                            ),
+                            color(TEXT),
+                        ));
+                        x += 2.;
+                    }
+                };
+                if fade_in > 0. {
+                    ramp(0., fade_in, true);
+                }
+                if fade_out > 0. {
+                    ramp(width - fade_out, fade_out, false);
                 }
             },
         )
@@ -953,6 +1195,7 @@ impl EditorScreen {
                 .when(selected, |piece| {
                     piece.border_2().border_color(color(ACCENT))
                 })
+                .when(silent, |piece| piece.opacity(0.4))
                 .child(waveform)
                 .on_mouse_down(
                     MouseButton::Left,

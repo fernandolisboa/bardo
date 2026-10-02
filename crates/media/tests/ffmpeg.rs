@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, ClipSource, Ffmpeg, FrameSize, Framing, LoudnessTarget, MIN_VERSION,
-    MediaError, Monitor, Output, ProxyCodec, ProxySettings, RenderPlan, VideoClip, VideoEncoder,
+    AudioClip, AudioTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize, Framing, LoudnessTarget,
+    MIN_VERSION, MediaError, Monitor, Output, ProxyCodec, ProxySettings, RenderPlan, VideoClip,
+    VideoEncoder,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -78,8 +79,12 @@ fn short_plan() -> RenderPlan {
                     duration: secs(3.0),
                     at: secs(0.25),
                     gain_db: 0.0,
+                    fade_in: Duration::ZERO,
+                    fade_out: Duration::ZERO,
+                    skipped: Duration::ZERO,
                 }],
                 gain_db: 0.0,
+                duck: None,
             },
             AudioTrack {
                 clips: vec![AudioClip {
@@ -88,8 +93,12 @@ fn short_plan() -> RenderPlan {
                     duration: secs(4.0),
                     at: Duration::ZERO,
                     gain_db: 0.0,
+                    fade_in: Duration::ZERO,
+                    fade_out: Duration::ZERO,
+                    skipped: Duration::ZERO,
                 }],
                 gain_db: -12.0,
+                duck: None,
             },
         ],
     }
@@ -298,6 +307,135 @@ fn renders_with_every_working_encoder() {
     }
 }
 
+/// 4 s of music over black: what the mix tests render.
+fn music_plan() -> RenderPlan {
+    RenderPlan {
+        video: vec![VideoClip {
+            source: ClipSource::Black,
+            start: Duration::ZERO,
+            duration: secs(4.0),
+            framing: Framing::Fit,
+        }],
+        audio: vec![AudioTrack {
+            clips: vec![AudioClip {
+                source: fixture("music-4s.mp3"),
+                start: Duration::ZERO,
+                duration: secs(4.0),
+                at: Duration::ZERO,
+                gain_db: 0.0,
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+                skipped: Duration::ZERO,
+            }],
+            gain_db: 0.0,
+            duck: None,
+        }],
+    }
+}
+
+/// The level of a rendered file's sound from `from` for `length` seconds,
+/// in dBFS (RMS of the mono downmix).
+fn level(ffmpeg: &Ffmpeg, path: &Path, from: f64, length: f64) -> f64 {
+    let output = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args([
+            "-v",
+            "error",
+            "-ss",
+            &format!("{from}"),
+            "-t",
+            &format!("{length}"),
+        ])
+        .arg("-i")
+        .arg(path)
+        .args(["-vn", "-f", "f32le", "-ac", "1", "-ar", "48000", "pipe:1"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let samples: Vec<f32> = output
+        .stdout
+        .chunks_exact(4)
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect();
+    assert!(!samples.is_empty());
+    let power = samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / samples.len() as f64;
+    10.0 * power.max(1e-12).log10()
+}
+
+fn render_audio(ffmpeg: &Ffmpeg, plan: &RenderPlan, destination: &Path) {
+    ffmpeg
+        .render(
+            plan,
+            &vertical(VideoEncoder::OpenH264),
+            None,
+            destination,
+            &(),
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_ducked_render_is_quieter_by_the_depth_only_where_it_dips() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("duck");
+    let plain = dir.join("plain.mp4");
+    let ducked = dir.join("ducked.mp4");
+    render_audio(&ffmpeg, &music_plan(), &plain);
+    let mut plan = music_plan();
+    plan.audio[0].duck = Some(Duck {
+        depth_db: 12.0,
+        dips: vec![Dip {
+            start: 1.35,
+            full: 1.5,
+            release: 2.5,
+            end: 3.0,
+        }],
+    });
+    render_audio(&ffmpeg, &plan, &ducked);
+
+    let difference = |from: f64, length: f64| {
+        level(&ffmpeg, &plain, from, length) - level(&ffmpeg, &ducked, from, length)
+    };
+    let before = difference(0.2, 1.0);
+    let under = difference(1.6, 0.8);
+    let after = difference(3.1, 0.8);
+    assert!(
+        before.abs() < 0.5,
+        "untouched before the dip: {before:.2} dB"
+    );
+    assert!(
+        (under - 12.0).abs() < 1.0,
+        "down by the depth: {under:.2} dB"
+    );
+    assert!(after.abs() < 0.5, "back up after it: {after:.2} dB");
+    // Ramps, not steps: half way down the release it is about half as low.
+    let ramp = difference(2.7, 0.1);
+    assert!(ramp > 3.0 && ramp < 9.0, "on the way back up: {ramp:.2} dB");
+}
+
+#[test]
+fn rendered_fades_rise_from_and_fall_to_silence() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("fades");
+    let plain = dir.join("plain.mp4");
+    let faded = dir.join("faded.mp4");
+    render_audio(&ffmpeg, &music_plan(), &plain);
+    let mut plan = music_plan();
+    let clip = &mut plan.audio[0].clips[0];
+    clip.fade_in = secs(1.0);
+    clip.fade_out = secs(1.0);
+    render_audio(&ffmpeg, &plan, &faded);
+
+    let difference = |from: f64, length: f64| {
+        level(&ffmpeg, &plain, from, length) - level(&ffmpeg, &faded, from, length)
+    };
+    assert!(difference(0.0, 0.1) > 15.0, "starts from silence");
+    assert!(difference(1.5, 1.0).abs() < 0.5, "full level between");
+    assert!(difference(3.9, 0.1) > 15.0, "ends in silence");
+    // Half way in, about -6 dB.
+    let half = difference(0.45, 0.1);
+    assert!(half > 4.0 && half < 8.0, "half way in: {half:.2} dB");
+}
+
 #[test]
 fn cancelling_a_render_leaves_no_file() {
     let dir = scratch("cancel");
@@ -378,8 +516,12 @@ fn rough_cut_plan() -> RenderPlan {
                 duration: secs(3.0),
                 at: Duration::ZERO,
                 gain_db: 0.0,
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+                skipped: Duration::ZERO,
             }],
             gain_db: 0.0,
+            duck: None,
         }],
     }
 }

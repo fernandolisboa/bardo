@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKeyError, AspectRatio, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind,
-    JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network, NetworkAccountFieldError,
-    NicheSeedError, PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError,
-    TemplateKind, TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage, Visibility,
-    VoiceCategory, VoiceFlag,
+    ApiKeyError, AspectRatio, ChannelFieldError, ContentLanguage, Country, Decibels,
+    JobFailureKind, JobKind, JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network,
+    NetworkAccountFieldError, NicheSeedError, PersonaFieldError, Provider, RateFieldError,
+    SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem, TemplateVariable,
+    ThemeFieldError, UiLanguage, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -700,6 +700,24 @@ pub enum Text {
     EditorSourceIn,
     EditorRemove,
     EditorShortcuts,
+    EditorInspectorTrack,
+    EditorLevel,
+    EditorMute,
+    EditorSolo,
+    EditorMuteShort,
+    EditorSoloShort,
+    EditorDuck,
+    EditorDuckDepth,
+    EditorDuckHint,
+    /// Placeholder: `{depth}`.
+    EditorDuckReadout,
+    EditorNoMusic,
+    EditorFades,
+    EditorFadeIn,
+    EditorFadeOut,
+    /// Placeholder: `{n}`, signed, with the decimal separator.
+    EditorDecibels,
+    EditorLaneHint,
 }
 
 impl Text {
@@ -1424,6 +1442,22 @@ impl Text {
             Text::EditorSourceIn => "editor.inspector.source_in",
             Text::EditorRemove => "editor.inspector.remove",
             Text::EditorShortcuts => "editor.inspector.shortcuts",
+            Text::EditorInspectorTrack => "editor.mix.inspector_track",
+            Text::EditorLevel => "editor.mix.level",
+            Text::EditorMute => "editor.mix.mute",
+            Text::EditorSolo => "editor.mix.solo",
+            Text::EditorMuteShort => "editor.mix.mute_short",
+            Text::EditorSoloShort => "editor.mix.solo_short",
+            Text::EditorDuck => "editor.mix.duck",
+            Text::EditorDuckDepth => "editor.mix.duck_depth",
+            Text::EditorDuckHint => "editor.mix.duck_hint",
+            Text::EditorDuckReadout => "editor.mix.duck_readout",
+            Text::EditorNoMusic => "editor.mix.no_music",
+            Text::EditorFades => "editor.mix.fades",
+            Text::EditorFadeIn => "editor.mix.fade_in",
+            Text::EditorFadeOut => "editor.mix.fade_out",
+            Text::EditorDecibels => "editor.mix.decibels",
+            Text::EditorLaneHint => "editor.mix.lane_hint",
         };
         Cow::Borrowed(key)
     }
@@ -1532,6 +1566,25 @@ impl Catalog {
             self.get(Text::DecimalSeparator)
         );
         self.format(Text::MoneyFormat, &[("n", &n)])
+    }
+
+    /// A level to the tenth of a decibel, signed: `−6.0 dB`, `+1,5 dB`,
+    /// `0.0 dB`.
+    pub fn decibels(&self, level: Decibels) -> String {
+        let tenths = level.tenths();
+        let sign = match tenths {
+            ..0 => "\u{2212}",
+            0 => "",
+            _ => "+",
+        };
+        let magnitude = tenths.unsigned_abs();
+        let n = format!(
+            "{sign}{}{}{}",
+            magnitude / 10,
+            self.get(Text::DecimalSeparator),
+            magnitude % 10
+        );
+        self.format(Text::EditorDecibels, &[("n", &n)])
     }
 
     /// An amount spent or estimated, to the cent: `$1,234.56`, `US$ 0,05`.
@@ -2166,6 +2219,22 @@ mod tests {
             Text::EditorSourceIn,
             Text::EditorRemove,
             Text::EditorShortcuts,
+            Text::EditorInspectorTrack,
+            Text::EditorLevel,
+            Text::EditorMute,
+            Text::EditorSolo,
+            Text::EditorMuteShort,
+            Text::EditorSoloShort,
+            Text::EditorDuck,
+            Text::EditorDuckDepth,
+            Text::EditorDuckHint,
+            Text::EditorDuckReadout,
+            Text::EditorNoMusic,
+            Text::EditorFades,
+            Text::EditorFadeIn,
+            Text::EditorFadeOut,
+            Text::EditorDecibels,
+            Text::EditorLaneHint,
         ];
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));
@@ -2321,6 +2390,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn decibels_read_signed_in_each_language() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        assert_eq!(en.decibels(Decibels::from_tenths(-60)), "\u{2212}6.0 dB");
+        assert_eq!(pt.decibels(Decibels::from_tenths(15)), "+1,5 dB");
+        assert_eq!(en.decibels(Decibels::ZERO), "0.0 dB");
+        assert_eq!(en.decibels(Decibels::from_tenths(-300)), "\u{2212}30.0 dB");
     }
 
     #[test]

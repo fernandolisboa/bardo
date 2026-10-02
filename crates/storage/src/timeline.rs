@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    NarrationId, ProfileId, RepositoryError, SavedAudioItem, SavedTimeline, SavedVideoItem,
-    ScenePlanId, TimelineRepository, VideoProjectId,
+    AudioLane, Decibels, Ducking, LaneMix, Mix, NarrationId, ProfileId, RepositoryError,
+    SavedAudioItem, SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -34,6 +34,27 @@ fn duration(nanos: i64) -> Result<Duration, RepositoryError> {
 const VIDEO: &str = "video";
 const NARRATION: &str = "narration";
 
+fn lane_name(lane: AudioLane) -> &'static str {
+    match lane {
+        AudioLane::Narration => "narration",
+        AudioLane::Music => "music",
+        AudioLane::Sfx => "sfx",
+    }
+}
+
+fn lane_named(name: &str) -> Result<AudioLane, RepositoryError> {
+    AudioLane::ALL
+        .into_iter()
+        .find(|lane| lane_name(*lane) == name)
+        .ok_or_else(|| invalid(format!("an audio lane named {name}")))
+}
+
+fn tenths(value: i64) -> Result<Decibels, RepositoryError> {
+    i16::try_from(value)
+        .map(Decibels::from_tenths)
+        .map_err(boxed)
+}
+
 /// An item row as stored.
 struct ItemRow {
     track: String,
@@ -42,6 +63,8 @@ struct ItemRow {
     start: i64,
     at: i64,
     duration: i64,
+    fade_in: i64,
+    fade_out: i64,
 }
 
 impl TimelineRepository for Database {
@@ -53,7 +76,8 @@ impl TimelineRepository for Database {
         let project_id = project.to_string();
         let head = conn
             .query_row(
-                "SELECT profile_id, scene_plan_id, narration_id, updated_at
+                "SELECT profile_id, scene_plan_id, narration_id, updated_at, duck_music,
+                        duck_depth_tenths
                  FROM timeline WHERE project_id = ?1",
                 [&project_id],
                 |row| {
@@ -62,17 +86,52 @@ impl TimelineRepository for Database {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, i64>(3)?,
+                        row.get::<_, bool>(4)?,
+                        row.get::<_, i64>(5)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
-        let Some((owner, plan, narration, updated_at)) = head else {
+        let Some((owner, plan, narration, updated_at, duck, depth)) = head else {
             return Ok(None);
         };
+        let mut mix = Mix::default();
+        mix.ducking = Ducking {
+            on: duck,
+            depth: tenths(depth)?,
+        };
+        let mut lanes = conn
+            .prepare(
+                "SELECT lane, gain_tenths, muted, solo FROM timeline_lane WHERE project_id = ?1",
+            )
+            .map_err(boxed)?;
+        let lanes = lanes
+            .query_map([&project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(3)?,
+                ))
+            })
+            .map_err(boxed)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(boxed)?;
+        for (lane, gain, muted, solo) in lanes {
+            mix.set_lane(
+                lane_named(&lane)?,
+                LaneMix {
+                    gain: tenths(gain)?,
+                    muted,
+                    solo,
+                },
+            );
+        }
         let mut statement = conn
             .prepare(
-                "SELECT track, scene, file, start_ns, at_ns, duration_ns FROM timeline_item
+                "SELECT track, scene, file, start_ns, at_ns, duration_ns, fade_in_ns, fade_out_ns
+                 FROM timeline_item
                  WHERE project_id = ?1 ORDER BY track, position",
             )
             .map_err(boxed)?;
@@ -85,6 +144,8 @@ impl TimelineRepository for Database {
                     start: row.get(3)?,
                     at: row.get(4)?,
                     duration: row.get(5)?,
+                    fade_in: row.get(6)?,
+                    fade_out: row.get(7)?,
                 })
             })
             .map_err(boxed)?
@@ -97,6 +158,7 @@ impl TimelineRepository for Database {
             narration: NarrationId::from(uuid(&narration)?),
             video: Vec::new(),
             narration_items: Vec::new(),
+            mix,
             updated_at: from_unix_millis(updated_at),
         };
         for row in rows {
@@ -111,6 +173,8 @@ impl TimelineRepository for Database {
                     start: duration(row.start)?,
                     at: duration(row.at)?,
                     duration: duration(row.duration)?,
+                    fade_in: duration(row.fade_in)?,
+                    fade_out: duration(row.fade_out)?,
                 }),
                 (track, ..) => return Err(invalid(format!("an item of track {track}"))),
             }
@@ -126,23 +190,42 @@ impl TimelineRepository for Database {
         tx.execute("DELETE FROM timeline WHERE project_id = ?1", [&project])
             .map_err(boxed)?;
         tx.execute(
-            "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at,
+                                   duck_music, duck_depth_tenths)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 project,
                 timeline.owner.to_string(),
                 timeline.scene_plan.to_string(),
                 timeline.narration.to_string(),
                 to_unix_millis(timeline.updated_at),
+                timeline.mix.ducking.on,
+                timeline.mix.ducking.depth.tenths(),
             ],
         )
         .map_err(boxed)?;
+        for lane in AudioLane::ALL {
+            let mix = timeline.mix.lane(lane);
+            tx.execute(
+                "INSERT INTO timeline_lane (project_id, lane, gain_tenths, muted, solo)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    project,
+                    lane_name(lane),
+                    mix.gain.tenths(),
+                    mix.muted,
+                    mix.solo
+                ],
+            )
+            .map_err(boxed)?;
+        }
         {
             let mut insert = tx
                 .prepare(
                     "INSERT INTO timeline_item
-                         (project_id, track, position, scene, file, start_ns, at_ns, duration_ns)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                         (project_id, track, position, scene, file, start_ns, at_ns, duration_ns,
+                          fade_in_ns, fade_out_ns)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 )
                 .map_err(boxed)?;
             let mut at = Duration::ZERO;
@@ -157,6 +240,8 @@ impl TimelineRepository for Database {
                         nanos(item.start)?,
                         nanos(at)?,
                         nanos(item.duration)?,
+                        0i64,
+                        0i64,
                     ])
                     .map_err(boxed)?;
                 at += item.duration;
@@ -172,6 +257,8 @@ impl TimelineRepository for Database {
                         nanos(item.start)?,
                         nanos(item.at)?,
                         nanos(item.duration)?,
+                        nanos(item.fade_in)?,
+                        nanos(item.fade_out)?,
                     ])
                     .map_err(boxed)?;
             }
@@ -244,14 +331,42 @@ mod tests {
                     start: Duration::ZERO,
                     at: Duration::ZERO,
                     duration: Duration::from_millis(1_000),
+                    fade_in: Duration::from_nanos(266_666_666),
+                    fade_out: Duration::ZERO,
                 },
                 SavedAudioItem {
                     file: "narration-1.mp3".into(),
                     start: Duration::from_millis(1_400),
                     at: Duration::from_nanos(1_033_333_333),
                     duration: Duration::from_millis(2_123),
+                    fade_in: Duration::ZERO,
+                    fade_out: Duration::from_millis(500),
                 },
             ],
+            mix: {
+                let mut mix = Mix::default();
+                mix.set_lane(
+                    AudioLane::Music,
+                    LaneMix {
+                        gain: Decibels::from_tenths(-65),
+                        muted: false,
+                        solo: true,
+                    },
+                );
+                mix.set_lane(
+                    AudioLane::Narration,
+                    LaneMix {
+                        gain: Decibels::from_tenths(15),
+                        muted: true,
+                        solo: false,
+                    },
+                );
+                mix.ducking = Ducking {
+                    on: false,
+                    depth: Decibels::from_tenths(185),
+                };
+                mix
+            },
             updated_at: time(1_800_000_002_000),
         }
     }
@@ -292,5 +407,17 @@ mod tests {
         orphan.project = VideoProjectId::new();
         assert!(db.save_timeline(&orphan).is_err());
         assert_eq!(db.saved_timeline(orphan.project).unwrap(), None);
+    }
+
+    #[test]
+    fn a_cut_saved_before_the_mix_existed_plays_the_default_mix() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut saved = cut(&project);
+        saved.mix = Mix::default();
+        db.save_timeline(&saved).unwrap();
+        // As a cut saved by an older Bardo: no lane rows.
+        db.conn().execute("DELETE FROM timeline_lane", []).unwrap();
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
     }
 }

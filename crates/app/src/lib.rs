@@ -443,6 +443,11 @@ impl Bardo {
         self.catalog.compact(n)
     }
 
+    /// A level to the tenth of a decibel, e.g. `−6.0 dB`, `+1,5 dB`.
+    pub fn decibels(&self, level: bardo_domain::Decibels) -> String {
+        self.catalog.decibels(level)
+    }
+
     /// An amount to the cent, e.g. `$1,234.56`, `US$ 0,05`.
     pub fn money(&self, amount: bardo_domain::Money) -> String {
         self.catalog.money(amount)
