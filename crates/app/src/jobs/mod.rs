@@ -14,6 +14,7 @@ pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::clips::ClipHandler;
+use crate::music_prompts::MusicPromptHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::proxies::ProxyHandler;
@@ -33,6 +34,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
     pub(crate) proxies: ProxyHandler,
+    pub(crate) music_prompts: MusicPromptHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -48,6 +50,7 @@ pub(crate) fn built_in_handlers(
         scenes,
         clips,
         proxies,
+        music_prompts,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -63,6 +66,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::SceneImages, scenes);
     handlers.insert(JobKind::SceneClips, Arc::new(clips));
     handlers.insert(JobKind::Proxies, Arc::new(proxies));
+    handlers.insert(JobKind::MusicPrompt, Arc::new(music_prompts));
     handlers
 }
 
@@ -676,6 +680,8 @@ mod tests {
             narrations: Arc::clone(db) as _,
             scene_plans: Arc::clone(db) as _,
             timelines: Arc::clone(db) as _,
+            media_assets: Arc::clone(db) as _,
+            music_prompts: Arc::clone(db) as _,
             network_accounts: Arc::clone(db) as _,
             costs: Arc::clone(db) as _,
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),

@@ -14,6 +14,10 @@
 //! is the one exception at its end: played past it, it holds its last
 //! frame, as the rough cut does with a clip shorter than its scene.
 //!
+//! The three audio tracks edit alike: narration, music and SFX items split,
+//! trim, move, fade and go the same way. Placing an imported asset on a
+//! track is an insert ([`Timeline::place`]), undone by removing it.
+//!
 //! Captions live in narration-file time (`crate::Captions`): trimming one
 //! moves its end in the file by the shift asked, and it stops at the
 //! captions beside it, at one frame long and at the narration's ends.
@@ -22,7 +26,7 @@ use std::time::Duration;
 
 use crate::{
     AspectRatio, AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, Framing,
-    GAIN_RANGE, LaneMix, Timeline, VideoItem, VideoSource, caption_text, min_length,
+    GAIN_RANGE, LaneMix, MediaAsset, Timeline, VideoItem, VideoSource, caption_text, min_length,
 };
 
 /// A track of the timeline that edits reach.
@@ -32,8 +36,37 @@ pub enum Track {
     Video,
     /// A1: the narration.
     Narration,
+    /// A2: the music.
+    Music,
+    /// A3: the sound effects.
+    Sfx,
     /// CC: the captions, by index in `Captions::lines`.
     Captions,
+}
+
+impl Track {
+    /// The audio lane it is, for an audio track.
+    pub fn lane(self) -> Option<AudioLane> {
+        match self {
+            Track::Narration => Some(AudioLane::Narration),
+            Track::Music => Some(AudioLane::Music),
+            Track::Sfx => Some(AudioLane::Sfx),
+            Track::Video | Track::Captions => None,
+        }
+    }
+
+    /// The track of an audio lane.
+    pub fn of_lane(lane: AudioLane) -> Track {
+        match lane {
+            AudioLane::Narration => Track::Narration,
+            AudioLane::Music => Track::Music,
+            AudioLane::Sfx => Track::Sfx,
+        }
+    }
+
+    pub fn is_audio(self) -> bool {
+        self.lane().is_some()
+    }
 }
 
 /// One item of the timeline.
@@ -61,6 +94,14 @@ impl ItemRef {
     pub fn caption(index: usize) -> Self {
         Self {
             track: Track::Captions,
+            index,
+        }
+    }
+
+    /// Item `index` of an audio lane's track.
+    pub fn audio(lane: AudioLane, index: usize) -> Self {
+        Self {
+            track: Track::of_lane(lane),
             index,
         }
     }
@@ -156,7 +197,8 @@ pub enum Edit {
         edge: Edge,
         by: Shift,
     },
-    /// Moves an audio item to start at `to`, short of the items beside it.
+    /// Moves an audio item to start at `to`, short of the items beside it
+    /// on its track.
     Move {
         track: Track,
         index: usize,
@@ -172,8 +214,8 @@ pub enum Edit {
         track: Track,
         index: usize,
     },
-    /// Puts an item at `index`: the undo of `Delete`. An audio item keeps
-    /// its time and must fit there.
+    /// Puts an item at `index`: the undo of `Delete`, and how media is
+    /// placed. An audio item keeps its time and must fit there.
     Insert {
         track: Track,
         index: usize,
@@ -222,11 +264,15 @@ pub enum EditError {
     /// A split must leave each part at least a frame long.
     #[error("the cut is not inside the item")]
     OutsideItem,
-    /// Moving is for audio items, reordering for video ones.
+    /// Moving is for audio items, reordering for video ones; media goes
+    /// on the tracks of its kind.
     #[error("the edit does not apply to that track")]
     WrongTrack,
     #[error("the item overlaps another")]
     Overlaps,
+    /// Media shorter than a frame has nothing to place.
+    #[error("the media is shorter than a frame")]
+    TooShort,
     #[error("the items are not two halves of one cut")]
     CannotJoin,
     /// The item is already there, or cannot go further that way.
@@ -239,11 +285,34 @@ pub enum EditError {
 
 impl Timeline {
     fn len_of(&self, track: Track) -> usize {
-        match track {
-            Track::Video => self.video.len(),
-            Track::Narration => self.narration.len(),
-            Track::Captions => self.captions.lines.len(),
+        match track.lane() {
+            Some(lane) => self.audio(lane).len(),
+            None if track == Track::Video => self.video.len(),
+            None => self.captions.lines.len(),
         }
+    }
+
+    /// The items of an audio track; `None` for the others.
+    fn audio_track(&self, track: Track) -> Option<&[AudioItem]> {
+        Some(self.audio(track.lane()?))
+    }
+
+    fn audio_track_mut(&mut self, track: Track) -> Option<&mut Vec<AudioItem>> {
+        match track {
+            Track::Narration => Some(&mut self.narration),
+            Track::Music => Some(&mut self.music),
+            Track::Sfx => Some(&mut self.sfx),
+            Track::Video | Track::Captions => None,
+        }
+    }
+
+    /// The audio items of `track`, or `WrongTrack`.
+    fn audio_items(&self, track: Track) -> Result<&[AudioItem], EditError> {
+        self.audio_track(track).ok_or(EditError::WrongTrack)
+    }
+
+    fn audio_items_mut(&mut self, track: Track) -> Result<&mut Vec<AudioItem>, EditError> {
+        self.audio_track_mut(track).ok_or(EditError::WrongTrack)
     }
 
     fn check(&self, track: Track, index: usize) -> Result<(), EditError> {
@@ -260,16 +329,19 @@ impl Timeline {
     pub fn span(&self, item: ItemRef) -> Option<(Duration, Duration)> {
         match item.track {
             Track::Video => self.video.get(item.index).map(|v| (v.at, v.duration)),
-            Track::Narration => self.narration.get(item.index).map(|a| (a.at, a.duration)),
             Track::Captions => self.caption_hull(item.index),
+            audio => self
+                .audio_track(audio)?
+                .get(item.index)
+                .map(|a| (a.at, a.duration)),
         }
     }
 
-    /// The end of the audio item before `index`, or zero.
-    fn audio_floor(&self, index: usize) -> Duration {
+    /// The end of the item before `index` on an audio track, or zero.
+    fn audio_floor(items: &[AudioItem], index: usize) -> Duration {
         index
             .checked_sub(1)
-            .map_or(Duration::ZERO, |before| self.narration[before].end())
+            .map_or(Duration::ZERO, |before| items[before].end())
     }
 
     /// How far each edge of an item can go: the shortest and longest shift
@@ -297,17 +369,18 @@ impl Timeline {
                 }
             }
             (Track::Video, Edge::End) => (-shrink, Shift::FAR),
-            (Track::Narration, Edge::Start) => {
-                let audio = &self.narration[item.index];
-                let room = audio.at - self.audio_floor(item.index);
+            (Track::Captions, _) => unreachable!("captions return above"),
+            (track, Edge::Start) => {
+                let items = self.audio_items(track)?;
+                let audio = &items[item.index];
+                let room = audio.at - Self::audio_floor(items, item.index);
                 (Shift::earlier(audio.start.min(room)), shrink)
             }
-            (Track::Captions, _) => unreachable!("captions return above"),
-            (Track::Narration, Edge::End) => {
-                let audio = &self.narration[item.index];
+            (track, Edge::End) => {
+                let items = self.audio_items(track)?;
+                let audio = &items[item.index];
                 let in_file = audio.length.saturating_sub(audio.start + audio.duration);
-                let room = self
-                    .narration
+                let room = items
                     .get(item.index + 1)
                     .map_or(in_file, |next| in_file.min(next.at - audio.end()));
                 (-shrink, Shift::later(room))
@@ -341,16 +414,75 @@ impl Timeline {
     /// The earliest and latest start an audio item can move to; the latest
     /// is `None` when nothing comes after it.
     pub fn move_limits(&self, item: ItemRef) -> Result<(Duration, Option<Duration>), EditError> {
-        if item.track != Track::Narration {
-            return Err(EditError::WrongTrack);
-        }
-        self.check(item.track, item.index)?;
-        let audio = &self.narration[item.index];
-        let latest = self
-            .narration
+        let items = self.audio_items(item.track)?;
+        let audio = items.get(item.index).ok_or(EditError::NoSuchItem)?;
+        let latest = items
             .get(item.index + 1)
             .map(|next| next.at - audio.duration);
-        Ok((self.audio_floor(item.index), latest))
+        Ok((Self::audio_floor(items, item.index), latest))
+    }
+
+    /// The edit that places `asset` on `track` at `at` (a frame boundary),
+    /// and where the new item goes: footage goes whole into the video
+    /// track at the cut nearest `at`; audio starts at `at`, or where the
+    /// item playing there ends, and plays whole or until the next item on
+    /// its track. Refused for a track of another kind (`WrongTrack`), for
+    /// media shorter than a frame (`TooShort`) or where not a frame of it
+    /// fits (`Overlaps`).
+    pub fn place(
+        &self,
+        asset: &MediaAsset,
+        track: Track,
+        at: Duration,
+    ) -> Result<(Edit, ItemRef), EditError> {
+        if !asset.fits(track) {
+            return Err(EditError::WrongTrack);
+        }
+        if track == Track::Video {
+            let item = VideoItem::footage(asset).ok_or(EditError::TooShort)?;
+            // Before the clip whose middle is past `at`.
+            let index = self
+                .video
+                .iter()
+                .position(|clip| at < clip.at + clip.duration / 2)
+                .unwrap_or(self.video.len());
+            let edit = Edit::Insert {
+                track,
+                index,
+                item: Item::Video(item),
+            };
+            return Ok((edit, ItemRef { track, index }));
+        }
+        if asset.duration < min_length() {
+            return Err(EditError::TooShort);
+        }
+        let items = self.audio_items(track)?;
+        let at = items
+            .iter()
+            .find(|item| item.at <= at && at < item.end())
+            .map_or(at, AudioItem::end);
+        let index = items.partition_point(|item| item.at < at);
+        let room = items
+            .get(index)
+            .map_or(asset.duration, |next| next.at.saturating_sub(at));
+        let duration = asset.duration.min(room);
+        if duration < min_length() {
+            return Err(EditError::Overlaps);
+        }
+        let edit = Edit::Insert {
+            track,
+            index,
+            item: Item::Audio(AudioItem {
+                file: asset.file.clone(),
+                start: Duration::ZERO,
+                at,
+                duration,
+                length: asset.duration,
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+            }),
+        };
+        Ok((edit, ItemRef { track, index }))
     }
 
     /// Makes `edit` and returns the edit that undoes it. On error the
@@ -409,20 +541,21 @@ impl Timeline {
                 self.video[index].duration = first;
                 self.video.insert(index + 1, second);
             }
-            Track::Narration => {
+            Track::Captions => return Err(EditError::WrongTrack),
+            audio => {
                 // The fade-in stays with the first part, the fade-out goes
                 // with the second; a split inside a fade ends it there.
-                let mut second = self.narration[index].clone();
+                let items = self.audio_items_mut(audio)?;
+                let mut second = items[index].clone();
                 second.start += first;
                 second.at = at;
                 second.duration = end - at;
                 second.fade_in = Duration::ZERO;
-                let first_part = &mut self.narration[index];
+                let first_part = &mut items[index];
                 first_part.duration = first;
                 first_part.fade_out = Duration::ZERO;
-                self.narration.insert(index + 1, second);
+                items.insert(index + 1, second);
             }
-            Track::Captions => return Err(EditError::WrongTrack),
         }
         Ok(Edit::Join { track, index })
     }
@@ -438,7 +571,7 @@ impl Timeline {
             Track::Video => {
                 let (first, second) = (&self.video[index], &self.video[index + 1]);
                 // A framing set on one half alone would be lost.
-                if first.scene != second.scene
+                if first.picture != second.picture
                     || first.source != second.source
                     || first.framing != second.framing
                     || second.start != first.start + first.duration
@@ -449,8 +582,10 @@ impl Timeline {
                 self.video[index].duration += second.duration;
                 second.at
             }
-            Track::Narration => {
-                let (first, second) = (&self.narration[index], &self.narration[index + 1]);
+            Track::Captions => return Err(EditError::WrongTrack),
+            audio => {
+                let items = self.audio_items_mut(audio)?;
+                let (first, second) = (&items[index], &items[index + 1]);
                 // Fades where they meet would be lost.
                 if first.file != second.file
                     || first.end() != second.at
@@ -460,13 +595,12 @@ impl Timeline {
                 {
                     return Err(EditError::CannotJoin);
                 }
-                let second = self.narration.remove(index + 1);
-                let joined = &mut self.narration[index];
+                let second = items.remove(index + 1);
+                let joined = &mut items[index];
                 joined.duration += second.duration;
                 joined.fade_out = second.fade_out;
                 second.at
             }
-            Track::Captions => return Err(EditError::WrongTrack),
         };
         Ok(Edit::Split { track, index, at })
     }
@@ -499,16 +633,6 @@ impl Timeline {
                 let item = &mut self.video[index];
                 item.duration = moved(item.duration)?;
             }
-            (Track::Narration, Edge::Start) => {
-                let item = &mut self.narration[index];
-                let (at, start, duration) =
-                    (moved(item.at)?, moved(item.start)?, shrunk(item.duration)?);
-                (item.at, item.start, item.duration) = (at, start, duration);
-            }
-            (Track::Narration, Edge::End) => {
-                let item = &mut self.narration[index];
-                item.duration = moved(item.duration)?;
-            }
             (Track::Captions, Edge::Start) => {
                 let caption = &mut self.captions.lines[index];
                 caption.start = moved(caption.start)?;
@@ -516,6 +640,16 @@ impl Timeline {
             (Track::Captions, Edge::End) => {
                 let caption = &mut self.captions.lines[index];
                 caption.end = moved(caption.end)?;
+            }
+            (audio, Edge::Start) => {
+                let item = &mut self.audio_items_mut(audio)?[index];
+                let (at, start, duration) =
+                    (moved(item.at)?, moved(item.start)?, shrunk(item.duration)?);
+                (item.at, item.start, item.duration) = (at, start, duration);
+            }
+            (audio, Edge::End) => {
+                let item = &mut self.audio_items_mut(audio)?[index];
+                item.duration = moved(item.duration)?;
             }
         }
         Ok(Edit::Trim {
@@ -529,7 +663,7 @@ impl Timeline {
     fn move_item(&mut self, track: Track, index: usize, to: Duration) -> Result<Edit, EditError> {
         let (earliest, latest) = self.move_limits(ItemRef { track, index })?;
         let to = latest.map_or(to, |latest| to.min(latest)).max(earliest);
-        let item = &mut self.narration[index];
+        let item = &mut self.audio_items_mut(track)?[index];
         if to == item.at {
             return Err(EditError::NoChange);
         }
@@ -556,8 +690,8 @@ impl Timeline {
         self.check(track, index)?;
         let item = match track {
             Track::Video => Item::Video(self.video.remove(index)),
-            Track::Narration => Item::Audio(self.narration.remove(index)),
             Track::Captions => Item::Caption(self.captions.lines.remove(index)),
+            audio => Item::Audio(self.audio_items_mut(audio)?.remove(index)),
         };
         Ok(Edit::Insert { track, index, item })
     }
@@ -573,19 +707,17 @@ impl Timeline {
                 }
                 self.video.insert(index, video.clone());
             }
-            (Track::Narration, Item::Audio(audio)) => {
-                let after_previous = self.audio_floor(index) <= audio.at;
-                let before_next = self
-                    .narration
-                    .get(index)
-                    .is_none_or(|next| audio.end() <= next.at);
+            (track, Item::Audio(audio)) if track.is_audio() => {
+                let items = self.audio_items_mut(track)?;
+                let after_previous = Self::audio_floor(items, index) <= audio.at;
+                let before_next = items.get(index).is_none_or(|next| audio.end() <= next.at);
                 if !after_previous || !before_next {
                     return Err(EditError::Overlaps);
                 }
                 if audio.duration < min_length() || audio.start + audio.duration > audio.length {
                     return Err(EditError::OutsideItem);
                 }
-                self.narration.insert(index, audio.clone());
+                items.insert(index, audio.clone());
             }
             (Track::Captions, Item::Caption(caption)) => {
                 let lines = &self.captions.lines;
@@ -644,11 +776,10 @@ impl Timeline {
         fade_in: Duration,
         fade_out: Duration,
     ) -> Result<Edit, EditError> {
-        if track != Track::Narration {
-            return Err(EditError::WrongTrack);
-        }
-        self.check(track, index)?;
-        let item = &mut self.narration[index];
+        let item = self
+            .audio_items_mut(track)?
+            .get_mut(index)
+            .ok_or(EditError::NoSuchItem)?;
         if (item.fade_in, item.fade_out) == (fade_in, fade_out) {
             return Err(EditError::NoChange);
         }
@@ -791,8 +922,8 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::timeline::tests::{image, ms, narration, plan, scene};
-    use crate::{CropPosition, SceneClip, frame_time};
+    use crate::timeline::tests::{asset, image, ms, narration, plan, scene};
+    use crate::{CropPosition, MediaKind, SceneClip, frame_time};
 
     /// Three scenes over a 4 s narration: a still (0-1 s), a clip (1-3 s)
     /// and a still (3-4 s).
@@ -1324,7 +1455,7 @@ mod tests {
     #[test]
     fn reordering_moves_a_clip_and_the_others_make_room() {
         let after = round_trip(&timeline(), Edit::Reorder { from: 0, to: 2 });
-        let scenes: Vec<usize> = after.video().iter().map(|item| item.scene).collect();
+        let scenes: Vec<usize> = after.video().iter().filter_map(VideoItem::scene).collect();
         assert_eq!(scenes, vec![1, 2, 0]);
         assert_eq!(
             spans(&after, Track::Video),
@@ -1335,7 +1466,7 @@ mod tests {
             ]
         );
         let after = round_trip(&timeline(), Edit::Reorder { from: 2, to: 0 });
-        let scenes: Vec<usize> = after.video().iter().map(|item| item.scene).collect();
+        let scenes: Vec<usize> = after.video().iter().filter_map(VideoItem::scene).collect();
         assert_eq!(scenes, vec![2, 0, 1]);
         assert_unchanged(Edit::Reorder { from: 1, to: 1 }, EditError::NoChange);
         assert_unchanged(Edit::Reorder { from: 0, to: 3 }, EditError::NoSuchItem);
@@ -2042,5 +2173,163 @@ mod tests {
             }),
             Err(EditError::CannotJoin)
         );
+    }
+
+    fn music_bed() -> MediaAsset {
+        asset(MediaKind::Audio, "bed.mp3", 3_000)
+    }
+
+    /// The timeline with `asset` placed on `track` at `at`.
+    fn placed(timeline: &Timeline, asset: &MediaAsset, track: Track, at: u64) -> Timeline {
+        let (edit, _) = timeline.place(asset, track, ms(at)).unwrap();
+        round_trip(timeline, edit)
+    }
+
+    #[test]
+    fn audio_is_placed_whole_at_the_playhead_and_removed_by_undo() {
+        let after = placed(&timeline(), &music_bed(), Track::Music, 500);
+        let music = after.music();
+        assert_eq!(music.len(), 1);
+        assert_eq!((music[0].at, music[0].duration), (ms(500), ms(3_000)));
+        assert_eq!((music[0].start, music[0].length), (ms(0), ms(3_000)));
+        assert_eq!(after.duration(), ms(4_000));
+        assert!(after.sfx().is_empty() && after.narration().len() == 1);
+    }
+
+    #[test]
+    fn audio_placed_over_an_item_goes_after_it_and_stops_at_the_next() {
+        let boom = asset(MediaKind::Audio, "boom.wav", 2_000);
+        let first = placed(&timeline(), &boom, Track::Sfx, 0);
+        let second = placed(&first, &boom, Track::Sfx, 3_000);
+        // Over the first: it goes where that one ends, short of the second.
+        let third = placed(&second, &boom, Track::Sfx, 1_200);
+        let spans: Vec<_> = third
+            .sfx()
+            .iter()
+            .map(|item| (item.at, item.duration))
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                (ms(0), ms(2_000)),
+                (ms(2_000), ms(1_000)),
+                (ms(3_000), ms(2_000))
+            ]
+        );
+        // No room left between them.
+        assert_eq!(
+            third.place(&boom, Track::Sfx, ms(2_500)),
+            Err(EditError::Overlaps)
+        );
+    }
+
+    #[test]
+    fn media_goes_only_on_the_tracks_of_its_kind() {
+        let timeline = timeline();
+        let footage = asset(MediaKind::Video, "walk.mp4", 2_000);
+        for track in [Track::Music, Track::Sfx, Track::Narration, Track::Captions] {
+            assert_eq!(
+                timeline.place(&footage, track, ms(0)),
+                Err(EditError::WrongTrack)
+            );
+        }
+        for track in [Track::Video, Track::Narration, Track::Captions] {
+            assert_eq!(
+                timeline.place(&music_bed(), track, ms(0)),
+                Err(EditError::WrongTrack)
+            );
+        }
+    }
+
+    #[test]
+    fn footage_goes_whole_into_the_cut_nearest_the_playhead() {
+        // 2.01 s: whole frames only.
+        let footage = asset(MediaKind::Video, "walk.mp4", 2_010);
+        // Inside the clip at 1-3 s, before its middle: before it.
+        let after = placed(&timeline(), &footage, Track::Video, 1_500);
+        let video = after.video();
+        assert_eq!(video.len(), 4);
+        assert_eq!(video[1].scene(), None);
+        assert_eq!(
+            video[1].source,
+            VideoSource::Clip {
+                file: "walk.mp4".into(),
+                length: ms(2_010)
+            }
+        );
+        assert_eq!(
+            (video[1].at, video[1].duration),
+            (ms(1_000), frame_time(60))
+        );
+        assert_eq!(video[1].framing, Framing::FILL);
+        // The scenes after it move on.
+        assert_eq!(video[2].at, ms(1_000) + frame_time(60));
+        // Past the middle of the last clip: at the end.
+        let at_end = placed(&timeline(), &footage, Track::Video, 3_600);
+        assert_eq!(at_end.video()[3].scene(), None);
+        // Shorter than a frame: nothing to place.
+        let blink = asset(MediaKind::Video, "blink.mp4", 20);
+        assert_eq!(
+            timeline().place(&blink, Track::Video, ms(0)),
+            Err(EditError::TooShort)
+        );
+        let click = asset(MediaKind::Audio, "click.wav", 20);
+        assert_eq!(
+            timeline().place(&click, Track::Sfx, ms(0)),
+            Err(EditError::TooShort)
+        );
+    }
+
+    #[test]
+    fn music_and_sfx_items_split_trim_move_fade_and_go_like_the_narration() {
+        let with_music = placed(&timeline(), &music_bed(), Track::Music, 0);
+        let split = round_trip(
+            &with_music,
+            Edit::Split {
+                track: Track::Music,
+                index: 0,
+                at: ms(1_000),
+            },
+        );
+        assert_eq!(split.music()[1].start, ms(1_000));
+        let moved = round_trip(
+            &split,
+            Edit::Move {
+                track: Track::Music,
+                index: 1,
+                to: ms(1_500),
+            },
+        );
+        assert_eq!(moved.music()[1].at, ms(1_500));
+        let trimmed = round_trip(
+            &moved,
+            Edit::Trim {
+                track: Track::Music,
+                index: 1,
+                edge: Edge::Start,
+                by: Shift::earlier(ms(2_000)),
+            },
+        );
+        // It stops at the piece before it.
+        assert_eq!(trimmed.music()[1].at, ms(1_000));
+        let faded = round_trip(
+            &trimmed,
+            Edit::SetFades {
+                track: Track::Music,
+                index: 0,
+                fade_in: ms(300),
+                fade_out: ms(0),
+            },
+        );
+        assert_eq!(faded.music()[0].fade_in, ms(300));
+        let gone = round_trip(
+            &faded,
+            Edit::Delete {
+                track: Track::Music,
+                index: 0,
+            },
+        );
+        assert_eq!(gone.music().len(), 1);
+        assert_eq!(gone.narration(), timeline().narration());
     }
 }

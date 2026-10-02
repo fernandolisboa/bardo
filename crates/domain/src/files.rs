@@ -3,7 +3,7 @@
 //! keeps file names; the files stay on disk where the user and other tools
 //! can reach them.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::VideoProjectId;
@@ -30,6 +30,16 @@ pub trait ProjectFiles: Send + Sync {
 
     fn read(&self, project: VideoProjectId, name: &str) -> Result<Vec<u8>, ProjectFileError>;
 
+    /// Copies the file at `source`, outside the project, in as `name`,
+    /// replacing any file of that name. The source is left as it was, and
+    /// a reader never sees the copy half written.
+    fn copy_in(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+        source: &Path,
+    ) -> Result<(), ProjectFileError>;
+
     fn exists(&self, project: VideoProjectId, name: &str) -> bool;
 
     /// Removes the file; a file already gone is not an error.
@@ -51,6 +61,15 @@ impl<T: ProjectFiles + ?Sized> ProjectFiles for Arc<T> {
 
     fn read(&self, project: VideoProjectId, name: &str) -> Result<Vec<u8>, ProjectFileError> {
         (**self).read(project, name)
+    }
+
+    fn copy_in(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+        source: &Path,
+    ) -> Result<(), ProjectFileError> {
+        (**self).copy_in(project, name, source)
     }
 
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {

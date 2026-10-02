@@ -52,7 +52,9 @@ mod generation;
 mod image;
 mod job;
 mod market;
+mod media;
 mod mix;
+mod music_prompt;
 mod narration;
 mod network;
 mod network_account;
@@ -104,10 +106,15 @@ pub use job::{
 pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
 };
+pub use media::{
+    AssetSource, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, UnknownAssetSource,
+    UnknownMediaKind,
+};
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,
     DuckEnvelope, Ducking, GAIN_RANGE, LaneMix, Mix,
 };
+pub use music_prompt::{MusicPrompt, MusicPromptFieldError, MusicPromptRepository};
 pub use narration::{
     InvalidWordTimings, Narration, NarrationId, NarrationRepository, NarrationSource, WordTiming,
     WordTimings, spoken_words,
@@ -161,7 +168,7 @@ pub use theme::{
     rank_themes,
 };
 pub use timeline::{
-    AudioItem, CaptionSpan, FPS, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,
+    AudioItem, CaptionSpan, FPS, Picture, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,
     TimelineRepository, VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame,
     snap, timecode,
 };

@@ -26,12 +26,12 @@ use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
     AspectRatio, AudioLane, CaptionStyle, CropPosition, DUCK_RANGE, Decibels, Ducking, Edge, FPS,
-    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, PictureSize, Track, VideoProjectId,
-    crop_window, frame_time, timecode,
+    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, PictureSize, Track,
+    VideoProjectId, crop_window, frame_time, timecode,
 };
 use bardo_app::{
-    Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PREVIEW_LANDSCAPE,
-    Text, caption_look,
+    Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, EditAction, Editor, EditorView,
+    PREVIEW_LANDSCAPE, Text, caption_look,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -39,8 +39,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, Bounds, ClickEvent, Entity, EventEmitter, FocusHandle, Focusable as _, Hsla,
     ImageSource, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, Pixels, RenderImage, SharedString, Subscription, Task, Window, canvas, div, img, px,
-    relative, rgb,
+    ObjectFit, PathPromptOptions, Pixels, RenderImage, SharedString, Subscription, Task, Window,
+    canvas, div, img, px, relative, rgb,
 };
 
 use crate::shell::tr;
@@ -97,12 +97,21 @@ pub(crate) mod tokens {
     pub const NARRATION: u32 = 0x2FA295;
     pub const NARRATION_FILL: u32 = 0x14302D;
     pub const MUSIC: u32 = 0xBBAEF7;
+    pub const MUSIC_FILL: u32 = 0x231F36;
+    pub const SFX_FILL: u32 = 0x7A4230;
     pub const SFX_EDGE: u32 = 0xC8664A;
     pub const CAPTIONS: u32 = 0xD2D6DC;
     pub const CAPTIONS_INK: u32 = 0x121417;
 }
 
 use tokens::*;
+
+/// The bin's tabs (caption styles live in the caption inspector).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BinTab {
+    Scenes,
+    Media,
+}
 
 /// What the editor asks of the window around it.
 pub enum EditorEvent {
@@ -128,6 +137,13 @@ pub struct EditorScreen {
     crop_drag: Option<CropDrag>,
     /// Where the picture behind a crop window is drawn.
     framing_box: Rc<Cell<Bounds<Pixels>>>,
+    bin_tab: BinTab,
+    /// Files chosen for import and not done yet.
+    importing: usize,
+    /// The file dialog and the imports it started.
+    import_task: Option<Task<()>>,
+    /// Files the last import refused, by name, and why.
+    import_errors: Vec<(String, Text)>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -181,6 +197,10 @@ impl EditorScreen {
             caption_loaded: None,
             crop_drag: None,
             framing_box: Rc::default(),
+            bin_tab: BinTab::Scenes,
+            importing: 0,
+            import_task: None,
+            import_errors: Vec::new(),
             _poll: poll,
             _subscriptions: subscriptions,
         }
@@ -276,6 +296,11 @@ impl EditorScreen {
             return;
         }
         self.revision = revision;
+        self.reload(cx);
+    }
+
+    /// Reads the editor again now, for media imported meanwhile.
+    fn reload(&mut self, cx: &mut Context<Self>) {
         let Self { bardo, editor, .. } = self;
         if let Some(editor) = editor.as_mut() {
             self.error = bardo
@@ -284,6 +309,80 @@ impl EditorScreen {
                 .err()
                 .map(|error| error.message());
         }
+        cx.notify();
+    }
+
+    /// Asks for files and imports each one off the UI thread, showing it in
+    /// the bin as soon as it is in.
+    fn import_media(&mut self, cx: &mut Context<Self>) {
+        let Some(project) = self.editor.as_ref().map(Editor::project) else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let import = match bardo.media_import(project) {
+            Ok(import) => import,
+            Err(error) => {
+                self.error = Some(error.message());
+                cx.notify();
+                return;
+            }
+        };
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(tr(bardo, Text::EditorMediaImport)),
+        });
+        self.import_errors.clear();
+        self.import_task = Some(cx.spawn(async move |this, cx| {
+            let paths = match chosen.await {
+                Ok(Ok(Some(paths))) => paths,
+                Ok(Err(_)) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.error = Some(Text::FileDialogFailed);
+                        this.import_task = None;
+                        cx.notify();
+                    });
+                    return;
+                }
+                Ok(Ok(None)) | Err(_) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.import_task = None;
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.importing = paths.len();
+                cx.notify();
+            });
+            for path in paths {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let import = import.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { import.run(&path) })
+                    .await;
+                let alive = this.update(cx, |this, cx| {
+                    this.importing = this.importing.saturating_sub(1);
+                    if let Err(error) = result {
+                        this.import_errors.push((name, error.message()));
+                    }
+                    this.reload(cx);
+                });
+                if alive.is_err() {
+                    return;
+                }
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.import_task = None;
+                cx.notify();
+            });
+        }));
         cx.notify();
     }
 
@@ -403,8 +502,8 @@ impl EditorScreen {
         );
     }
 
-    /// Alt+← and Alt+→: a clip one place earlier or later, a narration
-    /// piece one frame.
+    /// Alt+← and Alt+→: a clip one place earlier or later, an audio item
+    /// one frame.
     fn nudge_selection(&mut self, by: i64, cx: &mut Context<Self>) {
         let Some(editor) = self.editor.as_ref() else {
             return;
@@ -425,7 +524,7 @@ impl EditorScreen {
                     to,
                 }
             }
-            Track::Narration => {
+            Track::Narration | Track::Music | Track::Sfx => {
                 let Some((at, _)) = editor.view().span(item) else {
                     return;
                 };
@@ -658,8 +757,16 @@ impl EditorScreen {
         let selected_scene = self.editor.as_ref().and_then(|editor| {
             editor
                 .selected_clip()
-                .map(|index| editor.view().clips[index].scene)
+                .and_then(|index| editor.view().clips[index].shows.scene())
         });
+        let tab = |id: &'static str, text: Text, which: BinTab| {
+            tool_button(id, true, self.bin_tab == which)
+                .child(tr(bardo, text))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.bin_tab = which;
+                    cx.notify();
+                }))
+        };
         let tabs = h_flex()
             .gap_1()
             .px_2()
@@ -667,18 +774,24 @@ impl EditorScreen {
             .items_center()
             .border_b_1()
             .border_color(color(HAIRLINE))
-            .child(tool_button("bin-scenes", true, true).child(tr(bardo, Text::EditorBinScenes)))
-            .child(tool_button("bin-media", false, false).child(tr(bardo, Text::EditorBinMedia)))
+            .child(tab("bin-scenes", Text::EditorBinScenes, BinTab::Scenes))
+            .child(tab("bin-media", Text::EditorBinMedia, BinTab::Media))
             .child(
                 tool_button("bin-styles", false, false)
                     .child(tr(bardo, Text::EditorBinCaptionStyles)),
             );
+        if self.bin_tab == BinTab::Media {
+            return self.render_media_bin(tabs, view, cx);
+        }
         let rows = view.map_or_else(Vec::new, |view| {
             view.scenes
                 .iter()
                 .map(|scene| {
                     let index = scene.index;
-                    let clip = view.clips.iter().position(|clip| clip.scene == index);
+                    let clip = view
+                        .clips
+                        .iter()
+                        .position(|clip| clip.shows == ClipShows::Scene(index));
                     let at = clip.map(|clip| view.clips[clip].at);
                     let selected = selected_scene == Some(index);
                     let thumbnail = match &scene.thumbnail {
@@ -761,6 +874,186 @@ impl EditorScreen {
                     .p_2()
                     .gap_1()
                     .children(rows),
+            )
+            .into_any_element()
+    }
+
+    /// The Media tab: import files, see each one with its length and state,
+    /// and put it on a track at the playhead.
+    fn render_media_bin(
+        &self,
+        tabs: gpui_kit::Div,
+        view: Option<&EditorView>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let mono = cx.theme().mono_font_family.clone();
+        let editing = view.is_some_and(|view| view.timeline.is_some());
+        let busy = self.import_task.is_some();
+        let import = tool_button("media-import", !busy, false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(icon(IconName::Plus, TEXT_2))
+            .child(tr(bardo, Text::EditorMediaImport))
+            .when(!busy, |button| {
+                button.on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.import_media(cx)))
+            });
+        let header = v_flex()
+            .gap_1p5()
+            .p_2()
+            .border_b_1()
+            .border_color(color(HAIRLINE))
+            .child(h_flex().child(import))
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(color(TEXT_3))
+                    .child(tr(bardo, Text::EditorMediaImportHint)),
+            )
+            .when(self.importing > 0, |header| {
+                let importing = if self.importing == 1 {
+                    bardo.text(Text::EditorMediaImportingOne).into_owned()
+                } else {
+                    bardo.text_with(
+                        Text::EditorMediaImporting,
+                        &[("count", &self.importing.to_string())],
+                    )
+                };
+                header.child(label(importing, ACCENT))
+            })
+            .children(self.import_errors.iter().map(|(file, reason)| {
+                div()
+                    .text_size(px(11.))
+                    .text_color(color(ERROR))
+                    .child(SharedString::from(bardo.text_with(
+                        Text::EditorMediaImportFailed,
+                        &[("file", file), ("reason", &bardo.text(*reason))],
+                    )))
+            }));
+        let media = view.map_or(&[][..], |view| view.media.as_slice());
+        let rows: Vec<AnyElement> = media
+            .iter()
+            .enumerate()
+            .map(|(row, media)| {
+                let asset = &media.asset;
+                let audio = asset.kind == MediaKind::Audio;
+                let kind = match asset.picture {
+                    Some(picture) => format!(
+                        "{} · {}×{}",
+                        bardo.text(Text::EditorMediaVideo),
+                        picture.width,
+                        picture.height
+                    ),
+                    None => bardo.text(Text::EditorMediaAudio).into_owned(),
+                };
+                let state = match &media.media {
+                    ClipMedia::Ready => None,
+                    ClipMedia::Building => Some((Text::EditorProxyBuilding, TEXT_2)),
+                    ClipMedia::Missing => Some((Text::EditorMediaMissing, ERROR)),
+                    ClipMedia::ProxyFailed(_) => Some((Text::EditorProxyFailed, ERROR)),
+                    ClipMedia::ProxyCancelled => Some((Text::EditorProxyCancelled, ERROR)),
+                };
+                let id = asset.id;
+                let place = |button: &'static str, text: Text, track: Track| {
+                    tool_button((button, row), editing, false)
+                        .h(px(22.))
+                        .border_1()
+                        .border_color(color(HAIRLINE))
+                        .child(tr(bardo, text))
+                        .when(editing, |button| {
+                            button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.edit(EditAction::Place { asset: id, track }, cx);
+                            }))
+                        })
+                };
+                // One button per track the domain lets this kind of media on.
+                let actions = h_flex()
+                    .gap_1()
+                    .children(asset.kind.tracks().iter().filter_map(|&track| {
+                        let (button, text) = match track {
+                            Track::Music => ("media-music", Text::EditorMediaAddMusic),
+                            Track::Sfx => ("media-sfx", Text::EditorMediaAddSfx),
+                            Track::Video => ("media-video", Text::EditorMediaAddVideo),
+                            Track::Narration | Track::Captions => return None,
+                        };
+                        Some(place(button, text, track))
+                    }));
+                v_flex()
+                    .id(("bin-media", row))
+                    .gap_1()
+                    .p_2()
+                    .rounded(px(4.))
+                    .hover(|style| style.bg(color(RAISED)))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .w(px(4.))
+                                    .h(px(28.))
+                                    .flex_none()
+                                    .rounded(px(2.))
+                                    .bg(color(if audio { MUSIC } else { VIDEO_EDGE })),
+                            )
+                            .child(
+                                v_flex()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .child(
+                                        label(asset.name.clone(), TEXT)
+                                            .overflow_hidden()
+                                            .text_ellipsis(),
+                                    )
+                                    .child(label(kind, TEXT_3).text_size(px(11.))),
+                            )
+                            .child(
+                                label(short_duration(asset.duration), TEXT_3)
+                                    .font_family(mono.clone()),
+                            ),
+                    )
+                    .children(
+                        state.map(|(text, tint)| label(tr(bardo, text), tint).text_size(px(11.))),
+                    )
+                    .child(actions)
+                    .into_any_element()
+            })
+            .collect();
+        let empty = rows.is_empty().then(|| {
+            div()
+                .p_2()
+                .text_size(px(12.))
+                .text_color(color(TEXT_3))
+                .child(tr(bardo, Text::EditorMediaEmpty))
+        });
+        v_flex()
+            .w(px(260.))
+            .flex_none()
+            .h_full()
+            .bg(color(PANEL))
+            .border_r_1()
+            .border_color(color(HAIRLINE))
+            .child(tabs)
+            .child(header)
+            .child(
+                v_flex()
+                    .id("media-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_2()
+                    .gap_1()
+                    .children(empty)
+                    .children(rows)
+                    .when(!media.is_empty(), |list| {
+                        list.child(
+                            div()
+                                .px_2()
+                                .text_size(px(11.))
+                                .text_color(color(TEXT_3))
+                                .child(tr(bardo, Text::EditorMediaAddHint)),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -1178,18 +1471,31 @@ impl EditorScreen {
                 .child(tr(bardo, Text::EditorShortcuts))
         };
         let audio = selection
-            .filter(|item| item.track == Track::Narration)
+            .filter(|item| item.track.is_audio())
             .and_then(|item| {
                 let editor = self.editor.as_ref()?;
                 let piece = editor
                     .view()
                     .timeline
                     .as_ref()?
-                    .narration()
+                    .audio(item.track.lane()?)
                     .get(item.index)?
                     .clone();
                 Some(piece)
             });
+        // The imported file an audio item plays, by the name the user knows.
+        let audio_name = audio.as_ref().and_then(|piece| {
+            let editor = self.editor.as_ref()?;
+            Some(editor.view().media_file(&piece.file)?.asset.name.clone())
+        });
+        let audio_track =
+            selection
+                .filter(|item| item.track.is_audio())
+                .map(|item| match item.track {
+                    Track::Music => Text::EditorTrackMusic,
+                    Track::Sfx => Text::EditorTrackSfx,
+                    _ => Text::EditorTrackNarration,
+                });
         let lane = self.editor.as_ref().and_then(|editor| {
             Some((
                 editor.selected_lane()?,
@@ -1198,7 +1504,7 @@ impl EditorScreen {
         });
         let section = |text: Text| label(tr(bardo, text), TEXT_3);
         let fades = selection
-            .filter(|item| item.track == Track::Narration)
+            .filter(|item| item.track.is_audio())
             .zip(audio.as_ref())
             .map(|(item, piece)| {
                 let (fade_in, fade_out) = piece.fades();
@@ -1242,11 +1548,19 @@ impl EditorScreen {
                 .p_3()
                 .gap_3()
                 .child(
-                    div()
-                        .text_size(px(13.))
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(color(TEXT))
-                        .child(tr(bardo, Text::EditorTrackNarration)),
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(color(TEXT))
+                                .child(tr(
+                                    bardo,
+                                    audio_track.unwrap_or(Text::EditorTrackNarration),
+                                )),
+                        )
+                        .children(audio_name.map(|name| label(name, TEXT_2))),
                 )
                 .child(
                     v_flex()
@@ -1312,12 +1626,14 @@ impl EditorScreen {
                                     .text_size(px(13.))
                                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                     .text_color(color(TEXT))
-                                    .child(bardo.text_with(
-                                        Text::EditorSceneLabel,
-                                        &[("n", &(clip.scene + 1).to_string())],
-                                    )),
+                                    .child(clip_name(bardo, &clip)),
                             )
-                            .children(provenance.into_iter().map(|line| label(line, TEXT_2))),
+                            .children(provenance.into_iter().map(|line| {
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(color(TEXT_2))
+                                    .child(SharedString::from(line))
+                            })),
                     )
                     .child(
                         v_flex()
@@ -1347,17 +1663,19 @@ impl EditorScreen {
                                     .child(SharedString::from(file)),
                             )
                     }))
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(label(tr(bardo, Text::EditorNarrationLabel), TEXT_3))
-                            .child(
-                                div()
-                                    .text_size(px(12.))
-                                    .text_color(color(TEXT_2))
-                                    .child(SharedString::from(clip.text.clone())),
-                            ),
-                    )
+                    .when(clip.shows.scene().is_some(), |body| {
+                        body.child(
+                            v_flex()
+                                .gap_1()
+                                .child(label(tr(bardo, Text::EditorNarrationLabel), TEXT_3))
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .text_color(color(TEXT_2))
+                                        .child(SharedString::from(clip.text.clone())),
+                                ),
+                        )
+                    })
                     .child(remove())
                     .child(shortcuts())
                     .into_any_element()
@@ -1384,7 +1702,7 @@ impl EditorScreen {
                                 Text::EditorInspectorTrack
                             } else if caption.is_some() {
                                 Text::EditorInspectorCaption
-                            } else if selection.is_some_and(|item| item.track == Track::Narration) {
+                            } else if selection.is_some_and(|item| item.track.is_audio()) {
                                 Text::EditorInspectorAudio
                             } else {
                                 Text::EditorInspectorClip
@@ -1917,10 +2235,27 @@ impl EditorScreen {
                 TEXT_2,
             ))
             .child(
-                tool_button("empty-back", true, true)
+                h_flex()
                     .mt_2()
-                    .child(tr(bardo, Text::EditorBackToProject))
-                    .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::Close))),
+                    .gap_2()
+                    .child(
+                        tool_button("empty-back", true, true)
+                            .child(tr(bardo, Text::EditorBackToProject))
+                            .on_click(
+                                cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::Close)),
+                            ),
+                    )
+                    // Media can come in before the cut: it waits in the bin.
+                    .child(
+                        tool_button("empty-import", true, false)
+                            .border_1()
+                            .border_color(color(HAIRLINE))
+                            .child(tr(bardo, Text::EditorMediaImport))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.bin_tab = BinTab::Media;
+                                this.import_media(cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
@@ -1941,6 +2276,10 @@ fn provenance_lines(bardo: &Bardo, clip: &ClipView) -> Vec<String> {
         )
     };
     let mut lines = Vec::new();
+    if let ClipShows::Footage(_) = clip.shows {
+        lines.push(bardo.text(Text::EditorSourceFootage).into_owned());
+        return lines;
+    }
     match &clip.image {
         Some(image) => lines.push(source(Text::EditorSourceImage, image)),
         None => lines.push(bardo.text(Text::EditorSourceNone).into_owned()),
@@ -1962,14 +2301,31 @@ fn problem_line(bardo: &Bardo, problem: &ClipProblem) -> String {
         (_, Some(_)) => bardo.text(Text::EditorProblemFileGone).into_owned(),
         (_, None) => bardo.text(Text::EditorProblemNoImage).into_owned(),
     };
-    bardo.text_with(
-        Text::EditorProblemLine,
-        &[
-            ("n", &(problem.scene + 1).to_string()),
-            ("file", problem.file.as_deref().unwrap_or("—")),
-            ("reason", &reason),
-        ],
-    )
+    let file = problem.file.as_deref().unwrap_or("—");
+    match &problem.shows {
+        ClipShows::Scene(scene) => bardo.text_with(
+            Text::EditorProblemLine,
+            &[
+                ("n", &(scene + 1).to_string()),
+                ("file", file),
+                ("reason", &reason),
+            ],
+        ),
+        ClipShows::Footage(name) => bardo.text_with(
+            Text::EditorProblemFootageLine,
+            &[("name", name), ("file", file), ("reason", &reason)],
+        ),
+    }
+}
+
+/// A clip's name: its scene, or the imported file's name.
+pub(crate) fn clip_name(bardo: &Bardo, clip: &ClipView) -> String {
+    match &clip.shows {
+        ClipShows::Scene(scene) => {
+            bardo.text_with(Text::EditorSceneLabel, &[("n", &(scene + 1).to_string())])
+        }
+        ClipShows::Footage(name) => name.clone(),
+    }
 }
 
 impl Render for EditorScreen {

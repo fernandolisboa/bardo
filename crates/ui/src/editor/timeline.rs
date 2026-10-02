@@ -4,14 +4,16 @@
 //! `Bardo::edit` when the mouse is released.
 //!
 //! Dragging an item's edge trims it; dragging a clip drops it between two
-//! others; dragging a narration piece moves it. While a drag runs, a ghost
-//! shows where the item will land (snapped, and clamped as the domain
-//! will), and a line marks the word it snapped to. Alt frees it from the
-//! words.
+//! others; dragging an audio item (narration, music, SFX) moves it. While
+//! a drag runs, a ghost shows where the item will land (snapped, and
+//! clamped as the domain will), and a line marks the word it snapped to.
+//! Alt frees it from the words.
 //!
 //! Each audio lane's header carries its mute and solo buttons and its
 //! level; clicking the header picks the lane, and the inspector shows its
-//! mix. The music lane draws how the music ducks under the narration.
+//! mix. The music lane draws how the music ducks under the narration. The
+//! music and SFX lanes show the imported audio placed there, with its
+//! waveform.
 //!
 //! The caption lane shows each caption where the cut plays its words, as a
 //! chip with its text; dragging a chip's edge retimes it.
@@ -25,7 +27,7 @@ use bardo_app::bardo_domain::{
     AudioItem, AudioLane, DUCK_RANGE, Decibels, DuckEnvelope, Ducking, Edge, ItemRef, LaneMix,
     Track as Lane, timecode,
 };
-use bardo_app::{ClipMedia, ClipView, EditAction, Editor, EditorView, NarrationTrack, Text};
+use bardo_app::{ClipMedia, ClipView, EditAction, Editor, EditorView, Text};
 use gpui_kit::component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -35,7 +37,7 @@ use gpui_kit::{
 };
 
 use super::tokens::*;
-use super::{EditorScreen, color, icon, label, tool_button};
+use super::{EditorScreen, clip_name, color, icon, label, tool_button};
 use crate::shell::tr;
 
 /// The track header column, shared with the toolbar's timecode.
@@ -155,7 +157,8 @@ impl Track {
             Track::Captions => Some(Lane::Captions),
             Track::Video => Some(Lane::Video),
             Track::Narration => Some(Lane::Narration),
-            Track::Music | Track::Sfx => None,
+            Track::Music => Some(Lane::Music),
+            Track::Sfx => Some(Lane::Sfx),
         }
     }
 
@@ -168,6 +171,16 @@ impl Track {
             Track::Sfx => SFX_EDGE,
         }
     }
+}
+
+/// How an audio lane draws its items.
+#[derive(Clone, Copy)]
+struct PieceLook {
+    /// The element id's prefix.
+    id: &'static str,
+    fill: u32,
+    /// The waveform's and the outline's color.
+    wave: u32,
 }
 
 /// Zoom and scroll: view state the domain has no say in.
@@ -319,7 +332,8 @@ impl EditorScreen {
                 .collect::<Vec<_>>(),
         );
         let mut narration = Some(self.render_narration(view, selection, cx));
-        let mut music = Some(self.render_music(view, cx));
+        let mut music = Some(self.render_music(view, selection, cx));
+        let mut sfx = Some(self.render_sfx(view, selection, cx));
         let mut captions = Some(self.render_captions(view, selection, cx));
         let (mut ghost, snap_line) = self.render_drag(view);
         let lanes = Track::ALL.map(|track| {
@@ -334,7 +348,7 @@ impl EditorScreen {
                 Track::Video => lane.children(video.take().into_iter().flatten()),
                 Track::Narration => lane.children(narration.take().into_iter().flatten()),
                 Track::Music => lane.children(music.take().into_iter().flatten()),
-                Track::Sfx => lane,
+                Track::Sfx => lane.children(sfx.take().into_iter().flatten()),
             };
             let ghost = ghost
                 .take_if(|(on, _)| track.item_track() == Some(*on))
@@ -700,22 +714,88 @@ impl EditorScreen {
             .into_any_element()
     }
 
-    /// The music lane: empty until music can be placed there, with the
-    /// ducking envelope drawn where it will lower it.
-    fn render_music(&self, view: &EditorView, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let bardo = self.bardo.read(cx);
-        let mut elements = vec![
-            div()
-                .absolute()
-                .left(px(8.))
-                .bottom(px(4.))
-                .child(label(tr(bardo, Text::EditorNoMusic), TEXT_3).text_size(px(11.)))
-                .into_any_element(),
-        ];
+    /// The music lane: the music placed there, or a note that there is
+    /// none, with the ducking envelope drawn where it will lower it.
+    fn render_music(
+        &self,
+        view: &EditorView,
+        selection: Option<ItemRef>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut elements = self.render_audio_lane(view, AudioLane::Music, selection, cx);
+        if elements.is_empty() {
+            let bardo = self.bardo.read(cx);
+            elements.push(
+                div()
+                    .absolute()
+                    .left(px(8.))
+                    .bottom(px(4.))
+                    .child(label(tr(bardo, Text::EditorNoMusic), TEXT_3).text_size(px(11.)))
+                    .into_any_element(),
+            );
+        }
         if let Some(envelope) = view.ducking.clone() {
             elements.push(self.envelope(envelope));
         }
         elements
+    }
+
+    /// The SFX lane: the sounds placed there.
+    fn render_sfx(
+        &self,
+        view: &EditorView,
+        selection: Option<ItemRef>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        self.render_audio_lane(view, AudioLane::Sfx, selection, cx)
+    }
+
+    /// The imported audio on the music or SFX lane, each item with its
+    /// file's name and waveform.
+    fn render_audio_lane(
+        &self,
+        view: &EditorView,
+        lane: AudioLane,
+        selection: Option<ItemRef>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(timeline) = &view.timeline else {
+            return Vec::new();
+        };
+        let silent = !timeline.mix().is_audible(lane);
+        let look = match lane {
+            AudioLane::Music => PieceLook {
+                id: "music",
+                fill: MUSIC_FILL,
+                wave: MUSIC,
+            },
+            AudioLane::Sfx | AudioLane::Narration => PieceLook {
+                id: "sfx",
+                fill: SFX_FILL,
+                wave: SFX_EDGE,
+            },
+        };
+        timeline
+            .audio(lane)
+            .iter()
+            .enumerate()
+            .filter_map(|(index, piece)| {
+                let item = ItemRef::audio(lane, index);
+                let media = view.media_file(&piece.file);
+                let peaks = media.and_then(|media| media.peaks.clone());
+                let name = media.map(|media| media.asset.name.clone());
+                self.render_piece(
+                    item,
+                    piece,
+                    peaks,
+                    look,
+                    name,
+                    selection == Some(item),
+                    silent,
+                    cx,
+                )
+            })
+            .collect()
     }
 
     /// The ducking envelope across the lane: a line at the top that dips as
@@ -837,10 +917,7 @@ impl EditorScreen {
                     .object_fit(ObjectFit::Cover)
                     .opacity(0.85)
             });
-        let name = bardo.text_with(
-            Text::EditorSceneLabel,
-            &[("n", &(clip.scene + 1).to_string())],
-        );
+        let name = clip_name(bardo, clip);
         let element = div()
             .id(("clip", index))
             .absolute()
@@ -992,7 +1069,7 @@ impl EditorScreen {
                 },
                 _ => return,
             },
-            (Grip::Body, Lane::Narration) => EditAction::Move {
+            (Grip::Body, Lane::Narration | Lane::Music | Lane::Sfx) => EditAction::Move {
                 item,
                 to: drag.target(),
             },
@@ -1069,7 +1146,7 @@ impl EditorScreen {
                     );
                 }
             }
-            (Grip::Body, Lane::Narration) => {
+            (Grip::Body, Lane::Narration | Lane::Music | Lane::Sfx) => {
                 if let (Some((_, duration)), Some(at)) = (
                     view.span(drag.item),
                     editor.move_preview(drag.item, drag.target()),
@@ -1192,7 +1269,20 @@ impl EditorScreen {
             .enumerate()
             .filter_map(|(index, piece)| {
                 let item = ItemRef::narration(index);
-                self.render_piece(item, piece, narration, selection == Some(item), silent, cx)
+                self.render_piece(
+                    item,
+                    piece,
+                    narration.peaks.clone(),
+                    PieceLook {
+                        id: "narration",
+                        fill: NARRATION_FILL,
+                        wave: NARRATION,
+                    },
+                    None,
+                    selection == Some(item),
+                    silent,
+                    cx,
+                )
             })
             .collect();
         let state = &self.timeline;
@@ -1223,11 +1313,16 @@ impl EditorScreen {
         elements
     }
 
+    /// An audio item where the cut plays it: its stretch of the waveform,
+    /// its fades and, when given, its file's name.
+    #[allow(clippy::too_many_arguments)]
     fn render_piece(
         &self,
         item: ItemRef,
         piece: &AudioItem,
-        narration: &NarrationTrack,
+        peaks: Option<(u32, Vec<f32>)>,
+        look: PieceLook,
+        name: Option<String>,
         selected: bool,
         silent: bool,
         cx: &mut Context<Self>,
@@ -1239,7 +1334,7 @@ impl EditorScreen {
             return None;
         }
         let zoom = timeline.zoom;
-        let peaks = narration.peaks.clone();
+        let wave = look.wave;
         let source_start = piece.start.as_secs_f32();
         let (fade_in, fade_out) = piece.fades();
         let (fade_in, fade_out) = (fade_in.as_secs_f32() * zoom, fade_out.as_secs_f32() * zoom);
@@ -1273,7 +1368,7 @@ impl EditorScreen {
                                 point(px(origin + x), px(middle - bar / 2.)),
                                 size(px(1.), px(bar)),
                             ),
-                            color(NARRATION),
+                            color(wave),
                         ));
                         x += 2.;
                     }
@@ -1308,7 +1403,7 @@ impl EditorScreen {
         .inset_0();
         Some(
             div()
-                .id(("narration", item.index))
+                .id((look.id, item.index))
                 .absolute()
                 .top(px(4.))
                 .bottom(px(4.))
@@ -1316,14 +1411,27 @@ impl EditorScreen {
                 .w(px(width))
                 .overflow_hidden()
                 .rounded(px(3.))
-                .bg(color(NARRATION_FILL))
+                .bg(color(look.fill))
                 .border_1()
-                .border_color(color(NARRATION).opacity(0.6))
+                .border_color(color(look.wave).opacity(0.6))
                 .when(selected, |piece| {
                     piece.border_2().border_color(color(ACCENT))
                 })
                 .when(silent, |piece| piece.opacity(0.4))
                 .child(waveform)
+                .children(name.filter(|_| width > 48.).map(|name| {
+                    div()
+                        .absolute()
+                        .top(px(2.))
+                        .left(px(4.))
+                        .right(px(4.))
+                        .child(
+                            label(name, TEXT)
+                                .text_size(px(10.))
+                                .overflow_hidden()
+                                .text_ellipsis(),
+                        )
+                }))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, _, cx| {

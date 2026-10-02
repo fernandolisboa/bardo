@@ -72,11 +72,39 @@ The narration, one sentence per line: its number, when it is spoken, and its tex
 Split the narration into scenes. For each scene give the number of the sentence it starts at \
 and the image prompt that draws it.";
 
+const MUSIC_PROMPT_INSTRUCTIONS: &str = "\
+You write prompts for AI music tools (text-to-music generators). The music is the background bed \
+of a faceless YouTube video: a narrator speaks over it the whole time, so it supports the voice \
+and never competes with it.
+
+Write one prompt of 40 to 80 words in English, as plain text with no title, quotes, lists or \
+markdown. Describe genre, mood, tempo in BPM, key instruments and how the energy moves over the \
+track. The music is instrumental: no vocals, no choirs singing words, no spoken parts. Leave room \
+in the midrange where the voice sits.
+
+The music is original: never name artists, bands, songs, composers or soundtracks, and never ask \
+for an imitation of one. Keep it safe for advertisers.";
+
+const MUSIC_PROMPT_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Aesthetic notes: {{aesthetic_notes}}
+Audience country: {{country}}
+
+Video niche: {{niche}}
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+Video length: {{video_length}}
+
+Write the music prompt for this video. The track should loop or run for the video's length \
+without a hard ending.";
+
 /// Bardo's own text for `kind`: every profile's version 1.
 pub fn default_template(kind: TemplateKind) -> TemplateBody {
     let (instructions, prompt) = match kind {
         TemplateKind::Script => (SCRIPT_INSTRUCTIONS, SCRIPT_PROMPT),
         TemplateKind::ImagePrompt => (IMAGE_PROMPT_INSTRUCTIONS, IMAGE_PROMPT_PROMPT),
+        TemplateKind::MusicPrompt => (MUSIC_PROMPT_INSTRUCTIONS, MUSIC_PROMPT_PROMPT),
     };
     TemplateBody::new(kind, instructions, prompt).expect("the default templates are valid")
 }

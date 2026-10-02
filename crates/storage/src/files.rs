@@ -88,6 +88,32 @@ impl ProjectFiles for LocalProjectFiles {
         std::fs::read(self.folder(project).join(name)).map_err(|e| error(name, e))
     }
 
+    fn copy_in(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+        source: &Path,
+    ) -> Result<(), ProjectFileError> {
+        let name = checked(name)?;
+        let folder = self.folder(project);
+        std::fs::create_dir_all(&folder).map_err(|e| error(name, e))?;
+        // Copied beside it, then renamed over it, as `write` does. Bytes
+        // only, through a handle of its own: `fs::copy` would carry over a
+        // read-only flag, and Windows syncs only a handle open for writing.
+        let partial = folder.join(format!("{name}.partial"));
+        let copied = std::fs::File::open(source)
+            .and_then(|mut original| {
+                let mut copy = std::fs::File::create(&partial)?;
+                std::io::copy(&mut original, &mut copy)?;
+                copy.sync_all()
+            })
+            .and_then(|()| std::fs::rename(&partial, folder.join(name)));
+        if copied.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        copied.map_err(|e| error(name, e))
+    }
+
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {
         checked(name).is_ok_and(|name| self.folder(project).join(name).is_file())
     }
@@ -147,6 +173,17 @@ impl ProjectFiles for MemoryProjectFiles {
             .get(&(project, name.to_owned()))
             .cloned()
             .ok_or_else(|| error(name, std::io::ErrorKind::NotFound.into()))
+    }
+
+    /// Reads the source from disk.
+    fn copy_in(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+        source: &Path,
+    ) -> Result<(), ProjectFileError> {
+        let bytes = std::fs::read(source).map_err(|e| error(name, e))?;
+        self.write(project, name, &bytes)
     }
 
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {
@@ -230,5 +267,44 @@ mod tests {
         files.remove(project, "a.mp3").unwrap();
         assert!(!files.exists(project, "a.mp3"));
         assert!(files.write(project, "../a.mp3", b"a").is_err());
+    }
+
+    #[test]
+    fn copying_in_leaves_the_original_and_no_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("My Song.mp3");
+        std::fs::write(&original, b"tune").unwrap();
+        let files = LocalProjectFiles::new(dir.path().join("projects"));
+        let project = VideoProjectId::new();
+
+        files.copy_in(project, "media-1.mp3", &original).unwrap();
+        assert_eq!(files.read(project, "media-1.mp3").unwrap(), b"tune");
+        assert_eq!(std::fs::read(&original).unwrap(), b"tune");
+        let names: Vec<_> = std::fs::read_dir(files.path(project, "x").parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["media-1.mp3"]);
+
+        // A read-only original gives a copy Bardo can still replace.
+        let locked = dir.path().join("Locked.wav");
+        std::fs::write(&locked, b"riff").unwrap();
+        let mut permissions = std::fs::metadata(&locked).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&locked, permissions).unwrap();
+        files.copy_in(project, "media-3.wav", &locked).unwrap();
+        let copy = std::fs::metadata(files.path(project, "media-3.wav")).unwrap();
+        assert!(!copy.permissions().readonly());
+        assert_eq!(std::fs::read(&locked).unwrap(), b"riff");
+        // Writable again, so the temporary folder goes away on Windows.
+        let mut permissions = std::fs::metadata(&locked).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&locked, permissions).unwrap();
+
+        let missing = dir.path().join("gone.mp3");
+        assert!(files.copy_in(project, "media-2.mp3", &missing).is_err());
+        assert!(!files.exists(project, "media-2.mp3"));
+        assert!(files.copy_in(project, "../escape.mp3", &original).is_err());
     }
 }

@@ -151,6 +151,25 @@ fn probing_a_missing_file_fails_with_ffprobes_message() {
 }
 
 #[test]
+fn probing_a_file_that_is_not_media_fails() {
+    let path = scratch("not-media").join("song.mp3");
+    std::fs::write(&path, b"this is not an mp3 at all, only text").unwrap();
+    let error = ffmpeg().probe(&path).unwrap_err();
+    assert!(matches!(error, MediaError::Failed { .. }), "{error}");
+}
+
+#[test]
+fn a_still_image_probes_as_a_picture_with_no_length() {
+    // Imports tell images apart from video by this.
+    let probed = ffmpeg().probe(&fixture("still-640x360.png"));
+    match probed {
+        Err(MediaError::Parse(_)) => {}
+        Ok(info) => assert!(info.duration.is_zero() && info.audio.is_none(), "{info:?}"),
+        Err(error) => panic!("{error}"),
+    }
+}
+
+#[test]
 fn grabs_one_frame_scaled() {
     let size = FrameSize::new(160, 90);
     let frame = ffmpeg()
