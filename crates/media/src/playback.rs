@@ -312,8 +312,6 @@ impl Playback for DevicePlayback {
 mod tests {
     use std::io::Cursor;
 
-    use rodio::Source as _;
-
     use super::*;
     use crate::mp3;
 
