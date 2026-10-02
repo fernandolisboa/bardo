@@ -9,12 +9,14 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 - Specs: [`docs/spec/`](docs/spec/)
 - PRD: [`docs/prd/`](docs/prd/)
 - Design handoffs: [`docs/design/`](docs/design/)
+- Spikes: [`docs/spikes/`](docs/spikes/)
 
 ## Development
 
 Requires Windows 10/11 and the stable Rust toolchain (MSVC).
 
 ```sh
+cargo xtask fetch-ffmpeg  # once: the pinned ffmpeg build into .ffmpeg/ (ADR-0007)
 cargo run                 # opens the app (crate bardo-ui)
 cargo test --workspace
 cargo xtask lint-deps     # fails if any crate other than bardo-ui depends on GPUI

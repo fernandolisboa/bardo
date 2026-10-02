@@ -19,5 +19,11 @@ anyhow.workspace = true
 gpui-kit.workspace = true
 sys-locale = "0.3"
 
+# For examples/preview_probe.rs, a frame-to-screen measurement (issue #18).
+[dev-dependencies]
+bardo-media.workspace = true
+cpu-time = "1"
+image = { version = "0.25", default-features = false }
+
 [lints]
 workspace = true
