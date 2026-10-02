@@ -219,6 +219,44 @@ fn chars(text: &str) -> usize {
     text.chars().count()
 }
 
+/// How long `network` counts a post's text. X weighs it: a character
+/// outside the Latin, punctuation and general-symbol ranges (CJK, emoji)
+/// counts 2, and a link counts 23 whatever its length. An emoji made of
+/// several code points counts each one, which only errs on the safe side.
+/// Every other network counts characters.
+pub fn text_length(network: Network, text: &str) -> usize {
+    if network != Network::X {
+        return chars(text);
+    }
+    const LINK: usize = 23;
+    let light =
+        |c: char| matches!(u32::from(c), 0..=4351 | 8192..=8205 | 8208..=8223 | 8242..=8247);
+    let mut length = 0;
+    let mut rest = text;
+    while !rest.is_empty() {
+        let word_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let word = &rest[..word_end];
+        if word.starts_with("https://") || word.starts_with("http://") {
+            length += LINK;
+        } else {
+            length += word
+                .chars()
+                .map(|c| if light(c) { 1 } else { 2 })
+                .sum::<usize>();
+        }
+        rest = &rest[word_end..];
+        let space_end = rest
+            .find(|c: char| !c.is_whitespace())
+            .unwrap_or(rest.len());
+        length += rest[..space_end]
+            .chars()
+            .map(|c| if light(c) { 1 } else { 2 })
+            .sum::<usize>();
+        rest = &rest[space_end..];
+    }
+    length
+}
+
 /// Tags as a network keeps them: without leading `#`, trimmed, blank ones
 /// dropped, repeats (ignoring case) kept once in their first place. A
 /// hashtag cannot hold spaces, so on networks that take hashtags the words
@@ -431,7 +469,7 @@ pub fn problems(
     if let (Some(limit), Some(text)) = (rules.text, &post.text) {
         if rules.title.is_none() && draft.description.trim().is_empty() {
             problems.push(MetadataProblem::TextRequired);
-        } else if chars(text) > limit {
+        } else if text_length(network, text) > limit {
             problems.push(MetadataProblem::TextTooLong);
         }
     }
@@ -465,7 +503,8 @@ pub struct Export {
     pub video_file: String,
     /// The render it copied.
     pub render: RenderId,
-    /// The post it wrote ([`Post::fingerprint`]).
+    /// The post it wrote ([`Post::fingerprint`]), marked when the
+    /// disclosure reminder was written with it.
     pub post: String,
     pub exported_at: SystemTime,
 }
@@ -491,13 +530,25 @@ fn file_safe(text: &str, max_chars: usize) -> String {
     joined.trim_end_matches(['.', ' ']).trim().to_owned()
 }
 
-/// Names Windows keeps for devices, whatever the extension.
-fn reserved(stem: &str) -> bool {
-    let upper = stem.to_ascii_uppercase();
-    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
-            && upper.len() == 4
-            && upper.as_bytes()[3].is_ascii_digit())
+/// Names Windows keeps for devices, whatever follows the first dot
+/// (`CON.mp4` and `nul.final.mp4` are devices too).
+fn reserved(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = stem.to_uppercase();
+    let numbered = |prefix: &str| {
+        upper.strip_prefix(prefix).is_some_and(|n| {
+            let mut digits = n.chars();
+            matches!(
+                (digits.next(), digits.next()),
+                (Some('0'..='9' | '¹' | '²' | '³'), None)
+            )
+        })
+    };
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || numbered("COM")
+        || numbered("LPT")
 }
 
 /// The folder a project's export goes to: its title as a safe name, with
@@ -696,6 +747,30 @@ mod tests {
     }
 
     #[test]
+    fn x_weighs_wide_characters_and_links() {
+        assert_eq!(text_length(Network::X, "café, ação"), 10);
+        assert_eq!(text_length(Network::X, "月の話"), 6);
+        assert_eq!(text_length(Network::X, "go 🚀"), 5);
+        assert_eq!(
+            text_length(
+                Network::X,
+                "see https://example.com/a/very/long/path/to/a/page now"
+            ),
+            4 + 23 + 4
+        );
+        // Other networks count characters.
+        assert_eq!(text_length(Network::TikTok, "月の話 🚀"), 5);
+        // 140 wide characters fill X's 280.
+        let wide = "月".repeat(140);
+        assert!(problems(Network::X, &draft("", &wide, &[]), "").is_empty());
+        let over = "月".repeat(141);
+        assert_eq!(
+            problems(Network::X, &draft("", &over, &[]), ""),
+            [MetadataProblem::TextTooLong]
+        );
+    }
+
+    #[test]
     fn hashtag_networks_cap_the_tag_count_where_they_say() {
         let six = ["a", "b", "c", "d", "e", "f"];
         assert_eq!(
@@ -823,6 +898,12 @@ mod tests {
         assert_eq!(video_file_name("The Moon / Part 1."), "The Moon Part 1.mp4");
         assert_eq!(video_file_name("con"), "video.mp4");
         assert_eq!(video_file_name("COM1"), "video.mp4");
+        assert_eq!(video_file_name("NUL.final"), "video.mp4");
+        assert_eq!(video_file_name("aux .cut"), "video.mp4");
+        assert_eq!(video_file_name("CONIN$"), "video.mp4");
+        assert_eq!(video_file_name("lpt²"), "video.mp4");
+        assert_eq!(video_file_name("COM10"), "COM10.mp4");
+        assert_eq!(video_file_name("Console"), "Console.mp4");
         assert_eq!(video_file_name("Comet"), "Comet.mp4");
         assert_eq!(video_file_name(""), "video.mp4");
         assert_eq!(video_file_name(&"a".repeat(200)).chars().count(), 84);

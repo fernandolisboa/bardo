@@ -180,6 +180,8 @@ pub struct ProjectsScreen {
     /// Where the project's exports stand, for its Publish stage.
     export_summary: Option<ExportSummary>,
     export_error: Option<Text>,
+    /// Reading the Publish stage failed; cleared by the next good read.
+    export_load_error: Option<Text>,
     export_notice: Option<Text>,
     /// Writing the metadata waits on a budget answer.
     metadata_ask: Option<SpendEstimate>,
@@ -326,6 +328,7 @@ impl ProjectsScreen {
             export_view: None,
             export_summary: None,
             export_error: None,
+            export_load_error: None,
             export_notice: None,
             metadata_ask: None,
             confirm_metadata: false,
@@ -456,6 +459,7 @@ impl ProjectsScreen {
         self.confirm_render = false;
         self.render_error = None;
         self.export_error = None;
+        self.export_load_error = None;
         self.export_notice = None;
         self.metadata_ask = None;
         self.confirm_metadata = false;

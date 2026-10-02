@@ -1201,6 +1201,7 @@ nothing_chosen = "Choose at least one network to render."
 blocked = "A chosen network can't be rendered. See its checks."
 cut_changed = "The cut changed after this review. Review it again before rendering."
 already_running = "This project is already rendering."
+while_exporting = "Wait for the export to finish before rendering again."
 check_failed = "Bardo couldn't check this cut with ffmpeg. Check again, or see Details in Jobs."
 not_loaded = "Couldn't load the render review. Try again."
 
@@ -1278,6 +1279,7 @@ no_accounts = "This channel has no network accounts. Add one under Accounts to e
 nothing_chosen = "Choose at least one network to export."
 blocked = "A chosen network can't be exported yet. See what it still needs."
 already_running = "This project is already exporting."
+while_rendering = "Wait for the render to finish before exporting."
 not_loaded = "Couldn't load the publishing stage. Try again."
 
 [metadata.error]
@@ -1370,7 +1372,7 @@ youtube = "On YouTube, answer Yes to \"Altered or synthetic content\" in the upl
 tiktok = "On TikTok, turn on \"AI-generated content\" under More options before posting."
 instagram_reels = "On Instagram, turn on the AI label under Advanced settings before sharing."
 x = "X has no label setting: say in the post that the voice is synthetic."
-kick = "Kick has no label setting: say in the title or description that the voice is synthetic."
+kick = "Kick has no label setting and no description: say in the title that the voice is synthetic."
 
 [metadata.problem]
 title_required = "Write a title."

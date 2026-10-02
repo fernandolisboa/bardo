@@ -12,10 +12,10 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{
     Cost, Job, JobState, Network, TagPlacement, TemplateKind, VideoMetadataDraft, VideoProjectId,
-    compose,
+    compose, text_length,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, ExportBlock, ExportError, ExportTarget, ExportView, Text,
+    Bardo, BudgetConsent, ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, Text,
     export_job_networks,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -38,9 +38,11 @@ fn is_running(job: Option<&Job>) -> bool {
     job.is_some_and(|job| job.state().is_active())
 }
 
-/// Tags as typed: separated by commas, new lines or `#`.
+/// Tags as typed: separated by commas, new lines or a space before `#`
+/// (`#space #nasa`); a `#` inside a word stays (`C#`).
 fn split_tags(text: &str) -> Vec<String> {
-    text.split([',', '\n', '#'])
+    text.replace(" #", ",")
+        .split([',', '\n'])
         .map(str::trim)
         .filter(|tag| !tag.is_empty())
         .map(str::to_owned)
@@ -104,12 +106,21 @@ impl ProjectsScreen {
             Ok(view) => {
                 self.export_summary = Some(view.summary());
                 self.export_view = Some(view);
+                self.export_load_error = None;
             }
             Err(error) => {
-                // The other stages still show; this one says what failed.
-                self.export_summary = Some(Default::default());
+                // The other stages still show; this one stays open (with
+                // what was rendered) to say what failed.
+                let rendered = self
+                    .render_summary
+                    .as_ref()
+                    .map_or(0, |render| render.current + render.outdated);
+                self.export_summary = Some(ExportSummary {
+                    rendered,
+                    ..ExportSummary::default()
+                });
                 self.export_view = None;
-                self.export_error = Some(error.message());
+                self.export_load_error = Some(error.message());
             }
         }
         let placeholder = tr(self.bardo.read(cx), Text::MetadataTagsPlaceholder);
@@ -341,7 +352,7 @@ impl ProjectsScreen {
         let Some(view) = self.export_view.as_ref() else {
             let bardo = self.bardo.read(cx);
             parts.notices.extend(
-                self.export_error.map(|error| {
+                self.export_load_error.or(self.export_error).map(|error| {
                     kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()
                 }),
             );
@@ -482,7 +493,13 @@ impl ProjectsScreen {
                 )
                 .into_any_element();
         }
-        if stopped {
+        // Exporting waits for a render, which rewrites the files it copies.
+        let rendering = is_running(
+            self.render_summary
+                .as_ref()
+                .and_then(|summary| summary.job.as_ref()),
+        );
+        if stopped && !rendering {
             row = row.child(
                 Button::new("export-resume")
                     .small()
@@ -493,7 +510,9 @@ impl ProjectsScreen {
                     })),
             );
         }
-        if chosen > 0 {
+        // An export writes the stored metadata: unsaved edits are saved or
+        // reverted first.
+        if chosen > 0 && !rendering && !self.metadata_dirty(cx) {
             row = row.child(
                 Button::new("export-start")
                     .small()
@@ -789,6 +808,7 @@ impl ProjectsScreen {
                     .read(cx)
                     .metadata_draft_problems(network, &draft, &target.footer);
             let count = |text: &str| text.chars().count();
+            let text_count = |text: &str| text_length(network, text);
             if let (Some(limit), Some(title)) = (rules.title, post.title.as_ref()) {
                 let counter = counter(self.bardo.read(cx), count(title), limit);
                 let field = self.post_field(
@@ -807,7 +827,7 @@ impl ProjectsScreen {
                 } else {
                     Text::MetadataFieldCaption
                 };
-                let counter = counter(self.bardo.read(cx), count(text), limit);
+                let counter = counter(self.bardo.read(cx), text_count(text), limit);
                 let field = self.post_field(
                     "copy-metadata-text",
                     label,
@@ -852,7 +872,6 @@ impl ProjectsScreen {
 
             let dirty = self.metadata_dirty(cx);
             let bardo = self.bardo.read(cx);
-            let t = look(cx).tokens;
             // What the footer and the hashtags add, as the network gets it.
             let mut notes = Vec::new();
             if !target.footer.trim().is_empty() && rules.text.is_some() {
@@ -863,15 +882,21 @@ impl ProjectsScreen {
             }
             if !notes.is_empty() {
                 let preview = post.text.clone().unwrap_or_default();
+                let notes = notes
+                    .iter()
+                    .map(SharedString::as_ref)
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 body.push(
                     v_flex()
                         .gap_1()
-                        .children(
-                            notes
-                                .into_iter()
-                                .map(|note| div().text_xs().text_color(t.text2).child(note)),
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .child(field_label(tr(bardo, Text::MetadataPreview)))
+                                .child(kit::info("metadata-preview-info", None, notes.into())),
                         )
-                        .child(field_label(tr(bardo, Text::MetadataPreview)))
                         .child(kit::well(cx).text_xs().child(SharedString::from(preview)))
                         .into_any_element(),
                 );

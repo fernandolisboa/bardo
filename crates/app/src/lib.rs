@@ -438,6 +438,7 @@ impl Bardo {
         let export_handler = ExportHandler {
             owner: profile.id,
             exports: Arc::clone(&exports),
+            renders: Arc::clone(&renders),
             files: Arc::clone(&files),
             export_files: Arc::clone(&export_files),
         };

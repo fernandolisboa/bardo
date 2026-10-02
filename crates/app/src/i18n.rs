@@ -870,6 +870,7 @@ pub enum Text {
     RenderBlocked,
     RenderCutChanged,
     RenderAlreadyRunning,
+    RenderWhileExporting,
     RenderCheckFailed,
     RenderNotLoaded,
     RenderNoAccounts,
@@ -935,6 +936,7 @@ pub enum Text {
     ExportNothingChosen,
     ExportBlocked,
     ExportAlreadyRunning,
+    ExportWhileRendering,
     ExportNotLoaded,
     MetadataMissingKey,
     MetadataBusy,
@@ -1943,6 +1945,7 @@ impl Text {
             Text::RenderBlocked => "render.error.blocked",
             Text::RenderCutChanged => "render.error.cut_changed",
             Text::RenderAlreadyRunning => "render.error.already_running",
+            Text::RenderWhileExporting => "render.error.while_exporting",
             Text::RenderCheckFailed => "render.error.check_failed",
             Text::RenderNotLoaded => "render.error.not_loaded",
             Text::RenderNoAccounts => "render.no_accounts",
@@ -2008,6 +2011,7 @@ impl Text {
             Text::ExportNothingChosen => "export.error.nothing_chosen",
             Text::ExportBlocked => "export.error.blocked",
             Text::ExportAlreadyRunning => "export.error.already_running",
+            Text::ExportWhileRendering => "export.error.while_rendering",
             Text::ExportNotLoaded => "export.error.not_loaded",
             Text::MetadataMissingKey => "metadata.error.missing_key",
             Text::MetadataBusy => "metadata.error.busy",
@@ -3090,6 +3094,7 @@ mod tests {
         texts.push(Text::RenderBlocked);
         texts.push(Text::RenderCutChanged);
         texts.push(Text::RenderAlreadyRunning);
+        texts.push(Text::RenderWhileExporting);
         texts.push(Text::RenderCheckFailed);
         texts.push(Text::RenderNotLoaded);
         texts.push(Text::RenderNoAccounts);
@@ -3155,6 +3160,7 @@ mod tests {
         texts.push(Text::ExportNothingChosen);
         texts.push(Text::ExportBlocked);
         texts.push(Text::ExportAlreadyRunning);
+        texts.push(Text::ExportWhileRendering);
         texts.push(Text::ExportNotLoaded);
         texts.push(Text::MetadataMissingKey);
         texts.push(Text::MetadataBusy);

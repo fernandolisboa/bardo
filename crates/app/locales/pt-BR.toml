@@ -1201,6 +1201,7 @@ nothing_chosen = "Escolha pelo menos uma rede para renderizar."
 blocked = "Uma rede escolhida não pode ser renderizada. Veja as verificações dela."
 cut_changed = "O corte mudou depois desta revisão. Revise de novo antes de renderizar."
 already_running = "Este projeto já está renderizando."
+while_exporting = "Espere a exportação terminar antes de renderizar de novo."
 check_failed = "O Bardo não conseguiu verificar este corte com o ffmpeg. Verifique de novo ou veja os detalhes em Tarefas."
 not_loaded = "Não foi possível carregar a revisão do render. Tente de novo."
 
@@ -1278,6 +1279,7 @@ no_accounts = "Este canal não tem contas de rede. Adicione uma em Contas para e
 nothing_chosen = "Escolha ao menos uma rede para exportar."
 blocked = "Uma rede escolhida ainda não pode ser exportada. Veja o que falta nela."
 already_running = "Este projeto já está exportando."
+while_rendering = "Espere o render terminar antes de exportar."
 not_loaded = "Não foi possível carregar a etapa de publicação. Tente de novo."
 
 [metadata.error]
@@ -1370,7 +1372,7 @@ youtube = "No YouTube, responda Sim em \"Conteúdo alterado ou sintético\" nos 
 tiktok = "No TikTok, ative \"Conteúdo gerado por IA\" em Mais opções antes de postar."
 instagram_reels = "No Instagram, ative o rótulo de IA em Configurações avançadas antes de compartilhar."
 x = "O X não tem opção de rótulo: diga no post que a voz é sintética."
-kick = "A Kick não tem opção de rótulo: diga no título ou na descrição que a voz é sintética."
+kick = "A Kick não tem opção de rótulo nem descrição: diga no título que a voz é sintética."
 
 [metadata.problem]
 title_required = "Escreva um título."

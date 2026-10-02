@@ -25,11 +25,11 @@ use bardo_domain::{
     ApiKey, Cost, CostPurpose, Export, ExportFiles, ExportRepository, Generation, GenerationId,
     Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
     NarrationSource, Network, NetworkAccount, NetworkAccountId, Post, ProfileId, Progress,
-    ProjectFiles, Provider, Render, RenderedPrompt, RepositoryError, SecretStore, TagPlacement,
-    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextFormat, TextGenerator, TextRequest, UiLanguage, VideoMetadata,
-    VideoMetadataDraft, VideoProject, VideoProjectId, Visibility, package_folder, problems,
-    video_file_name,
+    ProjectFiles, Provider, Render, RenderId, RenderRepository, RenderedPrompt, RepositoryError,
+    SecretStore, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, UiLanguage,
+    VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility, package_folder,
+    problems, video_file_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +93,10 @@ pub enum ExportError {
     /// An export of this project is running or waiting.
     #[error("the project is already exporting")]
     AlreadyExporting,
+    /// A render of this project is running or waiting: its files may be
+    /// rewritten while they are copied.
+    #[error("the project is rendering")]
+    Rendering,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -112,6 +116,7 @@ impl ExportError {
             ExportError::NothingChosen => Text::ExportNothingChosen,
             ExportError::Blocked => Text::ExportBlocked,
             ExportError::AlreadyExporting => Text::ExportAlreadyRunning,
+            ExportError::Rendering => Text::ExportWhileRendering,
             ExportError::Template(error) => error.message(),
             ExportError::Repository(_) => Text::ExportNotLoaded,
         }
@@ -324,6 +329,11 @@ struct ExportOrder {
 struct ExportPayload {
     project: String,
     package: String,
+    /// When the job was queued, in Unix milliseconds: a network exported
+    /// after it (by a newer job) is not overwritten when this one is
+    /// retried.
+    #[serde(default)]
+    queued_at: u64,
     orders: Vec<ExportOrder>,
 }
 
@@ -348,6 +358,30 @@ pub fn export_job_networks(job: &Job) -> (usize, usize) {
 #[derive(Deserialize)]
 struct ProjectOf {
     project: String,
+}
+
+fn unix_millis(time: SystemTime) -> u64 {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
+/// What an export was made from, besides its render: the post, and
+/// whether the disclosure reminder was written with it.
+fn export_stamp(post: &Post, disclosure: bool) -> String {
+    let fingerprint = post.fingerprint();
+    if disclosure {
+        format!("{fingerprint}+disclosure")
+    } else {
+        fingerprint
+    }
+}
+
+/// Whether two file names name the same file on Windows, whose names
+/// ignore case: a title changed only in case keeps the same file.
+fn same_file_name(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
 }
 
 fn unexpected(error: impl std::fmt::Display) -> JobFailure {
@@ -528,6 +562,7 @@ impl MetadataHandler {
 pub(crate) struct ExportHandler {
     pub(crate) owner: ProfileId,
     pub(crate) exports: Arc<dyn ExportRepository>,
+    pub(crate) renders: Arc<dyn RenderRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) export_files: Arc<dyn ExportFiles>,
 }
@@ -552,55 +587,87 @@ impl JobHandler for ExportHandler {
                 .network
                 .parse()
                 .map_err(|_| JobFailure::unexpected("unknown network"))?;
-            let file_failure = |error: bardo_domain::ProjectFileError| {
-                JobFailure::new(JobFailureKind::Media, format!("{network}: {error}"))
-            };
-            let mut source = self
-                .files
-                .open(project, &order.render_file)
-                .map_err(file_failure)?;
-            self.export_files
-                .copy_from(&payload.package, network, &order.video_file, &mut source)
-                .map_err(file_failure)?;
-            self.export_files
-                .write(
-                    &payload.package,
-                    network,
-                    METADATA_FILE,
-                    order.metadata.as_bytes(),
-                )
-                .map_err(file_failure)?;
-            if let Some(previous) = order
-                .previous
-                .as_ref()
-                .filter(|previous| **previous != order.video_file)
-            {
-                // A leftover only costs disk space; the export stands.
-                if let Err(error) = self
-                    .export_files
-                    .remove(&payload.package, network, previous)
-                {
-                    tracing::warn!("could not remove the last export's video: {error}");
-                }
+            let newer = self
+                .exports
+                .exports(project)
+                .map_err(unexpected)?
+                .iter()
+                .any(|export| {
+                    export.network == network
+                        && unix_millis(export.exported_at) >= payload.queued_at
+                });
+            // A newer export of this network stands; retrying an old job
+            // does not put back what it replaced.
+            if !newer {
+                self.export_one(project, &payload.package, network, order)?;
             }
-            let export = Export {
-                project,
-                owner: self.owner,
-                network,
-                account: id(&order.account)?,
-                package: payload.package.clone(),
-                video_file: order.video_file.clone(),
-                render: id(&order.render)?,
-                post: order.post.clone(),
-                exported_at: SystemTime::now(),
-            };
-            self.exports.save_export(&export).map_err(unexpected)?;
             checkpoint.done.push(order.network.clone());
             let progress = Progress::of(checkpoint.done.len() as u64, total);
             cx.save_checkpoint(to_json(&checkpoint), progress)
                 .map_err(unexpected)?;
         }
         Ok(())
+    }
+}
+
+impl ExportHandler {
+    /// Copies one network's render and writes its metadata file.
+    fn export_one(
+        &self,
+        project: VideoProjectId,
+        package: &str,
+        network: Network,
+        order: &ExportOrder,
+    ) -> Result<(), JobFailure> {
+        let render: RenderId = id(&order.render)?;
+        let account: NetworkAccountId = id(&order.account)?;
+        let current = self
+            .renders
+            .renders(project)
+            .map_err(unexpected)?
+            .iter()
+            .any(|saved| saved.account == account && saved.id == render);
+        if !current {
+            return Err(JobFailure::new(
+                JobFailureKind::Media,
+                format!("{network}: rendered again since the export was queued; export again"),
+            ));
+        }
+        let file_failure = |error: bardo_domain::ProjectFileError| {
+            JobFailure::new(JobFailureKind::Media, format!("{network}: {error}"))
+        };
+        let mut source = self
+            .files
+            .open(project, &order.render_file)
+            .map_err(file_failure)?;
+        self.export_files
+            .copy_from(package, network, &order.video_file, &mut source)
+            .map_err(file_failure)?;
+        self.export_files
+            .write(package, network, METADATA_FILE, order.metadata.as_bytes())
+            .map_err(file_failure)?;
+        if let Some(previous) = order
+            .previous
+            .as_ref()
+            .filter(|previous| !same_file_name(previous, &order.video_file))
+        {
+            // A leftover only costs disk space; the export stands.
+            if let Err(error) = self.export_files.remove(package, network, previous) {
+                tracing::warn!("could not remove the last export's video: {error}");
+            }
+        }
+        let export = Export {
+            project,
+            owner: self.owner,
+            network,
+            account,
+            package: package.to_owned(),
+            video_file: order.video_file.clone(),
+            render,
+            post: order.post.clone(),
+            exported_at: SystemTime::now(),
+        };
+        self.exports.save_export(&export).map_err(unexpected)
     }
 }
 
@@ -733,6 +800,7 @@ impl Bardo {
         };
         let metadata = self.exports.video_metadata(project.id)?;
         let exports = self.exports.exports(project.id)?;
+        let disclosure = self.needs_disclosure(project.id)?;
         let targets = accounts
             .iter()
             .map(|account| {
@@ -764,7 +832,7 @@ impl Bardo {
                         .is_some_and(|render| render.id == last.render)
                         && post
                             .as_ref()
-                            .is_some_and(|post| post.fingerprint() == last.post)
+                            .is_some_and(|post| export_stamp(post, disclosure) == last.post)
                 });
                 ExportTarget {
                     account: account.id,
@@ -790,7 +858,7 @@ impl Bardo {
             .and_then(|metadata| self.generation_cost(project.id, metadata.generation().job));
         Ok(ExportView {
             project: project.id,
-            disclosure: self.needs_disclosure(project.id)?,
+            disclosure,
             metadata_job,
             export_job: self.latest_job_of(JobKind::Export, project.id),
             estimate: self.estimate(&[metadata_call(&rendered)])?,
@@ -873,9 +941,10 @@ impl Bardo {
         Ok(metadata)
     }
 
-    /// Queues the export of the chosen networks as `view` shows them:
-    /// each one's render and post as they are now. Refuses a network that
-    /// cannot be exported.
+    /// Queues the export of the chosen networks of `view`'s project, each
+    /// with its render and post as stored now (not as `view` last read
+    /// them). Refuses a network that cannot be exported, and refuses while
+    /// the project is rendering.
     pub fn start_export(
         &self,
         view: &ExportView,
@@ -887,6 +956,12 @@ impl Bardo {
             .is_some_and(|job| job.state().is_active())
         {
             return Err(ExportError::AlreadyExporting);
+        }
+        if self
+            .latest_job_of(JobKind::Render, project.id)
+            .is_some_and(|job| job.state().is_active())
+        {
+            return Err(ExportError::Rendering);
         }
         // What is stored now, not what the screen last read.
         let now = self.export_view(project.id)?;
@@ -919,7 +994,7 @@ impl Bardo {
                         &video_file,
                         now.disclosure,
                     ),
-                    post: post.fingerprint(),
+                    post: export_stamp(&post, now.disclosure),
                     previous: target
                         .last
                         .as_ref()
@@ -932,6 +1007,7 @@ impl Bardo {
         let payload = ExportPayload {
             project: project.id.to_string(),
             package: now.package.clone(),
+            queued_at: unix_millis(SystemTime::now()),
             orders,
         };
         let job = Job::new(self.profile.id, JobKind::Export, to_json(&payload));
@@ -1055,11 +1131,64 @@ mod tests {
         CostRepository, JobState, Meter, Money, NetworkAccountDraft, PersonaDetails, PersonaDraft,
         PersonaRepository, TokenUsage,
     };
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use bardo_domain::ProjectFileError;
     use bardo_storage::MemoryExportFiles;
 
     use super::*;
-    use crate::render::tests::render_all;
+    use crate::render::tests::{checked, render_all};
     use crate::scenes::tests::{Harness, done, wait_done};
+
+    /// Export files in memory whose copies wait while `hold` is set, so a
+    /// test can catch an export job running.
+    #[derive(Default)]
+    struct HeldExports {
+        inner: Arc<MemoryExportFiles>,
+        hold: AtomicBool,
+    }
+
+    impl ExportFiles for HeldExports {
+        fn write(
+            &self,
+            package: &str,
+            network: Network,
+            name: &str,
+            bytes: &[u8],
+        ) -> Result<(), ProjectFileError> {
+            self.inner.write(package, network, name, bytes)
+        }
+
+        fn copy_from(
+            &self,
+            package: &str,
+            network: Network,
+            name: &str,
+            source: &mut dyn std::io::Read,
+        ) -> Result<(), ProjectFileError> {
+            while self.hold.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            self.inner.copy_from(package, network, name, source)
+        }
+
+        fn remove(
+            &self,
+            package: &str,
+            network: Network,
+            name: &str,
+        ) -> Result<(), ProjectFileError> {
+            self.inner.remove(package, network, name)
+        }
+
+        fn exists(&self, package: &str, network: Network, name: &str) -> bool {
+            self.inner.exists(package, network, name)
+        }
+
+        fn folder(&self, package: &str, network: Network) -> PathBuf {
+            self.inner.folder(package, network)
+        }
+    }
 
     const CLAUDE_KEY: &str = "sk-ant-api03-test-key-0001";
 
@@ -1105,14 +1234,16 @@ mod tests {
         h: Harness,
         app: Bardo,
         exports: Arc<MemoryExportFiles>,
+        held: Arc<HeldExports>,
         project: VideoProject,
     }
 
     /// A drawn project with YouTube and TikTok accounts, rendered for both.
     fn rendered() -> Setup {
         let h = Harness::new();
-        let exports: Arc<MemoryExportFiles> = Arc::default();
-        let mut app = h.start_with_exports(Arc::clone(&exports) as _);
+        let held: Arc<HeldExports> = Arc::default();
+        let exports = Arc::clone(&held.inner);
+        let mut app = h.start_with_exports(Arc::clone(&held) as _);
         app.save_provider_key(Provider::Claude, CLAUDE_KEY).unwrap();
         let (project, _) = h.drawn_project(&app);
         add_account(
@@ -1136,6 +1267,7 @@ mod tests {
             h,
             app,
             exports,
+            held,
             project,
         }
     }
@@ -1378,6 +1510,165 @@ mod tests {
             ["A better title.mp4", "metadata.txt"],
             "the old video is gone"
         );
+    }
+
+    #[test]
+    fn a_title_changed_only_in_case_keeps_the_video() {
+        assert!(same_file_name("The Moon.mp4", "THE MOON.mp4"));
+        assert!(same_file_name("Ação.mp4", "AÇÃO.mp4"));
+        assert!(!same_file_name("The Moon.mp4", "The Moons.mp4"));
+        let s = rendered();
+        let view = generated(&s);
+        done(
+            &s.app,
+            s.app.start_export(&view, &[Network::YouTube]).unwrap(),
+        );
+        s.app
+            .edit_metadata(
+                s.project.id,
+                Network::YouTube,
+                VideoMetadataDraft {
+                    title: "THE PROBE NOBODY FOUND".into(),
+                    description: "In 1969 a probe went silent.".into(),
+                    tags: vec!["nasa".into()],
+                },
+            )
+            .unwrap();
+        let view = s.app.export_view(s.project.id).unwrap();
+        done(
+            &s.app,
+            s.app.start_export(&view, &[Network::YouTube]).unwrap(),
+        );
+        // On Windows both names are one file: removing the old one would
+        // remove the new one.
+        assert!(s.exports.exists(
+            &view.package,
+            Network::YouTube,
+            "The probe nobody found.mp4"
+        ));
+        assert!(s.exports.exists(
+            &view.package,
+            Network::YouTube,
+            "THE PROBE NOBODY FOUND.mp4"
+        ));
+    }
+
+    #[test]
+    fn a_retried_export_keeps_newer_exports_and_refuses_a_new_render() {
+        let s = rendered();
+        let view = generated(&s);
+        let video = s.h.files.read(s.project.id, "render-youtube.mp4").unwrap();
+        // The first export fails on YouTube: its render file is missing.
+        s.h.files
+            .remove(s.project.id, "render-youtube.mp4")
+            .unwrap();
+        let old = s
+            .app
+            .start_export(&view, &[Network::YouTube, Network::TikTok])
+            .unwrap();
+        assert_eq!(wait_done(&s.app, old).state(), JobState::Failed);
+
+        // A newer export writes YouTube with a new title.
+        s.h.files
+            .write(s.project.id, "render-youtube.mp4", &video)
+            .unwrap();
+        s.app
+            .edit_metadata(
+                s.project.id,
+                Network::YouTube,
+                VideoMetadataDraft {
+                    title: "A better title".into(),
+                    description: "In 1969 a probe went silent.".into(),
+                    tags: vec!["nasa".into()],
+                },
+            )
+            .unwrap();
+        let view = s.app.export_view(s.project.id).unwrap();
+        done(
+            &s.app,
+            s.app.start_export(&view, &[Network::YouTube]).unwrap(),
+        );
+
+        // Retrying the old one leaves YouTube as the newer export wrote it.
+        s.app.retry_job(old).unwrap();
+        done(&s.app, old);
+        assert_eq!(
+            s.exports.names(&view.package, Network::YouTube),
+            ["A better title.mp4", "metadata.txt"]
+        );
+        assert_eq!(s.exports.names(&view.package, Network::TikTok).len(), 2);
+        let view = s.app.export_view(s.project.id).unwrap();
+        assert!(view.targets.iter().all(|target| target.last_current));
+
+        // After a new render, an old export job no longer matches it.
+        let view = s.app.export_view(s.project.id).unwrap();
+        s.h.files.remove(s.project.id, "render-tiktok.mp4").unwrap();
+        let stale = s.app.start_export(&view, &[Network::TikTok]).unwrap();
+        assert_eq!(wait_done(&s.app, stale).state(), JobState::Failed);
+        render_all(&s.app, s.project.id);
+        s.app.retry_job(stale).unwrap();
+        let job = wait_done(&s.app, stale);
+        assert_eq!(job.state(), JobState::Failed);
+        assert!(
+            job.failure().unwrap().detail.contains("rendered again"),
+            "{:?}",
+            job.failure()
+        );
+    }
+
+    #[test]
+    fn rendering_and_exporting_wait_for_each_other() {
+        let s = rendered();
+        let view = generated(&s);
+
+        s.h.media.render_hold.store(true, Ordering::SeqCst);
+        let review = checked(&s.app, s.project.id);
+        let render = s.app.start_render(&review, &review.renderable()).unwrap();
+        assert!(matches!(
+            s.app.start_export(&view, &[Network::YouTube]),
+            Err(ExportError::Rendering)
+        ));
+        s.h.media.render_hold.store(false, Ordering::SeqCst);
+        done(&s.app, render);
+
+        s.held.hold.store(true, Ordering::SeqCst);
+        let view = s.app.export_view(s.project.id).unwrap();
+        let export = s.app.start_export(&view, &[Network::YouTube]).unwrap();
+        let review = checked(&s.app, s.project.id);
+        assert!(matches!(
+            s.app.start_render(&review, &review.renderable()),
+            Err(RenderError::Exporting)
+        ));
+        s.held.hold.store(false, Ordering::SeqCst);
+        done(&s.app, export);
+    }
+
+    #[test]
+    fn the_disclosure_outdates_an_export_written_without_it() {
+        let s = rendered();
+        let view = generated(&s);
+        done(
+            &s.app,
+            s.app.start_export(&view, &[Network::YouTube]).unwrap(),
+        );
+        assert!(target(&s.app.export_view(s.project.id).unwrap(), Network::YouTube).last_current);
+        let narrator = s
+            .app
+            .personas()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.details.name() == "Documentary Narrator (en-US)")
+            .unwrap();
+        let mut flagged = narrator.clone();
+        flagged.details = PersonaDetails::validate(PersonaDraft {
+            realistic_voice: true,
+            ..PersonaDraft::from(&narrator.details)
+        })
+        .unwrap();
+        PersonaRepository::save(&*s.h.db, &flagged).unwrap();
+        let view = s.app.export_view(s.project.id).unwrap();
+        assert!(view.disclosure);
+        assert!(!target(&view, Network::YouTube).last_current);
     }
 
     #[test]

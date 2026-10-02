@@ -120,7 +120,7 @@ pub use media::{
 pub use metadata::{
     DisclosureLabel, Export, ExportFiles, ExportRepository, METADATA_FILE, MetadataProblem,
     MetadataRules, Post, TagPlacement, VideoMetadata, VideoMetadataDraft, compose, normalize_tags,
-    package_folder, problems, video_file_name,
+    package_folder, problems, text_length, video_file_name,
 };
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,
