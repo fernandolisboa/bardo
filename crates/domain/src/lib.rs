@@ -47,6 +47,7 @@ mod cost;
 mod decision;
 mod edit;
 mod files;
+mod framing;
 mod generation;
 mod image;
 mod job;
@@ -92,6 +93,7 @@ pub use decision::{
 };
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
 pub use files::{ProjectFileError, ProjectFiles};
+pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{GeneratedImage, ImageFormat, ImageGenerator, ImageRequest};
 pub use job::{

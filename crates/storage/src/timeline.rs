@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    AudioLane, Caption, CaptionStyle, Decibels, Ducking, LaneMix, Mix, NarrationId, ProfileId,
-    RepositoryError, SavedAudioItem, SavedCaptions, SavedTimeline, SavedVideoItem, ScenePlanId,
-    TimelineRepository, VideoProjectId,
+    AspectRatio, AudioLane, Caption, CaptionStyle, CropPosition, Decibels, Ducking, Framing,
+    LaneMix, Mix, NarrationId, ProfileId, RepositoryError, SavedAudioItem, SavedCaptions,
+    SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -50,6 +50,26 @@ fn lane_named(name: &str) -> Result<AudioLane, RepositoryError> {
         .ok_or_else(|| invalid(format!("an audio lane named {name}")))
 }
 
+const CROP: &str = "crop";
+const FIT: &str = "fit";
+
+/// A framing as stored: its kind and, for a crop, its position.
+fn framing_columns(framing: Framing) -> (&'static str, u16, u16) {
+    match framing {
+        Framing::Crop(position) => (CROP, position.x(), position.y()),
+        Framing::Fit => (FIT, CropPosition::CENTER.x(), CropPosition::CENTER.y()),
+    }
+}
+
+fn framing(kind: &str, x: i64, y: i64) -> Result<Framing, RepositoryError> {
+    let step = |value: i64| u16::try_from(value).map_err(boxed);
+    match kind {
+        CROP => Ok(Framing::Crop(CropPosition::new(step(x)?, step(y)?))),
+        FIT => Ok(Framing::Fit),
+        other => Err(invalid(format!("a framing named {other}"))),
+    }
+}
+
 fn tenths(value: i64) -> Result<Decibels, RepositoryError> {
     i16::try_from(value)
         .map(Decibels::from_tenths)
@@ -66,6 +86,9 @@ struct ItemRow {
     duration: i64,
     fade_in: i64,
     fade_out: i64,
+    framing: String,
+    crop_x: i64,
+    crop_y: i64,
 }
 
 impl TimelineRepository for Database {
@@ -78,7 +101,7 @@ impl TimelineRepository for Database {
         let head = conn
             .query_row(
                 "SELECT profile_id, scene_plan_id, narration_id, updated_at, duck_music,
-                        duck_depth_tenths, has_captions, captions_shown, caption_style
+                        duck_depth_tenths, has_captions, captions_shown, caption_style, aspect
                  FROM timeline WHERE project_id = ?1",
                 [&project_id],
                 |row| {
@@ -95,6 +118,7 @@ impl TimelineRepository for Database {
                             row.get::<_, bool>(7)?,
                             row.get::<_, String>(8)?,
                         ),
+                        row.get::<_, String>(9)?,
                     ))
                 },
             )
@@ -104,6 +128,7 @@ impl TimelineRepository for Database {
             (owner, plan, narration, updated_at),
             (duck, depth),
             (has_captions, captions_shown, caption_style),
+            aspect,
         )) = head
         else {
             return Ok(None);
@@ -142,7 +167,8 @@ impl TimelineRepository for Database {
         }
         let mut statement = conn
             .prepare(
-                "SELECT track, scene, file, start_ns, at_ns, duration_ns, fade_in_ns, fade_out_ns
+                "SELECT track, scene, file, start_ns, at_ns, duration_ns, fade_in_ns, fade_out_ns,
+                        framing, crop_x, crop_y
                  FROM timeline_item
                  WHERE project_id = ?1 ORDER BY track, position",
             )
@@ -158,6 +184,9 @@ impl TimelineRepository for Database {
                     duration: row.get(5)?,
                     fade_in: row.get(6)?,
                     fade_out: row.get(7)?,
+                    framing: row.get(8)?,
+                    crop_x: row.get(9)?,
+                    crop_y: row.get(10)?,
                 })
             })
             .map_err(boxed)?
@@ -208,6 +237,7 @@ impl TimelineRepository for Database {
             narration_items: Vec::new(),
             mix,
             captions,
+            aspect: aspect.parse::<AspectRatio>().map_err(boxed)?,
             updated_at: from_unix_millis(updated_at),
         };
         for row in rows {
@@ -216,6 +246,7 @@ impl TimelineRepository for Database {
                     scene: usize::try_from(scene).map_err(boxed)?,
                     start: duration(row.start)?,
                     duration: duration(row.duration)?,
+                    framing: framing(&row.framing, row.crop_x, row.crop_y)?,
                 }),
                 (NARRATION, None, Some(file)) => saved.narration_items.push(SavedAudioItem {
                     file,
@@ -241,8 +272,8 @@ impl TimelineRepository for Database {
         tx.execute(
             "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at,
                                    duck_music, duck_depth_tenths, has_captions, captions_shown,
-                                   caption_style)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                   caption_style, aspect)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 project,
                 timeline.owner.to_string(),
@@ -261,6 +292,7 @@ impl TimelineRepository for Database {
                     .as_ref()
                     .map_or(CaptionStyle::default(), |captions| captions.style)
                     .code(),
+                timeline.aspect.code(),
             ],
         )
         .map_err(boxed)?;
@@ -303,12 +335,13 @@ impl TimelineRepository for Database {
                 .prepare(
                     "INSERT INTO timeline_item
                          (project_id, track, position, scene, file, start_ns, at_ns, duration_ns,
-                          fade_in_ns, fade_out_ns)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                          fade_in_ns, fade_out_ns, framing, crop_x, crop_y)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 )
                 .map_err(boxed)?;
             let mut at = Duration::ZERO;
             for (position, item) in timeline.video.iter().enumerate() {
+                let (framing, crop_x, crop_y) = framing_columns(item.framing);
                 insert
                     .execute(params![
                         project,
@@ -321,6 +354,9 @@ impl TimelineRepository for Database {
                         nanos(item.duration)?,
                         0i64,
                         0i64,
+                        framing,
+                        crop_x,
+                        crop_y,
                     ])
                     .map_err(boxed)?;
                 at += item.duration;
@@ -338,6 +374,9 @@ impl TimelineRepository for Database {
                         nanos(item.duration)?,
                         nanos(item.fade_in)?,
                         nanos(item.fade_out)?,
+                        CROP,
+                        CropPosition::CENTER.x(),
+                        CropPosition::CENTER.y(),
                     ])
                     .map_err(boxed)?;
             }
@@ -397,11 +436,13 @@ mod tests {
                     scene: 2,
                     start: Duration::from_nanos(1_500_000_001),
                     duration: Duration::from_nanos(966_666_666),
+                    framing: Framing::Crop(CropPosition::new(125, 1_000)),
                 },
                 SavedVideoItem {
                     scene: 0,
                     start: Duration::ZERO,
                     duration: Duration::from_secs(2),
+                    framing: Framing::Fit,
                 },
             ],
             narration_items: vec![
@@ -462,6 +503,7 @@ mod tests {
                 shown: false,
                 style: CaptionStyle::Punch,
             }),
+            aspect: AspectRatio::Vertical,
             updated_at: time(1_800_000_002_000),
         }
     }
@@ -515,6 +557,46 @@ mod tests {
         // As a cut saved by an older Bardo: no lane rows.
         db.conn().execute("DELETE FROM timeline_lane", []).unwrap();
         assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn a_cut_saved_before_framing_existed_is_16_9_with_centered_crops() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let original = cut(&project);
+        let mut saved = original.clone();
+        saved.aspect = AspectRatio::Landscape;
+        for item in &mut saved.video {
+            item.framing = Framing::FILL;
+        }
+        db.save_timeline(&original).unwrap();
+        // As a cut saved by an older Bardo: the columns' defaults.
+        let conn = db.conn();
+        conn.execute("UPDATE timeline SET aspect = '16:9'", [])
+            .unwrap();
+        conn.execute(
+            "UPDATE timeline_item SET framing = 'crop', crop_x = 500, crop_y = 500",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn crop_positions_out_of_range_are_refused() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        db.save_timeline(&cut(&project)).unwrap();
+        let conn = db.conn();
+        assert!(
+            conn.execute("UPDATE timeline_item SET crop_x = 1001", [])
+                .is_err()
+        );
+        assert!(
+            conn.execute("UPDATE timeline SET aspect = '4:3'", [])
+                .is_err()
+        );
     }
 
     #[test]
