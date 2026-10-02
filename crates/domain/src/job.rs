@@ -58,14 +58,17 @@ pub enum JobKind {
     ThemeSuggestion,
     /// Ranks a channel's themes that have no ranking (e.g. after an edit).
     ThemeRanking,
+    /// Has Claude write a video project's script from the script template.
+    ScriptGeneration,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 4] = [
+    pub const ALL: [JobKind; 5] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
         JobKind::ThemeRanking,
+        JobKind::ScriptGeneration,
     ];
 
     /// Stable name stored in the database.
@@ -75,6 +78,7 @@ impl JobKind {
             JobKind::NicheResearch => "niche_research",
             JobKind::ThemeSuggestion => "theme_suggestion",
             JobKind::ThemeRanking => "theme_ranking",
+            JobKind::ScriptGeneration => "script_generation",
         }
     }
 }

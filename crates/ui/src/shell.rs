@@ -8,8 +8,10 @@ use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::channels::ChannelsScreen;
 use crate::jobs::JobsPanel;
+use crate::projects::ProjectsScreen;
 use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
+use crate::templates::TemplatesScreen;
 use crate::themes::ThemesScreen;
 
 /// A UI string in the active language.
@@ -23,14 +25,18 @@ enum Screen {
     Channels,
     Research,
     Themes,
+    Projects,
+    Templates,
     Settings,
 }
 
 impl Screen {
-    const ALL: [Screen; 4] = [
+    const ALL: [Screen; 6] = [
         Screen::Channels,
         Screen::Research,
         Screen::Themes,
+        Screen::Projects,
+        Screen::Templates,
         Screen::Settings,
     ];
 
@@ -39,6 +45,8 @@ impl Screen {
             Screen::Channels => Text::ChannelsTitle,
             Screen::Research => Text::ResearchTitle,
             Screen::Themes => Text::ThemesTitle,
+            Screen::Projects => Text::ProjectsNav,
+            Screen::Templates => Text::TemplatesTitle,
             Screen::Settings => Text::SettingsTitle,
         }
     }
@@ -54,6 +62,8 @@ pub struct Shell {
     channels: Entity<ChannelsScreen>,
     research: Entity<ResearchScreen>,
     themes: Entity<ThemesScreen>,
+    projects: Entity<ProjectsScreen>,
+    templates: Entity<TemplatesScreen>,
     settings: Entity<SettingsScreen>,
     /// Kept alive while closed, so the toggle's count stays current.
     jobs: Entity<JobsPanel>,
@@ -68,6 +78,8 @@ impl Shell {
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
+        let projects = cx.new(|cx| ProjectsScreen::new(bardo.clone(), window, cx));
+        let templates = cx.new(|cx| TemplatesScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let subscriptions = vec![cx.observe(&jobs, |_, _, cx| cx.notify())];
@@ -77,6 +89,8 @@ impl Shell {
             channels,
             research,
             themes,
+            projects,
+            templates,
             settings,
             jobs,
             jobs_open: false,
@@ -86,8 +100,8 @@ impl Shell {
     }
 
     fn show(&mut self, screen: Screen, window: &mut Window, cx: &mut Context<Self>) {
-        // Channels may have changed on the channels screen, and niches on
-        // the research screen.
+        // Channels may have changed on the channels screen, niches on the
+        // research screen, and projects on the themes screen.
         if screen != self.screen {
             match screen {
                 Screen::Research => self
@@ -96,6 +110,12 @@ impl Shell {
                 Screen::Themes => self
                     .themes
                     .update(cx, |themes, cx| themes.reload_channels(window, cx)),
+                Screen::Projects => self
+                    .projects
+                    .update(cx, |projects, cx| projects.reload(window, cx)),
+                Screen::Templates => self
+                    .templates
+                    .update(cx, |templates, cx| templates.reload(window, cx)),
                 Screen::Channels | Screen::Settings => {}
             }
         }
@@ -215,6 +235,8 @@ impl Render for Shell {
                                 Screen::Channels => main.child(self.channels.clone()),
                                 Screen::Research => main.child(self.research.clone()),
                                 Screen::Themes => main.child(self.themes.clone()),
+                                Screen::Projects => main.child(self.projects.clone()),
+                                Screen::Templates => main.child(self.templates.clone()),
                                 Screen::Settings => main.child(self.settings.clone()),
                             }),
                     )

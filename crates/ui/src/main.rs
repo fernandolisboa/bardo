@@ -5,9 +5,11 @@
 
 mod channels;
 mod jobs;
+mod projects;
 mod research;
 mod settings;
 mod shell;
+mod templates;
 mod themes;
 
 use anyhow::Context as _;

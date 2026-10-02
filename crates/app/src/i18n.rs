@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use bardo_domain::{
     ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, NicheSeedError, Provider, ThemeFieldError, UiLanguage,
+    KeyCheckOutcome, NicheSeedError, Provider, ScriptFieldError, TemplateKind, TemplateProblem,
+    TemplateVariable, ThemeFieldError, UiLanguage,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -170,6 +171,77 @@ pub enum Text {
     ThemesBusy,
     ThemesNothingToRank,
     ThemesNotLoaded,
+    /// The top bar's short name for the video projects screen.
+    ProjectsNav,
+    ProjectsNoChannels,
+    ProjectsNotLoaded,
+    ProjectNotFound,
+    ScriptTitle,
+    ScriptEmpty,
+    GenerateScript,
+    /// Placeholder: `{n}`, the template version.
+    GenerateScriptHint,
+    RegenerateScript,
+    RegenerateScriptHint,
+    ScriptRunning,
+    ScriptStopped,
+    SaveScript,
+    RevertScript,
+    ScriptSaved,
+    ScriptEdited,
+    /// Placeholder: `{n}`.
+    ScriptWords,
+    ScriptCurrent,
+    ScriptPendingTitle,
+    ScriptPendingHint,
+    AcceptScript,
+    RejectScript,
+    ProvenanceTitle,
+    ProvenanceProvider,
+    ProvenanceModel,
+    ProvenanceTemplate,
+    /// Placeholder: `{n}`.
+    ProvenanceTemplateVersion,
+    ProvenanceTokens,
+    /// Placeholders: `{input}`, `{output}`.
+    ProvenanceTokensValue,
+    ProvenanceGenerated,
+    ShowPrompt,
+    HidePrompt,
+    PromptInstructions,
+    PromptTask,
+    ScriptMissing,
+    ScriptNothingToReview,
+    ScriptMissingKey,
+    ScriptBusy,
+    ScriptNotSaved,
+    ScriptFieldError(ScriptFieldError),
+    TemplatesTitle,
+    TemplatesHint,
+    TemplateKindName(TemplateKind),
+    TemplateVersionsTitle,
+    /// Placeholder: `{n}`.
+    TemplateVersionLabel,
+    TemplateCurrent,
+    /// Placeholders: `{n}`, `{next}`.
+    TemplateEditing,
+    TemplateInstructions,
+    TemplateInstructionsHint,
+    TemplatePrompt,
+    TemplatePromptHint,
+    TemplateVariablesTitle,
+    TemplateVariablesHint,
+    TemplateVariableHint(TemplateVariable),
+    SaveTemplate,
+    RevertTemplate,
+    DefaultTemplate,
+    /// Placeholder: `{n}`.
+    TemplateSaved,
+    TemplateUnchanged,
+    TemplateNotSaved,
+    TemplateNotFound,
+    TemplatesNotLoaded,
+    TemplateProblem(TemplateProblem),
     FetchedJustNow,
     /// Placeholder: `{n}`.
     FetchedMinutesAgo,
@@ -370,6 +442,81 @@ impl Text {
             Text::ThemesBusy => "themes.error.busy",
             Text::ThemesNothingToRank => "themes.error.nothing_to_rank",
             Text::ThemesNotLoaded => "themes.error.not_loaded",
+            Text::ProjectsNav => "projects.nav",
+            Text::ProjectsNoChannels => "projects.no_channels",
+            Text::ProjectsNotLoaded => "projects.error.not_loaded",
+            Text::ProjectNotFound => "projects.error.not_found",
+            Text::ScriptTitle => "script.title",
+            Text::ScriptEmpty => "script.empty",
+            Text::GenerateScript => "script.generate",
+            Text::GenerateScriptHint => "script.generate_hint",
+            Text::RegenerateScript => "script.regenerate",
+            Text::RegenerateScriptHint => "script.regenerate_hint",
+            Text::ScriptRunning => "script.running",
+            Text::ScriptStopped => "script.stopped",
+            Text::SaveScript => "script.save",
+            Text::RevertScript => "script.revert",
+            Text::ScriptSaved => "script.saved",
+            Text::ScriptEdited => "script.edited",
+            Text::ScriptWords => "script.words",
+            Text::ScriptCurrent => "script.current",
+            Text::ScriptPendingTitle => "script.pending.title",
+            Text::ScriptPendingHint => "script.pending.hint",
+            Text::AcceptScript => "script.pending.accept",
+            Text::RejectScript => "script.pending.reject",
+            Text::ProvenanceTitle => "provenance.title",
+            Text::ProvenanceProvider => "provenance.provider",
+            Text::ProvenanceModel => "provenance.model",
+            Text::ProvenanceTemplate => "provenance.template",
+            Text::ProvenanceTemplateVersion => "provenance.template_version",
+            Text::ProvenanceTokens => "provenance.tokens",
+            Text::ProvenanceTokensValue => "provenance.tokens_value",
+            Text::ProvenanceGenerated => "provenance.generated",
+            Text::ShowPrompt => "provenance.show_prompt",
+            Text::HidePrompt => "provenance.hide_prompt",
+            Text::PromptInstructions => "provenance.instructions",
+            Text::PromptTask => "provenance.prompt",
+            Text::ScriptMissing => "script.error.missing",
+            Text::ScriptNothingToReview => "script.error.nothing_to_review",
+            Text::ScriptMissingKey => "script.error.missing_key",
+            Text::ScriptBusy => "script.error.busy",
+            Text::ScriptNotSaved => "script.error.not_saved",
+            Text::ScriptFieldError(error) => match error {
+                ScriptFieldError::TextRequired => "script.error.text_required",
+                ScriptFieldError::TextTooLong => "script.error.text_too_long",
+            },
+            Text::TemplatesTitle => "templates.title",
+            Text::TemplatesHint => "templates.hint",
+            Text::TemplateKindName(kind) => {
+                return format!("templates.kind.{}", kind.code()).into();
+            }
+            Text::TemplateVersionsTitle => "templates.versions",
+            Text::TemplateVersionLabel => "templates.version",
+            Text::TemplateCurrent => "templates.current",
+            Text::TemplateEditing => "templates.editing",
+            Text::TemplateInstructions => "templates.instructions",
+            Text::TemplateInstructionsHint => "templates.instructions_hint",
+            Text::TemplatePrompt => "templates.prompt",
+            Text::TemplatePromptHint => "templates.prompt_hint",
+            Text::TemplateVariablesTitle => "templates.variables",
+            Text::TemplateVariablesHint => "templates.variables_hint",
+            Text::TemplateVariableHint(variable) => {
+                return format!("templates.variable.{}", variable.name()).into();
+            }
+            Text::SaveTemplate => "templates.save",
+            Text::RevertTemplate => "templates.revert",
+            Text::DefaultTemplate => "templates.default",
+            Text::TemplateSaved => "templates.saved",
+            Text::TemplateUnchanged => "templates.unchanged",
+            Text::TemplateNotSaved => "templates.error.not_saved",
+            Text::TemplateNotFound => "templates.error.not_found",
+            Text::TemplatesNotLoaded => "templates.error.not_loaded",
+            Text::TemplateProblem(problem) => match problem {
+                TemplateProblem::Required => "templates.error.required",
+                TemplateProblem::TooLong => "templates.error.too_long",
+                TemplateProblem::UnknownVariable => "templates.error.unknown_variable",
+                TemplateProblem::UnclosedVariable => "templates.error.unclosed_variable",
+            },
             Text::FetchedJustNow => "age.just_now",
             Text::FetchedMinutesAgo => "age.minutes",
             Text::FetchedHoursAgo => "age.hours",
@@ -624,6 +771,65 @@ mod tests {
             Text::ThemesBusy,
             Text::ThemesNothingToRank,
             Text::ThemesNotLoaded,
+            Text::ProjectsNav,
+            Text::ProjectsNoChannels,
+            Text::ProjectsNotLoaded,
+            Text::ProjectNotFound,
+            Text::ScriptTitle,
+            Text::ScriptEmpty,
+            Text::GenerateScript,
+            Text::GenerateScriptHint,
+            Text::RegenerateScript,
+            Text::RegenerateScriptHint,
+            Text::ScriptRunning,
+            Text::ScriptStopped,
+            Text::SaveScript,
+            Text::RevertScript,
+            Text::ScriptSaved,
+            Text::ScriptEdited,
+            Text::ScriptWords,
+            Text::ScriptCurrent,
+            Text::ScriptPendingTitle,
+            Text::ScriptPendingHint,
+            Text::AcceptScript,
+            Text::RejectScript,
+            Text::ProvenanceTitle,
+            Text::ProvenanceProvider,
+            Text::ProvenanceModel,
+            Text::ProvenanceTemplate,
+            Text::ProvenanceTemplateVersion,
+            Text::ProvenanceTokens,
+            Text::ProvenanceTokensValue,
+            Text::ProvenanceGenerated,
+            Text::ShowPrompt,
+            Text::HidePrompt,
+            Text::PromptInstructions,
+            Text::PromptTask,
+            Text::ScriptMissing,
+            Text::ScriptNothingToReview,
+            Text::ScriptMissingKey,
+            Text::ScriptBusy,
+            Text::ScriptNotSaved,
+            Text::TemplatesTitle,
+            Text::TemplatesHint,
+            Text::TemplateVersionsTitle,
+            Text::TemplateVersionLabel,
+            Text::TemplateCurrent,
+            Text::TemplateEditing,
+            Text::TemplateInstructions,
+            Text::TemplateInstructionsHint,
+            Text::TemplatePrompt,
+            Text::TemplatePromptHint,
+            Text::TemplateVariablesTitle,
+            Text::TemplateVariablesHint,
+            Text::SaveTemplate,
+            Text::RevertTemplate,
+            Text::DefaultTemplate,
+            Text::TemplateSaved,
+            Text::TemplateUnchanged,
+            Text::TemplateNotSaved,
+            Text::TemplateNotFound,
+            Text::TemplatesNotLoaded,
             Text::FetchedJustNow,
             Text::FetchedMinutesAgo,
             Text::FetchedHoursAgo,
@@ -647,6 +853,10 @@ mod tests {
         texts.extend(Country::ALL.map(Text::CountryName));
         texts.extend(ChannelFieldError::ALL.map(Text::ChannelFieldError));
         texts.extend(ThemeFieldError::ALL.map(Text::ThemeFieldError));
+        texts.extend(ScriptFieldError::ALL.map(Text::ScriptFieldError));
+        texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
+        texts.extend(TemplateVariable::ALL.map(Text::TemplateVariableHint));
+        texts.extend(TemplateProblem::ALL.map(Text::TemplateProblem));
         texts
     }
 
@@ -791,6 +1001,48 @@ mod tests {
                 (Text::ThemesDiscarded, &[("n", "4")][..]),
                 (Text::ThemeRankedBy, &[("model", "jev-1.13.0")][..]),
                 (Text::ProjectStarted, &[("title", "The Lost Probe")][..]),
+            ] {
+                let filled = catalog.format(text, args);
+                assert!(!filled.contains('{'), "{filled}");
+                for (_, value) in args {
+                    assert!(filled.contains(value), "{filled}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn script_and_template_limit_messages_match_the_domain_limits() {
+        use bardo_domain::{ScriptText, TemplateBody};
+
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        let script = catalog.get(Text::ScriptFieldError(ScriptFieldError::TextTooLong));
+        assert!(
+            script.contains(&ScriptText::MAX_CHARS.to_string()),
+            "{script}"
+        );
+        let template = catalog.get(Text::TemplateProblem(TemplateProblem::TooLong));
+        assert!(
+            template.contains(&TemplateBody::MAX_CHARS.to_string()),
+            "{template}"
+        );
+    }
+
+    #[test]
+    fn script_and_template_placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for (text, args) in [
+                (Text::GenerateScriptHint, &[("n", "3")][..]),
+                (Text::ScriptWords, &[("n", "1250")][..]),
+                (Text::ProvenanceTemplateVersion, &[("n", "3")][..]),
+                (
+                    Text::ProvenanceTokensValue,
+                    &[("input", "812"), ("output", "2431")][..],
+                ),
+                (Text::TemplateVersionLabel, &[("n", "3")][..]),
+                (Text::TemplateEditing, &[("n", "3"), ("next", "4")][..]),
+                (Text::TemplateSaved, &[("n", "4")][..]),
             ] {
                 let filled = catalog.format(text, args);
                 assert!(!filled.contains('{'), "{filled}");

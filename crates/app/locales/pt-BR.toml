@@ -97,6 +97,7 @@ countdown = "Contagem de teste"
 niche_research = "Pesquisa de nicho"
 theme_suggestion = "Sugestão de temas"
 theme_ranking = "Ranqueamento de temas"
+script_generation = "Geração de roteiro"
 
 [job.state]
 queued = "Na fila"
@@ -273,9 +274,103 @@ title_too_long = "Use no máximo 120 caracteres no título."
 angle_too_long = "Use no máximo 500 caracteres no ângulo."
 
 [projects]
+nav = "Projetos"
 title = "Projetos de vídeo"
 empty = "Aprove uma ideia para começar um projeto de vídeo."
 started = "Projeto de vídeo iniciado: {title}"
+no_channels = "Crie um canal e aprove um dos temas dele para começar um projeto de vídeo."
+
+[projects.error]
+not_loaded = "Não foi possível carregar os projetos de vídeo."
+not_found = "Este projeto de vídeo não existe mais."
+
+[script]
+title = "Roteiro"
+empty = "Ainda não há roteiro."
+generate = "Gerar roteiro"
+generate_hint = "O Claude escreve a partir do template de roteiro (versão {n}) com o canal, o nicho, o tema e a persona."
+regenerate = "Gerar de novo"
+regenerate_hint = "O novo roteiro fica aqui para você revisar; o atual continua até você aceitar o novo."
+running = "Escrevendo o roteiro…"
+stopped = "A última geração parou:"
+save = "Salvar"
+revert = "Descartar alterações"
+saved = "Roteiro salvo."
+edited = "Editado"
+words = "{n} palavras"
+current = "Roteiro atual"
+
+[script.pending]
+title = "Novo roteiro para revisar"
+hint = "Aceitar substitui o roteiro atual, inclusive as suas edições."
+accept = "Aceitar o novo roteiro"
+reject = "Manter o atual"
+
+[script.error]
+missing = "Gere um roteiro primeiro."
+nothing_to_review = "Não há roteiro novo para revisar."
+missing_key = "Salve uma chave do Claude em Configurações para gerar roteiros."
+busy = "Já há um roteiro sendo escrito para este projeto."
+not_saved = "Não foi possível salvar o roteiro. Tente de novo."
+text_required = "O roteiro não pode ficar vazio."
+text_too_long = "Use no máximo 60000 caracteres no roteiro."
+
+[provenance]
+title = "Procedência"
+provider = "Provedor"
+model = "Modelo"
+template = "Template"
+template_version = "versão {n}"
+tokens = "Tokens"
+tokens_value = "{input} de entrada · {output} de saída"
+generated = "Gerado"
+show_prompt = "Mostrar prompt"
+hide_prompt = "Ocultar prompt"
+instructions = "Instruções enviadas"
+prompt = "Prompt enviado"
+
+[templates]
+title = "Templates"
+hint = "Templates são os prompts que o Bardo envia à IA. Salvar cria uma nova versão; as antigas continuam aqui, e cada geração registra a versão que usou."
+versions = "Versões"
+version = "Versão {n}"
+current = "Atual"
+editing = "Editando a partir da versão {n}. Salvar cria a versão {next}."
+instructions = "Instruções"
+instructions_hint = "Regras fixas: o papel, o tom e o formato que a IA segue."
+prompt = "Prompt"
+prompt_hint = "A tarefa em si, com os dados do projeto."
+variables = "Variáveis"
+variables_hint = "Escreva uma variável como {{nome}}. Cada geração troca pelo valor do projeto."
+save = "Salvar como nova versão"
+revert = "Descartar alterações"
+default = "Carregar o padrão do Bardo"
+saved = "Salvo como versão {n}."
+unchanged = "Nada mudou, então nenhuma versão foi criada."
+
+[templates.kind]
+script = "Roteiro"
+
+[templates.variable]
+channel_name = "O nome do canal."
+channel_niche = "O nicho do canal."
+channel_themes = "Os temas recorrentes do canal."
+aesthetic_notes = "As notas de estética do canal."
+language = "O idioma do vídeo."
+country = "O país do público."
+persona = "O narrador: voz, tom e estilo de roteiro."
+niche = "O nicho do projeto de vídeo."
+theme_title = "O título provisório do vídeo."
+theme_angle = "O ângulo do tema aprovado."
+
+[templates.error]
+not_saved = "Não foi possível salvar o template. Tente de novo."
+not_found = "Esta versão do template não existe mais."
+not_loaded = "Não foi possível carregar os templates."
+required = "Escreva o prompt."
+too_long = "Use no máximo 8000 caracteres."
+unknown_variable = "Use só as variáveis listadas abaixo, escritas como aparecem."
+unclosed_variable = "Falta fechar uma variável com }}."
 
 [age]
 just_now = "agora há pouco"

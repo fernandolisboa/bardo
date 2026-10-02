@@ -169,15 +169,41 @@ fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryErr
     Ok(())
 }
 
-fn read_project(row: &Row<'_>) -> rusqlite::Result<[String; 6]> {
-    Ok([
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-    ])
+/// A video project row as stored.
+struct ProjectRow {
+    id: String,
+    owner: String,
+    channel: String,
+    niche: String,
+    theme: String,
+    title: String,
+    created_at: i64,
+}
+
+impl ProjectRow {
+    fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            owner: row.get(1)?,
+            channel: row.get(2)?,
+            niche: row.get(3)?,
+            theme: row.get(4)?,
+            title: row.get(5)?,
+            created_at: row.get(6)?,
+        })
+    }
+
+    fn into_project(self) -> Result<VideoProject, RepositoryError> {
+        Ok(VideoProject {
+            id: VideoProjectId::from(uuid(&self.id)?),
+            owner: ProfileId::from(uuid(&self.owner)?),
+            channel: ChannelId::from(uuid(&self.channel)?),
+            niche: niche(&self.niche)?,
+            theme: ThemeId::from(uuid(&self.theme)?),
+            title: self.title,
+            created_at: from_unix_millis(self.created_at),
+        })
+    }
 }
 
 impl ThemeRepository for Database {
@@ -240,34 +266,31 @@ impl ThemeRepository for Database {
     }
 
     fn projects(&self, channel: ChannelId) -> Result<Vec<VideoProject>, RepositoryError> {
-        let conn = self.conn();
-        let rows = conn
+        let rows = self
+            .conn()
             .prepare_cached(&format!(
                 "{SELECT_PROJECT} WHERE channel_id = ?1 ORDER BY created_at DESC"
             ))
             .and_then(|mut statement| {
                 statement
-                    .query_map([channel.to_string()], |row| {
-                        Ok((read_project(row)?, row.get::<_, i64>(6)?))
-                    })?
+                    .query_map([channel.to_string()], ProjectRow::read)?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .map_err(boxed)?;
-        rows.into_iter()
-            .map(
-                |([id, owner, channel, niche_label, theme, title], created_at)| {
-                    Ok(VideoProject {
-                        id: VideoProjectId::from(uuid(&id)?),
-                        owner: ProfileId::from(uuid(&owner)?),
-                        channel: ChannelId::from(uuid(&channel)?),
-                        niche: niche(&niche_label)?,
-                        theme: ThemeId::from(uuid(&theme)?),
-                        title,
-                        created_at: from_unix_millis(created_at),
-                    })
-                },
+        rows.into_iter().map(ProjectRow::into_project).collect()
+    }
+
+    fn project(&self, id: VideoProjectId) -> Result<Option<VideoProject>, RepositoryError> {
+        let row = self
+            .conn()
+            .query_row(
+                &format!("{SELECT_PROJECT} WHERE id = ?1"),
+                [id.to_string()],
+                ProjectRow::read,
             )
-            .collect()
+            .optional()
+            .map_err(boxed)?;
+        row.map(ProjectRow::into_project).transpose()
     }
 }
 
@@ -376,6 +399,8 @@ mod tests {
             db.projects(channel.id).unwrap(),
             std::slice::from_ref(&project)
         );
+        assert_eq!(db.project(project.id).unwrap().as_ref(), Some(&project));
+        assert_eq!(db.project(VideoProjectId::new()).unwrap(), None);
 
         // One project per theme: a second one fails and changes nothing.
         let mut again = project.clone();
