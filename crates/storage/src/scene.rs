@@ -1,12 +1,14 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    JobFailureKind, NarrationId, ProfileId, RepositoryError, Scene, SceneImage, ScenePlan,
-    ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, VideoProjectId,
+    GenerationId, JobFailureKind, NarrationId, ProfileId, RepositoryError, Scene, SceneClip,
+    SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
+    SceneRecord, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
+use crate::channel::clip_model;
 use crate::script::{generation, insert_generation};
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
@@ -46,6 +48,53 @@ struct SceneRow {
     image: (Option<String>, Option<String>),
     pending: (Option<String>, Option<String>),
     failure: Option<String>,
+    motion_prompt: Option<String>,
+    clip_model: (Option<String>, Option<String>),
+    clip_failure: Option<String>,
+}
+
+fn failure_kind(code: Option<String>) -> Result<Option<JobFailureKind>, RepositoryError> {
+    code.map(|code| code.parse::<JobFailureKind>())
+        .transpose()
+        .map_err(boxed)
+}
+
+/// Clip slots: the clip the cut uses, and a new one waiting for review.
+const CURRENT: &str = "current";
+const PENDING: &str = "pending";
+
+/// The scene's clip in `slot`, if it has one.
+fn clip(
+    conn: &Connection,
+    plan: &str,
+    position: i64,
+    slot: &str,
+) -> Result<Option<SceneClip>, RepositoryError> {
+    let row = conn
+        .query_row(
+            "SELECT file, seconds, source_image_id, generation_id FROM scene_clip
+             WHERE plan_id = ?1 AND position = ?2 AND slot = ?3",
+            params![plan, position, slot],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(boxed)?;
+    let Some((file, seconds, source, generation_id)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(SceneClip {
+        file,
+        seconds: u32::try_from(seconds).map_err(boxed)?,
+        source_image: GenerationId::from(uuid(&source)?),
+        generation: generation(conn, &generation_id)?,
+    }))
 }
 
 fn image(
@@ -63,7 +112,12 @@ fn image(
 }
 
 impl SceneRow {
-    fn into_scene(self, conn: &Connection) -> Result<Scene, RepositoryError> {
+    fn into_scene(
+        self,
+        conn: &Connection,
+        plan: &str,
+        position: i64,
+    ) -> Result<Scene, RepositoryError> {
         Ok(Scene::restore(SceneRecord {
             start: duration(self.start_ms)?,
             end: duration(self.end_ms)?,
@@ -72,11 +126,12 @@ impl SceneRow {
             prompt: prompt(&self.prompt)?,
             image: image(conn, self.image)?,
             pending: image(conn, self.pending)?,
-            failure: self
-                .failure
-                .map(|code| code.parse::<JobFailureKind>())
-                .transpose()
-                .map_err(boxed)?,
+            failure: failure_kind(self.failure)?,
+            motion_prompt: self.motion_prompt.as_deref().map(prompt).transpose()?,
+            clip_model: clip_model(self.clip_model)?,
+            clip: clip(conn, plan, position, CURRENT)?,
+            pending_clip: clip(conn, plan, position, PENDING)?,
+            clip_failure: failure_kind(self.clip_failure)?,
         }))
     }
 }
@@ -85,37 +140,85 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
     let mut statement = conn
         .prepare(
             "SELECT start_ms, end_ms, text, generated_prompt, prompt, image_file,
-                 image_generation_id, pending_file, pending_generation_id, failure
+                 image_generation_id, pending_file, pending_generation_id, failure,
+                 motion_prompt, clip_provider, clip_model, clip_failure, position
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
     let rows = statement
         .query_map([plan], |row| {
-            Ok(SceneRow {
-                start_ms: row.get(0)?,
-                end_ms: row.get(1)?,
-                text: row.get(2)?,
-                generated_prompt: row.get(3)?,
-                prompt: row.get(4)?,
-                image: (row.get(5)?, row.get(6)?),
-                pending: (row.get(7)?, row.get(8)?),
-                failure: row.get(9)?,
-            })
+            Ok((
+                SceneRow {
+                    start_ms: row.get(0)?,
+                    end_ms: row.get(1)?,
+                    text: row.get(2)?,
+                    generated_prompt: row.get(3)?,
+                    prompt: row.get(4)?,
+                    image: (row.get(5)?, row.get(6)?),
+                    pending: (row.get(7)?, row.get(8)?),
+                    failure: row.get(9)?,
+                    motion_prompt: row.get(10)?,
+                    clip_model: (row.get(11)?, row.get(12)?),
+                    clip_failure: row.get(13)?,
+                },
+                row.get::<_, i64>(14)?,
+            ))
         })
         .map_err(boxed)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(boxed)?;
-    rows.into_iter().map(|row| row.into_scene(conn)).collect()
+    rows.into_iter()
+        .map(|(row, position)| row.into_scene(conn, plan, position))
+        .collect()
 }
 
 fn position(index: usize) -> Result<i64, RepositoryError> {
     i64::try_from(index).map_err(boxed)
 }
 
-/// Saves the generations of the scene's images; they never change.
-fn insert_images(tx: &Transaction<'_>, scene: &Scene) -> Result<(), RepositoryError> {
+/// Saves the generations of the scene's images and clips; they never
+/// change.
+fn insert_generations(tx: &Transaction<'_>, scene: &Scene) -> Result<(), RepositoryError> {
     for image in scene.image().into_iter().chain(scene.pending()) {
         insert_generation(tx, &image.generation)?;
+    }
+    for clip in scene.clip().into_iter().chain(scene.pending_clip()) {
+        insert_generation(tx, &clip.generation)?;
+    }
+    Ok(())
+}
+
+/// Writes the scene's clips in place of the ones saved.
+fn write_clips(
+    tx: &Transaction<'_>,
+    plan: &str,
+    position: i64,
+    scene: &Scene,
+) -> Result<(), RepositoryError> {
+    tx.execute(
+        "DELETE FROM scene_clip WHERE plan_id = ?1 AND position = ?2",
+        params![plan, position],
+    )
+    .map_err(boxed)?;
+    for (slot, clip) in [(CURRENT, scene.clip()), (PENDING, scene.pending_clip())] {
+        let Some(clip) = clip else {
+            continue;
+        };
+        tx.execute(
+            "INSERT INTO scene_clip (plan_id, position, slot, file, seconds, source_image_id,
+                 generation_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                plan,
+                position,
+                slot,
+                clip.file,
+                i64::from(clip.seconds),
+                clip.source_image.to_string(),
+                clip.generation.id.to_string(),
+            ],
+        )
+        .map_err(boxed)?;
     }
     Ok(())
 }
@@ -126,12 +229,12 @@ fn insert_scene(
     index: usize,
     scene: &Scene,
 ) -> Result<(), RepositoryError> {
-    insert_images(tx, scene)?;
+    insert_generations(tx, scene)?;
     tx.execute(
         "INSERT INTO scene (plan_id, position, start_ms, end_ms, text, generated_prompt,
              prompt, image_file, image_generation_id, pending_file, pending_generation_id,
-             failure)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             failure, motion_prompt, clip_provider, clip_model, clip_failure)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             plan,
             position(index)?,
@@ -145,10 +248,14 @@ fn insert_scene(
             scene.pending().map(|image| image.file.as_str()),
             scene.pending().map(|image| image.generation.id.to_string()),
             scene.failure().map(|kind| kind.code()),
+            scene.own_motion_prompt().map(ScenePrompt::as_str),
+            scene.clip_model().map(|model| model.provider().code()),
+            scene.clip_model().map(|model| model.model()),
+            scene.clip_failure().map(|kind| kind.code()),
         ],
     )
     .map_err(boxed)?;
-    Ok(())
+    write_clips(tx, plan, position(index)?, scene)
 }
 
 impl ScenePlanRepository for Database {
@@ -234,11 +341,13 @@ impl ScenePlanRepository for Database {
         if saved == 0 {
             return Err(invalid(format!("plan {id} is not saved")));
         }
-        insert_images(&tx, scene)?;
+        insert_generations(&tx, scene)?;
         let updated = tx
             .execute(
                 "UPDATE scene SET prompt = ?3, image_file = ?4, image_generation_id = ?5,
-                     pending_file = ?6, pending_generation_id = ?7, failure = ?8
+                     pending_file = ?6, pending_generation_id = ?7, failure = ?8,
+                     motion_prompt = ?9, clip_provider = ?10, clip_model = ?11,
+                     clip_failure = ?12
                  WHERE plan_id = ?1 AND position = ?2",
                 params![
                     id,
@@ -249,12 +358,17 @@ impl ScenePlanRepository for Database {
                     scene.pending().map(|image| image.file.as_str()),
                     scene.pending().map(|image| image.generation.id.to_string()),
                     scene.failure().map(|kind| kind.code()),
+                    scene.own_motion_prompt().map(ScenePrompt::as_str),
+                    scene.clip_model().map(|model| model.provider().code()),
+                    scene.clip_model().map(|model| model.model()),
+                    scene.clip_failure().map(|kind| kind.code()),
                 ],
             )
             .map_err(boxed)?;
         if updated == 0 {
             return Err(invalid(format!("plan {id} has no scene {index}")));
         }
+        write_clips(&tx, &id, position(index)?, scene)?;
         tx.commit().map_err(boxed)
     }
 }
@@ -420,6 +534,53 @@ mod tests {
 
         assert_eq!(s.db.scene_plan(s.project.id).unwrap(), Some(plan));
         assert_eq!(s.db.scene_plan(VideoProjectId::new()).unwrap(), None);
+    }
+
+    fn clip(s: &Setup, file: &str, source: &SceneImage) -> SceneClip {
+        SceneClip {
+            file: file.into(),
+            seconds: 6,
+            source_image: source.generation.id,
+            generation: generation(s, Provider::Higgsfield, file),
+        }
+    }
+
+    #[test]
+    fn clips_round_trip_with_the_scene_s_motion_prompt_and_model() {
+        let s = setup();
+        let mut plan = plan(&s);
+        s.db.save_scene_plan(&plan).unwrap();
+        let still = image(&s, "still.png");
+        let scene = plan.scene_mut(0, time(1_800_000_030)).unwrap();
+        scene.add_image(still.clone());
+        scene.set_motion_prompt(Some(ScenePrompt::new("Slow push in.").unwrap()));
+        scene.set_clip_model(Some(
+            bardo_domain::ClipModelRef::new(Provider::Higgsfield, "minimax/h3/image-to-video")
+                .unwrap(),
+        ));
+        scene.add_clip(clip(&s, "one.mp4", &still));
+        scene.accept_clip().unwrap();
+        scene.add_clip(clip(&s, "two.mp4", &still));
+        scene.fail_clip(JobFailureKind::Declined);
+        s.db.save_scene(&plan, 0).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+
+        // Accepting and going back to the still empty the slots again.
+        let scene = plan.scene_mut(0, time(1_800_000_031)).unwrap();
+        scene.accept_clip().unwrap();
+        scene.remove_clip();
+        scene.set_motion_prompt(None);
+        scene.set_clip_model(None);
+        s.db.save_scene(&plan, 0).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+
+        // A whole plan saved with clips reads back the same.
+        let scene = plan.scene_mut(1, time(1_800_000_032)).unwrap();
+        let other = image(&s, "other.png");
+        scene.add_image(other.clone());
+        scene.add_clip(clip(&s, "three.mp4", &other));
+        s.db.save_scene_plan(&plan).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap(), Some(plan));
     }
 
     #[test]

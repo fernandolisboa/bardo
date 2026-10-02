@@ -1,6 +1,7 @@
 //! The HTTP seam every provider adapter goes through, so adapters can be
 //! tested against recorded responses instead of live calls (ADR-0001).
 
+use std::borrow::Cow;
 use std::fmt;
 use std::time::Duration;
 
@@ -8,6 +9,7 @@ use std::time::Duration;
 pub enum Method {
     Get,
     Post,
+    Put,
 }
 
 /// A request. Header values may hold keys and bodies may hold user content,
@@ -15,8 +17,10 @@ pub enum Method {
 pub struct HttpRequest {
     pub method: Method,
     pub url: String,
-    pub headers: Vec<(&'static str, String)>,
-    pub body: Option<String>,
+    /// Names are fixed by adapters, or given by a provider (presigned
+    /// upload headers).
+    pub headers: Vec<(Cow<'static, str>, String)>,
+    pub body: Option<Vec<u8>>,
 }
 
 impl HttpRequest {
@@ -34,13 +38,23 @@ impl HttpRequest {
         Self {
             method: Method::Post,
             url: url.into(),
-            headers: vec![("content-type", "application/json".to_owned())],
-            body: Some(body.into()),
+            headers: vec![("content-type".into(), "application/json".to_owned())],
+            body: Some(body.into().into_bytes()),
         }
     }
 
-    pub fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
-        self.headers.push((name, value.into()));
+    /// A PUT of raw bytes, e.g. a file to a presigned upload URL.
+    pub fn put(url: impl Into<String>, body: Vec<u8>) -> Self {
+        Self {
+            method: Method::Put,
+            url: url.into(),
+            headers: Vec::new(),
+            body: Some(body),
+        }
+    }
+
+    pub fn header(mut self, name: impl Into<Cow<'static, str>>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
         self
     }
 
@@ -55,12 +69,12 @@ impl HttpRequest {
 
 impl fmt::Debug for HttpRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let names: Vec<_> = self.headers.iter().map(|(name, _)| *name).collect();
+        let names: Vec<_> = self.headers.iter().map(|(name, _)| name.as_ref()).collect();
         f.debug_struct("HttpRequest")
             .field("method", &self.method)
             .field("url", &self.url)
             .field("headers", &names)
-            .field("body_bytes", &self.body.as_ref().map(String::len))
+            .field("body_bytes", &self.body.as_ref().map(Vec::len))
             .finish()
     }
 }
@@ -121,9 +135,36 @@ impl HttpResponse {
 #[error("{0}")]
 pub struct TransportError(pub String);
 
+/// An answer whose body is kept as bytes (a downloaded file).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryResponse {
+    pub status: u16,
+    pub bytes: Vec<u8>,
+}
+
 /// Sends requests. Blocking: call it off the UI thread.
 pub trait Transport: Send + Sync {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError>;
+
+    /// Sends `request` and keeps the body as bytes, up to `max_bytes`;
+    /// a longer body is an error rather than a cut file. Transports that
+    /// only replay text answer with the text's bytes.
+    fn send_for_bytes(
+        &self,
+        request: &HttpRequest,
+        max_bytes: u64,
+    ) -> Result<BinaryResponse, TransportError> {
+        let response = self.send(request)?;
+        if response.body.len() as u64 > max_bytes {
+            return Err(TransportError(format!(
+                "the body is over {max_bytes} bytes"
+            )));
+        }
+        Ok(BinaryResponse {
+            status: response.status,
+            bytes: response.body.into_bytes(),
+        })
+    }
 }
 
 /// Real HTTPS through `ureq`. Trusts the operating system's certificate
@@ -178,25 +219,38 @@ impl UreqTransport {
     }
 }
 
-impl Transport for UreqTransport {
-    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
-        let sent = match (request.method, &request.body) {
-            (Method::Get, _) => {
+impl UreqTransport {
+    fn call(
+        &self,
+        request: &HttpRequest,
+    ) -> Result<ureq::http::Response<ureq::Body>, TransportError> {
+        let sent = match request.method {
+            Method::Get => {
                 let mut call = self.agent.get(&request.url);
                 for (name, value) in &request.headers {
-                    call = call.header(*name, value.as_str());
+                    call = call.header(name.as_ref(), value.as_str());
                 }
                 call.call()
             }
-            (Method::Post, body) => {
-                let mut call = self.agent.post(&request.url);
+            Method::Post | Method::Put => {
+                let mut call = if request.method == Method::Post {
+                    self.agent.post(&request.url)
+                } else {
+                    self.agent.put(&request.url)
+                };
                 for (name, value) in &request.headers {
-                    call = call.header(*name, value.as_str());
+                    call = call.header(name.as_ref(), value.as_str());
                 }
-                call.send(body.as_deref().unwrap_or_default())
+                call.send(request.body.as_deref().unwrap_or_default())
             }
         };
-        let mut response = sent.map_err(|error| TransportError(error.to_string()))?;
+        sent.map_err(|error| TransportError(error.to_string()))
+    }
+}
+
+impl Transport for UreqTransport {
+    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
+        let mut response = self.call(request)?;
         let status = response.status().as_u16();
         let headers = response
             .headers()
@@ -217,5 +271,22 @@ impl Transport for UreqTransport {
             headers,
             body,
         })
+    }
+
+    fn send_for_bytes(
+        &self,
+        request: &HttpRequest,
+        max_bytes: u64,
+    ) -> Result<BinaryResponse, TransportError> {
+        let mut response = self.call(request)?;
+        let status = response.status().as_u16();
+        // A file is useless when cut, so reading too much is an error.
+        let bytes = response
+            .body_mut()
+            .with_config()
+            .limit(max_bytes)
+            .read_to_vec()
+            .map_err(|error| TransportError(error.to_string()))?;
+        Ok(BinaryResponse { status, bytes })
     }
 }

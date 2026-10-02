@@ -84,8 +84,9 @@ pub struct ProjectsScreen {
     narration_error: Option<Text>,
     scenes: Option<ScenesView>,
     scenes_error: Option<Text>,
-    /// The scene whose prompt is open in `scene_editor`.
-    editing_scene: Option<(ScenePlanId, usize)>,
+    /// The scene prompt open in `scene_editor`: which scene, and whether
+    /// its image or motion prompt.
+    editing_scene: Option<(ScenePlanId, usize, scenes::ScenePromptField)>,
     scene_editor: Entity<TextareaState>,
     scene_field_error: Option<SceneFieldError>,
     /// "Plan again" was clicked on scenes that have images: the panel asks

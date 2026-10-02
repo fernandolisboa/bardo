@@ -1,0 +1,4 @@
+HTTP/1.1 422 Unprocessable Entity
+content-type: application/json
+
+{"detail":[{"type":"less_than_equal","loc":["body","duration"],"msg":"Input should be less than or equal to 15","input":20}]}

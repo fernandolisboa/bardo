@@ -13,6 +13,7 @@ pub use countdown::TestJob;
 pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
+use crate::clips::ClipHandler;
 use crate::narrations::NarrationHandler;
 use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
@@ -27,6 +28,7 @@ pub(crate) fn built_in_handlers(
     scripts: ScriptHandler,
     narrations: NarrationHandler,
     scenes: SceneHandler,
+    clips: ClipHandler,
 ) -> HashMap<JobKind, Arc<dyn JobHandler>> {
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -39,6 +41,7 @@ pub(crate) fn built_in_handlers(
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);
+    handlers.insert(JobKind::SceneClips, Arc::new(clips));
     handlers
 }
 

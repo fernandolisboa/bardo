@@ -68,7 +68,7 @@ fn returns_the_final_image_not_the_drafts_with_the_tokens_counted() {
             input_tokens: 14,
             output_tokens: 218,
             image_tokens: 1_680,
-            characters: 0,
+            ..Metered::default()
         },
         "thinking is billed as text output, the image apart"
     );

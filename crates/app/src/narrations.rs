@@ -332,6 +332,7 @@ impl NarrationHandler {
                     purpose: CostPurpose::Narration,
                     usage: Metered::characters(speech.billed_characters),
                     job,
+                    reported: None,
                 },
                 project,
             );
@@ -735,6 +736,7 @@ mod tests {
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::clone(&self.speech) as _,
                 images: Arc::new(crate::testing::FakeImages::default()),
+                clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::clone(&self.audio) as _,
             };
             let mut app = Bardo::start_with(

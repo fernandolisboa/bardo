@@ -1,5 +1,6 @@
 //! Channel use cases: list, create and edit the profile's channels, each
-//! with an optional default persona from the profile's library.
+//! with an optional default persona from the profile's library and an
+//! optional video model for its clips.
 
 use bardo_domain::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, RepositoryError,
@@ -19,6 +20,9 @@ pub enum ChannelError {
     /// The chosen default persona is not one of the profile's.
     #[error("persona not found")]
     PersonaNotFound,
+    /// The chosen video model is not one the providers offer.
+    #[error("video model not offered")]
+    ClipModelNotOffered,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -32,6 +36,7 @@ impl ChannelError {
             ChannelError::NameTaken => Some(Text::ChannelNameTaken),
             ChannelError::NotFound => Some(Text::ChannelNotFound),
             ChannelError::PersonaNotFound => Some(Text::ChannelPersonaNotFound),
+            ChannelError::ClipModelNotOffered => Some(Text::ChannelClipModelNotOffered),
             ChannelError::Repository(_) => Some(Text::ChannelNotSaved),
         }
     }
@@ -54,6 +59,7 @@ impl Bardo {
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, None)?;
         self.ensure_own_persona(&details)?;
+        self.ensure_offered_clip_model(&details)?;
         let channel = Channel::new(self.profile.id, details);
         self.channels.save(&channel)?;
         Ok(channel)
@@ -72,6 +78,7 @@ impl Bardo {
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, Some(id))?;
         self.ensure_own_persona(&details)?;
+        self.ensure_offered_clip_model(&details)?;
         channel.details = details;
         self.channels.save(&channel)?;
         Ok(channel)
@@ -85,6 +92,13 @@ impl Bardo {
             Ok(_) => Ok(()),
             Err(PersonaError::Repository(error)) => Err(ChannelError::Repository(error)),
             Err(_) => Err(ChannelError::PersonaNotFound),
+        }
+    }
+
+    fn ensure_offered_clip_model(&self, details: &ChannelDetails) -> Result<(), ChannelError> {
+        match details.clip_model() {
+            Some(model) if !self.offers_clip_model(model) => Err(ChannelError::ClipModelNotOffered),
+            _ => Ok(()),
         }
     }
 
@@ -149,6 +163,7 @@ mod tests {
             language: ContentLanguage::English,
             country: Country::UnitedStates,
             default_persona: None,
+            clip_model: None,
         }
     }
 
@@ -207,6 +222,35 @@ mod tests {
         assert_eq!(updated.details.name(), "Arquivos do Espaço");
         assert_eq!(updated.details.country(), Country::Brazil);
         assert_eq!(app.channels().unwrap(), [updated]);
+    }
+
+    #[test]
+    fn a_channel_picks_one_of_the_offered_video_models() {
+        use bardo_domain::{ClipModelRef, Provider};
+
+        let app = app();
+        let offered = app.clip_models()[1].id.clone();
+        let created = app
+            .create_channel(ChannelDraft {
+                clip_model: Some(offered.clone()),
+                ..draft("Space Archives")
+            })
+            .unwrap();
+        assert_eq!(created.details.clip_model(), Some(&offered));
+
+        let unknown = ClipModelRef::new(Provider::Higgsfield, "retired/model").unwrap();
+        let error = app
+            .update_channel(
+                created.id,
+                ChannelDraft {
+                    clip_model: Some(unknown),
+                    ..draft("Space Archives")
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(error, ChannelError::ClipModelNotOffered));
+        assert_eq!(error.form_message(), Some(Text::ChannelClipModelNotOffered));
+        assert_eq!(app.channels().unwrap(), [created]);
     }
 
     #[test]

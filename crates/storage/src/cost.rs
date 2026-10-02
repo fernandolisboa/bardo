@@ -11,7 +11,7 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_RECORD: &str = "SELECT id, profile_id, provider, model, purpose, input_tokens, \
      output_tokens, image_tokens, characters, basis, amount_micros, channel_id, project_id, \
-     job_id, at FROM cost_record";
+     job_id, at, video_seconds FROM cost_record";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored cost is invalid: {0}")]
@@ -24,7 +24,7 @@ struct RecordRow {
     provider: String,
     model: String,
     purpose: String,
-    usage: [i64; 4],
+    usage: [i64; 5],
     basis: String,
     amount_micros: i64,
     channel_id: Option<String>,
@@ -41,7 +41,13 @@ impl RecordRow {
             provider: row.get(2)?,
             model: row.get(3)?,
             purpose: row.get(4)?,
-            usage: [row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?],
+            usage: [
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(15)?,
+            ],
             basis: row.get(9)?,
             amount_micros: row.get(10)?,
             channel_id: row.get(11)?,
@@ -53,7 +59,7 @@ impl RecordRow {
 
     fn into_record(self) -> Result<CostRecord, RepositoryError> {
         let count = |value: i64| u64::try_from(value).map_err(boxed);
-        let [input, output, image, characters] = self.usage;
+        let [input, output, image, characters, video_seconds] = self.usage;
         let amount = Money::from_micros(count(self.amount_micros)?);
         let cost = match self.basis.as_str() {
             "reported" => Cost::Reported(amount),
@@ -73,6 +79,7 @@ impl RecordRow {
                 output_tokens: count(output)?,
                 image_tokens: count(image)?,
                 characters: count(characters)?,
+                video_seconds: count(video_seconds)?,
             },
             cost,
             channel: self
@@ -130,8 +137,8 @@ impl CostRepository for Database {
             .execute(
                 "INSERT INTO cost_record (id, profile_id, provider, model, purpose, \
                  input_tokens, output_tokens, image_tokens, characters, basis, amount_micros, \
-                 channel_id, project_id, job_id, at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                 channel_id, project_id, job_id, at, video_seconds) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     record.id.to_string(),
                     record.owner.to_string(),
@@ -148,6 +155,7 @@ impl CostRepository for Database {
                     record.project.map(|id| id.to_string()),
                     record.job.map(|id| id.to_string()),
                     to_unix_millis(record.at),
+                    sql_count(usage.video_seconds),
                 ],
             )
             .map_err(boxed)?;
@@ -338,8 +346,7 @@ mod tests {
             usage: Metered {
                 input_tokens: 812,
                 output_tokens: 2_431,
-                image_tokens: 0,
-                characters: 0,
+                ..Metered::default()
             },
             cost,
             channel: Some(ChannelId::new()),
@@ -376,14 +383,25 @@ mod tests {
             Cost::Unpriced,
             at(1_790_916_203),
         );
-        for record in [&estimated, &reported, &unpriced] {
+        let clip = CostRecord {
+            provider: Provider::Higgsfield,
+            model: "kling-video/v3.0/std/image-to-video".into(),
+            usage: Metered::video_seconds(8),
+            ..record(
+                owner,
+                CostPurpose::SceneClip,
+                Cost::Reported(Money::from_micros(896_000)),
+                at(1_790_916_204),
+            )
+        };
+        for record in [&estimated, &reported, &unpriced, &clip] {
             db.record_cost(record).unwrap();
         }
         let october = Month::of(at(1_790_916_201));
         let stored = db
             .costs_between(owner, october.start(), october.end())
             .unwrap();
-        assert_eq!(stored, [estimated.clone(), reported, unpriced]);
+        assert_eq!(stored, [estimated.clone(), reported, unpriced, clip]);
         assert_eq!(
             db.project_costs(estimated.project.unwrap()).unwrap(),
             [estimated]
@@ -468,9 +486,17 @@ mod tests {
         db.save_rate(owner, &rate("3.5")).unwrap();
         let other = Rate::new(Provider::Gemini, "", Meter::ImageTokens, "60").unwrap();
         db.save_rate(owner, &other).unwrap();
+        let video = Rate::new(
+            Provider::Higgsfield,
+            "kling-video/",
+            Meter::VideoSeconds,
+            "0.07",
+        )
+        .unwrap();
+        db.save_rate(owner, &video).unwrap();
         assert_eq!(
             db.rate_changes(owner).unwrap(),
-            [rate("3.5"), other.clone()]
+            [rate("3.5"), other.clone(), video.clone()]
         );
 
         db.remove_rate(
@@ -480,7 +506,7 @@ mod tests {
             Meter::InputTokens,
         )
         .unwrap();
-        assert_eq!(db.rate_changes(owner).unwrap(), [other]);
+        assert_eq!(db.rate_changes(owner).unwrap(), [other, video]);
     }
 
     #[test]

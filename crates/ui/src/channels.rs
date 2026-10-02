@@ -3,7 +3,8 @@
 //! a `ChannelDraft` and errors back to fields.
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelDraft, ChannelFieldError, ChannelId, ContentLanguage, Country, PersonaId,
+    Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModelRef, ContentLanguage, Country,
+    PersonaId,
 };
 use bardo_app::{Bardo, ChannelError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -72,6 +73,27 @@ fn persona_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<PersonaId>>> {
     )
 }
 
+/// The provider's default model first (a channel that keeps it follows the
+/// default), then every model by name.
+fn clip_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef>>> {
+    let models = bardo.clip_models();
+    let default = models.first().map(|model| Choice {
+        value: None,
+        title: SharedString::from(
+            bardo.text_with(Text::ChannelClipModelDefault, &[("model", &model.name)]),
+        ),
+    });
+    SearchableVec::new(
+        default
+            .into_iter()
+            .chain(models.into_iter().map(|model| Choice {
+                value: Some(model.id),
+                title: SharedString::from(model.name),
+            }))
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn index_of<T: PartialEq>(all: &[T], value: &T) -> Option<IndexPath> {
     all.iter().position(|v| v == value).map(IndexPath::new)
 }
@@ -107,6 +129,7 @@ pub struct ChannelsScreen {
     language: ChoiceSelect<ContentLanguage>,
     country: ChoiceSelect<Country>,
     persona: ChoiceSelect<Option<PersonaId>>,
+    clip_model: ChoiceSelect<Option<ClipModelRef>>,
     /// The edited channel's network accounts, under the form.
     accounts: Entity<NetworkAccountsPanel>,
     field_errors: Vec<ChannelFieldError>,
@@ -127,12 +150,13 @@ impl ChannelsScreen {
         let aesthetic_notes = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
 
         let defaults = ChannelDraft::default();
-        let (languages, countries, personas) = {
+        let (languages, countries, personas, clip_models) = {
             let bardo = bardo.read(cx);
             (
                 language_choices(bardo),
                 country_choices(bardo),
                 persona_choices(bardo),
+                clip_model_choices(bardo),
             )
         };
         let language = cx.new(|cx| {
@@ -146,6 +170,8 @@ impl ChannelsScreen {
         let persona = cx.new(|cx| {
             SelectState::new(personas, Some(IndexPath::new(0)), window, cx).searchable(true)
         });
+        let clip_model =
+            cx.new(|cx| SelectState::new(clip_models, Some(IndexPath::new(0)), window, cx));
 
         let accounts = cx.new(|cx| NetworkAccountsPanel::new(bardo.clone(), window, cx));
 
@@ -179,6 +205,7 @@ impl ChannelsScreen {
             language,
             country,
             persona,
+            clip_model,
             accounts,
             field_errors: Vec::new(),
             notice: None,
@@ -212,6 +239,7 @@ impl ChannelsScreen {
         let languages = language_choices(bardo);
         let countries = country_choices(bardo);
         let personas = persona_choices(bardo);
+        let clip_models = clip_model_choices(bardo);
 
         self.name
             .update(cx, |input, cx| input.set_placeholder(name, window, cx));
@@ -236,6 +264,11 @@ impl ChannelsScreen {
             }
         });
         Self::set_persona_items(&self.persona, personas, window, cx);
+        self.clip_model.update(cx, |select, cx| {
+            let selected = select.selected_value().cloned().flatten();
+            select.set_items(clip_models, window, cx);
+            select.set_selected_value(&selected, window, cx);
+        });
         cx.notify();
     }
 
@@ -287,6 +320,14 @@ impl ChannelsScreen {
         self.persona.update(cx, |select, cx| {
             select.set_selected_value(&draft.default_persona, window, cx)
         });
+        self.clip_model.update(cx, |select, cx| {
+            select.set_selected_value(&draft.clip_model, window, cx);
+            // A model no longer offered shows as the default; saving keeps
+            // the form's choice.
+            if select.selected_value().is_none() {
+                select.set_selected_value(&None, window, cx);
+            }
+        });
     }
 
     fn draft(&self, cx: &App) -> ChannelDraft {
@@ -314,6 +355,7 @@ impl ChannelsScreen {
                 .copied()
                 .unwrap_or_default(),
             default_persona: self.persona.read(cx).selected_value().copied().flatten(),
+            clip_model: self.clip_model.read(cx).selected_value().cloned().flatten(),
         }
     }
 
@@ -569,6 +611,11 @@ impl ChannelsScreen {
                             .search_placeholder(tr(bardo, Text::PersonasTitle))
                             .into_any_element(),
                         Some(hint(Text::ChannelPersonaHint)),
+                    ))
+                    .child(field(
+                        Text::ChannelClipModel,
+                        Select::new(&self.clip_model).into_any_element(),
+                        Some(hint(Text::ChannelClipModelHint)),
                     ))
                     .child(
                         h_flex()

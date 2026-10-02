@@ -19,15 +19,16 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, CostPurpose, Generation, GenerationId, ImageGenerator, ImageRequest, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingImage,
-    NoSuchScene, ProfileId, Progress, ProjectFiles, Provider, RenderedPrompt, RepositoryError,
-    SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository,
-    ScenePrompt, SecretStore, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
-    sentences,
+    JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingClip,
+    NoPendingImage, NoSuchScene, ProfileId, Progress, ProjectFiles, Provider, RenderedPrompt,
+    RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
+    ScenePlanRepository, ScenePrompt, SecretStore, TemplateKind, TemplateUsed, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject,
+    VideoProjectId, sentences,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::clips::{ClipsView, SceneClipView};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
 use crate::{Bardo, KeyState, ScriptError, TemplateError, Text};
@@ -66,6 +67,17 @@ pub enum SceneError {
     #[error(transparent)]
     NothingToReview(#[from] NoPendingImage),
     #[error(transparent)]
+    NoClipToReview(#[from] NoPendingClip),
+    /// Clips animate a scene's image: draw it first.
+    #[error("the scene has no image to animate")]
+    NoImageToAnimate,
+    /// Every scene with an image has a clip or one being made.
+    #[error("every scene with an image already has a clip")]
+    NothingToAnimate,
+    /// The chosen video model is not one the providers offer.
+    #[error("the video model is not offered")]
+    ClipModelNotOffered,
+    #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
     Repository(#[from] RepositoryError),
@@ -81,12 +93,18 @@ impl SceneError {
             SceneError::NoPlan => Text::ScenesNoPlan,
             SceneError::SceneNotFound(_) => Text::SceneNotFound,
             SceneError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
+            SceneError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
             SceneError::MissingKey(_) => Text::ScenesMissingGeminiKey,
             SceneError::Busy => Text::ScenesBusy,
             SceneError::WouldDiscardImages(_) => Text::ScenesWouldDiscardImages,
             SceneError::NothingToGenerate => Text::ScenesNothingToGenerate,
             SceneError::OverBudget(_) => Text::BudgetReachedTitle,
-            SceneError::NothingToReview(_) => Text::SceneNothingToReview,
+            SceneError::NothingToReview(_) | SceneError::NoClipToReview(_) => {
+                Text::SceneNothingToReview
+            }
+            SceneError::NoImageToAnimate => Text::SceneNoImageToAnimate,
+            SceneError::NothingToAnimate => Text::ScenesNothingToAnimate,
+            SceneError::ClipModelNotOffered => Text::SceneClipModelNotOffered,
             SceneError::Template(error) => error.message(),
             SceneError::Repository(_) => Text::ScenesNotLoaded,
         }
@@ -121,6 +139,8 @@ pub struct ScenesView {
     pub images_estimate: Option<SpendEstimate>,
     /// What drawing one scene again would cost; `None` without a plan.
     pub image_estimate: Option<SpendEstimate>,
+    /// The scenes' clips: models, lengths, prices and jobs.
+    pub clips: ClipsView,
 }
 
 /// Claude's call that plans scenes from `rendered`.
@@ -145,6 +165,11 @@ impl ScenesView {
     /// Whether a scene plan or image job of the project is running.
     pub fn is_busy(&self) -> bool {
         self.job.as_ref().is_some_and(|job| job.state().is_active())
+    }
+
+    /// Whether a clip of some scene is being made.
+    pub fn is_animating(&self) -> bool {
+        self.clips.scenes.iter().any(SceneClipView::is_busy)
     }
 }
 
@@ -208,20 +233,20 @@ struct ProjectOf {
     project: String,
 }
 
-fn parse<T: for<'de> Deserialize<'de>>(payload: &str) -> Result<T, JobFailure> {
+pub(crate) fn parse<T: for<'de> Deserialize<'de>>(payload: &str) -> Result<T, JobFailure> {
     serde_json::from_str(payload)
         .map_err(|e| JobFailure::unexpected(format!("invalid scene payload: {e}")))
 }
 
-fn to_json(payload: &impl Serialize) -> String {
+pub(crate) fn to_json(payload: &impl Serialize) -> String {
     serde_json::to_string(payload).expect("a scene payload serializes")
 }
 
-fn unexpected(error: impl std::fmt::Display) -> JobFailure {
+pub(crate) fn unexpected(error: impl std::fmt::Display) -> JobFailure {
     JobFailure::unexpected(error.to_string())
 }
 
-fn id<T: From<uuid::Uuid>>(text: &str) -> Result<T, JobFailure> {
+pub(crate) fn id<T: From<uuid::Uuid>>(text: &str) -> Result<T, JobFailure> {
     uuid::Uuid::parse_str(text).map(T::from).map_err(unexpected)
 }
 
@@ -340,6 +365,7 @@ impl SceneHandler {
                 purpose: CostPurpose::ScenePlan,
                 usage: generated.usage.into(),
                 job,
+                reported: None,
             },
             project,
         );
@@ -454,6 +480,7 @@ impl SceneHandler {
                             purpose: CostPurpose::SceneImage,
                             usage: image.usage,
                             job,
+                            reported: None,
                         },
                         project,
                     );
@@ -540,7 +567,7 @@ impl SceneHandler {
 }
 
 impl Bardo {
-    fn scenes_project(&self, id: VideoProjectId) -> Result<VideoProject, SceneError> {
+    pub(crate) fn scenes_project(&self, id: VideoProjectId) -> Result<VideoProject, SceneError> {
         self.themes
             .project(id)?
             .filter(|project| project.owner == self.profile.id)
@@ -566,14 +593,14 @@ impl Bardo {
         Ok(())
     }
 
-    fn require_key(&self, provider: Provider) -> Result<(), SceneError> {
+    pub(crate) fn require_key(&self, provider: Provider) -> Result<(), SceneError> {
         if self.provider_key(provider).state == KeyState::NotSet {
             return Err(SceneError::MissingKey(provider));
         }
         Ok(())
     }
 
-    fn own_plan(&self, project: VideoProjectId) -> Result<ScenePlan, SceneError> {
+    pub(crate) fn own_plan(&self, project: VideoProjectId) -> Result<ScenePlan, SceneError> {
         let project = self.scenes_project(project)?;
         self.scene_plans
             .scene_plan(project.id)?
@@ -594,7 +621,9 @@ impl Bardo {
             None => None,
         };
         let missing = plan.as_ref().map_or(0, |plan| plan.missing_images().len());
+        let clips = self.clips_view(project.channel, plan.as_ref())?;
         Ok(ScenesView {
+            clips,
             narration: narration.as_ref().map(|narration| narration.id),
             stale: plan
                 .as_ref()
@@ -660,6 +689,9 @@ impl Bardo {
             .narration(project.id)?
             .ok_or(SceneError::NoNarration)?;
         self.scenes_idle(project.id)?;
+        if self.clips_busy(project.id) {
+            return Err(SceneError::Busy);
+        }
         let images = self
             .scene_plans
             .scene_plan(project.id)?
@@ -783,7 +815,7 @@ impl Bardo {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::Instant;
 
     use bardo_domain::{
@@ -793,7 +825,7 @@ mod tests {
 
     use super::*;
     use crate::testing::{
-        FakeDecisionEngine, FakeImages, FakeKeyChecker, FakeMarketData, FakeSpeech,
+        FakeClips, FakeDecisionEngine, FakeImages, FakeKeyChecker, FakeMarketData, FakeSpeech,
         FakeTextGenerator, FakeVoiceLibrary, SCENE_IMAGE,
     };
     use crate::{JobSettings, Providers, Repositories};
@@ -801,6 +833,7 @@ mod tests {
     const CLAUDE_KEY: &str = "sk-ant-api03-test-key-0001";
     const ELEVENLABS_KEY: &str = "sk_test_elevenlabs_key_0001";
     const GEMINI_KEY: &str = "AIzaSyTest-gemini-key-0001";
+    const HIGGSFIELD_KEY: &str = "hf-key-id-0001:hf-key-secret-0001";
     const PATIENCE: Duration = Duration::from_secs(10);
     const SCRIPT: &str = "Era uma vez, em 1969, uma sonda. Ela partiu para longe. \
                           O sinal sumiu em março. Ninguém sabe por quê.";
@@ -816,26 +849,28 @@ mod tests {
         .to_string()
     }
 
-    struct Harness {
-        db: Arc<Database>,
-        files: Arc<MemoryProjectFiles>,
-        text: Arc<FakeTextGenerator>,
-        images: Arc<FakeImages>,
-        secrets: Arc<MemorySecretStore>,
+    pub(crate) struct Harness {
+        pub(crate) db: Arc<Database>,
+        pub(crate) files: Arc<MemoryProjectFiles>,
+        pub(crate) text: Arc<FakeTextGenerator>,
+        pub(crate) images: Arc<FakeImages>,
+        pub(crate) clips: Arc<FakeClips>,
+        pub(crate) secrets: Arc<MemorySecretStore>,
     }
 
     impl Harness {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self {
                 db: Arc::new(Database::open_in_memory().unwrap()),
                 files: Arc::default(),
                 text: Arc::default(),
                 images: Arc::default(),
+                clips: Arc::default(),
                 secrets: Arc::default(),
             }
         }
 
-        fn start(&self) -> Bardo {
+        pub(crate) fn start(&self) -> Bardo {
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
@@ -844,6 +879,7 @@ mod tests {
                 voices: Arc::new(FakeVoiceLibrary::default()),
                 speech: Arc::new(FakeSpeech::default()),
                 images: Arc::clone(&self.images) as _,
+                clips: vec![Arc::clone(&self.clips) as _],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             let mut app = Bardo::start_with(
@@ -868,6 +904,7 @@ mod tests {
                 (Provider::Claude, CLAUDE_KEY),
                 (Provider::ElevenLabs, ELEVENLABS_KEY),
                 (Provider::Gemini, GEMINI_KEY),
+                (Provider::Higgsfield, HIGGSFIELD_KEY),
             ] {
                 app.save_provider_key(provider, key).unwrap();
             }
@@ -879,7 +916,7 @@ mod tests {
         }
 
         /// A project with a script and its narration.
-        fn narrated_project(&self, app: &Bardo) -> VideoProject {
+        pub(crate) fn narrated_project(&self, app: &Bardo) -> VideoProject {
             self.answer(SCRIPT.to_owned());
             let project = project(app);
             done(
@@ -895,7 +932,7 @@ mod tests {
         }
 
         /// A narrated project with its scenes planned.
-        fn planned_project(&self, app: &Bardo) -> (VideoProject, ScenePlan) {
+        pub(crate) fn planned_project(&self, app: &Bardo) -> (VideoProject, ScenePlan) {
             let project = self.narrated_project(app);
             self.answer(plan_answer());
             done(
@@ -908,7 +945,7 @@ mod tests {
         }
 
         /// A planned project with every scene drawn.
-        fn drawn_project(&self, app: &Bardo) -> (VideoProject, ScenePlan) {
+        pub(crate) fn drawn_project(&self, app: &Bardo) -> (VideoProject, ScenePlan) {
             let (project, _) = self.planned_project(app);
             done(
                 app,
@@ -920,7 +957,7 @@ mod tests {
         }
     }
 
-    fn wait_done(app: &Bardo, id: JobId) -> Job {
+    pub(crate) fn wait_done(app: &Bardo, id: JobId) -> Job {
         let deadline = Instant::now() + PATIENCE;
         loop {
             if let Some(job) = app
@@ -935,7 +972,7 @@ mod tests {
         }
     }
 
-    fn done(app: &Bardo, id: JobId) -> Job {
+    pub(crate) fn done(app: &Bardo, id: JobId) -> Job {
         let job = wait_done(app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
         job
@@ -943,7 +980,7 @@ mod tests {
 
     /// A channel whose default persona is the documentary narrator, and a
     /// project on one of its themes.
-    fn project(app: &Bardo) -> VideoProject {
+    pub(crate) fn project(app: &Bardo) -> VideoProject {
         let persona = app
             .personas()
             .unwrap()
