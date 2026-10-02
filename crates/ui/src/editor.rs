@@ -830,7 +830,11 @@ impl EditorScreen {
     fn render_banners(&self, view: &EditorView, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bardo = self.bardo.read(cx);
         let problems = view.problems();
-        if problems.is_empty() && !view.stale && self.error.is_none() {
+        // The screen's own error first, then the preview's (e.g. no sound).
+        let error = self
+            .error
+            .or_else(|| self.editor.as_ref().and_then(Editor::error));
+        if problems.is_empty() && !view.stale && error.is_none() {
             return None;
         }
         let can_retry = problems
@@ -880,7 +884,7 @@ impl EditorScreen {
             .stale
             .then_some(Text::EditorStale)
             .into_iter()
-            .chain(self.error)
+            .chain(error)
             .map(|text| {
                 h_flex()
                     .px_3()
