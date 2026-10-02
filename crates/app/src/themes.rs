@@ -836,6 +836,8 @@ mod tests {
                 channels: Box::new(Arc::clone(&self.db)),
                 jobs: Arc::clone(&self.db) as Arc<dyn JobRepository>,
                 themes: Arc::clone(&self.db) as _,
+                templates: Arc::clone(&self.db) as _,
+                scripts: Arc::clone(&self.db) as _,
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
             };

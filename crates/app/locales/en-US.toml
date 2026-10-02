@@ -97,6 +97,7 @@ countdown = "Test countdown"
 niche_research = "Niche research"
 theme_suggestion = "Theme suggestion"
 theme_ranking = "Theme ranking"
+script_generation = "Script generation"
 
 [job.state]
 queued = "Queued"
@@ -273,9 +274,103 @@ title_too_long = "Keep the title to at most 120 characters."
 angle_too_long = "Keep the angle to at most 500 characters."
 
 [projects]
+nav = "Projects"
 title = "Video projects"
 empty = "Approve an idea to start a video project."
 started = "Video project started: {title}"
+no_channels = "Create a channel and approve one of its themes to start a video project."
+
+[projects.error]
+not_loaded = "Could not load the video projects."
+not_found = "This video project is gone."
+
+[script]
+title = "Script"
+empty = "No script yet."
+generate = "Generate script"
+generate_hint = "Claude writes it from the script template (version {n}) with the channel, niche, theme and persona."
+regenerate = "Regenerate"
+regenerate_hint = "The new script waits here for your review; the current one stays until you accept it."
+running = "Writing the script…"
+stopped = "The last generation stopped:"
+save = "Save"
+revert = "Discard changes"
+saved = "Script saved."
+edited = "Edited"
+words = "{n} words"
+current = "Current script"
+
+[script.pending]
+title = "New script to review"
+hint = "Accepting replaces the current script, including your edits."
+accept = "Accept new script"
+reject = "Keep current"
+
+[script.error]
+missing = "Generate a script first."
+nothing_to_review = "There is no new script to review."
+missing_key = "Save a Claude key under Settings to generate scripts."
+busy = "A script is already being written for this project."
+not_saved = "Could not save the script. Try again."
+text_required = "The script cannot be empty."
+text_too_long = "Keep the script to at most 60000 characters."
+
+[provenance]
+title = "Provenance"
+provider = "Provider"
+model = "Model"
+template = "Template"
+template_version = "version {n}"
+tokens = "Tokens"
+tokens_value = "{input} in · {output} out"
+generated = "Generated"
+show_prompt = "Show prompt"
+hide_prompt = "Hide prompt"
+instructions = "Instructions sent"
+prompt = "Prompt sent"
+
+[templates]
+title = "Templates"
+hint = "Templates are the prompts Bardo sends to the AI. Saving creates a new version; old versions stay here, and every generation records the version it used."
+versions = "Versions"
+version = "Version {n}"
+current = "Current"
+editing = "Editing from version {n}. Saving creates version {next}."
+instructions = "Instructions"
+instructions_hint = "Standing rules: the role, tone and format the AI follows."
+prompt = "Prompt"
+prompt_hint = "The task itself, with the project's facts."
+variables = "Variables"
+variables_hint = "Write a variable as {{name}}. Each generation replaces it with the project's value."
+save = "Save as new version"
+revert = "Discard changes"
+default = "Load Bardo's default"
+saved = "Saved as version {n}."
+unchanged = "Nothing changed, so no version was added."
+
+[templates.kind]
+script = "Script"
+
+[templates.variable]
+channel_name = "The channel's name."
+channel_niche = "The channel's niche."
+channel_themes = "The channel's recurring themes."
+aesthetic_notes = "The channel's aesthetic notes."
+language = "The video's language."
+country = "The audience's country."
+persona = "The narrator: voice, tone and script style."
+niche = "The niche of the video project."
+theme_title = "The video's working title."
+theme_angle = "The approved theme's angle."
+
+[templates.error]
+not_saved = "Could not save the template. Try again."
+not_found = "This template version is gone."
+not_loaded = "Could not load the templates."
+required = "Write the prompt."
+too_long = "Keep it to at most 8000 characters."
+unknown_variable = "Use only the variables listed below, spelled as shown."
+unclosed_variable = "A variable is missing its closing }}."
 
 [age]
 just_now = "just now"

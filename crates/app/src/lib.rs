@@ -7,6 +7,8 @@ mod jobs;
 pub mod logging;
 mod provider_keys;
 mod research;
+mod scripts;
+mod templates;
 mod themes;
 
 use std::borrow::Cow;
@@ -15,8 +17,8 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ChannelRepository, DecisionEngine, JobRepository, KeyChecker, MarketData,
-    NicheResearchRepository, ProfileRepository, Redactor, RepositoryError, SecretStore,
-    TextGenerator, ThemeRepository, UiLanguage, UserProfile,
+    NicheResearchRepository, ProfileRepository, Redactor, RepositoryError, ScriptRepository,
+    SecretStore, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
 };
 use bardo_storage::Database;
 
@@ -26,11 +28,14 @@ pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
+pub use scripts::{ScriptError, ScriptView};
+pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
 use crate::jobs::JobQueue;
 use crate::provider_keys::ProviderKeys;
 use crate::research::NicheResearchHandler;
+use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +55,10 @@ pub struct Repositories {
     pub research: Arc<dyn NicheResearchRepository>,
     /// Themes and the video projects they start. Shared with the job queue.
     pub themes: Arc<dyn ThemeRepository>,
+    /// Template versions. Shared with the job queue.
+    pub templates: Arc<dyn TemplateRepository>,
+    /// Scripts and their generations. Shared with the job queue.
+    pub scripts: Arc<dyn ScriptRepository>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
@@ -58,14 +67,21 @@ pub struct Repositories {
 impl Repositories {
     /// Every data port served by one SQLite database, and keys by `secrets`.
     pub fn local(db: Database, secrets: Box<dyn SecretStore>) -> Self {
-        let db = Arc::new(db);
+        Self::shared(Arc::new(db), Arc::from(secrets))
+    }
+
+    /// `local` over a database and secret store the caller keeps a handle
+    /// to (tests read them directly).
+    pub fn shared(db: Arc<Database>, secrets: Arc<dyn SecretStore>) -> Self {
         Self {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Arc::clone(&db)),
             jobs: Arc::clone(&db) as Arc<dyn JobRepository>,
             themes: Arc::clone(&db) as _,
+            templates: Arc::clone(&db) as _,
+            scripts: Arc::clone(&db) as _,
             research: db,
-            secrets: Arc::from(secrets),
+            secrets,
         }
     }
 }
@@ -100,6 +116,8 @@ pub struct Bardo {
     channels: Box<dyn ChannelRepository>,
     research: Arc<dyn NicheResearchRepository>,
     themes: Arc<dyn ThemeRepository>,
+    templates: Arc<dyn TemplateRepository>,
+    scripts: Arc<dyn ScriptRepository>,
     market_data: Arc<dyn MarketData>,
     jobs: JobQueue,
     provider_keys: ProviderKeys,
@@ -137,6 +155,8 @@ impl Bardo {
             jobs,
             research,
             themes,
+            templates,
+            scripts,
             secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
@@ -162,12 +182,18 @@ impl Bardo {
             decisions: Arc::clone(&providers.decisions),
             secrets: Arc::clone(&secrets),
         };
+        let script_handler = ScriptHandler {
+            owner: profile.id,
+            scripts: Arc::clone(&scripts),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
             jobs,
             profile.id,
-            crate::jobs::built_in_handlers(research_handler, theme_handler),
+            crate::jobs::built_in_handlers(research_handler, theme_handler, script_handler),
             job_settings,
             redactor,
         )?;
@@ -176,6 +202,8 @@ impl Bardo {
             channels,
             research,
             themes,
+            templates,
+            scripts,
             market_data: providers.market_data,
             jobs,
             provider_keys,
@@ -371,6 +399,10 @@ pub(crate) mod testing {
         pub(crate) requests: Mutex<Vec<TextRequest>>,
         pub(crate) answers: Mutex<Vec<String>>,
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// Reported with every answer.
+        pub(crate) usage: Mutex<TokenUsage>,
+        /// How long each call takes, to catch a job mid-run.
+        pub(crate) delay: Mutex<Duration>,
     }
 
     impl FakeTextGenerator {
@@ -399,6 +431,8 @@ pub(crate) mod testing {
             request: &TextRequest,
         ) -> Result<GeneratedText, ProviderFailure> {
             self.requests.lock().unwrap().push(request.clone());
+            let delay = *self.delay.lock().unwrap();
+            std::thread::sleep(delay);
             if let Some(failure) = self.failure.lock().unwrap().clone() {
                 return Err(failure);
             }
@@ -412,7 +446,7 @@ pub(crate) mod testing {
             Ok(GeneratedText {
                 text,
                 model: "claude-fake".into(),
-                usage: TokenUsage::default(),
+                usage: *self.usage.lock().unwrap(),
             })
         }
     }
@@ -552,6 +586,8 @@ mod tests {
             channels: Box::new(Arc::clone(&db)),
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,
+            templates: Arc::clone(&db) as _,
+            scripts: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };

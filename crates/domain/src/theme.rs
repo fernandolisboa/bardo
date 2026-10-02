@@ -7,45 +7,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use uuid::Uuid;
-
 use crate::{ChannelId, Confidence, JobId, Niche, ProfileId, RepositoryError, Score};
-
-macro_rules! uuid_id {
-    ($(#[$doc:meta])* $name:ident) => {
-        $(#[$doc])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub struct $name(Uuid);
-
-        impl $name {
-            pub fn new() -> Self {
-                Self(Uuid::new_v4())
-            }
-
-            pub fn as_uuid(&self) -> Uuid {
-                self.0
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl From<Uuid> for $name {
-            fn from(value: Uuid) -> Self {
-                Self(value)
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-    };
-}
 
 uuid_id!(
     /// Identifies a theme.
@@ -413,6 +375,8 @@ pub trait ThemeRepository: Send + Sync {
 
     /// The channel's video projects, newest first.
     fn projects(&self, channel: ChannelId) -> Result<Vec<VideoProject>, RepositoryError>;
+
+    fn project(&self, id: VideoProjectId) -> Result<Option<VideoProject>, RepositoryError>;
 }
 
 impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
@@ -434,6 +398,10 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
 
     fn projects(&self, channel: ChannelId) -> Result<Vec<VideoProject>, RepositoryError> {
         (**self).projects(channel)
+    }
+
+    fn project(&self, id: VideoProjectId) -> Result<Option<VideoProject>, RepositoryError> {
+        (**self).project(id)
     }
 }
 

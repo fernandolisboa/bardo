@@ -14,6 +14,7 @@ pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::research::NicheResearchHandler;
+use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
 use crate::{AppError, Bardo, Text};
 
@@ -21,6 +22,7 @@ use crate::{AppError, Bardo, Text};
 pub(crate) fn built_in_handlers(
     research: NicheResearchHandler,
     themes: ThemeHandler,
+    scripts: ScriptHandler,
 ) -> HashMap<JobKind, Arc<dyn JobHandler>> {
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -28,6 +30,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::NicheResearch, Arc::new(research));
     handlers.insert(JobKind::ThemeSuggestion, Arc::clone(&themes) as _);
     handlers.insert(JobKind::ThemeRanking, themes);
+    handlers.insert(JobKind::ScriptGeneration, Arc::new(scripts));
     handlers
 }
 
@@ -632,6 +635,8 @@ mod tests {
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
             themes: Arc::clone(db) as _,
+            templates: Arc::clone(db) as _,
+            scripts: Arc::clone(db) as _,
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
         };

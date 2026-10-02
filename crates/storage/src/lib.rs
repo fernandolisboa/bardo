@@ -6,7 +6,9 @@ mod job;
 mod migrations;
 mod profile;
 mod research;
+mod script;
 mod secrets;
+mod template;
 mod theme;
 
 use std::path::{Path, PathBuf};
