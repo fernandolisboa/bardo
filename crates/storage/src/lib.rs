@@ -5,6 +5,7 @@ mod channel;
 mod cost;
 mod files;
 mod job;
+mod media;
 mod migrations;
 mod narration;
 mod network_account;

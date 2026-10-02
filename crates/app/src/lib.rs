@@ -8,6 +8,8 @@ mod editor;
 pub mod i18n;
 mod jobs;
 pub mod logging;
+mod media_import;
+mod music_prompts;
 mod narration_import;
 mod narrations;
 mod network_accounts;
@@ -27,11 +29,12 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ImageGenerator,
-    JobRepository, KeyChecker, MarketData, NarrationRepository, NetworkAccountRepository,
-    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
-    RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
-    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
-    UiLanguage, UserProfile, VoiceLibrary,
+    JobRepository, KeyChecker, MarketData, MediaAssetRepository, MusicPromptRepository,
+    NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
+    PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
+    ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
+    TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository, UiLanguage,
+    UserProfile, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryProjectFiles};
@@ -52,6 +55,8 @@ pub use editor::{
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use media_import::{MediaImport, MediaImportError};
+pub use music_prompts::MusicPromptError;
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use network_accounts::NetworkAccountError;
@@ -67,6 +72,7 @@ pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 use crate::clips::ClipHandler;
 use crate::costs::CostBook;
 use crate::jobs::JobQueue;
+use crate::music_prompts::MusicPromptHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
@@ -105,6 +111,10 @@ pub struct Repositories {
     pub scene_plans: Arc<dyn ScenePlanRepository>,
     /// The cuts made in the editor.
     pub timelines: Arc<dyn TimelineRepository>,
+    /// Each project's imported media.
+    pub media: Arc<dyn MediaAssetRepository>,
+    /// Each project's music prompt. Shared with the job queue.
+    pub music_prompts: Arc<dyn MusicPromptRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
     /// What generations cost, the user's rates and budgets. Shared with
@@ -151,6 +161,8 @@ impl Repositories {
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
+            media: Arc::clone(&db) as _,
+            music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             research: db,
@@ -222,6 +234,8 @@ pub struct Bardo {
     narrations: Arc<dyn NarrationRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
     timelines: Arc<dyn TimelineRepository>,
+    media_assets: Arc<dyn MediaAssetRepository>,
+    music_prompts: Arc<dyn MusicPromptRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
@@ -275,6 +289,8 @@ impl Bardo {
             narrations,
             scene_plans,
             timelines,
+            media,
+            music_prompts,
             network_accounts,
             costs,
             files,
@@ -357,6 +373,13 @@ impl Bardo {
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
         };
+        let music_prompt_handler = MusicPromptHandler {
+            owner: profile.id,
+            prompts: Arc::clone(&music_prompts),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
@@ -371,6 +394,7 @@ impl Bardo {
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,
+                music_prompts: music_prompt_handler,
             }),
             job_settings,
             redactor,
@@ -386,6 +410,8 @@ impl Bardo {
             narrations,
             scene_plans,
             timelines,
+            media_assets: media,
+            music_prompts,
             network_accounts,
             cost_book,
             files,
@@ -1181,6 +1207,8 @@ mod tests {
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
+            media: Arc::clone(&db) as _,
+            music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),

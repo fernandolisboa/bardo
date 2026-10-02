@@ -88,6 +88,26 @@ impl ProjectFiles for LocalProjectFiles {
         std::fs::read(self.folder(project).join(name)).map_err(|e| error(name, e))
     }
 
+    fn copy_in(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+        source: &Path,
+    ) -> Result<(), ProjectFileError> {
+        let name = checked(name)?;
+        let folder = self.folder(project);
+        std::fs::create_dir_all(&folder).map_err(|e| error(name, e))?;
+        // Copied beside it, then renamed over it, as `write` does.
+        let partial = folder.join(format!("{name}.partial"));
+        let copied = std::fs::copy(source, &partial)
+            .and_then(|_| std::fs::File::open(&partial)?.sync_all())
+            .and_then(|()| std::fs::rename(&partial, folder.join(name)));
+        if copied.is_err() {
+            let _ = std::fs::remove_file(&partial);
+        }
+        copied.map_err(|e| error(name, e))
+    }
+
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {
         checked(name).is_ok_and(|name| self.folder(project).join(name).is_file())
     }
@@ -147,6 +167,17 @@ impl ProjectFiles for MemoryProjectFiles {
             .get(&(project, name.to_owned()))
             .cloned()
             .ok_or_else(|| error(name, std::io::ErrorKind::NotFound.into()))
+    }
+
+    /// Reads the source from disk.
+    fn copy_in(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+        source: &Path,
+    ) -> Result<(), ProjectFileError> {
+        let bytes = std::fs::read(source).map_err(|e| error(name, e))?;
+        self.write(project, name, &bytes)
     }
 
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {
@@ -230,5 +261,28 @@ mod tests {
         files.remove(project, "a.mp3").unwrap();
         assert!(!files.exists(project, "a.mp3"));
         assert!(files.write(project, "../a.mp3", b"a").is_err());
+    }
+
+    #[test]
+    fn copying_in_leaves_the_original_and_no_partial_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("My Song.mp3");
+        std::fs::write(&original, b"tune").unwrap();
+        let files = LocalProjectFiles::new(dir.path().join("projects"));
+        let project = VideoProjectId::new();
+
+        files.copy_in(project, "media-1.mp3", &original).unwrap();
+        assert_eq!(files.read(project, "media-1.mp3").unwrap(), b"tune");
+        assert_eq!(std::fs::read(&original).unwrap(), b"tune");
+        let names: Vec<_> = std::fs::read_dir(files.path(project, "x").parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["media-1.mp3"]);
+
+        let missing = dir.path().join("gone.mp3");
+        assert!(files.copy_in(project, "media-2.mp3", &missing).is_err());
+        assert!(!files.exists(project, "media-2.mp3"));
+        assert!(files.copy_in(project, "../escape.mp3", &original).is_err());
     }
 }

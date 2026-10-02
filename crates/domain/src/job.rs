@@ -80,10 +80,13 @@ pub enum JobKind {
     /// copies of clips and images, waveform peaks of the narration), one
     /// file after another. A file that fails does not stop the others.
     Proxies,
+    /// Has Claude write the prompt for a video project's music, for the
+    /// user to take to a music tool.
+    MusicPrompt,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 11] = [
+    pub const ALL: [JobKind; 12] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -95,6 +98,7 @@ impl JobKind {
         JobKind::SceneImages,
         JobKind::SceneClips,
         JobKind::Proxies,
+        JobKind::MusicPrompt,
     ];
 
     /// Stable name stored in the database.
@@ -111,6 +115,7 @@ impl JobKind {
             JobKind::SceneImages => "scene_images",
             JobKind::SceneClips => "scene_clips",
             JobKind::Proxies => "proxies",
+            JobKind::MusicPrompt => "music_prompt",
         }
     }
 }

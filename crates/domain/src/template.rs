@@ -25,16 +25,24 @@ pub enum TemplateKind {
     /// The scene plan of a narrated video: where each scene starts and the
     /// image prompt for each one.
     ImagePrompt,
+    /// The prompt for a video's music, which the user takes to the music
+    /// tool of their choice.
+    MusicPrompt,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 2] = [TemplateKind::Script, TemplateKind::ImagePrompt];
+    pub const ALL: [TemplateKind; 3] = [
+        TemplateKind::Script,
+        TemplateKind::ImagePrompt,
+        TemplateKind::MusicPrompt,
+    ];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             TemplateKind::Script => "script",
             TemplateKind::ImagePrompt => "image_prompt",
+            TemplateKind::MusicPrompt => "music_prompt",
         }
     }
 
@@ -62,6 +70,16 @@ impl TemplateKind {
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::ThemeAngle,
                 TemplateVariable::NarrationSentences,
+            ],
+            TemplateKind::MusicPrompt => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::AestheticNotes,
+                TemplateVariable::Country,
+                TemplateVariable::Niche,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::VideoLength,
             ],
         }
     }
@@ -112,10 +130,12 @@ pub enum TemplateVariable {
     /// The narration, one numbered sentence per line with when it is
     /// spoken.
     NarrationSentences,
+    /// How long the video runs: its narration's length.
+    VideoLength,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 11] = [
+    pub const ALL: [TemplateVariable; 12] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -127,6 +147,7 @@ impl TemplateVariable {
         TemplateVariable::ThemeTitle,
         TemplateVariable::ThemeAngle,
         TemplateVariable::NarrationSentences,
+        TemplateVariable::VideoLength,
     ];
 
     /// The name written between the braces.
@@ -143,6 +164,7 @@ impl TemplateVariable {
             TemplateVariable::ThemeTitle => "theme_title",
             TemplateVariable::ThemeAngle => "theme_angle",
             TemplateVariable::NarrationSentences => "narration_sentences",
+            TemplateVariable::VideoLength => "video_length",
         }
     }
 

@@ -7,11 +7,17 @@ use std::time::Duration;
 
 use crate::PcmStream;
 use crate::ffmpeg::{
-    Ffmpeg, FrameSize, FrameStream, MediaError, Monitor, ProxySettings, RenderPlan, Waveform,
+    Ffmpeg, FrameSize, FrameStream, MediaError, MediaInfo, Monitor, ProxySettings, RenderPlan,
+    Waveform,
 };
 
-/// The media work the editor needs: proxies, waveforms and preview.
+/// The media work the editor needs: probing, proxies, waveforms and
+/// preview.
 pub trait MediaEngine: Send + Sync {
+    /// What a media file holds: its length and streams. Fails on a file
+    /// that is not media ffmpeg reads.
+    fn probe(&self, path: &Path) -> Result<MediaInfo, MediaError>;
+
     /// A 540-line proxy of a video file (ADR-0007).
     fn build_proxy(
         &self,
@@ -61,6 +67,10 @@ impl BundledFfmpeg {
 }
 
 impl MediaEngine for BundledFfmpeg {
+    fn probe(&self, path: &Path) -> Result<MediaInfo, MediaError> {
+        self.ffmpeg()?.probe(path)
+    }
+
     fn build_proxy(
         &self,
         source: &Path,

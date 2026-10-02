@@ -46,9 +46,10 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     AspectRatio, AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit,
     EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
-    NarrationId, NarrationRepository, ProjectFiles, RepositoryError, Scene, ScenePlanId,
-    ScenePlanRepository, Shift, ThemeRepository, Timeline, TimelineRepository, Track, VideoProject,
-    VideoProjectId, VideoSource, frame_at, frame_time, nearest_frame, snap,
+    MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, ProjectFiles,
+    RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
+    TimelineRepository, Track, VideoProject, VideoProjectId, VideoSource, frame_at, frame_time,
+    nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -140,8 +141,10 @@ impl ClipMedia {
 /// One clip of the video track as the editor shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClipView {
-    /// The scene it shows, from 0.
-    pub scene: usize,
+    /// The scene it shows, from 0; `None` for imported footage.
+    pub scene: Option<usize>,
+    /// The imported footage's file name as the user had it.
+    pub name: Option<String>,
     /// The file it plays, if any.
     pub file: Option<String>,
     /// Whether it is a video clip (else a still image or nothing).
@@ -161,6 +164,17 @@ pub struct ClipView {
     pub clip: Option<Generation>,
     /// The scene's narration.
     pub text: String,
+}
+
+/// One imported file as the media bin lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinMedia {
+    pub asset: MediaAsset,
+    /// Where its proxy stands (waveform peaks for audio).
+    pub media: ClipMedia,
+    /// Peaks of an audio file's waveform, once built; `peaks_per_second`
+    /// of them, over the file's own time.
+    pub peaks: Option<(u32, Vec<f32>)>,
 }
 
 /// One scene as the bin lists it.
@@ -203,7 +217,9 @@ pub struct CutBasis {
 /// A clip that needs the user: what the banner names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipProblem {
-    pub scene: usize,
+    /// The scene it shows; `None` for imported footage, named by `name`.
+    pub scene: Option<usize>,
+    pub name: Option<String>,
     pub file: Option<String>,
     pub media: ClipMedia,
 }
@@ -235,6 +251,8 @@ pub struct EditorView {
     /// One per video item of the timeline, in order.
     pub clips: Vec<ClipView>,
     pub scenes: Vec<BinScene>,
+    /// The project's imported media, oldest first.
+    pub media: Vec<BinMedia>,
     pub narration: Option<NarrationTrack>,
     /// Proxies ready, of those the timeline plays.
     pub proxies_ready: usize,
@@ -276,6 +294,7 @@ impl EditorView {
             .filter(|clip| clip.media.needs_attention())
             .map(|clip| ClipProblem {
                 scene: clip.scene,
+                name: clip.name.clone(),
                 file: clip.file.clone(),
                 media: clip.media.clone(),
             })
@@ -290,6 +309,11 @@ impl EditorView {
     /// The narration item under `time`.
     pub fn narration_at(&self, time: Duration) -> Option<usize> {
         self.timeline.as_ref()?.narration_at(time)
+    }
+
+    /// The imported file named `file` in the project folder.
+    pub fn media_file(&self, file: &str) -> Option<&BinMedia> {
+        self.media.iter().find(|media| media.asset.file == file)
     }
 }
 
@@ -309,7 +333,7 @@ pub enum EditAction {
         to: Duration,
         reach: Duration,
     },
-    /// Moves a narration item to start at `to`.
+    /// Moves an audio item to start at `to`.
     Move {
         item: ItemRef,
         to: Duration,
@@ -328,7 +352,7 @@ pub enum EditAction {
     },
     /// Turns the music's ducking on or off, or changes its depth.
     SetDucking(Ducking),
-    /// Sets a narration item's fades, cut short to fit in it.
+    /// Sets an audio item's fades, cut short to fit in it.
     SetFades {
         item: ItemRef,
         fade_in: Duration,
@@ -343,6 +367,12 @@ pub enum EditAction {
     SetFraming {
         index: usize,
         framing: Framing,
+    },
+    /// Places an imported file on `track` at the playhead: footage on the
+    /// video track at the nearest cut, audio on the music or SFX track.
+    Place {
+        asset: MediaAssetId,
+        track: Track,
     },
     Undo,
     Redo,
@@ -540,7 +570,7 @@ impl Editor {
         })
     }
 
-    /// Where a narration item dragged to start at `to` would go: on a
+    /// Where an audio item dragged to start at `to` would go: on a
     /// frame, short of the items beside it.
     pub fn move_preview(&self, item: ItemRef, to: Duration) -> Option<Duration> {
         let (earliest, latest) = self.view.timeline.as_ref()?.move_limits(item).ok()?;
@@ -668,6 +698,25 @@ impl Editor {
             EditAction::SetFraming { index, framing } => {
                 (Edit::SetFraming { index, framing }, None)
             }
+            EditAction::Place { asset, track } => {
+                let asset = &self
+                    .view
+                    .media
+                    .iter()
+                    .find(|media| media.asset.id == asset)
+                    .ok_or(EditError::NoSuchItem)?
+                    .asset;
+                let (at, _) = self.snapped(self.playhead, Duration::ZERO);
+                let edit = timeline.place(asset, track, at)?;
+                let placed = match &edit {
+                    Edit::Insert { track, index, .. } => Some(ItemRef {
+                        track: *track,
+                        index: *index,
+                    }),
+                    _ => None,
+                };
+                (edit, Some(placed))
+            }
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
     }
@@ -767,16 +816,11 @@ impl Editor {
                 framing: ffmpeg::Framing::Fit,
             });
         }
-        // A2 and A3 have nothing to play until media can be placed there;
-        // the music's ducking is already in place for it.
         let mix = timeline.mix();
         let audio = AudioLane::ALL
             .map(|lane| {
-                let items = match lane {
-                    AudioLane::Narration => timeline.narration(),
-                    AudioLane::Music | AudioLane::Sfx => &[],
-                };
-                let clips = items
+                let clips = timeline
+                    .audio(lane)
                     .iter()
                     .filter(|_| mix.is_audible(lane))
                     .filter(|item| self.files.exists(project, &item.file))
@@ -1134,11 +1178,12 @@ impl Bardo {
                 .map(|image| self.files.path(project.id, &image.file))
         };
 
+        let assets = self.media_assets.media_assets(project.id)?;
         let saved = self.timelines.saved_timeline(project.id)?;
         let (timeline, basis, cut_outdated) = match (&plan, &narration) {
             (Some(plan), Some(narration)) => {
                 let restored = saved.as_ref().and_then(|saved| {
-                    let timeline = Timeline::restore(saved, plan, narration)?;
+                    let timeline = Timeline::restore(saved, plan, narration, &assets)?;
                     // A cut saved before captions existed gets them now.
                     Some(if saved.captions.is_none() {
                         timeline.with_caption_style(caption_style)
@@ -1169,7 +1214,17 @@ impl Bardo {
         let (mut ready, mut total) = (0, 0);
         if let (Some(timeline), Some(plan)) = (&timeline, &plan) {
             for item in timeline.video() {
-                let scene = plan.scenes().get(item.scene);
+                let scene = item.scene.and_then(|index| plan.scenes().get(index));
+                let name = item
+                    .source
+                    .file()
+                    .filter(|_| item.scene.is_none())
+                    .and_then(|file| {
+                        assets
+                            .iter()
+                            .find(|asset| asset.file == file)
+                            .map(|asset| asset.name.clone())
+                    });
                 let media = match (item.source.file(), ProxyKind::of(&item.source)) {
                     (Some(file), Some(kind)) if has(file) => {
                         if has(&proxy_name(file, kind)) {
@@ -1183,6 +1238,7 @@ impl Bardo {
                 let is_clip = matches!(item.source, VideoSource::Clip { .. });
                 clips.push(ClipView {
                     scene: item.scene,
+                    name,
                     file: item.source.file().map(str::to_owned),
                     is_clip,
                     at: item.at,
@@ -1202,7 +1258,7 @@ impl Bardo {
                     text: scene.map(|scene| scene.text.clone()).unwrap_or_default(),
                 });
             }
-            for (file, kind) in proxy_orders(timeline) {
+            for (file, kind) in proxy_orders(timeline, &assets) {
                 if has(&file) {
                     total += 1;
                     if has(&proxy_name(&file, kind)) {
@@ -1226,16 +1282,38 @@ impl Bardo {
                     .collect()
             })
             .unwrap_or_default();
-        let narration_track = narration.as_ref().map(|narration| {
-            let peaks = self
-                .files
-                .read(
-                    project.id,
-                    &proxy_name(&narration.audio_file, ProxyKind::Audio),
-                )
+        let peaks = |file: &str| {
+            self.files
+                .read(project.id, &proxy_name(file, ProxyKind::Audio))
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<Peaks>(&bytes).ok())
-                .map(|peaks| (peaks.peaks_per_second, peaks.peaks));
+                .map(|peaks| (peaks.peaks_per_second, peaks.peaks))
+        };
+        let media = assets
+            .into_iter()
+            .map(|asset| {
+                let kind = asset_proxy(&asset);
+                let media = if !has(&asset.file) {
+                    ClipMedia::Missing
+                } else if has(&proxy_name(&asset.file, kind)) {
+                    ClipMedia::Ready
+                } else {
+                    problems
+                        .get(&asset.file)
+                        .cloned()
+                        .unwrap_or(ClipMedia::Building)
+                };
+                BinMedia {
+                    peaks: (asset.kind == MediaKind::Audio)
+                        .then(|| peaks(&asset.file))
+                        .flatten(),
+                    media,
+                    asset,
+                }
+            })
+            .collect();
+        let narration_track = narration.as_ref().map(|narration| {
+            let peaks = peaks(&narration.audio_file);
             let words = timeline.as_ref().map_or_else(Vec::new, |timeline| {
                 narration
                     .words()
@@ -1290,6 +1368,7 @@ impl Bardo {
             captions,
             clips,
             scenes,
+            media,
             narration: narration_track,
             proxies_ready: ready,
             proxies_total: total,
@@ -1476,7 +1555,8 @@ impl Bardo {
         } else {
             held_back(view.job.as_ref())
         };
-        let files: Vec<ProxyOrder> = proxy_orders(timeline)
+        let assets: Vec<MediaAsset> = view.media.iter().map(|media| media.asset.clone()).collect();
+        let files: Vec<ProxyOrder> = proxy_orders(timeline, &assets)
             .into_iter()
             .filter(|(file, kind)| {
                 self.files.exists(project, file)
@@ -1535,19 +1615,31 @@ fn held_back(job: Option<&Job>) -> HashMap<String, ClipMedia> {
     held
 }
 
+/// The proxy an imported file gets: a clip proxy for footage, waveform
+/// peaks for audio.
+fn asset_proxy(asset: &MediaAsset) -> ProxyKind {
+    match asset.kind {
+        MediaKind::Video => ProxyKind::Clip,
+        MediaKind::Audio => ProxyKind::Audio,
+    }
+}
+
 /// Every file of the timeline and what it gets: pictures first, in order,
-/// then the narration.
-fn proxy_orders(timeline: &Timeline) -> Vec<(String, ProxyKind)> {
+/// then the audio tracks', then imported files not placed yet.
+fn proxy_orders(timeline: &Timeline, assets: &[MediaAsset]) -> Vec<(String, ProxyKind)> {
     let mut orders: Vec<(String, ProxyKind)> = Vec::new();
     let video = timeline
         .video()
         .iter()
         .filter_map(|item| Some((item.source.file()?.to_owned(), ProxyKind::of(&item.source)?)));
-    let audio = timeline
-        .narration()
+    let audio = AudioLane::ALL
         .iter()
+        .flat_map(|lane| timeline.audio(*lane))
         .map(|item| (item.file.clone(), ProxyKind::Audio));
-    for order in video.chain(audio) {
+    let bin = assets
+        .iter()
+        .map(|asset| (asset.file.clone(), asset_proxy(asset)));
+    for order in video.chain(audio).chain(bin) {
         if !orders.contains(&order) {
             orders.push(order);
         }
@@ -1559,6 +1651,7 @@ fn proxy_orders(timeline: &Timeline) -> Vec<(String, ProxyKind)> {
 /// frames.
 #[cfg(test)]
 pub(crate) mod testing {
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
@@ -1566,7 +1659,7 @@ pub(crate) mod testing {
 
     use bardo_domain::{ProjectFiles, VideoProjectId};
     use bardo_media::ffmpeg::{
-        FrameSize, FrameStream, MediaError, Monitor, RenderPlan, VideoFrame, Waveform,
+        FrameSize, FrameStream, MediaError, MediaInfo, Monitor, RenderPlan, VideoFrame, Waveform,
     };
     use bardo_media::{MediaEngine, PcmStream};
     use bardo_storage::MemoryProjectFiles;
@@ -1592,6 +1685,8 @@ pub(crate) mod testing {
         pub(crate) previews: Mutex<Vec<PreviewCall>>,
         /// Previews end without a picture, as ffmpeg does on a broken file.
         pub(crate) blank: AtomicBool,
+        /// What probing each file name finds; other files are not media.
+        pub(crate) probes: Mutex<HashMap<String, MediaInfo>>,
     }
 
     impl FakeMedia {
@@ -1635,6 +1730,23 @@ pub(crate) mod testing {
     }
 
     impl MediaEngine for FakeMedia {
+        fn probe(&self, path: &Path) -> Result<MediaInfo, MediaError> {
+            if self.not_found.load(Ordering::SeqCst) {
+                return Err(MediaError::NotFound { tried: Vec::new() });
+            }
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            self.probes
+                .lock()
+                .unwrap()
+                .get(&name)
+                .cloned()
+                .ok_or_else(|| MediaError::Failed {
+                    program: "ffprobe".into(),
+                    status: "exit status: 1".into(),
+                    log: format!("{name}: Invalid data found when processing input"),
+                })
+        }
+
         fn build_proxy(
             &self,
             source: &Path,
@@ -2422,7 +2534,11 @@ mod tests {
         assert_eq!(after[0], (before[0].0, cut - before[0].0));
         assert_eq!(after[1], (cut, before[0].1 - (cut - before[0].0)));
         assert_eq!(after[2..], before[1..]);
-        assert_eq!(editor.view().clips[1].scene, 0, "both halves show scene 1");
+        assert_eq!(
+            editor.view().clips[1].scene,
+            Some(0),
+            "both halves show scene 1"
+        );
         assert_eq!(
             editor.selection(),
             Some(ItemRef::video(1)),
@@ -2612,7 +2728,12 @@ mod tests {
 
         app.edit(&mut editor, EditAction::Reorder { from: 0, to: last })
             .unwrap();
-        let scenes: Vec<usize> = editor.view().clips.iter().map(|clip| clip.scene).collect();
+        let scenes: Vec<usize> = editor
+            .view()
+            .clips
+            .iter()
+            .filter_map(|clip| clip.scene)
+            .collect();
         assert_eq!(scenes.last(), Some(&0));
         assert_eq!(scenes[0], 1);
         assert_eq!(editor.selection(), Some(ItemRef::video(last)));
@@ -2782,7 +2903,7 @@ mod tests {
             .unwrap();
 
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
-        let rough = editor.view().clips.iter().map(|clip| clip.scene);
+        let rough = editor.view().clips.iter().filter_map(|clip| clip.scene);
         assert!(rough.eq(0..plan.scenes().len()), "the rough cut, as it was");
         assert!(editor.cut_reset());
         assert!(!editor.can_undo(), "nothing of the old cut to undo");
@@ -2810,7 +2931,7 @@ mod tests {
         settle(&app, &mut editor);
 
         let moved = &editor.view().clips[2];
-        assert_eq!(moved.scene, 0, "still where it was cut to");
+        assert_eq!(moved.scene, Some(0), "still where it was cut to");
         let image = app.scenes(project.id).unwrap().plan.unwrap().scenes()[0]
             .image()
             .unwrap()
@@ -3303,5 +3424,274 @@ mod tests {
         assert_eq!(captions.style(), CaptionStyle::Boxed);
         assert!(!captions.lines().is_empty());
         assert!(!reopened.cut_reset());
+    }
+
+    /// Imports `name` into the project as audio of `seconds`, or as
+    /// 1080x1920 footage of `seconds` when `video`.
+    fn import(
+        h: &Harness,
+        app: &Bardo,
+        project: VideoProjectId,
+        dir: &tempfile::TempDir,
+        name: &str,
+        seconds: u64,
+        video: bool,
+    ) -> MediaAsset {
+        use bardo_media::ffmpeg::{AudioStream, MediaInfo, VideoStream};
+        let path = dir.path().join(name);
+        std::fs::write(&path, name.as_bytes()).unwrap();
+        h.media.probes.lock().unwrap().insert(
+            name.into(),
+            MediaInfo {
+                duration: Duration::from_secs(seconds),
+                video: video.then(|| VideoStream {
+                    codec: "h264".into(),
+                    width: 1080,
+                    height: 1920,
+                    frame_rate: (30, 1),
+                }),
+                audio: Some(AudioStream {
+                    codec: "aac".into(),
+                    sample_rate: 48_000,
+                    channels: 2,
+                }),
+            },
+        );
+        app.media_import(project).unwrap().run(&path).unwrap()
+    }
+
+    #[test]
+    fn imported_media_is_in_the_bin_with_its_proxy() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan) = h.drawn_project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let song = import(&h, &app, project.id, &dir, "bed.mp3", 90, false);
+        let footage = import(&h, &app, project.id, &dir, "drone.mov", 6, true);
+
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        let view = editor.view();
+        let ids: Vec<_> = view.media.iter().map(|media| media.asset.id).collect();
+        assert_eq!(ids, [song.id, footage.id]);
+        assert!(
+            view.media
+                .iter()
+                .all(|media| media.media == ClipMedia::Ready)
+        );
+        assert_eq!(view.media[0].peaks, Some((50, vec![0.25, 0.5, 1.0])));
+        assert_eq!(view.media[1].peaks, None);
+        assert!(
+            h.files
+                .exists(project.id, &format!("proxy-{}.mkv", footage.file))
+        );
+        assert_eq!(
+            view.proxies_total,
+            plan.scenes().len() + 3,
+            "images, the narration and both imports"
+        );
+        assert_eq!(view.media_file(&song.file).unwrap().asset, song);
+    }
+
+    #[test]
+    fn music_sfx_and_footage_are_placed_at_the_playhead_and_kept() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan) = h.drawn_project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let song = import(&h, &app, project.id, &dir, "bed.mp3", 90, false);
+        let whoosh = import(&h, &app, project.id, &dir, "whoosh.wav", 1, false);
+        let footage = import(&h, &app, project.id, &dir, "drone.mov", 6, true);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        let end = editor.view().duration();
+
+        editor.seek(frame_time(30) + Duration::from_millis(7));
+        app.edit(
+            &mut editor,
+            EditAction::Place {
+                asset: song.id,
+                track: Track::Music,
+            },
+        )
+        .unwrap();
+        let music = ItemRef::audio(AudioLane::Music, 0);
+        assert_eq!(editor.selection(), Some(music));
+        let timeline = editor.view().timeline.clone().unwrap();
+        assert_eq!(timeline.music()[0].file, song.file);
+        assert_eq!(timeline.music()[0].at, frame_time(30));
+        assert_eq!(timeline.music()[0].duration, song.duration);
+        assert!(
+            editor.view().duration() > end,
+            "the music runs past the narration"
+        );
+
+        app.edit(
+            &mut editor,
+            EditAction::Place {
+                asset: whoosh.id,
+                track: Track::Sfx,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            editor.view().timeline.as_ref().unwrap().sfx()[0].file,
+            whoosh.file
+        );
+
+        editor.seek(Duration::ZERO);
+        app.edit(
+            &mut editor,
+            EditAction::Place {
+                asset: footage.id,
+                track: Track::Video,
+            },
+        )
+        .unwrap();
+        assert_eq!(editor.selection(), Some(ItemRef::video(0)));
+        let clip = &editor.view().clips[0];
+        assert_eq!(clip.scene, None);
+        assert_eq!(clip.name.as_deref(), Some("drone.mov"));
+        assert_eq!(clip.file.as_deref(), Some(footage.file.as_str()));
+        assert!(clip.is_clip);
+        assert_eq!(clip.media, ClipMedia::Ready);
+        assert_eq!(clip.duration, frame_time(frame_at(footage.duration)));
+        assert_eq!(editor.view().clips.len(), plan.scenes().len() + 1);
+
+        // The preview plays all three as the render will.
+        let preview = editor.preview_plan().unwrap();
+        let ClipSource::Video(path) = &preview.video[0].source else {
+            panic!("footage plays its proxy: {:?}", preview.video[0].source)
+        };
+        assert!(path.ends_with(format!("proxy-{}.mkv", footage.file)));
+        let lane = |lane: AudioLane| {
+            &preview.audio[AudioLane::ALL.iter().position(|l| *l == lane).unwrap()]
+        };
+        assert!(lane(AudioLane::Music).clips[0].source.ends_with(&song.file));
+        // Audio stays where it was placed when the pictures move.
+        assert_eq!(lane(AudioLane::Music).clips[0].at, frame_time(30));
+        assert!(lane(AudioLane::Sfx).clips[0].source.ends_with(&whoosh.file));
+
+        // Reopening finds the same cut.
+        let placed = editor.view().timeline.clone();
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(reopened.view().timeline, placed);
+        assert!(!reopened.cut_reset());
+
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(editor.view().clips.len(), plan.scenes().len());
+        assert!(editor.view().clips.iter().all(|clip| clip.scene.is_some()));
+    }
+
+    #[test]
+    fn placed_music_moves_trims_and_fades_like_narration() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let song = import(&h, &app, project.id, &dir, "bed.mp3", 20, false);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        app.edit(
+            &mut editor,
+            EditAction::Place {
+                asset: song.id,
+                track: Track::Music,
+            },
+        )
+        .unwrap();
+        let music = ItemRef::audio(AudioLane::Music, 0);
+
+        app.edit(
+            &mut editor,
+            EditAction::Move {
+                item: music,
+                to: Duration::from_secs(2),
+            },
+        )
+        .unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item: music,
+                edge: Edge::End,
+                to: Duration::from_secs(12),
+                reach: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::SetFades {
+                item: music,
+                fade_in: Duration::from_secs(1),
+                fade_out: Duration::from_secs(2),
+            },
+        )
+        .unwrap();
+        let item = editor.view().timeline.as_ref().unwrap().music()[0].clone();
+        assert_eq!(item.at, Duration::from_secs(2));
+        assert_eq!(item.duration, Duration::from_secs(10));
+        assert_eq!(
+            item.fades(),
+            (Duration::from_secs(1), Duration::from_secs(2))
+        );
+
+        // Muting the music lane takes it out of the preview.
+        let mut mix = editor
+            .view()
+            .timeline
+            .as_ref()
+            .unwrap()
+            .mix()
+            .lane(AudioLane::Music);
+        mix.muted = true;
+        app.edit(
+            &mut editor,
+            EditAction::SetLane {
+                lane: AudioLane::Music,
+                mix,
+            },
+        )
+        .unwrap();
+        let preview = editor.preview_plan().unwrap();
+        assert!(preview.audio[1].clips.is_empty());
+    }
+
+    #[test]
+    fn media_goes_only_on_tracks_of_its_kind() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let song = import(&h, &app, project.id, &dir, "bed.mp3", 20, false);
+        let footage = import(&h, &app, project.id, &dir, "drone.mov", 6, true);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        let before = editor.view().timeline.clone();
+
+        for (asset, track) in [
+            (song.id, Track::Video),
+            (footage.id, Track::Music),
+            (footage.id, Track::Sfx),
+            (song.id, Track::Narration),
+        ] {
+            let error = app
+                .edit(&mut editor, EditAction::Place { asset, track })
+                .unwrap_err();
+            assert!(
+                matches!(error, EditorError::Edit(EditError::WrongTrack)),
+                "{track:?}: {error}"
+            );
+        }
+        let unknown = app.edit(
+            &mut editor,
+            EditAction::Place {
+                asset: MediaAssetId::new(),
+                track: Track::Music,
+            },
+        );
+        assert!(unknown.is_err());
+        assert_eq!(editor.view().timeline, before);
     }
 }
