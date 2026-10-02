@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use bardo_domain::{
     ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, NicheSeedError, Provider, ScriptFieldError, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFieldError, UiLanguage,
+    KeyCheckOutcome, NicheSeedError, PersonaFieldError, Provider, ScriptFieldError, TemplateKind,
+    TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage, VoiceCategory,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -47,6 +47,70 @@ pub enum Text {
     ChannelNotFound,
     ChannelNotSaved,
     ChannelFieldError(ChannelFieldError),
+    ChannelPersona,
+    ChannelPersonaNone,
+    ChannelPersonaHint,
+    ChannelPersonaNotFound,
+    PersonasTitle,
+    PersonasHint,
+    PersonasEmpty,
+    PersonasNotLoaded,
+    NewPersona,
+    NewPersonaTitle,
+    EditPersonaTitle,
+    PersonaName,
+    PersonaNamePlaceholder,
+    PersonaVoice,
+    PersonaVoiceNone,
+    PersonaVoiceHint,
+    ChooseVoice,
+    ReloadVoices,
+    HideVoices,
+    LoadingVoices,
+    VoicesTitle,
+    VoicesEmpty,
+    VoicesFailed,
+    VoicesMissingKey,
+    VoiceCategoryName(VoiceCategory),
+    VoiceAvailable,
+    VoiceMissing,
+    VoiceSelected,
+    PersonaTone,
+    PersonaTonePlaceholder,
+    PersonaScriptStyle,
+    PersonaScriptStylePlaceholder,
+    PersonaPresets,
+    PersonaPresetsHint,
+    PresetStability,
+    PresetStabilityHint,
+    PresetSimilarity,
+    PresetSimilarityHint,
+    PresetStyle,
+    PresetStyleHint,
+    PresetSpeed,
+    PresetSpeedHint,
+    /// Placeholder: `{n}`.
+    PresetPercent,
+    CreatePersona,
+    SavePersona,
+    DuplicatePersona,
+    PersonaSaved,
+    /// Placeholder: `{name}`.
+    PersonaDuplicated,
+    /// Placeholder: `{channels}`.
+    PersonaUsedBy,
+    PersonaUnused,
+    /// Placeholder: `{n}`.
+    PersonaConfirmTitle,
+    PersonaConfirmHint,
+    ConfirmPersonaSave,
+    CancelPersonaSave,
+    PersonaNameTaken,
+    PersonaNotFound,
+    PersonaNotSaved,
+    /// Appended to a duplicated persona's name, e.g. `Narrator (copy)`.
+    PersonaCopySuffix,
+    PersonaFieldError(PersonaFieldError),
     JobsTitle,
     JobsEmpty,
     JobsRunning,
@@ -295,6 +359,81 @@ impl Text {
             Text::ChannelNameTaken => "channel.error.name_taken",
             Text::ChannelNotFound => "channel.error.not_found",
             Text::ChannelNotSaved => "channel.error.not_saved",
+            Text::ChannelPersona => "channel.persona",
+            Text::ChannelPersonaNone => "channel.persona_none",
+            Text::ChannelPersonaHint => "channel.persona_hint",
+            Text::ChannelPersonaNotFound => "channel.error.persona_not_found",
+            Text::PersonasTitle => "personas.title",
+            Text::PersonasHint => "personas.hint",
+            Text::PersonasEmpty => "personas.empty",
+            Text::PersonasNotLoaded => "personas.not_loaded",
+            Text::NewPersona => "personas.new",
+            Text::NewPersonaTitle => "persona.new_title",
+            Text::EditPersonaTitle => "persona.edit_title",
+            Text::PersonaName => "persona.name",
+            Text::PersonaNamePlaceholder => "persona.name_placeholder",
+            Text::PersonaVoice => "persona.voice",
+            Text::PersonaVoiceNone => "persona.voice_none",
+            Text::PersonaVoiceHint => "persona.voice_hint",
+            Text::ChooseVoice => "voices.choose",
+            Text::ReloadVoices => "voices.reload",
+            Text::HideVoices => "voices.hide",
+            Text::LoadingVoices => "voices.loading",
+            Text::VoicesTitle => "voices.title",
+            Text::VoicesEmpty => "voices.empty",
+            Text::VoicesFailed => "voices.failed",
+            Text::VoicesMissingKey => "voices.missing_key",
+            Text::VoiceCategoryName(category) => match category {
+                VoiceCategory::Cloned => "voices.category.cloned",
+                VoiceCategory::Professional => "voices.category.professional",
+                VoiceCategory::Generated => "voices.category.generated",
+                VoiceCategory::Default => "voices.category.default",
+                VoiceCategory::Other => "voices.category.other",
+            },
+            Text::VoiceAvailable => "voices.available",
+            Text::VoiceMissing => "voices.missing",
+            Text::VoiceSelected => "voices.selected",
+            Text::PersonaTone => "persona.tone",
+            Text::PersonaTonePlaceholder => "persona.tone_placeholder",
+            Text::PersonaScriptStyle => "persona.script_style",
+            Text::PersonaScriptStylePlaceholder => "persona.script_style_placeholder",
+            Text::PersonaPresets => "persona.presets",
+            Text::PersonaPresetsHint => "persona.presets_hint",
+            Text::PresetStability => "persona.preset.stability",
+            Text::PresetStabilityHint => "persona.preset.stability_hint",
+            Text::PresetSimilarity => "persona.preset.similarity",
+            Text::PresetSimilarityHint => "persona.preset.similarity_hint",
+            Text::PresetStyle => "persona.preset.style",
+            Text::PresetStyleHint => "persona.preset.style_hint",
+            Text::PresetSpeed => "persona.preset.speed",
+            Text::PresetSpeedHint => "persona.preset.speed_hint",
+            Text::PresetPercent => "persona.preset.percent",
+            Text::CreatePersona => "persona.create",
+            Text::SavePersona => "persona.save",
+            Text::DuplicatePersona => "persona.duplicate",
+            Text::PersonaSaved => "persona.saved",
+            Text::PersonaDuplicated => "persona.duplicated",
+            Text::PersonaUsedBy => "persona.used_by",
+            Text::PersonaUnused => "persona.unused",
+            Text::PersonaConfirmTitle => "persona.confirm.title",
+            Text::PersonaConfirmHint => "persona.confirm.hint",
+            Text::ConfirmPersonaSave => "persona.confirm.save",
+            Text::CancelPersonaSave => "persona.confirm.cancel",
+            Text::PersonaNameTaken => "persona.error.name_taken",
+            Text::PersonaNotFound => "persona.error.not_found",
+            Text::PersonaNotSaved => "persona.error.not_saved",
+            Text::PersonaCopySuffix => "persona.copy_suffix",
+            Text::PersonaFieldError(error) => match error {
+                PersonaFieldError::NameRequired => "persona.error.name_required",
+                PersonaFieldError::NameTooLong => "persona.error.name_too_long",
+                PersonaFieldError::VoiceRequired => "persona.error.voice_required",
+                PersonaFieldError::ToneTooLong => "persona.error.tone_too_long",
+                PersonaFieldError::ScriptStyleTooLong => "persona.error.script_style_too_long",
+                PersonaFieldError::StabilityOutOfRange => "persona.error.stability_out_of_range",
+                PersonaFieldError::SimilarityOutOfRange => "persona.error.similarity_out_of_range",
+                PersonaFieldError::StyleOutOfRange => "persona.error.style_out_of_range",
+                PersonaFieldError::SpeedOutOfRange => "persona.error.speed_out_of_range",
+            },
             Text::ChannelFieldError(error) => match error {
                 ChannelFieldError::NameRequired => "channel.error.name_required",
                 ChannelFieldError::NameTooLong => "channel.error.name_too_long",
@@ -669,6 +808,63 @@ mod tests {
             Text::ChannelNameTaken,
             Text::ChannelNotFound,
             Text::ChannelNotSaved,
+            Text::ChannelPersona,
+            Text::ChannelPersonaNone,
+            Text::ChannelPersonaHint,
+            Text::ChannelPersonaNotFound,
+            Text::PersonasTitle,
+            Text::PersonasHint,
+            Text::PersonasEmpty,
+            Text::PersonasNotLoaded,
+            Text::NewPersona,
+            Text::NewPersonaTitle,
+            Text::EditPersonaTitle,
+            Text::PersonaName,
+            Text::PersonaNamePlaceholder,
+            Text::PersonaVoice,
+            Text::PersonaVoiceNone,
+            Text::PersonaVoiceHint,
+            Text::ChooseVoice,
+            Text::ReloadVoices,
+            Text::HideVoices,
+            Text::LoadingVoices,
+            Text::VoicesTitle,
+            Text::VoicesEmpty,
+            Text::VoicesFailed,
+            Text::VoicesMissingKey,
+            Text::VoiceAvailable,
+            Text::VoiceMissing,
+            Text::VoiceSelected,
+            Text::PersonaTone,
+            Text::PersonaTonePlaceholder,
+            Text::PersonaScriptStyle,
+            Text::PersonaScriptStylePlaceholder,
+            Text::PersonaPresets,
+            Text::PersonaPresetsHint,
+            Text::PresetStability,
+            Text::PresetStabilityHint,
+            Text::PresetSimilarity,
+            Text::PresetSimilarityHint,
+            Text::PresetStyle,
+            Text::PresetStyleHint,
+            Text::PresetSpeed,
+            Text::PresetSpeedHint,
+            Text::PresetPercent,
+            Text::CreatePersona,
+            Text::SavePersona,
+            Text::DuplicatePersona,
+            Text::PersonaSaved,
+            Text::PersonaDuplicated,
+            Text::PersonaUsedBy,
+            Text::PersonaUnused,
+            Text::PersonaConfirmTitle,
+            Text::PersonaConfirmHint,
+            Text::ConfirmPersonaSave,
+            Text::CancelPersonaSave,
+            Text::PersonaNameTaken,
+            Text::PersonaNotFound,
+            Text::PersonaNotSaved,
+            Text::PersonaCopySuffix,
             Text::JobsTitle,
             Text::JobsEmpty,
             Text::JobsRunning,
@@ -852,6 +1048,8 @@ mod tests {
         texts.extend(ContentLanguage::ALL.map(Text::ContentLanguageName));
         texts.extend(Country::ALL.map(Text::CountryName));
         texts.extend(ChannelFieldError::ALL.map(Text::ChannelFieldError));
+        texts.extend(PersonaFieldError::ALL.map(Text::PersonaFieldError));
+        texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
         texts.extend(ThemeFieldError::ALL.map(Text::ThemeFieldError));
         texts.extend(ScriptFieldError::ALL.map(Text::ScriptFieldError));
         texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
@@ -1043,6 +1241,57 @@ mod tests {
                 (Text::TemplateVersionLabel, &[("n", "3")][..]),
                 (Text::TemplateEditing, &[("n", "3"), ("next", "4")][..]),
                 (Text::TemplateSaved, &[("n", "4")][..]),
+            ] {
+                let filled = catalog.format(text, args);
+                assert!(!filled.contains('{'), "{filled}");
+                for (_, value) in args {
+                    assert!(filled.contains(value), "{filled}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn persona_limit_messages_match_the_domain_limits() {
+        use bardo_domain::{GenerationPresets, PersonaDetails};
+
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        for (error, limit) in [
+            (
+                PersonaFieldError::NameTooLong,
+                PersonaDetails::MAX_NAME_CHARS.to_string(),
+            ),
+            (
+                PersonaFieldError::ToneTooLong,
+                format!("{}", PersonaDetails::MAX_TONE_CHARS / 1000),
+            ),
+            (
+                PersonaFieldError::ScriptStyleTooLong,
+                format!("{}", PersonaDetails::MAX_SCRIPT_STYLE_CHARS / 1000),
+            ),
+            (
+                PersonaFieldError::SpeedOutOfRange,
+                GenerationPresets::SPEED.start().to_string(),
+            ),
+            (
+                PersonaFieldError::SpeedOutOfRange,
+                GenerationPresets::SPEED.end().to_string(),
+            ),
+        ] {
+            let message = catalog.get(Text::PersonaFieldError(error));
+            assert!(message.contains(&limit), "{message}");
+        }
+    }
+
+    #[test]
+    fn persona_placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for (text, args) in [
+                (Text::PresetPercent, &[("n", "75")][..]),
+                (Text::PersonaDuplicated, &[("name", "Narrator (copy)")][..]),
+                (Text::PersonaUsedBy, &[("channels", "Space Archives")][..]),
+                (Text::PersonaConfirmTitle, &[("n", "2")][..]),
             ] {
                 let filled = catalog.format(text, args);
                 assert!(!filled.contains('{'), "{filled}");

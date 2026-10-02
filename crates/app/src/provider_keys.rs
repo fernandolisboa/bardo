@@ -132,6 +132,21 @@ impl ProviderKeys {
     pub(crate) fn redactor(&self) -> &Redactor {
         &self.redactor
     }
+
+    /// The saved key, read fresh from the store and masked from then on.
+    pub(crate) fn read(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<ApiKey, ProviderKeyError> {
+        let key = self
+            .store
+            .get(owner, provider)
+            .map_err(|error| store_failure(&self.redactor, provider, "read", error))?
+            .ok_or(ProviderKeyError::NotSet)?;
+        self.redactor.add(&key);
+        Ok(key)
+    }
 }
 
 /// A key test ready to run. `run` calls the provider and blocks, so the UI
@@ -236,12 +251,7 @@ impl Bardo {
     /// secret store, so it tests exactly what features will use.
     pub fn key_test(&self, provider: Provider) -> Result<KeyTest, ProviderKeyError> {
         let keys = &self.provider_keys;
-        let key = keys
-            .store
-            .get(self.profile.id, provider)
-            .map_err(|error| store_failure(&keys.redactor, provider, "read", error))?
-            .ok_or(ProviderKeyError::NotSet)?;
-        keys.redactor.add(&key);
+        let key = keys.read(self.profile.id, provider)?;
         Ok(KeyTest {
             provider,
             key,
@@ -320,6 +330,7 @@ mod tests {
                 themes: Arc::clone(&self.db) as _,
                 templates: Arc::clone(&self.db) as _,
                 scripts: Arc::clone(&self.db) as _,
+                personas: Arc::clone(&self.db) as _,
                 research: Arc::clone(&self.db) as _,
                 secrets,
             };

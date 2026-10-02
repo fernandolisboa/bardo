@@ -1,0 +1,4 @@
+HTTP/2 401
+content-type: application/json
+
+{"detail":{"status":"missing_permissions","message":"The API key you used is missing the permission voices_read to execute this operation."}}

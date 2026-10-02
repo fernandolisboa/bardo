@@ -5,6 +5,7 @@ mod channels;
 pub mod i18n;
 mod jobs;
 pub mod logging;
+mod personas;
 mod provider_keys;
 mod research;
 mod scripts;
@@ -17,8 +18,9 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ChannelRepository, DecisionEngine, JobRepository, KeyChecker, MarketData,
-    NicheResearchRepository, ProfileRepository, Redactor, RepositoryError, ScriptRepository,
-    SecretStore, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
+    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, Redactor,
+    RepositoryError, ScriptRepository, SecretStore, TemplateRepository, TextGenerator,
+    ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
 };
 use bardo_storage::Database;
 
@@ -26,6 +28,7 @@ pub use bardo_domain;
 pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use scripts::{ScriptError, ScriptView};
@@ -59,6 +62,8 @@ pub struct Repositories {
     pub templates: Arc<dyn TemplateRepository>,
     /// Scripts and their generations. Shared with the job queue.
     pub scripts: Arc<dyn ScriptRepository>,
+    /// The persona library.
+    pub personas: Arc<dyn PersonaRepository>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
@@ -80,6 +85,7 @@ impl Repositories {
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
+            personas: Arc::clone(&db) as _,
             research: db,
             secrets,
         }
@@ -96,6 +102,8 @@ pub struct Providers {
     pub text: Arc<dyn TextGenerator>,
     /// Typed decisions (JEV).
     pub decisions: Arc<dyn DecisionEngine>,
+    /// The user's voices (ElevenLabs).
+    pub voices: Arc<dyn VoiceLibrary>,
 }
 
 impl Providers {
@@ -106,6 +114,7 @@ impl Providers {
             market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
             text: Arc::new(bardo_ai::ClaudeTextGenerator::new()),
             decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
+            voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
         }
     }
 }
@@ -118,7 +127,11 @@ pub struct Bardo {
     themes: Arc<dyn ThemeRepository>,
     templates: Arc<dyn TemplateRepository>,
     scripts: Arc<dyn ScriptRepository>,
+    personas: Arc<dyn PersonaRepository>,
     market_data: Arc<dyn MarketData>,
+    voices: Arc<dyn VoiceLibrary>,
+    /// The last voice listing of this session, for the voice picker.
+    voice_list: Option<VoiceList>,
     jobs: JobQueue,
     provider_keys: ProviderKeys,
     profile: UserProfile,
@@ -126,8 +139,9 @@ pub struct Bardo {
 }
 
 impl Bardo {
-    /// Loads the local profile, creating it on first start (no login), and
-    /// starts the job queue, resuming jobs the last session left running.
+    /// Loads the local profile, creating it on first start (no login), gives
+    /// a profile without personas the default ones, and starts the job
+    /// queue, resuming jobs the last session left running.
     /// `system_locale` (e.g. `pt-BR`) picks the language of a new profile.
     pub fn start(
         repositories: Repositories,
@@ -157,6 +171,7 @@ impl Bardo {
             themes,
             templates,
             scripts,
+            personas,
             secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
@@ -167,6 +182,9 @@ impl Bardo {
                 profile
             }
         };
+        if personas.list(profile.id)?.is_empty() {
+            personas.insert_all(&Persona::defaults(profile.id))?;
+        }
         let catalog = Catalog::load(profile.ui_language);
         let redactor = Redactor::new();
         let research_handler = NicheResearchHandler {
@@ -204,7 +222,10 @@ impl Bardo {
             themes,
             templates,
             scripts,
+            personas,
             market_data: providers.market_data,
+            voices: providers.voices,
+            voice_list: None,
             jobs,
             provider_keys,
             profile,
@@ -284,7 +305,7 @@ pub(crate) mod testing {
         Answer, ApiKey, Confidence, DecisionEngine, Decisions, GeneratedText, KeyCheck,
         KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche, Provider,
         ProviderFailure, Question, Questions, ScoreAnswer, TextGenerator, TextRequest, TokenUsage,
-        UploadSample,
+        UploadSample, Voice, VoiceLibrary,
     };
 
     use crate::Providers;
@@ -533,6 +554,25 @@ pub(crate) mod testing {
         }
     }
 
+    /// Answers every listing with `voices`, or `failure` when set; counts
+    /// the calls.
+    #[derive(Default)]
+    pub(crate) struct FakeVoiceLibrary {
+        pub(crate) voices: Mutex<Vec<Voice>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        pub(crate) calls: Mutex<Vec<String>>,
+    }
+
+    impl VoiceLibrary for FakeVoiceLibrary {
+        fn voices(&self, key: &ApiKey) -> Result<Vec<Voice>, ProviderFailure> {
+            self.calls.lock().unwrap().push(key.expose().to_owned());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            Ok(self.voices.lock().unwrap().clone())
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -544,6 +584,7 @@ pub(crate) mod testing {
             market_data,
             text: Arc::new(FakeTextGenerator::default()),
             decisions: Arc::new(FakeDecisionEngine::default()),
+            voices: Arc::new(FakeVoiceLibrary::default()),
         }
     }
 }
@@ -579,6 +620,35 @@ mod tests {
         }
     }
 
+    /// Personas kept in memory: the profile these tests start with lives
+    /// in `FakeProfiles`, not in the database personas would reference.
+    #[derive(Default)]
+    struct FakePersonas(std::sync::Mutex<Vec<Persona>>);
+
+    impl PersonaRepository for FakePersonas {
+        fn list(&self, owner: bardo_domain::ProfileId) -> Result<Vec<Persona>, RepositoryError> {
+            let saved = self.0.lock().unwrap();
+            Ok(saved.iter().filter(|p| p.owner == owner).cloned().collect())
+        }
+
+        fn get(&self, id: bardo_domain::PersonaId) -> Result<Option<Persona>, RepositoryError> {
+            Ok(self.0.lock().unwrap().iter().find(|p| p.id == id).cloned())
+        }
+
+        fn save(&self, persona: &Persona) -> Result<(), RepositoryError> {
+            self.insert_all(std::slice::from_ref(persona))
+        }
+
+        fn insert_all(&self, personas: &[Persona]) -> Result<(), RepositoryError> {
+            let mut saved = self.0.lock().unwrap();
+            for persona in personas {
+                saved.retain(|p| p.id != persona.id);
+                saved.push(persona.clone());
+            }
+            Ok(())
+        }
+    }
+
     fn start(profiles: &FakeProfiles, locale: Option<&str>) -> Bardo {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
@@ -588,6 +658,7 @@ mod tests {
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
+            personas: Arc::new(FakePersonas::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };

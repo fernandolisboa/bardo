@@ -637,6 +637,7 @@ mod tests {
             themes: Arc::clone(db) as _,
             templates: Arc::clone(db) as _,
             scripts: Arc::clone(db) as _,
+            personas: Arc::clone(db) as _,
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
         };

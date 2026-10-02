@@ -1,0 +1,4 @@
+HTTP/2 200
+content-type: application/json
+
+{"voices":[{"voice_id":"22N9cF8z0o7y23njdyaY","name":"Florence","category":"premade","labels":{"accent":"british","age":"middle_aged","gender":"female","use_case":"narrative_story"},"description":"Sophisticated and lyrical, this voice flows like a steady stream.","preview_url":"https://storage.googleapis.com/eleven-public-prod/preview.mp3","is_owner":false},{"voice_id":"FrS6cKLB1wg4WYgPa9GW","name":"Wyatt","category":"premade","labels":{"gender":"male"},"description":"","is_owner":false},{"voice_id":"Zx9Yw8Vu7Ts6Rq5Po4Nm","name":"Narrador Épico","category":"generated","labels":{"gender":"male","age":"old","descriptive":"","use_case":"narrative_story"},"description":"Designed from a prompt.","is_owner":true}],"has_more":false,"total_count":null,"next_page_token":null}

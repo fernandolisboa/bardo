@@ -1,10 +1,11 @@
-//! Channel use cases: list, create and edit the profile's channels.
+//! Channel use cases: list, create and edit the profile's channels, each
+//! with an optional default persona from the profile's library.
 
 use bardo_domain::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, RepositoryError,
 };
 
-use crate::{AppError, Bardo, Text};
+use crate::{AppError, Bardo, PersonaError, Text};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChannelError {
@@ -15,6 +16,9 @@ pub enum ChannelError {
     NameTaken,
     #[error("channel not found")]
     NotFound,
+    /// The chosen default persona is not one of the profile's.
+    #[error("persona not found")]
+    PersonaNotFound,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -27,6 +31,7 @@ impl ChannelError {
             ChannelError::Invalid(_) => None,
             ChannelError::NameTaken => Some(Text::ChannelNameTaken),
             ChannelError::NotFound => Some(Text::ChannelNotFound),
+            ChannelError::PersonaNotFound => Some(Text::ChannelPersonaNotFound),
             ChannelError::Repository(_) => Some(Text::ChannelNotSaved),
         }
     }
@@ -48,6 +53,7 @@ impl Bardo {
     pub fn create_channel(&self, draft: ChannelDraft) -> Result<Channel, ChannelError> {
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, None)?;
+        self.ensure_own_persona(&details)?;
         let channel = Channel::new(self.profile.id, details);
         self.channels.save(&channel)?;
         Ok(channel)
@@ -65,9 +71,21 @@ impl Bardo {
             .ok_or(ChannelError::NotFound)?;
         let details = ChannelDetails::validate(draft).map_err(ChannelError::Invalid)?;
         self.ensure_name_free(&details, Some(id))?;
+        self.ensure_own_persona(&details)?;
         channel.details = details;
         self.channels.save(&channel)?;
         Ok(channel)
+    }
+
+    fn ensure_own_persona(&self, details: &ChannelDetails) -> Result<(), ChannelError> {
+        let Some(id) = details.default_persona() else {
+            return Ok(());
+        };
+        match self.own_persona(id) {
+            Ok(_) => Ok(()),
+            Err(PersonaError::Repository(error)) => Err(ChannelError::Repository(error)),
+            Err(_) => Err(ChannelError::PersonaNotFound),
+        }
     }
 
     fn ensure_name_free(
@@ -106,6 +124,7 @@ mod tests {
             themes: Arc::clone(db) as _,
             templates: Arc::clone(db) as _,
             scripts: Arc::clone(db) as _,
+            personas: Arc::clone(db) as _,
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
         };
@@ -124,6 +143,7 @@ mod tests {
             aesthetic_notes: "archival".into(),
             language: ContentLanguage::English,
             country: Country::UnitedStates,
+            default_persona: None,
         }
     }
 
@@ -271,6 +291,7 @@ mod tests {
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
+            personas: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };

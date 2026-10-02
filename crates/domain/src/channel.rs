@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{ContentLanguage, Country, Market, ProfileId, RepositoryError};
+use crate::{ContentLanguage, Country, Market, PersonaId, ProfileId, RepositoryError};
 
 /// Identifies a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,6 +47,8 @@ pub struct ChannelDraft {
     pub aesthetic_notes: String,
     pub language: ContentLanguage,
     pub country: Country,
+    /// The persona the channel's videos use unless a video overrides it.
+    pub default_persona: Option<PersonaId>,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -82,6 +84,7 @@ pub struct ChannelDetails {
     aesthetic_notes: String,
     language: ContentLanguage,
     country: Country,
+    default_persona: Option<PersonaId>,
 }
 
 impl ChannelDetails {
@@ -136,6 +139,7 @@ impl ChannelDetails {
             aesthetic_notes,
             language: draft.language,
             country: draft.country,
+            default_persona: draft.default_persona,
         })
     }
 
@@ -163,6 +167,11 @@ impl ChannelDetails {
         self.country
     }
 
+    /// Whether the persona exists for this owner is the app's to check.
+    pub fn default_persona(&self) -> Option<PersonaId> {
+        self.default_persona
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -183,6 +192,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             aesthetic_notes: details.aesthetic_notes.clone(),
             language: details.language,
             country: details.country,
+            default_persona: details.default_persona,
         }
     }
 }
@@ -200,8 +210,8 @@ fn normalize_themes(themes: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// A brand the user runs on one or more networks (CONTEXT.md). Default
-/// persona and network accounts arrive with their own slices.
+/// A brand the user runs on one or more networks (CONTEXT.md). Network
+/// accounts arrive with their own slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Channel {
     pub id: ChannelId,
@@ -367,6 +377,7 @@ mod tests {
             aesthetic_notes: "escuro, imagens de arquivo".into(),
             language: ContentLanguage::Portuguese,
             country: Country::Brazil,
+            default_persona: Some(PersonaId::new()),
         })
         .unwrap();
         assert_eq!(

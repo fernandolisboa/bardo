@@ -1,8 +1,8 @@
 //! Script use cases (PRD stories 29-30, 43): Claude writes a video
 //! project's script from the script template, filled with the channel,
-//! niche, theme and persona; the user edits it freely. Regenerating puts the
-//! new script up for review next to the current one, which stays until the
-//! user accepts the new one. Every generation records its provenance.
+//! niche, theme and the channel's default persona; the user edits it
+//! freely. Regenerating puts the new script up for review next to the
+//! current one, which stays until the user accepts the new one. Every generation records its provenance.
 //!
 //! Generating calls Claude, so it runs as a job. The template is rendered
 //! when the job starts: the job sends exactly the prompt it records, even if
@@ -26,7 +26,7 @@ use crate::{Bardo, Catalog, KeyState, TemplateError, Text};
 /// What a variable says when the channel left it blank, so the prompt
 /// never reads as cut off.
 const NOT_SET: &str = "not set";
-/// The narrator until personas exist: projects have no persona yet.
+/// The narrator when the channel has no default persona.
 const NO_PERSONA: &str = "no persona chosen yet; a clear, engaging documentary narrator";
 
 #[derive(Debug, thiserror::Error)]
@@ -254,6 +254,16 @@ impl Bardo {
             .unwrap_or_default();
         let english = Catalog::load(UiLanguage::EnUs);
         let details = &channel.details;
+        // Per-video overrides arrive with persona sharing; until then the
+        // channel's default speaks for every video.
+        let persona = match details.default_persona() {
+            Some(id) => self
+                .personas
+                .get(id)?
+                .filter(|persona| persona.owner == self.profile.id)
+                .map(|persona| persona.details.describe()),
+            None => None,
+        };
         Ok(TemplateValues::from([
             (TemplateVariable::ChannelName, details.name().to_owned()),
             (TemplateVariable::ChannelNiche, or_not_set(details.niche())),
@@ -277,7 +287,10 @@ impl Bardo {
                     .get(Text::CountryName(details.country()))
                     .into_owned(),
             ),
-            (TemplateVariable::Persona, NO_PERSONA.to_owned()),
+            (
+                TemplateVariable::Persona,
+                persona.unwrap_or_else(|| NO_PERSONA.to_owned()),
+            ),
             (TemplateVariable::Niche, project.niche.label().to_owned()),
             (TemplateVariable::ThemeTitle, project.title.clone()),
             (TemplateVariable::ThemeAngle, or_not_set(&angle)),
@@ -419,6 +432,7 @@ mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 text: Arc::clone(&self.text) as _,
                 decisions: Arc::new(FakeDecisionEngine::default()),
+                voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
             };
             Bardo::start_with(
                 Repositories::shared(Arc::clone(&self.db), Arc::clone(&self.secrets) as _),
@@ -569,6 +583,39 @@ mod tests {
             assert!(request.prompt.contains(fact), "{fact}: {}", request.prompt);
         }
         assert!(!request.prompt.contains("{{"), "{}", request.prompt);
+    }
+
+    #[test]
+    fn the_narrator_is_the_channels_default_persona() {
+        let h = Harness::new();
+        h.answer(&["Script."]);
+        let app = h.start_with_key();
+        let project = project(&app);
+        let persona = app
+            .personas()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.details.name() == "Documentary Narrator (en-US)")
+            .unwrap();
+        let channel = app.channels.get(project.channel).unwrap().unwrap();
+        app.update_channel(
+            channel.id,
+            ChannelDraft {
+                default_persona: Some(persona.id),
+                ..ChannelDraft::from(&channel.details)
+            },
+        )
+        .unwrap();
+
+        generate(&app, &project);
+        let prompt = &h.text.requests()[0].prompt;
+        assert!(
+            prompt.contains(&format!("Narrator: {}", persona.details.describe())),
+            "{prompt}"
+        );
+        assert!(prompt.contains("Voice: Wyatt."), "{prompt}");
+        assert!(prompt.contains("Tone: Sober, measured"), "{prompt}");
+        assert!(!prompt.contains("no persona chosen"), "{prompt}");
     }
 
     #[test]
