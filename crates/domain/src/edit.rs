@@ -324,7 +324,7 @@ impl Timeline {
             }
             Track::Narration => {
                 // The fade-in stays with the first part, the fade-out goes
-                // with the second.
+                // with the second; a split inside a fade ends it there.
                 let mut second = self.narration[index].clone();
                 second.start += first;
                 second.at = at;
@@ -1469,6 +1469,18 @@ mod tests {
         let pieces = after.narration();
         assert_eq!(pieces[0].fades(), (ms(500), Duration::ZERO));
         assert_eq!(pieces[1].fades(), (Duration::ZERO, ms(700)));
+
+        // A split inside a fade ends the fade at the split.
+        let inside = round_trip(
+            &faded,
+            Edit::Split {
+                track: Track::Narration,
+                index: 0,
+                at: ms(300),
+            },
+        );
+        assert_eq!(inside.narration()[0].fades(), (ms(300), Duration::ZERO));
+        assert_eq!(inside.narration()[1].fades(), (Duration::ZERO, ms(700)));
 
         // A fade added where the halves meet keeps them apart.
         let mut faded_inside = after.clone();

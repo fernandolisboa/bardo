@@ -64,7 +64,7 @@ Track colors differ in lightness as well as hue, so they stay distinguishable fo
 
 - **Clip (V1)**: name; source provenance (e.g. "Nano Banana image · Animated with Higgsfield · Kling 2.5", file, resolution, fps); In / Out / Duration; Crop position `Fit | Fill | Custom` with X/Y (applies in 9:16; in 16:9 the clip fits the frame); Speed; **Replace asset**, **Regenerate** (#15, #16).
 - **Caption (CC)**: text; In / Out / Duration with "snapped to words" hint; channel caption styles as swatches (three per channel); vertical position (Top / Center / Bottom plus offset); "Apply style to all captions".
-- **Audio region (A1–A3)**: In / Out / Duration, **Fades** (fade in, fade out; − / + in 0.1 s steps, never longer than the region together), file, **Remove from the cut**. Fades draw as ramps over the region.
+- **Audio region (A1–A3)**: In / Out / Duration, **Fades** (fade in, fade out; − / + in 0.1 s steps, never longer than the region together; a split inside a fade ends it at the split), file, **Remove from the cut**. Fades draw as ramps over the region.
 - **Track (A1–A3, picked by its header)**: **Level** (− / + in 0.5 dB steps, −30 to +12 dB), **Mute**, **Solo**; on A2, **Duck under the narration** and **Duck by** (1 to 30 dB in 1 dB steps; − ducks deeper) with a hint on what ducking follows. Every change is one undoable edit (#22).
 - **Missing media**: alert at the top of the clip inspector with **Relink…**; crop and speed hidden.
 

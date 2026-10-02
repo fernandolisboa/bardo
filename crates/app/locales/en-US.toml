@@ -887,7 +887,6 @@ fade_in = "Fade in"
 fade_out = "Fade out"
 decibels = "{n} dB"
 lane_hint = "Level, mute and solo apply to the whole track."
-
 [editor.tool]
 select = "Select (V)"
 split = "Split (S)"

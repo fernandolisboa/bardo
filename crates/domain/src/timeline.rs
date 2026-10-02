@@ -982,7 +982,11 @@ pub(crate) mod tests {
         item.fade_out = ms(2_000);
         assert_eq!(item.fades(), (ms(1_000), ms(2_000)));
         item.duration = ms(2_500);
-        assert_eq!(item.fades(), (ms(1_000), ms(1_500)), "the fade-out first");
+        assert_eq!(
+            item.fades(),
+            (ms(1_000), ms(1_500)),
+            "the fade-out is cut short first"
+        );
         item.duration = ms(600);
         assert_eq!(item.fades(), (ms(600), Duration::ZERO));
     }

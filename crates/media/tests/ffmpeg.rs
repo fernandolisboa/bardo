@@ -353,8 +353,10 @@ fn level(ffmpeg: &Ffmpeg, path: &Path, from: f64, length: f64) -> f64 {
     assert!(output.status.success());
     let samples: Vec<f32> = output
         .stdout
-        .chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
         .collect();
     assert!(!samples.is_empty());
     let power = samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / samples.len() as f64;

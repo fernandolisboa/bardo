@@ -160,8 +160,9 @@ impl DuckEnvelope {
     /// The envelope that ducks `depth` under `speech`, the stretches of the
     /// timeline where the narration speaks (in any order, overlapping or
     /// not). Stretches closer than [`DUCK_HOLD`] make one dip; each dip
-    /// starts going down [`DUCK_ATTACK`] ahead (from the timeline's start
-    /// at the earliest) and comes back over [`DUCK_RELEASE`].
+    /// starts going down [`DUCK_ATTACK`] ahead (speech closer than that to
+    /// the timeline's start is ducked from its first frame) and comes back
+    /// over [`DUCK_RELEASE`].
     pub fn under(speech: &[(Duration, Duration)], depth: Decibels) -> DuckEnvelope {
         let mut spans: Vec<(Duration, Duration)> = speech
             .iter()
@@ -178,11 +179,20 @@ impl DuckEnvelope {
         }
         let dips = merged
             .into_iter()
-            .map(|(full, release)| Dip {
-                start: full.saturating_sub(DUCK_ATTACK),
-                full,
-                release,
-                end: release + DUCK_RELEASE,
+            .map(|(full, release)| {
+                // Speech too early for a whole attack is ducked from the
+                // first frame rather than dropping the music in a blip.
+                let full = if full < DUCK_ATTACK {
+                    Duration::ZERO
+                } else {
+                    full
+                };
+                Dip {
+                    start: full - DUCK_ATTACK.min(full),
+                    full,
+                    release,
+                    end: release + DUCK_RELEASE,
+                }
             })
             .collect();
         DuckEnvelope { depth, dips }
@@ -366,7 +376,8 @@ mod tests {
     fn speech_at_the_very_start_is_ducked_from_the_first_frame() {
         let envelope = DuckEnvelope::under(&[(ms(50), ms(1_000))], DEFAULT_DUCK);
         assert_eq!(envelope.dips[0].start, Duration::ZERO);
-        assert!(envelope.amount_at(Duration::ZERO) == 0.0);
+        assert_eq!(envelope.dips[0].full, Duration::ZERO);
+        assert_eq!(envelope.amount_at(Duration::ZERO), 1.0);
         assert_eq!(envelope.amount_at(ms(50)), 1.0);
         let at_zero = DuckEnvelope::under(&[(ms(0), ms(1_000))], DEFAULT_DUCK);
         assert_eq!(at_zero.amount_at(Duration::ZERO), 1.0);
