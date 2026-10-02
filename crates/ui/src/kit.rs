@@ -8,7 +8,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Div, ElementId, Hsla, SharedString, div, px};
+use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, SharedString, Stateful, div, px};
 
 use crate::appearance::look;
 
@@ -89,6 +89,25 @@ pub fn status_with(tone: Tone, icon: IconName, label: impl Into<SharedString>, c
         .child(div().whitespace_nowrap().child(label.into()))
 }
 
+/// A message after an action (saved, failed, exported to …): icon and
+/// text in the tone's ink; wraps, unlike a [`status`] chip.
+pub fn notice(tone: Tone, text: impl Into<SharedString>, cx: &App) -> Div {
+    let ink = tone.ink(cx);
+    h_flex()
+        .min_w_0()
+        .gap_1p5()
+        .items_start()
+        .text_sm()
+        .text_color(ink)
+        .child(
+            div()
+                .flex_none()
+                .pt(px(2.))
+                .child(Icon::new(tone.icon()).size(px(14.)).text_color(ink)),
+        )
+        .child(div().min_w_0().child(text.into()))
+}
+
 /// A card: a surface a step off the app ground, framed.
 pub fn card(cx: &App) -> Div {
     let t = &look(cx).tokens;
@@ -111,14 +130,6 @@ pub fn well(cx: &App) -> Div {
         .py_1p5()
         .text_sm()
         .text_color(t.text)
-}
-
-/// A muted one-liner under a heading.
-pub fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
-    div()
-        .text_sm()
-        .text_color(look(cx).tokens.text2)
-        .child(text.into())
 }
 
 /// An ⓘ button whose popover holds the how-it-works or billing text, so
@@ -180,4 +191,60 @@ pub fn section_heading(text: impl Into<SharedString>) -> Div {
             .font_weight(gpui_kit::FontWeight::MEDIUM)
             .child(text.into()),
     )
+}
+
+/// A side panel (list of channels, projects, …): a surface beside the app
+/// ground.
+pub fn side_panel(cx: &App) -> Div {
+    let t = &look(cx).tokens;
+    v_flex()
+        .bg(t.surface)
+        .border_r(t.border_width)
+        .border_color(t.border)
+}
+
+/// A row of a side panel's list; the selected one is tinted and edged.
+pub fn list_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> {
+    let t = look(cx).tokens;
+    v_flex()
+        .id(id)
+        .px_3()
+        .py_2()
+        .gap_0p5()
+        .rounded(t.radius)
+        .cursor_pointer()
+        .border(t.border_width)
+        .map(|row| {
+            if selected {
+                row.bg(t.selected).border_color(t.accent_edge)
+            } else {
+                row.border_color(gpui_kit::transparent_black())
+                    .hover(|row| row.bg(t.hover))
+            }
+        })
+}
+
+/// A form field: its label (with an ⓘ when it needs explaining), the
+/// control, and an error or a one-line hint below.
+pub fn field(
+    label: SharedString,
+    info: Option<Popover>,
+    control: AnyElement,
+    below: Option<AnyElement>,
+) -> Div {
+    v_flex()
+        .gap_1()
+        .child(
+            h_flex()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .child(label),
+                )
+                .children(info),
+        )
+        .child(control)
+        .children(below)
 }

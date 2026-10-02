@@ -793,6 +793,7 @@ pub enum Text {
     UiThemeName(UiTheme),
     UiThemeKind(UiTheme),
     ProviderKeysInfo,
+    Details,
 }
 
 impl Text {
@@ -1627,6 +1628,7 @@ impl Text {
                 (ThemeFamily::Base, ThemeMode::Dark) => "ui_theme_kind.dark",
             },
             Text::ProviderKeysInfo => "provider_keys.info",
+            Text::Details => "app.details",
         };
         Cow::Borrowed(key)
     }
@@ -2526,6 +2528,7 @@ mod tests {
         texts.extend(UiTheme::ALL.map(Text::UiThemeName));
         texts.extend(UiTheme::ALL.map(Text::UiThemeKind));
         texts.push(Text::ProviderKeysInfo);
+        texts.push(Text::Details);
         texts
     }
 

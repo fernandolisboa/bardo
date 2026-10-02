@@ -93,7 +93,6 @@ pub(crate) mod tokens {
     pub const TEXT_2: EditorColor = EditorColor::Text2;
     pub const TEXT_3: EditorColor = EditorColor::Text3;
     pub const ACCENT: EditorColor = EditorColor::Accent;
-    pub const ACCENT_INK: EditorColor = EditorColor::AccentInk;
     pub const ERROR: EditorColor = EditorColor::Error;
     pub const ERROR_FILL: EditorColor = EditorColor::ErrorFill;
     pub const VIDEO_FILL: EditorColor = EditorColor::VideoFill;
@@ -715,19 +714,8 @@ impl EditorScreen {
                     this.edit(EditAction::Redo, cx);
                 }))
             });
-        // Render (#27) comes with its slice.
-        let render = div()
-            .h(px(28.))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded(px(4.))
-            .bg(color(ACCENT))
-            .text_color(color(ACCENT_INK))
-            .text_size(px(12.))
-            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-            .opacity(0.5)
-            .child(tr(bardo, Text::EditorReviewRender));
+        // Render (#27) comes with its slice; until then its button is
+        // hidden, not shown disabled.
         h_flex()
             .h(px(44.))
             .flex_none()
@@ -751,7 +739,6 @@ impl EditorScreen {
             .child(jobs)
             .child(undo)
             .child(redo)
-            .child(render)
             .into_any_element()
     }
 

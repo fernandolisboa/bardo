@@ -3,6 +3,7 @@
 [app]
 name = "Bardo"
 tagline = "Crie e opere canais dark, com IA ajudando em cada etapa."
+details = "Detalhes"
 
 [settings]
 ui_language = "Idioma da interface"

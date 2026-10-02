@@ -323,7 +323,7 @@ impl SettingsScreen {
         });
         let error = row
             .error
-            .map(|error| kit::status(Tone::Danger, tr(bardo, error), cx));
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
 
         let test_label = if testing {
             Text::TestingKey
@@ -447,8 +447,11 @@ impl SettingsScreen {
 
         let option = |id: &'static str, on: bool, title: Text, hint: Text, cx: &App| {
             let t = look(cx).tokens;
+            // Wraps the follow row's pickers under its text when the window
+            // (or a monospace theme font) leaves no room beside it.
             h_flex()
                 .id(id)
+                .flex_wrap()
                 .gap_3()
                 .p_3()
                 .rounded(t.radius_lg)
@@ -460,6 +463,7 @@ impl SettingsScreen {
                 .child(
                     v_flex()
                         .flex_1()
+                        .min_w(px(240.))
                         .child(div().font_medium().child(tr(bardo, title)))
                         .child(div().text_xs().text_color(t.text2).child(tr(bardo, hint))),
                 )
@@ -541,7 +545,7 @@ impl SettingsScreen {
             .gap_3()
             .children(
                 self.appearance_error
-                    .map(|error| kit::status(Tone::Danger, tr(bardo, error), cx)),
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
             .child(kit::section_heading(tr(bardo, Text::AppearanceTheme)))
             .child(follow)
@@ -632,42 +636,43 @@ impl SettingsScreen {
             }))
             .child(preview)
             .child(
-                h_flex()
-                    .items_start()
-                    .gap_2()
+                v_flex()
                     .px_2p5()
                     .py_2()
                     .border_t_1()
                     .border_color(t.border)
                     .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_medium()
-                                    .child(tr(bardo, Text::UiThemeName(theme))),
-                            )
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(tr(bardo, Text::UiThemeName(theme))),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .justify_between()
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(t.text2)
                                     .child(tr(bardo, Text::UiThemeKind(theme))),
+                            )
+                            .child(
+                                h_flex()
+                                    .id(("theme-contrast", theme as usize))
+                                    .gap_0p5()
+                                    .text_xs()
+                                    .text_color(t.success)
+                                    .child(Icon::new(IconName::Check).size(px(12.)))
+                                    .child(level)
+                                    .tooltip(move |window, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(contrast.clone())
+                                            .build(window, cx)
+                                    }),
                             ),
-                    )
-                    .child(
-                        h_flex()
-                            .id(("theme-contrast", theme as usize))
-                            .gap_0p5()
-                            .text_xs()
-                            .text_color(t.success)
-                            .child(Icon::new(IconName::Check).size(px(12.)))
-                            .child(level)
-                            .tooltip(move |window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(contrast.clone())
-                                    .build(window, cx)
-                            }),
                     ),
             )
             .into_any_element()

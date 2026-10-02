@@ -11,15 +11,17 @@ use bardo_app::bardo_domain::{
 use bardo_app::{Bardo, NetworkAccountError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, IconName, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Window, div};
 
+use crate::appearance::look;
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 /// One option of a select: a domain value and its label.
@@ -546,19 +548,20 @@ impl NetworkAccountsPanel {
                 let open = self.editing == Some(Editing::Existing(id, network));
                 let custom = !account.details.overrides().is_empty();
                 let preset = if custom {
-                    Tag::warning()
+                    kit::status_with(
+                        Tone::Accent,
+                        IconName::Settings2,
+                        tr(bardo, Text::RenderPresetCustom),
+                        cx,
+                    )
                 } else {
-                    Tag::secondary()
-                }
-                .small()
-                .child(tr(
-                    bardo,
-                    if custom {
-                        Text::RenderPresetCustom
-                    } else {
-                        Text::RenderPresetDefault
-                    },
-                ));
+                    kit::status_with(
+                        Tone::Neutral,
+                        IconName::Check,
+                        tr(bardo, Text::RenderPresetDefault),
+                        cx,
+                    )
+                };
                 let confirm = (self.confirm_remove == Some(id)).then(|| {
                     v_flex()
                         .gap_2()
@@ -591,12 +594,10 @@ impl NetworkAccountsPanel {
                                 ),
                         )
                 });
-                v_flex()
+                kit::card(cx)
                     .p_3()
                     .gap_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if open { theme.ring } else { theme.border })
+                    .when(open, |card| card.border_color(look(cx).tokens.accent_edge))
                     .child(
                         h_flex()
                             .gap_2()
@@ -621,17 +622,27 @@ impl NetworkAccountsPanel {
                                         },
                                     )),
                             )
-                            .child(
-                                Button::new(("remove-account", network as usize))
+                            .child({
+                                // Removing is rare: it waits in the "⋯" menu.
+                                let panel = cx.entity();
+                                let remove = tr(bardo, Text::RemoveNetworkAccount);
+                                Button::new(("account-more", network as usize))
                                     .small()
                                     .ghost()
-                                    .label(tr(bardo, Text::RemoveNetworkAccount))
-                                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                        this.confirm_remove = Some(id);
-                                        this.notice = None;
-                                        cx.notify();
-                                    })),
-                            ),
+                                    .icon(IconName::Ellipsis)
+                                    .dropdown_menu(move |menu, _, _| {
+                                        let panel = panel.clone();
+                                        menu.item(PopupMenuItem::new(remove.clone()).on_click(
+                                            move |_, _, cx| {
+                                                panel.update(cx, |this, cx| {
+                                                    this.confirm_remove = Some(id);
+                                                    this.notice = None;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        ))
+                                    })
+                            }),
                     )
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         SharedString::from(bardo.preset_summary(&account.render_preset())),
@@ -677,19 +688,12 @@ impl NetworkAccountsPanel {
 
     fn render_notice(&self, cx: &App) -> Option<AnyElement> {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        let (text, color) = match self.notice.as_ref()? {
-            Notice::Saved => (Text::NetworkAccountSaved, theme.success),
-            Notice::Removed => (Text::NetworkAccountRemoved, theme.success),
-            Notice::Error(text) => (*text, theme.danger),
+        let (text, tone) = match self.notice.as_ref()? {
+            Notice::Saved => (Text::NetworkAccountSaved, Tone::Success),
+            Notice::Removed => (Text::NetworkAccountRemoved, Tone::Success),
+            Notice::Error(text) => (*text, Tone::Danger),
         };
-        Some(
-            div()
-                .text_sm()
-                .text_color(color)
-                .child(tr(bardo, text))
-                .into_any_element(),
-        )
+        Some(kit::notice(tone, tr(bardo, text), cx).into_any_element())
     }
 
     fn render_form(&self, editing: Editing, cx: &mut Context<Self>) -> AnyElement {
@@ -725,12 +729,12 @@ impl NetworkAccountsPanel {
                 .child(control)
                 .children(below)
         };
-        let section = |title: Text, about: Text| {
-            v_flex()
+        let section = |id: &'static str, title: Text, about: Text| {
+            h_flex()
                 .pt_2()
-                .gap_0p5()
+                .gap_1()
                 .child(div().font_semibold().child(tr(bardo, title)))
-                .child(hint(tr(bardo, about)))
+                .child(kit::info(id, None, tr(bardo, about)))
         };
 
         let (title, action) = match editing {
@@ -754,12 +758,10 @@ impl NetworkAccountsPanel {
             )],
         ));
 
-        v_flex()
+        kit::card(cx)
             .p_4()
             .gap_3()
-            .rounded_lg()
-            .border_1()
-            .border_color(theme.border)
+            .border_color(look(cx).tokens.accent_edge)
             .child(div().text_lg().font_semibold().child(SharedString::from(
                 bardo.text_with(title, &[("network", &network_name)]),
             )))
@@ -769,6 +771,7 @@ impl NetworkAccountsPanel {
                 error_for(HANDLE_ERRORS),
             ))
             .child(section(
+                "account-metadata-info",
                 Text::AccountMetadataTitle,
                 Text::AccountMetadataHint,
             ))
@@ -797,7 +800,11 @@ impl NetworkAccountsPanel {
                 Textarea::new(&self.footer).into_any_element(),
                 error_for(FOOTER_ERRORS),
             ))
-            .child(section(Text::RenderPresetTitle, Text::RenderPresetHint))
+            .child(section(
+                "render-preset-info",
+                Text::RenderPresetTitle,
+                Text::RenderPresetHint,
+            ))
             .child(
                 h_flex()
                     .gap_4()
@@ -888,10 +895,7 @@ impl Render for NetworkAccountsPanel {
             vec![muted(Text::ChannelAccountsSaveFirst)]
         } else if self.load_failed {
             vec![
-                div()
-                    .text_sm()
-                    .text_color(theme.danger)
-                    .child(tr(bardo, Text::ChannelAccountsNotLoaded))
+                kit::notice(Tone::Danger, tr(bardo, Text::ChannelAccountsNotLoaded), cx)
                     .into_any_element(),
             ]
         } else if rows.is_empty() && form.is_none() {
@@ -912,20 +916,19 @@ impl Render for NetworkAccountsPanel {
             .border_t_1()
             .border_color(theme.border)
             .child(
-                v_flex()
-                    .gap_0p5()
+                h_flex()
+                    .gap_1()
                     .child(
                         div()
                             .text_xl()
                             .font_semibold()
                             .child(tr(bardo, Text::ChannelAccountsTitle)),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::ChannelAccountsHint)),
-                    ),
+                    .child(kit::info(
+                        "channel-accounts-info",
+                        None,
+                        tr(bardo, Text::ChannelAccountsHint),
+                    )),
             )
             .children(body)
             .children(form)

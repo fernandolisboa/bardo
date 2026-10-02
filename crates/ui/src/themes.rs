@@ -18,14 +18,13 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
 };
 
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
@@ -355,13 +354,12 @@ impl ThemesScreen {
 
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         let view = self.view.as_ref();
         let has_niche = view.is_some_and(|view| view.niche.is_some());
         let running = self.running();
         let unranked = view.map_or(0, |view| view.unranked);
 
-        v_flex()
+        kit::side_panel(cx)
             .id("themes-controls")
             .w(px(340.))
             .h_full()
@@ -369,14 +367,7 @@ impl ThemesScreen {
             .overflow_y_scroll()
             .p_4()
             .gap_3()
-            .border_r_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .text_xl()
-                    .font_semibold()
-                    .child(tr(bardo, Text::ThemesTitle)),
-            )
+            .child(kit::title(tr(bardo, Text::ThemesTitle)))
             .child(field(
                 tr(bardo, Text::ThemesChannel),
                 Select::new(&self.channel_select).into_any_element(),
@@ -394,53 +385,54 @@ impl ThemesScreen {
                 view.and_then(|view| view.research)
                     .map(|scores| research_tags(bardo, scores)),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(SharedString::from(bardo.text_with(
-                        Text::SuggestThemesHint,
-                        &[("n", &SUGGESTIONS_PER_RUN.to_string())],
-                    ))),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .flex_wrap()
-                    .child(
-                        Button::new("suggest-themes")
-                            .primary()
-                            .label(tr(bardo, Text::SuggestThemes))
-                            .disabled(running || !has_niche)
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.suggest(false, BudgetConsent::Ask, cx)
-                            })),
-                    )
-                    .when(unranked > 0, |row| {
-                        row.child(
-                            Button::new("rank-themes")
-                                .outline()
-                                .label(tr(bardo, Text::RankThemes))
-                                .disabled(running)
+            // Nothing to suggest for without a niche; a running job shows
+            // its progress instead of the buttons.
+            .when(has_niche && !running, |panel| {
+                panel.child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .child(
+                            Button::new("suggest-themes")
+                                .primary()
+                                .label(tr(bardo, Text::SuggestThemes))
                                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                    this.suggest(true, BudgetConsent::Ask, cx)
+                                    this.suggest(false, BudgetConsent::Ask, cx)
                                 })),
                         )
-                    }),
-            )
-            .children(view.and_then(|view| {
+                        .when(unranked > 0, |row| {
+                            row.child(
+                                Button::new("rank-themes")
+                                    .outline()
+                                    .label(tr(bardo, Text::RankThemes))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                        this.suggest(true, BudgetConsent::Ask, cx)
+                                    })),
+                            )
+                        })
+                        .child(kit::info(
+                            "suggest-themes-info",
+                            None,
+                            SharedString::from(bardo.text_with(
+                                Text::SuggestThemesHint,
+                                &[("n", &SUGGESTIONS_PER_RUN.to_string())],
+                            )),
+                        )),
+                )
+            })
+            .children(view.filter(|_| has_niche && !running).and_then(|view| {
                 estimate_note(bardo, &view.suggest_estimate, Text::EstimateCost, cx)
             }))
             .when(unranked > 0, |panel| {
-                panel.child(div().text_xs().text_color(theme.muted_foreground).child(
-                    SharedString::from(
-                        bardo.text_with(Text::ThemesUnranked, &[("n", &unranked.to_string())]),
-                    ),
+                panel.child(kit::notice(
+                    Tone::Warning,
+                    bardo.text_with(Text::ThemesUnranked, &[("n", &unranked.to_string())]),
+                    cx,
                 ))
             })
             .children(
                 view.and_then(|view| view.rank_estimate.as_ref())
-                    .filter(|_| unranked > 0)
+                    .filter(|_| unranked > 0 && !running)
                     .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
             )
             .children(self.budget_ask.as_ref().map(|(rank_only, estimate)| {
@@ -459,12 +451,10 @@ impl ThemesScreen {
                     }),
                 )
             }))
-            .children(self.error.map(|error| {
-                div()
-                    .text_sm()
-                    .text_color(theme.danger)
-                    .child(tr(bardo, error))
-            }))
+            .children(
+                self.error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+            )
             .children(self.render_job(cx))
     }
 
@@ -509,22 +499,24 @@ impl ThemesScreen {
                 Some(
                     v_flex()
                         .gap_1()
+                        .child(kit::notice(
+                            Tone::Danger,
+                            tr(bardo, Text::ThemesStopped),
+                            cx,
+                        ))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.danger)
-                                .child(tr(bardo, Text::ThemesStopped)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(SharedString::from(failure.detail.clone())),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                                )
+                                .child(kit::details(
+                                    "themes-failure-details",
+                                    tr(bardo, Text::Details),
+                                    vec![SharedString::from(failure.detail.clone())],
+                                )),
                         )
                         .into_any_element(),
                 )
@@ -558,41 +550,27 @@ impl ThemesScreen {
             .p_4()
             .gap_3()
             .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .items_baseline()
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_semibold()
-                                    .child(tr(bardo, Text::ThemesListTitle)),
-                            )
-                            .when(discarded > 0, |row| {
-                                row.child(div().text_xs().text_color(theme.muted_foreground).child(
-                                    SharedString::from(bardo.text_with(
-                                        Text::ThemesDiscarded,
-                                        &[("n", &discarded.to_string())],
-                                    )),
-                                ))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::ThemesRankingHint)),
-                    ),
+                kit::section_heading(tr(bardo, Text::ThemesListTitle))
+                    .child(kit::info(
+                        "themes-ranking-info",
+                        None,
+                        tr(bardo, Text::ThemesRankingHint),
+                    ))
+                    .when(discarded > 0, |row| {
+                        row.child(div().text_xs().text_color(theme.muted_foreground).child(
+                            SharedString::from(bardo.text_with(
+                                Text::ThemesDiscarded,
+                                &[("n", &discarded.to_string())],
+                            )),
+                        ))
+                    }),
             )
             .children(self.started.as_ref().map(|title| {
-                div()
-                    .text_sm()
-                    .text_color(theme.success)
-                    .child(SharedString::from(
-                        bardo.text_with(Text::ProjectStarted, &[("title", title)]),
-                    ))
+                kit::notice(
+                    Tone::Success,
+                    bardo.text_with(Text::ProjectStarted, &[("title", title)]),
+                    cx,
+                )
             }))
             .when(empty, |list| {
                 list.child(muted(cx, tr(bardo, Text::ThemesEmpty)))
@@ -614,7 +592,11 @@ impl ThemesScreen {
             .gap_1()
             .flex_none()
             .when(approved, |tags| {
-                tags.child(Tag::success().small().child(tr(bardo, Text::ThemeApproved)))
+                tags.child(kit::status(
+                    Tone::Success,
+                    tr(bardo, Text::ThemeApproved),
+                    cx,
+                ))
             })
             .children(idea.ranking().map(|ranking| {
                 h_flex()
@@ -680,22 +662,22 @@ impl ThemesScreen {
                     Text::ThemeCompetition,
                     ranking.competition,
                 ))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .self_end()
-                        .child(SharedString::from(format!(
-                            "{} · {}",
-                            bardo.text_with(Text::ThemeRankedBy, &[("model", &ranking.model)]),
-                            bardo.time_ago(ranking.ranked_at)
-                        ))),
-                )
+                .child(div().self_end().child(kit::details(
+                    ("theme-ranking-details", ix),
+                    tr(bardo, Text::Details),
+                    vec![SharedString::from(format!(
+                        "{} · {}",
+                        bardo.text_with(Text::ThemeRankedBy, &[("model", &ranking.model)]),
+                        bardo.time_ago(ranking.ranked_at)
+                    ))],
+                )))
                 .into_any_element(),
-            None => div()
-                .text_xs()
-                .text_color(theme.warning)
-                .child(tr(bardo, Text::ThemeNotRanked))
+            None => h_flex()
+                .child(kit::status(
+                    Tone::Warning,
+                    tr(bardo, Text::ThemeNotRanked),
+                    cx,
+                ))
                 .into_any_element(),
         };
 
@@ -739,17 +721,10 @@ impl ThemesScreen {
                 }
             };
 
-        v_flex()
+        kit::card(cx)
             .id(("theme", ix))
             .p_3()
             .gap_2()
-            .rounded_md()
-            .border_1()
-            .border_color(if approved {
-                theme.success
-            } else {
-                theme.border
-            })
             .child(header)
             .child(reasons)
             .child(body)
@@ -758,17 +733,14 @@ impl ThemesScreen {
 
     fn render_editor(&self, editing: &Editing, cx: &Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         let errors = |fields: &[ThemeFieldError]| -> Vec<AnyElement> {
             editing
                 .errors
                 .iter()
                 .filter(|error| fields.contains(error))
                 .map(|error| {
-                    div()
+                    kit::notice(Tone::Danger, tr(bardo, Text::ThemeFieldError(*error)), cx)
                         .text_xs()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, Text::ThemeFieldError(*error)))
                         .into_any_element()
                 })
                 .collect()
@@ -861,12 +833,7 @@ impl ThemesScreen {
             .gap_2()
             .border_t_1()
             .border_color(theme.border)
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(tr(bardo, Text::ProjectsTitle)),
-            )
+            .child(kit::section_heading(tr(bardo, Text::ProjectsTitle)))
             .when(empty, |list| {
                 list.child(muted(cx, tr(bardo, Text::ProjectsEmpty)))
             })

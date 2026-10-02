@@ -8,13 +8,14 @@ use bardo_app::bardo_domain::{
 use bardo_app::{Bardo, Text, default_template};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Window, div, px};
 
+use crate::appearance::look;
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 pub struct TemplatesScreen {
@@ -137,16 +138,10 @@ impl TemplatesScreen {
                 .map(|(ix, version)| {
                     let picked = version.clone();
                     let selected = self.base == Some(version.id);
-                    h_flex()
-                        .id(("template-version", ix))
-                        .px_3()
-                        .py_2()
+                    kit::list_row(("template-version", ix), selected, cx)
+                        .flex_row()
                         .gap_2()
                         .justify_between()
-                        .rounded_md()
-                        .cursor_pointer()
-                        .when(selected, |row| row.bg(theme.list_active))
-                        .when(!selected, |row| row.hover(|row| row.bg(theme.list_hover)))
                         .child(SharedString::from(bardo.text_with(
                             Text::TemplateVersionLabel,
                             &[("n", &version.number.to_string())],
@@ -155,11 +150,12 @@ impl TemplatesScreen {
                             h_flex()
                                 .gap_1()
                                 .when(ix == 0, |row| {
-                                    row.child(
-                                        Tag::primary()
-                                            .small()
-                                            .child(tr(bardo, Text::TemplateCurrent)),
-                                    )
+                                    row.child(kit::status_with(
+                                        Tone::Accent,
+                                        IconName::Check,
+                                        tr(bardo, Text::TemplateCurrent),
+                                        cx,
+                                    ))
                                 })
                                 .child(
                                     div().text_xs().text_color(theme.muted_foreground).child(
@@ -175,7 +171,7 @@ impl TemplatesScreen {
                 })
                 .collect();
 
-        v_flex()
+        kit::side_panel(cx)
             .id("templates-versions")
             .w(px(300.))
             .h_full()
@@ -183,19 +179,15 @@ impl TemplatesScreen {
             .overflow_y_scroll()
             .p_4()
             .gap_3()
-            .border_r_1()
-            .border_color(theme.border)
             .child(
-                div()
-                    .text_xl()
-                    .font_semibold()
-                    .child(tr(bardo, Text::TemplatesTitle)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::TemplatesHint)),
+                h_flex()
+                    .gap_1()
+                    .child(kit::title(tr(bardo, Text::TemplatesTitle)))
+                    .child(kit::info(
+                        "templates-info",
+                        None,
+                        tr(bardo, Text::TemplatesHint),
+                    )),
             )
             .child(
                 h_flex()
@@ -242,11 +234,13 @@ impl TemplatesScreen {
                 .iter()
                 .filter(|error| error.field == field)
                 .map(|error| {
-                    div()
-                        .text_xs()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, Text::TemplateProblem(error.problem)))
-                        .into_any_element()
+                    kit::notice(
+                        Tone::Danger,
+                        tr(bardo, Text::TemplateProblem(error.problem)),
+                        cx,
+                    )
+                    .text_xs()
+                    .into_any_element()
                 })
                 .collect()
         };
@@ -264,7 +258,7 @@ impl TemplatesScreen {
                             .flex_none()
                             .text_xs()
                             .font_medium()
-                            .text_color(theme.primary)
+                            .text_color(look(cx).tokens.accent_text)
                             .child(SharedString::from(variable.placeholder())),
                     )
                     .child(
@@ -285,12 +279,10 @@ impl TemplatesScreen {
             .overflow_y_scroll()
             .p_4()
             .gap_3()
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(tr(bardo, Text::TemplateKindName(self.kind))),
-            )
+            .child(kit::section_heading(tr(
+                bardo,
+                Text::TemplateKindName(self.kind),
+            )))
             .children(base_number.map(|n| {
                 div()
                     .text_xs()
@@ -358,14 +350,12 @@ impl TemplatesScreen {
             .children(
                 self.notice
                     .clone()
-                    .map(|notice| div().text_sm().text_color(theme.success).child(notice)),
+                    .map(|notice| kit::notice(Tone::Success, notice, cx)),
             )
-            .children(self.error.map(|error| {
-                div()
-                    .text_sm()
-                    .text_color(theme.danger)
-                    .child(tr(bardo, error))
-            }))
+            .children(
+                self.error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+            )
             .child(
                 v_flex()
                     .pt_3()
@@ -374,38 +364,28 @@ impl TemplatesScreen {
                     .border_t_1()
                     .border_color(theme.border)
                     .child(
-                        div()
-                            .text_sm()
-                            .font_medium()
-                            .child(tr(bardo, Text::TemplateVariablesTitle)),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::TemplateVariablesHint)),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(tr(bardo, Text::TemplateVariablesTitle)),
+                            )
+                            .child(kit::info(
+                                "template-variables-info",
+                                None,
+                                tr(bardo, Text::TemplateVariablesHint),
+                            )),
                     )
                     .children(variables),
             )
     }
 }
 
-fn field(label: SharedString, hint: SharedString, input: AnyElement, cx: &App) -> gpui_kit::Div {
-    v_flex()
-        .gap_1()
-        .child(
-            h_flex()
-                .gap_2()
-                .items_baseline()
-                .child(div().text_sm().font_medium().child(label))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(hint),
-                ),
-        )
-        .child(input)
+fn field(label: SharedString, hint: SharedString, input: AnyElement, _cx: &App) -> gpui_kit::Div {
+    let id = SharedString::from(format!("template-field-{label}"));
+    kit::field(label, Some(kit::info(id, None, hint)), input, None)
 }
 
 impl Render for TemplatesScreen {

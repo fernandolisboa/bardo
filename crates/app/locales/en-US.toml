@@ -3,6 +3,7 @@
 [app]
 name = "Bardo"
 tagline = "Create and run faceless channels, with AI assisting every step."
+details = "Details"
 
 [settings]
 ui_language = "Interface language"

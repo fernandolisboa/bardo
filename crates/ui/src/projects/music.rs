@@ -8,14 +8,12 @@ use bardo_app::{BudgetConsent, MusicPromptError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ClipboardItem, SharedString, Window, div};
 
 use super::{ProjectsScreen, PromptShown, muted};
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
@@ -131,26 +129,31 @@ impl ProjectsScreen {
         let title_row = h_flex()
             .gap_2()
             .items_center()
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(tr(bardo, Text::MusicPromptTitle)),
-            )
+            .child(kit::section_heading(tr(bardo, Text::MusicPromptTitle)))
             .when(prompt.is_some_and(|prompt| prompt.is_edited()), |row| {
-                row.child(
-                    Tag::warning()
-                        .small()
-                        .child(tr(bardo, Text::MusicPromptEdited)),
-                )
+                row.child(kit::status(
+                    Tone::Info,
+                    tr(bardo, Text::MusicPromptEdited),
+                    cx,
+                ))
             });
-        let hint = div()
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .child(SharedString::from(bardo.text_with(
-                Text::MusicPromptGenerateHint,
-                &[("n", &view.template.number.to_string())],
-            )));
+        let hint: SharedString = match prompt {
+            None => bardo
+                .text_with(
+                    Text::MusicPromptGenerateHint,
+                    &[("n", &view.template.number.to_string())],
+                )
+                .into(),
+            Some(_) => format!(
+                "{} {}",
+                bardo.text(Text::MusicPromptRegenerateHint),
+                bardo.text_with(
+                    Text::MusicPromptGenerateHint,
+                    &[("n", &view.template.number.to_string())],
+                )
+            )
+            .into(),
+        };
         let generate = Button::new("generate-music-prompt")
             .small()
             .label(tr(
@@ -161,7 +164,6 @@ impl ProjectsScreen {
                     Text::MusicPromptGenerate
                 },
             ))
-            .disabled(running)
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 this.generate_music(BudgetConsent::Ask, window, cx)
             }));
@@ -170,13 +172,20 @@ impl ProjectsScreen {
         } else {
             generate.primary()
         };
+        // A running generation shows its spinner instead of the button.
+        let generate = (!running).then(|| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(generate)
+                .child(kit::info("music-prompt-info", None, hint))
+        });
         let body: AnyElement = match prompt {
             None => v_flex()
                 .gap_2()
                 .child(muted(cx, tr(bardo, Text::MusicPromptEmpty)))
-                .child(hint)
                 .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
-                .child(h_flex().child(generate))
+                .children(generate)
                 .into_any_element(),
             Some(_) => v_flex()
                 .gap_2()
@@ -214,15 +223,8 @@ impl ProjectsScreen {
                                 })),
                         )
                         .child(div().flex_1())
-                        .child(generate),
+                        .children(generate),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, Text::MusicPromptRegenerateHint)),
-                )
-                .child(hint)
                 .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
                 .into_any_element(),
         };
@@ -250,18 +252,14 @@ impl ProjectsScreen {
                 .border_t_1()
                 .border_color(theme.border)
                 .child(title_row)
-                .children(self.music_notice.map(|notice| {
-                    div()
-                        .text_sm()
-                        .text_color(theme.success)
-                        .child(tr(bardo, notice))
-                }))
-                .children(self.music_error.map(|error| {
-                    div()
-                        .text_sm()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, error))
-                }))
+                .children(
+                    self.music_notice
+                        .map(|notice| kit::notice(Tone::Success, tr(bardo, notice), cx)),
+                )
+                .children(
+                    self.music_error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+                )
                 .children(job)
                 .children(ask)
                 .child(body)
@@ -274,7 +272,6 @@ impl ProjectsScreen {
     fn render_music_job(&self, cx: &App) -> Option<AnyElement> {
         let job = self.music.as_ref()?.job.as_ref()?;
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         match job.state() {
             JobState::Queued | JobState::Running => Some(
                 h_flex()
@@ -289,22 +286,24 @@ impl ProjectsScreen {
                 Some(
                     v_flex()
                         .gap_1()
+                        .child(kit::notice(
+                            Tone::Danger,
+                            tr(bardo, Text::MusicPromptStopped),
+                            cx,
+                        ))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.danger)
-                                .child(tr(bardo, Text::MusicPromptStopped)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(SharedString::from(failure.detail.clone())),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                                )
+                                .child(kit::details(
+                                    "music-failure-details",
+                                    tr(bardo, Text::Details),
+                                    vec![SharedString::from(failure.detail.clone())],
+                                )),
                         )
                         .into_any_element(),
                 )

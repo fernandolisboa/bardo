@@ -30,6 +30,16 @@ impl Rgb {
         0.2126 * self.channel(16) + 0.7152 * self.channel(8) + 0.0722 * self.channel(0)
     }
 
+    /// This color at `alpha` over `ground`, blended in sRGB.
+    pub fn over(self, ground: Rgb, alpha: f64) -> Rgb {
+        let mix = |shift: u32| {
+            let top = f64::from((self.0 >> shift) & 0xFF);
+            let bottom = f64::from((ground.0 >> shift) & 0xFF);
+            ((top * alpha + bottom * (1.0 - alpha)).round() as u32) << shift
+        };
+        Rgb(mix(16) | mix(8) | mix(0))
+    }
+
     /// WCAG 2.x contrast ratio between two colors (1 to 21).
     pub fn contrast(self, other: Rgb) -> f64 {
         let (a, b) = (self.luminance(), other.luminance());
@@ -294,6 +304,7 @@ mod tests {
         assert!((Rgb(0x777777).contrast(Rgb(0x777777)) - 1.0).abs() < 1e-9);
         // #767676 on white is the classic 4.54:1.
         assert!((Rgb(0x767676).contrast(Rgb(0xFFFFFF)) - 4.54).abs() < 0.01);
+        assert_eq!(Rgb(0xFFFFFF).over(Rgb(0x000000), 0.5), Rgb(0x808080));
     }
 
     #[test]
@@ -339,8 +350,21 @@ mod tests {
                 ("info", p.info, p.info_bg),
             ];
             for (name, ink, tint) in statuses {
+                // Notices sit on the app ground, chips on their tint.
                 assert_contrast(theme, &format!("{name} on surface"), ink, p.surface, text);
+                assert_contrast(theme, &format!("{name} on app"), ink, p.app, text);
                 assert_contrast(theme, &format!("{name} on its tint"), ink, tint, text);
+            }
+            // A selected chip: accent text on the selected tint.
+            let chip = "accent text on selected";
+            assert_contrast(theme, chip, p.accent_text, p.selected, text);
+            // gpui-kit fills a dark theme's inputs with 30% of the control
+            // outline over the card.
+            if theme.mode() == ThemeMode::Dark {
+                let fill = p.border_strong.over(p.surface, 0.3);
+                for (name, ink) in [("text", p.text), ("text2", p.text2)] {
+                    assert_contrast(theme, &format!("{name} in an input"), ink, fill, text);
+                }
             }
             assert_contrast(theme, "accent ink on accent", p.on_accent, p.accent, text);
             for (ground_name, ground) in [("surface", p.surface), ("app", p.app)] {
