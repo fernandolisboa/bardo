@@ -1,0 +1,9 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+
+{
+  "id": "v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx",
+  "status": "cancelled",
+  "model": "gemini-omni-1.1-flash",
+  "object": "interaction"
+}

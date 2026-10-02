@@ -1,0 +1,19 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+
+{
+  "name": "models/veo-3.1-fast-generate-preview/operations/8x3kq2v9zt1m",
+  "done": true,
+  "response": {
+    "@type": "type.googleapis.com/google.ai.generativelanguage.v1beta.PredictLongRunningResponse",
+    "generateVideoResponse": {
+      "generatedSamples": [
+        {
+          "video": {
+            "uri": "https://generativelanguage.googleapis.com/v1beta/files/7k2m9q4x1t8v:download?alt=media"
+          }
+        }
+      ]
+    }
+  }
+}

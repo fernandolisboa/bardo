@@ -6,7 +6,8 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    ClipModelRef, Job, JobState, Scene, SceneClip, SceneImage, TemplateKind, VideoProjectId,
+    ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip, SceneImage, TemplateKind,
+    VideoProjectId,
 };
 use bardo_app::{BudgetConsent, SceneClipView, SceneError, ScenesView, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -816,34 +817,49 @@ impl ProjectsScreen {
                 )],
             ),
         );
-        let menu_models = models.clone();
+        // Every model under its provider's name; with two providers the
+        // list is longer than some windows, so it scrolls.
+        let menu_models: Vec<(Option<SharedString>, ClipModel)> = models
+            .iter()
+            .enumerate()
+            .map(|(at, model)| {
+                let provider = model.id.provider();
+                let starts_group = at == 0 || models[at - 1].id.provider() != provider;
+                let heading = starts_group.then(|| tr(bardo, Text::ProviderName(provider)));
+                (heading, model.clone())
+            })
+            .collect();
         let model_menu = Button::new(("scene-clip-model", index))
             .ghost()
             .xsmall()
             .dropdown_caret(true)
             .label(model_label)
             .disabled(view.is_busy())
-            .dropdown_menu(move |mut menu, _, _| {
-                let choices = std::iter::once((None::<ClipModelRef>, channel_title.clone())).chain(
-                    menu_models.iter().map(|model| {
-                        (
-                            Some(model.id.clone()),
-                            SharedString::from(model.name.clone()),
-                        )
-                    }),
-                );
-                for (value, title) in choices {
+            .dropdown_menu(move |menu, _, _| {
+                let pick = |value: Option<ClipModelRef>, title: SharedString| {
                     let screen = screen.clone();
                     let checked = value == own;
-                    menu = menu.item(PopupMenuItem::new(title).checked(checked).on_click(
-                        move |_, window, cx| {
+                    PopupMenuItem::new(title)
+                        .checked(checked)
+                        .on_click(move |_, window, cx| {
                             let value = value.clone();
                             let _ = screen.update(cx, |this, cx| {
                                 this.scene_action(window, cx, |bardo, id| {
                                     bardo.set_scene_clip_model(id, index, value)
                                 });
                             });
-                        },
+                        })
+                };
+                let mut menu = menu
+                    .scrollable(true)
+                    .item(pick(None, channel_title.clone()));
+                for (heading, model) in &menu_models {
+                    if let Some(heading) = heading {
+                        menu = menu.separator().label(heading.clone());
+                    }
+                    menu = menu.item(pick(
+                        Some(model.id.clone()),
+                        SharedString::from(model.name.clone()),
                     ));
                 }
                 menu

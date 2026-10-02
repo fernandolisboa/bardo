@@ -1,0 +1,10 @@
+HTTP/2 400
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 400,
+    "message": "Unsupported duration: 1080p videos must be 8 seconds long.",
+    "status": "INVALID_ARGUMENT"
+  }
+}

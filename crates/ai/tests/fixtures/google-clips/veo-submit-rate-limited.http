@@ -1,0 +1,25 @@
+HTTP/2 429
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 429,
+    "message": "You exceeded your current quota, please check your plan and billing details.",
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+        "violations": [
+          {
+            "quotaMetric": "generativelanguage.googleapis.com/predict_long_running_requests_paid_tier",
+            "quotaId": "PredictLongRunningRequestsPerMinutePerProjectPerModel"
+          }
+        ]
+      },
+      {
+        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+        "retryDelay": "30s"
+      }
+    ]
+  }
+}

@@ -157,7 +157,8 @@ pub struct Providers {
     pub speech: Arc<dyn SpeechSynthesizer>,
     /// Scene images (Nano Banana, through the Gemini API).
     pub images: Arc<dyn ImageGenerator>,
-    /// Scene clips, one adapter per video provider (Higgsfield).
+    /// Scene clips, one adapter per video provider (Higgsfield, then Google
+    /// through the Gemini API).
     pub clips: Vec<Arc<dyn ClipGenerator>>,
     /// The local audio device, for playback.
     pub audio: Arc<dyn AudioOutput>,
@@ -174,7 +175,10 @@ impl Providers {
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
             images: Arc::new(bardo_ai::GeminiImages::new()),
-            clips: vec![Arc::new(bardo_ai::HiggsfieldClips::new())],
+            clips: vec![
+                Arc::new(bardo_ai::HiggsfieldClips::new()),
+                Arc::new(bardo_ai::GoogleClips::new()),
+            ],
             audio: Arc::new(bardo_media::DeviceAudio),
         }
     }
@@ -1021,7 +1025,7 @@ pub(crate) mod testing {
             })
         }
 
-        fn download(&self, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+        fn download(&self, _key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
             Ok(GeneratedClip {
                 bytes: CLIP.to_vec(),
             })

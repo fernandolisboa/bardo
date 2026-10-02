@@ -1,0 +1,47 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+
+{
+  "steps": [
+    {
+      "type": "user_input",
+      "content": [
+        {
+          "type": "image",
+          "mime_type": "image/png"
+        },
+        {
+          "type": "text",
+          "text": "Animate this image..."
+        }
+      ]
+    },
+    {
+      "type": "thought",
+      "content": [
+        {
+          "type": "thought",
+          "text": "Planning a slow push in."
+        }
+      ]
+    },
+    {
+      "type": "model_output",
+      "content": [
+        {
+          "type": "video",
+          "mime_type": "video/mp4",
+          "data": "AAAAGGZ0eXBpc29tY2xpcC1ieXRlcw=="
+        }
+      ]
+    }
+  ],
+  "id": "v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx",
+  "status": "completed",
+  "model": "gemini-omni-1.1-flash",
+  "object": "interaction",
+  "usage": {
+    "total_input_tokens": 1290,
+    "total_output_tokens": 46336
+  }
+}

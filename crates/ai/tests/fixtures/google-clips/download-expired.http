@@ -1,0 +1,10 @@
+HTTP/2 404
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 404,
+    "message": "File 7k2m9q4x1t8v was not found or has expired.",
+    "status": "NOT_FOUND"
+  }
+}

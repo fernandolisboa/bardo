@@ -4,6 +4,7 @@
 pub mod claude;
 pub mod elevenlabs;
 pub mod gemini;
+pub mod google_clips;
 pub mod higgsfield;
 pub mod http;
 pub mod jev;
@@ -14,6 +15,7 @@ pub mod retry;
 pub use claude::ClaudeTextGenerator;
 pub use elevenlabs::{ElevenLabsSpeech, ElevenLabsVoices};
 pub use gemini::GeminiImages;
+pub use google_clips::GoogleClips;
 pub use higgsfield::HiggsfieldClips;
 pub use jev::JevDecisionEngine;
 pub use key_check::HttpKeyChecker;

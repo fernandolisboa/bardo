@@ -667,6 +667,37 @@ mod tests {
     }
 
     #[test]
+    fn the_built_in_rates_price_google_clips_by_model_and_resolution() {
+        let per_second = |model: &str| price(Provider::Gemini, model, Meter::VideoSeconds);
+        let dollars = |text| Some(Money::parse(text).unwrap());
+        for (model, expected) in [
+            ("veo-3.1-generate-preview/720p", "0.40"),
+            ("veo-3.1-generate-preview/1080p", "0.40"),
+            ("veo-3.1-fast-generate-preview/720p", "0.10"),
+            ("veo-3.1-fast-generate-preview/1080p", "0.12"),
+            ("veo-3.1-lite-generate-preview/720p", "0.05"),
+            ("veo-3.1-lite-generate-preview/1080p", "0.08"),
+            ("gemini-omni-1.1-flash/720p", "0.10136"),
+        ] {
+            assert_eq!(per_second(model), dollars(expected), "{model}");
+        }
+        assert_eq!(
+            per_second("gemini-omni-1.1-flash/1080p"),
+            None,
+            "no published price"
+        );
+        for model in bardo_ai::google_clips::models() {
+            let priced = per_second(model.id.model()).is_some();
+            assert_eq!(
+                priced,
+                !model.id.model().ends_with("flash/1080p"),
+                "{}",
+                model.id
+            );
+        }
+    }
+
+    #[test]
     fn a_rate_file_says_what_is_wrong() {
         assert!(parse_rates("[claude.\"m\"]\ninput_tokens = \"4\"").is_ok());
         for broken in [

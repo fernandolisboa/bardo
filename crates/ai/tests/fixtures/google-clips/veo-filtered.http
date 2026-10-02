@@ -1,0 +1,16 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+
+{
+  "name": "models/veo-3.1-fast-generate-preview/operations/8x3kq2v9zt1m",
+  "done": true,
+  "response": {
+    "@type": "type.googleapis.com/google.ai.generativelanguage.v1beta.PredictLongRunningResponse",
+    "generateVideoResponse": {
+      "raiMediaFilteredCount": 1,
+      "raiMediaFilteredReasons": [
+        "We encountered an issue with the audio for your prompt. You will not be charged for this request. Please try changing your prompt or try again."
+      ]
+    }
+  }
+}

@@ -832,7 +832,7 @@ pub(crate) mod tests {
 
     const CLAUDE_KEY: &str = "sk-ant-api03-test-key-0001";
     const ELEVENLABS_KEY: &str = "sk_test_elevenlabs_key_0001";
-    const GEMINI_KEY: &str = "AIzaSyTest-gemini-key-0001";
+    pub(crate) const GEMINI_KEY: &str = "AIzaSyTest-gemini-key-0001";
     const HIGGSFIELD_KEY: &str = "hf-key-id-0001:hf-key-secret-0001";
     const PATIENCE: Duration = Duration::from_secs(10);
     const SCRIPT: &str = "Era uma vez, em 1969, uma sonda. Ela partiu para longe. \
@@ -855,6 +855,8 @@ pub(crate) mod tests {
         pub(crate) text: Arc<FakeTextGenerator>,
         pub(crate) images: Arc<FakeImages>,
         pub(crate) clips: Arc<FakeClips>,
+        /// Video providers after the fake one.
+        pub(crate) more_clips: Vec<Arc<dyn bardo_domain::ClipGenerator>>,
         pub(crate) secrets: Arc<MemorySecretStore>,
     }
 
@@ -866,6 +868,7 @@ pub(crate) mod tests {
                 text: Arc::default(),
                 images: Arc::default(),
                 clips: Arc::default(),
+                more_clips: Vec::new(),
                 secrets: Arc::default(),
             }
         }
@@ -879,7 +882,9 @@ pub(crate) mod tests {
                 voices: Arc::new(FakeVoiceLibrary::default()),
                 speech: Arc::new(FakeSpeech::default()),
                 images: Arc::clone(&self.images) as _,
-                clips: vec![Arc::clone(&self.clips) as _],
+                clips: std::iter::once(Arc::clone(&self.clips) as _)
+                    .chain(self.more_clips.iter().cloned())
+                    .collect(),
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             let mut app = Bardo::start_with(

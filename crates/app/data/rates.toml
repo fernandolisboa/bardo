@@ -28,6 +28,32 @@ input_tokens = "0.50"
 output_tokens = "3.00"
 image_tokens = "60.00"
 
+# Google bills Veo clips per second of video, by model and resolution; the
+# soundtrack Veo always makes is included. Gemini Omni Flash bills output
+# tokens, 5,792 per second of 720p video at $17.50 per million; Google
+# publishes no figure for its upscaled 1080p, so that has no rate. Google
+# quotes nothing before a clip, so these prices are what gets recorded.
+[gemini."veo-3.1-generate-preview/720p"]
+video_seconds = "0.40"
+
+[gemini."veo-3.1-generate-preview/1080p"]
+video_seconds = "0.40"
+
+[gemini."veo-3.1-fast-generate-preview/720p"]
+video_seconds = "0.10"
+
+[gemini."veo-3.1-fast-generate-preview/1080p"]
+video_seconds = "0.12"
+
+[gemini."veo-3.1-lite-generate-preview/720p"]
+video_seconds = "0.05"
+
+[gemini."veo-3.1-lite-generate-preview/1080p"]
+video_seconds = "0.08"
+
+[gemini."gemini-omni-1.1-flash/720p"]
+video_seconds = "0.10136"
+
 # Higgsfield bills each clip per second of video, by model; these are the
 # published API prices as of 2026-09-16. The price of a clip also depends on
 # resolution and sound, so Higgsfield's own quote (asked before every clip)

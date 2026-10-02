@@ -36,6 +36,10 @@ fn request(model: &str) -> ClipRequest {
         model: model.into(),
         prompt: "Slow push in on the launch pad, steam rising.".into(),
         image: StagedImage(PUBLIC_URL.into()),
+        first_frame: ClipImage {
+            bytes: vec![0x89, b'P', b'N', b'G'],
+            format: ImageFormat::Png,
+        },
         seconds: 8,
     }
 }
@@ -335,7 +339,7 @@ fn a_status_check_with_a_bad_key_fails_without_ending_the_request() {
 #[test]
 fn the_clip_downloads_without_the_key() {
     let adapter = clips(&["download-clip"]);
-    let clip = adapter.download(VIDEO_URL).unwrap();
+    let clip = adapter.download(&key(), VIDEO_URL).unwrap();
     assert_eq!(&clip.bytes[4..8], b"ftyp");
     let sent = adapter.transport().sent();
     assert_eq!(sent[0].url, VIDEO_URL);
@@ -345,12 +349,12 @@ fn the_clip_downloads_without_the_key() {
 #[test]
 fn a_download_that_is_gone_or_not_a_clip_fails() {
     let gone = clips(&["download-expired"])
-        .download(VIDEO_URL)
+        .download(&key(), VIDEO_URL)
         .unwrap_err();
     assert_eq!(gone.kind, ProviderFailureKind::Unexpected);
     assert!(gone.detail.contains("no longer available"));
     let html = clips(&["status-completed"])
-        .download(VIDEO_URL)
+        .download(&key(), VIDEO_URL)
         .unwrap_err();
     assert!(html.detail.contains("not an MP4"));
 }
