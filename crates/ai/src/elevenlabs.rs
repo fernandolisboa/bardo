@@ -8,17 +8,23 @@
 //! Narration (`POST /v1/text-to-speech/{voice_id}/with-timestamps`): the
 //! text read aloud as MP3, with the time each character is spoken, in one
 //! JSON answer. What the call billed comes in the `character-cost` header.
+//!
+//! Forced alignment (`POST /v1/forced-alignment`): a recording the user
+//! made and the text it reads, sent as a form; the answer times each
+//! character of the text. ElevenLabs bills it like speech-to-text, per
+//! hour of audio, and says nothing of it in the answer.
 
 use std::time::Duration;
 
 use bardo_domain::{
-    Alignment, ApiKey, CharTiming, Provider, ProviderFailure, ProviderFailureKind, Speech,
-    SpeechRequest, SpeechSynthesizer, Voice, VoiceCategory, VoiceLibrary, VoiceRef,
+    AlignedSpeech, Alignment, AlignmentRequest, ApiKey, CharTiming, Provider, ProviderFailure,
+    ProviderFailureKind, Speech, SpeechAligner, SpeechRequest, SpeechSynthesizer, Voice,
+    VoiceCategory, VoiceLibrary, VoiceRef,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
 
-use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
+use crate::http::{FormPart, HttpRequest, HttpResponse, Transport, UreqTransport};
 use crate::key_check::failure;
 use crate::retry::{Backoff, Sleeper, thread_sleeper};
 
@@ -364,4 +370,156 @@ impl<T: Transport> SpeechSynthesizer for ElevenLabsSpeech<T> {
         }
         parse_speech(&response, &request.text)
     }
+}
+
+pub const ALIGNMENT_URL: &str = "https://api.elevenlabs.io/v1/forced-alignment";
+/// ElevenLabs names no model for forced alignment; its costs are kept
+/// under this name.
+pub const ALIGNMENT_MODEL: &str = "forced_alignment";
+/// The largest file the endpoint takes is just under 1 GB.
+pub const MAX_ALIGNMENT_BYTES: u64 = 1_000_000_000 - 1;
+
+/// The request that aligns `request.audio` with `request.text`.
+pub fn alignment_request(key: &ApiKey, request: &AlignmentRequest<'_>) -> HttpRequest {
+    let content_type = match request.file_name.rsplit_once('.') {
+        Some((_, extension)) if extension.eq_ignore_ascii_case("wav") => "audio/wav",
+        Some((_, extension)) if extension.eq_ignore_ascii_case("mp3") => "audio/mpeg",
+        _ => "application/octet-stream",
+    };
+    HttpRequest::post_multipart(
+        ALIGNMENT_URL,
+        &[
+            FormPart::File {
+                name: "file",
+                file_name: request.file_name,
+                content_type,
+                bytes: request.audio,
+            },
+            FormPart::Text {
+                name: "text",
+                value: request.text,
+            },
+        ],
+    )
+    .header("xi-api-key", key.expose())
+}
+
+/// Reads a successful alignment: the timing of each character of the text.
+pub fn parse_alignment(response: &HttpResponse) -> Result<AlignedSpeech, ProviderFailure> {
+    let body: Value = serde_json::from_str(&response.body)
+        .map_err(|error| unexpected(format!("unreadable alignment: {error}")))?;
+    let characters = body["characters"]
+        .as_array()
+        .filter(|characters| !characters.is_empty())
+        .ok_or_else(|| unexpected("the answer has no timings"))?;
+    let seconds = |value: &Value| {
+        value
+            .as_f64()
+            .filter(|s| s.is_finite() && *s >= 0.0)
+            .map(Duration::from_secs_f64)
+            .ok_or_else(|| unexpected("a timing is not a time"))
+    };
+    let chars = characters
+        .iter()
+        .map(|entry| {
+            let start = seconds(&entry["start"])?;
+            Ok(CharTiming {
+                text: entry["text"].as_str().unwrap_or_default().to_owned(),
+                start,
+                end: seconds(&entry["end"])?.max(start),
+            })
+        })
+        .collect::<Result<_, ProviderFailure>>()?;
+    Ok(AlignedSpeech {
+        alignment: Alignment { chars },
+        model: ALIGNMENT_MODEL.to_owned(),
+    })
+}
+
+/// Times the characters of a recording with ElevenLabs over HTTPS.
+pub struct ElevenLabsAlignment<T = UreqTransport> {
+    transport: T,
+    backoff: Backoff,
+    sleep: Sleeper,
+}
+
+impl ElevenLabsAlignment {
+    /// Uploading a long WAV over a slow connection takes a while; the
+    /// alignment itself is quick.
+    pub const TIMEOUT: Duration = Duration::from_secs(30 * 60);
+    /// Timings of the longest script Bardo keeps, with headroom.
+    pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
+
+    pub fn new() -> Self {
+        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+    }
+}
+
+impl Default for ElevenLabsAlignment {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsAlignment<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self {
+            transport,
+            backoff: Backoff::default(),
+            sleep: thread_sleeper(),
+        }
+    }
+
+    /// Replaces how the adapter waits between retries (tests record the
+    /// waits instead).
+    pub fn with_sleeper(mut self, sleep: Sleeper) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> SpeechAligner for ElevenLabsAlignment<T> {
+    fn align(
+        &self,
+        key: &ApiKey,
+        request: &AlignmentRequest<'_>,
+    ) -> Result<AlignedSpeech, ProviderFailure> {
+        if request.audio.len() as u64 > MAX_ALIGNMENT_BYTES {
+            return Err(unexpected(
+                "the recording is over 1 GB, the most ElevenLabs aligns",
+            ));
+        }
+        let response = self
+            .backoff
+            .send(
+                &self.transport,
+                &alignment_request(key, request),
+                &self.sleep,
+            )
+            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        if !(200..=299).contains(&response.status) {
+            return Err(alignment_failure(&response));
+        }
+        parse_alignment(&response)
+    }
+}
+
+/// A refused alignment. A 400 or 422 means ElevenLabs could not use the
+/// file or text (its message says which), not that the key is wrong.
+fn alignment_failure(response: &HttpResponse) -> ProviderFailure {
+    if matches!(response.status, 400 | 422) {
+        let body: Value = serde_json::from_str(&response.body).unwrap_or_default();
+        let detail = body["detail"]["message"]
+            .as_str()
+            .or_else(|| body["detail"][0]["msg"].as_str())
+            .or_else(|| body["detail"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("HTTP {}", response.status));
+        return unexpected(format!("the recording was not accepted: {detail}"));
+    }
+    failure(Provider::ElevenLabs, response)
 }

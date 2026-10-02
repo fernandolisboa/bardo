@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 bardo-domain.workspace = true
-rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }
+rodio = { version = "0.22", default-features = false, features = ["playback", "mp3", "wav"] }
 thiserror.workspace = true
 
 [lints]

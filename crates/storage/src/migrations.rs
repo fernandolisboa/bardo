@@ -15,6 +15,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0011_cost.sql"),
     include_str!("../migrations/0012_clip.sql"),
     include_str!("../migrations/0013_persona_sharing.sql"),
+    include_str!("../migrations/0014_imported_narration.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
@@ -166,6 +167,72 @@ mod tests {
                 .is_err(),
             "the generation still refers to its template"
         );
+    }
+
+    #[test]
+    fn rebuilding_narrations_keeps_them_their_words_and_rates() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..13] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 13).unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language,
+                 country)
+             VALUES ('c', 'p', 'Space', '', '', 'en', 'US');
+             INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                 suggested_at, position)
+             VALUES ('t', 'p', 'c', 'space', 'Probe', '', 'approved', 0, 0);
+             INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                 created_at)
+             VALUES ('v', 'p', 'c', 't', 'space', 'Probe', 0);
+             INSERT INTO narration (project_id, id, profile_id, text, voice_provider,
+                 voice_id, voice_name, stability, similarity, style, speed, model,
+                 billed_characters, audio_file, duration_ms, generated_at)
+             VALUES ('v', 'n', 'p', 'Hi.', 'elevenlabs', 'voice', 'Wyatt', 50, 75, 0, 100,
+                 'eleven_multilingual_v2', 3, 'narration-n.mp3', 900, 0);
+             INSERT INTO narration_word (narration_id, position, text_start, text_end,
+                 start_ms, end_ms)
+             VALUES ('n', 0, 0, 3, 0, 800);
+             INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+             VALUES ('p', 'higgsfield', 'kling-video/', 'video_seconds', 70000);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let (source, voice): (String, String) = conn
+            .query_row("SELECT source, voice_name FROM narration", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((source.as_str(), voice.as_str()), ("generated", "Wyatt"));
+        let words: i64 = conn
+            .query_row("SELECT COUNT(*) FROM narration_word", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(words, 1, "the words are kept");
+        assert!(
+            conn.execute("DELETE FROM narration", []).is_ok()
+                && conn
+                    .query_row("SELECT COUNT(*) FROM narration_word", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap()
+                    == 0,
+            "words still go with their narration"
+        );
+        let rates: i64 = conn
+            .query_row("SELECT COUNT(*) FROM rate", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rates, 1);
+        conn.execute(
+            "INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+             VALUES ('p', 'elevenlabs', 'forced_alignment', 'audio_seconds', 220000)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

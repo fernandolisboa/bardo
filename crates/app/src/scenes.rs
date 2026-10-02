@@ -881,6 +881,7 @@ pub(crate) mod tests {
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(FakeVoiceLibrary::default()),
                 speech: Arc::new(FakeSpeech::default()),
+                aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
                 images: Arc::clone(&self.images) as _,
                 clips: std::iter::once(Arc::clone(&self.clips) as _)
                     .chain(self.more_clips.iter().cloned())

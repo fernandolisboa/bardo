@@ -14,6 +14,7 @@ pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::clips::ClipHandler;
+use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
@@ -27,6 +28,7 @@ pub(crate) fn built_in_handlers(
     themes: ThemeHandler,
     scripts: ScriptHandler,
     narrations: NarrationHandler,
+    imports: NarrationImportHandler,
     scenes: SceneHandler,
     clips: ClipHandler,
 ) -> HashMap<JobKind, Arc<dyn JobHandler>> {
@@ -38,6 +40,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ThemeRanking, themes);
     handlers.insert(JobKind::ScriptGeneration, Arc::new(scripts));
     handlers.insert(JobKind::Narration, Arc::new(narrations));
+    handlers.insert(JobKind::NarrationImport, Arc::new(imports));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);

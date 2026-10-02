@@ -3,6 +3,10 @@
 //! spoken, so generated narration needs no speech-to-text. The interface
 //! hides the provider's protocol; callers say what to read and with which
 //! voice, and get MP3 audio back with its character timings.
+//!
+//! Speech alignment (PRD story 33) gives the same character timings for a
+//! recording the user made of the text, so imported narration is timed
+//! like generated narration.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -92,6 +96,47 @@ impl<T: SpeechSynthesizer + ?Sized> SpeechSynthesizer for Arc<T> {
 
     fn synthesize(&self, key: &ApiKey, request: &SpeechRequest) -> Result<Speech, ProviderFailure> {
         (**self).synthesize(key, request)
+    }
+}
+
+/// A recording to align with the text it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlignmentRequest<'a> {
+    /// The audio file's bytes, as the user recorded it.
+    pub audio: &'a [u8],
+    /// The file's name, which tells the provider its format.
+    pub file_name: &'a str,
+    /// What the recording says.
+    pub text: &'a str,
+}
+
+/// When each character of a recording's text is heard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlignedSpeech {
+    pub alignment: Alignment,
+    /// The aligner, as the provider names it.
+    pub model: String,
+}
+
+/// Times the words of a recording the user made (PRD story 33): forced
+/// alignment, which needs the text the recording reads. Calls the network
+/// and blocks, so it runs inside a job. Transcribing a recording without
+/// its text (speech-to-text with timestamps) is a later adapter.
+pub trait SpeechAligner: Send + Sync {
+    fn align(
+        &self,
+        key: &ApiKey,
+        request: &AlignmentRequest<'_>,
+    ) -> Result<AlignedSpeech, ProviderFailure>;
+}
+
+impl<T: SpeechAligner + ?Sized> SpeechAligner for Arc<T> {
+    fn align(
+        &self,
+        key: &ApiKey,
+        request: &AlignmentRequest<'_>,
+    ) -> Result<AlignedSpeech, ProviderFailure> {
+        (**self).align(key, request)
     }
 }
 

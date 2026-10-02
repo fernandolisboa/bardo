@@ -1,0 +1,5 @@
+HTTP/2 200
+server: uvicorn
+content-type: application/json
+
+{"characters":[],"words":[],"loss":0.0}

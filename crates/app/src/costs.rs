@@ -152,6 +152,8 @@ pub(crate) struct PlannedCall {
     pub(crate) characters: Option<usize>,
     /// Seconds of video, when known before the job.
     pub(crate) video_seconds: Option<u32>,
+    /// Seconds of audio, when known before the job.
+    pub(crate) audio_seconds: Option<u64>,
 }
 
 impl PlannedCall {
@@ -172,6 +174,7 @@ impl PlannedCall {
             prompt_chars: None,
             characters: None,
             video_seconds: None,
+            audio_seconds: None,
         }
     }
 
@@ -183,6 +186,11 @@ impl PlannedCall {
 
     pub(crate) fn with_video_seconds(mut self, seconds: u32) -> Self {
         self.video_seconds = Some(seconds);
+        self
+    }
+
+    pub(crate) fn with_audio_seconds(mut self, seconds: u64) -> Self {
+        self.audio_seconds = Some(seconds);
         self
     }
 
@@ -220,6 +228,8 @@ fn first_guess(purpose: CostPurpose) -> Metered {
             ..Metered::default()
         },
         CostPurpose::SceneClip => Metered::video_seconds(5),
+        // A ten-minute recording.
+        CostPurpose::NarrationAlignment => Metered::audio_seconds(600),
     }
 }
 
@@ -323,6 +333,9 @@ impl CostBook {
         }
         if let Some(seconds) = call.video_seconds {
             usage.video_seconds = u64::from(seconds);
+        }
+        if let Some(seconds) = call.audio_seconds {
+            usage.audio_seconds = seconds;
         }
         Ok(usage.times(call.calls))
     }

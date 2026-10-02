@@ -11,7 +11,7 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_RECORD: &str = "SELECT id, profile_id, provider, model, purpose, input_tokens, \
      output_tokens, image_tokens, characters, basis, amount_micros, channel_id, project_id, \
-     job_id, at, video_seconds FROM cost_record";
+     job_id, at, video_seconds, audio_seconds FROM cost_record";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored cost is invalid: {0}")]
@@ -24,7 +24,7 @@ struct RecordRow {
     provider: String,
     model: String,
     purpose: String,
-    usage: [i64; 5],
+    usage: [i64; 6],
     basis: String,
     amount_micros: i64,
     channel_id: Option<String>,
@@ -47,6 +47,7 @@ impl RecordRow {
                 row.get(7)?,
                 row.get(8)?,
                 row.get(15)?,
+                row.get(16)?,
             ],
             basis: row.get(9)?,
             amount_micros: row.get(10)?,
@@ -59,7 +60,14 @@ impl RecordRow {
 
     fn into_record(self) -> Result<CostRecord, RepositoryError> {
         let count = |value: i64| u64::try_from(value).map_err(boxed);
-        let [input, output, image, characters, video_seconds] = self.usage;
+        let [
+            input,
+            output,
+            image,
+            characters,
+            video_seconds,
+            audio_seconds,
+        ] = self.usage;
         let amount = Money::from_micros(count(self.amount_micros)?);
         let cost = match self.basis.as_str() {
             "reported" => Cost::Reported(amount),
@@ -80,6 +88,7 @@ impl RecordRow {
                 image_tokens: count(image)?,
                 characters: count(characters)?,
                 video_seconds: count(video_seconds)?,
+                audio_seconds: count(audio_seconds)?,
             },
             cost,
             channel: self
@@ -137,8 +146,9 @@ impl CostRepository for Database {
             .execute(
                 "INSERT INTO cost_record (id, profile_id, provider, model, purpose, \
                  input_tokens, output_tokens, image_tokens, characters, basis, amount_micros, \
-                 channel_id, project_id, job_id, at, video_seconds) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                 channel_id, project_id, job_id, at, video_seconds, audio_seconds) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                 ?17)",
                 params![
                     record.id.to_string(),
                     record.owner.to_string(),
@@ -156,6 +166,7 @@ impl CostRepository for Database {
                     record.job.map(|id| id.to_string()),
                     to_unix_millis(record.at),
                     sql_count(usage.video_seconds),
+                    sql_count(usage.audio_seconds),
                 ],
             )
             .map_err(boxed)?;
@@ -394,14 +405,28 @@ mod tests {
                 at(1_790_916_204),
             )
         };
-        for record in [&estimated, &reported, &unpriced, &clip] {
+        let alignment = CostRecord {
+            provider: Provider::ElevenLabs,
+            model: "forced_alignment".into(),
+            usage: Metered::audio_seconds(184),
+            ..record(
+                owner,
+                CostPurpose::NarrationAlignment,
+                Cost::Estimated(Money::from_micros(11_244)),
+                at(1_790_916_205),
+            )
+        };
+        for record in [&estimated, &reported, &unpriced, &clip, &alignment] {
             db.record_cost(record).unwrap();
         }
         let october = Month::of(at(1_790_916_201));
         let stored = db
             .costs_between(owner, october.start(), october.end())
             .unwrap();
-        assert_eq!(stored, [estimated.clone(), reported, unpriced, clip]);
+        assert_eq!(
+            stored,
+            [estimated.clone(), reported, unpriced, clip, alignment]
+        );
         assert_eq!(
             db.project_costs(estimated.project.unwrap()).unwrap(),
             [estimated]
@@ -494,9 +519,17 @@ mod tests {
         )
         .unwrap();
         db.save_rate(owner, &video).unwrap();
+        let audio = Rate::new(
+            Provider::ElevenLabs,
+            "forced_alignment",
+            Meter::AudioSeconds,
+            "0.40",
+        )
+        .unwrap();
+        db.save_rate(owner, &audio).unwrap();
         assert_eq!(
             db.rate_changes(owner).unwrap(),
-            [rate("3.5"), other.clone(), video.clone()]
+            [rate("3.5"), audio.clone(), other.clone(), video.clone()]
         );
 
         db.remove_rate(
@@ -506,7 +539,7 @@ mod tests {
             Meter::InputTokens,
         )
         .unwrap();
-        assert_eq!(db.rate_changes(owner).unwrap(), [other, video]);
+        assert_eq!(db.rate_changes(owner).unwrap(), [audio, other, video]);
     }
 
     #[test]

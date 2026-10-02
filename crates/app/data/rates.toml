@@ -1,13 +1,14 @@
 # Built-in prices of the models Bardo calls, in US dollars, as text so they
-# stay exact: per million tokens, per thousand characters, or per second of
-# video.
+# stay exact: per million tokens, per thousand characters, per second of
+# video, or per hour of audio.
 #
 # Checked on 2026-10-02 against each provider's published API prices. The
 # user can change any of them, or add models, on the costs screen; a price
 # changed here reaches every user who has not changed it.
 #
 # Layout: [provider."model"] with one price per meter (input_tokens,
-# output_tokens, image_tokens, characters, video_seconds). A model covers
+# output_tokens, image_tokens, characters, video_seconds, audio_seconds;
+# audio is priced per hour). A model covers
 # every model whose name starts with it, so `jev` covers `jev-1.13.0`, and
 # an empty model covers all of the provider's models.
 
@@ -20,6 +21,11 @@ output_tokens = "20.00"
 # price of Multilingual v2 and v3.
 [elevenlabs."eleven_multilingual_v2"]
 characters = "0.10"
+
+# Forced alignment of a recording the user made is billed like ElevenLabs'
+# speech-to-text, per hour of audio.
+[elevenlabs."forced_alignment"]
+audio_seconds = "0.22"
 
 # Google Gemini API, paid tier. Images are priced per output image token
 # (a 2K image is 1,680 of them); reasoning is billed as text output.

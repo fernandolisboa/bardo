@@ -607,8 +607,8 @@ impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
 mod tests {
     use super::*;
     use crate::{
-        Alignment, CharTiming, GenerationId, GenerationPresets, Provider, ScriptText, TemplateUsed,
-        TemplateVersionId, TokenUsage, VoiceRef, WordTimings,
+        Alignment, CharTiming, GenerationId, Provider, ScriptText, TemplateUsed, TemplateVersionId,
+        TokenUsage, WordTimings,
     };
 
     fn ms(n: u64) -> Duration {
@@ -634,11 +634,13 @@ mod tests {
             project: VideoProjectId::new(),
             owner: ProfileId::new(),
             text: ScriptText::new(text).unwrap(),
-            voice: VoiceRef::elevenlabs("FrS6cKLB1wg4WYgPa9GW", "Wyatt").unwrap(),
-            presets: GenerationPresets::default(),
-            model: "eleven".into(),
-            billed_characters: 0,
-            audio_file: "narration.mp3".into(),
+            // Scenes follow the words, whoever spoke them.
+            source: crate::NarrationSource::Imported {
+                file_name: "take 3.wav".into(),
+                aligner: Provider::ElevenLabs,
+                model: "forced_alignment".into(),
+            },
+            audio_file: "narration.wav".into(),
             duration: alignment.end() + ms(tail),
             words: WordTimings::from_alignment(text, &alignment),
             generated_at: SystemTime::UNIX_EPOCH,
