@@ -3,9 +3,11 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use std::time::Duration;
+
 use bardo_domain::{
     ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, Provider, UiLanguage,
+    KeyCheckOutcome, NicheSeedError, Provider, UiLanguage,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -86,6 +88,55 @@ pub enum Text {
     ApiKeyError(ApiKeyError),
     ProviderKeyNotSet,
     ProviderKeyStoreFailed,
+    ResearchTitle,
+    ResearchNoChannels,
+    ResearchChannel,
+    ResearchSeeds,
+    ResearchSeedsPlaceholder,
+    ResearchSeedsHint,
+    RunResearch,
+    RefreshResearch,
+    /// Placeholder: `{units}`.
+    RefreshResearchCost,
+    /// Placeholder: `{units}`.
+    ResearchCost,
+    ResearchCostNone,
+    ResearchMissingKey,
+    ResearchNotStarted,
+    ResearchNotLoaded,
+    ResearchRunning,
+    ResearchStopped,
+    NicheSeedError(NicheSeedError),
+    ResearchResultsTitle,
+    ResearchScoresHint,
+    ResearchOpportunity,
+    ResearchCompetition,
+    ResearchTrend,
+    ResearchUploads,
+    ResearchMedianViews,
+    ResearchViewsPerDay,
+    ResearchMedianSubscribers,
+    ResearchSmallChannels,
+    /// Placeholders: `{videos}`, `{channels}`.
+    ResearchSample,
+    ResearchFetched,
+    ResearchNotFetched,
+    ResearchNoUploads,
+    ResearchStale,
+    FetchedJustNow,
+    /// Placeholder: `{n}`.
+    FetchedMinutesAgo,
+    /// Placeholder: `{n}`.
+    FetchedHoursAgo,
+    /// Placeholder: `{n}`.
+    FetchedDaysAgo,
+    /// Placeholder: `{n}`, already formatted with the decimal separator.
+    NumberThousands,
+    /// Placeholder: `{n}`.
+    NumberMillions,
+    /// Placeholder: `{n}`.
+    NumberBillions,
+    DecimalSeparator,
 }
 
 impl Text {
@@ -189,6 +240,50 @@ impl Text {
             },
             Text::ProviderKeyNotSet => "provider_keys.error.not_set",
             Text::ProviderKeyStoreFailed => "provider_keys.error.store_failed",
+            Text::ResearchTitle => "research.title",
+            Text::ResearchNoChannels => "research.no_channels",
+            Text::ResearchChannel => "research.channel",
+            Text::ResearchSeeds => "research.seeds",
+            Text::ResearchSeedsPlaceholder => "research.seeds_placeholder",
+            Text::ResearchSeedsHint => "research.seeds_hint",
+            Text::RunResearch => "research.run",
+            Text::RefreshResearch => "research.refresh",
+            Text::RefreshResearchCost => "research.refresh_cost",
+            Text::ResearchCost => "research.cost",
+            Text::ResearchCostNone => "research.cost_none",
+            Text::ResearchMissingKey => "research.error.missing_key",
+            Text::ResearchNotStarted => "research.error.not_started",
+            Text::ResearchNotLoaded => "research.error.not_loaded",
+            Text::ResearchRunning => "research.running",
+            Text::ResearchStopped => "research.stopped",
+            Text::NicheSeedError(error) => match error {
+                NicheSeedError::Required => "research.error.seed_required",
+                NicheSeedError::TooMany => "research.error.too_many_seeds",
+                NicheSeedError::TooLong => "research.error.seed_too_long",
+            },
+            Text::ResearchResultsTitle => "research.results",
+            Text::ResearchScoresHint => "research.scores_hint",
+            Text::ResearchOpportunity => "research.opportunity",
+            Text::ResearchCompetition => "research.competition",
+            Text::ResearchTrend => "research.trend",
+            Text::ResearchUploads => "research.uploads",
+            Text::ResearchMedianViews => "research.median_views",
+            Text::ResearchViewsPerDay => "research.views_per_day",
+            Text::ResearchMedianSubscribers => "research.median_subscribers",
+            Text::ResearchSmallChannels => "research.small_channels",
+            Text::ResearchSample => "research.sample",
+            Text::ResearchFetched => "research.fetched",
+            Text::ResearchNotFetched => "research.not_fetched",
+            Text::ResearchNoUploads => "research.no_uploads",
+            Text::ResearchStale => "research.stale",
+            Text::FetchedJustNow => "age.just_now",
+            Text::FetchedMinutesAgo => "age.minutes",
+            Text::FetchedHoursAgo => "age.hours",
+            Text::FetchedDaysAgo => "age.days",
+            Text::NumberThousands => "number.thousands",
+            Text::NumberMillions => "number.millions",
+            Text::NumberBillions => "number.billions",
+            Text::DecimalSeparator => "number.decimal_separator",
         };
         Cow::Borrowed(key)
     }
@@ -240,6 +335,42 @@ impl Catalog {
             .fold(self.get(text).into_owned(), |out, (name, value)| {
                 out.replace(&format!("{{{name}}}"), value)
             })
+    }
+
+    /// A count in a few characters: `950`, `8.7K`, `48K`, `1.8M` in en-US.
+    /// One decimal below ten units, cut rather than rounded, so `999,999`
+    /// never shows as `1000K`.
+    pub fn compact(&self, n: u64) -> String {
+        let (unit, text) = match n {
+            0..1_000 => return n.to_string(),
+            1_000..1_000_000 => (1_000, Text::NumberThousands),
+            1_000_000..1_000_000_000 => (1_000_000, Text::NumberMillions),
+            _ => (1_000_000_000, Text::NumberBillions),
+        };
+        let tenths = n / (unit / 10);
+        let number = if tenths < 100 && !tenths.is_multiple_of(10) {
+            format!(
+                "{}{}{}",
+                tenths / 10,
+                self.get(Text::DecimalSeparator),
+                tenths % 10
+            )
+        } else {
+            (tenths / 10).to_string()
+        };
+        self.format(text, &[("n", &number)])
+    }
+
+    /// How long ago something happened, e.g. `3 h ago`.
+    pub fn age(&self, elapsed: Duration) -> String {
+        let minutes = elapsed.as_secs() / 60;
+        let (text, n) = match minutes {
+            0 => return self.get(Text::FetchedJustNow).into_owned(),
+            1..60 => (Text::FetchedMinutesAgo, minutes),
+            60..2_880 => (Text::FetchedHoursAgo, minutes / 60),
+            _ => (Text::FetchedDaysAgo, minutes / 1_440),
+        };
+        self.format(text, &[("n", &n.to_string())])
     }
 }
 
@@ -327,7 +458,47 @@ mod tests {
             Text::KeyCheckDetail,
             Text::ProviderKeyNotSet,
             Text::ProviderKeyStoreFailed,
+            Text::ResearchTitle,
+            Text::ResearchNoChannels,
+            Text::ResearchChannel,
+            Text::ResearchSeeds,
+            Text::ResearchSeedsPlaceholder,
+            Text::ResearchSeedsHint,
+            Text::RunResearch,
+            Text::RefreshResearch,
+            Text::RefreshResearchCost,
+            Text::ResearchCost,
+            Text::ResearchCostNone,
+            Text::ResearchMissingKey,
+            Text::ResearchNotStarted,
+            Text::ResearchNotLoaded,
+            Text::ResearchRunning,
+            Text::ResearchStopped,
+            Text::ResearchResultsTitle,
+            Text::ResearchScoresHint,
+            Text::ResearchOpportunity,
+            Text::ResearchCompetition,
+            Text::ResearchTrend,
+            Text::ResearchUploads,
+            Text::ResearchMedianViews,
+            Text::ResearchViewsPerDay,
+            Text::ResearchMedianSubscribers,
+            Text::ResearchSmallChannels,
+            Text::ResearchSample,
+            Text::ResearchFetched,
+            Text::ResearchNotFetched,
+            Text::ResearchNoUploads,
+            Text::ResearchStale,
+            Text::FetchedJustNow,
+            Text::FetchedMinutesAgo,
+            Text::FetchedHoursAgo,
+            Text::FetchedDaysAgo,
+            Text::NumberThousands,
+            Text::NumberMillions,
+            Text::NumberBillions,
+            Text::DecimalSeparator,
         ];
+        texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));
         texts.extend(Provider::ALL.map(Text::ProviderPurpose));
         texts.extend(Provider::ALL.map(Text::ProviderKeyPlaceholder));
@@ -420,6 +591,79 @@ mod tests {
             message.contains(&bardo_domain::ApiKey::MAX_CHARS.to_string()),
             "{message}"
         );
+    }
+
+    #[test]
+    fn seed_limit_messages_match_the_domain_limits() {
+        use bardo_domain::{Niche, NicheSeeds};
+
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        let too_many = catalog.get(Text::NicheSeedError(NicheSeedError::TooMany));
+        assert!(
+            too_many.contains(&NicheSeeds::MAX.to_string()),
+            "{too_many}"
+        );
+        let too_long = catalog.get(Text::NicheSeedError(NicheSeedError::TooLong));
+        assert!(
+            too_long.contains(&Niche::MAX_CHARS.to_string()),
+            "{too_long}"
+        );
+    }
+
+    #[test]
+    fn research_placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for (text, args) in [
+                (Text::ResearchCost, &[("units", "204")][..]),
+                (Text::RefreshResearchCost, &[("units", "510")][..]),
+                (
+                    Text::ResearchSample,
+                    &[("videos", "47"), ("channels", "38")][..],
+                ),
+            ] {
+                let filled = catalog.format(text, args);
+                assert!(!filled.contains('{'), "{filled}");
+                for (_, value) in args {
+                    assert!(filled.contains(value), "{filled}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn counts_are_compact_and_localized() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        let cases = [
+            (0, "0", "0"),
+            (999, "999", "999"),
+            (1_000, "1K", "1 mil"),
+            (8_790, "8.7K", "8,7 mil"),
+            (48_213, "48K", "48 mil"),
+            (999_999, "999K", "999 mil"),
+            (1_840_000, "1.8M", "1,8 mi"),
+            (12_000_000, "12M", "12 mi"),
+            (2_100_000_000, "2.1B", "2,1 bi"),
+        ];
+        for (n, english, portuguese) in cases {
+            assert_eq!(en.compact(n), english);
+            assert_eq!(pt.compact(n), portuguese);
+        }
+    }
+
+    #[test]
+    fn ages_pick_a_readable_unit() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        let minutes = |m: u64| Duration::from_secs(m * 60);
+        assert_eq!(en.age(Duration::from_secs(30)), "just now");
+        assert_eq!(en.age(minutes(5)), "5 min ago");
+        assert_eq!(en.age(minutes(90)), "1 h ago");
+        assert_eq!(en.age(minutes(47 * 60)), "47 h ago");
+        assert_eq!(en.age(minutes(3 * 1_440)), "3 days ago");
+        assert_eq!(pt.age(minutes(3 * 1_440)), "há 3 dias");
+        assert_eq!(pt.age(minutes(5)), "há 5 min");
     }
 
     #[test]

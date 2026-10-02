@@ -1,6 +1,6 @@
 [package]
 name = "bardo-ai"
-description = "Adapters for the decision engine and generative providers."
+description = "Adapters for the decision engine, generative providers and market data."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 bardo-domain.workspace = true
+form_urlencoded.workspace = true
+humantime.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 ureq.workspace = true

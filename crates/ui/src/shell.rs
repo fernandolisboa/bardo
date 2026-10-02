@@ -8,6 +8,7 @@ use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::channels::ChannelsScreen;
 use crate::jobs::JobsPanel;
+use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
 
 /// A UI string in the active language.
@@ -19,15 +20,17 @@ pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Channels,
+    Research,
     Settings,
 }
 
 impl Screen {
-    const ALL: [Screen; 2] = [Screen::Channels, Screen::Settings];
+    const ALL: [Screen; 3] = [Screen::Channels, Screen::Research, Screen::Settings];
 
     fn title(self) -> Text {
         match self {
             Screen::Channels => Text::ChannelsTitle,
+            Screen::Research => Text::ResearchTitle,
             Screen::Settings => Text::SettingsTitle,
         }
     }
@@ -41,6 +44,7 @@ pub struct Shell {
     bardo: Entity<Bardo>,
     screen: Screen,
     channels: Entity<ChannelsScreen>,
+    research: Entity<ResearchScreen>,
     settings: Entity<SettingsScreen>,
     /// Kept alive while closed, so the toggle's count stays current.
     jobs: Entity<JobsPanel>,
@@ -53,6 +57,7 @@ impl Shell {
     pub fn new(bardo: Bardo, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bardo = cx.new(|_| bardo);
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
+        let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let subscriptions = vec![cx.observe(&jobs, |_, _, cx| cx.notify())];
@@ -60,12 +65,23 @@ impl Shell {
             bardo,
             screen: Screen::Channels,
             channels,
+            research,
             settings,
             jobs,
             jobs_open: false,
             error: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    fn show(&mut self, screen: Screen, window: &mut Window, cx: &mut Context<Self>) {
+        // Channels may have changed on the channels screen.
+        if screen == Screen::Research && self.screen != Screen::Research {
+            self.research
+                .update(cx, |research, cx| research.reload_channels(window, cx));
+        }
+        self.screen = screen;
+        cx.notify();
     }
 
     fn select_language(
@@ -110,10 +126,9 @@ impl Render for Shell {
                     .label(tr(bardo, screen.title()))
                     .selected(screen == self.screen)
             }))
-            .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
+            .on_click(cx.listener(|this, clicked: &Vec<usize>, window, cx| {
                 if let Some(screen) = clicked.first().and_then(|&i| Screen::ALL.get(i)) {
-                    this.screen = *screen;
-                    cx.notify();
+                    this.show(*screen, window, cx);
                 }
             }));
 
@@ -179,6 +194,7 @@ impl Render for Shell {
                             .min_w_0()
                             .map(|main| match self.screen {
                                 Screen::Channels => main.child(self.channels.clone()),
+                                Screen::Research => main.child(self.research.clone()),
                                 Screen::Settings => main.child(self.settings.clone()),
                             }),
                     )

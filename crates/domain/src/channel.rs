@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{ContentLanguage, Country, ProfileId, RepositoryError};
+use crate::{ContentLanguage, Country, Market, ProfileId, RepositoryError};
 
 /// Identifies a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -161,6 +161,11 @@ impl ChannelDetails {
 
     pub fn country(&self) -> Country {
         self.country
+    }
+
+    /// The audience the channel aims at, for market research.
+    pub fn market(&self) -> Market {
+        Market::new(self.country, self.language)
     }
 
     /// Whether two channel names would read as the same to the user.

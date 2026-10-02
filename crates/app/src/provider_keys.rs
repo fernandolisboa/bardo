@@ -65,7 +65,7 @@ struct Slot {
 }
 
 pub(crate) struct ProviderKeys {
-    store: Box<dyn SecretStore>,
+    store: Arc<dyn SecretStore>,
     checker: Arc<dyn KeyChecker>,
     redactor: Redactor,
     slots: HashMap<Provider, Slot>,
@@ -77,7 +77,7 @@ impl ProviderKeys {
     /// cannot be read does not stop the app; the provider shows as
     /// unreadable.
     pub(crate) fn load(
-        store: Box<dyn SecretStore>,
+        store: Arc<dyn SecretStore>,
         checker: Arc<dyn KeyChecker>,
         redactor: Redactor,
         owner: ProfileId,
@@ -289,7 +289,7 @@ mod tests {
 
     use super::*;
     use crate::testing::FakeKeyChecker;
-    use crate::{Providers, Repositories};
+    use crate::{Providers, Repositories, testing};
 
     const CLAUDE_KEY: &str = "sk-ant-api03-test-0001-wxyz";
 
@@ -312,22 +312,24 @@ mod tests {
             }
         }
 
-        fn start_with_store(&self, secrets: Box<dyn SecretStore>) -> Bardo {
+        fn start_with_store(&self, secrets: Arc<dyn SecretStore>) -> Bardo {
             let repositories = Repositories {
                 profiles: Box::new(Arc::clone(&self.db)),
                 channels: Box::new(Arc::clone(&self.db)),
                 jobs: Arc::clone(&self.db) as _,
+                research: Arc::clone(&self.db) as _,
                 secrets,
             };
             let providers = Providers {
                 key_checker: Arc::clone(&self.checker) as _,
+                ..testing::providers()
             };
             Bardo::start(repositories, providers, Some("en-US")).unwrap()
         }
 
         /// Starts (or restarts) the app over the same database and store.
         fn start(&self) -> Bardo {
-            self.start_with_store(Box::new(Arc::clone(&self.secrets)))
+            self.start_with_store(Arc::clone(&self.secrets) as _)
         }
 
         fn answer(&self, outcome: KeyCheckOutcome, detail: Option<&str>) {
@@ -556,7 +558,7 @@ mod tests {
 
     #[test]
     fn an_unreadable_store_does_not_stop_the_app() {
-        let app = Harness::new().start_with_store(Box::new(BrokenStore));
+        let app = Harness::new().start_with_store(Arc::new(BrokenStore));
         assert!(
             app.provider_keys()
                 .iter()
@@ -566,7 +568,7 @@ mod tests {
 
     #[test]
     fn a_store_failure_is_reported_without_the_key() {
-        let mut app = Harness::new().start_with_store(Box::new(BrokenStore));
+        let mut app = Harness::new().start_with_store(Arc::new(BrokenStore));
         let error = app
             .save_provider_key(Provider::Claude, CLAUDE_KEY)
             .unwrap_err();

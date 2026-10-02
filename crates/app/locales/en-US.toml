@@ -94,6 +94,7 @@ retry = "Retry"
 
 [job.kind]
 countdown = "Test countdown"
+niche_research = "Niche research"
 
 [job.state]
 queued = "Queued"
@@ -105,6 +106,12 @@ done = "Done"
 [job.failure]
 simulated = "The test job failed on purpose."
 unexpected = "Something went wrong inside Bardo."
+missing_key = "No key is saved for this provider. Add it under Settings, then retry."
+key_rejected = "The provider rejected the saved key. Check it under Settings, then retry."
+not_allowed = "The key lacks access this needs, such as an API not enabled for the project."
+limit_reached = "A quota or rate limit stopped the provider. YouTube quotas reset daily at midnight Pacific time."
+provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
+unexpected_answer = "The provider gave an answer Bardo does not understand."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -172,3 +179,53 @@ too_short = "This is too short to be an API key."
 too_long = "Use at most 512 characters."
 invalid_characters = "Keys have no spaces, line breaks or accented characters."
 not_id_and_secret = "Paste the key ID and the secret joined by a colon: KEY_ID:KEY_SECRET."
+
+[research]
+title = "Research"
+no_channels = "Create a channel first. Research uses its target country and content language."
+channel = "Channel"
+seeds = "Niches or keywords"
+seeds_placeholder = "space history\ncold war mysteries\ndeep sea creatures"
+seeds_hint = "One per line, up to 20. Results are kept for 7 days per niche, country and language."
+run = "Run research"
+refresh = "Refresh all"
+refresh_cost = "Refresh all ({units} units)"
+cost = "Uses about {units} units of your daily YouTube quota (10,000 by default)."
+cost_none = "Every niche is cached: running uses no quota."
+running = "Researching…"
+stopped = "Last research stopped:"
+results = "Results"
+scores_hint = "Competition rises with upload volume, channel size and few views per video. Trend follows views per day of recent uploads. Opportunity averages trend and room left by competition."
+opportunity = "Opportunity"
+competition = "Competition"
+trend = "Trend"
+uploads = "Uploads, 30 days"
+median_views = "Median views"
+views_per_day = "Views per day"
+median_subscribers = "Median subscribers"
+small_channels = "Small channels"
+sample = "From {videos} videos by {channels} channels"
+fetched = "Fetched"
+not_fetched = "Not researched yet."
+no_uploads = "No uploads in the last 30 days for this market."
+stale = "Older than 7 days: refresh for current numbers."
+
+[research.error]
+missing_key = "Save a YouTube Data API key under Settings to research niches."
+not_started = "Could not start research. Try again."
+not_loaded = "Could not load research results."
+seed_required = "Enter at least one niche or keyword."
+too_many_seeds = "Use at most 20 niches per run."
+seed_too_long = "Keep each niche to at most 100 characters."
+
+[age]
+just_now = "just now"
+minutes = "{n} min ago"
+hours = "{n} h ago"
+days = "{n} days ago"
+
+[number]
+thousands = "{n}K"
+millions = "{n}M"
+billions = "{n}B"
+decimal_separator = "."

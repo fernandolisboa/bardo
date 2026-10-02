@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use uuid::Uuid;
 
-use crate::{ProfileId, RepositoryError};
+use crate::{ProfileId, ProviderFailureKind, RepositoryError};
 
 /// Identifies a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -50,15 +50,19 @@ impl fmt::Display for JobId {
 pub enum JobKind {
     /// Built-in test job: counts down in steps, with a checkpoint per step.
     Countdown,
+    /// Fetches market data for a channel's seed niches, one checkpoint per
+    /// niche.
+    NicheResearch,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 1] = [JobKind::Countdown];
+    pub const ALL: [JobKind; 2] = [JobKind::Countdown, JobKind::NicheResearch];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             JobKind::Countdown => "countdown",
+            JobKind::NicheResearch => "niche_research",
         }
     }
 }
@@ -192,24 +196,71 @@ pub enum JobFailureKind {
     /// A defect inside Bardo: a panic, an unreadable payload, a missing
     /// handler or a failed save. Retrying would fail the same way.
     Unexpected,
+    /// The provider's key is not saved. The user adds it in settings.
+    MissingKey,
+    /// The provider rejected the saved key.
+    KeyRejected,
+    /// The key may not do this (permission, API not enabled).
+    NotAllowed,
+    /// A quota, rate limit or credit balance stops the provider. Retrying
+    /// within seconds would hit it again.
+    LimitReached,
+    /// The provider is down or unreachable. Transient.
+    ProviderUnavailable,
+    /// The provider answered in a way Bardo does not understand.
+    UnexpectedAnswer,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 2] = [JobFailureKind::Simulated, JobFailureKind::Unexpected];
+    pub const ALL: [JobFailureKind; 8] = [
+        JobFailureKind::Simulated,
+        JobFailureKind::Unexpected,
+        JobFailureKind::MissingKey,
+        JobFailureKind::KeyRejected,
+        JobFailureKind::NotAllowed,
+        JobFailureKind::LimitReached,
+        JobFailureKind::ProviderUnavailable,
+        JobFailureKind::UnexpectedAnswer,
+    ];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             JobFailureKind::Simulated => "simulated",
             JobFailureKind::Unexpected => "unexpected",
+            JobFailureKind::MissingKey => "missing_key",
+            JobFailureKind::KeyRejected => "key_rejected",
+            JobFailureKind::NotAllowed => "not_allowed",
+            JobFailureKind::LimitReached => "limit_reached",
+            JobFailureKind::ProviderUnavailable => "provider_unavailable",
+            JobFailureKind::UnexpectedAnswer => "unexpected_answer",
         }
     }
 
     /// Whether another attempt may succeed, so the queue retries it.
     pub fn is_transient(self) -> bool {
         match self {
-            JobFailureKind::Simulated => true,
-            JobFailureKind::Unexpected => false,
+            JobFailureKind::Simulated | JobFailureKind::ProviderUnavailable => true,
+            JobFailureKind::Unexpected
+            | JobFailureKind::MissingKey
+            | JobFailureKind::KeyRejected
+            | JobFailureKind::NotAllowed
+            | JobFailureKind::LimitReached
+            | JobFailureKind::UnexpectedAnswer => false,
+        }
+    }
+}
+
+impl From<ProviderFailureKind> for JobFailureKind {
+    fn from(kind: ProviderFailureKind) -> Self {
+        match kind {
+            ProviderFailureKind::Rejected => JobFailureKind::KeyRejected,
+            ProviderFailureKind::NotAllowed => JobFailureKind::NotAllowed,
+            ProviderFailureKind::LimitReached => JobFailureKind::LimitReached,
+            ProviderFailureKind::ProviderDown | ProviderFailureKind::Unreachable => {
+                JobFailureKind::ProviderUnavailable
+            }
+            ProviderFailureKind::Unexpected => JobFailureKind::UnexpectedAnswer,
         }
     }
 }
@@ -836,6 +887,29 @@ mod tests {
             assert_eq!(kind.code().parse(), Ok(kind));
         }
         assert!("rendering".parse::<JobState>().is_err());
+    }
+
+    #[test]
+    fn only_outages_among_provider_failures_are_retried() {
+        let retried: Vec<_> = [
+            ProviderFailureKind::Rejected,
+            ProviderFailureKind::NotAllowed,
+            ProviderFailureKind::LimitReached,
+            ProviderFailureKind::ProviderDown,
+            ProviderFailureKind::Unreachable,
+            ProviderFailureKind::Unexpected,
+        ]
+        .into_iter()
+        .filter(|&kind| JobFailureKind::from(kind).is_transient())
+        .collect();
+        assert_eq!(
+            retried,
+            [
+                ProviderFailureKind::ProviderDown,
+                ProviderFailureKind::Unreachable
+            ]
+        );
+        assert!(!JobFailureKind::MissingKey.is_transient());
     }
 
     #[test]

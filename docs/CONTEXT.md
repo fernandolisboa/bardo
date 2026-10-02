@@ -11,6 +11,11 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Persona** | A reusable narrator identity owned by the user profile: voice reference, tone, script style and generation presets. Assigned to a channel as default and overridable per video. |
 | **Voice reference** | A pointer to a voice held by a voice provider (e.g. an ElevenLabs voice id). The voice itself never lives in Bardo. |
 | **Niche** | A content market (e.g. "space history"). Scored for competition and trend. |
+| **Market** | A channel's target country plus content language. Market data is fetched and cached per niche and market. |
+| **Niche research** | A job that fetches recent uploads for a channel's seed niches (YouTube Data API) and scores each niche. Results are cached with their fetch date for 7 days; refresh fetches again. |
+| **Competition** | 0–100 score of how hard a niche is to stand out in: upload volume, channel size and few views per upload push it up. |
+| **Trend** | 0–100 score of how fast a niche's recent uploads gather views (median views per day). |
+| **Opportunity** | The average of trend and room left by competition (100 − competition). Research results rank by it. |
 | **Theme** | A specific video idea inside a niche. |
 | **Word timings** | When each word of the narration is spoken. Comes with generated narration; computed by alignment for imported audio. Drives captions and cut snapping. |
 | **Template** | A versioned, editable prompt/plan used to generate a script, title, description or media prompt. |

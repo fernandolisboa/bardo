@@ -185,8 +185,8 @@ pub struct SecretStoreError(#[from] pub Box<dyn std::error::Error + Send + Sync>
 /// Where provider keys live: the operating system's credential store for
 /// the signed-in user (Windows Credential Manager), never files or the
 /// database (ADR-0001). Keys belong to a profile, so more profiles can have
-/// their own later.
-pub trait SecretStore {
+/// their own later. Background jobs read keys too, so it is thread-safe.
+pub trait SecretStore: Send + Sync {
     fn get(&self, owner: ProfileId, provider: Provider)
     -> Result<Option<ApiKey>, SecretStoreError>;
 
@@ -283,6 +283,43 @@ pub struct KeyCheck {
 impl KeyCheck {
     pub fn new(outcome: KeyCheckOutcome, detail: Option<String>) -> Self {
         Self { outcome, detail }
+    }
+}
+
+/// Why a provider call returned no result. The same causes a key check
+/// tells apart, minus success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProviderFailureKind {
+    /// Wrong, revoked or expired key.
+    Rejected,
+    /// The key may not do this (missing permission, API not enabled).
+    NotAllowed,
+    /// A rate limit, quota or credit balance stops the call right now.
+    LimitReached,
+    /// The provider is failing on its side.
+    ProviderDown,
+    /// No answer: offline, DNS, TLS, proxy or timeout.
+    Unreachable,
+    /// An answer the adapter does not understand.
+    Unexpected,
+}
+
+/// A failed provider call.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{kind:?}: {detail}")]
+pub struct ProviderFailure {
+    pub kind: ProviderFailureKind,
+    /// The provider's own message or the network error, in English, for
+    /// logs and the jobs panel. Callers redact it before showing it.
+    pub detail: String,
+}
+
+impl ProviderFailure {
+    pub fn new(kind: ProviderFailureKind, detail: impl Into<String>) -> Self {
+        Self {
+            kind,
+            detail: detail.into(),
+        }
     }
 }
 

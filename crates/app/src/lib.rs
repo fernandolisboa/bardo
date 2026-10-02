@@ -6,13 +6,15 @@ pub mod i18n;
 mod jobs;
 pub mod logging;
 mod provider_keys;
+mod research;
 
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, JobRepository, KeyChecker, ProfileRepository, Redactor, RepositoryError,
-    SecretStore, UiLanguage, UserProfile,
+    ChannelRepository, JobRepository, KeyChecker, MarketData, NicheResearchRepository,
+    ProfileRepository, Redactor, RepositoryError, SecretStore, UiLanguage, UserProfile,
 };
 use bardo_storage::Database;
 
@@ -21,9 +23,11 @@ pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
+pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 
 use crate::jobs::JobQueue;
 use crate::provider_keys::ProviderKeys;
+use crate::research::NicheResearchHandler;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -38,8 +42,11 @@ pub struct Repositories {
     pub channels: Box<dyn ChannelRepository>,
     /// Shared with the job queue's worker threads.
     pub jobs: Arc<dyn JobRepository>,
-    /// Provider keys. Never the database (ADR-0001).
-    pub secrets: Box<dyn SecretStore>,
+    /// Niche research results and seeds. Shared with the job queue.
+    pub research: Arc<dyn NicheResearchRepository>,
+    /// Provider keys. Never the database (ADR-0001). Shared with jobs that
+    /// call providers.
+    pub secrets: Arc<dyn SecretStore>,
 }
 
 impl Repositories {
@@ -49,8 +56,9 @@ impl Repositories {
         Self {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Arc::clone(&db)),
-            jobs: db,
-            secrets,
+            jobs: Arc::clone(&db) as Arc<dyn JobRepository>,
+            research: db,
+            secrets: Arc::from(secrets),
         }
     }
 }
@@ -59,6 +67,8 @@ impl Repositories {
 /// adapter adds a field here; tests swap any of them for a fake.
 pub struct Providers {
     pub key_checker: Arc<dyn KeyChecker>,
+    /// Niche research (YouTube Data API).
+    pub market_data: Arc<dyn MarketData>,
 }
 
 impl Providers {
@@ -66,6 +76,7 @@ impl Providers {
     pub fn live() -> Self {
         Self {
             key_checker: Arc::new(bardo_ai::HttpKeyChecker::new()),
+            market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
         }
     }
 }
@@ -74,6 +85,8 @@ impl Providers {
 pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
     channels: Box<dyn ChannelRepository>,
+    research: Arc<dyn NicheResearchRepository>,
+    market_data: Arc<dyn MarketData>,
     jobs: JobQueue,
     provider_keys: ProviderKeys,
     profile: UserProfile,
@@ -108,6 +121,7 @@ impl Bardo {
             profiles,
             channels,
             jobs,
+            research,
             secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
@@ -120,18 +134,26 @@ impl Bardo {
         };
         let catalog = Catalog::load(profile.ui_language);
         let redactor = Redactor::new();
+        let research_handler = NicheResearchHandler {
+            owner: profile.id,
+            research: Arc::clone(&research),
+            market_data: Arc::clone(&providers.market_data),
+            secrets: Arc::clone(&secrets),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
             jobs,
             profile.id,
-            crate::jobs::built_in_handlers(),
+            crate::jobs::built_in_handlers(research_handler),
             job_settings,
             redactor,
         )?;
         Ok(Self {
             profiles,
             channels,
+            research,
+            market_data: providers.market_data,
             jobs,
             provider_keys,
             profile,
@@ -177,6 +199,18 @@ impl Bardo {
     pub fn text_with(&self, text: Text, args: &[(&str, &str)]) -> String {
         self.catalog.format(text, args)
     }
+
+    /// A count in the interface language's short form (`48K`, `48 mil`).
+    pub fn compact_count(&self, n: u64) -> String {
+        self.catalog.compact(n)
+    }
+
+    /// How long ago `at` was, e.g. `3 h ago`. A time in the future reads
+    /// as just now.
+    pub fn time_ago(&self, at: SystemTime) -> String {
+        let elapsed = SystemTime::now().duration_since(at).unwrap_or_default();
+        self.catalog.age(elapsed)
+    }
 }
 
 /// Portuguese system locales (`pt-BR`, `pt_BR`, `pt`) start in pt-BR;
@@ -191,9 +225,14 @@ fn language_for_locale(locale: Option<&str>) -> UiLanguage {
 /// Test doubles shared by the use case tests.
 #[cfg(test)]
 pub(crate) mod testing {
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, SystemTime};
 
-    use bardo_domain::{ApiKey, KeyCheck, KeyCheckOutcome, KeyChecker, Provider};
+    use bardo_domain::{
+        ApiKey, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche,
+        Provider, ProviderFailure, UploadSample,
+    };
 
     use crate::Providers;
 
@@ -219,10 +258,96 @@ pub(crate) mod testing {
         }
     }
 
+    /// One market data call, as the fake saw it.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct MarketCall {
+        pub(crate) niche: String,
+        pub(crate) market: Market,
+        pub(crate) key: String,
+        pub(crate) since: SystemTime,
+    }
+
+    /// Counts every call. Answers with the sample set for the niche's
+    /// label, a default one-upload sample otherwise, or `failure` when set.
+    #[derive(Default)]
+    pub(crate) struct FakeMarketData {
+        pub(crate) calls: Mutex<Vec<MarketCall>>,
+        pub(crate) samples: Mutex<HashMap<String, MarketSample>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// How long each call takes, to catch a job mid-run.
+        pub(crate) delay: Mutex<Duration>,
+    }
+
+    impl FakeMarketData {
+        pub(crate) fn calls(&self) -> Vec<MarketCall> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        /// A sample whose uploads all have `views`, uploaded a day ago.
+        pub(crate) fn set_views(&self, label: &str, views: u64) {
+            let sample = MarketSample {
+                upload_volume: 500,
+                uploads: vec![UploadSample {
+                    channel_id: "UCfake".into(),
+                    published_at: SystemTime::now() - Duration::from_secs(86_400),
+                    views,
+                    channel_subscribers: Some(5_000),
+                }],
+            };
+            self.samples
+                .lock()
+                .unwrap()
+                .insert(label.to_owned(), sample);
+        }
+    }
+
+    impl MarketData for FakeMarketData {
+        fn recent_uploads(
+            &self,
+            key: &ApiKey,
+            niche: &Niche,
+            market: Market,
+            since: SystemTime,
+        ) -> Result<MarketSample, ProviderFailure> {
+            self.calls.lock().unwrap().push(MarketCall {
+                niche: niche.label().to_owned(),
+                market,
+                key: key.expose().to_owned(),
+                since,
+            });
+            let delay = *self.delay.lock().unwrap();
+            std::thread::sleep(delay);
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            if let Some(sample) = self.samples.lock().unwrap().get(niche.label()) {
+                return Ok(sample.clone());
+            }
+            Ok(MarketSample {
+                upload_volume: 100,
+                uploads: vec![UploadSample {
+                    channel_id: "UCfake".into(),
+                    published_at: SystemTime::now() - Duration::from_secs(86_400),
+                    views: 1_000,
+                    channel_subscribers: Some(5_000),
+                }],
+            })
+        }
+
+        fn quota_units_per_niche(&self) -> u32 {
+            102
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
+        providers_with(Arc::new(FakeMarketData::default()))
+    }
+
+    pub(crate) fn providers_with(market_data: Arc<FakeMarketData>) -> Providers {
         Providers {
             key_checker: Arc::new(FakeKeyChecker::default()),
+            market_data,
         }
     }
 }
@@ -263,8 +388,9 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(profiles.clone()),
             channels: Box::new(Arc::clone(&db)),
-            jobs: db,
-            secrets: Box::new(MemorySecretStore::default()),
+            jobs: Arc::clone(&db) as _,
+            research: db,
+            secrets: Arc::new(MemorySecretStore::default()),
         };
         Bardo::start(repositories, testing::providers(), locale).unwrap()
     }

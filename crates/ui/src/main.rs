@@ -5,6 +5,7 @@
 
 mod channels;
 mod jobs;
+mod research;
 mod settings;
 mod shell;
 

@@ -1,0 +1,11 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=UTF-8
+
+{
+  "items": [
+    { "id": "Qm4f1rT8vXa", "statistics": { "viewCount": "125431" } },
+    { "id": "Lp2c9Wk3sYb", "statistics": { "viewCount": "8790" } },
+    { "id": "Zt7h3Nq5dRc", "statistics": { "viewCount": "40102" } },
+    { "id": "Hy6j8Pm1gFd", "statistics": { "viewCount": "2210" } }
+  ]
+}
