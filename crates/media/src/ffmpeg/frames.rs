@@ -118,6 +118,16 @@ pub struct FrameStream {
 /// Frames decoded ahead of the reader.
 const AHEAD: usize = 3;
 
+/// What [`FrameStream::poll_frame`] found.
+#[derive(Debug)]
+pub enum FramePoll {
+    Ready(VideoFrame),
+    /// Nothing decoded yet.
+    Waiting,
+    /// No more frames: the stream ended or ffmpeg failed (see `finish`).
+    Ended,
+}
+
 impl FrameStream {
     pub(super) fn spawn(
         mut command: Command,
@@ -178,6 +188,16 @@ impl FrameStream {
     /// The next frame if one is decoded already.
     pub fn try_next_frame(&self) -> Option<VideoFrame> {
         self.frames.try_recv().ok()
+    }
+
+    /// The next frame if one is decoded already, telling a stream that is
+    /// over (ffmpeg exited) from one that is only behind.
+    pub fn poll_frame(&self) -> FramePoll {
+        match self.frames.try_recv() {
+            Ok(frame) => FramePoll::Ready(frame),
+            Err(mpsc::TryRecvError::Empty) => FramePoll::Waiting,
+            Err(mpsc::TryRecvError::Disconnected) => FramePoll::Ended,
+        }
     }
 
     /// Waits for ffmpeg to exit after the last frame was read; reports a

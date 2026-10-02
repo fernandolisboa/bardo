@@ -26,8 +26,8 @@ use bardo_domain::{
     VideoSource, frame_at, frame_time,
 };
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, ClipSource, FrameSize, FrameStream, Framing, MediaError, RenderPlan,
-    VideoClip, VideoFrame,
+    AudioClip, AudioTrack, ClipSource, FramePoll, FrameSize, FrameStream, Framing, MediaError,
+    RenderPlan, VideoClip, VideoFrame,
 };
 use bardo_media::{AudioOutput, MediaEngine, StreamPlayback};
 use serde::Deserialize;
@@ -43,6 +43,8 @@ pub const PREVIEW_PORTRAIT: (u32, u32) = (304, 540);
 
 /// How long the preview waits for its sound before playing without it.
 const AUDIO_PATIENCE: Duration = Duration::from_secs(1);
+/// How far short of the end the sound may stop and still count as done.
+const SOUND_END_SLACK: Duration = Duration::from_millis(100);
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditorError {
@@ -430,7 +432,15 @@ impl Editor {
 
     pub fn pause(&mut self) {
         // Dropping the streams stops ffmpeg and the sound.
-        self.playing = None;
+        if self.playing.take().is_some() {
+            // On a frame, so playing again starts on a whole one.
+            self.playhead = frame_time(frame_at(self.playhead));
+        }
+    }
+
+    /// The last frame's time: where playing to the end leaves the playhead.
+    fn last_frame(&self) -> Duration {
+        frame_time(frame_at(self.view.duration()).saturating_sub(1))
     }
 
     pub fn toggle_play(&mut self) -> Result<(), EditorError> {
@@ -493,16 +503,35 @@ impl Editor {
     /// Returns a new picture to show, if there is one.
     pub fn tick(&mut self, now: Instant) -> Option<VideoFrame> {
         if let Some(still) = &self.still {
-            let frame = still.try_next_frame();
-            if frame.is_some() {
-                self.still = None;
-            }
-            return frame;
+            return match still.poll_frame() {
+                FramePoll::Ready(frame) => {
+                    self.still = None;
+                    Some(frame)
+                }
+                FramePoll::Waiting => None,
+                FramePoll::Ended => {
+                    // ffmpeg stopped without a picture: a broken proxy.
+                    let failure = self.still.take().map(FrameStream::finish);
+                    self.error = Some(preview_failure(failure));
+                    None
+                }
+            };
         }
         let duration = self.view.duration();
+        let last_frame = self.last_frame();
         let playing = self.playing.as_mut()?;
         if playing.pending.is_none() {
-            playing.pending = playing.frames.try_next_frame();
+            match playing.frames.poll_frame() {
+                FramePoll::Ready(frame) => playing.pending = Some(frame),
+                FramePoll::Waiting => {}
+                FramePoll::Ended if playing.started_at.is_none() => {
+                    // Not one picture: ffmpeg failed before playing began.
+                    let failure = self.playing.take().map(|playing| playing.frames.finish());
+                    self.error = Some(preview_failure(failure));
+                    return None;
+                }
+                FramePoll::Ended => {}
+            }
         }
         let started_at = match playing.started_at {
             Some(at) => at,
@@ -523,13 +552,29 @@ impl Editor {
             Some(audio) => audio.position(),
             None => now.duration_since(started_at),
         };
+        // The sound runs as long as the timeline, so its end is the end
+        // (rounding can leave it a hair short). Ending well before means
+        // it failed: play on without it, on the wall clock.
+        if playing.audio.as_ref().is_some_and(|a| a.has_ended())
+            && playing.from + elapsed + SOUND_END_SLACK < duration
+        {
+            playing.audio = None;
+            if let Some(at) = now.checked_sub(elapsed) {
+                playing.started_at = Some(at);
+            }
+            self.error = Some(Text::EditorNoSound);
+        }
         let time = (playing.from + elapsed).min(duration);
         self.playhead = time;
         let mut newest = None;
-        while let Some(frame) = playing
-            .pending
-            .take()
-            .or_else(|| playing.frames.try_next_frame())
+        while let Some(frame) =
+            playing
+                .pending
+                .take()
+                .or_else(|| match playing.frames.poll_frame() {
+                    FramePoll::Ready(frame) => Some(frame),
+                    FramePoll::Waiting | FramePoll::Ended => None,
+                })
         {
             if frame.at <= time {
                 newest = Some(frame);
@@ -538,12 +583,10 @@ impl Editor {
                 break;
             }
         }
-        // The sound runs as long as the timeline, so its end is the end
-        // (rounding can leave it a hair short of the duration).
         let sound_over = playing.audio.as_ref().is_some_and(|a| a.has_ended());
         if time >= duration || sound_over {
             self.playing = None;
-            self.playhead = duration;
+            self.playhead = last_frame;
         }
         newest
     }
@@ -561,9 +604,9 @@ impl Editor {
         {
             self.selection = None;
         }
-        let end = self.view.duration();
-        if self.playhead > end {
-            self.playhead = end;
+        let last = self.last_frame();
+        if self.playhead > last {
+            self.playhead = last;
         }
         if !self.can_play() {
             self.playing = None;
@@ -571,6 +614,14 @@ impl Editor {
         } else if changed || was_unready {
             self.restart();
         }
+    }
+}
+
+/// What the preview says when ffmpeg stopped before giving a picture.
+fn preview_failure(finished: Option<Result<(), MediaError>>) -> Text {
+    match finished {
+        Some(Err(error)) => EditorError::from(error).message(),
+        _ => Text::EditorPreviewFailed,
     }
 }
 
@@ -889,6 +940,8 @@ pub(crate) mod testing {
         pub(crate) not_found: AtomicBool,
         pub(crate) built: Mutex<Vec<PathBuf>>,
         pub(crate) previews: Mutex<Vec<PreviewCall>>,
+        /// Previews end without a picture, as ffmpeg does on a broken file.
+        pub(crate) blank: AtomicBool,
     }
 
     impl FakeMedia {
@@ -982,7 +1035,12 @@ pub(crate) mod testing {
                 from,
                 size,
             });
-            let frames = (0..3)
+            let count = if self.blank.load(Ordering::SeqCst) {
+                0
+            } else {
+                3
+            };
+            let frames = (0..count)
                 .map(|n| VideoFrame {
                     size,
                     at: from + bardo_domain::frame_time(n),
@@ -1218,13 +1276,79 @@ mod tests {
         settle(&app, &mut editor);
         editor.play().unwrap();
         editor.tick(Instant::now());
-        h.audio.stream.lock().unwrap().ended = true;
+        {
+            let mut sound = h.audio.stream.lock().unwrap();
+            sound.position = editor.view().duration();
+            sound.ended = true;
+        }
         editor.tick(Instant::now());
         assert!(!editor.is_playing());
-        assert_eq!(editor.playhead(), editor.view().duration());
+        let last = frame_time(frame_at(editor.view().duration()) - 1);
+        assert_eq!(
+            editor.playhead(),
+            last,
+            "on the last frame, which can be shown"
+        );
 
         editor.play().unwrap();
         assert_eq!(h.media.previews().last().unwrap().from, Duration::ZERO);
+    }
+
+    #[test]
+    fn sound_that_stops_early_leaves_the_picture_playing_on_the_wall_clock() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        editor.play().unwrap();
+        let start = Instant::now();
+        editor.tick(start);
+        h.audio.stream.lock().unwrap().ended = true;
+        editor.tick(start + Duration::from_millis(100));
+        assert!(editor.is_playing(), "a failed sound is not the end");
+        assert_eq!(editor.error(), Some(Text::EditorNoSound));
+        editor.tick(start + Duration::from_millis(300));
+        assert_eq!(
+            editor.playhead(),
+            Duration::from_millis(200),
+            "timed from the switch"
+        );
+    }
+
+    #[test]
+    fn a_preview_that_ends_without_a_picture_says_so_and_stops_asking() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        h.media.blank.store(true, Ordering::SeqCst);
+
+        editor.seek(frame_time(10));
+        assert!(editor.tick(Instant::now()).is_none());
+        assert_eq!(editor.error(), Some(Text::EditorPreviewFailed));
+        assert!(!editor.needs_ticks());
+
+        editor.play().unwrap();
+        editor.tick(Instant::now());
+        assert!(!editor.is_playing());
+        assert_eq!(editor.error(), Some(Text::EditorPreviewFailed));
+    }
+
+    #[test]
+    fn pausing_leaves_the_playhead_on_a_frame() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        editor.play().unwrap();
+        editor.tick(Instant::now());
+        h.audio.stream.lock().unwrap().position = Duration::from_millis(110);
+        editor.tick(Instant::now());
+        editor.pause();
+        assert_eq!(editor.playhead(), frame_time(3));
     }
 
     #[test]

@@ -182,6 +182,14 @@ impl EditorScreen {
         }
     }
 
+    /// Frees the preview's picture from the window's atlas; the shell calls
+    /// it before closing the editor.
+    pub fn release(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(old) = self.frame.take() {
+            cx.drop_image(old, Some(window));
+        }
+    }
+
     /// Moves the preview on and swaps in a new picture when one is due.
     fn advance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self.editor.as_mut() else {

@@ -22,7 +22,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 pub use encoders::{Encoders, VideoEncoder};
-pub use frames::{FrameSize, FrameStream, VideoFrame};
+pub use frames::{FramePoll, FrameSize, FrameStream, VideoFrame};
 pub use probe::{AudioStream, MediaInfo, VideoStream};
 pub use proxy::{ProxyCodec, ProxySettings};
 pub use render::{

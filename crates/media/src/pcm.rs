@@ -57,6 +57,14 @@ impl PcmSender {
     }
 }
 
+impl Drop for PcmSender {
+    /// A producer that stops early (a failed decode) still releases the
+    /// player waiting for sound; the stream then reads as ended.
+    fn drop(&mut self) {
+        self.buffered.store(true, Ordering::Release);
+    }
+}
+
 impl PcmStream {
     /// A stream fed by a producer through the returned sender, holding up
     /// to `ahead` chunks. `producer` lives as long as the stream.

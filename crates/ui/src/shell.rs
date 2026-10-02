@@ -167,19 +167,24 @@ impl Shell {
         let bardo = self.bardo.clone();
         let editor = cx.new(|cx| EditorScreen::new(bardo, project, window, cx));
         let subscription =
-            cx.subscribe_in(&editor, window, |this, _, event, window, cx| match event {
-                EditorEvent::Close => {
-                    this.editor = None;
-                    // The editor may have queued jobs or removed old proxies.
-                    this.projects
-                        .update(cx, |projects, cx| projects.reload(window, cx));
-                    cx.notify();
-                }
-                EditorEvent::ToggleJobs => {
-                    this.jobs_open = !this.jobs_open;
-                    cx.notify();
-                }
-            });
+            cx.subscribe_in(
+                &editor,
+                window,
+                |this, editor, event, window, cx| match event {
+                    EditorEvent::Close => {
+                        editor.update(cx, |editor, cx| editor.release(window, cx));
+                        this.editor = None;
+                        // The editor may have queued jobs or removed old proxies.
+                        this.projects
+                            .update(cx, |projects, cx| projects.reload(window, cx));
+                        cx.notify();
+                    }
+                    EditorEvent::ToggleJobs => {
+                        this.jobs_open = !this.jobs_open;
+                        cx.notify();
+                    }
+                },
+            );
         self.editor = Some((editor, subscription));
         cx.notify();
     }
