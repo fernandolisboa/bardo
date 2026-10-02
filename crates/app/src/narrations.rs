@@ -1,7 +1,8 @@
 //! Narration use cases (PRD stories 31-32): the persona's voice reads a
 //! video project's script; the audio goes into the project folder with the
 //! timing of every word, and the user plays it back with the current word
-//! highlighted.
+//! highlighted. A recording the user made instead is imported in
+//! `narration_import`; playback and staleness are the same for both.
 //!
 //! The reader is the project's own persona when it picked one, else the
 //! channel's default; a persona whose voice is flagged (an imported voice
@@ -18,8 +19,8 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     Alignment, ApiKey, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind,
-    JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, Persona, ProfileId,
-    Progress, ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore,
+    JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, NarrationSource, Persona,
+    ProfileId, Progress, ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore,
     SpeechRequest, SpeechSynthesizer, VideoProject, VideoProjectId, VoiceFlag, VoiceRef,
     WordTimings, split_for_speech,
 };
@@ -28,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
+use crate::narration_import::ImportPayload;
 use crate::{Bardo, KeyState, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -46,8 +48,8 @@ pub enum NarrationError {
     /// Generation calls this provider, and no key is saved for it.
     #[error("no {0} key saved")]
     MissingKey(Provider),
-    /// A narration of the project is being generated.
-    #[error("a narration is already being generated for this project")]
+    /// A narration of the project is being generated or imported.
+    #[error("a narration is already being made for this project")]
     Busy,
     /// The narration would reach the provider's budget; the screen asks
     /// before starting it with `BudgetConsent::Confirmed`.
@@ -56,6 +58,18 @@ pub enum NarrationError {
     /// Playback needs a narration.
     #[error("the project has no narration yet")]
     NoNarration,
+    /// The chosen recording cannot be read (gone, or not allowed).
+    #[error("the recording cannot be read")]
+    RecordingUnreadable,
+    /// The chosen recording is neither MP3 nor uncompressed WAV.
+    #[error("the recording is not MP3 or WAV")]
+    RecordingUnsupported,
+    /// The chosen recording holds no sound.
+    #[error("the recording has no audio")]
+    RecordingEmpty,
+    /// The chosen recording is over `MAX_RECORDING_BYTES`.
+    #[error("the recording is too large")]
+    RecordingTooLarge,
     /// The narration's audio file is gone from the project folder.
     #[error("the narration's audio file is missing")]
     AudioMissing,
@@ -77,6 +91,10 @@ impl NarrationError {
             NarrationError::Busy => Text::NarrationBusy,
             NarrationError::OverBudget(_) => Text::BudgetReachedTitle,
             NarrationError::NoNarration => Text::NarrationMissing,
+            NarrationError::RecordingUnreadable => Text::RecordingUnreadable,
+            NarrationError::RecordingUnsupported => Text::RecordingUnsupported,
+            NarrationError::RecordingEmpty => Text::RecordingEmpty,
+            NarrationError::RecordingTooLarge => Text::RecordingTooLarge,
             NarrationError::AudioMissing => Text::NarrationAudioMissing,
             NarrationError::Playback(_) => Text::NarrationCannotPlay,
             NarrationError::Repository(_) => Text::NarrationNotLoaded,
@@ -94,7 +112,7 @@ pub struct NarrationView {
     pub narration: Option<Narration>,
     /// Whether the script changed since the narration read it.
     pub stale: bool,
-    /// The project's latest narration job.
+    /// The project's latest narration job: generating or importing.
     pub job: Option<Job>,
     /// Who reads the next narration: the project's own persona, else the
     /// channel's default. A flagged one cannot read it yet.
@@ -285,7 +303,7 @@ impl JobHandler for NarrationHandler {
 impl NarrationHandler {
     /// Reads the text `job` asks for and saves the narration. Without a
     /// context (tests replaying a job) nothing reports progress or stops it.
-    fn narrate(
+    pub(crate) fn narrate(
         &self,
         payload: &str,
         job: JobId,
@@ -424,13 +442,15 @@ impl NarrationHandler {
             project,
             owner: self.owner,
             text,
-            voice,
-            presets,
-            model: records
-                .first()
-                .map(|record| record.model.clone())
-                .unwrap_or_default(),
-            billed_characters: records.iter().map(|r| r.billed_characters).sum(),
+            source: NarrationSource::Generated {
+                voice,
+                presets,
+                model: records
+                    .first()
+                    .map(|record| record.model.clone())
+                    .unwrap_or_default(),
+                billed_characters: records.iter().map(|r| r.billed_characters).sum(),
+            },
             audio_file: file,
             duration: joined.duration,
             words,
@@ -496,19 +516,36 @@ impl NarrationPlayer {
 }
 
 impl Bardo {
-    fn narration_project(&self, id: VideoProjectId) -> Result<VideoProject, NarrationError> {
+    pub(crate) fn narration_project(
+        &self,
+        id: VideoProjectId,
+    ) -> Result<VideoProject, NarrationError> {
         self.themes
             .project(id)?
             .filter(|project| project.owner == self.profile.id)
             .ok_or(NarrationError::ProjectNotFound)
     }
 
+    /// The project's latest job that makes its narration: generating it or
+    /// importing a recording.
     fn latest_narration_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
-        self.jobs().into_iter().rev().find(|job| {
-            job.kind() == JobKind::Narration
-                && NarrationPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+        self.jobs().into_iter().rev().find(|job| match job.kind() {
+            JobKind::Narration => {
+                NarrationPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+            }
+            JobKind::NarrationImport => {
+                ImportPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+            }
+            _ => false,
         })
+    }
+
+    /// Whether a narration of the project is being generated or imported;
+    /// one at a time.
+    pub(crate) fn narration_busy(&self, project: VideoProjectId) -> bool {
+        self.latest_narration_job(project)
+            .is_some_and(|job| job.state().is_active())
     }
 
     /// The persona that reads the project's narration: its own, else the
@@ -572,10 +609,7 @@ impl Bardo {
         if let Some(flag) = persona.voice_flag {
             return Err(NarrationError::VoiceFlagged(flag));
         }
-        if self
-            .latest_narration_job(project.id)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.narration_busy(project.id) {
             return Err(NarrationError::Busy);
         }
         let provider = persona.details.voice().provider();
@@ -695,7 +729,7 @@ pub(crate) mod testing {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::Instant;
 
     use bardo_domain::{
@@ -706,6 +740,7 @@ mod tests {
 
     use super::testing::FakeAudioOutput;
     use super::*;
+    use crate::narration_import::testing::FakeAligner;
     use crate::testing::{
         FakeDecisionEngine, FakeKeyChecker, FakeMarketData, FakeSpeech, FakeTextGenerator,
         PART_AUDIO,
@@ -713,43 +748,47 @@ mod tests {
     use crate::{JobSettings, Providers, Repositories};
 
     const CLAUDE_KEY: &str = "sk-ant-api03-test-key-0001";
-    const ELEVENLABS_KEY: &str = "sk_test_elevenlabs_key_0001";
+    pub(crate) const ELEVENLABS_KEY: &str = "sk_test_elevenlabs_key_0001";
     const PATIENCE: Duration = Duration::from_secs(10);
-    const SCRIPT: &str = "Era uma vez, em 1969, uma sonda. Ela partiu — e nunca voltou.";
+    pub(crate) const SCRIPT: &str = "Era uma vez, em 1969, uma sonda. Ela partiu — e nunca voltou.";
 
-    struct Harness {
-        db: Arc<Database>,
-        files: Arc<dyn ProjectFiles>,
-        speech: Arc<FakeSpeech>,
-        audio: Arc<FakeAudioOutput>,
-        secrets: Arc<MemorySecretStore>,
+    pub(crate) struct Harness {
+        pub(crate) db: Arc<Database>,
+        pub(crate) files: Arc<dyn ProjectFiles>,
+        pub(crate) speech: Arc<FakeSpeech>,
+        pub(crate) aligner: Arc<FakeAligner>,
+        pub(crate) text: Arc<FakeTextGenerator>,
+        pub(crate) audio: Arc<FakeAudioOutput>,
+        pub(crate) secrets: Arc<MemorySecretStore>,
     }
 
     impl Harness {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self::with_files(Arc::new(MemoryProjectFiles::default()))
         }
 
-        fn with_files(files: Arc<dyn ProjectFiles>) -> Self {
+        pub(crate) fn with_files(files: Arc<dyn ProjectFiles>) -> Self {
             Self {
                 db: Arc::new(Database::open_in_memory().unwrap()),
                 files,
                 speech: Arc::default(),
+                aligner: Arc::default(),
+                text: Arc::default(),
                 audio: Arc::default(),
                 secrets: Arc::default(),
             }
         }
 
-        fn start(&self) -> Bardo {
-            let text = FakeTextGenerator::default();
-            text.answers.lock().unwrap().push(SCRIPT.to_owned());
+        pub(crate) fn start(&self) -> Bardo {
+            self.text.answers.lock().unwrap().push(SCRIPT.to_owned());
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
-                text: Arc::new(text),
+                text: Arc::clone(&self.text) as _,
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::clone(&self.speech) as _,
+                aligner: Arc::clone(&self.aligner) as _,
                 images: Arc::new(crate::testing::FakeImages::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::clone(&self.audio) as _,
@@ -784,7 +823,7 @@ mod tests {
         }
     }
 
-    fn wait_done(app: &Bardo, id: JobId) -> Job {
+    pub(crate) fn wait_done(app: &Bardo, id: JobId) -> Job {
         let deadline = Instant::now() + PATIENCE;
         loop {
             if let Some(job) = app
@@ -801,7 +840,7 @@ mod tests {
 
     /// A channel whose default persona is the documentary narrator, and a
     /// project with a generated script.
-    fn project(app: &Bardo) -> VideoProject {
+    pub(crate) fn project(app: &Bardo) -> VideoProject {
         let project = project_without_persona(app, "Space Archives");
         let persona = documentary_narrator(app);
         let channel = app.channels.get(project.channel).unwrap().unwrap();
@@ -816,7 +855,7 @@ mod tests {
         project
     }
 
-    fn documentary_narrator(app: &Bardo) -> Persona {
+    pub(crate) fn documentary_narrator(app: &Bardo) -> Persona {
         app.personas()
             .unwrap()
             .into_iter()
@@ -824,7 +863,7 @@ mod tests {
             .unwrap()
     }
 
-    fn project_without_persona(app: &Bardo, channel: &str) -> VideoProject {
+    pub(crate) fn project_without_persona(app: &Bardo, channel: &str) -> VideoProject {
         let channel = app
             .create_channel(ChannelDraft {
                 name: channel.into(),
@@ -853,7 +892,7 @@ mod tests {
         project
     }
 
-    fn narrate(app: &Bardo, project: &VideoProject) -> Narration {
+    pub(crate) fn narrate(app: &Bardo, project: &VideoProject) -> Narration {
         let id = app
             .generate_narration(project.id, BudgetConsent::Ask)
             .unwrap();
@@ -892,11 +931,16 @@ mod tests {
         assert_eq!(requests[0].previous_text, None);
 
         assert_eq!(narration.text.as_str(), SCRIPT);
-        assert_eq!(narration.voice.name(), "Wyatt");
-        assert_eq!(narration.voice.provider(), Provider::ElevenLabs);
-        assert_eq!(narration.presets, persona.details.presets());
-        assert_eq!(narration.model, "eleven-fake");
-        assert_eq!(narration.billed_characters, SCRIPT.chars().count() as u64);
+        assert_eq!(
+            narration.source,
+            NarrationSource::Generated {
+                voice: persona.details.voice().clone(),
+                presets: persona.details.presets(),
+                model: "eleven-fake".into(),
+                billed_characters: SCRIPT.chars().count() as u64,
+            }
+        );
+        assert_eq!(narration.source.provider(), Provider::ElevenLabs);
         assert_eq!(narration.audio_file, audio_file(narration.id));
         assert_eq!(narration.duration, part_duration());
         let job = app.narration(project.id).unwrap().job.unwrap();
@@ -1093,7 +1137,9 @@ mod tests {
         let requests = h.speech.requests();
         assert_eq!(&requests[0].voice, storyteller.details.voice());
         assert_eq!(requests[0].presets, storyteller.details.presets());
-        assert_eq!(narration.voice.name(), "Florence");
+        assert!(
+            matches!(&narration.source, NarrationSource::Generated { voice, .. } if voice.name() == "Florence")
+        );
 
         // Back to the channel's default.
         app.set_project_persona(project.id, None).unwrap();

@@ -43,6 +43,62 @@ impl HttpRequest {
         }
     }
 
+    /// A POST of an HTML form with files (`multipart/form-data`), e.g. an
+    /// audio file and its text.
+    pub fn post_multipart(url: impl Into<String>, parts: &[FormPart<'_>]) -> Self {
+        let boundary = boundary_for(parts);
+        let mut body = Vec::with_capacity(
+            parts
+                .iter()
+                .map(|part| part.bytes().len() + 160)
+                .sum::<usize>()
+                + 64,
+        );
+        for part in parts {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            match part {
+                FormPart::Text { name, value } => {
+                    body.extend_from_slice(
+                        format!(
+                            "Content-Disposition: form-data; name=\"{}\"\r\n\r\n",
+                            quoted(name)
+                        )
+                        .as_bytes(),
+                    );
+                    body.extend_from_slice(value.as_bytes());
+                }
+                FormPart::File {
+                    name,
+                    file_name,
+                    content_type,
+                    bytes,
+                } => {
+                    body.extend_from_slice(
+                        format!(
+                            "Content-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n\
+                             Content-Type: {content_type}\r\n\r\n",
+                            quoted(name),
+                            quoted(file_name)
+                        )
+                        .as_bytes(),
+                    );
+                    body.extend_from_slice(bytes);
+                }
+            }
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        Self {
+            method: Method::Post,
+            url: url.into(),
+            headers: vec![(
+                "content-type".into(),
+                format!("multipart/form-data; boundary={boundary}"),
+            )],
+            body: Some(body),
+        }
+    }
+
     /// A PUT of raw bytes, e.g. a file to a presigned upload URL.
     pub fn put(url: impl Into<String>, body: Vec<u8>) -> Self {
         Self {
@@ -65,6 +121,59 @@ impl HttpRequest {
             .find(|(header, _)| header.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
     }
+}
+
+/// One field of a multipart form.
+#[derive(Debug, Clone, Copy)]
+pub enum FormPart<'a> {
+    Text {
+        name: &'a str,
+        value: &'a str,
+    },
+    File {
+        name: &'a str,
+        file_name: &'a str,
+        content_type: &'a str,
+        bytes: &'a [u8],
+    },
+}
+
+impl FormPart<'_> {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            FormPart::Text { value, .. } => value.as_bytes(),
+            FormPart::File { bytes, .. } => bytes,
+        }
+    }
+}
+
+/// A boundary that appears in no part, so the server cannot cut a part
+/// short. A collision with audio bytes is all but impossible; checking
+/// makes it impossible.
+fn boundary_for(parts: &[FormPart<'_>]) -> String {
+    (0u32..)
+        .map(|n| format!("bardo-form-boundary-7d1c4f9a2e{n}"))
+        .find(|boundary| {
+            let needle = boundary.as_bytes();
+            parts
+                .iter()
+                .all(|part| !part.bytes().windows(needle.len()).any(|w| w == needle))
+        })
+        .expect("some boundary is free")
+}
+
+/// A form field or file name inside double quotes: quotes and line breaks
+/// would end it early, so they become underscores.
+fn quoted(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if matches!(c, '"' | '\r' | '\n') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 impl fmt::Debug for HttpRequest {
@@ -288,5 +397,71 @@ impl Transport for UreqTransport {
             .read_to_vec()
             .map_err(|error| TransportError(error.to_string()))?;
         Ok(BinaryResponse { status, bytes })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_multipart_form_holds_each_part_between_boundaries() {
+        let request = HttpRequest::post_multipart(
+            "https://example.test/upload",
+            &[
+                FormPart::File {
+                    name: "file",
+                    file_name: "take \"3\".wav",
+                    content_type: "audio/wav",
+                    bytes: b"RIFF\x00\x01",
+                },
+                FormPart::Text {
+                    name: "text",
+                    value: "Olá, mundo.",
+                },
+            ],
+        );
+        assert_eq!(request.method, Method::Post);
+        let content_type = request.header_value("content-type").unwrap();
+        let boundary = content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+                 filename=\"take _3_.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        expected.extend_from_slice(b"RIFF\x00\x01\r\n");
+        expected.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\n\
+                 Olá, mundo.\r\n--{boundary}--\r\n"
+            )
+            .as_bytes(),
+        );
+        assert_eq!(request.body.unwrap(), expected);
+    }
+
+    #[test]
+    fn the_boundary_never_appears_in_a_part() {
+        let taken = b"xx bardo-form-boundary-7d1c4f9a2e0 xx";
+        let request = HttpRequest::post_multipart(
+            "https://example.test/upload",
+            &[FormPart::File {
+                name: "file",
+                file_name: "a.mp3",
+                content_type: "audio/mpeg",
+                bytes: taken,
+            }],
+        );
+        assert!(
+            request
+                .header_value("content-type")
+                .unwrap()
+                .ends_with("bardo-form-boundary-7d1c4f9a2e1")
+        );
     }
 }

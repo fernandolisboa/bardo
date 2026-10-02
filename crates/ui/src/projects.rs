@@ -1,22 +1,23 @@
 //! Video projects screen: pick a channel and one of its projects, choose
 //! who narrates it (the channel's default persona or one for this video),
-//! then generate, edit and review the project's script, generate and play its
-//! narration with the spoken word highlighted, and plan its scenes and draw
-//! their images. Generation runs as jobs in `bardo_app`; this view polls
-//! the job revision and re-reads the script, narration and scenes when it
-//! moves, and re-renders while the narration plays.
+//! then generate, edit and review the project's script, generate (or import
+//! a recording of) and play its narration with the spoken word highlighted,
+//! and plan its scenes and draw their images. Generation runs as jobs in
+//! `bardo_app`; this view polls the job revision and re-reads the script,
+//! narration and scenes when it moves, and re-renders while the narration
+//! plays.
 //! The editor keeps the user's typing: it is refilled only when the stored
 //! text changes (first generation, accepting a new script).
 
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, Job, JobState, Narration, PersonaId, SceneFieldError,
-    ScenePlanId, ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
+    Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource, PersonaId,
+    SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, NarrationError, NarrationPlayer, NarrationView, ScenesView, ScriptError,
-    ScriptView, SpendEstimate, Text,
+    Bardo, BudgetConsent, NarrationError, NarrationPlayer, NarrationView, Recording, ScenesView,
+    ScriptError, ScriptView, SpendEstimate, Text,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -29,7 +30,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, PathPromptOptions, SharedString, Subscription, Task,
+    Window, div, px,
 };
 
 use crate::shell::tr;
@@ -103,6 +105,16 @@ pub struct ProjectsScreen {
     script_ask: Option<SpendEstimate>,
     /// A narration held back at a budget.
     narration_ask: Option<SpendEstimate>,
+    /// Choosing or reading a recording to import; dropping it stops
+    /// waiting for the result.
+    choosing_recording: Option<Task<()>>,
+    /// Whether the chosen file is being read.
+    reading_recording: bool,
+    /// A recording read and waiting for the user to confirm the import,
+    /// with what aligning it would cost.
+    recording: Option<(Recording, SpendEstimate)>,
+    /// An import held back at a budget.
+    import_ask: Option<SpendEstimate>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -185,6 +197,10 @@ impl ProjectsScreen {
             scenes_ask: None,
             script_ask: None,
             narration_ask: None,
+            choosing_recording: None,
+            reading_recording: false,
+            recording: None,
+            import_ask: None,
             editor,
             loaded: None,
             field_error: None,
@@ -290,6 +306,10 @@ impl ProjectsScreen {
         self.scenes_ask = None;
         self.script_ask = None;
         self.narration_ask = None;
+        self.choosing_recording = None;
+        self.reading_recording = false;
+        self.recording = None;
+        self.import_ask = None;
         self.load(window, cx);
         self.fill_narrator(window, cx);
         cx.notify();
@@ -459,6 +479,89 @@ impl ProjectsScreen {
             Err(error) => Some(error.message()),
         };
         self.load(window, cx);
+        cx.notify();
+    }
+
+    /// Asks for a recording of the script, then reads it in the
+    /// background to show its length and cost before importing.
+    fn choose_recording(&mut self, cx: &mut Context<Self>) {
+        self.narration_error = None;
+        self.import_ask = None;
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr(self.bardo.read(cx), Text::ImportNarrationDialog)),
+        });
+        self.choosing_recording = Some(cx.spawn(async move |this, cx| {
+            let (path, failed) = match chosen.await {
+                Ok(Ok(Some(paths))) => (paths.into_iter().next(), false),
+                Ok(Err(_)) => (None, true),
+                Ok(Ok(None)) | Err(_) => (None, false),
+            };
+            let Some(path) = path else {
+                let _ = this.update(cx, |this, cx| {
+                    this.choosing_recording = None;
+                    if failed {
+                        this.narration_error = Some(Text::FileDialogFailed);
+                    }
+                    cx.notify();
+                });
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.reading_recording = true;
+                cx.notify();
+            });
+            let read = cx
+                .background_executor()
+                .spawn(async move { Recording::open(&path) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.choosing_recording = None;
+                this.reading_recording = false;
+                match read.and_then(|recording| {
+                    let estimate = this.bardo.read(cx).import_estimate(&recording)?;
+                    Ok((recording, estimate))
+                }) {
+                    Ok(chosen) => this.recording = Some(chosen),
+                    Err(error) => this.narration_error = Some(error.message()),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Starts importing the chosen recording.
+    fn import_recording(
+        &mut self,
+        consent: BudgetConsent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.import_ask = None;
+        let (Some(id), Some((recording, _))) = (self.project, self.recording.as_ref()) else {
+            return;
+        };
+        if let Some(player) = self.player.as_mut() {
+            player.pause();
+        }
+        match self.bardo.read(cx).import_narration(id, recording, consent) {
+            Ok(_) => {
+                self.recording = None;
+                self.narration_error = None;
+            }
+            Err(NarrationError::OverBudget(estimate)) => self.import_ask = Some(estimate),
+            Err(error) => self.narration_error = Some(error.message()),
+        }
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn cancel_recording(&mut self, cx: &mut Context<Self>) {
+        self.recording = None;
+        self.import_ask = None;
         cx.notify();
     }
 
@@ -1184,6 +1287,20 @@ impl ProjectsScreen {
         } else {
             generate.primary().small()
         };
+        let choosing = self.choosing_recording.is_some() || self.recording.is_some();
+        let import = Button::new("import-narration")
+            .label(tr(bardo, Text::ImportNarration))
+            .outline()
+            .small()
+            .disabled(running || choosing || view.script.is_none())
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.choose_recording(cx)));
+        let chosen = self
+            .recording
+            .as_ref()
+            .filter(|_| self.import_ask.is_none())
+            .map(|(recording, estimate)| {
+                self.render_chosen_recording(recording, estimate, narration.is_some(), cx)
+            });
 
         Some(
             v_flex()
@@ -1227,8 +1344,24 @@ impl ProjectsScreen {
                         .children(view.estimate.as_ref().and_then(|estimate| {
                             estimate_note(bardo, estimate, Text::EstimateCost, cx)
                         }))
-                        .child(h_flex().child(generate)),
+                        .child(h_flex().gap_2().child(generate).child(import)),
                 )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, Text::ImportNarrationHint)),
+                )
+                .when(self.reading_recording, |panel| {
+                    panel.child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(Spinner::new().small())
+                            .child(div().text_sm().child(tr(bardo, Text::RecordingReading))),
+                    )
+                })
+                .children(chosen)
                 .children(self.narration_ask.as_ref().map(|estimate| {
                     budget_question(
                         "narration-budget",
@@ -1242,6 +1375,18 @@ impl ProjectsScreen {
                             this.narration_ask = None;
                             cx.notify();
                         }),
+                    )
+                }))
+                .children(self.import_ask.as_ref().map(|estimate| {
+                    budget_question(
+                        "import-budget",
+                        bardo,
+                        estimate,
+                        cx,
+                        cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.import_recording(BudgetConsent::Confirmed, window, cx)
+                        }),
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.cancel_recording(cx)),
                     )
                 }))
                 .children(record)
@@ -1259,7 +1404,14 @@ impl ProjectsScreen {
                     .gap_2()
                     .items_center()
                     .child(Spinner::new().small())
-                    .child(div().text_sm().child(tr(bardo, Text::NarrationRunning)))
+                    .child(div().text_sm().child(tr(
+                        bardo,
+                        if job.kind() == JobKind::NarrationImport {
+                            Text::NarrationAligning
+                        } else {
+                            Text::NarrationRunning
+                        },
+                    )))
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         SharedString::from(format!("{}%", job.progress().permille() / 10)),
                     ))
@@ -1404,33 +1556,109 @@ impl ProjectsScreen {
                 )
                 .child(div().text_sm().child(SharedString::from(value)))
         };
-        h_flex()
+        let source = &narration.source;
+        let record = h_flex()
             .flex_wrap()
             .gap_x_6()
             .gap_y_2()
             .child(fact(
                 Text::ProvenanceProvider,
                 bardo
-                    .text(Text::ProviderName(narration.voice.provider()))
+                    .text(Text::ProviderName(source.provider()))
                     .into_owned(),
             ))
-            .child(fact(Text::ProvenanceModel, narration.model.clone()))
-            .child(fact(
-                Text::NarrationVoice,
-                narration.voice.name().to_owned(),
-            ))
-            .child(fact(
-                Text::NarrationCost,
-                bardo.text_with(
-                    Text::NarrationCostValue,
-                    &[("n", &narration.billed_characters.to_string())],
-                ),
-            ))
+            .child(fact(Text::ProvenanceModel, source.model().to_owned()));
+        let record = match source {
+            NarrationSource::Generated {
+                voice,
+                billed_characters,
+                ..
+            } => record
+                .child(fact(Text::NarrationVoice, voice.name().to_owned()))
+                .child(fact(
+                    Text::NarrationCost,
+                    bardo.text_with(
+                        Text::NarrationCostValue,
+                        &[("n", &billed_characters.to_string())],
+                    ),
+                )),
+            NarrationSource::Imported { file_name, .. } => record
+                .child(fact(Text::NarrationRecording, file_name.clone()))
+                .child(fact(
+                    Text::NarrationCost,
+                    bardo.text_with(
+                        Text::NarrationAudioValue,
+                        &[("length", &clock(narration.duration))],
+                    ),
+                )),
+        };
+        let made = match source {
+            NarrationSource::Generated { .. } => Text::ProvenanceGenerated,
+            NarrationSource::Imported { .. } => Text::NarrationImported,
+        };
+        record
             .child(fact(Text::NarrationDuration, clock(narration.duration)))
-            .child(fact(
-                Text::ProvenanceGenerated,
-                bardo.time_ago(narration.generated_at),
-            ))
+            .child(fact(made, bardo.time_ago(narration.generated_at)))
+            .into_any_element()
+    }
+
+    /// The recording the user chose: its name and length, what aligning it
+    /// costs, and whether to go ahead.
+    fn render_chosen_recording(
+        &self,
+        recording: &Recording,
+        estimate: &SpendEstimate,
+        replaces: bool,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        v_flex()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(theme.border)
+            .child(div().text_sm().child(SharedString::from(bardo.text_with(
+                Text::RecordingChosen,
+                &[
+                    ("file", &recording.file_name),
+                    ("length", &clock(recording.duration)),
+                ],
+            ))))
+            .when(replaces, |card| {
+                card.child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, Text::RecordingReplaces)),
+                )
+            })
+            .children(estimate_note(bardo, estimate, Text::EstimateCost, cx))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("use-recording")
+                            .primary()
+                            .small()
+                            .label(tr(bardo, Text::UseRecording))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.import_recording(BudgetConsent::Ask, window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("cancel-recording")
+                            .ghost()
+                            .small()
+                            .label(tr(bardo, Text::CancelRecording))
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.cancel_recording(cx)
+                                }),
+                            ),
+                    ),
+            )
             .into_any_element()
     }
 }

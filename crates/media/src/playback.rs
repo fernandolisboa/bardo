@@ -1,6 +1,7 @@
 //! Audio playback on the default output device (rodio). Playback opens
 //! paused at the start; the caller plays, pauses, seeks and reads the
-//! position, which is what drives word highlighting.
+//! position, which is what drives word highlighting. Files are MP3 unless
+//! their name says WAV.
 
 use std::fs::File;
 use std::io::BufReader;
@@ -8,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
+
+use crate::AudioFormat;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlaybackError {
@@ -71,8 +74,13 @@ impl DevicePlayback {
     fn load(&mut self) -> Result<(), PlaybackError> {
         let file =
             File::open(&self.path).map_err(|error| PlaybackError::Unreadable(error.to_string()))?;
-        let decoder = Decoder::new_mp3(BufReader::new(file))
-            .map_err(|error| PlaybackError::Unreadable(error.to_string()))?;
+        let reader = BufReader::new(file);
+        let name = self.path.file_name().and_then(|name| name.to_str());
+        let decoder = match name.and_then(AudioFormat::from_file_name) {
+            Some(AudioFormat::Wav) => Decoder::new_wav(reader),
+            Some(AudioFormat::Mp3) | None => Decoder::new_mp3(reader),
+        }
+        .map_err(|error| PlaybackError::Unreadable(error.to_string()))?;
         self.player.append(decoder);
         Ok(())
     }
@@ -133,6 +141,19 @@ mod tests {
         let channels = decoder.channels().get() as u64;
         let samples = decoder.count() as u64;
         Duration::from_nanos(samples * 1_000_000_000 / (rate * channels))
+    }
+
+    #[test]
+    fn wav_decodes_to_the_length_its_header_says() {
+        let wav = crate::audio::tests::silent_wav(2);
+        let decoder = Decoder::new_wav(Cursor::new(wav)).unwrap();
+        let rate = decoder.sample_rate().get() as u64;
+        let channels = decoder.channels().get() as u64;
+        let samples = decoder.count() as u64;
+        assert_eq!(
+            Duration::from_nanos(samples * 1_000_000_000 / (rate * channels)),
+            Duration::from_secs(2)
+        );
     }
 
     #[test]

@@ -153,6 +153,8 @@ pub enum Meter {
     Characters,
     /// Seconds of video generated.
     VideoSeconds,
+    /// Seconds of audio sent to be timed or transcribed.
+    AudioSeconds,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -160,12 +162,13 @@ pub enum Meter {
 pub struct UnknownMeter(pub String);
 
 impl Meter {
-    pub const ALL: [Meter; 5] = [
+    pub const ALL: [Meter; 6] = [
         Meter::InputTokens,
         Meter::OutputTokens,
         Meter::ImageTokens,
         Meter::Characters,
         Meter::VideoSeconds,
+        Meter::AudioSeconds,
     ];
 
     /// Stable identifier for storage and the rate file. Never change one.
@@ -176,16 +179,19 @@ impl Meter {
             Meter::ImageTokens => "image_tokens",
             Meter::Characters => "characters",
             Meter::VideoSeconds => "video_seconds",
+            Meter::AudioSeconds => "audio_seconds",
         }
     }
 
     /// How many units a price is for, as providers publish them: tokens
-    /// per million, characters per thousand, video per second.
+    /// per million, characters per thousand, video per second, audio per
+    /// hour.
     pub fn units_per_price(self) -> u64 {
         match self {
             Meter::InputTokens | Meter::OutputTokens | Meter::ImageTokens => 1_000_000,
             Meter::Characters => 1_000,
             Meter::VideoSeconds => 1,
+            Meter::AudioSeconds => 3_600,
         }
     }
 }
@@ -209,6 +215,7 @@ pub struct Metered {
     pub image_tokens: u64,
     pub characters: u64,
     pub video_seconds: u64,
+    pub audio_seconds: u64,
 }
 
 impl Metered {
@@ -226,6 +233,13 @@ impl Metered {
         }
     }
 
+    pub fn audio_seconds(audio_seconds: u64) -> Self {
+        Metered {
+            audio_seconds,
+            ..Metered::default()
+        }
+    }
+
     pub fn get(&self, meter: Meter) -> u64 {
         match meter {
             Meter::InputTokens => self.input_tokens,
@@ -233,6 +247,7 @@ impl Metered {
             Meter::ImageTokens => self.image_tokens,
             Meter::Characters => self.characters,
             Meter::VideoSeconds => self.video_seconds,
+            Meter::AudioSeconds => self.audio_seconds,
         }
     }
 
@@ -243,6 +258,7 @@ impl Metered {
             Meter::ImageTokens => self.image_tokens = value,
             Meter::Characters => self.characters = value,
             Meter::VideoSeconds => self.video_seconds = value,
+            Meter::AudioSeconds => self.audio_seconds = value,
         }
     }
 
@@ -463,6 +479,8 @@ pub enum CostPurpose {
     SceneImage,
     /// A video provider animating a scene's image.
     SceneClip,
+    /// A provider timing the words of a narration the user recorded.
+    NarrationAlignment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -470,7 +488,7 @@ pub enum CostPurpose {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 7] = [
+    pub const ALL: [CostPurpose; 8] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -478,6 +496,7 @@ impl CostPurpose {
         CostPurpose::ScenePlan,
         CostPurpose::SceneImage,
         CostPurpose::SceneClip,
+        CostPurpose::NarrationAlignment,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -490,6 +509,7 @@ impl CostPurpose {
             CostPurpose::ScenePlan => "scene_plan",
             CostPurpose::SceneImage => "scene_image",
             CostPurpose::SceneClip => "scene_clip",
+            CostPurpose::NarrationAlignment => "narration_alignment",
         }
     }
 }
@@ -960,6 +980,38 @@ mod tests {
         );
         assert_eq!(Meter::VideoSeconds.code().parse(), Ok(Meter::VideoSeconds));
         assert_eq!("scene_clip".parse(), Ok(CostPurpose::SceneClip));
+    }
+
+    #[test]
+    fn audio_is_priced_per_hour() {
+        let table = RateTable::new(vec![rate(
+            Provider::ElevenLabs,
+            "forced_alignment",
+            Meter::AudioSeconds,
+            "0.22",
+        )]);
+        assert_eq!(
+            table.price(
+                Provider::ElevenLabs,
+                "forced_alignment",
+                &Metered::audio_seconds(1_800)
+            ),
+            Some(dollars("0.11"))
+        );
+        assert_eq!(
+            table.price(
+                Provider::ElevenLabs,
+                "eleven_multilingual_v2",
+                &Metered::audio_seconds(60)
+            ),
+            None,
+            "speech models are not aligners"
+        );
+        assert_eq!(Meter::AudioSeconds.code().parse(), Ok(Meter::AudioSeconds));
+        assert_eq!(
+            "narration_alignment".parse(),
+            Ok(CostPurpose::NarrationAlignment)
+        );
     }
 
     #[test]

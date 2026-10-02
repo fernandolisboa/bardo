@@ -26,6 +26,8 @@ pub struct Sent {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: serde_json::Value,
+    /// The body as sent, for bodies that are not JSON (forms, files).
+    pub raw_body: Vec<u8>,
 }
 
 impl Sent {
@@ -86,6 +88,7 @@ impl Transport for Scripted {
                     })
                 })
                 .unwrap_or_default(),
+            raw_body: request.body.clone().unwrap_or_default(),
         });
         self.answers
             .lock()

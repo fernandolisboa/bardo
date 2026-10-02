@@ -1,7 +1,9 @@
-//! Narration (PRD stories 31-32): the script read aloud with the persona's
-//! voice, saved as an audio asset with the word timings of the text it
-//! read. Word timings come from the provider's character timings, mapped
-//! onto the script's words here; captions and cut snapping build on them.
+//! Narration (PRD stories 31-33): the script read aloud with the persona's
+//! voice, or recorded by the user and imported, saved as an audio asset
+//! with the word timings of the text it read. Word timings come from the
+//! provider's character timings (of its speech, or of its alignment of the
+//! user's recording), mapped onto the script's words here; captions, cut
+//! snapping and scenes build on them the same way for both.
 //! A narration belongs to the text it read: once the script changes, the
 //! narration is stale until it is generated again.
 
@@ -10,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    Alignment, GenerationPresets, JobId, ProfileId, RepositoryError, Script, ScriptText,
+    Alignment, GenerationPresets, JobId, ProfileId, Provider, RepositoryError, Script, ScriptText,
     VideoProjectId, VoiceRef,
 };
 
@@ -297,7 +299,52 @@ fn resync(words: &[String], spoken: &[TimedWord]) -> Option<(usize, usize)> {
     })
 }
 
-/// A generated narration of a video project's script.
+/// Where a narration's audio came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NarrationSource {
+    /// A persona's voice read the script.
+    Generated {
+        /// The voice that read it; the provider is the voice's.
+        voice: VoiceRef,
+        presets: GenerationPresets,
+        /// The model that spoke, as the provider named it.
+        model: String,
+        /// What the provider billed, in its unit (ElevenLabs: characters).
+        billed_characters: u64,
+    },
+    /// The user recorded the script and imported the file; a provider
+    /// timed its words (PRD story 33).
+    Imported {
+        /// The file's name as the user had it.
+        file_name: String,
+        /// The provider that timed the words.
+        aligner: Provider,
+        /// The aligner, as the provider named it.
+        model: String,
+    },
+}
+
+impl NarrationSource {
+    /// The provider that spoke or timed the narration.
+    pub fn provider(&self) -> Provider {
+        match self {
+            NarrationSource::Generated { voice, .. } => voice.provider(),
+            NarrationSource::Imported { aligner, .. } => *aligner,
+        }
+    }
+
+    /// The model that spoke or timed the narration.
+    pub fn model(&self) -> &str {
+        match self {
+            NarrationSource::Generated { model, .. } | NarrationSource::Imported { model, .. } => {
+                model
+            }
+        }
+    }
+}
+
+/// A video project's narration of its script: generated with a persona's
+/// voice, or recorded by the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Narration {
     pub id: NarrationId,
@@ -305,19 +352,16 @@ pub struct Narration {
     pub owner: ProfileId,
     /// The script text as it was read.
     pub text: ScriptText,
-    /// The voice that read it; the provider is the voice's.
-    pub voice: VoiceRef,
-    pub presets: GenerationPresets,
-    /// The model that spoke, as the provider named it.
-    pub model: String,
-    /// What the provider billed, in its unit (ElevenLabs: characters).
-    pub billed_characters: u64,
-    /// The MP3 file's name in the project folder.
+    pub source: NarrationSource,
+    /// The audio file's name in the project folder: MP3, or the WAV the
+    /// user imported.
     pub audio_file: String,
     pub duration: Duration,
     pub words: WordTimings,
+    /// When it was generated or imported.
     pub generated_at: SystemTime,
-    /// The job that generated it, so a resumed job does not pay twice.
+    /// The job that generated or aligned it, so a resumed job does not pay
+    /// twice.
     pub job: Option<JobId>,
 }
 
@@ -572,10 +616,12 @@ mod tests {
             project,
             owner,
             text: script.text().clone(),
-            voice: VoiceRef::elevenlabs("FrS6cKLB1wg4WYgPa9GW", "Wyatt").unwrap(),
-            presets: GenerationPresets::default(),
-            model: "eleven_multilingual_v2".into(),
-            billed_characters: 8,
+            source: NarrationSource::Generated {
+                voice: VoiceRef::elevenlabs("FrS6cKLB1wg4WYgPa9GW", "Wyatt").unwrap(),
+                presets: GenerationPresets::default(),
+                model: "eleven_multilingual_v2".into(),
+                billed_characters: 8,
+            },
             audio_file: "narration.mp3".into(),
             duration: ms(800),
             words: WordTimings::from_alignment("Hi, you.", &aligned("Hi, you.")),
@@ -583,6 +629,8 @@ mod tests {
             job: None,
         };
         assert!(!narration.is_stale(&script));
+        assert_eq!(narration.source.provider(), Provider::ElevenLabs);
+        assert_eq!(narration.source.model(), "eleven_multilingual_v2");
         let words: Vec<_> = narration.words().map(|(word, _)| word).collect();
         assert_eq!(words, ["Hi,", "you."]);
 

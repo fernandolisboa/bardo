@@ -94,8 +94,8 @@ pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
 };
 pub use narration::{
-    InvalidWordTimings, Narration, NarrationId, NarrationRepository, WordTiming, WordTimings,
-    spoken_words,
+    InvalidWordTimings, Narration, NarrationId, NarrationRepository, NarrationSource, WordTiming,
+    WordTimings, spoken_words,
 };
 pub use network::{
     AspectRatio, Bitrate, Loudness, MaxDuration, Network, OutOfRange, PresetOverrides,
@@ -131,7 +131,8 @@ pub use script::{
     ScriptText,
 };
 pub use speech::{
-    Alignment, CharTiming, Speech, SpeechRequest, SpeechSynthesizer, split_for_speech,
+    AlignedSpeech, Alignment, AlignmentRequest, CharTiming, Speech, SpeechAligner, SpeechRequest,
+    SpeechSynthesizer, split_for_speech,
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,

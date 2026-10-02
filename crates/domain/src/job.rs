@@ -63,6 +63,9 @@ pub enum JobKind {
     /// Reads a video project's script aloud with the persona's voice, one
     /// checkpoint per part of the text.
     Narration,
+    /// Copies a recording the user made of a video project's script into
+    /// the project folder and has its words timed against the script.
+    NarrationImport,
     /// Has Claude split a video project's narration into scenes and write
     /// an image prompt for each.
     ScenePlan,
@@ -76,13 +79,14 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 9] = [
+    pub const ALL: [JobKind; 10] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
         JobKind::ThemeRanking,
         JobKind::ScriptGeneration,
         JobKind::Narration,
+        JobKind::NarrationImport,
         JobKind::ScenePlan,
         JobKind::SceneImages,
         JobKind::SceneClips,
@@ -97,6 +101,7 @@ impl JobKind {
             JobKind::ThemeRanking => "theme_ranking",
             JobKind::ScriptGeneration => "script_generation",
             JobKind::Narration => "narration",
+            JobKind::NarrationImport => "narration_import",
             JobKind::ScenePlan => "scene_plan",
             JobKind::SceneImages => "scene_images",
             JobKind::SceneClips => "scene_clips",

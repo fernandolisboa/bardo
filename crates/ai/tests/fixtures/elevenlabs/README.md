@@ -1,13 +1,16 @@
 # ElevenLabs fixtures
 
-Raw HTTP responses (status line, headers, body) that the voice list and
-narration tests replay instead of calling `GET /v2/voices` and
-`POST /v1/text-to-speech/{voice_id}/with-timestamps`. Noise headers
-(cookies, dates, trace ids) were dropped.
+Raw HTTP responses (status line, headers, body) that the voice list,
+narration and alignment tests replay instead of calling `GET /v2/voices`,
+`POST /v1/text-to-speech/{voice_id}/with-timestamps` and
+`POST /v1/forced-alignment`. Noise headers (cookies, dates, trace ids)
+were dropped.
 
 Recorded on 2026-10-02 from the live API with an invalid key:
 
-- `voices-rejected.http`, `tts-rejected.http`.
+- `voices-rejected.http`, `tts-rejected.http`, `alignment-rejected.http`.
+- `alignment-missing-file.http`: the validation error of a form without
+  its file (422, `detail` as a list).
 
 Written from the documented response shape, because recording them needs a
 real key (re-record when the voice picker or narration misbehaves with a
@@ -24,7 +27,12 @@ real key):
 - `tts-quota-exceeded.http`, `tts-rate-limited.http`,
   `tts-voice-not-found.http`.
 
-Synthetic, for edge cases: `voices-not-json.http`,
+- `alignment-hello.http`: "Hi, you. It is 1969." aligned, with character
+  and word timings and a `loss` score; Bardo reads only the characters.
+- `alignment-rate-limited.http`.
+
+Synthetic, for edge cases: `alignment-no-timings.http` (an empty
+character list), `voices-not-json.http`,
 `tts-normalized-only.http` (no timings of the text as sent, no cost
 header), `tts-no-audio.http`, `tts-misaligned.http` (timing lists of
 different lengths).

@@ -13,7 +13,7 @@ pub mod market;
 pub mod retry;
 
 pub use claude::ClaudeTextGenerator;
-pub use elevenlabs::{ElevenLabsSpeech, ElevenLabsVoices};
+pub use elevenlabs::{ElevenLabsAlignment, ElevenLabsSpeech, ElevenLabsVoices};
 pub use gemini::GeminiImages;
 pub use google_clips::GoogleClips;
 pub use higgsfield::HiggsfieldClips;

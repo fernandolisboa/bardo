@@ -945,6 +945,7 @@ mod tests {
                 decisions: Arc::clone(&self.decisions) as _,
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
+                aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
                 images: Arc::new(crate::testing::FakeImages::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),

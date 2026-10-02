@@ -7,6 +7,7 @@ mod costs;
 pub mod i18n;
 mod jobs;
 pub mod logging;
+mod narration_import;
 mod narrations;
 mod network_accounts;
 mod persona_package;
@@ -26,8 +27,9 @@ use bardo_domain::{
     ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ImageGenerator,
     JobRepository, KeyChecker, MarketData, NarrationRepository, NetworkAccountRepository,
     NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
-    RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechSynthesizer,
-    TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
+    RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
+    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
+    VoiceLibrary,
 };
 use bardo_media::AudioOutput;
 use bardo_storage::{Database, MemoryProjectFiles};
@@ -41,6 +43,7 @@ pub use costs::{
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use network_accounts::NetworkAccountError;
 pub use persona_package::PackageError;
@@ -55,6 +58,7 @@ pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 use crate::clips::ClipHandler;
 use crate::costs::CostBook;
 use crate::jobs::JobQueue;
+use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
 use crate::research::NicheResearchHandler;
@@ -157,6 +161,9 @@ pub struct Providers {
     pub voices: Arc<dyn VoiceLibrary>,
     /// Narration (ElevenLabs).
     pub speech: Arc<dyn SpeechSynthesizer>,
+    /// Word timings of narration the user recorded (ElevenLabs forced
+    /// alignment).
+    pub aligner: Arc<dyn SpeechAligner>,
     /// Scene images (Nano Banana, through the Gemini API).
     pub images: Arc<dyn ImageGenerator>,
     /// Scene clips, one adapter per video provider (Higgsfield, then Google
@@ -176,6 +183,7 @@ impl Providers {
             decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
+            aligner: Arc::new(bardo_ai::ElevenLabsAlignment::new()),
             images: Arc::new(bardo_ai::GeminiImages::new()),
             clips: vec![
                 Arc::new(bardo_ai::HiggsfieldClips::new()),
@@ -300,6 +308,14 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let import_handler = NarrationImportHandler {
+            owner: profile.id,
+            narrations: Arc::clone(&narrations),
+            files: Arc::clone(&files),
+            aligner: Arc::clone(&providers.aligner),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let scene_handler = SceneHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
@@ -328,6 +344,7 @@ impl Bardo {
                 theme_handler,
                 script_handler,
                 narration_handler,
+                import_handler,
                 scene_handler,
                 clip_handler,
             ),
@@ -1051,6 +1068,7 @@ pub(crate) mod testing {
             decisions: Arc::new(FakeDecisionEngine::default()),
             voices: Arc::new(FakeVoiceLibrary::default()),
             speech: Arc::new(FakeSpeech::default()),
+            aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
             images: Arc::new(FakeImages::default()),
             clips: vec![Arc::new(FakeClips::default())],
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
