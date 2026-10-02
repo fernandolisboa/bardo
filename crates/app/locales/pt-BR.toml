@@ -94,6 +94,7 @@ retry = "Tentar de novo"
 
 [job.kind]
 countdown = "Contagem de teste"
+niche_research = "Pesquisa de nicho"
 
 [job.state]
 queued = "Na fila"
@@ -105,6 +106,12 @@ done = "Concluída"
 [job.failure]
 simulated = "A tarefa de teste falhou de propósito."
 unexpected = "Algo deu errado dentro do Bardo."
+missing_key = "Não há chave salva para este provedor. Adicione em Configurações e tente de novo."
+key_rejected = "O provedor recusou a chave salva. Confira em Configurações e tente de novo."
+not_allowed = "A chave não tem o acesso necessário, como uma API não ativada no projeto."
+limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube renovam todo dia à meia-noite do horário do Pacífico."
+provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
+unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -172,3 +179,53 @@ too_short = "Isto é curto demais para ser uma chave de API."
 too_long = "Use no máximo 512 caracteres."
 invalid_characters = "Chaves não têm espaços, quebras de linha nem acentos."
 not_id_and_secret = "Cole o ID da chave e o segredo unidos por dois-pontos: KEY_ID:KEY_SECRET."
+
+[research]
+title = "Pesquisa"
+no_channels = "Crie um canal primeiro. A pesquisa usa o país-alvo e o idioma do conteúdo dele."
+channel = "Canal"
+seeds = "Nichos ou palavras-chave"
+seeds_placeholder = "história espacial\nmistérios da guerra fria\ncriaturas do fundo do mar"
+seeds_hint = "Um por linha, até 20. Os resultados ficam guardados por 7 dias por nicho, país e idioma."
+run = "Pesquisar"
+refresh = "Atualizar tudo"
+refresh_cost = "Atualizar tudo ({units} unidades)"
+cost = "Usa cerca de {units} unidades da sua cota diária do YouTube (10.000 por padrão)."
+cost_none = "Todos os nichos estão em cache: pesquisar não usa cota."
+running = "Pesquisando…"
+stopped = "A última pesquisa parou:"
+results = "Resultados"
+scores_hint = "A concorrência sobe com o volume de uploads, o tamanho dos canais e poucas views por vídeo. A tendência segue as views por dia dos uploads recentes. A oportunidade é a média da tendência com o espaço que a concorrência deixa."
+opportunity = "Oportunidade"
+competition = "Concorrência"
+trend = "Tendência"
+uploads = "Uploads, 30 dias"
+median_views = "Views (mediana)"
+views_per_day = "Views por dia"
+median_subscribers = "Inscritos (mediana)"
+small_channels = "Canais pequenos"
+sample = "De {videos} vídeos de {channels} canais"
+fetched = "Buscado"
+not_fetched = "Ainda não pesquisado."
+no_uploads = "Nenhum upload nos últimos 30 dias para este mercado."
+stale = "Mais de 7 dias: atualize para ver números atuais."
+
+[research.error]
+missing_key = "Salve uma chave da YouTube Data API em Configurações para pesquisar nichos."
+not_started = "Não foi possível iniciar a pesquisa. Tente de novo."
+not_loaded = "Não foi possível carregar os resultados da pesquisa."
+seed_required = "Digite pelo menos um nicho ou palavra-chave."
+too_many_seeds = "Use no máximo 20 nichos por pesquisa."
+seed_too_long = "Use no máximo 100 caracteres por nicho."
+
+[age]
+just_now = "agora há pouco"
+minutes = "há {n} min"
+hours = "há {n} h"
+days = "há {n} dias"
+
+[number]
+thousands = "{n} mil"
+millions = "{n} mi"
+billions = "{n} bi"
+decimal_separator = ","

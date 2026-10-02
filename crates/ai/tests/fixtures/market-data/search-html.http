@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: text/html
+
+<html><body>Access to this site is restricted by your network administrator.</body></html>

@@ -9,6 +9,7 @@ mod profile;
 mod provider_key;
 mod redaction;
 mod repository;
+mod research;
 
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
@@ -18,11 +19,17 @@ pub use job::{
     JobRecord, JobRepository, JobState, Progress, RetryPolicy, UnknownJobFailureKind,
     UnknownJobKind, UnknownJobState,
 };
-pub use market::{ContentLanguage, Country, UnsupportedContentLanguage, UnsupportedCountry};
+pub use market::{
+    ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
+};
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{
-    ApiKey, ApiKeyError, KeyCheck, KeyCheckOutcome, KeyChecker, Provider, SecretStore,
-    SecretStoreError, UnknownProvider,
+    ApiKey, ApiKeyError, KeyCheck, KeyCheckOutcome, KeyChecker, Provider, ProviderFailure,
+    ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,
 };
 pub use redaction::Redactor;
 pub use repository::RepositoryError;
+pub use research::{
+    MarketData, MarketSample, Niche, NicheResearch, NicheResearchRepository, NicheScores,
+    NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,
+};

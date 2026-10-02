@@ -13,12 +13,16 @@ pub use countdown::TestJob;
 pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
+use crate::research::NicheResearchHandler;
 use crate::{AppError, Bardo, Text};
 
 /// The handler of every job kind Bardo ships.
-pub(crate) fn built_in_handlers() -> HashMap<JobKind, Arc<dyn JobHandler>> {
+pub(crate) fn built_in_handlers(
+    research: NicheResearchHandler,
+) -> HashMap<JobKind, Arc<dyn JobHandler>> {
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
     handlers.insert(JobKind::Countdown, Arc::new(countdown::Countdown));
+    handlers.insert(JobKind::NicheResearch, Arc::new(research));
     handlers
 }
 
@@ -622,7 +626,8 @@ mod tests {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
-            secrets: Box::new(MemorySecretStore::default()),
+            research: Arc::clone(db) as _,
+            secrets: Arc::new(MemorySecretStore::default()),
         };
         Bardo::start_with(
             repositories,

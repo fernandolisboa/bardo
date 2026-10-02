@@ -103,7 +103,8 @@ mod tests {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as _,
-            secrets: Box::new(MemorySecretStore::default()),
+            research: Arc::clone(db) as _,
+            secrets: Arc::new(MemorySecretStore::default()),
         };
         Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap()
     }
@@ -263,8 +264,9 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Broken),
-            jobs: db,
-            secrets: Box::new(MemorySecretStore::default()),
+            jobs: Arc::clone(&db) as _,
+            research: db,
+            secrets: Arc::new(MemorySecretStore::default()),
         };
         let app = Bardo::start(repositories, testing::providers(), None).unwrap();
         let error = app.create_channel(draft("Space Archives")).unwrap_err();

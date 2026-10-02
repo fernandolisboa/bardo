@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=UTF-8
+
+{
+  "pageInfo": {
+    "totalResults": 0
+  },
+  "items": []
+}

@@ -1,12 +1,10 @@
-use std::time::{Duration, SystemTime};
-
 use bardo_domain::{
     Job, JobFailure, JobId, JobRecord, JobRepository, ProfileId, Progress, RepositoryError,
 };
 use rusqlite::{Row, params};
 use uuid::Uuid;
 
-use crate::{Database, boxed};
+use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 /// Column values of a job row, before parsing.
 struct JobRow {
@@ -68,17 +66,6 @@ impl JobRow {
     }
 }
 
-fn to_unix_millis(time: SystemTime) -> i64 {
-    match time.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
-        Err(_) => 0,
-    }
-}
-
-fn from_unix_millis(millis: i64) -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_millis(u64::try_from(millis).unwrap_or(0))
-}
-
 impl JobRepository for Database {
     fn list(&self, owner: ProfileId) -> Result<Vec<Job>, RepositoryError> {
         let rows = self
@@ -137,6 +124,8 @@ impl JobRepository for Database {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, SystemTime};
+
     use bardo_domain::{
         JobFailureKind, JobKind, JobState, ProfileRepository, RetryPolicy, UiLanguage, UserProfile,
     };

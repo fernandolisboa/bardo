@@ -5,10 +5,12 @@ mod channel;
 mod job;
 mod migrations;
 mod profile;
+mod research;
 mod secrets;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, SystemTime};
 
 use bardo_domain::RepositoryError;
 use rusqlite::Connection;
@@ -73,6 +75,18 @@ impl Database {
 /// Wraps an adapter error for the domain's repository ports.
 pub(crate) fn boxed(error: impl std::error::Error + Send + Sync + 'static) -> RepositoryError {
     RepositoryError(Box::new(error))
+}
+
+/// Times are stored as Unix milliseconds; times before 1970 store as 0.
+pub(crate) fn to_unix_millis(time: SystemTime) -> i64 {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
+        Err(_) => 0,
+    }
+}
+
+pub(crate) fn from_unix_millis(millis: i64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(u64::try_from(millis).unwrap_or(0))
 }
 
 /// `%APPDATA%\Bardo\bardo.db` on Windows (the platform's per-user data

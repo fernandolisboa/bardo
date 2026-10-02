@@ -137,6 +137,20 @@ impl FromStr for Country {
     }
 }
 
+/// Where a channel's videos are aimed: the country and the content language.
+/// Market data is fetched and cached per market.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Market {
+    pub country: Country,
+    pub language: ContentLanguage,
+}
+
+impl Market {
+    pub fn new(country: Country, language: ContentLanguage) -> Self {
+        Self { country, language }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;

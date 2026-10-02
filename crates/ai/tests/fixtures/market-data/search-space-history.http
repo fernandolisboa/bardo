@@ -1,0 +1,30 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=UTF-8
+
+{
+  "pageInfo": {
+    "totalResults": 48213
+  },
+  "items": [
+    {
+      "id": { "videoId": "Qm4f1rT8vXa" },
+      "snippet": { "publishedAt": "2026-09-27T14:00:08Z", "channelId": "UCa1a1a1a1a1a1a1a1a1a1a1" }
+    },
+    {
+      "id": { "videoId": "Lp2c9Wk3sYb" },
+      "snippet": { "publishedAt": "2026-09-21T18:30:00Z", "channelId": "UCb2b2b2b2b2b2b2b2b2b2b2" }
+    },
+    {
+      "id": { "videoId": "Zt7h3Nq5dRc" },
+      "snippet": { "publishedAt": "2026-09-30T09:15:42Z", "channelId": "UCa1a1a1a1a1a1a1a1a1a1a1" }
+    },
+    {
+      "id": { "videoId": "Hy6j8Pm1gFd" },
+      "snippet": { "publishedAt": "2026-09-11T22:04:19Z", "channelId": "UCc3c3c3c3c3c3c3c3c3c3c3" }
+    },
+    {
+      "id": { "videoId": "Wv5k2Bx9nTe" },
+      "snippet": { "publishedAt": "2026-09-05T07:00:00Z", "channelId": "UCd4d4d4d4d4d4d4d4d4d4d4" }
+    }
+  ]
+}

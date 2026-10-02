@@ -1,0 +1,11 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=UTF-8
+
+{
+  "items": [
+    { "id": "UCa1a1a1a1a1a1a1a1a1a1a1", "statistics": { "subscriberCount": "1840000", "hiddenSubscriberCount": false } },
+    { "id": "UCb2b2b2b2b2b2b2b2b2b2b2", "statistics": { "subscriberCount": "6300", "hiddenSubscriberCount": false } },
+    { "id": "UCc3c3c3c3c3c3c3c3c3c3c3", "statistics": { "hiddenSubscriberCount": true } },
+    { "id": "UCd4d4d4d4d4d4d4d4d4d4d4", "statistics": { "subscriberCount": "92000", "hiddenSubscriberCount": false } }
+  ]
+}
