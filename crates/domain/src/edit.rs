@@ -270,6 +270,9 @@ pub enum EditError {
     WrongTrack,
     #[error("the item overlaps another")]
     Overlaps,
+    /// Media shorter than a frame has nothing to place.
+    #[error("the media is shorter than a frame")]
+    TooShort,
     #[error("the items are not two halves of one cut")]
     CannotJoin,
     /// The item is already there, or cannot go further that way.
@@ -290,13 +293,8 @@ impl Timeline {
     }
 
     /// The items of an audio track; `None` for the others.
-    fn audio_track(&self, track: Track) -> Option<&Vec<AudioItem>> {
-        match track {
-            Track::Narration => Some(&self.narration),
-            Track::Music => Some(&self.music),
-            Track::Sfx => Some(&self.sfx),
-            Track::Video | Track::Captions => None,
-        }
+    fn audio_track(&self, track: Track) -> Option<&[AudioItem]> {
+        Some(self.audio(track.lane()?))
     }
 
     fn audio_track_mut(&mut self, track: Track) -> Option<&mut Vec<AudioItem>> {
@@ -309,7 +307,7 @@ impl Timeline {
     }
 
     /// The audio items of `track`, or `WrongTrack`.
-    fn audio_items(&self, track: Track) -> Result<&Vec<AudioItem>, EditError> {
+    fn audio_items(&self, track: Track) -> Result<&[AudioItem], EditError> {
         self.audio_track(track).ok_or(EditError::WrongTrack)
     }
 
@@ -424,29 +422,39 @@ impl Timeline {
         Ok((Self::audio_floor(items, item.index), latest))
     }
 
-    /// The edit that places `asset` on `track` at `at` (a frame boundary):
-    /// footage goes whole into the video track at the cut nearest `at`;
-    /// audio starts at `at`, or where the item playing there ends, and
-    /// plays whole or until the next item on its track. Refused for a
-    /// track of another kind (`WrongTrack`) or where not a frame of it
+    /// The edit that places `asset` on `track` at `at` (a frame boundary),
+    /// and where the new item goes: footage goes whole into the video
+    /// track at the cut nearest `at`; audio starts at `at`, or where the
+    /// item playing there ends, and plays whole or until the next item on
+    /// its track. Refused for a track of another kind (`WrongTrack`), for
+    /// media shorter than a frame (`TooShort`) or where not a frame of it
     /// fits (`Overlaps`).
-    pub fn place(&self, asset: &MediaAsset, track: Track, at: Duration) -> Result<Edit, EditError> {
+    pub fn place(
+        &self,
+        asset: &MediaAsset,
+        track: Track,
+        at: Duration,
+    ) -> Result<(Edit, ItemRef), EditError> {
         if !asset.fits(track) {
             return Err(EditError::WrongTrack);
         }
         if track == Track::Video {
-            let item = VideoItem::footage(asset).ok_or(EditError::OutsideItem)?;
+            let item = VideoItem::footage(asset).ok_or(EditError::TooShort)?;
             // Before the clip whose middle is past `at`.
             let index = self
                 .video
                 .iter()
                 .position(|clip| at < clip.at + clip.duration / 2)
                 .unwrap_or(self.video.len());
-            return Ok(Edit::Insert {
+            let edit = Edit::Insert {
                 track,
                 index,
                 item: Item::Video(item),
-            });
+            };
+            return Ok((edit, ItemRef { track, index }));
+        }
+        if asset.duration < min_length() {
+            return Err(EditError::TooShort);
         }
         let items = self.audio_items(track)?;
         let at = items
@@ -461,7 +469,7 @@ impl Timeline {
         if duration < min_length() {
             return Err(EditError::Overlaps);
         }
-        Ok(Edit::Insert {
+        let edit = Edit::Insert {
             track,
             index,
             item: Item::Audio(AudioItem {
@@ -473,7 +481,8 @@ impl Timeline {
                 fade_in: Duration::ZERO,
                 fade_out: Duration::ZERO,
             }),
-        })
+        };
+        Ok((edit, ItemRef { track, index }))
     }
 
     /// Makes `edit` and returns the edit that undoes it. On error the
@@ -562,7 +571,7 @@ impl Timeline {
             Track::Video => {
                 let (first, second) = (&self.video[index], &self.video[index + 1]);
                 // A framing set on one half alone would be lost.
-                if first.scene != second.scene
+                if first.picture != second.picture
                     || first.source != second.source
                     || first.framing != second.framing
                     || second.start != first.start + first.duration
@@ -1446,7 +1455,7 @@ mod tests {
     #[test]
     fn reordering_moves_a_clip_and_the_others_make_room() {
         let after = round_trip(&timeline(), Edit::Reorder { from: 0, to: 2 });
-        let scenes: Vec<usize> = after.video().iter().filter_map(|item| item.scene).collect();
+        let scenes: Vec<usize> = after.video().iter().filter_map(VideoItem::scene).collect();
         assert_eq!(scenes, vec![1, 2, 0]);
         assert_eq!(
             spans(&after, Track::Video),
@@ -1457,7 +1466,7 @@ mod tests {
             ]
         );
         let after = round_trip(&timeline(), Edit::Reorder { from: 2, to: 0 });
-        let scenes: Vec<usize> = after.video().iter().filter_map(|item| item.scene).collect();
+        let scenes: Vec<usize> = after.video().iter().filter_map(VideoItem::scene).collect();
         assert_eq!(scenes, vec![2, 0, 1]);
         assert_unchanged(Edit::Reorder { from: 1, to: 1 }, EditError::NoChange);
         assert_unchanged(Edit::Reorder { from: 0, to: 3 }, EditError::NoSuchItem);
@@ -2172,7 +2181,8 @@ mod tests {
 
     /// The timeline with `asset` placed on `track` at `at`.
     fn placed(timeline: &Timeline, asset: &MediaAsset, track: Track, at: u64) -> Timeline {
-        round_trip(timeline, timeline.place(asset, track, ms(at)).unwrap())
+        let (edit, _) = timeline.place(asset, track, ms(at)).unwrap();
+        round_trip(timeline, edit)
     }
 
     #[test]
@@ -2239,7 +2249,7 @@ mod tests {
         let after = placed(&timeline(), &footage, Track::Video, 1_500);
         let video = after.video();
         assert_eq!(video.len(), 4);
-        assert_eq!(video[1].scene, None);
+        assert_eq!(video[1].scene(), None);
         assert_eq!(
             video[1].source,
             VideoSource::Clip {
@@ -2256,12 +2266,17 @@ mod tests {
         assert_eq!(video[2].at, ms(1_000) + frame_time(60));
         // Past the middle of the last clip: at the end.
         let at_end = placed(&timeline(), &footage, Track::Video, 3_600);
-        assert_eq!(at_end.video()[3].scene, None);
+        assert_eq!(at_end.video()[3].scene(), None);
         // Shorter than a frame: nothing to place.
         let blink = asset(MediaKind::Video, "blink.mp4", 20);
         assert_eq!(
             timeline().place(&blink, Track::Video, ms(0)),
-            Err(EditError::OutsideItem)
+            Err(EditError::TooShort)
+        );
+        let click = asset(MediaKind::Audio, "click.wav", 20);
+        assert_eq!(
+            timeline().place(&click, Track::Sfx, ms(0)),
+            Err(EditError::TooShort)
         );
     }
 

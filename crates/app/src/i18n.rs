@@ -739,6 +739,7 @@ pub enum Text {
     EditorFramingSource,
     EditorMediaImport,
     EditorMediaImportHint,
+    EditorMediaImportingOne,
     /// Placeholder: `{count}`.
     EditorMediaImporting,
     EditorMediaEmpty,
@@ -1542,6 +1543,7 @@ impl Text {
             Text::EditorFramingSource => "editor.framing.source",
             Text::EditorMediaImport => "editor.media.import",
             Text::EditorMediaImportHint => "editor.media.import_hint",
+            Text::EditorMediaImportingOne => "editor.media.importing_one",
             Text::EditorMediaImporting => "editor.media.importing",
             Text::EditorMediaEmpty => "editor.media.empty",
             Text::EditorMediaAddMusic => "editor.media.add_music",
@@ -2376,6 +2378,7 @@ mod tests {
             Text::EditorFramingSource,
             Text::EditorMediaImport,
             Text::EditorMediaImportHint,
+            Text::EditorMediaImportingOne,
             Text::EditorMediaImporting,
             Text::EditorMediaEmpty,
             Text::EditorMediaAddMusic,

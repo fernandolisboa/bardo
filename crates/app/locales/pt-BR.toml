@@ -974,6 +974,7 @@ caption_text = "A legenda precisa de texto, com até 200 caracteres."
 [editor.media]
 import = "Importar arquivos…"
 import_hint = "Músicas, efeitos sonoros e vídeos. O Bardo copia cada arquivo para a pasta do projeto e deixa o seu como está."
+importing_one = "Importando 1 arquivo…"
 importing = "Importando {count} arquivos…"
 empty = "Ainda não há mídia. Importe músicas, efeitos sonoros ou vídeos para colocá-los na linha do tempo."
 add_music = "+ Música"

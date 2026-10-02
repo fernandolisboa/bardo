@@ -110,9 +110,8 @@ impl VideoSource {
 /// One stretch of the video track.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoItem {
-    /// The scene it shows, by index in the scene plan; `None` for imported
-    /// footage.
-    pub scene: Option<usize>,
+    /// The scene or footage it shows.
+    pub picture: Picture,
     pub source: VideoSource,
     /// Where in the clip it starts. A still has no time of its own: its
     /// start only moves on a split, so the pieces of a still that gets
@@ -128,6 +127,14 @@ pub struct VideoItem {
 impl VideoItem {
     pub fn end(&self) -> Duration {
         self.at + self.duration
+    }
+
+    /// The scene it shows, by index in the scene plan; `None` for footage.
+    pub fn scene(&self) -> Option<usize> {
+        match self.picture {
+            Picture::Scene(scene) => Some(scene),
+            Picture::Footage(_) => None,
+        }
     }
 
     /// How its picture fills a frame of `aspect`: scene pictures are 16:9,
@@ -161,7 +168,7 @@ impl VideoItem {
     pub fn footage(asset: &MediaAsset) -> Option<VideoItem> {
         let duration = frame_time(frame_at(asset.duration));
         (asset.kind == MediaKind::Video && duration >= min_length()).then(|| VideoItem {
-            scene: None,
+            picture: Picture::Footage(asset.file.clone()),
             source: VideoSource::Clip {
                 file: asset.file.clone(),
                 length: asset.duration,
@@ -283,7 +290,7 @@ impl Timeline {
                     .map_or(end_frame, |&(_, next)| next);
                 let at = frame_time(start);
                 VideoItem {
-                    scene: Some(index),
+                    picture: Picture::Scene(index),
                     source: VideoSource::of(&plan.scenes()[index]),
                     start: Duration::ZERO,
                     at,
@@ -366,26 +373,21 @@ impl Timeline {
             .video
             .iter()
             .map(|item| {
-                let (scene, source) = match &item.picture {
-                    SavedPicture::Scene(scene) => (
-                        Some(*scene),
-                        plan.scenes()
-                            .get(*scene)
-                            .map_or(VideoSource::Missing, VideoSource::of),
-                    ),
-                    SavedPicture::Footage(file) => {
+                let source = match &item.picture {
+                    Picture::Scene(scene) => plan
+                        .scenes()
+                        .get(*scene)
+                        .map_or(VideoSource::Missing, VideoSource::of),
+                    Picture::Footage(file) => {
                         let footage = asset(file, MediaKind::Video)?;
-                        (
-                            None,
-                            VideoSource::Clip {
-                                file: footage.file.clone(),
-                                length: footage.duration,
-                            },
-                        )
+                        VideoSource::Clip {
+                            file: footage.file.clone(),
+                            length: footage.duration,
+                        }
                     }
                 };
                 Some(VideoItem {
-                    scene,
+                    picture: item.picture.clone(),
                     source,
                     start: item.start,
                     at: Duration::ZERO,
@@ -408,8 +410,8 @@ impl Timeline {
         let mut timeline = Timeline {
             video,
             narration,
-            music: placed(&saved.music)?,
-            sfx: placed(&saved.sfx)?,
+            music: placed(&saved.music_items)?,
+            sfx: placed(&saved.sfx_items)?,
             mix: saved.mix,
             captions,
             aspect: saved.aspect,
@@ -436,19 +438,15 @@ impl Timeline {
                 .video
                 .iter()
                 .map(|item| SavedVideoItem {
-                    picture: match (item.scene, item.source.file()) {
-                        (None, Some(file)) => SavedPicture::Footage(file.to_owned()),
-                        // Footage always has its file.
-                        (scene, _) => SavedPicture::Scene(scene.unwrap_or_default()),
-                    },
+                    picture: item.picture.clone(),
                     start: item.start,
                     duration: item.duration,
                     framing: item.framing,
                 })
                 .collect(),
             narration_items: self.narration.iter().map(SavedAudioItem::of).collect(),
-            music: self.music.iter().map(SavedAudioItem::of).collect(),
-            sfx: self.sfx.iter().map(SavedAudioItem::of).collect(),
+            music_items: self.music.iter().map(SavedAudioItem::of).collect(),
+            sfx_items: self.sfx.iter().map(SavedAudioItem::of).collect(),
             mix: self.mix,
             captions: Some(SavedCaptions {
                 lines: self.captions.lines.clone(),
@@ -724,9 +722,9 @@ pub fn snap(time: Duration, targets: &[Duration], within: Duration) -> Option<Du
         .copied()
 }
 
-/// What a saved video item shows.
+/// What a video item shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SavedPicture {
+pub enum Picture {
     /// A scene of the plan, by index: not its file, so a scene's new image
     /// takes its place in the cut.
     Scene(usize),
@@ -737,7 +735,7 @@ pub enum SavedPicture {
 /// A video item as saved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedVideoItem {
-    pub picture: SavedPicture,
+    pub picture: Picture,
     pub start: Duration,
     pub duration: Duration,
     pub framing: Framing,
@@ -793,8 +791,8 @@ pub struct SavedTimeline {
     /// The narration track (A1), in order.
     pub narration_items: Vec<SavedAudioItem>,
     /// The music (A2) and SFX (A3) tracks, in order.
-    pub music: Vec<SavedAudioItem>,
-    pub sfx: Vec<SavedAudioItem>,
+    pub music_items: Vec<SavedAudioItem>,
+    pub sfx_items: Vec<SavedAudioItem>,
     pub mix: Mix,
     /// `None` for a cut saved before captions existed.
     pub captions: Option<SavedCaptions>,
@@ -950,7 +948,7 @@ pub(crate) mod tests {
 
         let video = timeline.video();
         assert_eq!(video.len(), 2);
-        assert_eq!(video[0].scene, Some(0));
+        assert_eq!(video[0].scene(), Some(0));
         assert_eq!(video[0].source, VideoSource::Still("scene-a.png".into()));
         assert_eq!((video[0].at, video[0].duration), (ms(0), ms(2_000)));
         assert_eq!(video[1].at, ms(2_000));
@@ -1040,7 +1038,7 @@ pub(crate) mod tests {
         let shown: Vec<usize> = timeline
             .video()
             .iter()
-            .filter_map(|item| item.scene)
+            .filter_map(VideoItem::scene)
             .collect();
         assert_eq!(shown, vec![0, 2]);
         assert_eq!(timeline.video()[1].at, ms(1_000));
@@ -1176,7 +1174,7 @@ pub(crate) mod tests {
         timeline.narration[0].duration = ms(3_900);
 
         let saved = saved(&timeline, &plan, &narration);
-        assert_eq!(saved.video[0].picture, SavedPicture::Scene(1));
+        assert_eq!(saved.video[0].picture, Picture::Scene(1));
         assert_eq!(
             Timeline::restore(&saved, &plan, &narration, &[]),
             Some(timeline.clone())
@@ -1201,7 +1199,7 @@ pub(crate) mod tests {
         );
 
         let mut short = saved.clone();
-        short.video[1].picture = SavedPicture::Scene(7);
+        short.video[1].picture = Picture::Scene(7);
         let restored = Timeline::restore(&short, &plan, &narration, &[]).unwrap();
         assert_eq!(restored.video()[1].source, VideoSource::Missing);
     }
@@ -1616,11 +1614,11 @@ pub(crate) mod tests {
             (&boom, crate::Track::Sfx, 1_000),
             (&footage, crate::Track::Video, 1_900),
         ] {
-            let edit = timeline.place(asset, track, ms(at)).unwrap();
+            let (edit, _) = timeline.place(asset, track, ms(at)).unwrap();
             timeline.apply(&edit).unwrap();
         }
         assert_eq!(timeline.music()[0].duration, ms(30_000));
-        assert_eq!(timeline.video()[1].scene, None);
+        assert_eq!(timeline.video()[1].scene(), None);
         assert_eq!(
             timeline.files(),
             [
@@ -1637,7 +1635,7 @@ pub(crate) mod tests {
         let saved = saved(&timeline, &plan, &narration);
         assert_eq!(
             saved.video[1].picture,
-            SavedPicture::Footage("media-3.mov".into())
+            Picture::Footage("media-3.mov".into())
         );
         let media = [music.clone(), boom.clone(), footage.clone()];
         assert_eq!(

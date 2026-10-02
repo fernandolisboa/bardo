@@ -168,8 +168,8 @@ pub use theme::{
     rank_themes,
 };
 pub use timeline::{
-    AudioItem, CaptionSpan, FPS, SavedAudioItem, SavedPicture, SavedTimeline, SavedVideoItem,
-    Timeline, TimelineRepository, VideoItem, VideoSource, frame_at, frame_time, min_length,
-    nearest_frame, snap, timecode,
+    AudioItem, CaptionSpan, FPS, Picture, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,
+    TimelineRepository, VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame,
+    snap, timecode,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

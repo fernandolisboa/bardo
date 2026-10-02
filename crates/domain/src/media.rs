@@ -69,6 +69,8 @@ pub enum AssetSource {
 }
 
 impl AssetSource {
+    pub const ALL: [AssetSource; 1] = [AssetSource::Imported];
+
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
@@ -85,10 +87,10 @@ impl std::str::FromStr for AssetSource {
     type Err = UnknownAssetSource;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "imported" => Ok(AssetSource::Imported),
-            other => Err(UnknownAssetSource(other.to_owned())),
-        }
+        AssetSource::ALL
+            .into_iter()
+            .find(|source| source.code() == s)
+            .ok_or_else(|| UnknownAssetSource(s.to_owned()))
     }
 }
 

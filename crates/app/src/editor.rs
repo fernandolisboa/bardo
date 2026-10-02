@@ -46,7 +46,7 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     AspectRatio, AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit,
     EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
-    MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, ProjectFiles,
+    MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, Picture, ProjectFiles,
     RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
     TimelineRepository, Track, VideoProject, VideoProjectId, VideoSource, frame_at, frame_time,
     nearest_frame, snap,
@@ -138,13 +138,29 @@ impl ClipMedia {
     }
 }
 
+/// What a clip of the video track shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipShows {
+    /// A scene, from 0.
+    Scene(usize),
+    /// Imported footage, by its file name as the user had it.
+    Footage(String),
+}
+
+impl ClipShows {
+    /// The scene, if it shows one.
+    pub fn scene(&self) -> Option<usize> {
+        match self {
+            ClipShows::Scene(scene) => Some(*scene),
+            ClipShows::Footage(_) => None,
+        }
+    }
+}
+
 /// One clip of the video track as the editor shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClipView {
-    /// The scene it shows, from 0; `None` for imported footage.
-    pub scene: Option<usize>,
-    /// The imported footage's file name as the user had it.
-    pub name: Option<String>,
+    pub shows: ClipShows,
     /// The file it plays, if any.
     pub file: Option<String>,
     /// Whether it is a video clip (else a still image or nothing).
@@ -217,9 +233,7 @@ pub struct CutBasis {
 /// A clip that needs the user: what the banner names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipProblem {
-    /// The scene it shows; `None` for imported footage, named by `name`.
-    pub scene: Option<usize>,
-    pub name: Option<String>,
+    pub shows: ClipShows,
     pub file: Option<String>,
     pub media: ClipMedia,
 }
@@ -293,8 +307,7 @@ impl EditorView {
             .iter()
             .filter(|clip| clip.media.needs_attention())
             .map(|clip| ClipProblem {
-                scene: clip.scene,
-                name: clip.name.clone(),
+                shows: clip.shows.clone(),
                 file: clip.file.clone(),
                 media: clip.media.clone(),
             })
@@ -707,15 +720,8 @@ impl Editor {
                     .ok_or(EditError::NoSuchItem)?
                     .asset;
                 let (at, _) = self.snapped(self.playhead, Duration::ZERO);
-                let edit = timeline.place(asset, track, at)?;
-                let placed = match &edit {
-                    Edit::Insert { track, index, .. } => Some(ItemRef {
-                        track: *track,
-                        index: *index,
-                    }),
-                    _ => None,
-                };
-                (edit, Some(placed))
+                let (edit, placed) = timeline.place(asset, track, at)?;
+                (edit, Some(Some(placed)))
             }
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
@@ -1214,17 +1220,16 @@ impl Bardo {
         let (mut ready, mut total) = (0, 0);
         if let (Some(timeline), Some(plan)) = (&timeline, &plan) {
             for item in timeline.video() {
-                let scene = item.scene.and_then(|index| plan.scenes().get(index));
-                let name = item
-                    .source
-                    .file()
-                    .filter(|_| item.scene.is_none())
-                    .and_then(|file| {
+                let scene = item.scene().and_then(|index| plan.scenes().get(index));
+                let shows = match &item.picture {
+                    Picture::Scene(index) => ClipShows::Scene(*index),
+                    Picture::Footage(file) => ClipShows::Footage(
                         assets
                             .iter()
-                            .find(|asset| asset.file == file)
-                            .map(|asset| asset.name.clone())
-                    });
+                            .find(|asset| &asset.file == file)
+                            .map_or_else(|| file.clone(), |asset| asset.name.clone()),
+                    ),
+                };
                 let media = match (item.source.file(), ProxyKind::of(&item.source)) {
                     (Some(file), Some(kind)) if has(file) => {
                         if has(&proxy_name(file, kind)) {
@@ -1237,8 +1242,7 @@ impl Bardo {
                 };
                 let is_clip = matches!(item.source, VideoSource::Clip { .. });
                 clips.push(ClipView {
-                    scene: item.scene,
-                    name,
+                    shows,
                     file: item.source.file().map(str::to_owned),
                     is_clip,
                     at: item.at,
@@ -1258,12 +1262,12 @@ impl Bardo {
                     text: scene.map(|scene| scene.text.clone()).unwrap_or_default(),
                 });
             }
-            for (file, kind) in proxy_orders(timeline, &assets) {
-                if has(&file) {
-                    total += 1;
-                    if has(&proxy_name(&file, kind)) {
-                        ready += 1;
-                    }
+        }
+        for (file, kind) in proxy_orders(timeline.as_ref(), &assets) {
+            if has(&file) {
+                total += 1;
+                if has(&proxy_name(&file, kind)) {
+                    ready += 1;
                 }
             }
         }
@@ -1543,9 +1547,6 @@ impl Bardo {
         view: EditorView,
         retry: bool,
     ) -> Result<EditorView, EditorError> {
-        let Some(timeline) = &view.timeline else {
-            return Ok(view);
-        };
         if view.job.as_ref().is_some_and(|job| job.state().is_active()) {
             return Ok(view);
         }
@@ -1556,7 +1557,7 @@ impl Bardo {
             held_back(view.job.as_ref())
         };
         let assets: Vec<MediaAsset> = view.media.iter().map(|media| media.asset.clone()).collect();
-        let files: Vec<ProxyOrder> = proxy_orders(timeline, &assets)
+        let files: Vec<ProxyOrder> = proxy_orders(view.timeline.as_ref(), &assets)
             .into_iter()
             .filter(|(file, kind)| {
                 self.files.exists(project, file)
@@ -1624,17 +1625,18 @@ fn asset_proxy(asset: &MediaAsset) -> ProxyKind {
     }
 }
 
-/// Every file of the timeline and what it gets: pictures first, in order,
-/// then the audio tracks', then imported files not placed yet.
-fn proxy_orders(timeline: &Timeline, assets: &[MediaAsset]) -> Vec<(String, ProxyKind)> {
+/// Every file of the timeline, if there is one, and what it gets: pictures
+/// first, in order, then the audio tracks', then imported files not placed
+/// yet.
+fn proxy_orders(timeline: Option<&Timeline>, assets: &[MediaAsset]) -> Vec<(String, ProxyKind)> {
     let mut orders: Vec<(String, ProxyKind)> = Vec::new();
     let video = timeline
-        .video()
-        .iter()
+        .into_iter()
+        .flat_map(Timeline::video)
         .filter_map(|item| Some((item.source.file()?.to_owned(), ProxyKind::of(&item.source)?)));
-    let audio = AudioLane::ALL
-        .iter()
-        .flat_map(|lane| timeline.audio(*lane))
+    let audio = timeline
+        .into_iter()
+        .flat_map(|timeline| AudioLane::ALL.iter().flat_map(|lane| timeline.audio(*lane)))
         .map(|item| (item.file.clone(), ProxyKind::Audio));
     let bin = assets
         .iter()
@@ -1685,7 +1687,9 @@ pub(crate) mod testing {
         pub(crate) previews: Mutex<Vec<PreviewCall>>,
         /// Previews end without a picture, as ffmpeg does on a broken file.
         pub(crate) blank: AtomicBool,
-        /// What probing each file name finds; other files are not media.
+        /// What probing a file finds, by the file's contents (it is the
+        /// copy in the project folder that gets probed); other files are
+        /// not media.
         pub(crate) probes: Mutex<HashMap<String, MediaInfo>>,
     }
 
@@ -1735,10 +1739,22 @@ pub(crate) mod testing {
                 return Err(MediaError::NotFound { tried: Vec::new() });
             }
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let contents = match &self.files {
+                Some(files) => {
+                    let project = path.parent().and_then(Path::file_name).unwrap();
+                    let project: VideoProjectId = uuid::Uuid::parse_str(&project.to_string_lossy())
+                        .unwrap()
+                        .into();
+                    files
+                        .read(project, &name)
+                        .map_err(|error| MediaError::Io(std::io::Error::other(error.to_string())))?
+                }
+                None => std::fs::read(path)?,
+            };
             self.probes
                 .lock()
                 .unwrap()
-                .get(&name)
+                .get(String::from_utf8_lossy(&contents).as_ref())
                 .cloned()
                 .ok_or_else(|| MediaError::Failed {
                     program: "ffprobe".into(),
@@ -2535,7 +2551,7 @@ mod tests {
         assert_eq!(after[1], (cut, before[0].1 - (cut - before[0].0)));
         assert_eq!(after[2..], before[1..]);
         assert_eq!(
-            editor.view().clips[1].scene,
+            editor.view().clips[1].shows.scene(),
             Some(0),
             "both halves show scene 1"
         );
@@ -2732,7 +2748,7 @@ mod tests {
             .view()
             .clips
             .iter()
-            .filter_map(|clip| clip.scene)
+            .filter_map(|clip| clip.shows.scene())
             .collect();
         assert_eq!(scenes.last(), Some(&0));
         assert_eq!(scenes[0], 1);
@@ -2903,7 +2919,11 @@ mod tests {
             .unwrap();
 
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
-        let rough = editor.view().clips.iter().filter_map(|clip| clip.scene);
+        let rough = editor
+            .view()
+            .clips
+            .iter()
+            .filter_map(|clip| clip.shows.scene());
         assert!(rough.eq(0..plan.scenes().len()), "the rough cut, as it was");
         assert!(editor.cut_reset());
         assert!(!editor.can_undo(), "nothing of the old cut to undo");
@@ -2931,7 +2951,11 @@ mod tests {
         settle(&app, &mut editor);
 
         let moved = &editor.view().clips[2];
-        assert_eq!(moved.scene, Some(0), "still where it was cut to");
+        assert_eq!(
+            moved.shows,
+            ClipShows::Scene(0),
+            "still where it was cut to"
+        );
         let image = app.scenes(project.id).unwrap().plan.unwrap().scenes()[0]
             .image()
             .unwrap()
@@ -3439,6 +3463,7 @@ mod tests {
     ) -> MediaAsset {
         use bardo_media::ffmpeg::{AudioStream, MediaInfo, VideoStream};
         let path = dir.path().join(name);
+        // Probed by its contents: the copy is what ffmpeg reads.
         std::fs::write(&path, name.as_bytes()).unwrap();
         h.media.probes.lock().unwrap().insert(
             name.into(),
@@ -3490,7 +3515,23 @@ mod tests {
             plan.scenes().len() + 3,
             "images, the narration and both imports"
         );
-        assert_eq!(view.media_file(&song.file).unwrap().asset, song);
+        assert_eq!(view.media_file(&song.file).unwrap().asset.id, song.id);
+    }
+
+    #[test]
+    fn media_imported_before_the_cut_gets_its_proxy() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let song = import(&h, &app, project.id, &dir, "bed.mp3", 90, false);
+
+        let mut editor = app.open_editor(project.id).unwrap();
+        assert!(editor.view().is_empty());
+        settle(&app, &mut editor);
+        let media = editor.view().media_file(&song.file).unwrap();
+        assert_eq!(media.media, ClipMedia::Ready, "not building forever");
+        assert_eq!(editor.view().proxies_total, 1);
     }
 
     #[test]
@@ -3550,8 +3591,7 @@ mod tests {
         .unwrap();
         assert_eq!(editor.selection(), Some(ItemRef::video(0)));
         let clip = &editor.view().clips[0];
-        assert_eq!(clip.scene, None);
-        assert_eq!(clip.name.as_deref(), Some("drone.mov"));
+        assert_eq!(clip.shows, ClipShows::Footage("drone.mov".into()));
         assert_eq!(clip.file.as_deref(), Some(footage.file.as_str()));
         assert!(clip.is_clip);
         assert_eq!(clip.media, ClipMedia::Ready);
@@ -3580,7 +3620,13 @@ mod tests {
 
         app.edit(&mut editor, EditAction::Undo).unwrap();
         assert_eq!(editor.view().clips.len(), plan.scenes().len());
-        assert!(editor.view().clips.iter().all(|clip| clip.scene.is_some()));
+        assert!(
+            editor
+                .view()
+                .clips
+                .iter()
+                .all(|clip| clip.shows.scene().is_some())
+        );
     }
 
     #[test]

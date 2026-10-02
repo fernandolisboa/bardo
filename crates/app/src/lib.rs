@@ -49,9 +49,9 @@ pub use costs::{
     SpendRow,
 };
 pub use editor::{
-    BinScene, ClipMedia, ClipProblem, ClipView, CutBasis, EditAction, Editor, EditorError,
-    EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark, media_framing,
-    preview_size,
+    BinScene, ClipMedia, ClipProblem, ClipShows, ClipView, CutBasis, EditAction, Editor,
+    EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
+    media_framing, preview_size,
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
@@ -112,7 +112,7 @@ pub struct Repositories {
     /// The cuts made in the editor.
     pub timelines: Arc<dyn TimelineRepository>,
     /// Each project's imported media.
-    pub media: Arc<dyn MediaAssetRepository>,
+    pub media_assets: Arc<dyn MediaAssetRepository>,
     /// Each project's music prompt. Shared with the job queue.
     pub music_prompts: Arc<dyn MusicPromptRepository>,
     /// Each channel's network accounts.
@@ -161,7 +161,7 @@ impl Repositories {
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
-            media: Arc::clone(&db) as _,
+            media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
@@ -289,7 +289,7 @@ impl Bardo {
             narrations,
             scene_plans,
             timelines,
-            media,
+            media_assets,
             music_prompts,
             network_accounts,
             costs,
@@ -410,7 +410,7 @@ impl Bardo {
             narrations,
             scene_plans,
             timelines,
-            media_assets: media,
+            media_assets,
             music_prompts,
             network_accounts,
             cost_book,
@@ -1207,7 +1207,7 @@ mod tests {
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
-            media: Arc::clone(&db) as _,
+            media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,

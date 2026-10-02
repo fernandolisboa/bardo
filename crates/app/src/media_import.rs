@@ -1,10 +1,10 @@
 //! Imported media (PRD story 41): the user brings their own music, sound
-//! effects and footage into a video project. Each file is read by ffmpeg
-//! first, so a file Bardo cannot play is refused with a clear reason, then
-//! copied into the project folder under a name of its own; the original
-//! is never changed. The copy is the project's asset from then on: the
-//! editor builds its proxy like a generated clip's and places it on the
-//! music, SFX or video track.
+//! effects and footage into a video project. Each file is copied into the
+//! project folder under a name of its own, the original never changed, and
+//! the copy is read by ffmpeg, so a file Bardo cannot play is refused with
+//! a clear reason and its copy removed. The copy is the project's asset
+//! from then on: the editor builds its proxy like a generated clip's and
+//! places it on the music, SFX or video track.
 //!
 //! Reading and copying a large file takes a while, so the editor runs it
 //! off the UI thread with a `MediaImport`, not as a job: nothing is paid
@@ -12,7 +12,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use bardo_domain::{
     AssetSource, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, PictureSize, ProfileId,
@@ -73,14 +73,44 @@ pub struct MediaImport {
 }
 
 impl MediaImport {
-    /// Reads the file at `path`, copies it into the project folder and
-    /// records it as an imported asset. Blocks while ffmpeg reads the file
-    /// and while it is copied: call it off the UI thread.
+    /// Copies the file at `path` into the project folder, reads the copy
+    /// with ffmpeg and records it as an imported asset; a copy that is not
+    /// media is removed again. Reading the copy, not the original, keeps
+    /// what is recorded true to the file the project plays. Blocks while
+    /// the file is copied and read: call it off the UI thread.
     pub fn run(&self, path: &Path) -> Result<MediaAsset, MediaImportError> {
-        if !path.is_file() {
+        if !path.is_file() || std::fs::File::open(path).is_err() {
             return Err(MediaImportError::Unreadable);
         }
-        let info = self.media.probe(path).map_err(|error| match error {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let id = MediaAssetId::new();
+        let file = MediaAsset::file_name(id, &name);
+        self.files
+            .copy_in(self.project, &file, path)
+            .map_err(|error| MediaImportError::NotCopied(error.to_string()))?;
+        let asset = self.read(id, file.clone(), name).and_then(|asset| {
+            self.assets.save_media_asset(&asset)?;
+            Ok(asset)
+        });
+        if asset.is_err() {
+            // Nothing refers to the copy; leave no stray file behind.
+            let _ = self.files.remove(self.project, &file);
+        }
+        asset
+    }
+
+    /// The asset the copy `file` makes, as ffmpeg reads it.
+    fn read(
+        &self,
+        id: MediaAssetId,
+        file: String,
+        name: String,
+    ) -> Result<MediaAsset, MediaImportError> {
+        let copy = self.files.path(self.project, &file);
+        let info = self.media.probe(&copy).map_err(|error| match error {
             MediaError::NotFound { .. } => MediaImportError::NoFfmpeg,
             MediaError::Io(_) | MediaError::Spawn { .. } => MediaImportError::Unreadable,
             other => MediaImportError::Unsupported(other.to_string()),
@@ -100,17 +130,7 @@ impl MediaImport {
         if info.duration < frame_time(1) {
             return Err(MediaImportError::TooShort);
         }
-
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let id = MediaAssetId::new();
-        let file = MediaAsset::file_name(id, &name);
-        self.files
-            .copy_in(self.project, &file, path)
-            .map_err(|error| MediaImportError::NotCopied(error.to_string()))?;
-        let asset = MediaAsset {
+        Ok(MediaAsset {
             id,
             project: self.project,
             owner: self.owner,
@@ -120,24 +140,9 @@ impl MediaImport {
             name,
             duration: info.duration,
             picture,
-            imported_at: whole_millis(SystemTime::now()),
-        };
-        if let Err(error) = self.assets.save_media_asset(&asset) {
-            // Nothing refers to the copy; leave no stray file behind.
-            let _ = self.files.remove(self.project, &asset.file);
-            return Err(error.into());
-        }
-        Ok(asset)
+            imported_at: SystemTime::now(),
+        })
     }
-}
-
-/// `time` as storage keeps it, to the millisecond, so the asset returned
-/// is the asset listed.
-fn whole_millis(time: SystemTime) -> SystemTime {
-    let since = time
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    SystemTime::UNIX_EPOCH + Duration::from_millis(since.as_millis() as u64)
 }
 
 impl Bardo {
@@ -174,6 +179,7 @@ impl Bardo {
 mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::Ordering;
+    use std::time::Duration;
 
     use bardo_domain::{ChannelDraft, VideoProject};
     use bardo_media::ffmpeg::{AudioStream, MediaInfo, VideoStream};
@@ -193,10 +199,11 @@ mod tests {
 
     impl Harness {
         fn new() -> Self {
+            let files = Arc::new(MemoryProjectFiles::default());
             Self {
                 db: Arc::new(Database::open_in_memory().unwrap()),
-                files: Arc::default(),
-                media: Arc::default(),
+                media: Arc::new(FakeMedia::writing_to(Arc::clone(&files))),
+                files,
                 dir: tempfile::tempdir().unwrap(),
             }
         }
@@ -228,13 +235,14 @@ mod tests {
             .unwrap()
         }
 
-        /// A file outside the project with `bytes`, ffmpeg reading it as
-        /// `info` when given.
+        /// A file outside the project with `bytes`, ffmpeg reading it (and
+        /// any copy of it) as `info` when given.
         fn file(&self, name: &str, bytes: &[u8], info: Option<MediaInfo>) -> PathBuf {
             let path = self.dir.path().join(name);
             std::fs::write(&path, bytes).unwrap();
             if let Some(info) = info {
-                self.media.probes.lock().unwrap().insert(name.into(), info);
+                let contents = String::from_utf8_lossy(bytes).into_owned();
+                self.media.probes.lock().unwrap().insert(contents, info);
             }
             path
         }
@@ -311,7 +319,13 @@ mod tests {
         // The copy is in the project folder; the original is as it was.
         assert_eq!(h.files.read(project.id, &asset.file).unwrap(), b"mp3 bytes");
         assert_eq!(std::fs::read(&source).unwrap(), b"mp3 bytes");
-        assert_eq!(app.media_assets(project.id).unwrap(), [asset]);
+        let listed: Vec<_> = app
+            .media_assets(project.id)
+            .unwrap()
+            .into_iter()
+            .map(|listed| (listed.id, listed.file, listed.duration))
+            .collect();
+        assert_eq!(listed, [(asset.id, asset.file, asset.duration)]);
     }
 
     #[test]

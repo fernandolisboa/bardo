@@ -97,10 +97,16 @@ impl ProjectFiles for LocalProjectFiles {
         let name = checked(name)?;
         let folder = self.folder(project);
         std::fs::create_dir_all(&folder).map_err(|e| error(name, e))?;
-        // Copied beside it, then renamed over it, as `write` does.
+        // Copied beside it, then renamed over it, as `write` does. Bytes
+        // only, through a handle of its own: `fs::copy` would carry over a
+        // read-only flag, and Windows syncs only a handle open for writing.
         let partial = folder.join(format!("{name}.partial"));
-        let copied = std::fs::copy(source, &partial)
-            .and_then(|_| std::fs::File::open(&partial)?.sync_all())
+        let copied = std::fs::File::open(source)
+            .and_then(|mut original| {
+                let mut copy = std::fs::File::create(&partial)?;
+                std::io::copy(&mut original, &mut copy)?;
+                copy.sync_all()
+            })
             .and_then(|()| std::fs::rename(&partial, folder.join(name)));
         if copied.is_err() {
             let _ = std::fs::remove_file(&partial);
@@ -279,6 +285,22 @@ mod tests {
             .map(|entry| entry.unwrap().file_name())
             .collect();
         assert_eq!(names, ["media-1.mp3"]);
+
+        // A read-only original gives a copy Bardo can still replace.
+        let locked = dir.path().join("Locked.wav");
+        std::fs::write(&locked, b"riff").unwrap();
+        let mut permissions = std::fs::metadata(&locked).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&locked, permissions).unwrap();
+        files.copy_in(project, "media-3.wav", &locked).unwrap();
+        let copy = std::fs::metadata(files.path(project, "media-3.wav")).unwrap();
+        assert!(!copy.permissions().readonly());
+        assert_eq!(std::fs::read(&locked).unwrap(), b"riff");
+        // Writable again, so the temporary folder goes away on Windows.
+        let mut permissions = std::fs::metadata(&locked).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&locked, permissions).unwrap();
 
         let missing = dir.path().join("gone.mp3");
         assert!(files.copy_in(project, "media-2.mp3", &missing).is_err());

@@ -4,10 +4,10 @@
 //! `Bardo::edit` when the mouse is released.
 //!
 //! Dragging an item's edge trims it; dragging a clip drops it between two
-//! others; dragging an audio item (narration, music, SFX) moves it. While a drag runs, a ghost
-//! shows where the item will land (snapped, and clamped as the domain
-//! will), and a line marks the word it snapped to. Alt frees it from the
-//! words.
+//! others; dragging an audio item (narration, music, SFX) moves it. While
+//! a drag runs, a ghost shows where the item will land (snapped, and
+//! clamped as the domain will), and a line marks the word it snapped to.
+//! Alt frees it from the words.
 //!
 //! Each audio lane's header carries its mute and solo buttons and its
 //! level; clicking the header picks the lane, and the inspector shows its
@@ -37,7 +37,7 @@ use gpui_kit::{
 };
 
 use super::tokens::*;
-use super::{EditorScreen, color, icon, label, tool_button};
+use super::{EditorScreen, clip_name, color, icon, label, tool_button};
 use crate::shell::tr;
 
 /// The track header column, shared with the toolbar's timecode.
@@ -917,12 +917,7 @@ impl EditorScreen {
                     .object_fit(ObjectFit::Cover)
                     .opacity(0.85)
             });
-        let name = match (clip.scene, &clip.name) {
-            (Some(scene), _) => {
-                bardo.text_with(Text::EditorSceneLabel, &[("n", &(scene + 1).to_string())])
-            }
-            (None, name) => name.clone().unwrap_or_default(),
-        };
+        let name = clip_name(bardo, clip);
         let element = div()
             .id(("clip", index))
             .absolute()

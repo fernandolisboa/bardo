@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use bardo_domain::{
     AspectRatio, AudioLane, Caption, CaptionStyle, CropPosition, Decibels, Ducking, Framing,
-    LaneMix, Mix, NarrationId, ProfileId, RepositoryError, SavedAudioItem, SavedCaptions,
-    SavedPicture, SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, VideoProjectId,
+    LaneMix, Mix, NarrationId, Picture, ProfileId, RepositoryError, SavedAudioItem, SavedCaptions,
+    SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -234,8 +234,8 @@ impl TimelineRepository for Database {
             narration: NarrationId::from(uuid(&narration)?),
             video: Vec::new(),
             narration_items: Vec::new(),
-            music: Vec::new(),
-            sfx: Vec::new(),
+            music_items: Vec::new(),
+            sfx_items: Vec::new(),
             mix,
             captions,
             aspect: aspect.parse::<AspectRatio>().map_err(boxed)?,
@@ -244,9 +244,9 @@ impl TimelineRepository for Database {
         for row in rows {
             let picture = match (row.track.as_str(), row.scene, &row.file) {
                 (VIDEO, Some(scene), None) => {
-                    Some(SavedPicture::Scene(usize::try_from(scene).map_err(boxed)?))
+                    Some(Picture::Scene(usize::try_from(scene).map_err(boxed)?))
                 }
-                (VIDEO, None, Some(file)) => Some(SavedPicture::Footage(file.clone())),
+                (VIDEO, None, Some(file)) => Some(Picture::Footage(file.clone())),
                 (VIDEO, ..) => return Err(invalid("a video item of no scene or file")),
                 _ => None,
             };
@@ -275,8 +275,8 @@ impl TimelineRepository for Database {
             };
             match lane_named(&row.track)? {
                 AudioLane::Narration => saved.narration_items.push(item),
-                AudioLane::Music => saved.music.push(item),
-                AudioLane::Sfx => saved.sfx.push(item),
+                AudioLane::Music => saved.music_items.push(item),
+                AudioLane::Sfx => saved.sfx_items.push(item),
             }
         }
         Ok(Some(saved))
@@ -363,10 +363,8 @@ impl TimelineRepository for Database {
             for (position, item) in timeline.video.iter().enumerate() {
                 let (framing, crop_x, crop_y) = framing_columns(item.framing);
                 let (scene, file) = match &item.picture {
-                    SavedPicture::Scene(scene) => {
-                        (Some(i64::try_from(*scene).map_err(boxed)?), None)
-                    }
-                    SavedPicture::Footage(file) => (None, Some(file)),
+                    Picture::Scene(scene) => (Some(i64::try_from(*scene).map_err(boxed)?), None),
+                    Picture::Footage(file) => (None, Some(file)),
                 };
                 insert
                     .execute(params![
@@ -389,8 +387,8 @@ impl TimelineRepository for Database {
             }
             let audio = [
                 (AudioLane::Narration, &timeline.narration_items),
-                (AudioLane::Music, &timeline.music),
-                (AudioLane::Sfx, &timeline.sfx),
+                (AudioLane::Music, &timeline.music_items),
+                (AudioLane::Sfx, &timeline.sfx_items),
             ];
             for (lane, item, position) in audio.into_iter().flat_map(|(lane, items)| {
                 items
@@ -469,19 +467,19 @@ mod tests {
             narration: NarrationId::new(),
             video: vec![
                 SavedVideoItem {
-                    picture: SavedPicture::Scene(2),
+                    picture: Picture::Scene(2),
                     start: Duration::from_nanos(1_500_000_001),
                     duration: Duration::from_nanos(966_666_666),
                     framing: Framing::Crop(CropPosition::new(125, 1_000)),
                 },
                 SavedVideoItem {
-                    picture: SavedPicture::Footage("media-walk.mov".into()),
+                    picture: Picture::Footage("media-walk.mov".into()),
                     start: Duration::from_millis(250),
                     duration: Duration::from_secs(1),
                     framing: Framing::Crop(CropPosition::new(500, 0)),
                 },
                 SavedVideoItem {
-                    picture: SavedPicture::Scene(0),
+                    picture: Picture::Scene(0),
                     start: Duration::ZERO,
                     duration: Duration::from_secs(2),
                     framing: Framing::Fit,
@@ -505,7 +503,7 @@ mod tests {
                     fade_out: Duration::from_millis(500),
                 },
             ],
-            music: vec![SavedAudioItem {
+            music_items: vec![SavedAudioItem {
                 file: "media-bed.mp3".into(),
                 start: Duration::from_secs(4),
                 at: Duration::from_millis(200),
@@ -513,7 +511,7 @@ mod tests {
                 fade_in: Duration::from_secs(1),
                 fade_out: Duration::from_secs(2),
             }],
-            sfx: vec![
+            sfx_items: vec![
                 SavedAudioItem {
                     file: "media-boom.wav".into(),
                     start: Duration::ZERO,
@@ -600,7 +598,7 @@ mod tests {
         let mut shorter = cut(&project);
         shorter.video.truncate(1);
         shorter.narration_items.clear();
-        shorter.sfx.truncate(1);
+        shorter.sfx_items.truncate(1);
         shorter.captions.as_mut().unwrap().lines.truncate(1);
         db.save_timeline(&shorter).unwrap();
         assert_eq!(db.saved_timeline(project.id).unwrap(), Some(shorter));

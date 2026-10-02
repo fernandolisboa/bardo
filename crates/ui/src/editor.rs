@@ -30,8 +30,8 @@ use bardo_app::bardo_domain::{
     VideoProjectId, crop_window, frame_time, timecode,
 };
 use bardo_app::{
-    Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PREVIEW_LANDSCAPE,
-    Text, caption_look,
+    Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, EditAction, Editor, EditorView,
+    PREVIEW_LANDSCAPE, Text, caption_look,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -296,15 +296,7 @@ impl EditorScreen {
             return;
         }
         self.revision = revision;
-        let Self { bardo, editor, .. } = self;
-        if let Some(editor) = editor.as_mut() {
-            self.error = bardo
-                .read(cx)
-                .refresh_editor(editor)
-                .err()
-                .map(|error| error.message());
-        }
-        cx.notify();
+        self.reload(cx);
     }
 
     /// Reads the editor again now, for media imported meanwhile.
@@ -765,7 +757,7 @@ impl EditorScreen {
         let selected_scene = self.editor.as_ref().and_then(|editor| {
             editor
                 .selected_clip()
-                .and_then(|index| editor.view().clips[index].scene)
+                .and_then(|index| editor.view().clips[index].shows.scene())
         });
         let tab = |id: &'static str, text: Text, which: BinTab| {
             tool_button(id, true, self.bin_tab == which)
@@ -796,7 +788,10 @@ impl EditorScreen {
                 .iter()
                 .map(|scene| {
                     let index = scene.index;
-                    let clip = view.clips.iter().position(|clip| clip.scene == Some(index));
+                    let clip = view
+                        .clips
+                        .iter()
+                        .position(|clip| clip.shows == ClipShows::Scene(index));
                     let at = clip.map(|clip| view.clips[clip].at);
                     let selected = selected_scene == Some(index);
                     let thumbnail = match &scene.thumbnail {
@@ -916,13 +911,15 @@ impl EditorScreen {
                     .child(tr(bardo, Text::EditorMediaImportHint)),
             )
             .when(self.importing > 0, |header| {
-                header.child(label(
+                let importing = if self.importing == 1 {
+                    bardo.text(Text::EditorMediaImportingOne).into_owned()
+                } else {
                     bardo.text_with(
                         Text::EditorMediaImporting,
                         &[("count", &self.importing.to_string())],
-                    ),
-                    ACCENT,
-                ))
+                    )
+                };
+                header.child(label(importing, ACCENT))
             })
             .children(self.import_errors.iter().map(|(file, reason)| {
                 div()
@@ -969,22 +966,18 @@ impl EditorScreen {
                             }))
                         })
                 };
-                let actions = if audio {
-                    h_flex()
-                        .gap_1()
-                        .child(place(
-                            "media-music",
-                            Text::EditorMediaAddMusic,
-                            Track::Music,
-                        ))
-                        .child(place("media-sfx", Text::EditorMediaAddSfx, Track::Sfx))
-                } else {
-                    h_flex().gap_1().child(place(
-                        "media-video",
-                        Text::EditorMediaAddVideo,
-                        Track::Video,
-                    ))
-                };
+                // One button per track the domain lets this kind of media on.
+                let actions = h_flex()
+                    .gap_1()
+                    .children(asset.kind.tracks().iter().filter_map(|&track| {
+                        let (button, text) = match track {
+                            Track::Music => ("media-music", Text::EditorMediaAddMusic),
+                            Track::Sfx => ("media-sfx", Text::EditorMediaAddSfx),
+                            Track::Video => ("media-video", Text::EditorMediaAddVideo),
+                            Track::Narration | Track::Captions => return None,
+                        };
+                        Some(place(button, text, track))
+                    }));
                 v_flex()
                     .id(("bin-media", row))
                     .gap_1()
@@ -1670,7 +1663,7 @@ impl EditorScreen {
                                     .child(SharedString::from(file)),
                             )
                     }))
-                    .when(clip.scene.is_some(), |body| {
+                    .when(clip.shows.scene().is_some(), |body| {
                         body.child(
                             v_flex()
                                 .gap_1()
@@ -2242,10 +2235,27 @@ impl EditorScreen {
                 TEXT_2,
             ))
             .child(
-                tool_button("empty-back", true, true)
+                h_flex()
                     .mt_2()
-                    .child(tr(bardo, Text::EditorBackToProject))
-                    .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::Close))),
+                    .gap_2()
+                    .child(
+                        tool_button("empty-back", true, true)
+                            .child(tr(bardo, Text::EditorBackToProject))
+                            .on_click(
+                                cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::Close)),
+                            ),
+                    )
+                    // Media can come in before the cut: it waits in the bin.
+                    .child(
+                        tool_button("empty-import", true, false)
+                            .border_1()
+                            .border_color(color(HAIRLINE))
+                            .child(tr(bardo, Text::EditorMediaImport))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.bin_tab = BinTab::Media;
+                                this.import_media(cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
@@ -2266,7 +2276,7 @@ fn provenance_lines(bardo: &Bardo, clip: &ClipView) -> Vec<String> {
         )
     };
     let mut lines = Vec::new();
-    if clip.scene.is_none() {
+    if let ClipShows::Footage(_) = clip.shows {
         lines.push(bardo.text(Text::EditorSourceFootage).into_owned());
         return lines;
     }
@@ -2292,8 +2302,8 @@ fn problem_line(bardo: &Bardo, problem: &ClipProblem) -> String {
         (_, None) => bardo.text(Text::EditorProblemNoImage).into_owned(),
     };
     let file = problem.file.as_deref().unwrap_or("—");
-    match problem.scene {
-        Some(scene) => bardo.text_with(
+    match &problem.shows {
+        ClipShows::Scene(scene) => bardo.text_with(
             Text::EditorProblemLine,
             &[
                 ("n", &(scene + 1).to_string()),
@@ -2301,24 +2311,20 @@ fn problem_line(bardo: &Bardo, problem: &ClipProblem) -> String {
                 ("reason", &reason),
             ],
         ),
-        None => bardo.text_with(
+        ClipShows::Footage(name) => bardo.text_with(
             Text::EditorProblemFootageLine,
-            &[
-                ("name", problem.name.as_deref().unwrap_or_default()),
-                ("file", file),
-                ("reason", &reason),
-            ],
+            &[("name", name), ("file", file), ("reason", &reason)],
         ),
     }
 }
 
 /// A clip's name: its scene, or the imported file's name.
-fn clip_name(bardo: &Bardo, clip: &ClipView) -> String {
-    match (clip.scene, &clip.name) {
-        (Some(scene), _) => {
+pub(crate) fn clip_name(bardo: &Bardo, clip: &ClipView) -> String {
+    match &clip.shows {
+        ClipShows::Scene(scene) => {
             bardo.text_with(Text::EditorSceneLabel, &[("n", &(scene + 1).to_string())])
         }
-        (None, name) => name.clone().unwrap_or_default(),
+        ClipShows::Footage(name) => name.clone(),
     }
 }
 

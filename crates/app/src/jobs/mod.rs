@@ -680,7 +680,7 @@ mod tests {
             narrations: Arc::clone(db) as _,
             scene_plans: Arc::clone(db) as _,
             timelines: Arc::clone(db) as _,
-            media: Arc::clone(db) as _,
+            media_assets: Arc::clone(db) as _,
             music_prompts: Arc::clone(db) as _,
             network_accounts: Arc::clone(db) as _,
             costs: Arc::clone(db) as _,

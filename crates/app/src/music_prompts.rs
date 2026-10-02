@@ -655,7 +655,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(again, MusicPromptError::Busy));
         wait_done(&app, id);
-        // A script job of the same project does not block it.
+        // Once that job is done, generating again works.
         assert!(
             app.generate_music_prompt(project.id, BudgetConsent::Ask)
                 .is_ok()

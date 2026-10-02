@@ -974,6 +974,7 @@ caption_text = "A caption needs some text, up to 200 characters."
 [editor.media]
 import = "Import files…"
 import_hint = "Music, sound effects and footage. Bardo copies each file into the project folder and leaves yours as it is."
+importing_one = "Importing 1 file…"
 importing = "Importing {count} files…"
 empty = "No media yet. Import music, sound effects or footage to place them on the timeline."
 add_music = "+ Music"
