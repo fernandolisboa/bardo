@@ -44,6 +44,7 @@ mod channel;
 mod clip;
 mod cost;
 mod decision;
+mod edit;
 mod files;
 mod generation;
 mod image;
@@ -83,6 +84,7 @@ pub use decision::{
     Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,
     Questions, ScoreAnswer, YesNoAnswer,
 };
+pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
 pub use files::{ProjectFileError, ProjectFiles};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{GeneratedImage, ImageFormat, ImageGenerator, ImageRequest};
@@ -147,6 +149,7 @@ pub use theme::{
     rank_themes,
 };
 pub use timeline::{
-    AudioItem, FPS, Timeline, VideoItem, VideoSource, frame_at, frame_time, nearest_frame, timecode,
+    AudioItem, FPS, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline, TimelineRepository,
+    VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame, snap, timecode,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

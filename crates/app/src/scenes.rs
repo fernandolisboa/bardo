@@ -840,7 +840,7 @@ pub(crate) mod tests {
 
     /// Three scenes: the launch (sentence 0), the departure (1) and the
     /// lost signal (2 and 3).
-    fn plan_answer() -> String {
+    pub(crate) fn plan_answer() -> String {
         serde_json::json!({"scenes": [
             {"first_sentence": 0, "prompt": "A probe on the launch pad, archival photo"},
             {"first_sentence": 1, "prompt": "The probe drifting away from Earth"},
@@ -882,6 +882,29 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn start(&self) -> Bardo {
+            self.start_from(Repositories::shared_with_files(
+                Arc::clone(&self.db),
+                Arc::clone(&self.secrets) as _,
+                Arc::clone(&self.files) as _,
+            ))
+        }
+
+        /// `start` with the editor's cuts kept by `timelines`.
+        pub(crate) fn start_with_timelines(
+            &self,
+            timelines: Arc<dyn bardo_domain::TimelineRepository>,
+        ) -> Bardo {
+            self.start_from(Repositories {
+                timelines,
+                ..Repositories::shared_with_files(
+                    Arc::clone(&self.db),
+                    Arc::clone(&self.secrets) as _,
+                    Arc::clone(&self.files) as _,
+                )
+            })
+        }
+
+        fn start_from(&self, repositories: Repositories) -> Bardo {
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
@@ -898,11 +921,7 @@ pub(crate) mod tests {
                 media: Arc::clone(&self.media) as _,
             };
             let mut app = Bardo::start_with(
-                Repositories::shared_with_files(
-                    Arc::clone(&self.db),
-                    Arc::clone(&self.secrets) as _,
-                    Arc::clone(&self.files) as _,
-                ),
+                repositories,
                 providers,
                 Some("en-US"),
                 JobSettings {
@@ -926,7 +945,7 @@ pub(crate) mod tests {
             app
         }
 
-        fn answer(&self, text: String) {
+        pub(crate) fn answer(&self, text: String) {
             self.text.answers.lock().unwrap().push(text);
         }
 

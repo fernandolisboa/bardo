@@ -1,0 +1,296 @@
+use std::time::Duration;
+
+use bardo_domain::{
+    NarrationId, ProfileId, RepositoryError, SavedAudioItem, SavedTimeline, SavedVideoItem,
+    ScenePlanId, TimelineRepository, VideoProjectId,
+};
+use rusqlite::{OptionalExtension, params};
+use uuid::Uuid;
+
+use crate::{Database, boxed, from_unix_millis, to_unix_millis};
+
+#[derive(Debug, thiserror::Error)]
+#[error("stored timeline is invalid: {0}")]
+struct InvalidRow(String);
+
+fn invalid(detail: impl Into<String>) -> RepositoryError {
+    boxed(InvalidRow(detail.into()))
+}
+
+fn uuid(text: &str) -> Result<Uuid, RepositoryError> {
+    Uuid::parse_str(text).map_err(boxed)
+}
+
+fn nanos(duration: Duration) -> Result<i64, RepositoryError> {
+    i64::try_from(duration.as_nanos()).map_err(boxed)
+}
+
+fn duration(nanos: i64) -> Result<Duration, RepositoryError> {
+    u64::try_from(nanos)
+        .map(Duration::from_nanos)
+        .map_err(boxed)
+}
+
+const VIDEO: &str = "video";
+const NARRATION: &str = "narration";
+
+/// An item row as stored.
+struct ItemRow {
+    track: String,
+    scene: Option<i64>,
+    file: Option<String>,
+    start: i64,
+    at: i64,
+    duration: i64,
+}
+
+impl TimelineRepository for Database {
+    fn saved_timeline(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Option<SavedTimeline>, RepositoryError> {
+        let conn = self.conn();
+        let project_id = project.to_string();
+        let head = conn
+            .query_row(
+                "SELECT profile_id, scene_plan_id, narration_id, updated_at
+                 FROM timeline WHERE project_id = ?1",
+                [&project_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(boxed)?;
+        let Some((owner, plan, narration, updated_at)) = head else {
+            return Ok(None);
+        };
+        let mut statement = conn
+            .prepare(
+                "SELECT track, scene, file, start_ns, at_ns, duration_ns FROM timeline_item
+                 WHERE project_id = ?1 ORDER BY track, position",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([&project_id], |row| {
+                Ok(ItemRow {
+                    track: row.get(0)?,
+                    scene: row.get(1)?,
+                    file: row.get(2)?,
+                    start: row.get(3)?,
+                    at: row.get(4)?,
+                    duration: row.get(5)?,
+                })
+            })
+            .map_err(boxed)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(boxed)?;
+        let mut saved = SavedTimeline {
+            project,
+            owner: ProfileId::from(uuid(&owner)?),
+            scene_plan: ScenePlanId::from(uuid(&plan)?),
+            narration: NarrationId::from(uuid(&narration)?),
+            video: Vec::new(),
+            narration_items: Vec::new(),
+            updated_at: from_unix_millis(updated_at),
+        };
+        for row in rows {
+            match (row.track.as_str(), row.scene, row.file) {
+                (VIDEO, Some(scene), None) => saved.video.push(SavedVideoItem {
+                    scene: usize::try_from(scene).map_err(boxed)?,
+                    start: duration(row.start)?,
+                    duration: duration(row.duration)?,
+                }),
+                (NARRATION, None, Some(file)) => saved.narration_items.push(SavedAudioItem {
+                    file,
+                    start: duration(row.start)?,
+                    at: duration(row.at)?,
+                    duration: duration(row.duration)?,
+                }),
+                (track, ..) => return Err(invalid(format!("an item of track {track}"))),
+            }
+        }
+        Ok(Some(saved))
+    }
+
+    fn save_timeline(&self, timeline: &SavedTimeline) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let project = timeline.project.to_string();
+        // Its items go with it (ON DELETE CASCADE).
+        tx.execute("DELETE FROM timeline WHERE project_id = ?1", [&project])
+            .map_err(boxed)?;
+        tx.execute(
+            "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                project,
+                timeline.owner.to_string(),
+                timeline.scene_plan.to_string(),
+                timeline.narration.to_string(),
+                to_unix_millis(timeline.updated_at),
+            ],
+        )
+        .map_err(boxed)?;
+        {
+            let mut insert = tx
+                .prepare(
+                    "INSERT INTO timeline_item
+                         (project_id, track, position, scene, file, start_ns, at_ns, duration_ns)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )
+                .map_err(boxed)?;
+            let mut at = Duration::ZERO;
+            for (position, item) in timeline.video.iter().enumerate() {
+                insert
+                    .execute(params![
+                        project,
+                        VIDEO,
+                        i64::try_from(position).map_err(boxed)?,
+                        Some(i64::try_from(item.scene).map_err(boxed)?),
+                        None::<String>,
+                        nanos(item.start)?,
+                        nanos(at)?,
+                        nanos(item.duration)?,
+                    ])
+                    .map_err(boxed)?;
+                at += item.duration;
+            }
+            for (position, item) in timeline.narration_items.iter().enumerate() {
+                insert
+                    .execute(params![
+                        project,
+                        NARRATION,
+                        i64::try_from(position).map_err(boxed)?,
+                        None::<i64>,
+                        Some(&item.file),
+                        nanos(item.start)?,
+                        nanos(item.at)?,
+                        nanos(item.duration)?,
+                    ])
+                    .map_err(boxed)?;
+            }
+        }
+        tx.commit().map_err(boxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use bardo_domain::{
+        Channel, ChannelDetails, ChannelDraft, ChannelRepository, Niche, ProfileRepository, Theme,
+        ThemeIdea, ThemeRepository, UiLanguage, UserProfile, VideoProject,
+    };
+
+    use super::*;
+
+    fn time(millis: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
+    }
+
+    fn project(db: &Database) -> VideoProject {
+        let profile = UserProfile::new(UiLanguage::EnUs);
+        ProfileRepository::save(db, &profile).unwrap();
+        let details = ChannelDetails::validate(ChannelDraft {
+            name: "Space Archives".into(),
+            ..ChannelDraft::default()
+        })
+        .unwrap();
+        let channel = Channel::new(profile.id, details);
+        ChannelRepository::save(db, &channel).unwrap();
+        let mut theme = Theme::suggested(
+            profile.id,
+            channel.id,
+            Niche::new("space history").unwrap(),
+            ThemeIdea::new("The lost probe", "").unwrap(),
+            time(1_800_000_000_000),
+            0,
+            None,
+        );
+        db.save_themes(std::slice::from_ref(&theme)).unwrap();
+        let project = theme.approve(time(1_800_000_001_000)).unwrap();
+        db.start_project(&theme, &project).unwrap();
+        project
+    }
+
+    fn cut(project: &VideoProject) -> SavedTimeline {
+        SavedTimeline {
+            project: project.id,
+            owner: project.owner,
+            scene_plan: ScenePlanId::new(),
+            narration: NarrationId::new(),
+            video: vec![
+                SavedVideoItem {
+                    scene: 2,
+                    start: Duration::from_nanos(1_500_000_001),
+                    duration: Duration::from_nanos(966_666_666),
+                },
+                SavedVideoItem {
+                    scene: 0,
+                    start: Duration::ZERO,
+                    duration: Duration::from_secs(2),
+                },
+            ],
+            narration_items: vec![
+                SavedAudioItem {
+                    file: "narration-1.mp3".into(),
+                    start: Duration::ZERO,
+                    at: Duration::ZERO,
+                    duration: Duration::from_millis(1_000),
+                },
+                SavedAudioItem {
+                    file: "narration-1.mp3".into(),
+                    start: Duration::from_millis(1_400),
+                    at: Duration::from_nanos(1_033_333_333),
+                    duration: Duration::from_millis(2_123),
+                },
+            ],
+            updated_at: time(1_800_000_002_000),
+        }
+    }
+
+    #[test]
+    fn a_project_never_edited_has_no_saved_timeline() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        assert_eq!(db.saved_timeline(project.id).unwrap(), None);
+    }
+
+    #[test]
+    fn a_saved_timeline_round_trips_to_the_nanosecond() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let saved = cut(&project);
+        db.save_timeline(&saved).unwrap();
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn saving_again_replaces_every_item() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        db.save_timeline(&cut(&project)).unwrap();
+        let mut shorter = cut(&project);
+        shorter.video.truncate(1);
+        shorter.narration_items.clear();
+        db.save_timeline(&shorter).unwrap();
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(shorter));
+    }
+
+    #[test]
+    fn a_timeline_needs_its_project() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut orphan = cut(&project);
+        orphan.project = VideoProjectId::new();
+        assert!(db.save_timeline(&orphan).is_err());
+        assert_eq!(db.saved_timeline(orphan.project).unwrap(), None);
+    }
+}

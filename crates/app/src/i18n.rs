@@ -692,6 +692,14 @@ pub enum Text {
     EditorPreviewFailed,
     EditorNotLoaded,
     EditorNoSound,
+    EditorNothingToCut,
+    EditorCannotEdit,
+    EditorEditNotSaved,
+    EditorCutReset,
+    EditorInspectorAudio,
+    EditorSourceIn,
+    EditorRemove,
+    EditorShortcuts,
 }
 
 impl Text {
@@ -1408,6 +1416,14 @@ impl Text {
             Text::EditorPreviewFailed => "editor.error.preview_failed",
             Text::EditorNotLoaded => "editor.error.not_loaded",
             Text::EditorNoSound => "editor.error.no_sound",
+            Text::EditorNothingToCut => "editor.error.nothing_to_cut",
+            Text::EditorCannotEdit => "editor.error.cannot_edit",
+            Text::EditorEditNotSaved => "editor.error.edit_not_saved",
+            Text::EditorCutReset => "editor.cut_reset",
+            Text::EditorInspectorAudio => "editor.inspector.audio",
+            Text::EditorSourceIn => "editor.inspector.source_in",
+            Text::EditorRemove => "editor.inspector.remove",
+            Text::EditorShortcuts => "editor.inspector.shortcuts",
         };
         Cow::Borrowed(key)
     }
@@ -2142,6 +2158,14 @@ mod tests {
             Text::EditorPreviewFailed,
             Text::EditorNotLoaded,
             Text::EditorNoSound,
+            Text::EditorNothingToCut,
+            Text::EditorCannotEdit,
+            Text::EditorEditNotSaved,
+            Text::EditorCutReset,
+            Text::EditorInspectorAudio,
+            Text::EditorSourceIn,
+            Text::EditorRemove,
+            Text::EditorShortcuts,
         ];
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));

@@ -2,9 +2,15 @@
 //! its rough cut, the timeline the scene plan and narration make
 //! (`Timeline::rough_cut`), with a preview that plays it from proxies.
 //!
-//! The timeline is derived, not stored: it changes when the scenes or the
-//! narration do, until cut editing (#21) gives the user's own edits a
-//! place. Opening or refreshing the editor queues a job for the proxies the
+//! Cut editing (stories 58, 59, 70): split, trim, move, reorder and delete
+//! are domain edits (`bardo_domain::Edit`) the editor makes on its timeline
+//! and saves at once, so the cut survives closing the project; undo and
+//! redo walk the session's history. Cuts snap to the narration's words when
+//! snapping is on. The saved cut belongs to the scene plan and narration it
+//! was made on: a new plan or narration starts the editor over from the
+//! rough cut, and says so. A scene's new image takes its place in the cut.
+//!
+//! Opening or refreshing the editor queues a job for the proxies the
 //! timeline lacks; editing never waits on it, clips without a proxy show
 //! that they are building, and the preview waits until none is.
 //!
@@ -18,12 +24,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    FPS, Generation, Job, JobKind, JobState, NarrationRepository, ProjectFiles, RepositoryError,
-    Scene, ScenePlanRepository, ThemeRepository, Timeline, VideoProject, VideoProjectId,
-    VideoSource, frame_at, frame_time,
+    Edge, Edit, EditError, FPS, Generation, History, ItemRef, Job, JobKind, JobState, NarrationId,
+    NarrationRepository, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
+    Shift, ThemeRepository, Timeline, TimelineRepository, Track, VideoProject, VideoProjectId,
+    VideoSource, frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, ClipSource, FramePoll, FrameSize, FrameStream, Framing, MediaError,
@@ -58,6 +65,14 @@ pub enum EditorError {
     NothingToRetry,
     #[error("the preview could not start: {0}")]
     Preview(#[from] MediaError),
+    /// Nothing under the playhead to split, or nothing selected to delete.
+    #[error("nothing to cut there")]
+    NothingToCut,
+    #[error("the edit could not be made: {0}")]
+    Edit(#[from] EditError),
+    /// The edit was made but could not be saved; the cut is as it was.
+    #[error("the edit could not be saved: {0}")]
+    NotSaved(RepositoryError),
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -71,6 +86,9 @@ impl EditorError {
             EditorError::NothingToRetry => Text::EditorNothingToRetry,
             EditorError::Preview(MediaError::NotFound { .. }) => Text::EditorFfmpegMissing,
             EditorError::Preview(_) => Text::EditorPreviewFailed,
+            EditorError::NothingToCut => Text::EditorNothingToCut,
+            EditorError::Edit(_) => Text::EditorCannotEdit,
+            EditorError::NotSaved(_) => Text::EditorEditNotSaved,
             EditorError::Repository(_) => Text::EditorNotLoaded,
         }
     }
@@ -111,6 +129,8 @@ pub struct ClipView {
     pub is_clip: bool,
     pub at: Duration,
     pub duration: Duration,
+    /// Where in the clip it starts (zero for a still).
+    pub start: Duration,
     pub media: ClipMedia,
     /// The scene's image, for thumbnails.
     pub thumbnail: Option<PathBuf>,
@@ -133,7 +153,7 @@ pub struct BinScene {
     pub thumbnail: Option<PathBuf>,
 }
 
-/// A narrated word on the narration track.
+/// A narrated word on the narration track, where the cut plays it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WordMark {
     pub text: String,
@@ -145,10 +165,20 @@ pub struct WordMark {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NarrationTrack {
     pub file: String,
+    /// How long the narration file is.
     pub duration: Duration,
+    /// The words the cut keeps, at their timeline times.
     pub words: Vec<WordMark>,
-    /// Peaks of its waveform, once built; `peaks_per_second` of them.
+    /// Peaks of its waveform, once built; `peaks_per_second` of them, over
+    /// the file's own time.
     pub peaks: Option<(u32, Vec<f32>)>,
+}
+
+/// The scene plan and narration a cut is made on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CutBasis {
+    pub scene_plan: ScenePlanId,
+    pub narration: NarrationId,
 }
 
 /// A clip that needs the user: what the banner names.
@@ -166,6 +196,14 @@ pub struct EditorView {
     pub channel_name: String,
     /// `None` until the project has a narration and a scene plan.
     pub timeline: Option<Timeline>,
+    /// What the timeline is cut on, when there is one.
+    pub basis: Option<CutBasis>,
+    /// Whether a saved cut was left behind because the scenes or narration
+    /// changed since it was made.
+    pub cut_outdated: bool,
+    /// Where the narration's words start and end on the timeline: what
+    /// cuts snap to.
+    pub word_boundaries: Vec<Duration>,
     /// Whether the project has a narration (the empty state says what is
     /// missing).
     pub has_narration: bool,
@@ -183,8 +221,15 @@ pub struct EditorView {
 }
 
 impl EditorView {
+    /// Whether there is nothing to play: no timeline yet, or every item cut
+    /// away.
     pub fn is_empty(&self) -> bool {
         self.timeline.as_ref().is_none_or(Timeline::is_empty)
+    }
+
+    /// Where `item` sits on the timeline and how long it is.
+    pub fn span(&self, item: ItemRef) -> Option<(Duration, Duration)> {
+        self.timeline.as_ref()?.span(item)
     }
 
     pub fn duration(&self) -> Duration {
@@ -218,6 +263,43 @@ impl EditorView {
     pub fn clip_at(&self, time: Duration) -> Option<usize> {
         self.timeline.as_ref()?.video_at(time)
     }
+
+    /// The narration item under `time`.
+    pub fn narration_at(&self, time: Duration) -> Option<usize> {
+        self.timeline.as_ref()?.narration_at(time)
+    }
+}
+
+/// What the user asks of the timeline. `reach` is how far a cut may move to
+/// land on a word (zero, or snapping off, keeps it where it is).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EditAction {
+    /// Splits the selected item if the playhead is inside it, else the
+    /// video clip under the playhead.
+    SplitAtPlayhead {
+        reach: Duration,
+    },
+    /// Moves an edge of `item` to `to`.
+    Trim {
+        item: ItemRef,
+        edge: Edge,
+        to: Duration,
+        reach: Duration,
+    },
+    /// Moves a narration item to start at `to`.
+    Move {
+        item: ItemRef,
+        to: Duration,
+    },
+    /// Takes video clip `from` to position `to`.
+    Reorder {
+        from: usize,
+        to: usize,
+    },
+    /// Removes the selected item.
+    DeleteSelection,
+    Undo,
+    Redo,
 }
 
 /// The preview's shape.
@@ -270,13 +352,20 @@ pub struct Editor {
     audio: Arc<dyn AudioOutput>,
     files: Arc<dyn ProjectFiles>,
     playhead: Duration,
-    selection: Option<usize>,
+    selection: Option<ItemRef>,
     aspect: PreviewAspect,
     playing: Option<Playing>,
     /// The one picture asked for while paused.
     still: Option<FrameStream>,
     /// The last preview problem, until the next play or seek.
     error: Option<Text>,
+    /// The edits of this session, to undo and redo.
+    history: History,
+    /// Whether cuts snap to the narration's words.
+    snapping: bool,
+    /// Whether opening found the saved cut left behind, until the next
+    /// edit.
+    cut_reset: bool,
 }
 
 impl Editor {
@@ -292,8 +381,196 @@ impl Editor {
         self.playhead
     }
 
-    pub fn selection(&self) -> Option<usize> {
+    pub fn selection(&self) -> Option<ItemRef> {
         self.selection
+    }
+
+    /// The selected video clip, if a clip is selected.
+    pub fn selected_clip(&self) -> Option<usize> {
+        self.selection
+            .filter(|item| item.track == Track::Video)
+            .map(|item| item.index)
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    pub fn snapping(&self) -> bool {
+        self.snapping
+    }
+
+    pub fn set_snapping(&mut self, on: bool) {
+        self.snapping = on;
+    }
+
+    /// Whether the saved cut was left behind on opening because the scenes
+    /// or narration changed; until the next edit.
+    pub fn cut_reset(&self) -> bool {
+        self.cut_reset
+    }
+
+    /// Where a cut aimed at `time` lands: on the nearest word boundary
+    /// within `reach` when snapping is on, else on the nearest frame. The
+    /// flag says it found a word.
+    pub fn snapped(&self, time: Duration, reach: Duration) -> (Duration, bool) {
+        let word = self
+            .snapping
+            .then(|| snap(time, &self.view.word_boundaries, reach))
+            .flatten();
+        (
+            frame_time(nearest_frame(word.unwrap_or(time))),
+            word.is_some(),
+        )
+    }
+
+    /// How far a trim of `item`'s `edge` toward `to` moves it, within what
+    /// the item allows.
+    fn trim_shift(
+        &self,
+        item: ItemRef,
+        edge: Edge,
+        to: Duration,
+        reach: Duration,
+    ) -> Option<Shift> {
+        let timeline = self.view.timeline.as_ref()?;
+        let (at, duration) = timeline.span(item)?;
+        let from = match edge {
+            Edge::Start => at,
+            Edge::End => at + duration,
+        };
+        let (earliest, latest) = timeline.trim_limits(item, edge).ok()?;
+        let (to, _) = self.snapped(to, reach);
+        Some(Shift::between(from, to).clamp(earliest, latest))
+    }
+
+    /// Where `item` would sit while its `edge` is dragged to `to`: its new
+    /// start and length, before the clips after it follow.
+    pub fn trim_preview(
+        &self,
+        item: ItemRef,
+        edge: Edge,
+        to: Duration,
+        reach: Duration,
+    ) -> Option<(Duration, Duration)> {
+        let (at, duration) = self.view.span(item)?;
+        let shift = self.trim_shift(item, edge, to, reach)?;
+        let end = at + duration;
+        Some(match edge {
+            Edge::Start => {
+                let start = shift.move_time(at).unwrap_or(Duration::ZERO);
+                (start, end.saturating_sub(start))
+            }
+            Edge::End => (at, shift.move_time(end).unwrap_or(end).saturating_sub(at)),
+        })
+    }
+
+    /// Where a narration item dragged to start at `to` would go: on a
+    /// frame, short of the items beside it.
+    pub fn move_preview(&self, item: ItemRef, to: Duration) -> Option<Duration> {
+        let (earliest, latest) = self.view.timeline.as_ref()?.move_limits(item).ok()?;
+        let to = frame_time(nearest_frame(to));
+        Some(latest.map_or(to, |latest| to.min(latest)).max(earliest))
+    }
+
+    /// The position video clip `from` takes when dropped at `time`: before
+    /// the clip whose middle is past `time`.
+    pub fn reorder_target(&self, from: usize, time: Duration) -> Option<usize> {
+        let clips = &self.view.clips;
+        if from >= clips.len() {
+            return None;
+        }
+        let slot = clips
+            .iter()
+            .position(|clip| time < clip.at + clip.duration / 2)
+            .unwrap_or(clips.len());
+        Some(if slot > from { slot - 1 } else { slot })
+    }
+
+    /// The edit an action makes, and what is selected after it.
+    fn edit_for(&self, action: EditAction) -> Result<(Edit, Option<ItemRef>), EditorError> {
+        let timeline = self
+            .view
+            .timeline
+            .as_ref()
+            .ok_or(EditorError::NothingToCut)?;
+        Ok(match action {
+            EditAction::SplitAtPlayhead { reach } => {
+                let (at, _) = self.snapped(self.playhead, reach);
+                let inside = |item: &ItemRef| {
+                    timeline
+                        .span(*item)
+                        .is_some_and(|(start, length)| start < at && at < start + length)
+                };
+                let item = self
+                    .selection
+                    .filter(inside)
+                    .or_else(|| timeline.video_at(at).map(ItemRef::video))
+                    .filter(inside)
+                    .ok_or(EditorError::NothingToCut)?;
+                let edit = Edit::Split {
+                    track: item.track,
+                    index: item.index,
+                    at,
+                };
+                // The part after the cut, where the playhead goes on.
+                (
+                    edit,
+                    Some(ItemRef {
+                        index: item.index + 1,
+                        ..item
+                    }),
+                )
+            }
+            EditAction::Trim {
+                item,
+                edge,
+                to,
+                reach,
+            } => {
+                let by = self
+                    .trim_shift(item, edge, to, reach)
+                    .ok_or(EditError::NoSuchItem)?;
+                (
+                    Edit::Trim {
+                        track: item.track,
+                        index: item.index,
+                        edge,
+                        by,
+                    },
+                    Some(item),
+                )
+            }
+            EditAction::Move { item, to } => {
+                let to = self.move_preview(item, to).ok_or(EditError::WrongTrack)?;
+                (
+                    Edit::Move {
+                        track: item.track,
+                        index: item.index,
+                        to,
+                    },
+                    Some(item),
+                )
+            }
+            EditAction::Reorder { from, to } => {
+                (Edit::Reorder { from, to }, Some(ItemRef::video(to)))
+            }
+            EditAction::DeleteSelection => {
+                let item = self.selection.ok_or(EditorError::NothingToCut)?;
+                (
+                    Edit::Delete {
+                        track: item.track,
+                        index: item.index,
+                    },
+                    None,
+                )
+            }
+            EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
+        })
     }
 
     pub fn aspect(&self) -> PreviewAspect {
@@ -319,9 +596,9 @@ impl Editor {
         self.playing.is_some() || self.still.is_some()
     }
 
-    /// Selects a clip of the video track, or nothing.
-    pub fn select(&mut self, clip: Option<usize>) {
-        self.selection = clip.filter(|&index| index < self.view.clips.len());
+    /// Selects an item of the timeline, or nothing.
+    pub fn select(&mut self, item: Option<ItemRef>) {
+        self.selection = item.filter(|&item| self.view.span(item).is_some());
     }
 
     /// Switches the preview's shape.
@@ -338,7 +615,7 @@ impl Editor {
         let timeline = self.view.timeline.as_ref().filter(|t| !t.is_empty())?;
         let project = self.project();
         let framing = self.aspect.framing();
-        let video = timeline
+        let mut video: Vec<VideoClip> = timeline
             .video()
             .iter()
             .map(|item| {
@@ -355,12 +632,22 @@ impl Editor {
                 };
                 VideoClip {
                     source,
-                    start: Duration::ZERO,
+                    start: item.source_start(),
                     duration: item.duration,
                     framing,
                 }
             })
             .collect();
+        // Black after the last clip while the narration runs on.
+        let end = timeline.duration();
+        if end > timeline.video_end() {
+            video.push(VideoClip {
+                source: ClipSource::Black,
+                start: Duration::ZERO,
+                duration: end - timeline.video_end(),
+                framing,
+            });
+        }
         let narration = timeline
             .narration()
             .iter()
@@ -600,7 +887,7 @@ impl Editor {
         self.view = view;
         if self
             .selection
-            .is_some_and(|index| index >= self.view.clips.len())
+            .is_some_and(|item| self.view.span(item).is_none())
         {
             self.selection = None;
         }
@@ -667,15 +954,30 @@ impl Bardo {
                 .map(|image| self.files.path(project.id, &image.file))
         };
 
-        let timeline = match (&plan, &narration) {
-            (Some(plan), Some(narration)) => Some(Timeline::rough_cut(plan, narration)),
-            _ => None,
+        let saved = self.timelines.saved_timeline(project.id)?;
+        let (timeline, basis, cut_outdated) = match (&plan, &narration) {
+            (Some(plan), Some(narration)) => {
+                let restored = saved
+                    .as_ref()
+                    .and_then(|saved| Timeline::restore(saved, plan, narration));
+                let outdated = saved.is_some() && restored.is_none();
+                let basis = CutBasis {
+                    scene_plan: plan.id,
+                    narration: narration.id,
+                };
+                (
+                    Some(restored.unwrap_or_else(|| Timeline::rough_cut(plan, narration))),
+                    Some(basis),
+                    outdated,
+                )
+            }
+            _ => (None, None, false),
         };
         let mut clips = Vec::new();
         let (mut ready, mut total) = (0, 0);
         if let (Some(timeline), Some(plan)) = (&timeline, &plan) {
             for item in timeline.video() {
-                let scene = &plan.scenes()[item.scene];
+                let scene = plan.scenes().get(item.scene);
                 let media = match (item.source.file(), ProxyKind::of(&item.source)) {
                     (Some(file), Some(kind)) if has(file) => {
                         if has(&proxy_name(file, kind)) {
@@ -686,24 +988,26 @@ impl Bardo {
                     }
                     _ => ClipMedia::Missing,
                 };
-                let is_clip = matches!(item.source, VideoSource::Clip(_));
+                let is_clip = matches!(item.source, VideoSource::Clip { .. });
                 clips.push(ClipView {
                     scene: item.scene,
                     file: item.source.file().map(str::to_owned),
                     is_clip,
                     at: item.at,
                     duration: item.duration,
+                    start: item.start,
                     media,
-                    thumbnail: thumbnail(scene),
+                    thumbnail: scene.and_then(thumbnail),
                     path: item
                         .source
                         .file()
                         .map(|file| self.files.path(project.id, file)),
-                    image: scene.image().map(|image| image.generation.clone()),
-                    clip: is_clip
-                        .then(|| scene.clip().map(|clip| clip.generation.clone()))
-                        .flatten(),
-                    text: scene.text.clone(),
+                    image: scene
+                        .and_then(|scene| scene.image().map(|image| image.generation.clone())),
+                    clip: scene
+                        .filter(|_| is_clip)
+                        .and_then(|scene| scene.clip().map(|clip| clip.generation.clone())),
+                    text: scene.map(|scene| scene.text.clone()).unwrap_or_default(),
                 });
             }
             for (file, kind) in proxy_orders(timeline) {
@@ -740,20 +1044,39 @@ impl Bardo {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<Peaks>(&bytes).ok())
                 .map(|peaks| (peaks.peaks_per_second, peaks.peaks));
+            let words = timeline.as_ref().map_or_else(Vec::new, |timeline| {
+                narration
+                    .words()
+                    .filter_map(|(text, timing)| {
+                        let start = timeline.on_narration(timing.start)?;
+                        // A word cut short ends where its piece does.
+                        let end = timeline
+                            .on_narration(timing.end)
+                            .filter(|end| *end >= start)
+                            .unwrap_or(start);
+                        Some(WordMark {
+                            text: text.to_owned(),
+                            start,
+                            end,
+                        })
+                    })
+                    .collect()
+            });
             NarrationTrack {
                 file: narration.audio_file.clone(),
                 duration: narration.duration,
-                words: narration
-                    .words()
-                    .map(|(text, timing)| WordMark {
-                        text: text.to_owned(),
-                        start: timing.start,
-                        end: timing.end,
-                    })
-                    .collect(),
+                words,
                 peaks,
             }
         });
+        let word_boundaries = match (&timeline, &narration) {
+            (Some(timeline), Some(narration)) => timeline.word_boundaries(
+                narration
+                    .words()
+                    .map(|(_, timing)| (timing.start, timing.end)),
+            ),
+            _ => Vec::new(),
+        };
         Ok(EditorView {
             channel_name,
             stale: plan
@@ -761,6 +1084,9 @@ impl Bardo {
                 .is_some_and(|plan| plan.is_stale(narration.as_ref())),
             has_narration: narration.is_some(),
             timeline,
+            basis,
+            cut_outdated,
+            word_boundaries,
             clips,
             scenes,
             narration: narration_track,
@@ -772,9 +1098,14 @@ impl Bardo {
     }
 
     /// Opens the editor on `project` and starts building the proxies its
-    /// timeline lacks.
+    /// timeline lacks. A saved cut the scenes or narration left behind is
+    /// replaced by the rough cut, once, and the editor says so.
     pub fn open_editor(&self, project: VideoProjectId) -> Result<Editor, EditorError> {
         let view = self.editor_view(project)?;
+        let cut_reset = view.cut_outdated;
+        if let (true, Some(timeline), Some(basis)) = (cut_reset, &view.timeline, view.basis) {
+            self.save_cut(project, timeline, basis)?;
+        }
         let view = self.queue_missing_proxies(view, false)?;
         let mut editor = Editor {
             view,
@@ -787,17 +1118,99 @@ impl Bardo {
             playing: None,
             still: None,
             error: None,
+            history: History::default(),
+            snapping: true,
+            cut_reset,
         };
         editor.show_still();
         Ok(editor)
     }
 
     /// Reads the editor's view again (after jobs moved), queueing proxies
-    /// for media that entered the timeline.
+    /// for media that entered the timeline. A timeline changed from outside
+    /// (new scenes or narration) can no longer be undone; a cut they left
+    /// behind starts over from the rough cut, as on opening.
     pub fn refresh_editor(&self, editor: &mut Editor) -> Result<(), EditorError> {
-        let view = self.editor_view(editor.project())?;
+        let project = editor.project();
+        let view = self.editor_view(project)?;
+        if let (true, Some(timeline), Some(basis)) = (view.cut_outdated, &view.timeline, view.basis)
+        {
+            self.save_cut(project, timeline, basis)?;
+            editor.cut_reset = true;
+        }
         let view = self.queue_missing_proxies(view, false)?;
+        if view.timeline != editor.view.timeline {
+            editor.history.clear();
+        }
         editor.update(view);
+        Ok(())
+    }
+
+    /// The scene plan and narration a cut of `project` is made on now.
+    fn cut_basis(&self, project: VideoProjectId) -> Result<Option<CutBasis>, EditorError> {
+        let plan = self.scene_plans.scene_plan(project)?;
+        let narration = self.narrations.narration(project)?;
+        Ok(plan.zip(narration).map(|(plan, narration)| CutBasis {
+            scene_plan: plan.id,
+            narration: narration.id,
+        }))
+    }
+
+    fn save_cut(
+        &self,
+        project: VideoProjectId,
+        timeline: &Timeline,
+        basis: CutBasis,
+    ) -> Result<(), RepositoryError> {
+        self.timelines.save_timeline(&timeline.to_saved(
+            project,
+            self.profile.id,
+            basis.scene_plan,
+            basis.narration,
+            SystemTime::now(),
+        ))
+    }
+
+    /// Makes `action` on the editor's timeline and saves the cut. An edit
+    /// that changes nothing (a trim already at its limit) is no error.
+    /// Scenes or narration redone since the editor last read them take the
+    /// cut the action aimed at away: the editor starts over and says so.
+    pub fn edit(&self, editor: &mut Editor, action: EditAction) -> Result<(), EditorError> {
+        let project = editor.project();
+        if self.cut_basis(project)? != editor.view.basis {
+            return self.refresh_editor(editor);
+        }
+        let (Some(mut timeline), Some(basis)) = (editor.view.timeline.clone(), editor.view.basis)
+        else {
+            return Err(EditorError::NothingToCut);
+        };
+        let mut history = editor.history.clone();
+        let made = match action {
+            EditAction::Undo => history.undo(&mut timeline).map(|done| (done, None)),
+            EditAction::Redo => history.redo(&mut timeline).map(|done| (done, None)),
+            action => {
+                let (edit, selection) = editor.edit_for(action)?;
+                history
+                    .apply(&mut timeline, &edit)
+                    .map(|()| (true, selection))
+            }
+        };
+        let selection = match made {
+            Ok((true, selection)) => selection,
+            Ok((false, _)) | Err(EditError::NoChange) => return Ok(()),
+            Err(error) => {
+                // A failed undo leaves a history that no longer fits.
+                editor.history = history;
+                return Err(error.into());
+            }
+        };
+        self.save_cut(project, &timeline, basis)
+            .map_err(EditorError::NotSaved)?;
+        let view = self.editor_view(project)?;
+        editor.history = history;
+        editor.cut_reset = false;
+        editor.update(view);
+        editor.select(selection);
         Ok(())
     }
 
@@ -1568,5 +1981,529 @@ mod tests {
             app.open_editor(VideoProjectId::new()),
             Err(EditorError::ProjectNotFound)
         ));
+    }
+
+    /// A drawn project open in the editor with its proxies built.
+    fn opened(h: &Harness, app: &Bardo) -> (VideoProject, Editor) {
+        let (project, _) = h.drawn_project(app);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(app, &mut editor);
+        (project, editor)
+    }
+
+    fn spans(editor: &Editor) -> Vec<(Duration, Duration)> {
+        editor
+            .view()
+            .clips
+            .iter()
+            .map(|clip| (clip.at, clip.duration))
+            .collect()
+    }
+
+    const REACH: Duration = Duration::from_millis(150);
+
+    /// The test narration says a word every few milliseconds, closer than a
+    /// frame; these tests put one word boundary where they need it.
+    fn one_word_at(editor: &mut Editor, at: Duration) {
+        editor.view.word_boundaries = vec![at];
+    }
+
+    #[test]
+    fn cuts_snap_to_the_words_the_cut_keeps() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let timeline = editor.view().timeline.clone().unwrap();
+        let words: Vec<(Duration, Duration)> = app
+            .narrations
+            .narration(editor.project())
+            .unwrap()
+            .unwrap()
+            .words()
+            .map(|(_, timing)| (timing.start, timing.end))
+            .collect();
+        assert!(!editor.view().word_boundaries.is_empty());
+        assert_eq!(
+            editor.view().word_boundaries,
+            timeline.word_boundaries(words.iter().copied())
+        );
+
+        // Cutting the narration's first half away leaves its words out.
+        editor.set_snapping(false);
+        let middle = frame_time(frame_at(editor.view().duration()) / 2);
+        editor.seek(middle);
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(&mut editor, EditAction::SplitAtPlayhead { reach: REACH })
+            .unwrap();
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        assert!(editor.view().word_boundaries.iter().all(|at| *at >= middle));
+    }
+
+    #[test]
+    fn splitting_cuts_the_clip_under_the_playhead_on_the_nearest_word() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        let before = spans(&editor);
+        let word = Duration::from_millis(140);
+        assert!(word > before[0].0 + frame_time(1) && word + frame_time(1) < before[0].1);
+        one_word_at(&mut editor, word);
+        editor.seek(word + Duration::from_millis(80));
+
+        app.edit(&mut editor, EditAction::SplitAtPlayhead { reach: REACH })
+            .unwrap();
+
+        let cut = frame_time(nearest_frame(word));
+        let after = spans(&editor);
+        assert_eq!(after.len(), before.len() + 1);
+        assert_eq!(after[0], (before[0].0, cut - before[0].0));
+        assert_eq!(after[1], (cut, before[0].1 - (cut - before[0].0)));
+        assert_eq!(after[2..], before[1..]);
+        assert_eq!(editor.view().clips[1].scene, 0, "both halves show scene 1");
+        assert_eq!(
+            editor.selection(),
+            Some(ItemRef::video(1)),
+            "the part after the cut"
+        );
+        assert!(editor.can_undo());
+
+        // Saved: the cut comes back when the project opens again.
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(spans(&reopened), after);
+        assert!(!reopened.can_undo(), "the history is the session's");
+        assert!(!reopened.cut_reset());
+    }
+
+    #[test]
+    fn without_snapping_the_cut_stays_on_the_playhead() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let word = Duration::from_millis(140);
+        one_word_at(&mut editor, word);
+        let playhead = frame_time(nearest_frame(word) + 2);
+        editor.seek(playhead);
+        editor.set_snapping(false);
+        assert_eq!(editor.snapped(playhead, REACH), (playhead, false));
+
+        app.edit(&mut editor, EditAction::SplitAtPlayhead { reach: REACH })
+            .unwrap();
+        assert_eq!(editor.view().clips[1].at, playhead);
+
+        // A zero reach (Alt held) does the same with snapping on.
+        editor.set_snapping(true);
+        one_word_at(&mut editor, word);
+        assert_eq!(editor.snapped(playhead, Duration::ZERO), (playhead, false));
+        assert_eq!(
+            editor.snapped(playhead, REACH),
+            (frame_time(nearest_frame(word)), true)
+        );
+    }
+
+    #[test]
+    fn a_split_needs_the_playhead_inside_an_item() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.set_snapping(false);
+        let second = editor.view().clips[1].at;
+        editor.seek(second);
+        assert!(matches!(
+            app.edit(&mut editor, EditAction::SplitAtPlayhead { reach: REACH }),
+            Err(EditorError::NothingToCut)
+        ));
+        assert!(!editor.can_undo());
+        assert_eq!(
+            EditorError::NothingToCut.message(),
+            Text::EditorNothingToCut
+        );
+
+        // A selected narration item is split before the clip under it.
+        editor.seek(second + frame_time(3));
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(&mut editor, EditAction::SplitAtPlayhead { reach: REACH })
+            .unwrap();
+        let timeline = editor.view().timeline.as_ref().unwrap();
+        assert_eq!(timeline.narration().len(), 2);
+        assert_eq!(timeline.narration()[1].at, second + frame_time(3));
+        assert_eq!(editor.selection(), Some(ItemRef::narration(1)));
+    }
+
+    #[test]
+    fn undo_and_redo_walk_every_edit_and_save_each_step() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        let original = editor.view().timeline.clone();
+        editor.select(Some(ItemRef::video(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: 1 })
+            .unwrap();
+        let edited = editor.view().timeline.clone();
+
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(editor.view().timeline, original);
+        assert!(!editor.can_undo() && editor.can_redo());
+        assert_eq!(
+            app.open_editor(project.id).unwrap().view().timeline,
+            original,
+            "undoing saves too"
+        );
+        // Nothing left to undo: nothing happens.
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+
+        app.edit(&mut editor, EditAction::Redo).unwrap();
+        app.edit(&mut editor, EditAction::Redo).unwrap();
+        assert_eq!(editor.view().timeline, edited);
+        assert!(!editor.can_redo());
+    }
+
+    #[test]
+    fn trimming_a_clip_end_moves_the_clips_after_it_and_snaps_to_a_word() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let before = spans(&editor);
+        let word = Duration::from_millis(140);
+        one_word_at(&mut editor, word);
+        let aim = word + Duration::from_millis(60);
+        let end = frame_time(nearest_frame(word));
+        let item = ItemRef::video(0);
+
+        assert_eq!(
+            editor.trim_preview(item, Edge::End, aim, REACH),
+            Some((before[0].0, end - before[0].0)),
+            "the dragged clip, snapped"
+        );
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item,
+                edge: Edge::End,
+                to: aim,
+                reach: REACH,
+            },
+        )
+        .unwrap();
+        let after = spans(&editor);
+        assert_eq!(after[0].1, end);
+        let shift = before[0].1 - end;
+        assert_eq!(after[1], (before[1].0 - shift, before[1].1));
+        // The narration stays: it now runs past the video.
+        assert_eq!(
+            editor.view().duration(),
+            before.last().map(|(a, d)| *a + *d).unwrap()
+        );
+
+        // Dragged past the clip's start, it keeps a frame.
+        assert_eq!(
+            editor.trim_preview(item, Edge::End, Duration::ZERO, REACH),
+            Some((Duration::ZERO, frame_time(1)))
+        );
+    }
+
+    #[test]
+    fn trimming_a_still_start_keeps_it_in_place_and_lengthens_it() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.set_snapping(false);
+        let before = spans(&editor);
+        let item = ItemRef::video(1);
+        let aim = before[1].0 - frame_time(6);
+        assert_eq!(
+            editor.trim_preview(item, Edge::Start, aim, REACH),
+            Some((aim, before[1].1 + frame_time(6)))
+        );
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item,
+                edge: Edge::Start,
+                to: aim,
+                reach: REACH,
+            },
+        )
+        .unwrap();
+        let after = spans(&editor);
+        assert_eq!(after[1].0, before[1].0, "the track is magnetic");
+        assert_eq!(after[1].1, before[1].1 + frame_time(6));
+        assert_eq!(after[2].0, before[2].0 + frame_time(6));
+    }
+
+    #[test]
+    fn reordering_drops_a_clip_between_two_others() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let clips = editor.view().clips.clone();
+        let last = clips.len() - 1;
+        let middle = |index: usize| clips[index].at + clips[index].duration / 2;
+        let past_end = clips[last].at + clips[last].duration + Duration::from_secs(1);
+        assert_eq!(editor.reorder_target(0, Duration::ZERO), Some(0));
+        assert_eq!(editor.reorder_target(0, middle(1) + frame_time(1)), Some(1));
+        assert_eq!(editor.reorder_target(0, past_end), Some(last));
+        assert_eq!(editor.reorder_target(last, Duration::ZERO), Some(0));
+        assert_eq!(editor.reorder_target(9, Duration::ZERO), None);
+
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: last })
+            .unwrap();
+        let scenes: Vec<usize> = editor.view().clips.iter().map(|clip| clip.scene).collect();
+        assert_eq!(scenes.last(), Some(&0));
+        assert_eq!(scenes[0], 1);
+        assert_eq!(editor.selection(), Some(ItemRef::video(last)));
+    }
+
+    #[test]
+    fn deleting_narration_leaves_silence_and_moving_it_stops_at_its_neighbour() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.set_snapping(false);
+        let middle = frame_time(frame_at(editor.view().duration()) / 2);
+        editor.seek(middle);
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(&mut editor, EditAction::SplitAtPlayhead { reach: REACH })
+            .unwrap();
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        assert_eq!(editor.selection(), None);
+        let timeline = editor.view().timeline.clone().unwrap();
+        assert_eq!(timeline.narration().len(), 1);
+        assert_eq!(timeline.narration()[0].at, middle, "silence before it");
+        assert!(matches!(
+            app.edit(&mut editor, EditAction::DeleteSelection),
+            Err(EditorError::NothingToCut)
+        ));
+
+        // The narration's words follow the cut: those cut away are gone.
+        let words = &editor.view().narration.as_ref().unwrap().words;
+        assert!(words.iter().all(|word| word.start >= middle));
+
+        let item = ItemRef::narration(0);
+        assert_eq!(
+            editor.move_preview(item, Duration::ZERO),
+            Some(Duration::ZERO)
+        );
+        app.edit(
+            &mut editor,
+            EditAction::Move {
+                item,
+                to: Duration::from_millis(10),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            editor.view().timeline.as_ref().unwrap().narration()[0].at,
+            Duration::ZERO,
+            "on a frame"
+        );
+        // Video items do not move; they reorder.
+        assert!(matches!(
+            app.edit(
+                &mut editor,
+                EditAction::Move {
+                    item: ItemRef::video(0),
+                    to: Duration::ZERO,
+                },
+            ),
+            Err(EditorError::Edit(EditError::WrongTrack))
+        ));
+    }
+
+    #[test]
+    fn the_preview_plays_the_edited_cut() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.set_snapping(false);
+        let clip = editor.view().clips[2].clone();
+        let duration = editor.view().duration();
+        // Shorten the narration so the video outlasts it, then cut the
+        // first clip's end.
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item: ItemRef::narration(0),
+                edge: Edge::Start,
+                to: frame_time(15),
+                reach: REACH,
+            },
+        )
+        .unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item: ItemRef::video(2),
+                edge: Edge::End,
+                to: clip.at + clip.duration - frame_time(5),
+                reach: REACH,
+            },
+        )
+        .unwrap();
+        let calls = h.media.previews().len();
+        editor.play().unwrap();
+        assert_eq!(h.media.previews().len(), calls + 1);
+        let plan = h.media.previews().pop().unwrap().plan;
+        let end = frame_time(frame_at(clip.at + clip.duration) - 5);
+        assert_eq!(plan.video[2].duration, end - clip.at);
+        // The narration ends later than the video now: black fills in.
+        assert_eq!(plan.video.last().unwrap().source, ClipSource::Black);
+        assert_eq!(plan.duration(), duration);
+        let narration = &plan.audio[0].clips[0];
+        assert_eq!(
+            (narration.at, narration.start),
+            (frame_time(15), frame_time(15))
+        );
+    }
+
+    #[test]
+    fn an_edit_shows_its_picture_again_while_paused() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.tick(Instant::now());
+        let calls = h.media.previews().len();
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: 1 })
+            .unwrap();
+        assert_eq!(h.media.previews().len(), calls + 1, "the new cut's frame");
+        assert!(editor.needs_ticks());
+    }
+
+    #[test]
+    fn a_new_scene_plan_starts_the_cut_over_and_says_so_once() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        editor.select(Some(ItemRef::video(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+
+        h.answer(crate::scenes::tests::plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, true, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let editor = app.open_editor(project.id).unwrap();
+        assert!(editor.cut_reset());
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(
+            editor.view().clips.len(),
+            plan.scenes().len(),
+            "the rough cut"
+        );
+        assert!(
+            !app.open_editor(project.id).unwrap().cut_reset(),
+            "said once"
+        );
+    }
+
+    #[test]
+    fn an_edit_after_the_scenes_were_redone_starts_the_cut_over_instead() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        editor.select(Some(ItemRef::video(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+
+        // Redone while the editor is open, before it reads the jobs again.
+        h.answer(crate::scenes::tests::plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, true, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: 2 })
+            .unwrap();
+
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let rough = editor.view().clips.iter().map(|clip| clip.scene);
+        assert!(rough.eq(0..plan.scenes().len()), "the rough cut, as it was");
+        assert!(editor.cut_reset());
+        assert!(!editor.can_undo(), "nothing of the old cut to undo");
+        assert!(
+            !app.open_editor(project.id).unwrap().cut_reset(),
+            "the rough cut was saved"
+        );
+    }
+
+    #[test]
+    fn a_new_image_takes_its_scene_s_place_in_the_cut_and_ends_the_history() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: 2 })
+            .unwrap();
+        assert!(editor.can_undo());
+
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        app.accept_scene_image(project.id, 0).unwrap();
+        settle(&app, &mut editor);
+
+        let moved = &editor.view().clips[2];
+        assert_eq!(moved.scene, 0, "still where it was cut to");
+        let image = app.scenes(project.id).unwrap().plan.unwrap().scenes()[0]
+            .image()
+            .unwrap()
+            .file
+            .clone();
+        assert_eq!(moved.file.as_deref(), Some(image.as_str()));
+        assert!(!editor.can_undo(), "the timeline changed under the history");
+    }
+
+    #[test]
+    fn an_edit_that_cannot_be_saved_leaves_the_cut_as_it_was() {
+        struct Broken;
+        impl TimelineRepository for Broken {
+            fn saved_timeline(
+                &self,
+                _: VideoProjectId,
+            ) -> Result<Option<bardo_domain::SavedTimeline>, RepositoryError> {
+                Ok(None)
+            }
+            fn save_timeline(
+                &self,
+                _: &bardo_domain::SavedTimeline,
+            ) -> Result<(), RepositoryError> {
+                Err(RepositoryError("disk full".into()))
+            }
+        }
+        let h = Harness::new();
+        let app = h.start_with_timelines(Arc::new(Broken));
+        let (_, mut editor) = opened(&h, &app);
+        let before = editor.view().timeline.clone();
+        editor.select(Some(ItemRef::video(0)));
+        let error = app
+            .edit(&mut editor, EditAction::DeleteSelection)
+            .unwrap_err();
+        assert_eq!(error.message(), Text::EditorEditNotSaved);
+        assert_eq!(editor.view().timeline, before);
+        assert!(!editor.can_undo());
+    }
+
+    #[test]
+    fn a_trim_at_its_limit_changes_nothing_and_is_no_error() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let item = ItemRef::narration(0);
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item,
+                edge: Edge::Start,
+                to: Duration::ZERO,
+                reach: REACH,
+            },
+        )
+        .unwrap();
+        assert!(!editor.can_undo());
     }
 }

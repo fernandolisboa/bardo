@@ -42,7 +42,7 @@ impl ProxyKind {
 
     pub(crate) fn of(source: &VideoSource) -> Option<ProxyKind> {
         match source {
-            VideoSource::Clip(_) => Some(ProxyKind::Clip),
+            VideoSource::Clip { .. } => Some(ProxyKind::Clip),
             VideoSource::Still(_) => Some(ProxyKind::Still),
             VideoSource::Missing => None,
         }

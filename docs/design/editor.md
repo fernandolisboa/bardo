@@ -87,8 +87,10 @@ Editing never waits on proxies or jobs (story 69).
 
 ## Interactions
 
-- Snapping (on by default) snaps cuts, trims and caption edges to narration word boundaries; Alt while dragging disables it.
-- Split, trim, reorder and delete on V1 and audio tracks; every edit is undoable (#21).
+- Snapping (on by default) snaps cuts, trims and caption edges to narration word boundaries within 8 px at the current zoom; Alt while dragging disables it. While dragging, a ghost outline shows where the item lands and a thin line marks the word it snapped to.
+- Split, trim, reorder and delete on V1 and audio tracks; every edit is undoable (#21). V1 is magnetic: trimming, removing or reordering a clip moves the clips after it, and trimming a clip's start cuts into it while it stays in place. Audio pieces move freely and stop at their neighbours; removing one leaves silence.
+- Mouse: drag an item's end (6 px grab zone, resize cursor) to trim it; drag a clip to drop it between two others (an accent bar marks the slot); drag a narration piece to move it. Clicking an item selects it and moves the playhead there.
+- The Split button splits at the playhead (the selected item if the playhead is inside it, else the clip under it). The inspector of a selected item has **Remove from the cut** and lists the editing shortcuts.
 - The aspect switch changes the preview and enables per-clip crop; the crop window can be dragged in the preview.
 - Selecting a caption chip, a clip or an audio region drives the inspector; clicking empty timeline clears the selection.
 
@@ -101,8 +103,11 @@ Shortcuts are scoped to the focused panel (timeline or preview), never global, s
 | Space | Play / pause |
 | S | Split at playhead |
 | V | Select tool |
-| Delete | Remove selection |
-| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Delete / Backspace | Remove selection |
+| [ / ] | Trim the selection's start / end to the playhead |
+| Alt+← / Alt+→ | Move the selected clip one place earlier / later, or the selected narration piece one frame |
+| Esc | Clear the selection |
+| Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / redo |
 | J / K / L | Shuttle back / stop / forward |
 | ← / → | Step one frame |
 | Alt+drag | Disable snapping while dragging |

@@ -30,8 +30,8 @@ use bardo_domain::{
     JobRepository, KeyChecker, MarketData, NarrationRepository, NetworkAccountRepository,
     NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
     RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
-    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
-    VoiceLibrary,
+    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
+    UiLanguage, UserProfile, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryProjectFiles};
@@ -44,8 +44,8 @@ pub use costs::{
     SpendRow,
 };
 pub use editor::{
-    BinScene, ClipMedia, ClipProblem, ClipView, Editor, EditorError, EditorView, NarrationTrack,
-    PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, PreviewAspect, WordMark,
+    BinScene, ClipMedia, ClipProblem, ClipView, CutBasis, EditAction, Editor, EditorError,
+    EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, PreviewAspect, WordMark,
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
@@ -100,6 +100,8 @@ pub struct Repositories {
     pub narrations: Arc<dyn NarrationRepository>,
     /// Scene plans, their prompts and images. Shared with the job queue.
     pub scene_plans: Arc<dyn ScenePlanRepository>,
+    /// The cuts made in the editor.
+    pub timelines: Arc<dyn TimelineRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
     /// What generations cost, the user's rates and budgets. Shared with
@@ -145,6 +147,7 @@ impl Repositories {
             personas: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
+            timelines: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             research: db,
@@ -215,6 +218,7 @@ pub struct Bardo {
     personas: Arc<dyn PersonaRepository>,
     narrations: Arc<dyn NarrationRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
+    timelines: Arc<dyn TimelineRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
@@ -267,6 +271,7 @@ impl Bardo {
             personas,
             narrations,
             scene_plans,
+            timelines,
             network_accounts,
             costs,
             files,
@@ -377,6 +382,7 @@ impl Bardo {
             personas,
             narrations,
             scene_plans,
+            timelines,
             network_accounts,
             cost_book,
             files,
@@ -1166,6 +1172,7 @@ mod tests {
             personas: Arc::new(FakePersonas::default()),
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
+            timelines: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),

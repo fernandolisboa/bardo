@@ -35,7 +35,8 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Generation** | The provenance of a generated asset: provider, model, the final prompt sent, the template version and the tokens used. Never changes; editing the asset leaves its generation as it was. |
 | **Video project** | One video in production: script, generated assets, timeline, per-network metadata and publications. Starts when the user approves a theme and stays linked to its channel, niche and theme. |
 | **Asset** | Any media file in a project: generated image, video clip, narration, music, SFX or imported file. |
-| **Timeline** | Ordered clips on video and audio tracks, with cuts, gain, fades and captions. |
+| **Timeline** | Ordered clips on video and audio tracks, with cuts, gain, fades and captions. The video track is magnetic (clips run back to back, so removing or reordering one moves the ones after it); audio items sit where they are put, with silence between them. Starts as the rough cut built from the scene plan and narration. |
+| **Cut** | The user's edits to a timeline (split, trim, move, reorder, delete), saved as they are made and undoable within the editor session. A cut belongs to the scene plan and narration it was made on: a new plan or narration starts it over from the rough cut. Cuts snap to the narration's word boundaries unless snapping is off. |
 | **Proxy** | A low-resolution copy of a clip (540 lines, every frame a keyframe) that preview decodes instead of the original, so playback and scrubbing stay light. Built in the background; the render always reads the originals. |
 | **Render preset** | Output format per network (aspect ratio, resolution, codec, bitrate, duration limit, loudness target). Each network has a built-in one; a network account overrides single values, and the rest follow the built-in. |
 | **Render** | Producing the final media file from a timeline. Irreversible in cost/time; requires review. |

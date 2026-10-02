@@ -847,6 +847,7 @@ building = "Gerando proxies de pré-visualização… {ready} de {total} arquivo
 keep_editing = "Você pode continuar editando enquanto isso roda"
 stale = "A narração mudou depois que as cenas foram planejadas. Planeje-as de novo para acompanhar."
 
+cut_reset = "As cenas ou a narração mudaram desde a sua última edição, então o corte recomeça do corte bruto."
 [editor.bin]
 scenes = "Cenas"
 media = "Mídia"
@@ -865,6 +866,10 @@ length = "Duração"
 file = "Arquivo"
 narration = "Narração"
 
+audio = "Áudio"
+source_in = "Início na fonte"
+remove = "Remover do corte"
+shortcuts = "S divide · [ e ] aparam até o cursor · Alt+← e Alt+→ movem · Delete remove"
 [editor.tool]
 select = "Selecionar (V)"
 split = "Dividir (S)"
@@ -912,3 +917,6 @@ ffmpeg_missing = "O ffmpeg não foi encontrado, então não há pré-visualizaç
 preview_failed = "A pré-visualização não pôde começar."
 not_loaded = "Não foi possível carregar o editor."
 no_sound = "Sem dispositivo de som: a pré-visualização toca sem áudio."
+nothing_to_cut = "Nada para cortar aí: coloque o cursor dentro de um clipe ou selecione um."
+cannot_edit = "Essa edição não cabe aí."
+edit_not_saved = "Não foi possível salvar a edição, então o corte continua como estava."

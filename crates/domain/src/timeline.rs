@@ -5,10 +5,21 @@
 //!
 //! Every cut sits on a frame boundary of [`FPS`], so clips placed back to
 //! back never drift from the narration however many there are.
+//!
+//! The video track is magnetic: its clips always run back to back from the
+//! start, so a cut never leaves a black gap, and removing or reordering a
+//! clip moves the ones after it. Audio items sit where they are put, never
+//! overlapping on their track, with silence between them. The user's cuts
+//! (`crate::Edit`) change a timeline; a saved one ([`SavedTimeline`])
+//! remembers them against the scene plan and narration they were made on.
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
-use crate::{Narration, ScenePlan};
+use crate::{
+    Narration, NarrationId, ProfileId, RepositoryError, Scene, ScenePlan, ScenePlanId,
+    VideoProjectId,
+};
 
 /// The timeline's frame rate.
 pub const FPS: u32 = 30;
@@ -51,8 +62,9 @@ pub fn timecode(time: Duration) -> String {
 /// What a stretch of the video track shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VideoSource {
-    /// A video clip in the project folder.
-    Clip(String),
+    /// A video clip in the project folder, and its length (as asked of
+    /// the model that made it).
+    Clip { file: String, length: Duration },
     /// A still image in the project folder, shown for the whole stretch.
     Still(String),
     /// Nothing to show yet: the scene has no image.
@@ -60,10 +72,23 @@ pub enum VideoSource {
 }
 
 impl VideoSource {
+    /// What `scene` shows: its clip, or its still image when it has no clip
+    /// or its clip animates an image the scene no longer shows.
+    pub fn of(scene: &Scene) -> VideoSource {
+        match (scene.clip(), scene.image()) {
+            (Some(clip), _) if !scene.is_clip_stale() => VideoSource::Clip {
+                file: clip.file.clone(),
+                length: Duration::from_secs(clip.seconds.into()),
+            },
+            (_, Some(image)) => VideoSource::Still(image.file.clone()),
+            _ => VideoSource::Missing,
+        }
+    }
+
     /// The file in the project folder, if there is one.
     pub fn file(&self) -> Option<&str> {
         match self {
-            VideoSource::Clip(file) | VideoSource::Still(file) => Some(file),
+            VideoSource::Clip { file, .. } | VideoSource::Still(file) => Some(file),
             VideoSource::Missing => None,
         }
     }
@@ -75,6 +100,10 @@ pub struct VideoItem {
     /// The scene it shows, by index in the scene plan.
     pub scene: usize,
     pub source: VideoSource,
+    /// Where in the clip it starts. A still has no time of its own: its
+    /// start only moves on a split, so the pieces of a still that gets
+    /// animated later play on from each other.
+    pub start: Duration,
     /// Where it starts on the timeline.
     pub at: Duration,
     pub duration: Duration,
@@ -83,6 +112,21 @@ pub struct VideoItem {
 impl VideoItem {
     pub fn end(&self) -> Duration {
         self.at + self.duration
+    }
+
+    /// Whether its source plays through time (a clip), so cutting into it
+    /// moves where in the source it starts.
+    pub fn has_source_time(&self) -> bool {
+        matches!(self.source, VideoSource::Clip { .. })
+    }
+
+    /// Where playing starts in the source: never past the clip's last
+    /// frame, which a piece cut beyond the clip's end holds.
+    pub fn source_start(&self) -> Duration {
+        match &self.source {
+            VideoSource::Clip { length, .. } => self.start.min(length.saturating_sub(min_length())),
+            _ => self.start,
+        }
     }
 }
 
@@ -96,13 +140,27 @@ pub struct AudioItem {
     /// Where it starts on the timeline.
     pub at: Duration,
     pub duration: Duration,
+    /// How long the whole file is: no item plays past its end.
+    pub length: Duration,
+}
+
+impl AudioItem {
+    pub fn end(&self) -> Duration {
+        self.at + self.duration
+    }
+}
+
+/// The shortest an item can be: one frame. A cut that would leave less is
+/// not made.
+pub fn min_length() -> Duration {
+    frame_time(1)
 }
 
 /// A video project's edit: the video track and the narration track.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeline {
-    video: Vec<VideoItem>,
-    narration: Vec<AudioItem>,
+    pub(crate) video: Vec<VideoItem>,
+    pub(crate) narration: Vec<AudioItem>,
 }
 
 impl Timeline {
@@ -144,18 +202,11 @@ impl Timeline {
                 let end = starts
                     .get(position + 1)
                     .map_or(end_frame, |&(_, next)| next);
-                let scene = &plan.scenes()[index];
-                let source = match (scene.clip(), scene.image()) {
-                    (Some(clip), _) if !scene.is_clip_stale() => {
-                        VideoSource::Clip(clip.file.clone())
-                    }
-                    (_, Some(image)) => VideoSource::Still(image.file.clone()),
-                    _ => VideoSource::Missing,
-                };
                 let at = frame_time(start);
                 VideoItem {
                     scene: index,
-                    source,
+                    source: VideoSource::of(&plan.scenes()[index]),
+                    start: Duration::ZERO,
                     at,
                     duration: frame_time(end) - at,
                 }
@@ -166,8 +217,114 @@ impl Timeline {
             start: Duration::ZERO,
             at: Duration::ZERO,
             duration: narration.duration,
+            length: narration.duration,
         }];
         Timeline { video, narration }
+    }
+
+    /// The timeline `saved` keeps, on the scenes of `plan` as they are now
+    /// (a scene's new image shows where its old one did). `None` when it was
+    /// cut on another scene plan or narration, or does not hold together:
+    /// the editor then starts over from the rough cut.
+    pub fn restore(saved: &SavedTimeline, plan: &ScenePlan, narration: &Narration) -> Option<Self> {
+        if saved.scene_plan != plan.id
+            || saved.narration != narration.id
+            || saved
+                .narration_items
+                .iter()
+                .any(|item| item.file != narration.audio_file)
+        {
+            return None;
+        }
+        let video = saved
+            .video
+            .iter()
+            .map(|item| VideoItem {
+                scene: item.scene,
+                source: plan
+                    .scenes()
+                    .get(item.scene)
+                    .map_or(VideoSource::Missing, VideoSource::of),
+                start: item.start,
+                at: Duration::ZERO,
+                duration: item.duration,
+            })
+            .collect();
+        let narration = saved
+            .narration_items
+            .iter()
+            .map(|item| AudioItem {
+                file: item.file.clone(),
+                start: item.start,
+                at: item.at,
+                duration: item.duration,
+                length: narration.duration,
+            })
+            .collect();
+        let mut timeline = Timeline { video, narration };
+        timeline.relayout();
+        timeline.holds_together().then_some(timeline)
+    }
+
+    /// What saving this timeline keeps.
+    pub fn to_saved(
+        &self,
+        project: VideoProjectId,
+        owner: ProfileId,
+        scene_plan: ScenePlanId,
+        narration: NarrationId,
+        now: SystemTime,
+    ) -> SavedTimeline {
+        SavedTimeline {
+            project,
+            owner,
+            scene_plan,
+            narration,
+            video: self
+                .video
+                .iter()
+                .map(|item| SavedVideoItem {
+                    scene: item.scene,
+                    start: item.start,
+                    duration: item.duration,
+                })
+                .collect(),
+            narration_items: self
+                .narration
+                .iter()
+                .map(|item| SavedAudioItem {
+                    file: item.file.clone(),
+                    start: item.start,
+                    at: item.at,
+                    duration: item.duration,
+                })
+                .collect(),
+            updated_at: now,
+        }
+    }
+
+    /// Lays the video track out back to back from the start.
+    pub(crate) fn relayout(&mut self) {
+        let mut at = Duration::ZERO;
+        for item in &mut self.video {
+            item.at = at;
+            at += item.duration;
+        }
+    }
+
+    /// Every item at least a frame long; audio items in order, apart, and
+    /// within their file.
+    fn holds_together(&self) -> bool {
+        let video = self.video.iter().all(|item| item.duration >= min_length());
+        let audio = self
+            .narration
+            .iter()
+            .all(|item| item.duration >= min_length() && item.start + item.duration <= item.length);
+        let apart = self
+            .narration
+            .windows(2)
+            .all(|pair| pair[0].end() <= pair[1].at);
+        video && audio && apart
     }
 
     pub fn video(&self) -> &[VideoItem] {
@@ -179,22 +336,65 @@ impl Timeline {
         &self.narration
     }
 
-    /// As long as the video track.
-    pub fn duration(&self) -> Duration {
+    /// The end of the video track.
+    pub fn video_end(&self) -> Duration {
         self.video.last().map_or(Duration::ZERO, VideoItem::end)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.video.is_empty()
+    /// Until the last item of any track ends, on the nearest frame (as the
+    /// rough cut ends); the video shows black after its own end.
+    pub fn duration(&self) -> Duration {
+        let audio = self
+            .narration
+            .iter()
+            .map(|item| frame_time(nearest_frame(item.end())))
+            .max()
+            .unwrap_or(Duration::ZERO);
+        self.video_end().max(audio)
     }
 
-    /// The video item shown at `time`; the last one at or past the end.
+    /// Whether no track has anything left.
+    pub fn is_empty(&self) -> bool {
+        self.video.is_empty() && self.narration.is_empty()
+    }
+
+    /// The video item shown at `time`, if the video runs that long.
     pub fn video_at(&self, time: Duration) -> Option<usize> {
-        if self.video.is_empty() {
-            return None;
-        }
         let index = self.video.partition_point(|item| item.end() <= time);
-        Some(index.min(self.video.len() - 1))
+        (index < self.video.len()).then_some(index)
+    }
+
+    /// The narration item playing at `time`, if any.
+    pub fn narration_at(&self, time: Duration) -> Option<usize> {
+        self.narration
+            .iter()
+            .position(|item| item.at <= time && time < item.end())
+    }
+
+    /// Where on the timeline the moment `source` of the narration file
+    /// plays, if the cut kept it (an item's end counts as kept).
+    pub fn on_narration(&self, source: Duration) -> Option<Duration> {
+        self.narration
+            .iter()
+            .find(|item| item.start <= source && source <= item.start + item.duration)
+            .map(|item| item.at + (source - item.start))
+    }
+
+    /// Where the narration's words start and end on the timeline, in
+    /// order: the points cuts snap to. `words` are times in the narration
+    /// file; those the cut left out have no place.
+    pub fn word_boundaries(
+        &self,
+        words: impl IntoIterator<Item = (Duration, Duration)>,
+    ) -> Vec<Duration> {
+        let mut boundaries: Vec<Duration> = words
+            .into_iter()
+            .flat_map(|(start, end)| [start, end])
+            .filter_map(|time| self.on_narration(time))
+            .collect();
+        boundaries.sort();
+        boundaries.dedup();
+        boundaries
     }
 
     /// Every video and audio file the timeline plays, each once, in order.
@@ -214,10 +414,78 @@ impl Timeline {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::time::SystemTime;
+/// The target nearest `time` within `within` of it, if any: where a cut
+/// snaps.
+pub fn snap(time: Duration, targets: &[Duration], within: Duration) -> Option<Duration> {
+    let distance = |target: &Duration| target.abs_diff(time);
+    targets
+        .iter()
+        .filter(|target| distance(target) <= within)
+        .min_by_key(|target| distance(target))
+        .copied()
+}
 
+/// A video item as saved: the scene it shows, not the file, so a scene's
+/// new image takes its place in the cut.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedVideoItem {
+    pub scene: usize,
+    pub start: Duration,
+    pub duration: Duration,
+}
+
+/// An audio item as saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedAudioItem {
+    pub file: String,
+    pub start: Duration,
+    pub at: Duration,
+    pub duration: Duration,
+}
+
+/// A video project's cut as the user left it, on the scene plan and the
+/// narration it was made on. A new plan or narration leaves it behind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedTimeline {
+    pub project: VideoProjectId,
+    pub owner: ProfileId,
+    pub scene_plan: ScenePlanId,
+    pub narration: NarrationId,
+    /// In order; positions follow from the lengths (the track is magnetic).
+    pub video: Vec<SavedVideoItem>,
+    /// The narration track (A1), in order.
+    pub narration_items: Vec<SavedAudioItem>,
+    pub updated_at: SystemTime,
+}
+
+/// Persistence port for edited timelines.
+pub trait TimelineRepository: Send + Sync {
+    /// The project's saved cut, if it was ever edited.
+    fn saved_timeline(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Option<SavedTimeline>, RepositoryError>;
+
+    /// Makes `timeline` the project's saved cut, replacing any other; all or
+    /// none.
+    fn save_timeline(&self, timeline: &SavedTimeline) -> Result<(), RepositoryError>;
+}
+
+impl<T: TimelineRepository + ?Sized> TimelineRepository for Arc<T> {
+    fn saved_timeline(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Option<SavedTimeline>, RepositoryError> {
+        (**self).saved_timeline(project)
+    }
+
+    fn save_timeline(&self, timeline: &SavedTimeline) -> Result<(), RepositoryError> {
+        (**self).save_timeline(timeline)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
     use crate::{
         Generation, GenerationId, JobFailureKind, NarrationId, NarrationSource, ProfileId,
@@ -225,11 +493,11 @@ mod tests {
         ScriptText, TemplateUsed, TemplateVersionId, TokenUsage, VideoProjectId, WordTimings,
     };
 
-    fn ms(n: u64) -> Duration {
+    pub(crate) fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
     }
 
-    fn generation() -> Generation {
+    pub(crate) fn generation() -> Generation {
         Generation {
             id: GenerationId::new(),
             owner: ProfileId::new(),
@@ -249,14 +517,14 @@ mod tests {
         }
     }
 
-    fn image(file: &str) -> SceneImage {
+    pub(crate) fn image(file: &str) -> SceneImage {
         SceneImage {
             file: file.into(),
             generation: generation(),
         }
     }
 
-    fn scene(start: u64, end: u64) -> SceneRecord {
+    pub(crate) fn scene(start: u64, end: u64) -> SceneRecord {
         let prompt = ScenePrompt::new("a lighthouse at dusk").unwrap();
         SceneRecord {
             start: ms(start),
@@ -275,7 +543,7 @@ mod tests {
         }
     }
 
-    fn plan(scenes: Vec<SceneRecord>) -> ScenePlan {
+    pub(crate) fn plan(scenes: Vec<SceneRecord>) -> ScenePlan {
         let generation = generation();
         ScenePlan::restore(ScenePlanRecord {
             id: ScenePlanId::new(),
@@ -288,7 +556,7 @@ mod tests {
         })
     }
 
-    fn narration(duration: u64) -> Narration {
+    pub(crate) fn narration(duration: u64) -> Narration {
         Narration {
             id: NarrationId::new(),
             project: VideoProjectId::new(),
@@ -350,6 +618,7 @@ mod tests {
                 start: Duration::ZERO,
                 at: Duration::ZERO,
                 duration: ms(5_500),
+                length: ms(5_500),
             }]
         );
     }
@@ -389,7 +658,10 @@ mod tests {
         let timeline = Timeline::rough_cut(&plan(vec![animated, redrawn]), &narration(2_000));
         assert_eq!(
             timeline.video()[0].source,
-            VideoSource::Clip("clip-a.mp4".into())
+            VideoSource::Clip {
+                file: "clip-a.mp4".into(),
+                length: Duration::from_secs(5),
+            }
         );
         assert_eq!(
             timeline.video()[1].source,
@@ -430,7 +702,8 @@ mod tests {
         assert_eq!(timeline.video_at(ms(0)), Some(0));
         assert_eq!(timeline.video_at(ms(999)), Some(0));
         assert_eq!(timeline.video_at(ms(1_000)), Some(1));
-        assert_eq!(timeline.video_at(ms(5_000)), Some(1));
+        assert_eq!(timeline.video_at(ms(1_999)), Some(1));
+        assert_eq!(timeline.video_at(ms(2_000)), None, "past the video's end");
     }
 
     #[test]
@@ -441,5 +714,182 @@ mod tests {
         second.image = Some(image("scene-a.png"));
         let timeline = Timeline::rough_cut(&plan(vec![first, second]), &narration(2_000));
         assert_eq!(timeline.files(), vec!["scene-a.png", "narration-1.mp3"]);
+    }
+
+    #[test]
+    fn the_timeline_lasts_until_its_last_item_ends() {
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 1_000)]), &narration(1_000));
+        assert_eq!(timeline.duration(), ms(1_000));
+        timeline.narration[0].at = ms(500);
+        assert_eq!(timeline.video_end(), ms(1_000));
+        assert_eq!(
+            timeline.duration(),
+            ms(1_500),
+            "the narration runs past the video"
+        );
+        timeline.video.clear();
+        assert!(!timeline.is_empty());
+        timeline.narration.clear();
+        assert!(timeline.is_empty());
+    }
+
+    #[test]
+    fn narration_times_follow_the_cut() {
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        // Two pieces of the file: 0-1 s plays at 0, 2-4 s plays at 1 s.
+        timeline.narration = vec![
+            AudioItem {
+                file: "narration-1.mp3".into(),
+                start: ms(0),
+                at: ms(0),
+                duration: ms(1_000),
+                length: ms(4_000),
+            },
+            AudioItem {
+                file: "narration-1.mp3".into(),
+                start: ms(2_000),
+                at: ms(1_000),
+                duration: ms(2_000),
+                length: ms(4_000),
+            },
+        ];
+        assert_eq!(timeline.on_narration(ms(500)), Some(ms(500)));
+        assert_eq!(timeline.on_narration(ms(1_500)), None, "cut out");
+        assert_eq!(timeline.on_narration(ms(2_500)), Some(ms(1_500)));
+        assert_eq!(
+            timeline.on_narration(ms(4_000)),
+            Some(ms(3_000)),
+            "an end counts"
+        );
+        assert_eq!(timeline.narration_at(ms(999)), Some(0));
+        assert_eq!(timeline.narration_at(ms(1_000)), Some(1));
+        assert_eq!(timeline.narration_at(ms(3_000)), None);
+
+        let words = [
+            (ms(100), ms(400)),
+            (ms(1_200), ms(1_800)),
+            (ms(2_100), ms(2_600)),
+        ];
+        assert_eq!(
+            timeline.word_boundaries(words),
+            vec![ms(100), ms(400), ms(1_100), ms(1_600)]
+        );
+    }
+
+    #[test]
+    fn snap_finds_the_nearest_target_within_reach() {
+        let targets = [ms(1_000), ms(1_300), ms(2_000)];
+        assert_eq!(snap(ms(1_100), &targets, ms(150)), Some(ms(1_000)));
+        assert_eq!(snap(ms(1_200), &targets, ms(150)), Some(ms(1_300)));
+        assert_eq!(snap(ms(1_600), &targets, ms(150)), None);
+        assert_eq!(snap(ms(1_000), &targets, Duration::ZERO), Some(ms(1_000)));
+        assert_eq!(snap(ms(1_001), &[], ms(150)), None);
+    }
+
+    fn drawn(scenes: &[(u64, u64, &str)]) -> ScenePlan {
+        plan(
+            scenes
+                .iter()
+                .map(|&(start, end, file)| {
+                    let mut record = scene(start, end);
+                    record.image = Some(image(file));
+                    record
+                })
+                .collect(),
+        )
+    }
+
+    fn saved(timeline: &Timeline, plan: &ScenePlan, narration: &Narration) -> SavedTimeline {
+        timeline.to_saved(
+            plan.project,
+            plan.owner,
+            plan.id,
+            narration.id,
+            SystemTime::UNIX_EPOCH,
+        )
+    }
+
+    #[test]
+    fn a_saved_timeline_comes_back_as_it_was_cut() {
+        let plan = drawn(&[(0, 2_000, "a.png"), (2_000, 4_000, "b.png")]);
+        let narration = narration(4_000);
+        let mut timeline = Timeline::rough_cut(&plan, &narration);
+        timeline.video.swap(0, 1);
+        timeline.video[0].duration = ms(1_500);
+        timeline.relayout();
+        timeline.narration[0].at = ms(100);
+        timeline.narration[0].duration = ms(3_900);
+
+        let saved = saved(&timeline, &plan, &narration);
+        assert_eq!(saved.video[0].scene, 1);
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration),
+            Some(timeline.clone())
+        );
+    }
+
+    #[test]
+    fn a_restored_timeline_shows_each_scene_as_it_is_now() {
+        let plan = drawn(&[(0, 2_000, "a.png"), (2_000, 4_000, "b.png")]);
+        let narration = narration(4_000);
+        let timeline = Timeline::rough_cut(&plan, &narration);
+        let saved = saved(&timeline, &plan, &narration);
+
+        let mut redrawn = plan.clone();
+        let scene = redrawn.scene_mut(1, SystemTime::UNIX_EPOCH).unwrap();
+        scene.add_image(image("b2.png"));
+        scene.accept_image().unwrap();
+        let restored = Timeline::restore(&saved, &redrawn, &narration).unwrap();
+        assert_eq!(
+            restored.video()[1].source,
+            VideoSource::Still("b2.png".into())
+        );
+
+        let mut short = saved.clone();
+        short.video[1].scene = 7;
+        let restored = Timeline::restore(&short, &plan, &narration).unwrap();
+        assert_eq!(restored.video()[1].source, VideoSource::Missing);
+    }
+
+    #[test]
+    fn a_saved_timeline_on_another_plan_or_narration_is_left_behind() {
+        let plan = drawn(&[(0, 2_000, "a.png")]);
+        let narration = narration(2_000);
+        let saved = saved(&Timeline::rough_cut(&plan, &narration), &plan, &narration);
+        let replanned = drawn(&[(0, 2_000, "a.png")]);
+        assert_eq!(Timeline::restore(&saved, &replanned, &narration), None);
+        let renarrated = self::narration(2_000);
+        assert_eq!(Timeline::restore(&saved, &plan, &renarrated), None);
+    }
+
+    #[test]
+    fn a_saved_timeline_that_does_not_hold_together_is_left_behind() {
+        let plan = drawn(&[(0, 2_000, "a.png")]);
+        let narration = narration(2_000);
+        let mut saved = saved(&Timeline::rough_cut(&plan, &narration), &plan, &narration);
+        saved.narration_items[0].duration = ms(2_500);
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration),
+            None,
+            "past the file"
+        );
+        let mut saved = saved.clone();
+        saved.narration_items[0].duration = ms(1_000);
+        let mut second = saved.narration_items[0].clone();
+        second.at = ms(500);
+        saved.narration_items.push(second);
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration),
+            None,
+            "overlapping"
+        );
+        let mut saved = saved.clone();
+        saved.narration_items.truncate(1);
+        saved.narration_items[0].file = "../elsewhere.mp3".into();
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration),
+            None,
+            "another file"
+        );
     }
 }

@@ -847,6 +847,7 @@ building = "Building preview proxies… {ready} of {total} files"
 keep_editing = "You can keep editing while this runs"
 stale = "The narration changed after the scenes were planned. Plan them again to match it."
 
+cut_reset = "The scenes or the narration changed since your last edit, so the cut starts over from the rough cut."
 [editor.bin]
 scenes = "Scenes"
 media = "Media"
@@ -865,6 +866,10 @@ length = "Duration"
 file = "File"
 narration = "Narration"
 
+audio = "Audio"
+source_in = "Source in"
+remove = "Remove from the cut"
+shortcuts = "S split · [ and ] trim to the playhead · Alt+← and Alt+→ move · Delete remove"
 [editor.tool]
 select = "Select (V)"
 split = "Split (S)"
@@ -912,3 +917,6 @@ ffmpeg_missing = "ffmpeg was not found, so there is no preview. Reinstall Bardo 
 preview_failed = "The preview could not start."
 not_loaded = "Could not load the editor."
 no_sound = "No sound device: the preview plays muted."
+nothing_to_cut = "Nothing to cut there: put the playhead inside a clip, or select one."
+cannot_edit = "That edit does not fit there."
+edit_not_saved = "Could not save the edit, so the cut is as it was."
