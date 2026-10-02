@@ -22,6 +22,7 @@ mod proxies;
 mod research;
 mod scenes;
 mod scripts;
+mod selection;
 mod stages;
 mod templates;
 mod themes;
@@ -32,7 +33,7 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ImageGenerator,
-    JobRepository, KeyChecker, MarketData, MediaAssetRepository, MusicPromptRepository,
+    JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository, MusicPromptRepository,
     NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
     ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
@@ -71,6 +72,7 @@ pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, Prov
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use scenes::{SceneError, ScenesView};
 pub use scripts::{ScriptError, ScriptView};
+pub use selection::{Step, step_selection};
 pub use stages::{
     SceneState, Stage, StageNote, StageState, StageStatus, opening_stage, project_stages,
     scene_states,
@@ -480,6 +482,26 @@ impl Bardo {
         }
         let updated = UserProfile {
             ui_theme: preference,
+            ..self.profile.clone()
+        };
+        self.profiles.save(&updated)?;
+        self.profile = updated;
+        Ok(())
+    }
+
+    /// Where the profile's screens place their parts.
+    pub fn ui_layout(&self) -> LayoutId {
+        self.profile.ui_layout
+    }
+
+    /// Changes the layout and remembers it. On failure the current layout
+    /// stays.
+    pub fn set_ui_layout(&mut self, layout: LayoutId) -> Result<(), AppError> {
+        if layout == self.profile.ui_layout {
+            return Ok(());
+        }
+        let updated = UserProfile {
+            ui_layout: layout,
             ..self.profile.clone()
         };
         self.profiles.save(&updated)?;
@@ -1345,6 +1367,31 @@ mod tests {
     }
 
     #[test]
+    fn a_new_profile_uses_the_workspace_layout() {
+        let app = start(&FakeProfiles::default(), None);
+        assert_eq!(app.ui_layout(), LayoutId::Workspace);
+    }
+
+    #[test]
+    fn layout_choice_survives_a_restart() {
+        let profiles = FakeProfiles::default();
+        start(&profiles, None)
+            .set_ui_layout(LayoutId::Studio)
+            .unwrap();
+        assert_eq!(start(&profiles, None).ui_layout(), LayoutId::Studio);
+    }
+
+    #[test]
+    fn failed_save_keeps_the_current_layout() {
+        let profiles = FakeProfiles::default();
+        let mut app = start(&profiles, None);
+        profiles.fail_saves.set(true);
+
+        assert!(app.set_ui_layout(LayoutId::Studio).is_err());
+        assert_eq!(app.ui_layout(), LayoutId::Workspace);
+    }
+
+    #[test]
     fn works_against_real_sqlite() {
         let db = Database::open_in_memory().unwrap();
         let repositories = Repositories::local(
@@ -1358,5 +1405,7 @@ mod tests {
         let fixed = UiThemePreference::Fixed(bardo_domain::UiTheme::Brass);
         app.set_ui_theme(fixed).unwrap();
         assert_eq!(app.ui_theme(), fixed);
+        app.set_ui_layout(LayoutId::Studio).unwrap();
+        assert_eq!(app.ui_layout(), LayoutId::Studio);
     }
 }

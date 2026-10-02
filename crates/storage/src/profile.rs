@@ -1,5 +1,6 @@
 use bardo_domain::{
-    ProfileId, ProfileRepository, RepositoryError, UiLanguage, UiThemePreference, UserProfile,
+    LayoutId, ProfileId, ProfileRepository, RepositoryError, UiLanguage, UiThemePreference,
+    UserProfile,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -11,7 +12,7 @@ impl ProfileRepository for Database {
         let row = self
             .conn()
             .query_row(
-                "SELECT id, ui_language, ui_theme FROM user_profile
+                "SELECT id, ui_language, ui_theme, ui_layout FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
                 |row| {
@@ -19,33 +20,38 @@ impl ProfileRepository for Database {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
 
-        let Some((id, ui_language, ui_theme)) = row else {
+        let Some((id, ui_language, ui_theme, ui_layout)) = row else {
             return Ok(None);
         };
         Ok(Some(UserProfile {
             id: ProfileId::from(Uuid::parse_str(&id).map_err(boxed)?),
             ui_language: ui_language.parse::<UiLanguage>().map_err(boxed)?,
             ui_theme: UiThemePreference::from_code_or_default(&ui_theme),
+            ui_layout: LayoutId::from_code_or_default(&ui_layout),
         }))
     }
 
     fn save(&self, profile: &UserProfile) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "INSERT INTO user_profile (id, ui_language, ui_theme) VALUES (?1, ?2, ?3)
+                "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout)
+                 VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
-                     ui_theme = excluded.ui_theme",
+                     ui_theme = excluded.ui_theme,
+                     ui_layout = excluded.ui_layout",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
-                    profile.ui_theme.code()
+                    profile.ui_theme.code(),
+                    profile.ui_layout.code()
                 ],
             )
             .map_err(boxed)?;
@@ -116,6 +122,36 @@ mod tests {
         assert_eq!(
             db.load_default().unwrap().unwrap().ui_theme,
             UiThemePreference::default()
+        );
+    }
+
+    #[test]
+    fn layout_is_saved_and_loaded_back() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert_eq!(
+            db.load_default().unwrap().unwrap().ui_layout,
+            LayoutId::Workspace
+        );
+
+        profile.ui_layout = LayoutId::Studio;
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
+    }
+
+    #[test]
+    fn unknown_stored_layout_reads_as_workspace() {
+        let db = Database::open_in_memory().unwrap();
+        let profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        db.conn()
+            .execute("UPDATE user_profile SET ui_layout = 'dashboard'", [])
+            .unwrap();
+
+        assert_eq!(
+            db.load_default().unwrap().unwrap().ui_layout,
+            LayoutId::Workspace
         );
     }
 

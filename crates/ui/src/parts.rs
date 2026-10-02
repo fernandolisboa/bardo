@@ -9,9 +9,11 @@
 
 use std::rc::Rc;
 
-use bardo_app::{Bardo, Destination, Stage, StageStatus, Text};
+use bardo_app::{Bardo, Destination, Stage, StageStatus, Step, Text};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, ElementId, SharedString, Window};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, ElementId, FocusHandle, ScrollHandle, SharedString, Window,
+};
 
 use crate::shell::tr;
 
@@ -20,6 +22,9 @@ pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// What picking one of `T` (a place, a stage) runs.
 pub type OnPick<T> = Rc<dyn Fn(T, &mut Window, &mut App)>;
+
+/// What a key runs.
+pub type OnKey = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// A screen, in parts. Every part but the header is optional.
 pub struct ScreenParts {
@@ -39,6 +44,11 @@ pub struct ScreenParts {
     pub content: Vec<AnyElement>,
     /// Summaries beside the content (spend by channel).
     pub aside: Vec<AnyElement>,
+    /// The page's figures (spent, budgets in alert), above its content.
+    pub summary: Vec<Figure>,
+    /// Parts of the content shown one at a time or all together, as the
+    /// layout prefers; after `content`.
+    pub sections: Option<Sections>,
 }
 
 impl ScreenParts {
@@ -52,6 +62,8 @@ impl ScreenParts {
             inspector: None,
             content: Vec::new(),
             aside: Vec::new(),
+            summary: Vec::new(),
+            sections: None,
         }
     }
 }
@@ -153,6 +165,10 @@ pub struct Collection {
     /// What shows instead of items when there are none, or why they could
     /// not load.
     pub empty: Option<AnyElement>,
+    /// What a table of the items calls its columns.
+    pub headings: Headings,
+    /// ↑/↓ and Enter over the items, when they take the keyboard.
+    pub keys: Option<CollectionKeys>,
 }
 
 impl Collection {
@@ -164,6 +180,8 @@ impl Collection {
             tiles: Vec::new(),
             cards: Vec::new(),
             empty: None,
+            headings: Headings::default(),
+            keys: None,
         }
     }
 
@@ -194,6 +212,12 @@ pub struct Tile {
     pub attention: bool,
     /// Whether the state is a failure (drawn edged in danger).
     pub failed: bool,
+    /// A second text, quieter: the scene's image prompt.
+    pub detail: Option<SharedString>,
+    /// Properties a table shows a column each for: the image and clip
+    /// states, the model, the cost. Every tile of a collection lists the
+    /// same ones, in the same order.
+    pub facts: Vec<Fact>,
     pub on_click: OnClick,
 }
 
@@ -211,9 +235,86 @@ impl Tile {
             marks: Vec::new(),
             attention: false,
             failed: false,
+            detail: None,
+            facts: Vec::new(),
             on_click,
         }
     }
+}
+
+/// A property of a tile, under its column's name.
+pub struct Fact {
+    pub label: SharedString,
+    pub value: AnyElement,
+    /// Figures align right.
+    pub numeric: bool,
+}
+
+/// The names of a table's columns for a tile's parts; a part without a
+/// name keeps its column unnamed.
+#[derive(Default)]
+pub struct Headings {
+    pub picture: Option<SharedString>,
+    pub time: Option<SharedString>,
+    pub text: Option<SharedString>,
+    pub detail: Option<SharedString>,
+}
+
+/// The keyboard over a collection: what ↑/↓ and Enter do, and the focus
+/// that takes the keys (the screen keeps it, so it outlives a render).
+pub struct CollectionKeys {
+    pub focus: FocusHandle,
+    pub on_step: OnPick<Step>,
+    /// Accepts what the selected item waits on; `None` when it waits on
+    /// nothing.
+    pub on_enter: Option<OnKey>,
+    /// What the keys do, behind an ⓘ.
+    pub hint: Option<SharedString>,
+    /// Scrolls the items, when a layout gives them a scroll of their own,
+    /// so the screen can bring the selected one into view.
+    pub scroll: ScrollHandle,
+}
+
+/// A figure of the page: "Spent in October: $40.70".
+pub struct Figure {
+    pub label: SharedString,
+    pub value: SharedString,
+    /// Beside the value: "of 2 in alert".
+    pub beside: Option<SharedString>,
+    /// Under it: what it is made of, a link to act on it.
+    pub line: Option<AnyElement>,
+    /// Edges its card when it needs the user.
+    pub tone: Option<crate::kit::Tone>,
+    /// The figure as a short phrase or chips, for a one-line summary;
+    /// without one, the value and the label.
+    pub brief: Option<AnyElement>,
+}
+
+impl Figure {
+    pub fn new(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            beside: None,
+            line: None,
+            tone: None,
+            brief: None,
+        }
+    }
+}
+
+/// Parts of a page under their names: the budgets and the rate table.
+pub struct Sections {
+    pub id: ElementId,
+    pub items: Vec<Section>,
+    /// The one shown when only one is.
+    pub selected: usize,
+    pub on_pick: OnPick<usize>,
+}
+
+pub struct Section {
+    pub title: SharedString,
+    pub body: AnyElement,
 }
 
 /// The selected item's properties.
@@ -221,6 +322,9 @@ pub struct Inspector {
     /// The item's name line, with what sits beside it.
     pub title: Option<AnyElement>,
     pub body: Vec<AnyElement>,
+    /// Which part of `body` is the item's picture, or its current and new
+    /// one side by side; a layout may set it apart.
+    pub media: Option<usize>,
     /// Pinned at the bottom: provenance behind "Generation details".
     pub footer: Option<AnyElement>,
 }
@@ -230,6 +334,7 @@ impl Inspector {
         Self {
             title: None,
             body,
+            media: None,
             footer: None,
         }
     }
@@ -249,6 +354,10 @@ pub struct Navigation {
     pub jobs: usize,
     /// This month's spend, formatted.
     pub spent: Option<SharedString>,
+    /// The jobs as a line: "2 jobs running".
+    pub jobs_line: SharedString,
+    /// This month's spend as a line: "$9.59 in October 2026".
+    pub spent_line: Option<SharedString>,
     /// The budgets' use, when any is set: percent and its line.
     pub budgets: Option<BudgetMeter>,
     pub on_pick: OnPick<Destination>,
@@ -301,6 +410,8 @@ impl Navigation {
             jobs_open: false,
             jobs: 0,
             spent: None,
+            jobs_line: tr(bardo, Text::StatusNoJobs),
+            spent_line: None,
             budgets: None,
             on_pick: Rc::new(on_pick),
         }

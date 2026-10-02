@@ -215,8 +215,20 @@ impl Shell {
         });
         navigation.jobs_open = self.jobs_open;
         navigation.jobs = self.jobs.read(cx).active();
+        navigation.jobs_line = match navigation.jobs {
+            0 => tr(bardo, Text::StatusNoJobs),
+            1 => tr(bardo, Text::StatusOneJob),
+            n => SharedString::from(bardo.text_with(Text::StatusJobs, &[("n", &n.to_string())])),
+        };
         if let Some(spend) = &self.spend {
             navigation.spent = Some(SharedString::from(bardo.money(spend.total)));
+            navigation.spent_line = Some(SharedString::from(bardo.text_with(
+                Text::StatusMonthSpend,
+                &[
+                    ("amount", &bardo.money(spend.total)),
+                    ("month", &bardo.month_name(bardo.current_month())),
+                ],
+            )));
             navigation.budgets = spend.budget_percent.map(|percent| BudgetMeter {
                 percent,
                 tone: match spend.level() {

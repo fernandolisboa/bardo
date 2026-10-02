@@ -1136,3 +1136,44 @@ clips = "After the clips"
 edit = "After the edit"
 render = "After the render"
 publish = "After publishing"
+
+[appearance.layout]
+title = "Layout"
+hint = "Where every screen places its parts. The screens do the same things in every layout; switching keeps the screen and the selection you are on."
+
+[ui_layout]
+workspace = "Workspace"
+studio = "Studio"
+not_saved = "Couldn't save the layout. Try again."
+
+[ui_layout.description]
+workspace = "Sidebar by pillar, cards with the details beside them."
+studio = "Denser: top tabs, tables with the details below, a status bar."
+
+[status]
+jobs = "{n} jobs in progress"
+one_job = "1 job in progress"
+no_jobs = "No jobs in progress"
+month_spend = "{amount} in {month}"
+
+[scenes.column]
+picture = "Image"
+time = "Time"
+narration = "Narration"
+prompt = "Prompt"
+image = "Image"
+clip = "Clip"
+model = "Model"
+cost = "Clip cost"
+
+[scenes.state]
+done = "Ready"
+
+[scenes.keys]
+hint = "↑ and ↓ move through the scenes and the details follow. Enter uses the new image or clip of a scene under review."
+
+[costs.brief]
+spent = "spent"
+over = "{n} over budget"
+near = "{n} near budget"
+unpriced = "{n} without a price"

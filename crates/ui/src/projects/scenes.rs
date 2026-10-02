@@ -13,8 +13,8 @@ use bardo_app::bardo_domain::{
 use std::rc::Rc;
 
 use bardo_app::{
-    Bardo, BudgetConsent, SceneClipView, SceneError, SceneState, ScenesView, Stage, Text,
-    scene_states,
+    Bardo, BudgetConsent, SceneClipView, SceneError, SceneState, ScenesView, Stage, Step, Text,
+    scene_states, step_selection,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
@@ -32,7 +32,9 @@ use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::appearance::look;
 use crate::icons::Lucide;
 use crate::kit::{self, Tone};
-use crate::parts::{Collection, CollectionKind, Inspector, ScreenParts, Tile};
+use crate::parts::{
+    Collection, CollectionKeys, CollectionKind, Fact, Headings, Inspector, ScreenParts, Tile,
+};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
@@ -199,16 +201,10 @@ impl ProjectsScreen {
             return;
         };
         let states = scene_states(view, stage);
-        // The picked scene, else the first with something left, else the
-        // first.
-        let selected = self
-            .selected_scene
-            .filter(|index| *index < states.len())
-            .or_else(|| states.iter().position(|state| state.is_pending()))
-            .or((!states.is_empty()).then_some(0));
+        let selected = self.shown_scene(&states);
         parts.toolbar = Some(self.scenes_toolbar(stage, view, &states, cx));
         parts.notices.extend(self.scenes_notices(view, cx));
-        parts.collection = Some(self.scene_grid(view, &states, selected, cx));
+        parts.collection = Some(self.scene_grid(stage, view, &states, selected, cx));
         parts.inspector = view
             .plan
             .as_ref()
@@ -221,6 +217,59 @@ impl ProjectsScreen {
                 PromptShown::ScenePlan,
                 cx,
             ));
+        }
+    }
+
+    /// The scene in the inspector: the picked one, else the first with
+    /// something left, else the first.
+    fn shown_scene(&self, states: &[SceneState]) -> Option<usize> {
+        self.selected_scene
+            .filter(|index| *index < states.len())
+            .or_else(|| states.iter().position(|state| state.is_pending()))
+            .or((!states.is_empty()).then_some(0))
+    }
+
+    /// The scenes on screen, in order: every one, or those with something
+    /// left.
+    fn shown_scenes(&self, states: &[SceneState]) -> Vec<usize> {
+        (0..states.len())
+            .filter(|index| !self.pending_only || states[*index].is_pending())
+            .collect()
+    }
+
+    /// ↑/↓ over the scenes: the inspector follows the selection.
+    fn step_scene(&mut self, stage: Stage, step: Step, cx: &mut Context<Self>) {
+        let Some(view) = self.scenes.as_ref() else {
+            return;
+        };
+        let states = scene_states(view, stage);
+        let shown = self.shown_scenes(&states);
+        if let Some(index) = step_selection(&shown, self.shown_scene(&states), step) {
+            self.selected_scene = Some(index);
+            if let Some(row) = shown.iter().position(|shown| *shown == index) {
+                self.scene_scroll.scroll_to_item(row);
+            }
+            cx.notify();
+        }
+    }
+
+    /// Enter over the scenes: the selected scene's new image (Scenes) or
+    /// clip (Clips) replaces the current one, when one waits for review.
+    fn accept_shown(&mut self, stage: Stage, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.scenes.as_ref() else {
+            return;
+        };
+        let states = scene_states(view, stage);
+        let Some(index) = self.shown_scene(&states) else {
+            return;
+        };
+        if states[index] != SceneState::Review {
+            return;
+        }
+        if stage == Stage::Clips {
+            self.scene_action(window, cx, |bardo, id| bardo.accept_scene_clip(id, index));
+        } else {
+            self.scene_action(window, cx, |bardo, id| bardo.accept_scene_image(id, index));
         }
     }
 
@@ -490,14 +539,18 @@ impl ProjectsScreen {
             .collect()
     }
 
-    /// The scenes as cards, every one or only those with something left.
+    /// The scenes, every one or only those with something left: their
+    /// picture, time and narration, prompt, image and clip states, clip
+    /// model and price; ↑/↓ and Enter over them.
     fn scene_grid(
         &self,
+        stage: Stage,
         view: &ScenesView,
         states: &[SceneState],
         selected: Option<usize>,
         cx: &mut Context<Self>,
     ) -> Collection {
+        let keys = self.scene_keys(stage, selected.map(|index| states[index]), cx);
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let mut collection = Collection::new(CollectionKind::Grid, "scene-grid");
@@ -512,12 +565,24 @@ impl ProjectsScreen {
                     .into_any_element()
             })
         };
+        let image_states = scene_states(view, Stage::Scenes);
+        let clip_states = scene_states(view, Stage::Clips);
+        collection.headings = Headings {
+            picture: Some(tr(bardo, Text::SceneColumnPicture)),
+            time: Some(tr(bardo, Text::SceneColumnTime)),
+            text: Some(tr(bardo, Text::SceneColumnNarration)),
+            detail: Some(tr(bardo, Text::SceneColumnPrompt)),
+        };
+        collection.keys = Some(keys);
         collection.tiles = scenes
             .iter()
             .enumerate()
             .filter(|(index, _)| !self.pending_only || states[*index].is_pending())
             .map(|(index, scene)| {
                 let state = states[index];
+                let clip = view.clips.scenes.get(index);
+                let plain = |text: SharedString| div().truncate().child(text).into_any_element();
+                let dash = || plain(SharedString::from("—"));
                 let mut tile = Tile::new(
                     ("scene-card", index),
                     Rc::new(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -546,6 +611,39 @@ impl ProjectsScreen {
                     .collect();
                 tile.attention = state == SceneState::Review;
                 tile.failed = state == SceneState::Failed;
+                tile.detail = Some(SharedString::from(scene.prompt().as_str().to_owned()));
+                tile.facts = vec![
+                    Fact {
+                        label: tr(bardo, Text::SceneColumnImage),
+                        value: state_chip(bardo, image_states[index], cx),
+                        numeric: false,
+                    },
+                    Fact {
+                        label: tr(bardo, Text::SceneColumnClip),
+                        value: match clip_states[index] {
+                            // Nothing to animate yet: the image column says why.
+                            SceneState::ToDraw => dash(),
+                            clip_state => state_chip(bardo, clip_state, cx),
+                        },
+                        numeric: false,
+                    },
+                    Fact {
+                        label: tr(bardo, Text::SceneColumnModel),
+                        value: clip
+                            .and_then(|clip| clip.model.as_ref())
+                            .map_or_else(dash, |model| {
+                                plain(SharedString::from(model.name.clone()))
+                            }),
+                        numeric: false,
+                    },
+                    Fact {
+                        label: tr(bardo, Text::SceneColumnCost),
+                        value: clip.and_then(|clip| clip.price).map_or_else(dash, |price| {
+                            plain(SharedString::from(bardo.money(price)))
+                        }),
+                        numeric: true,
+                    },
+                ];
                 tile
             })
             .collect();
@@ -556,6 +654,32 @@ impl ProjectsScreen {
         };
         collection.empty = Some(muted(cx, tr(bardo, empty)));
         collection
+    }
+
+    /// ↑/↓ walk the scenes; Enter accepts what the selected one waits on.
+    fn scene_keys(
+        &self,
+        stage: Stage,
+        selected: Option<SceneState>,
+        cx: &mut Context<Self>,
+    ) -> CollectionKeys {
+        let screen = cx.entity().downgrade();
+        let on_step = Rc::new(move |step: Step, _: &mut Window, cx: &mut App| {
+            let _ = screen.update(cx, |this, cx| this.step_scene(stage, step, cx));
+        });
+        let screen = cx.entity().downgrade();
+        let on_enter = (selected == Some(SceneState::Review)).then(|| {
+            Rc::new(move |window: &mut Window, cx: &mut App| {
+                let _ = screen.update(cx, |this, cx| this.accept_shown(stage, window, cx));
+            }) as crate::parts::OnKey
+        });
+        CollectionKeys {
+            focus: self.scene_keys.clone(),
+            on_step,
+            on_enter,
+            hint: Some(tr(self.bardo.read(cx), Text::SceneKeysHint)),
+            scroll: self.scene_scroll.clone(),
+        }
     }
 
     /// The picked scene: its narration, then its image and prompt (Scenes)
@@ -573,7 +697,8 @@ impl ProjectsScreen {
             .filter(|(_, editing, _)| *editing == index)
             .map(|(_, _, field)| field);
         let busy = view.is_busy();
-        let stage_body: Vec<AnyElement> = if stage == Stage::Clips {
+        // The body and where in it the picture is.
+        let (stage_body, media): (Vec<AnyElement>, usize) = if stage == Stage::Clips {
             let clip = view
                 .clips
                 .scenes
@@ -581,9 +706,12 @@ impl ProjectsScreen {
                 .filter(|_| scene.can_animate())
                 .map(|clip| self.render_scene_clip(index, scene, clip, open, cx));
             let bardo = self.bardo.read(cx);
-            std::iter::once(scene_picture(bardo, scene.image(), cx))
-                .chain(clip.or_else(|| Some(muted(cx, tr(bardo, Text::SceneNoImage)))))
-                .collect()
+            (
+                std::iter::once(scene_picture(bardo, scene.image(), cx))
+                    .chain(clip.or_else(|| Some(muted(cx, tr(bardo, Text::SceneNoImage)))))
+                    .collect(),
+                0,
+            )
         } else {
             self.scene_image_body(index, scene, open, busy, cx)
         };
@@ -653,6 +781,8 @@ impl ProjectsScreen {
         });
 
         let mut inspector = Inspector::new(std::iter::once(narration).chain(stage_body).collect());
+        // After the narration.
+        inspector.media = Some(1 + media);
         inspector.title = Some(title);
         inspector.footer = footer;
         inspector
@@ -660,7 +790,7 @@ impl ProjectsScreen {
 
     /// The Scenes stage of the inspector: why the image failed, the image
     /// (or the current one beside a new one to review), its prompt, and
-    /// drawing it again.
+    /// drawing it again; with where the image is.
     fn scene_image_body(
         &self,
         index: usize,
@@ -668,7 +798,7 @@ impl ProjectsScreen {
         open: Option<ScenePromptField>,
         busy: bool,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    ) -> (Vec<AnyElement>, usize) {
         let editor = (open == Some(ScenePromptField::Image))
             .then(|| self.render_prompt_editor(index, None, cx));
         let bardo = self.bardo.read(cx);
@@ -817,7 +947,8 @@ impl ProjectsScreen {
                 },
             );
 
-        failure
+        let media = usize::from(failure.is_some());
+        let body = failure
             .into_iter()
             .chain(Some(picture))
             .chain(Some(
@@ -828,7 +959,8 @@ impl ProjectsScreen {
                     .into_any_element(),
             ))
             .chain(redraw)
-            .collect()
+            .collect();
+        (body, media)
     }
 
     /// A plan or image job running, or why the last one stopped.
@@ -1329,6 +1461,13 @@ fn scene_picture(bardo: &Bardo, image: Option<&SceneImage>, cx: &App) -> AnyElem
 }
 
 /// A scene card's state chip; a scene with nothing left shows none.
+/// A scene's state at a stage as a chip, "Ready" when nothing is left.
+fn state_chip(bardo: &Bardo, state: SceneState, cx: &App) -> AnyElement {
+    scene_chip(bardo, state, cx).unwrap_or_else(|| {
+        kit::status(Tone::Success, tr(bardo, Text::SceneStateDone), cx).into_any_element()
+    })
+}
+
 fn scene_chip(bardo: &Bardo, state: SceneState, cx: &App) -> Option<AnyElement> {
     let (tone, icon, text): (Tone, Icon, Text) = match state {
         SceneState::Done => return None,

@@ -58,6 +58,7 @@ fn main() -> anyhow::Result<()> {
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             appearance::init(bardo.ui_theme(), cx);
+            layout::show(bardo.ui_layout(), cx);
             let title = SharedString::from(bardo.text(bardo_app::Text::AppName).into_owned());
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(

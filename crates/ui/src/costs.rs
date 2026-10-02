@@ -3,6 +3,7 @@
 //! the rate table that prices calls, and the spend by channel and video. Spend, budgets and rates live in `bardo_app`; this file
 //! maps clicks to use cases and results to text.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{BudgetLevel, Meter, Month, Provider};
@@ -10,7 +11,6 @@ use bardo_app::{Bardo, CostsView, Destination, ProviderSpend, RateRow, SpendRow,
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
     ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
@@ -24,7 +24,7 @@ use crate::appearance::look;
 use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::layout;
-use crate::parts::{Header, ScreenParts};
+use crate::parts::{Figure, Header, ScreenParts, Section, Sections};
 use crate::shell::tr;
 
 /// How often the screen checks the job queue for new costs.
@@ -365,10 +365,12 @@ impl CostsScreen {
             .into_any_element()
     }
 
-    /// The month in three tiles: what was spent, the budgets in alert and
+    /// The month in three figures: what was spent, the budgets in alert and
     /// the calls without a price.
-    fn tiles(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let view = self.view.as_ref()?;
+    fn figures(&self, cx: &mut Context<Self>) -> Vec<Figure> {
+        let Some(view) = self.view.as_ref() else {
+            return Vec::new();
+        };
         let summary = view.summary();
         let unpriced = view.unpriced.first().cloned();
         let add_price = unpriced.clone().map(|(provider, model)| {
@@ -383,98 +385,112 @@ impl CostsScreen {
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let mono = cx.theme().mono_font_family.clone();
-        let tile = |label: SharedString, figure: String, beside: Option<SharedString>| {
-            kit::card(cx)
-                .flex_1()
-                .min_w(px(220.))
-                .p_4()
-                .gap_1()
-                .child(div().text_sm().text_color(t.text2).child(label))
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_baseline()
-                        .child(
-                            div()
-                                .text_2xl()
-                                .font_semibold()
-                                .font_family(mono.clone())
-                                .child(SharedString::from(figure)),
-                        )
-                        .children(beside.map(|beside| div().font_medium().child(beside))),
-                )
-        };
-
-        let spent = tile(
-            SharedString::from(bardo.text_with(
-                Text::CostsTotal,
-                &[("month", &bardo.month_name(view.month))],
-            )),
-            bardo.money(summary.total),
-            None,
-        )
-        .child(
+        let small = |text: SharedString| {
             div()
                 .text_xs()
                 .text_color(t.text2)
-                .child(SharedString::from(bardo.text_with(
-                    Text::CostsAcrossProviders,
-                    &[("n", &summary.providers_used.to_string())],
-                ))),
+                .child(text)
+                .into_any_element()
+        };
+        let chip = |tone: Tone, text: String| {
+            kit::status(tone, SharedString::from(text), cx).into_any_element()
+        };
+
+        let mut spent = Figure::new(
+            bardo.text_with(
+                Text::CostsTotal,
+                &[("month", &bardo.month_name(view.month))],
+            ),
+            bardo.money(summary.total),
+        );
+        spent.line = Some(small(SharedString::from(bardo.text_with(
+            Text::CostsAcrossProviders,
+            &[("n", &summary.providers_used.to_string())],
+        ))));
+        spent.brief = Some(
+            h_flex()
+                .gap_1()
+                .items_baseline()
+                .text_sm()
+                .child(
+                    div()
+                        .font_semibold()
+                        .font_family(mono.clone())
+                        .child(SharedString::from(bardo.money(summary.total))),
+                )
+                .child(
+                    div()
+                        .text_color(t.text2)
+                        .child(tr(bardo, Text::CostsBriefSpent)),
+                )
+                .into_any_element(),
         );
 
-        let budgets = tile(
+        let mut budgets = Figure::new(
             tr(bardo, Text::CostsBudgetsTile),
             summary.alerts.len().to_string(),
-            (summary.budgets > 0).then(|| {
-                SharedString::from(bardo.text_with(
-                    Text::CostsBudgetsInAlert,
-                    &[("total", &summary.budgets.to_string())],
-                ))
-            }),
-        )
-        .map(|card| {
-            if summary.budgets == 0 {
-                card.child(
-                    div()
-                        .text_xs()
-                        .text_color(t.text2)
-                        .child(tr(bardo, Text::CostsNoBudgets)),
-                )
-            } else {
-                card.child(
-                    h_flex()
-                        .gap_1()
-                        .flex_wrap()
-                        .children(summary.alerts.iter().map(|(provider, level)| {
-                            let tone = if *level == BudgetLevel::Reached {
-                                Tone::Danger
-                            } else {
-                                Tone::Warning
-                            };
-                            kit::status(tone, tr(bardo, Text::ProviderName(*provider)), cx)
-                        })),
-                )
-            }
+        );
+        budgets.beside = (summary.budgets > 0).then(|| {
+            SharedString::from(bardo.text_with(
+                Text::CostsBudgetsInAlert,
+                &[("total", &summary.budgets.to_string())],
+            ))
         });
+        budgets.line = Some(if summary.budgets == 0 {
+            small(tr(bardo, Text::CostsNoBudgets))
+        } else {
+            h_flex()
+                .gap_1()
+                .flex_wrap()
+                .children(summary.alerts.iter().map(|(provider, level)| {
+                    let tone = if *level == BudgetLevel::Reached {
+                        Tone::Danger
+                    } else {
+                        Tone::Warning
+                    };
+                    kit::status(tone, tr(bardo, Text::ProviderName(*provider)), cx)
+                }))
+                .into_any_element()
+        });
+        let over = summary
+            .alerts
+            .iter()
+            .filter(|(_, level)| *level == BudgetLevel::Reached)
+            .count();
+        let near = summary.alerts.len() - over;
+        budgets.brief = Some(
+            h_flex()
+                .gap_1()
+                .children((over > 0).then(|| {
+                    chip(
+                        Tone::Danger,
+                        bardo.text_with(Text::CostsBriefOver, &[("n", &over.to_string())]),
+                    )
+                }))
+                .children((near > 0).then(|| {
+                    chip(
+                        Tone::Warning,
+                        bardo.text_with(Text::CostsBriefNear, &[("n", &near.to_string())]),
+                    )
+                }))
+                .into_any_element(),
+        );
 
         let count = view.unpriced.len();
-        let unpriced_tile = tile(
-            tr(bardo, Text::CostsUnpricedTitle),
-            count.to_string(),
-            (count > 0).then(|| {
-                tr(
-                    bardo,
-                    if count == 1 {
-                        Text::CostsUnpricedModel
-                    } else {
-                        Text::CostsUnpricedModels
-                    },
-                )
-            }),
-        )
-        .when(count > 0, |card| card.border_color(t.warning))
-        .child(match unpriced {
+        let mut unpriced_figure =
+            Figure::new(tr(bardo, Text::CostsUnpricedTitle), count.to_string());
+        unpriced_figure.beside = (count > 0).then(|| {
+            tr(
+                bardo,
+                if count == 1 {
+                    Text::CostsUnpricedModel
+                } else {
+                    Text::CostsUnpricedModels
+                },
+            )
+        });
+        unpriced_figure.tone = (count > 0).then_some(Tone::Warning);
+        unpriced_figure.line = Some(match unpriced {
             Some((_, model)) => {
                 let models = view
                     .unpriced
@@ -504,23 +520,20 @@ impl CostsScreen {
                     ))
                     .into_any_element()
             }
-            None => div()
-                .text_xs()
-                .text_color(t.text2)
-                .child(tr(bardo, Text::CostsUnpricedNone))
-                .into_any_element(),
+            None => small(tr(bardo, Text::CostsUnpricedNone)),
         });
-
-        Some(
-            h_flex()
-                .gap_3()
-                .flex_wrap()
-                .items_stretch()
-                .child(spent)
-                .child(budgets)
-                .child(unpriced_tile)
+        unpriced_figure.brief = Some(
+            div()
+                .children((count > 0).then(|| {
+                    chip(
+                        Tone::Warning,
+                        bardo.text_with(Text::CostsBriefUnpriced, &[("n", &count.to_string())]),
+                    )
+                }))
                 .into_any_element(),
-        )
+        );
+
+        vec![spent, budgets, unpriced_figure]
     }
 
     /// Opens the rate table with the model that has no price filled in.
@@ -541,27 +554,6 @@ impl CostsScreen {
         self.new_price
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
-    }
-
-    fn tabs(&self, cx: &mut Context<Self>) -> AnyElement {
-        let bardo = self.bardo.read(cx);
-        TabBar::new("costs-tabs")
-            .underline()
-            .selected_index(match self.tab {
-                CostsTab::Budgets => 0,
-                CostsTab::Rates => 1,
-            })
-            .child(Tab::new().label(tr(bardo, Text::CostsBudgetsTile)))
-            .child(Tab::new().label(tr(bardo, Text::RatesTitle)))
-            .on_click(cx.listener(|this, index: &usize, _, cx| {
-                this.tab = if *index == 0 {
-                    CostsTab::Budgets
-                } else {
-                    CostsTab::Rates
-                };
-                cx.notify();
-            }))
-            .into_any_element()
     }
 
     /// Every paid provider's month against its budget, as a table.
@@ -1179,13 +1171,18 @@ fn spend_line(
 impl Render for CostsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let month = self.month_switch(cx);
-        let tiles = self.tiles(cx);
-        let tabs = self.tabs(cx);
-        let body = match self.tab {
-            CostsTab::Budgets => self.budgets_table(cx),
-            CostsTab::Rates => self.render_rates(cx).into_any_element(),
-        };
+        let summary = self.figures(cx);
+        let budgets = self.budgets_table(cx);
+        let rates = self.render_rates(cx).into_any_element();
         let aside = self.breakdown(cx);
+        let on_pick = cx.listener(|this, index: &usize, _, cx| {
+            this.tab = if *index == 0 {
+                CostsTab::Budgets
+            } else {
+                CostsTab::Rates
+            };
+            cx.notify();
+        });
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Costs);
         header.trail = vec![tr(bardo, Text::CostsOverview).into_any_element()];
@@ -1193,13 +1190,25 @@ impl Render for CostsScreen {
             Some(kit::info("costs-info", None, tr(bardo, Text::CostsHint)).into_any_element());
         header.actions = vec![month];
         let mut parts = ScreenParts::new(header);
-        parts.toolbar = Some(
-            v_flex()
-                .gap_4()
-                .children(tiles)
-                .child(tabs)
-                .into_any_element(),
-        );
+        parts.summary = summary;
+        parts.sections = Some(Sections {
+            id: "costs-tabs".into(),
+            items: vec![
+                Section {
+                    title: tr(bardo, Text::CostsBudgetsTile),
+                    body: budgets,
+                },
+                Section {
+                    title: tr(bardo, Text::RatesTitle),
+                    body: rates,
+                },
+            ],
+            selected: match self.tab {
+                CostsTab::Budgets => 0,
+                CostsTab::Rates => 1,
+            },
+            on_pick: Rc::new(move |index, window, cx| on_pick(&index, window, cx)),
+        });
         parts.notices =
             self.notice
                 .map(|notice| kit::notice(Tone::Success, tr(bardo, notice), cx).into_any_element())
@@ -1208,7 +1217,6 @@ impl Render for CostsScreen {
                     kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element()
                 }))
                 .collect();
-        parts.content = vec![body];
         parts.aside = aside;
         layout::screen(parts, cx)
     }

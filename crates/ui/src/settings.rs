@@ -1,12 +1,13 @@
 //! Settings screen. The API keys tab has one card per provider to save,
-//! replace, test and remove its key; the Appearance tab picks the theme and
-//! the interface language. Rules, storage and the test call live in
+//! replace, test and remove its key; the Appearance tab picks the layout,
+//! the theme and the interface language. Rules, storage and the test call live in
 //! `bardo_app`; this file maps clicks to use cases and results to text.
 
 use std::collections::HashMap;
 
 use bardo_app::bardo_domain::{
-    KeyCheckOutcome, Provider, ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
+    KeyCheckOutcome, LayoutId, Provider, ThemeFamily, ThemeMode, UiLanguage, UiTheme,
+    UiThemePreference,
 };
 use bardo_app::{Bardo, Destination, KeyState, ProviderKeyStatus, Text};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -214,6 +215,23 @@ impl SettingsScreen {
                 appearance::follow(preference, appearance::system_mode(window), cx);
             }
             Err(_) => self.appearance_error = Some(Text::UiThemeNotSaved),
+        }
+        cx.notify();
+    }
+
+    /// Saves the layout and arranges every screen in it at once.
+    fn set_layout(&mut self, chosen: LayoutId, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.set_ui_layout(chosen);
+            cx.notify();
+            result
+        });
+        match result {
+            Ok(()) => {
+                self.appearance_error = None;
+                layout::show(chosen, cx);
+            }
+            Err(_) => self.appearance_error = Some(Text::UiLayoutNotSaved),
         }
         cx.notify();
     }
@@ -442,6 +460,11 @@ impl SettingsScreen {
     }
 
     fn render_appearance(&self, cx: &mut Context<Self>) -> AnyElement {
+        let chosen_layout = self.bardo.read(cx).ui_layout();
+        let layouts: Vec<AnyElement> = LayoutId::ALL
+            .into_iter()
+            .map(|layout| self.layout_card(layout, layout == chosen_layout, cx))
+            .collect();
         let cards: Vec<AnyElement> = {
             let fixed = match self.bardo.read(cx).ui_theme() {
                 UiThemePreference::Fixed(theme) => Some(theme),
@@ -562,6 +585,21 @@ impl SettingsScreen {
                 self.appearance_error
                     .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
+            .child(
+                kit::section_heading(tr(bardo, Text::AppearanceLayout)).child(kit::info(
+                    "layout-info",
+                    None,
+                    tr(bardo, Text::AppearanceLayoutHint),
+                )),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_stretch()
+                    .gap_3()
+                    .children(layouts),
+            )
+            .child(div().h_2())
             .child(kit::section_heading(tr(bardo, Text::AppearanceTheme)))
             .child(follow)
             .child(always)
@@ -569,6 +607,120 @@ impl SettingsScreen {
             .child(div().h_2())
             .child(kit::section_heading(tr(bardo, Text::UiLanguageLabel)))
             .child(h_flex().child(language_switch))
+            .into_any_element()
+    }
+
+    /// A layout as a sketch of where things go, its name and one line.
+    fn layout_card(&self, layout: LayoutId, chosen: bool, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let t = look(cx).tokens;
+        let block = |color: Hsla| div().rounded(t.radius).bg(color);
+        let rows = |count: usize| {
+            v_flex().gap_1().children((0..count).map(|ix| {
+                h_flex()
+                    .gap_1()
+                    .child(block(t.text2).w(px(10.)).h(px(6.)))
+                    .child(
+                        block(if ix == 1 { t.accent } else { t.border_strong })
+                            .flex_1()
+                            .h(px(6.)),
+                    )
+            }))
+        };
+        let sketch = match layout {
+            LayoutId::Workspace => h_flex()
+                .size_full()
+                .gap_1p5()
+                .child(
+                    v_flex()
+                        .w(px(34.))
+                        .h_full()
+                        .gap_1()
+                        .p_1()
+                        .bg(t.surface)
+                        .child(block(t.accent).w_full().h(px(5.)))
+                        .child(block(t.border_strong).w_full().h(px(5.)))
+                        .child(block(t.border_strong).w_full().h(px(5.))),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .h_full()
+                        .gap_1()
+                        .py_1()
+                        .child(block(t.border_strong).w(px(60.)).h(px(6.)))
+                        .child(div().grid().grid_cols(3).gap_1().children((0..6).map(|ix| {
+                            block(if ix == 2 { t.accent } else { t.sunken })
+                                .h(px(18.))
+                                .border(t.border_width)
+                                .border_color(t.border)
+                        }))),
+                )
+                .child(block(t.surface).w(px(40.)).h_full())
+                .into_any_element(),
+            LayoutId::Studio => v_flex()
+                .size_full()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .p_1()
+                        .bg(t.surface)
+                        .child(block(t.accent).w(px(14.)).h(px(5.)))
+                        .children((0..4).map(|_| block(t.border_strong).w(px(18.)).h(px(5.)))),
+                )
+                .child(div().flex_1().px_1().child(rows(3)))
+                .child(
+                    h_flex()
+                        .h(px(20.))
+                        .gap_1()
+                        .p_1()
+                        .bg(t.surface)
+                        .child(block(t.sunken).flex_1().h_full())
+                        .child(block(t.sunken).flex_1().h_full())
+                        .child(block(t.sunken).w(px(24.)).h_full()),
+                )
+                .into_any_element(),
+        };
+        v_flex()
+            .id(("layout-card", layout as usize))
+            .w(px(260.))
+            .overflow_hidden()
+            .rounded(t.radius_lg)
+            .border(t.border_width)
+            .border_color(if chosen { t.accent } else { t.frame })
+            .when(chosen, |card| card.border_2())
+            .bg(t.surface)
+            .cursor_pointer()
+            .hover(|card| card.border_color(t.accent_edge))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_layout(layout, cx)))
+            .child(div().h(px(84.)).p_2().bg(t.app).child(sketch))
+            .child(
+                v_flex()
+                    .px_2p5()
+                    .py_2()
+                    .gap_0p5()
+                    .border_t_1()
+                    .border_color(t.border)
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(radio(chosen, cx))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(tr(bardo, Text::UiLayoutName(layout))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(t.text2)
+                            .child(tr(bardo, Text::UiLayoutDescription(layout))),
+                    ),
+            )
             .into_any_element()
     }
 

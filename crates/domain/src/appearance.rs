@@ -1,5 +1,6 @@
 //! How the app's own interface looks: the interface theme and how the
-//! profile picks it (CONTEXT.md, "Interface theme"). Not to be confused with
+//! profile picks it (CONTEXT.md, "Interface theme"), and the layout that
+//! places every screen (CONTEXT.md, "Layout"). Not to be confused with
 //! `Theme`, a video idea.
 
 use std::fmt;
@@ -197,6 +198,60 @@ impl FromStr for UiThemePreference {
     }
 }
 
+/// Where the screens' parts go (CONTEXT.md, "Layout"). A layout moves
+/// things on screen and never changes what they do; the theme colors them.
+/// More layouts may come: each is a variant here and an arrangement in the
+/// interface, nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum LayoutId {
+    /// A sidebar by pillar, a stepper over the project, cards with an
+    /// inspector beside them.
+    #[default]
+    Workspace,
+    /// Denser: top tabs, compact stage tabs, tables with an inspector
+    /// below and a status bar.
+    Studio,
+}
+
+impl LayoutId {
+    pub const ALL: [LayoutId; 2] = [LayoutId::Workspace, LayoutId::Studio];
+
+    /// Stable code, used in storage.
+    pub fn code(self) -> &'static str {
+        match self {
+            LayoutId::Workspace => "workspace",
+            LayoutId::Studio => "studio",
+        }
+    }
+
+    /// Reads the stored form; a layout this version does not know (one
+    /// removed later, a hand-edited value) gives the default.
+    pub fn from_code_or_default(code: &str) -> Self {
+        code.parse().unwrap_or_default()
+    }
+}
+
+impl fmt::Display for LayoutId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown layout: {0}")]
+pub struct UnknownLayout(pub String);
+
+impl FromStr for LayoutId {
+    type Err = UnknownLayout;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        LayoutId::ALL
+            .into_iter()
+            .find(|layout| layout.code() == s)
+            .ok_or_else(|| UnknownLayout(s.to_owned()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +323,31 @@ mod tests {
                 "{code}"
             );
         }
+    }
+
+    #[test]
+    fn layout_codes_round_trip_and_are_distinct() {
+        for layout in LayoutId::ALL {
+            assert_eq!(layout.code().parse::<LayoutId>(), Ok(layout));
+        }
+        assert_eq!(LayoutId::Workspace.code(), "workspace");
+        assert_eq!(LayoutId::Studio.code(), "studio");
+    }
+
+    #[test]
+    fn the_default_layout_is_workspace() {
+        assert_eq!(LayoutId::default(), LayoutId::Workspace);
+    }
+
+    #[test]
+    fn unknown_layouts_fall_back_to_workspace() {
+        for code in ["", "Studio", "dashboard", "studio "] {
+            assert_eq!(
+                LayoutId::from_code_or_default(code),
+                LayoutId::Workspace,
+                "{code:?}"
+            );
+        }
+        assert_eq!(LayoutId::from_code_or_default("studio"), LayoutId::Studio);
     }
 }
