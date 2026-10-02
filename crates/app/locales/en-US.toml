@@ -1340,7 +1340,7 @@ regenerate_hint = "Writing again replaces every network's metadata, edits includ
 running = "Claude is writing the metadata…"
 stopped = "Writing the metadata stopped."
 confirm_title = "Write the metadata again?"
-confirm_body = "Your edits on {n} networks will be replaced by what Claude writes."
+confirm_body = "Networks with your edits: {n}. What Claude writes replaces those edits."
 none = "Write the metadata to edit this network's post."
 empty = "No metadata yet. Claude writes it for every network at once."
 state_none = "Not written"
@@ -1363,6 +1363,7 @@ saved = "Metadata saved."
 copy = "Copy"
 copied = "Copied. Paste it in the network's upload form."
 preview = "As posted"
+cost_unpriced = "No rate yet"
 
 [disclosure.how]
 youtube = "On YouTube, answer Yes to \"Altered or synthetic content\" in the upload's Details."

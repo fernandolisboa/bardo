@@ -1011,6 +1011,7 @@ pub enum Text {
     MetadataCopy,
     MetadataCopied,
     MetadataPreview,
+    MetadataCostUnpriced,
     /// Where the network takes the synthetic-content label.
     DisclosureHow(Network),
     /// A metadata rule broken, with `{limit}` where it has one.
@@ -2083,6 +2084,7 @@ impl Text {
             Text::MetadataCopy => "metadata.copy",
             Text::MetadataCopied => "metadata.copied",
             Text::MetadataPreview => "metadata.preview",
+            Text::MetadataCostUnpriced => "metadata.cost_unpriced",
             Text::DisclosureHow(network) => {
                 return format!("disclosure.how.{}", network.code()).into();
             }
@@ -3229,6 +3231,7 @@ mod tests {
         texts.push(Text::MetadataCopy);
         texts.push(Text::MetadataCopied);
         texts.push(Text::MetadataPreview);
+        texts.push(Text::MetadataCostUnpriced);
         texts.extend(Network::ALL.map(Text::DisclosureHow));
         texts.extend(MetadataProblem::ALL.map(Text::MetadataProblem));
         texts

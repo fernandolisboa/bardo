@@ -231,6 +231,20 @@ impl ExportView {
             .collect()
     }
 
+    /// Where the exports stand: how many networks have a render, how many
+    /// are exported as they are now, and the latest export job.
+    pub fn summary(&self) -> ExportSummary {
+        let rendered = self.targets.iter().filter(|t| t.render.is_some());
+        ExportSummary {
+            rendered: rendered.clone().count(),
+            exported: rendered.clone().filter(|t| t.last_current).count(),
+            outdated: rendered
+                .filter(|t| t.last.is_some() && !t.last_current)
+                .count(),
+            job: self.export_job.clone(),
+        }
+    }
+
     /// The generation the networks' metadata came from, if any.
     pub fn generation(&self) -> Option<&Generation> {
         self.targets
@@ -790,19 +804,7 @@ impl Bardo {
     /// Where the project's exports stand: how many networks have a render,
     /// how many are exported as they are now, and the latest export job.
     pub fn export_summary(&self, project: VideoProjectId) -> Result<ExportSummary, ExportError> {
-        let view = self.export_view(project)?;
-        let rendered = view.targets.iter().filter(|t| t.render.is_some());
-        let exported = rendered.clone().filter(|t| t.last_current).count();
-        let outdated = rendered
-            .clone()
-            .filter(|t| t.last.is_some() && !t.last_current)
-            .count();
-        Ok(ExportSummary {
-            rendered: rendered.count(),
-            exported,
-            outdated,
-            job: view.export_job,
-        })
+        Ok(self.export_view(project)?.summary())
     }
 
     /// Starts a job in which Claude writes every network's title,

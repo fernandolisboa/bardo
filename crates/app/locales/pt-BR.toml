@@ -1340,7 +1340,7 @@ regenerate_hint = "Escrever de novo substitui os metadados de todas as redes, in
 running = "O Claude está escrevendo os metadados…"
 stopped = "A escrita dos metadados parou."
 confirm_title = "Escrever os metadados de novo?"
-confirm_body = "Suas edições em {n} redes serão substituídas pelo que o Claude escrever."
+confirm_body = "Redes com edições suas: {n}. O que o Claude escrever substitui essas edições."
 none = "Escreva os metadados para editar o post desta rede."
 empty = "Ainda sem metadados. O Claude escreve para todas as redes de uma vez."
 state_none = "Não escritos"
@@ -1363,6 +1363,7 @@ saved = "Metadados salvos."
 copy = "Copiar"
 copied = "Copiado. Cole no formulário de upload da rede."
 preview = "Como será postado"
+cost_unpriced = "Sem tarifa ainda"
 
 [disclosure.how]
 youtube = "No YouTube, responda Sim em \"Conteúdo alterado ou sintético\" nos Detalhes do upload."
