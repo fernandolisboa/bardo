@@ -5,10 +5,11 @@
 
 mod channels;
 mod jobs;
+mod settings;
 mod shell;
 
 use anyhow::Context as _;
-use bardo_app::{Bardo, Repositories};
+use bardo_app::{Bardo, Providers, Repositories};
 use bardo_storage::Database;
 use gpui_kit::{
     App, AppContext as _, Bounds, SharedString, TitlebarOptions, WindowBounds, WindowOptions, px,
@@ -21,8 +22,18 @@ fn main() -> anyhow::Result<()> {
     let db_path = bardo_storage::default_database_path()?;
     let db = Database::open(&db_path)
         .with_context(|| format!("opening the database at {}", db_path.display()))?;
+    let secrets = bardo_storage::platform_secret_store()?;
     let locale = sys_locale::get_locale();
-    let bardo = Bardo::start(Repositories::sqlite(db), locale.as_deref())?;
+    let bardo = Bardo::start(
+        Repositories::local(db, secrets),
+        Providers::live(),
+        locale.as_deref(),
+    )?;
+    // Started after the app so the saved keys are already masked. Without a
+    // log file Bardo still runs; it only loses its diagnostics.
+    if let Some(log_path) = bardo_app::logging::default_log_path() {
+        let _ = bardo_app::logging::init(&log_path, bardo.redactor());
+    }
 
     gpui_kit::application().run(move |cx: &mut App| {
         gpui_kit::init(cx);

@@ -4,7 +4,8 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use bardo_domain::{
-    ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState, UiLanguage,
+    ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
+    KeyCheckOutcome, Provider, UiLanguage,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -64,6 +65,27 @@ pub enum Text {
     TestJobsHint,
     StartTestJob,
     StartFailingTestJob,
+    SettingsTitle,
+    ProviderKeysTitle,
+    ProviderKeysHint,
+    ProviderName(Provider),
+    ProviderPurpose(Provider),
+    ProviderKeyPlaceholder(Provider),
+    KeyNotSet,
+    /// Placeholder: `{hint}`.
+    KeySaved,
+    KeyUnreadable,
+    SaveKey,
+    ReplaceKey,
+    TestKey,
+    TestingKey,
+    RemoveKey,
+    KeyCheckOutcome(KeyCheckOutcome),
+    /// Placeholder: `{detail}`.
+    KeyCheckDetail,
+    ApiKeyError(ApiKeyError),
+    ProviderKeyNotSet,
+    ProviderKeyStoreFailed,
 }
 
 impl Text {
@@ -134,6 +156,39 @@ impl Text {
             Text::TestJobsHint => "jobs.test.hint",
             Text::StartTestJob => "jobs.test.start",
             Text::StartFailingTestJob => "jobs.test.start_failing",
+            Text::SettingsTitle => "settings.title",
+            Text::ProviderKeysTitle => "provider_keys.title",
+            Text::ProviderKeysHint => "provider_keys.hint",
+            Text::ProviderName(provider) => {
+                return format!("provider.{}.name", provider.code()).into();
+            }
+            Text::ProviderPurpose(provider) => {
+                return format!("provider.{}.purpose", provider.code()).into();
+            }
+            Text::ProviderKeyPlaceholder(provider) => {
+                return format!("provider.{}.placeholder", provider.code()).into();
+            }
+            Text::KeyNotSet => "provider_keys.not_set",
+            Text::KeySaved => "provider_keys.saved",
+            Text::KeyUnreadable => "provider_keys.unreadable",
+            Text::SaveKey => "provider_keys.save",
+            Text::ReplaceKey => "provider_keys.replace",
+            Text::TestKey => "provider_keys.test",
+            Text::TestingKey => "provider_keys.testing",
+            Text::RemoveKey => "provider_keys.remove",
+            Text::KeyCheckOutcome(outcome) => {
+                return format!("key_check.{}", outcome.code()).into();
+            }
+            Text::KeyCheckDetail => "key_check.detail",
+            Text::ApiKeyError(error) => match error {
+                ApiKeyError::Required => "api_key.error.required",
+                ApiKeyError::TooShort => "api_key.error.too_short",
+                ApiKeyError::TooLong => "api_key.error.too_long",
+                ApiKeyError::InvalidCharacters => "api_key.error.invalid_characters",
+                ApiKeyError::NotIdAndSecret => "api_key.error.not_id_and_secret",
+            },
+            Text::ProviderKeyNotSet => "provider_keys.error.not_set",
+            Text::ProviderKeyStoreFailed => "provider_keys.error.store_failed",
         };
         Cow::Borrowed(key)
     }
@@ -258,7 +313,26 @@ mod tests {
             Text::TestJobsHint,
             Text::StartTestJob,
             Text::StartFailingTestJob,
+            Text::SettingsTitle,
+            Text::ProviderKeysTitle,
+            Text::ProviderKeysHint,
+            Text::KeyNotSet,
+            Text::KeySaved,
+            Text::KeyUnreadable,
+            Text::SaveKey,
+            Text::ReplaceKey,
+            Text::TestKey,
+            Text::TestingKey,
+            Text::RemoveKey,
+            Text::KeyCheckDetail,
+            Text::ProviderKeyNotSet,
+            Text::ProviderKeyStoreFailed,
         ];
+        texts.extend(Provider::ALL.map(Text::ProviderName));
+        texts.extend(Provider::ALL.map(Text::ProviderPurpose));
+        texts.extend(Provider::ALL.map(Text::ProviderKeyPlaceholder));
+        texts.extend(KeyCheckOutcome::ALL.map(Text::KeyCheckOutcome));
+        texts.extend(ApiKeyError::ALL.map(Text::ApiKeyError));
         texts.extend(UiLanguage::ALL.map(Text::LanguageName));
         texts.extend(JobKind::ALL.map(Text::JobKindName));
         texts.extend(JobState::ALL.map(Text::JobStateName));
@@ -328,7 +402,24 @@ mod tests {
             assert!(!text.contains('{'), "{text}");
             let text = catalog.format(Text::JobFailedAfter, &[("attempts", "4")]);
             assert!(text.contains('4') && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::KeySaved, &[("hint", "…abcd")]);
+            assert!(text.contains("…abcd") && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::KeyCheckDetail, &[("detail", "Invalid API key")]);
+            assert!(
+                text.contains("Invalid API key") && !text.contains('{'),
+                "{text}"
+            );
         }
+    }
+
+    #[test]
+    fn key_length_message_matches_the_domain_limit() {
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        let message = catalog.get(Text::ApiKeyError(ApiKeyError::TooLong));
+        assert!(
+            message.contains(&bardo_domain::ApiKey::MAX_CHARS.to_string()),
+            "{message}"
+        );
     }
 
     #[test]

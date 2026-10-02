@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: application/json
+
+{"kind":"youtube#i18nLanguageListResponse","etag":"abc","items":[{"kind":"youtube#i18nLanguage","etag":"def","id":"en","snippet":{"hl":"en","name":"English"}}]}

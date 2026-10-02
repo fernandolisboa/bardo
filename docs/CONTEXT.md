@@ -23,6 +23,8 @@ Shared language for specs, code and reviews. When a term here and a name in code
 | **Manual publication** | A publication the user posted by hand from an export, linked to Bardo by its post URL so its metrics can be tracked. |
 | **Export** | A ready-to-post package (file in the network preset + metadata to copy) for manual posting. |
 | **Budget** | A monthly spending limit the user sets per AI provider. Reaching it makes new jobs for that provider ask for confirmation. |
+| **Provider** | A paid AI or data service Bardo calls with the user's own key: Claude, ElevenLabs, Gemini, Higgsfield, TypeSafe (JEV), YouTube Data API. |
+| **Provider key** | The user's API key for one provider, kept in Windows Credential Manager per user profile. Tested with the cheapest authenticated call the provider offers; masked by the redactor wherever text leaves the app (logs, stored errors, screen). |
 | **Job** | A long-running task (generation, render, upload, metrics sync) in the queue, with progress, cancel and resume. |
 | **Metrics snapshot** | Post-publication statistics for one publication at a point in time (views, retention, engagement and, on YouTube, estimated revenue/CPM/RPM). |
 | **Decision engine** | Answers typed questions (choice, score, yes/no) about a piece of content, with probabilities and confidence. Ranks, scores and gates; never generates content. Implemented by JEV (hosted) and, later, Laya (local). |

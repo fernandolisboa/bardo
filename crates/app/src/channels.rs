@@ -93,18 +93,19 @@ mod tests {
     use std::sync::Arc;
 
     use bardo_domain::{ChannelRepository, ContentLanguage, Country, ProfileId};
-    use bardo_storage::Database;
+    use bardo_storage::{Database, MemorySecretStore};
 
     use super::*;
-    use crate::Repositories;
+    use crate::{Repositories, testing};
 
     fn start(db: &Arc<Database>) -> Bardo {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as _,
+            secrets: Box::new(MemorySecretStore::default()),
         };
-        Bardo::start(repositories, Some("en-US")).unwrap()
+        Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap()
     }
 
     fn app() -> Bardo {
@@ -263,8 +264,9 @@ mod tests {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Broken),
             jobs: db,
+            secrets: Box::new(MemorySecretStore::default()),
         };
-        let app = Bardo::start(repositories, None).unwrap();
+        let app = Bardo::start(repositories, testing::providers(), None).unwrap();
         let error = app.create_channel(draft("Space Archives")).unwrap_err();
         assert_eq!(error.form_message(), Some(Text::ChannelNotSaved));
     }

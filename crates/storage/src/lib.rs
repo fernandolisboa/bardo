@@ -1,16 +1,21 @@
-//! SQLite persistence and migrations. Secrets access (Windows Credential
-//! Manager) lands with the provider keys slice.
+//! SQLite persistence and migrations, and the secret store for provider
+//! keys (Windows Credential Manager).
 
 mod channel;
 mod job;
 mod migrations;
 mod profile;
+mod secrets;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use bardo_domain::RepositoryError;
 use rusqlite::Connection;
+
+#[cfg(windows)]
+pub use secrets::CredentialManager;
+pub use secrets::{MemorySecretStore, credential_target, platform_secret_store};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {

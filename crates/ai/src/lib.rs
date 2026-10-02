@@ -1,3 +1,6 @@
 //! Adapters for the decision engine and generative providers.
-//!
-//! Empty until its first slice lands (ADR-0001).
+
+pub mod http;
+pub mod key_check;
+
+pub use key_check::HttpKeyChecker;

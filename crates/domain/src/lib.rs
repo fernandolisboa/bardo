@@ -6,6 +6,8 @@ mod channel;
 mod job;
 mod market;
 mod profile;
+mod provider_key;
+mod redaction;
 mod repository;
 
 pub use channel::{
@@ -18,4 +20,9 @@ pub use job::{
 };
 pub use market::{ContentLanguage, Country, UnsupportedContentLanguage, UnsupportedCountry};
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
+pub use provider_key::{
+    ApiKey, ApiKeyError, KeyCheck, KeyCheckOutcome, KeyChecker, Provider, SecretStore,
+    SecretStoreError, UnknownProvider,
+};
+pub use redaction::Redactor;
 pub use repository::RepositoryError;

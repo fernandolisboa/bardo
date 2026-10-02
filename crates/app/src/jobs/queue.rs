@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     InvalidJobTransition, Job, JobFailure, JobId, JobKind, JobRepository, JobState, ProfileId,
-    Progress, RepositoryError, RetryPolicy,
+    Progress, Redactor, RepositoryError, RetryPolicy,
 };
 
 /// Runs one kind of job. Handlers run on a worker thread, read their payload
@@ -174,6 +174,8 @@ struct Shared {
     repository: Arc<dyn JobRepository>,
     handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
     settings: JobSettings,
+    /// Failure details are stored and shown, so known keys are masked first.
+    redactor: Redactor,
     state: Mutex<State>,
     /// Wakes the scheduler: a job was queued or finished, or the app closes.
     wake: Condvar,
@@ -187,6 +189,16 @@ impl Shared {
 
     fn changed(&self) {
         self.revision.fetch_add(1, Ordering::Release);
+    }
+
+    /// Masks known keys in the failure and logs it.
+    fn redacted(&self, id: JobId, failure: JobFailure) -> JobFailure {
+        let failure = JobFailure {
+            detail: self.redactor.redact(&failure.detail),
+            ..failure
+        };
+        tracing::warn!(job = %id, kind = failure.kind.code(), detail = %failure.detail, "job attempt failed");
+        failure
     }
 
     /// Applies a handler report to its job. Reports for a job that is no
@@ -229,7 +241,10 @@ impl Shared {
         if let Some(job) = state.job_mut(id) {
             let ended = match result {
                 Ok(()) => job.complete(),
-                Err(failure) => job.fail_attempt(failure, SystemTime::now(), &retry),
+                Err(failure) => {
+                    let failure = self.redacted(id, failure);
+                    job.fail_attempt(failure, SystemTime::now(), &retry)
+                }
             };
             if ended.is_ok() {
                 // If this save fails, the job runs again from its last
@@ -280,6 +295,7 @@ impl JobQueue {
         owner: ProfileId,
         handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
         settings: JobSettings,
+        redactor: Redactor,
     ) -> Result<Self, RepositoryError> {
         let mut jobs = repository.list(owner)?;
         for job in jobs.iter_mut().filter(|j| j.state() == JobState::Running) {
@@ -290,6 +306,7 @@ impl JobQueue {
             repository,
             handlers,
             settings,
+            redactor,
             state: Mutex::new(State {
                 jobs,
                 workers: HashMap::new(),
@@ -386,7 +403,10 @@ fn schedule(shared: &Arc<Shared>) {
             if let Err(error) = spawn_worker(shared, &job, stop) {
                 state.workers.remove(&job.id());
                 if let Some(job) = state.job_mut(job.id()) {
-                    let failure = JobFailure::unexpected(format!("could not start: {error}"));
+                    let failure = shared.redacted(
+                        job.id(),
+                        JobFailure::unexpected(format!("could not start: {error}")),
+                    );
                     let _ = job.fail_attempt(failure, now, &shared.settings.retry);
                     let _ = shared.repository.save(job);
                 }

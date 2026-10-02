@@ -1,0 +1,4 @@
+HTTP/1.1 403 Forbidden
+content-type: application/json
+
+{"error":{"code":403,"message":"The request cannot be completed because you have exceeded your quota.","errors":[{"message":"The request cannot be completed because you have exceeded your quota.","domain":"youtube.quota","reason":"quotaExceeded"}]}}
