@@ -886,6 +886,17 @@ style = "Style"
 style_hint = "The style applies to every caption in this project."
 show = "Show captions"
 
+[editor.framing]
+title = "Framing"
+fit = "Fit"
+fill = "Fill"
+custom = "Custom"
+position = "Horizontal position"
+landscape_hint = "Applies in 9:16. In 16:9 the clip fits the frame."
+drag_hint = "Drag the picture in the preview, or use − and +, to place the 9:16 window."
+fit_hint = "The whole picture shows, with bars above and below."
+source = "16:9 source · cropped area dimmed"
+
 [editor.mix]
 inspector_track = "Track"
 level = "Level"

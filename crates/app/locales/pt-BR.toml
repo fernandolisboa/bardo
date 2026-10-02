@@ -886,6 +886,17 @@ style = "Estilo"
 style_hint = "O estilo vale para todas as legendas deste projeto."
 show = "Mostrar legendas"
 
+[editor.framing]
+title = "Enquadramento"
+fit = "Ajustar"
+fill = "Preencher"
+custom = "Personalizado"
+position = "Posição horizontal"
+landscape_hint = "Vale no 9:16. No 16:9 o clipe aparece inteiro no quadro."
+drag_hint = "Arraste a imagem na prévia, ou use − e +, para posicionar a janela 9:16."
+fit_hint = "A imagem aparece inteira, com faixas em cima e embaixo."
+source = "Origem 16:9 · área cortada escurecida"
+
 [editor.mix]
 inspector_track = "Faixa"
 level = "Volume"

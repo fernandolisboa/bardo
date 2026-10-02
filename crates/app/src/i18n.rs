@@ -728,6 +728,15 @@ pub enum Text {
     EditorCaptionStyle,
     EditorCaptionStyleHint,
     EditorShowCaptions,
+    EditorFraming,
+    EditorFramingFit,
+    EditorFramingFill,
+    EditorFramingCustom,
+    EditorFramingPosition,
+    EditorFramingLandscapeHint,
+    EditorFramingDragHint,
+    EditorFramingFitHint,
+    EditorFramingSource,
 }
 
 impl Text {
@@ -1482,6 +1491,15 @@ impl Text {
             Text::EditorCaptionStyle => "editor.captions.style",
             Text::EditorCaptionStyleHint => "editor.captions.style_hint",
             Text::EditorShowCaptions => "editor.captions.show",
+            Text::EditorFraming => "editor.framing.title",
+            Text::EditorFramingFit => "editor.framing.fit",
+            Text::EditorFramingFill => "editor.framing.fill",
+            Text::EditorFramingCustom => "editor.framing.custom",
+            Text::EditorFramingPosition => "editor.framing.position",
+            Text::EditorFramingLandscapeHint => "editor.framing.landscape_hint",
+            Text::EditorFramingDragHint => "editor.framing.drag_hint",
+            Text::EditorFramingFitHint => "editor.framing.fit_hint",
+            Text::EditorFramingSource => "editor.framing.source",
         };
         Cow::Borrowed(key)
     }
@@ -2268,6 +2286,15 @@ mod tests {
             Text::EditorCaptionStyle,
             Text::EditorCaptionStyleHint,
             Text::EditorShowCaptions,
+            Text::EditorFraming,
+            Text::EditorFramingFit,
+            Text::EditorFramingFill,
+            Text::EditorFramingCustom,
+            Text::EditorFramingPosition,
+            Text::EditorFramingLandscapeHint,
+            Text::EditorFramingDragHint,
+            Text::EditorFramingFitHint,
+            Text::EditorFramingSource,
         ];
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));

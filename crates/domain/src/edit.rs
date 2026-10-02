@@ -4,7 +4,8 @@
 //! changes (stories 61-63: a lane's level, mute and solo, the ducking, an
 //! audio item's fades) are edits too, so they undo the same way, and so are
 //! caption changes (stories 65, 66: a caption's text and ends, deleting
-//! one, showing them or not, their style).
+//! one, showing them or not, their style), and so is framing (story 67:
+//! the frame's shape, each clip's crop).
 //!
 //! Edits are exact: they cut where they are told, and the caller snaps the
 //! time first (to a frame, and to a word when snapping is on). Trims and
@@ -20,8 +21,8 @@
 use std::time::Duration;
 
 use crate::{
-    AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, GAIN_RANGE, LaneMix,
-    Timeline, VideoItem, VideoSource, caption_text, min_length,
+    AspectRatio, AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, Framing,
+    GAIN_RANGE, LaneMix, Timeline, VideoItem, VideoSource, caption_text, min_length,
 };
 
 /// A track of the timeline that edits reach.
@@ -204,6 +205,13 @@ pub enum Edit {
     /// Burns the captions in, or not.
     ShowCaptions(bool),
     SetCaptionStyle(CaptionStyle),
+    /// Cuts for a frame of another shape.
+    SetAspect(AspectRatio),
+    /// Sets how a video item's picture fills the frame.
+    SetFraming {
+        index: usize,
+        framing: Framing,
+    },
 }
 
 /// Why an edit was not made. The timeline is left as it was.
@@ -372,6 +380,8 @@ impl Timeline {
             Edit::SetCaptionText { index, text } => self.set_caption_text(*index, text)?,
             Edit::ShowCaptions(shown) => self.show_captions(*shown)?,
             Edit::SetCaptionStyle(style) => self.set_caption_style(*style)?,
+            Edit::SetAspect(aspect) => self.set_aspect(*aspect)?,
+            Edit::SetFraming { index, framing } => self.set_framing(*index, *framing)?,
         };
         self.relayout();
         Ok(undo)
@@ -427,8 +437,10 @@ impl Timeline {
         let at = match track {
             Track::Video => {
                 let (first, second) = (&self.video[index], &self.video[index + 1]);
+                // A framing set on one half alone would be lost.
                 if first.scene != second.scene
                     || first.source != second.source
+                    || first.framing != second.framing
                     || second.start != first.start + first.duration
                 {
                     return Err(EditError::CannotJoin);
@@ -683,6 +695,26 @@ impl Timeline {
         let before = std::mem::replace(&mut self.captions.style, style);
         Ok(Edit::SetCaptionStyle(before))
     }
+
+    fn set_aspect(&mut self, aspect: AspectRatio) -> Result<Edit, EditError> {
+        if self.aspect == aspect {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut self.aspect, aspect);
+        Ok(Edit::SetAspect(before))
+    }
+
+    fn set_framing(&mut self, index: usize, framing: Framing) -> Result<Edit, EditError> {
+        let item = self.video.get_mut(index).ok_or(EditError::NoSuchItem)?;
+        if item.framing == framing {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut item.framing, framing);
+        Ok(Edit::SetFraming {
+            index,
+            framing: before,
+        })
+    }
 }
 
 /// How many edits a history keeps to undo.
@@ -760,7 +792,7 @@ impl History {
 mod tests {
     use super::*;
     use crate::timeline::tests::{image, ms, narration, plan, scene};
-    use crate::{SceneClip, frame_time};
+    use crate::{CropPosition, SceneClip, frame_time};
 
     /// Three scenes over a 4 s narration: a still (0-1 s), a clip (1-3 s)
     /// and a still (3-4 s).
@@ -1913,5 +1945,102 @@ mod tests {
         history.undo(&mut timeline).unwrap();
         let shown: Vec<usize> = timeline.caption_spans().iter().map(|s| s.index).collect();
         assert_eq!(shown, [0, 1, 2]);
+    }
+
+    #[test]
+    fn the_frame_shape_changes_and_undoes() {
+        let vertical = round_trip(&timeline(), Edit::SetAspect(AspectRatio::Vertical));
+        assert_eq!(vertical.aspect(), AspectRatio::Vertical);
+        assert_eq!(
+            timeline().apply(&Edit::SetAspect(AspectRatio::Landscape)),
+            Err(EditError::NoChange)
+        );
+    }
+
+    #[test]
+    fn a_clips_crop_moves_and_undoes() {
+        let left = Framing::Crop(CropPosition::new(0, 500));
+        let moved = round_trip(
+            &timeline(),
+            Edit::SetFraming {
+                index: 1,
+                framing: left,
+            },
+        );
+        assert_eq!(moved.video()[1].framing, left);
+        assert_eq!(moved.video()[0].framing, Framing::FILL, "only that clip");
+        let fitted = round_trip(
+            &moved,
+            Edit::SetFraming {
+                index: 1,
+                framing: Framing::Fit,
+            },
+        );
+        assert_eq!(fitted.video()[1].framing, Framing::Fit);
+
+        let mut timeline = timeline();
+        assert_eq!(
+            timeline.apply(&Edit::SetFraming {
+                index: 0,
+                framing: Framing::FILL
+            }),
+            Err(EditError::NoChange)
+        );
+        assert_eq!(
+            timeline.apply(&Edit::SetFraming {
+                index: 3,
+                framing: Framing::Fit
+            }),
+            Err(EditError::NoSuchItem)
+        );
+    }
+
+    #[test]
+    fn a_crop_follows_its_clip_through_splits_and_reorders() {
+        let mut timeline = timeline();
+        let right = Framing::Crop(CropPosition::new(1_000, 500));
+        timeline
+            .apply(&Edit::SetFraming {
+                index: 1,
+                framing: right,
+            })
+            .unwrap();
+        timeline
+            .apply(&Edit::Split {
+                track: Track::Video,
+                index: 1,
+                at: ms(2_000),
+            })
+            .unwrap();
+        assert_eq!(timeline.video()[1].framing, right);
+        assert_eq!(timeline.video()[2].framing, right, "both halves");
+        timeline.apply(&Edit::Reorder { from: 2, to: 0 }).unwrap();
+        assert_eq!(timeline.video()[0].framing, right);
+        assert_eq!(timeline.video()[1].framing, Framing::FILL);
+    }
+
+    #[test]
+    fn halves_framed_apart_do_not_join() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::Split {
+                track: Track::Video,
+                index: 1,
+                at: ms(2_000),
+            })
+            .unwrap();
+        timeline
+            .apply(&Edit::SetFraming {
+                index: 2,
+                framing: Framing::Fit,
+            })
+            .unwrap();
+        assert_eq!(
+            timeline.apply(&Edit::Join {
+                track: Track::Video,
+                index: 1
+            }),
+            Err(EditError::CannotJoin)
+        );
     }
 }

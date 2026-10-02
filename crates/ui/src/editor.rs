@@ -5,6 +5,10 @@
 //! called every frame while the preview plays; each becomes a `RenderImage`
 //! and the previous one is dropped (ADR-0007).
 //!
+//! In a 9:16 cut, the selected clip's crop window shows over its whole
+//! picture, dimmed around it, and dragging the window moves the crop; the
+//! edit is made when the drag ends.
+//!
 //! A selected caption's text is edited in the inspector and applied on
 //! Enter or when the field loses focus; the editor's shortcuts stay out of
 //! the way while it has focus.
@@ -15,24 +19,28 @@
 
 mod timeline;
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
-    AudioLane, CaptionStyle, DUCK_RANGE, Decibels, Ducking, Edge, FPS, GAIN_RANGE, Generation,
-    ItemRef, LaneMix, Track, VideoProjectId, frame_time, timecode,
+    AspectRatio, AudioLane, CaptionStyle, CropPosition, DUCK_RANGE, Decibels, Ducking, Edge, FPS,
+    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, PictureSize, Track, VideoProjectId,
+    crop_window, frame_time, timecode,
 };
 use bardo_app::{
-    Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PreviewAspect, Text,
-    caption_look,
+    Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PREVIEW_LANDSCAPE,
+    Text, caption_look,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, Focusable as _, Hsla,
-    ImageSource, KeyDownEvent, ObjectFit, RenderImage, SharedString, Subscription, Task, Window,
-    div, img, px, rgb,
+    AnyElement, App, Bounds, ClickEvent, Entity, EventEmitter, FocusHandle, Focusable as _, Hsla,
+    ImageSource, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ObjectFit, Pixels, RenderImage, SharedString, Subscription, Task, Window, canvas, div, img, px,
+    relative, rgb,
 };
 
 use crate::shell::tr;
@@ -43,6 +51,30 @@ const POLL_EVERY: Duration = Duration::from_millis(100);
 const GAIN_STEP: Decibels = Decibels::from_tenths(5);
 const DUCK_STEP: Decibels = Decibels::from_tenths(10);
 const FADE_STEP: Duration = Duration::from_millis(100);
+/// What one click of the crop position's − or + moves: 5% of the room.
+const CROP_STEP: i32 = 50;
+/// A scene picture as the preview draws it (16:9), for placing a crop
+/// window over it.
+const SOURCE: PictureSize = PictureSize::new(PREVIEW_LANDSCAPE.0, PREVIEW_LANDSCAPE.1);
+
+/// A crop window being dragged across its picture in the preview.
+#[derive(Debug, Clone, Copy)]
+struct CropDrag {
+    /// The clip, by index on the video track.
+    index: usize,
+    from_x: f32,
+    start: CropPosition,
+    /// Where the window is now.
+    position: CropPosition,
+}
+
+/// A clip's crop window as the preview shows it over its picture.
+struct FramedWindow {
+    index: usize,
+    thumbnail: std::path::PathBuf,
+    position: CropPosition,
+    dragging: bool,
+}
 
 /// The design's tokens (`docs/design/editor.md`); the fills of tracks
 /// that have no content yet come with their slices.
@@ -93,6 +125,9 @@ pub struct EditorScreen {
     caption_input: Entity<InputState>,
     /// The caption the field holds, by index, and its text when loaded.
     caption_loaded: Option<(usize, String)>,
+    crop_drag: Option<CropDrag>,
+    /// Where the picture behind a crop window is drawn.
+    framing_box: Rc<Cell<Bounds<Pixels>>>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -144,6 +179,8 @@ impl EditorScreen {
             revision,
             caption_input,
             caption_loaded: None,
+            crop_drag: None,
+            framing_box: Rc::default(),
             _poll: poll,
             _subscriptions: subscriptions,
         }
@@ -732,28 +769,28 @@ impl EditorScreen {
         let bardo = self.bardo.read(cx);
         let mono = cx.theme().mono_font_family.clone();
         let editor = self.editor.as_ref();
-        let aspect = editor.map_or(PreviewAspect::Landscape, Editor::aspect);
+        let aspect = editor.map_or(AspectRatio::Landscape, Editor::aspect);
+        let has_cut = editor.is_some_and(|editor| editor.view().timeline.is_some());
         let aspects = h_flex()
             .gap_0p5()
             .p_0p5()
             .rounded(px(4.))
             .bg(color(APP))
-            .children(PreviewAspect::ALL.map(|option| {
-                let name = match option {
-                    PreviewAspect::Landscape => bardo_app::bardo_domain::AspectRatio::Landscape,
-                    PreviewAspect::Portrait => bardo_app::bardo_domain::AspectRatio::Vertical,
-                };
-                tool_button(
-                    ("aspect", option as usize),
-                    editor.is_some(),
-                    option == aspect,
-                )
-                .h(px(24.))
-                .child(tr(bardo, Text::AspectRatioName(name)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.with_editor(cx, |editor| editor.set_aspect(option));
-                }))
-            }));
+            .children(
+                [AspectRatio::Landscape, AspectRatio::Vertical]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(position, option)| {
+                        tool_button(("aspect", position), has_cut, option == aspect)
+                            .h(px(24.))
+                            .child(tr(bardo, Text::AspectRatioName(option)))
+                            .when(has_cut && option != aspect, |button| {
+                                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.edit(EditAction::SetAspect(option), cx);
+                                }))
+                            })
+                    }),
+            );
         let header = h_flex()
             .h(px(36.))
             .px_3()
@@ -784,14 +821,15 @@ impl EditorScreen {
                     )),
             );
 
-        let ratio = match aspect {
-            PreviewAspect::Landscape => 16. / 9.,
-            PreviewAspect::Portrait => 9. / 16.,
-        };
         let overlay = editor.and_then(|editor| self.preview_overlay(editor, cx));
         let picture = self.frame.clone().filter(|_| {
             editor.is_some_and(|editor| !editor.view().is_empty() && editor.can_play())
         });
+        let framed = editor.and_then(|editor| self.framed_window(editor));
+        let ratio = match (aspect, &framed) {
+            (AspectRatio::Vertical, None) => 9. / 16.,
+            _ => 16. / 9.,
+        };
         // The frame takes the stage's height at the preview's shape; on a
         // narrow stage it is clipped to the width and the picture letterboxed.
         let frame = div()
@@ -802,15 +840,18 @@ impl EditorScreen {
             .overflow_hidden()
             .bg(color(0x000000))
             .border_1()
-            .border_color(color(HAIRLINE))
-            .children(picture.map(|image| {
+            .border_color(color(HAIRLINE));
+        let frame = match framed {
+            Some(framed) => self.render_framing(frame, framed, picture, bardo, cx),
+            None => frame.children(picture.map(|image| {
                 img(ImageSource::Render(image))
                     .absolute()
                     .inset_0()
                     .size_full()
                     .object_fit(ObjectFit::Contain)
-            }))
-            .children(overlay);
+            })),
+        }
+        .children(overlay);
         let stage = div()
             .flex_1()
             .min_h_0()
@@ -877,6 +918,151 @@ impl EditorScreen {
             .child(stage)
             .child(transport)
             .into_any_element()
+    }
+
+    /// The clip whose crop window the preview shows over its picture, the
+    /// picture, and where the window is (where a drag has it, while one
+    /// goes on).
+    fn framed_window(&self, editor: &Editor) -> Option<FramedWindow> {
+        let index = editor.framed_clip()?;
+        let item = editor.view().timeline.as_ref()?.video().get(index)?;
+        let thumbnail = editor.view().clips.get(index)?.thumbnail.clone()?;
+        let Framing::Crop(position) = item.framing else {
+            return None;
+        };
+        let drag = self.crop_drag.filter(|drag| drag.index == index);
+        Some(FramedWindow {
+            index,
+            thumbnail,
+            position: drag.map_or(position, |drag| drag.position),
+            dragging: drag.is_some(),
+        })
+    }
+
+    /// A 9:16 crop window over its 16:9 picture: the picture dimmed, the
+    /// window showing the preview (or, while dragged, the picture under
+    /// it), outlined, and draggable across.
+    fn render_framing(
+        &self,
+        frame: gpui_kit::Div,
+        framed: FramedWindow,
+        picture: Option<Arc<RenderImage>>,
+        bardo: &Bardo,
+        cx: &Context<Self>,
+    ) -> gpui_kit::Div {
+        let window = crop_window(SOURCE, AspectRatio::Vertical, framed.position);
+        let across = |pixels: u32| pixels as f32 / SOURCE.width as f32;
+        let (left, width) = (across(window.x), across(window.width));
+        let backdrop = || {
+            img(framed.thumbnail.clone())
+                .absolute()
+                .top_0()
+                .h_full()
+                .object_fit(ObjectFit::Cover)
+        };
+        let content = if framed.dragging || picture.is_none() {
+            // The window's share of the picture behind it.
+            backdrop()
+                .left(relative(-left / width))
+                .w(relative(1. / width))
+                .into_any_element()
+        } else {
+            picture
+                .map(|image| {
+                    img(ImageSource::Render(image))
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                        .object_fit(ObjectFit::Cover)
+                        .into_any_element()
+                })
+                .unwrap_or_else(|| div().into_any_element())
+        };
+        let bounds = self.framing_box.clone();
+        let measure = canvas(move |measured, _, _| bounds.set(measured), |_, _, _, _| {})
+            .absolute()
+            .inset_0();
+        let index = framed.index;
+        let start = framed.position;
+        frame
+            .child(measure)
+            .child(backdrop().left_0().w_full().opacity(0.32))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .h_full()
+                    .left(relative(left))
+                    .w(relative(width))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(color(TEXT))
+                    .cursor_ew_resize()
+                    .child(content)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.crop_drag = Some(CropDrag {
+                                index,
+                                from_x: event.position.x.into(),
+                                start,
+                                position: start,
+                            });
+                            cx.notify();
+                        }),
+                    ),
+            )
+            // Over the window, which can slide under it.
+            .child(
+                label(tr(bardo, Text::EditorFramingSource), TEXT_2)
+                    .absolute()
+                    .bottom_2()
+                    .left_2()
+                    .px_1p5()
+                    .py_0p5()
+                    .rounded(px(3.))
+                    .bg(color(APP).opacity(0.8))
+                    .text_size(px(10.)),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                let width: f32 = this.framing_box.get().size.width.into();
+                let Some(drag) = this.crop_drag.as_mut() else {
+                    return;
+                };
+                if width <= 0. {
+                    return;
+                }
+                let x: f32 = event.position.x.into();
+                let dx = f64::from((x - drag.from_x) / width) * f64::from(SOURCE.width);
+                drag.position = drag.start.dragged(SOURCE, AspectRatio::Vertical, dx, 0.0);
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.drop_crop(cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.drop_crop(cx)),
+            )
+    }
+
+    /// Ends a crop drag with the edit it shows.
+    fn drop_crop(&mut self, cx: &mut Context<Self>) {
+        let Some(drag) = self.crop_drag.take() else {
+            return;
+        };
+        cx.notify();
+        if drag.position != drag.start {
+            self.edit(
+                EditAction::SetFraming {
+                    index: drag.index,
+                    framing: Framing::Crop(drag.position),
+                },
+                cx,
+            );
+        }
     }
 
     /// What covers the preview: progress while proxies build, "Media
@@ -1138,6 +1324,12 @@ impl EditorScreen {
                                 fields.child(field(Text::EditorSourceIn, timecode(clip.start)))
                             }),
                     )
+                    .children(
+                        self.editor
+                            .as_ref()
+                            .and_then(Editor::selected_clip)
+                            .and_then(|index| self.render_framing_controls(index, cx)),
+                    )
                     .children(clip.file.clone().map(|file| {
                         v_flex()
                             .gap_1()
@@ -1379,6 +1571,94 @@ impl EditorScreen {
                     .child(button(1, IconName::Plus, more)),
             )
             .into_any_element()
+    }
+
+    /// A selected clip's framing in a 9:16 cut: fit, fill (a centered
+    /// window) or a window placed elsewhere, and where across it sits.
+    /// Hidden while the clip's media is missing.
+    fn render_framing_controls(&self, index: usize, cx: &Context<Self>) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let editor = self.editor.as_ref()?;
+        let item = editor.view().timeline.as_ref()?.video().get(index)?;
+        if editor.view().clips.get(index)?.media == ClipMedia::Missing {
+            return None;
+        }
+        let vertical = editor.aspect() == AspectRatio::Vertical;
+        let framing = item.framing;
+        let set = move |framing: Framing| EditAction::SetFraming { index, framing };
+        let custom = matches!(framing, Framing::Crop(position) if position != CropPosition::CENTER);
+        let choices = [
+            (
+                Text::EditorFramingFit,
+                Some(Framing::Fit),
+                framing == Framing::Fit,
+            ),
+            (
+                Text::EditorFramingFill,
+                Some(Framing::FILL),
+                framing == Framing::FILL,
+            ),
+            // Reached by moving the window, not picked.
+            (Text::EditorFramingCustom, None, custom),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(position, (text, target, active))| {
+            let target = target.filter(|_| vertical && !active);
+            tool_button(
+                ("framing", position),
+                vertical && (target.is_some() || active),
+                active,
+            )
+            .h(px(24.))
+            .flex_1()
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(tr(bardo, text))
+            .when_some(target, |button, target| {
+                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(set(target), cx);
+                }))
+            })
+        });
+        let (value, less, more) = match framing {
+            Framing::Crop(position) => (
+                format!("{}%", position.x() / 10),
+                (vertical && position.x() > 0)
+                    .then(|| set(Framing::Crop(position.nudged(-CROP_STEP)))),
+                (vertical && position.x() < bardo_app::bardo_domain::CROP_STEPS)
+                    .then(|| set(Framing::Crop(position.nudged(CROP_STEP)))),
+            ),
+            Framing::Fit => ("—".to_owned(), None, None),
+        };
+        let hint = if !vertical {
+            Text::EditorFramingLandscapeHint
+        } else if framing == Framing::Fit {
+            Text::EditorFramingFitHint
+        } else {
+            Text::EditorFramingDragHint
+        };
+        Some(
+            v_flex()
+                .gap_1p5()
+                .child(label(tr(bardo, Text::EditorFraming), TEXT_3))
+                .child(h_flex().gap_1().children(choices))
+                .child(self.stepper(
+                    "crop-x",
+                    tr(bardo, Text::EditorFramingPosition),
+                    value,
+                    less,
+                    more,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(color(TEXT_3))
+                        .child(tr(bardo, hint)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// A toggle row: a name and an on/off pill that makes `action`.

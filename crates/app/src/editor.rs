@@ -21,6 +21,12 @@
 //! another style; each is an edit like any other. The preview burns them in
 //! as the render will.
 //!
+//! Framing (story 67) is part of the cut too: the shape of the frame it is
+//! made for, 16:9 or 9:16, and how each clip fills a 9:16 frame (a window
+//! placed across the picture, or the whole picture with bars). Switching
+//! the shape or moving a clip's window is an edit, saved and undoable, and
+//! the preview plays it at the new shape.
+//!
 //! Opening or refreshing the editor queues a job for the proxies the
 //! timeline lacks; editing never waits on it, clips without a proxy show
 //! that they are building, and the preview waits until none is.
@@ -38,15 +44,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit, EditError, FPS,
-    Generation, History, ItemRef, Job, JobKind, JobState, LaneMix, NarrationId,
-    NarrationRepository, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
-    Shift, ThemeRepository, Timeline, TimelineRepository, Track, VideoProject, VideoProjectId,
-    VideoSource, frame_at, frame_time, nearest_frame, snap,
+    AspectRatio, AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit,
+    EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
+    NarrationId, NarrationRepository, ProjectFiles, RepositoryError, Scene, ScenePlanId,
+    ScenePlanRepository, Shift, ThemeRepository, Timeline, TimelineRepository, Track, VideoProject,
+    VideoProjectId, VideoSource, frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll, FrameSize,
-    FrameStream, Framing, MediaError, RenderPlan, VideoClip, VideoFrame,
+    self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
+    FrameSize, FrameStream, MediaError, RenderPlan, VideoClip, VideoFrame,
 };
 use bardo_media::{AudioOutput, MediaEngine, StreamPlayback};
 use serde::Deserialize;
@@ -331,36 +337,35 @@ pub enum EditAction {
     /// Burns the captions in, or not.
     ShowCaptions(bool),
     SetCaptionStyle(CaptionStyle),
+    /// Cuts for a frame of another shape.
+    SetAspect(AspectRatio),
+    /// Sets how video clip `index` fills a 9:16 frame.
+    SetFraming {
+        index: usize,
+        framing: Framing,
+    },
     Undo,
     Redo,
 }
 
-/// The preview's shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PreviewAspect {
-    /// 16:9, each picture fitted to the frame.
-    #[default]
-    Landscape,
-    /// 9:16, a centered window of each picture (per-clip framing is #24).
-    Portrait,
+/// The size the preview draws a frame of `aspect` at.
+pub fn preview_size(aspect: AspectRatio) -> FrameSize {
+    let (width, height) = match aspect {
+        AspectRatio::Landscape => PREVIEW_LANDSCAPE,
+        AspectRatio::Vertical => PREVIEW_PORTRAIT,
+    };
+    FrameSize::new(width, height)
 }
 
-impl PreviewAspect {
-    pub const ALL: [PreviewAspect; 2] = [PreviewAspect::Landscape, PreviewAspect::Portrait];
-
-    pub fn size(self) -> FrameSize {
-        let (width, height) = match self {
-            PreviewAspect::Landscape => PREVIEW_LANDSCAPE,
-            PreviewAspect::Portrait => PREVIEW_PORTRAIT,
-        };
-        FrameSize::new(width, height)
-    }
-
-    fn framing(self) -> Framing {
-        match self {
-            PreviewAspect::Landscape => Framing::Fit,
-            PreviewAspect::Portrait => Framing::Crop { x: 0.5, y: 0.5 },
+/// A clip's framing as the media engine crops or fits it: the same window
+/// `bardo_domain::crop_window` gives.
+pub fn media_framing(framing: Framing) -> ffmpeg::Framing {
+    match framing {
+        Framing::Crop(position) => {
+            let (x, y) = position.fractions();
+            ffmpeg::Framing::Crop { x, y }
         }
+        Framing::Fit => ffmpeg::Framing::Fit,
     }
 }
 
@@ -389,7 +394,6 @@ pub struct Editor {
     /// An audio lane picked by its header, whose mix the inspector shows;
     /// never with an item selected.
     lane: Option<AudioLane>,
-    aspect: PreviewAspect,
     playing: Option<Playing>,
     /// The one picture asked for while paused.
     still: Option<FrameStream>,
@@ -660,12 +664,37 @@ impl Editor {
             }
             EditAction::ShowCaptions(shown) => (Edit::ShowCaptions(shown), None),
             EditAction::SetCaptionStyle(style) => (Edit::SetCaptionStyle(style), None),
+            EditAction::SetAspect(aspect) => (Edit::SetAspect(aspect), None),
+            EditAction::SetFraming { index, framing } => {
+                (Edit::SetFraming { index, framing }, None)
+            }
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
     }
 
-    pub fn aspect(&self) -> PreviewAspect {
-        self.aspect
+    /// The shape of the frame the cut is made for (16:9 until there is
+    /// one).
+    pub fn aspect(&self) -> AspectRatio {
+        self.view
+            .timeline
+            .as_ref()
+            .map_or(AspectRatio::Landscape, Timeline::aspect)
+    }
+
+    /// The clip whose window the preview shows over its whole picture: the
+    /// selected clip, while the playhead is on it, in a 9:16 cut that crops
+    /// it, when it has a picture to show around the window.
+    pub fn framed_clip(&self) -> Option<usize> {
+        let index = self.selected_clip()?;
+        let timeline = self.view.timeline.as_ref()?;
+        let item = timeline.video().get(index)?;
+        let clip = self.view.clips.get(index)?;
+        let on_it = item.at <= self.playhead && self.playhead < item.end();
+        (on_it
+            && matches!(item.framing_in(self.aspect()), Framing::Crop(_))
+            && clip.thumbnail.is_some()
+            && clip.media == ClipMedia::Ready)
+            .then_some(index)
     }
 
     pub fn error(&self) -> Option<Text> {
@@ -699,20 +728,12 @@ impl Editor {
         self.lane = lane.filter(|_| self.view.timeline.is_some());
     }
 
-    /// Switches the preview's shape.
-    pub fn set_aspect(&mut self, aspect: PreviewAspect) {
-        if aspect != self.aspect {
-            self.aspect = aspect;
-            self.restart();
-        }
-    }
-
     /// The timeline as the preview plays it: proxies for pictures, black
     /// where there is no proxy, the narration as recorded.
     pub fn preview_plan(&self) -> Option<RenderPlan> {
         let timeline = self.view.timeline.as_ref().filter(|t| !t.is_empty())?;
         let project = self.project();
-        let framing = self.aspect.framing();
+        let aspect = timeline.aspect();
         let mut video: Vec<VideoClip> = timeline
             .video()
             .iter()
@@ -732,7 +753,7 @@ impl Editor {
                     source,
                     start: item.source_start(),
                     duration: item.duration,
-                    framing,
+                    framing: media_framing(item.framing_in(aspect)),
                 }
             })
             .collect();
@@ -743,7 +764,7 @@ impl Editor {
                 source: ClipSource::Black,
                 start: Duration::ZERO,
                 duration: end - timeline.video_end(),
-                framing,
+                framing: ffmpeg::Framing::Fit,
             });
         }
         // A2 and A3 have nothing to play until media can be placed there;
@@ -826,9 +847,9 @@ impl Editor {
         self.error = None;
         self.still = None;
         let plan = self.preview_plan().ok_or(EditorError::PreviewNotReady)?;
-        let frames = self
-            .media
-            .preview(&plan, self.playhead, self.aspect.size(), (FPS, 1))?;
+        let frames =
+            self.media
+                .preview(&plan, self.playhead, preview_size(self.aspect()), (FPS, 1))?;
         // Without sound the preview still plays, on the wall clock.
         let audio = match self.media.preview_audio(&plan, self.playhead) {
             Ok(stream) => match self.audio.stream(stream) {
@@ -913,7 +934,7 @@ impl Editor {
         };
         match self
             .media
-            .preview(&plan, self.playhead, self.aspect.size(), (FPS, 1))
+            .preview(&plan, self.playhead, preview_size(self.aspect()), (FPS, 1))
         {
             Ok(stream) => {
                 self.error = None;
@@ -1130,8 +1151,15 @@ impl Bardo {
                     scene_plan: plan.id,
                     narration: narration.id,
                 };
+                // A cut that starts over keeps the frame shape it had.
                 let timeline = restored.unwrap_or_else(|| {
-                    Timeline::rough_cut(plan, narration).with_caption_style(caption_style)
+                    Timeline::rough_cut(plan, narration)
+                        .with_caption_style(caption_style)
+                        .with_aspect(
+                            saved
+                                .as_ref()
+                                .map_or(AspectRatio::Landscape, |saved| saved.aspect),
+                        )
                 });
                 (Some(timeline), Some(basis), outdated)
             }
@@ -1288,7 +1316,6 @@ impl Bardo {
             playhead: Duration::ZERO,
             selection: None,
             lane: None,
-            aspect: PreviewAspect::default(),
             playing: None,
             still: None,
             error: None,
@@ -1811,7 +1838,7 @@ mod tests {
             };
             assert!(path.ends_with(format!("proxy-{}.jpg", item.file.as_ref().unwrap())));
             assert_eq!(clip.duration, item.duration);
-            assert_eq!(clip.framing, Framing::Fit);
+            assert_eq!(clip.framing, ffmpeg::Framing::Fit);
         }
         let narration = &call.plan.audio[0].clips[0];
         assert!(
@@ -1975,21 +2002,146 @@ mod tests {
     }
 
     #[test]
-    fn portrait_previews_a_centered_window() {
+    fn switching_to_9_16_previews_each_clip_through_a_centered_window() {
         let h = Harness::new();
         let app = h.start();
-        let (project, _) = h.drawn_project(&app);
-        let mut editor = app.open_editor(project.id).unwrap();
-        settle(&app, &mut editor);
-        editor.set_aspect(PreviewAspect::Portrait);
+        let (project, mut editor) = opened(&h, &app);
+        assert_eq!(editor.aspect(), AspectRatio::Landscape);
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Vertical))
+            .unwrap();
+        assert_eq!(editor.aspect(), AspectRatio::Vertical);
         let call = h.media.previews().pop().unwrap();
         assert_eq!(call.size, FrameSize::new(304, 540));
         assert!(
             call.plan
                 .video
                 .iter()
-                .all(|clip| clip.framing == Framing::Crop { x: 0.5, y: 0.5 })
+                .all(|clip| clip.framing == ffmpeg::Framing::Crop { x: 0.5, y: 0.5 })
         );
+        // The shape is the project's: it comes back on opening, and undoes.
+        assert_eq!(
+            app.open_editor(project.id).unwrap().aspect(),
+            AspectRatio::Vertical
+        );
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(editor.aspect(), AspectRatio::Landscape);
+        let call = h.media.previews().pop().unwrap();
+        assert_eq!(call.size, FrameSize::new(960, 540));
+    }
+
+    #[test]
+    fn a_clips_crop_moves_its_window_in_the_preview_and_undoes() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Vertical))
+            .unwrap();
+        let left = Framing::Crop(bardo_domain::CropPosition::new(0, 500));
+        app.edit(
+            &mut editor,
+            EditAction::SetFraming {
+                index: 1,
+                framing: left,
+            },
+        )
+        .unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::SetFraming {
+                index: 2,
+                framing: Framing::Fit,
+            },
+        )
+        .unwrap();
+        let framings = |editor: &Editor, h: &Harness| -> Vec<ffmpeg::Framing> {
+            assert_eq!(editor.view().timeline.as_ref().unwrap().video().len(), 3);
+            h.media
+                .previews()
+                .pop()
+                .unwrap()
+                .plan
+                .video
+                .iter()
+                .map(|clip| clip.framing)
+                .collect()
+        };
+        let center = ffmpeg::Framing::Crop { x: 0.5, y: 0.5 };
+        assert_eq!(
+            framings(&editor, &h)[..3],
+            [
+                center,
+                ffmpeg::Framing::Crop { x: 0.0, y: 0.5 },
+                ffmpeg::Framing::Fit
+            ]
+        );
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(
+            reopened.view().timeline.as_ref().unwrap().video()[1].framing,
+            left,
+            "saved with the cut"
+        );
+
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(framings(&editor, &h)[..3], [center, center, center]);
+        app.edit(&mut editor, EditAction::Redo).unwrap();
+        assert_eq!(
+            framings(&editor, &h)[1],
+            ffmpeg::Framing::Crop { x: 0.0, y: 0.5 }
+        );
+
+        // A 16:9 cut takes every picture whole, whatever its crop.
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Landscape))
+            .unwrap();
+        assert!(
+            framings(&editor, &h)
+                .iter()
+                .all(|framing| *framing == ffmpeg::Framing::Fit)
+        );
+    }
+
+    #[test]
+    fn the_preview_shows_the_selected_clips_window_over_its_picture_in_9_16() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.select(Some(ItemRef::video(1)));
+        assert_eq!(editor.framed_clip(), None, "16:9 crops nothing");
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Vertical))
+            .unwrap();
+        assert_eq!(editor.framed_clip(), None, "the playhead is elsewhere");
+        let at = editor.view().clips[1].at;
+        editor.seek(at);
+        assert_eq!(editor.framed_clip(), Some(1));
+        app.edit(
+            &mut editor,
+            EditAction::SetFraming {
+                index: 1,
+                framing: Framing::Fit,
+            },
+        )
+        .unwrap();
+        assert_eq!(editor.framed_clip(), None, "a fitted clip has no window");
+        editor.select(Some(ItemRef::narration(0)));
+        assert_eq!(editor.framed_clip(), None);
+    }
+
+    #[test]
+    fn a_cut_that_starts_over_keeps_its_frame_shape() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Vertical))
+            .unwrap();
+        h.answer(crate::scenes::tests::plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, true, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let editor = app.open_editor(project.id).unwrap();
+        assert!(editor.cut_reset());
+        assert_eq!(editor.aspect(), AspectRatio::Vertical);
     }
 
     #[test]

@@ -47,7 +47,8 @@ pub use costs::{
 };
 pub use editor::{
     BinScene, ClipMedia, ClipProblem, ClipView, CutBasis, EditAction, Editor, EditorError,
-    EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, PreviewAspect, WordMark,
+    EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark, media_framing,
+    preview_size,
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};

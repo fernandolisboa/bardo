@@ -646,3 +646,107 @@ fn the_preview_shows_captions_from_the_playhead() {
     assert!(bright_pixels(&frames[0].bgra) > 100, "at 1.0 s");
     assert_eq!(bright_pixels(&frames[20].bgra), 0, "at 1.67 s");
 }
+
+/// The band of `bands-320x180.png` a column falls in: red, green or blue,
+/// `None` within a few pixels of where two meet.
+fn band_at(column: f64) -> Option<usize> {
+    const EDGES: [f64; 2] = [107.0, 213.0];
+    if EDGES.iter().any(|edge| (column - edge).abs() < 4.0) {
+        return None;
+    }
+    Some(EDGES.iter().filter(|edge| column > **edge).count())
+}
+
+/// Which of red, green and blue a BGRA pixel is, if it is clearly one.
+fn colour_of(pixel: &[u8]) -> Option<usize> {
+    let (blue, green, red) = (pixel[0], pixel[1], pixel[2]);
+    [red, green, blue]
+        .iter()
+        .position(|channel| *channel > 160)
+        .filter(|_| [red, green, blue].iter().filter(|c| **c > 80).count() == 1)
+}
+
+#[test]
+fn renders_each_clip_through_its_crop_window_at_the_output_size() {
+    use bardo_domain::{AspectRatio, CropPosition, PictureSize, crop_window};
+
+    let positions = [0, 250, 500, 1_000];
+    let mut video: Vec<VideoClip> = positions
+        .iter()
+        .map(|&x| {
+            let (x, y) = CropPosition::new(x, 500).fractions();
+            VideoClip {
+                source: ClipSource::Still(fixture("bands-320x180.png")),
+                start: Duration::ZERO,
+                duration: secs(0.5),
+                framing: Framing::Crop { x, y },
+            }
+        })
+        .collect();
+    video.push(VideoClip {
+        source: ClipSource::Still(fixture("bands-320x180.png")),
+        start: Duration::ZERO,
+        duration: secs(0.5),
+        framing: Framing::Fit,
+    });
+    let plan = RenderPlan {
+        video,
+        audio: Vec::new(),
+        captions: None,
+    };
+    let ffmpeg = ffmpeg();
+    let destination = scratch("framing").join("framed.mp4");
+    let output = vertical(VideoEncoder::OpenH264);
+    ffmpeg
+        .render(&plan, &output, None, &destination, &())
+        .unwrap();
+    let video = ffmpeg.probe(&destination).unwrap().video.unwrap();
+    assert_eq!((video.width, video.height), (360, 640));
+
+    let size = output.size;
+    let pixel = |frame: &[u8], x: u32, y: u32| {
+        let at = ((y * size.width + x) * 4) as usize;
+        frame[at..at + 4].to_vec()
+    };
+    for (index, &x) in positions.iter().enumerate() {
+        // What the domain says the window is; the picture must match it.
+        let window = crop_window(
+            PictureSize::new(320, 180),
+            AspectRatio::Vertical,
+            CropPosition::new(x, 500),
+        );
+        let frame = ffmpeg
+            .frame_at(&destination, secs(index as f64 * 0.5 + 0.25), size)
+            .unwrap();
+        for fraction in [0.05, 0.25, 0.5, 0.75, 0.95] {
+            let column = (fraction * f64::from(size.width)) as u32;
+            let source = f64::from(window.x) + fraction * f64::from(window.width);
+            let Some(expected) = band_at(source) else {
+                continue;
+            };
+            let found = pixel(&frame.bgra, column, size.height / 2);
+            assert_eq!(
+                colour_of(&found),
+                Some(expected),
+                "crop at {x}: column {column} (source {source:.0}) is {found:?}"
+            );
+        }
+    }
+
+    // Fit: the whole picture across the middle, black above and below.
+    let frame = ffmpeg.frame_at(&destination, secs(2.25), size).unwrap();
+    let middle = size.height / 2;
+    let across: Vec<Option<usize>> = [0.15, 0.5, 0.85]
+        .iter()
+        .map(|fraction| colour_of(&pixel(&frame.bgra, (fraction * 360.0) as u32, middle)))
+        .collect();
+    assert_eq!(across, [Some(0), Some(1), Some(2)]);
+    for row in [20, size.height - 20] {
+        assert!(
+            pixel(&frame.bgra, size.width / 2, row)[..3]
+                .iter()
+                .all(|channel| *channel < 30),
+            "bars at row {row}"
+        );
+    }
+}

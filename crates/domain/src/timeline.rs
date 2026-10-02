@@ -17,13 +17,16 @@
 //! level, mute and solo, the music's ducking under the narration, and each
 //! audio item's fades; and its captions (`crate::Captions`), which show
 //! wherever the cut plays the words they caption.
+//!
+//! And it carries its framing (`crate::Framing`): the shape of the frame
+//! it is cut for, and how each clip fills it.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    CaptionStyle, Captions, DuckEnvelope, Edge, Mix, Narration, NarrationId, ProfileId,
-    RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, VideoProjectId,
+    AspectRatio, CaptionStyle, Captions, DuckEnvelope, Edge, Framing, Mix, Narration, NarrationId,
+    ProfileId, RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -112,11 +115,22 @@ pub struct VideoItem {
     /// Where it starts on the timeline.
     pub at: Duration,
     pub duration: Duration,
+    /// How its picture fills a frame of another shape.
+    pub framing: Framing,
 }
 
 impl VideoItem {
     pub fn end(&self) -> Duration {
         self.at + self.duration
+    }
+
+    /// How its picture fills a frame of `aspect`: scene pictures are 16:9,
+    /// so a 16:9 frame takes them whole and only 9:16 applies its framing.
+    pub fn framing_in(&self, aspect: AspectRatio) -> Framing {
+        match aspect {
+            AspectRatio::Landscape => Framing::Fit,
+            AspectRatio::Vertical => self.framing,
+        }
     }
 
     /// Whether its source plays through time (a clip), so cutting into it
@@ -188,14 +202,15 @@ impl CaptionSpan {
     }
 }
 
-/// A video project's edit: the video track, the narration track, the mix
-/// and the captions.
+/// A video project's edit: the video track, the narration track, the mix,
+/// the captions and the frame's shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeline {
     pub(crate) video: Vec<VideoItem>,
     pub(crate) narration: Vec<AudioItem>,
     pub(crate) mix: Mix,
     pub(crate) captions: Captions,
+    pub(crate) aspect: AspectRatio,
 }
 
 impl Timeline {
@@ -206,7 +221,8 @@ impl Timeline {
     /// as the scenes when they run longer; the last scene fills to the
     /// end. Scenes too short to fill a frame are left out, and the scene
     /// before them runs on. The narration's words come captioned
-    /// (`crate::caption_lines`), in the default style.
+    /// (`crate::caption_lines`), in the default style. The cut is 16:9,
+    /// each clip filling a 9:16 frame from the middle.
     pub fn rough_cut(plan: &ScenePlan, narration: &Narration) -> Timeline {
         let end_frame = plan
             .scenes()
@@ -245,6 +261,7 @@ impl Timeline {
                     start: Duration::ZERO,
                     at,
                     duration: frame_time(end) - at,
+                    framing: Framing::default(),
                 }
             })
             .collect();
@@ -263,6 +280,7 @@ impl Timeline {
             narration,
             mix: Mix::default(),
             captions,
+            aspect: AspectRatio::Landscape,
         }
     }
 
@@ -270,6 +288,13 @@ impl Timeline {
     /// a new cut).
     pub fn with_caption_style(mut self, style: CaptionStyle) -> Timeline {
         self.captions.style = style;
+        self
+    }
+
+    /// This timeline cut for `aspect` (the shape a cut left behind had, for
+    /// the one replacing it).
+    pub fn with_aspect(mut self, aspect: AspectRatio) -> Timeline {
+        self.aspect = aspect;
         self
     }
 
@@ -309,6 +334,7 @@ impl Timeline {
                 start: item.start,
                 at: Duration::ZERO,
                 duration: item.duration,
+                framing: item.framing,
             })
             .collect();
         let narration = saved
@@ -329,6 +355,7 @@ impl Timeline {
             narration,
             mix: saved.mix,
             captions,
+            aspect: saved.aspect,
         };
         timeline.relayout();
         timeline.holds_together().then_some(timeline)
@@ -355,6 +382,7 @@ impl Timeline {
                     scene: item.scene,
                     start: item.start,
                     duration: item.duration,
+                    framing: item.framing,
                 })
                 .collect(),
             narration_items: self
@@ -375,6 +403,7 @@ impl Timeline {
                 shown: self.captions.shown,
                 style: self.captions.style,
             }),
+            aspect: self.aspect,
             updated_at: now,
         }
     }
@@ -423,6 +452,11 @@ impl Timeline {
 
     pub fn captions(&self) -> &Captions {
         &self.captions
+    }
+
+    /// The shape of the frame the cut is made for.
+    pub fn aspect(&self) -> AspectRatio {
+        self.aspect
     }
 
     /// Where the captions show: each stretch of a caption the cut plays, in
@@ -624,6 +658,7 @@ pub struct SavedVideoItem {
     pub scene: usize,
     pub start: Duration,
     pub duration: Duration,
+    pub framing: Framing,
 }
 
 /// An audio item as saved.
@@ -652,6 +687,8 @@ pub struct SavedTimeline {
     pub mix: Mix,
     /// `None` for a cut saved before captions existed.
     pub captions: Option<SavedCaptions>,
+    /// The shape of the frame the cut is made for.
+    pub aspect: AspectRatio,
     pub updated_at: SystemTime,
 }
 
@@ -1396,5 +1433,37 @@ pub(crate) mod tests {
             None,
             "a level out of range"
         );
+    }
+
+    #[test]
+    fn a_saved_timeline_keeps_its_frame_shape_and_crops() {
+        let plan = drawn(&[(0, 2_000, "a.png"), (2_000, 4_000, "b.png")]);
+        let narration = narration(4_000);
+        let rough = Timeline::rough_cut(&plan, &narration);
+        assert_eq!(rough.aspect(), AspectRatio::Landscape);
+        assert!(
+            rough
+                .video()
+                .iter()
+                .all(|item| item.framing == Framing::FILL)
+        );
+
+        let mut timeline = rough.with_aspect(AspectRatio::Vertical);
+        let left = Framing::Crop(crate::CropPosition::new(0, 500));
+        timeline.video[0].framing = left;
+        timeline.video[1].framing = Framing::Fit;
+        let saved = saved(&timeline, &plan, &narration);
+        assert_eq!(saved.aspect, AspectRatio::Vertical);
+        assert_eq!(saved.video[0].framing, left);
+        assert_eq!(Timeline::restore(&saved, &plan, &narration), Some(timeline));
+    }
+
+    #[test]
+    fn a_16_9_frame_takes_every_picture_whole() {
+        let plan = drawn(&[(0, 2_000, "a.png")]);
+        let mut item = Timeline::rough_cut(&plan, &narration(2_000)).video[0].clone();
+        item.framing = Framing::Crop(crate::CropPosition::new(0, 0));
+        assert_eq!(item.framing_in(AspectRatio::Landscape), Framing::Fit);
+        assert_eq!(item.framing_in(AspectRatio::Vertical), item.framing);
     }
 }

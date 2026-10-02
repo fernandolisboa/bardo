@@ -62,7 +62,7 @@ Track colors differ in lightness as well as hue, so they stay distinguishable fo
 
 ## Inspector contents
 
-- **Clip (V1)**: name; source provenance (e.g. "Nano Banana image · Animated with Higgsfield · Kling 2.5", file, resolution, fps); In / Out / Duration; Crop position `Fit | Fill | Custom` with X/Y (applies in 9:16; in 16:9 the clip fits the frame); Speed; **Replace asset**, **Regenerate** (#15, #16).
+- **Clip (V1)**: name; source provenance (e.g. "Nano Banana image · Animated with Higgsfield · Kling 2.5", file, resolution, fps); In / Out / Duration; Framing `Fit | Fill | Custom` with the horizontal position (− / + in 5% steps; Custom shows once the window is moved off center; a 9:16 window over a 16:9 picture only moves across). Applies in 9:16; in 16:9 the clip fits the frame; Speed; **Replace asset**, **Regenerate** (#15, #16).
 - **Caption (CC)**: text; In / Out / Duration with "snapped to words" hint; channel caption styles as swatches (three per channel); vertical position (Top / Center / Bottom plus offset); "Apply style to all captions".
 - **Audio region (A1–A3)**: In / Out / Duration, **Fades** (fade in, fade out; − / + in 0.1 s steps, never longer than the region together; a split inside a fade ends it at the split), file, **Remove from the cut**. Fades draw as ramps over the region.
 - **Track (A1–A3, picked by its header)**: **Level** (− / + in 0.5 dB steps, −30 to +12 dB), **Mute**, **Solo**; on A2, **Duck under the narration** and **Duck by** (1 to 30 dB in 1 dB steps; − ducks deeper) with a hint on what ducking follows. Every change is one undoable edit (#22).
@@ -92,7 +92,7 @@ Editing never waits on proxies or jobs (story 69).
 - Split, trim, reorder and delete on V1 and audio tracks; every edit is undoable (#21). V1 is magnetic: trimming, removing or reordering a clip moves the clips after it, and trimming a clip's start cuts into it while it stays in place. Audio pieces move freely and stop at their neighbours; removing one leaves silence.
 - Mouse: drag an item's end (6 px grab zone, resize cursor) to trim it; drag a clip to drop it between two others (an accent bar marks the slot); drag a narration piece to move it. Clicking an item selects it and moves the playhead there.
 - The Split button splits at the playhead (the selected item if the playhead is inside it, else the clip under it). The inspector of a selected item has **Remove from the cut** and lists the editing shortcuts.
-- The aspect switch changes the preview and enables per-clip crop; the crop window can be dragged in the preview.
+- The aspect switch is the project's frame shape (an undoable edit) and changes the preview. In 9:16, the selected clip's crop window shows over its dimmed 16:9 picture while the playhead is on it; dragging the window moves the crop, made as one edit when the drag ends.
 - Selecting a caption chip, a clip or an audio region drives the inspector; clicking empty timeline clears the selection.
 
 ## Keyboard shortcuts
