@@ -17,7 +17,7 @@ The spike ran in a 4-core Linux container with no GPU, using the same FFmpeg rel
 | `waveform` | Peaks per second of the first audio stream |
 | `build_proxy` | 540-line MJPEG (or H.264) proxy with progress and cancel |
 | `detect_encoders` | Which H.264 encoders work here, best first (trial encode each) |
-| `render` | A `RenderPlan` (clips back to back, crop or fit per clip, audio tracks with placed clips and gains) to MP4, two-pass loudness, progress and cancel |
+| `render` | A `RenderPlan` (clips back to back, crop or fit per clip, audio tracks with placed clips and gains) to MP4, two-pass loudness (measure, then one gain and a true-peak limiter), progress and cancel |
 | `preview` | The same plan from the playhead on, as BGRA frames at preview size |
 | `measure_loudness` | Integrated loudness, true peak and range of a file (for the review screen) |
 
@@ -100,7 +100,7 @@ At preview size the copy path adds a sixth of a core and no frame time, even wit
 
 - **#20 (rough cut):** can start on this decision. The timeline model in `domain` maps onto `media::ffmpeg::RenderPlan`; preview is `Ffmpeg::preview` over proxies, restarted on seek (about 0.1 s); proxies build as a job per clip (`build_proxy`) when clips enter the timeline; waveforms from `Ffmpeg::waveform`. Audio playback during preview is not covered by this spike: decode the same plan's audio mix to PCM on a second pipe and play it with the existing `rodio` output, using the audio clock to pace video frames.
   As built in #20: one proxies job per project rather than per clip (it skips proxies that exist, keeps going past a failed file and lists the failures in its checkpoint); stills get a 540-line JPEG proxy and the narration a peaks file; `RenderPlan` clips are a video, a still (`-loop 1`) or black, and a clip shorter than its scene holds its last frame; `Ffmpeg::preview_audio` streams the mix as f32 PCM on a second pipe, and the preview waits for its first frame and buffered audio, then paces video by the samples the device has played (wall clock without a sound device).
-- **#27 (final render):** `Ffmpeg::render` is the core; to add: segment rendering for resume (render fixed-length segments with keyframes at the boundaries, checkpoint each, join with the concat demuxer without re-encoding; the measured loudness gain is linear so it applies per segment), captions burned in, ducking and fades in the audio graph, and the child in a job object so it dies with Bardo.
+- **#27 (final render):** done. Resume works per output file: each finished file is checkpointed and a resumed render makes only the ones left; segment rendering (fixed-length segments joined with the concat demuxer) stays an option if single files get long enough for that to matter. The second loudness pass became one gain plus a true-peak limiter (ADR-0007). The child in a job object that dies with Bardo is still open (ADR-0007).
 - **#32 (imported narration):** other formats (M4A/AAC, FLAC, OGG/Opus) can now be converted to WAV on import with one `ffmpeg` call.
 - **Long timelines:** past a few hundred clips the command line nears Windows' 32,767-character limit; move the graph to a file (`-/filter_complex`) and open each source once.
 

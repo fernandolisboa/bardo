@@ -195,6 +195,7 @@ cancel = "Cancel"
 retry = "Retry"
 
 [job.kind]
+render = "Final render"
 countdown = "Test countdown"
 niche_research = "Niche research"
 theme_suggestion = "Theme suggestion"
@@ -1063,6 +1064,11 @@ terminal_dark = "Terminal · dark"
 budgets_used = "{percent}% of this month's budgets"
 
 [stage.note]
+render_ready = "Ready to review"
+rendered = "Files: {n}"
+render_outdated = "Out of date: {n}"
+rendering = "Rendering…"
+render_stopped = "Stopped"
 script_missing = "Not written yet"
 script_to_review = "New version to review"
 script_words = "{n} words"
@@ -1177,3 +1183,81 @@ spent = "spent"
 over = "{n} over budget"
 near = "{n} near budget"
 unpriced = "{n} without a price"
+
+[render.error]
+no_cut = "Plan the scenes and record the narration first: the render needs a cut."
+nothing_chosen = "Choose at least one network to render."
+blocked = "A chosen network can't be rendered. See its checks."
+cut_changed = "The cut changed after this review. Review it again before rendering."
+already_running = "This project is already rendering."
+check_failed = "Bardo couldn't check this cut with ffmpeg. Check again, or see Details in Jobs."
+not_loaded = "Couldn't load the render review. Try again."
+
+[render]
+checking = "Checking encoders and loudness…"
+no_accounts = "This channel has no network accounts. Add one under Accounts to render for it."
+info = "Render makes one file per network, in that account's preset: frame, size, codec, bitrate, length limit and loudness. It takes a while and replaces the network's last file, so it starts only after you review the checks and confirm. A blocking check keeps that network out; a warning lets you go on."
+captions_on = "On"
+captions_off = "Off"
+measuring = "Measuring…"
+lufs = "{value} LUFS"
+silent = "Silent"
+targets = "Networks"
+chosen = "{n} of {total} chosen"
+include = "Render for this network"
+loudness_on_target = "on target"
+loudness_off_target = "off target"
+show_file = "Show in folder"
+size = "{value} MB"
+encoder = "Encoder"
+encoder_hardware = "{name}, on the graphics card"
+encoder_software = "{name}, on the processor"
+start = "Render ({n})"
+check_again = "Check again"
+running = "Rendering {done} of {total}…"
+stopped = "The render stopped."
+cancelled = "Render cancelled. Resume renders the files left; finished ones stay."
+resume = "Resume"
+
+[render.figure]
+length = "Length"
+frame = "Cut frame"
+loudness = "Mix loudness"
+captions = "Captions"
+
+[render.gate]
+too_long = "Longer than this network takes ({limit}). Shorten the cut or raise the account's limit."
+no_encoder = "No {codec} encoder works on this computer. Pick another codec in the account's preset."
+reframed = "The cut is {cut}; this file is {output}, each clip through its crop window (centered unless you moved it)."
+captions_off = "Captions are off in the cut."
+missing_media = "{n} clips have no media and render black."
+silent = "The mix has no sound; it renders as it is."
+loudness_far = "The mix is {gain} dB from this network's target; the render changes it that much."
+peaks_limited = "At this target the peaks would clip, so the render limits them."
+blocks = "Blocks"
+warning = "Warning"
+
+[render.state]
+ready = "Ready"
+blocked = "Blocked"
+warnings = "{n} to check"
+checking = "Checking"
+
+[render.last]
+current = "Rendered"
+outdated = "Out of date"
+none = "Not rendered"
+file = "{size} · {loudness} · {encoder}"
+outdated_hint = "The cut or the preset changed after this file was rendered."
+
+[render.column]
+preset = "Preset"
+checks = "Checks"
+last = "Last render"
+
+[render.confirm]
+title = "Render {n} files now?"
+body = "Rendering takes a while and replaces each network's last file. It runs in the background; you can cancel and resume it."
+warnings = "{n} warnings stay as they are."
+go = "Render now"
+back = "Go back"

@@ -865,6 +865,73 @@ pub enum Text {
     StageName(Stage),
     /// Why a stage is locked: it waits on that stage.
     StageAfter(Stage),
+    RenderNoCut,
+    RenderChecking,
+    RenderNothingChosen,
+    RenderBlocked,
+    RenderCutChanged,
+    RenderAlreadyRunning,
+    RenderCheckFailed,
+    RenderNotLoaded,
+    RenderNoAccounts,
+    RenderInfo,
+    RenderFigureLength,
+    RenderFigureFrame,
+    RenderFigureLoudness,
+    RenderFigureCaptions,
+    RenderCaptionsOn,
+    RenderCaptionsOff,
+    RenderMeasuring,
+    RenderLufs,
+    RenderSilent,
+    RenderTargets,
+    RenderChosen,
+    RenderInclude,
+    GateTooLong,
+    GateNoEncoder,
+    GateReframed,
+    GateCaptionsOff,
+    GateMissingMedia,
+    GateSilent,
+    GateLoudnessFar,
+    GatePeaksLimited,
+    GateBlocks,
+    GateWarning,
+    RenderStateReady,
+    RenderStateBlocked,
+    RenderStateWarnings,
+    RenderStateChecking,
+    RenderLastCurrent,
+    RenderLastOutdated,
+    RenderLastNone,
+    RenderLastFile,
+    RenderLastOutdatedHint,
+    RenderLoudnessOnTarget,
+    RenderLoudnessOffTarget,
+    RenderShowFile,
+    RenderSize,
+    RenderColumnPreset,
+    RenderColumnChecks,
+    RenderColumnLast,
+    RenderEncoder,
+    RenderEncoderHardware,
+    RenderEncoderSoftware,
+    RenderStart,
+    RenderCheckAgain,
+    RenderConfirmTitle,
+    RenderConfirmBody,
+    RenderConfirmWarnings,
+    RenderConfirm,
+    RenderConfirmBack,
+    RenderRunning,
+    RenderStopped,
+    RenderCancelled,
+    RenderResume,
+    StageRenderReady,
+    StageRendered,
+    StageRenderOutdated,
+    StageRendering,
+    StageRenderStopped,
 }
 
 impl Text {
@@ -1787,6 +1854,73 @@ impl Text {
                 Destination::Costs => "nav.place.costs",
                 Destination::Settings => "nav.place.settings",
             },
+            Text::RenderNoCut => "render.error.no_cut",
+            Text::RenderChecking => "render.checking",
+            Text::RenderNothingChosen => "render.error.nothing_chosen",
+            Text::RenderBlocked => "render.error.blocked",
+            Text::RenderCutChanged => "render.error.cut_changed",
+            Text::RenderAlreadyRunning => "render.error.already_running",
+            Text::RenderCheckFailed => "render.error.check_failed",
+            Text::RenderNotLoaded => "render.error.not_loaded",
+            Text::RenderNoAccounts => "render.no_accounts",
+            Text::RenderInfo => "render.info",
+            Text::RenderFigureLength => "render.figure.length",
+            Text::RenderFigureFrame => "render.figure.frame",
+            Text::RenderFigureLoudness => "render.figure.loudness",
+            Text::RenderFigureCaptions => "render.figure.captions",
+            Text::RenderCaptionsOn => "render.captions_on",
+            Text::RenderCaptionsOff => "render.captions_off",
+            Text::RenderMeasuring => "render.measuring",
+            Text::RenderLufs => "render.lufs",
+            Text::RenderSilent => "render.silent",
+            Text::RenderTargets => "render.targets",
+            Text::RenderChosen => "render.chosen",
+            Text::RenderInclude => "render.include",
+            Text::GateTooLong => "render.gate.too_long",
+            Text::GateNoEncoder => "render.gate.no_encoder",
+            Text::GateReframed => "render.gate.reframed",
+            Text::GateCaptionsOff => "render.gate.captions_off",
+            Text::GateMissingMedia => "render.gate.missing_media",
+            Text::GateSilent => "render.gate.silent",
+            Text::GateLoudnessFar => "render.gate.loudness_far",
+            Text::GatePeaksLimited => "render.gate.peaks_limited",
+            Text::GateBlocks => "render.gate.blocks",
+            Text::GateWarning => "render.gate.warning",
+            Text::RenderStateReady => "render.state.ready",
+            Text::RenderStateBlocked => "render.state.blocked",
+            Text::RenderStateWarnings => "render.state.warnings",
+            Text::RenderStateChecking => "render.state.checking",
+            Text::RenderLastCurrent => "render.last.current",
+            Text::RenderLastOutdated => "render.last.outdated",
+            Text::RenderLastNone => "render.last.none",
+            Text::RenderLastFile => "render.last.file",
+            Text::RenderLastOutdatedHint => "render.last.outdated_hint",
+            Text::RenderLoudnessOnTarget => "render.loudness_on_target",
+            Text::RenderLoudnessOffTarget => "render.loudness_off_target",
+            Text::RenderShowFile => "render.show_file",
+            Text::RenderSize => "render.size",
+            Text::RenderColumnPreset => "render.column.preset",
+            Text::RenderColumnChecks => "render.column.checks",
+            Text::RenderColumnLast => "render.column.last",
+            Text::RenderEncoder => "render.encoder",
+            Text::RenderEncoderHardware => "render.encoder_hardware",
+            Text::RenderEncoderSoftware => "render.encoder_software",
+            Text::RenderStart => "render.start",
+            Text::RenderCheckAgain => "render.check_again",
+            Text::RenderConfirmTitle => "render.confirm.title",
+            Text::RenderConfirmBody => "render.confirm.body",
+            Text::RenderConfirmWarnings => "render.confirm.warnings",
+            Text::RenderConfirm => "render.confirm.go",
+            Text::RenderConfirmBack => "render.confirm.back",
+            Text::RenderRunning => "render.running",
+            Text::RenderStopped => "render.stopped",
+            Text::RenderCancelled => "render.cancelled",
+            Text::RenderResume => "render.resume",
+            Text::StageRenderReady => "stage.note.render_ready",
+            Text::StageRendered => "stage.note.rendered",
+            Text::StageRenderOutdated => "stage.note.render_outdated",
+            Text::StageRendering => "stage.note.rendering",
+            Text::StageRenderStopped => "stage.note.render_stopped",
             Text::StageName(stage) => match stage {
                 Stage::Script => "stage.name.script",
                 Stage::Narration => "stage.name.narration",
@@ -2775,6 +2909,73 @@ mod tests {
         texts.extend(Destination::ALL.map(Text::DestinationName));
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
+        texts.push(Text::RenderNoCut);
+        texts.push(Text::RenderChecking);
+        texts.push(Text::RenderNothingChosen);
+        texts.push(Text::RenderBlocked);
+        texts.push(Text::RenderCutChanged);
+        texts.push(Text::RenderAlreadyRunning);
+        texts.push(Text::RenderCheckFailed);
+        texts.push(Text::RenderNotLoaded);
+        texts.push(Text::RenderNoAccounts);
+        texts.push(Text::RenderInfo);
+        texts.push(Text::RenderFigureLength);
+        texts.push(Text::RenderFigureFrame);
+        texts.push(Text::RenderFigureLoudness);
+        texts.push(Text::RenderFigureCaptions);
+        texts.push(Text::RenderCaptionsOn);
+        texts.push(Text::RenderCaptionsOff);
+        texts.push(Text::RenderMeasuring);
+        texts.push(Text::RenderLufs);
+        texts.push(Text::RenderSilent);
+        texts.push(Text::RenderTargets);
+        texts.push(Text::RenderChosen);
+        texts.push(Text::RenderInclude);
+        texts.push(Text::GateTooLong);
+        texts.push(Text::GateNoEncoder);
+        texts.push(Text::GateReframed);
+        texts.push(Text::GateCaptionsOff);
+        texts.push(Text::GateMissingMedia);
+        texts.push(Text::GateSilent);
+        texts.push(Text::GateLoudnessFar);
+        texts.push(Text::GatePeaksLimited);
+        texts.push(Text::GateBlocks);
+        texts.push(Text::GateWarning);
+        texts.push(Text::RenderStateReady);
+        texts.push(Text::RenderStateBlocked);
+        texts.push(Text::RenderStateWarnings);
+        texts.push(Text::RenderStateChecking);
+        texts.push(Text::RenderLastCurrent);
+        texts.push(Text::RenderLastOutdated);
+        texts.push(Text::RenderLastNone);
+        texts.push(Text::RenderLastFile);
+        texts.push(Text::RenderLastOutdatedHint);
+        texts.push(Text::RenderLoudnessOnTarget);
+        texts.push(Text::RenderLoudnessOffTarget);
+        texts.push(Text::RenderShowFile);
+        texts.push(Text::RenderSize);
+        texts.push(Text::RenderColumnPreset);
+        texts.push(Text::RenderColumnChecks);
+        texts.push(Text::RenderColumnLast);
+        texts.push(Text::RenderEncoder);
+        texts.push(Text::RenderEncoderHardware);
+        texts.push(Text::RenderEncoderSoftware);
+        texts.push(Text::RenderStart);
+        texts.push(Text::RenderCheckAgain);
+        texts.push(Text::RenderConfirmTitle);
+        texts.push(Text::RenderConfirmBody);
+        texts.push(Text::RenderConfirmWarnings);
+        texts.push(Text::RenderConfirm);
+        texts.push(Text::RenderConfirmBack);
+        texts.push(Text::RenderRunning);
+        texts.push(Text::RenderStopped);
+        texts.push(Text::RenderCancelled);
+        texts.push(Text::RenderResume);
+        texts.push(Text::StageRenderReady);
+        texts.push(Text::StageRendered);
+        texts.push(Text::StageRenderOutdated);
+        texts.push(Text::StageRendering);
+        texts.push(Text::StageRenderStopped);
         texts
     }
 

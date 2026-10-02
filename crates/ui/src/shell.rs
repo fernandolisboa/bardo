@@ -1,5 +1,5 @@
 use bardo_app::bardo_domain::{BudgetLevel, VideoProjectId};
-use bardo_app::{Bardo, Destination, SpendSummary, Text};
+use bardo_app::{Bardo, Destination, SpendSummary, Stage, Text};
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::*;
 use gpui_kit::{Entity, SharedString, Subscription, Window, div};
@@ -195,6 +195,15 @@ impl Shell {
                         // The editor may have queued jobs or removed old proxies.
                         this.projects
                             .update(cx, |projects, cx| projects.reload(window, cx));
+                        cx.notify();
+                    }
+                    EditorEvent::Render => {
+                        editor.update(cx, |editor, cx| editor.release(window, cx));
+                        this.editor = None;
+                        this.projects.update(cx, |projects, cx| {
+                            projects.reload(window, cx);
+                            projects.show_stage(Stage::Render, window, cx);
+                        });
                         cx.notify();
                     }
                     EditorEvent::ToggleJobs => {

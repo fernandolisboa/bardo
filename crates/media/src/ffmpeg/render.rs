@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::captions::{CaptionFiles, CaptionTrack};
 use super::frames::{FrameSize, FrameStream};
@@ -25,7 +25,7 @@ const SAMPLE_RATE: u32 = 48_000;
 
 /// What to render. `media`'s own shape for now; the editor's timeline in
 /// `domain` (#20) maps onto it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RenderPlan {
     /// Played back to back; the timeline is as long as these together.
     pub video: Vec<VideoClip>,
@@ -34,7 +34,7 @@ pub struct RenderPlan {
     pub captions: Option<CaptionTrack>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoClip {
     pub source: ClipSource,
     /// Where in the source the clip starts (ignored for stills and black).
@@ -46,7 +46,7 @@ pub struct VideoClip {
 }
 
 /// What a video clip shows.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClipSource {
     /// A video file.
     Video(PathBuf),
@@ -57,7 +57,7 @@ pub enum ClipSource {
 }
 
 /// How a source picture fills an output frame of another shape.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Framing {
     /// The largest window of the output's shape, placed `x` across (0.0 at
     /// the left edge, 1.0 at the right) and `y` down the source: a 9:16
@@ -67,7 +67,7 @@ pub enum Framing {
     Fit,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioTrack {
     pub clips: Vec<AudioClip>,
     pub gain_db: f32,
@@ -75,7 +75,7 @@ pub struct AudioTrack {
     pub duck: Option<Duck>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioClip {
     pub source: PathBuf,
     /// Where in the source the clip starts.
@@ -94,7 +94,7 @@ pub struct AudioClip {
 }
 
 /// A level envelope: down by `depth_db` in each dip, linear in decibels.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Duck {
     pub depth_db: f32,
     /// In order and apart.
@@ -104,7 +104,7 @@ pub struct Duck {
 /// One dip: down from `start` to the full depth at `full`, held until
 /// `release`, back up by `end`. Seconds on the plan's timeline; a plan
 /// starting inside a dip has it begin before zero.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Dip {
     pub start: f64,
     pub full: f64,
@@ -130,11 +130,20 @@ pub struct LoudnessTarget {
     pub integrated: f32,
     /// Maximum true peak, dBTP.
     pub true_peak: f32,
-    /// Loudness range, LU.
-    pub range: f32,
 }
 
-/// Loudness as ffmpeg's `loudnorm` measured it (EBU R128).
+/// The loudness range `loudnorm` is given when measuring; the
+/// measurements do not depend on it.
+const MEASURED_RANGE: f32 = 11.0;
+
+/// Measurements do not depend on the target, but `loudnorm` needs one.
+const REFERENCE_TARGET: LoudnessTarget = LoudnessTarget {
+    integrated: -14.0,
+    true_peak: -1.0,
+};
+
+/// Loudness as ffmpeg's `loudnorm` measured it (EBU R128). Silence
+/// measures as minus infinity.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Loudness {
     pub integrated: f32,
@@ -142,6 +151,13 @@ pub struct Loudness {
     pub range: f32,
     pub threshold: f32,
     pub target_offset: f32,
+}
+
+impl Loudness {
+    /// Whether there is no sound to speak of (`bardo_domain::SILENCE`).
+    pub fn is_silent(&self) -> bool {
+        !self.integrated.is_finite() || f64::from(self.integrated) < bardo_domain::SILENCE
+    }
 }
 
 impl RenderPlan {
@@ -434,24 +450,27 @@ fn audio_graph(plan: &RenderPlan, first_input: usize) -> (Vec<Input<'_>>, String
 
 fn loudnorm(target: LoudnessTarget) -> String {
     format!(
-        "loudnorm=I={}:TP={}:LRA={}",
-        target.integrated, target.true_peak, target.range
+        "loudnorm=I={}:TP={}:LRA={MEASURED_RANGE}",
+        target.integrated, target.true_peak
     )
 }
 
-/// Second-pass loudnorm: with the first pass's measurements and
-/// `linear=true` it applies one gain to the whole mix (no pumping), as long
-/// as that gain keeps the true peak under the target.
-fn loudnorm_apply(target: LoudnessTarget, measured: Loudness) -> String {
+/// The rate the true-peak limiter runs at: 4× oversampling, so the peaks
+/// it sees are the true peaks between samples.
+const OVERSAMPLED: u32 = 192_000;
+
+/// The second pass: one gain to the target for the whole mix (no
+/// pumping), then a limiter at 4× oversampling for the peaks that gain
+/// pushes over the ceiling. `loudnorm`'s own second pass switches to
+/// dynamic compression when the mix's range is wide or the gain lifts its
+/// peaks, which flattens the mix as edited and still let peaks over the
+/// ceiling through AAC.
+fn normalize_filter(target: LoudnessTarget, measured: Loudness) -> String {
+    let gain = target.integrated - measured.integrated;
+    let ceiling = 10_f32.powf(target.true_peak / 20.0);
     format!(
-        "{}:measured_I={}:measured_TP={}:measured_LRA={}:measured_thresh={}:offset={}:linear=true,\
-         aresample={SAMPLE_RATE}",
-        loudnorm(target),
-        measured.integrated,
-        measured.true_peak,
-        measured.range,
-        measured.threshold,
-        measured.target_offset
+        "volume={gain:.2}dB,aresample={OVERSAMPLED},\
+         alimiter=limit={ceiling:.4}:level=disabled:attack=1:release=50,aresample={SAMPLE_RATE}"
     )
 }
 
@@ -488,11 +507,7 @@ impl Ffmpeg {
         monitor: &dyn Monitor,
     ) -> Result<Loudness, MediaError> {
         let total = self.probe(path)?.duration;
-        let reference = LoudnessTarget {
-            integrated: -14.0,
-            true_peak: -1.0,
-            range: 11.0,
-        };
+        let reference = REFERENCE_TARGET;
         let mut command = self.ffmpeg();
         command
             .args(["-loglevel", "info", "-i"])
@@ -507,11 +522,21 @@ impl Ffmpeg {
         parse_loudness(&log)
     }
 
+    /// Loudness of the plan's audio mix before normalization, as the render
+    /// review shows it. Audio only, so it takes a fraction of a render.
+    pub fn measure_mix_loudness(
+        &self,
+        plan: &RenderPlan,
+        monitor: &dyn Monitor,
+    ) -> Result<Loudness, MediaError> {
+        plan.check()?;
+        self.measure_mix(plan, monitor, Span::whole(plan.duration()))
+    }
+
     /// Loudness of the plan's audio mix before normalization.
     fn measure_mix(
         &self,
         plan: &RenderPlan,
-        target: LoudnessTarget,
         monitor: &dyn Monitor,
         span: Span,
     ) -> Result<Loudness, MediaError> {
@@ -522,7 +547,10 @@ impl Ffmpeg {
         command
             .args([
                 "-filter_complex",
-                &format!("{mix};[amix]{}:print_format=json[aout]", loudnorm(target)),
+                &format!(
+                    "{mix};[amix]{}:print_format=json[aout]",
+                    loudnorm(REFERENCE_TARGET)
+                ),
             ])
             .args(["-map", "[aout]", "-f", "null", "-"]);
         let log = process::run(command, monitor, span)?;
@@ -546,10 +574,12 @@ impl Ffmpeg {
         let measured = match loudness {
             Some(target) => Some((
                 target,
-                self.measure_mix(plan, target, monitor, Span::part(total, 0.0, 0.1))?,
+                self.measure_mix(plan, monitor, Span::part(total, 0.0, 0.1))?,
             )),
             None => None,
         };
+        // Silence has no loudness to bring anywhere: it renders as it is.
+        let normalize = measured.filter(|(_, measured)| !measured.is_silent());
 
         let captions = CaptionFiles::write(plan.captions.as_ref(), output.size)?;
         let overlay = captions.as_ref().map(CaptionFiles::filter);
@@ -557,8 +587,10 @@ impl Ffmpeg {
             video_graph(plan, output.size, output.fps, "yuv420p", overlay.as_deref());
         let (audio_inputs, mix) = audio_graph(plan, inputs.len());
         inputs.extend(audio_inputs);
-        let audio_out = match measured {
-            Some((target, measured)) => format!("[amix]{}[aout]", loudnorm_apply(target, measured)),
+        let audio_out = match normalize {
+            Some((target, measured)) => {
+                format!("[amix]{}[aout]", normalize_filter(target, measured))
+            }
             None => "[amix]anull[aout]".to_string(),
         };
         let (numerator, denominator) = output.fps;
@@ -946,11 +978,10 @@ mod tests {
     }
 
     #[test]
-    fn second_pass_applies_one_linear_gain() {
+    fn second_pass_applies_one_gain_and_limits_true_peaks() {
         let target = LoudnessTarget {
             integrated: -14.0,
             true_peak: -1.5,
-            range: 11.0,
         };
         let measured = Loudness {
             integrated: -23.5,
@@ -960,9 +991,9 @@ mod tests {
             target_offset: 0.1,
         };
         assert_eq!(
-            loudnorm_apply(target, measured),
-            "loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=-23.5:measured_TP=-7.1:measured_LRA=1.2:\
-             measured_thresh=-33.8:offset=0.1:linear=true,aresample=48000"
+            normalize_filter(target, measured),
+            "volume=9.50dB,aresample=192000,\
+             alimiter=limit=0.8414:level=disabled:attack=1:release=50,aresample=48000"
         );
     }
 

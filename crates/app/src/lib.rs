@@ -19,6 +19,7 @@ mod persona_package;
 mod personas;
 mod provider_keys;
 mod proxies;
+mod render;
 mod research;
 mod scenes;
 mod scripts;
@@ -35,10 +36,10 @@ use bardo_domain::{
     ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ImageGenerator,
     JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository, MusicPromptRepository,
     NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
-    PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
-    ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
-    TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository, UiLanguage,
-    UiThemePreference, UserProfile, VoiceLibrary,
+    PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RenderRepository,
+    RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
+    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
+    UiLanguage, UiThemePreference, UserProfile, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryProjectFiles};
@@ -69,6 +70,10 @@ pub use network_accounts::NetworkAccountError;
 pub use persona_package::PackageError;
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus, persona_package_folder};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
+pub use render::{
+    CheckFound, RenderChecks, RenderError, RenderReview, RenderSummary, RenderTarget,
+    render_job_files,
+};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use scenes::{SceneError, ScenesView};
 pub use scripts::{ScriptError, ScriptView};
@@ -88,6 +93,7 @@ use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
 use crate::proxies::ProxyHandler;
+use crate::render::RenderHandler;
 use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
@@ -128,6 +134,8 @@ pub struct Repositories {
     pub music_prompts: Arc<dyn MusicPromptRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
+    /// Each project's rendered files. Shared with the job queue.
+    pub renders: Arc<dyn RenderRepository>,
     /// What generations cost, the user's rates and budgets. Shared with
     /// the job queue.
     pub costs: Arc<dyn CostRepository>,
@@ -175,6 +183,7 @@ impl Repositories {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            renders: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             research: db,
             files,
@@ -248,6 +257,7 @@ pub struct Bardo {
     media_assets: Arc<dyn MediaAssetRepository>,
     music_prompts: Arc<dyn MusicPromptRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
+    renders: Arc<dyn RenderRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
@@ -303,6 +313,7 @@ impl Bardo {
             media_assets,
             music_prompts,
             network_accounts,
+            renders,
             costs,
             files,
             secrets,
@@ -384,6 +395,12 @@ impl Bardo {
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
         };
+        let render_handler = RenderHandler {
+            owner: profile.id,
+            renders: Arc::clone(&renders),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+        };
         let music_prompt_handler = MusicPromptHandler {
             owner: profile.id,
             prompts: Arc::clone(&music_prompts),
@@ -406,6 +423,7 @@ impl Bardo {
                 clips: clip_handler,
                 proxies: proxy_handler,
                 music_prompts: music_prompt_handler,
+                renders: render_handler,
             }),
             job_settings,
             redactor,
@@ -424,6 +442,7 @@ impl Bardo {
             media_assets,
             music_prompts,
             network_accounts,
+            renders,
             cost_book,
             files,
             audio: providers.audio,
@@ -1261,6 +1280,7 @@ mod tests {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            renders: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
             research: db,

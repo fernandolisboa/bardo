@@ -786,95 +786,8 @@ impl Editor {
     /// The timeline as the preview plays it: proxies for pictures, black
     /// where there is no proxy, the narration as recorded.
     pub fn preview_plan(&self) -> Option<RenderPlan> {
-        let timeline = self.view.timeline.as_ref().filter(|t| !t.is_empty())?;
-        let project = self.project();
-        let aspect = timeline.aspect();
-        let mut video: Vec<VideoClip> = timeline
-            .video()
-            .iter()
-            .map(|item| {
-                let proxy = ProxyKind::of(&item.source).and_then(|kind| {
-                    let name = proxy_name(item.source.file()?, kind);
-                    self.files
-                        .exists(project, &name)
-                        .then(|| (kind, self.files.path(project, &name)))
-                });
-                let source = match proxy {
-                    Some((ProxyKind::Clip, path)) => ClipSource::Video(path),
-                    Some((_, path)) => ClipSource::Still(path),
-                    None => ClipSource::Black,
-                };
-                VideoClip {
-                    source,
-                    start: item.source_start(),
-                    duration: item.duration,
-                    framing: media_framing(item.framing_in(aspect)),
-                }
-            })
-            .collect();
-        // Black after the last clip while the narration runs on.
-        let end = timeline.duration();
-        if end > timeline.video_end() {
-            video.push(VideoClip {
-                source: ClipSource::Black,
-                start: Duration::ZERO,
-                duration: end - timeline.video_end(),
-                framing: ffmpeg::Framing::Fit,
-            });
-        }
-        let mix = timeline.mix();
-        let audio = AudioLane::ALL
-            .map(|lane| {
-                let clips = timeline
-                    .audio(lane)
-                    .iter()
-                    .filter(|_| mix.is_audible(lane))
-                    .filter(|item| self.files.exists(project, &item.file))
-                    .map(|item| {
-                        let (fade_in, fade_out) = item.fades();
-                        AudioClip {
-                            source: self.files.path(project, &item.file),
-                            start: item.start,
-                            duration: item.duration,
-                            at: item.at,
-                            gain_db: 0.0,
-                            fade_in,
-                            fade_out,
-                            skipped: Duration::ZERO,
-                        }
-                    })
-                    .collect();
-                AudioTrack {
-                    clips,
-                    gain_db: mix.lane(lane).gain.db(),
-                    duck: self
-                        .view
-                        .ducking
-                        .as_ref()
-                        .filter(|_| lane == AudioLane::Music)
-                        .map(duck),
-                }
-            })
-            .to_vec();
-        let captions = timeline.captions();
-        let captions = captions.shown().then(|| CaptionTrack {
-            style: captions.style(),
-            lines: self
-                .view
-                .captions
-                .iter()
-                .map(|span| CaptionLine {
-                    text: captions.lines()[span.index].text.clone(),
-                    at: span.at,
-                    duration: span.duration,
-                })
-                .collect(),
-        });
-        Some(RenderPlan {
-            video,
-            audio,
-            captions,
-        })
+        let aspect = self.view.timeline.as_ref()?.aspect();
+        timeline_plan(&self.view, &*self.files, aspect, PlanMedia::Proxies)
     }
 
     /// Plays from the playhead (from the start when it is at the end).
@@ -1112,6 +1025,116 @@ impl Editor {
     }
 }
 
+/// Where a plan's pictures come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanMedia {
+    /// The 540-line proxies, black where one is missing: the preview.
+    Proxies,
+    /// The files themselves, black where one is missing: the render.
+    Originals,
+}
+
+/// The cut of `view` as the media engine plays it, framed for `aspect`:
+/// every lane at its mix, the music ducked under the narration, captions
+/// burned in when shown. `None` when there is nothing to play.
+pub(crate) fn timeline_plan(
+    view: &EditorView,
+    files: &dyn ProjectFiles,
+    aspect: AspectRatio,
+    media: PlanMedia,
+) -> Option<RenderPlan> {
+    let timeline = view.timeline.as_ref().filter(|t| !t.is_empty())?;
+    let project = view.project.id;
+    let mut video: Vec<VideoClip> = timeline
+        .video()
+        .iter()
+        .map(|item| {
+            let shown = ProxyKind::of(&item.source).and_then(|kind| {
+                let file = item.source.file()?;
+                let name = match media {
+                    PlanMedia::Proxies => proxy_name(file, kind),
+                    PlanMedia::Originals => file.to_owned(),
+                };
+                files
+                    .exists(project, &name)
+                    .then(|| (kind, files.path(project, &name)))
+            });
+            let source = match shown {
+                Some((ProxyKind::Clip, path)) => ClipSource::Video(path),
+                Some((_, path)) => ClipSource::Still(path),
+                None => ClipSource::Black,
+            };
+            VideoClip {
+                source,
+                start: item.source_start(),
+                duration: item.duration,
+                framing: media_framing(item.framing_in(aspect)),
+            }
+        })
+        .collect();
+    // Black after the last clip while the narration runs on.
+    let end = timeline.duration();
+    if end > timeline.video_end() {
+        video.push(VideoClip {
+            source: ClipSource::Black,
+            start: Duration::ZERO,
+            duration: end - timeline.video_end(),
+            framing: ffmpeg::Framing::Fit,
+        });
+    }
+    let mix = timeline.mix();
+    let audio = AudioLane::ALL
+        .map(|lane| {
+            let clips = timeline
+                .audio(lane)
+                .iter()
+                .filter(|_| mix.is_audible(lane))
+                .filter(|item| files.exists(project, &item.file))
+                .map(|item| {
+                    let (fade_in, fade_out) = item.fades();
+                    AudioClip {
+                        source: files.path(project, &item.file),
+                        start: item.start,
+                        duration: item.duration,
+                        at: item.at,
+                        gain_db: 0.0,
+                        fade_in,
+                        fade_out,
+                        skipped: Duration::ZERO,
+                    }
+                })
+                .collect();
+            AudioTrack {
+                clips,
+                gain_db: mix.lane(lane).gain.db(),
+                duck: view
+                    .ducking
+                    .as_ref()
+                    .filter(|_| lane == AudioLane::Music)
+                    .map(duck),
+            }
+        })
+        .to_vec();
+    let captions = timeline.captions();
+    let captions = captions.shown().then(|| CaptionTrack {
+        style: captions.style(),
+        lines: view
+            .captions
+            .iter()
+            .map(|span| CaptionLine {
+                text: captions.lines()[span.index].text.clone(),
+                at: span.at,
+                duration: span.duration,
+            })
+            .collect(),
+    });
+    Some(RenderPlan {
+        video,
+        audio,
+        captions,
+    })
+}
+
 /// The music's ducking as the media engine plays it.
 fn duck(envelope: &DuckEnvelope) -> Duck {
     let seconds = |time: Duration| time.as_secs_f64();
@@ -1145,7 +1168,10 @@ struct ProjectOf {
 }
 
 impl Bardo {
-    fn editor_project(&self, project: VideoProjectId) -> Result<VideoProject, EditorError> {
+    pub(crate) fn editor_project(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<VideoProject, EditorError> {
         self.themes
             .project(project)?
             .filter(|project| project.owner == self.profile.id)
@@ -1661,10 +1687,32 @@ pub(crate) mod testing {
 
     use bardo_domain::{ProjectFiles, VideoProjectId};
     use bardo_media::ffmpeg::{
-        FrameSize, FrameStream, MediaError, MediaInfo, Monitor, RenderPlan, VideoFrame, Waveform,
+        Encoders, FrameSize, FrameStream, Loudness, LoudnessTarget, MediaError, MediaInfo, Monitor,
+        Output, RenderPlan, VideoEncoder, VideoFrame, Waveform,
     };
     use bardo_media::{MediaEngine, PcmStream};
     use bardo_storage::MemoryProjectFiles;
+
+    /// One render asked for, and whether it made a file.
+    #[derive(Debug, Clone)]
+    pub(crate) struct RenderCall {
+        pub(crate) plan: RenderPlan,
+        pub(crate) output: Output,
+        pub(crate) loudness: Option<LoudnessTarget>,
+        pub(crate) destination: PathBuf,
+        pub(crate) made: bool,
+    }
+
+    /// A loudness measurement: integrated and true peak.
+    pub(crate) fn loudness(integrated: f32, true_peak: f32) -> Loudness {
+        Loudness {
+            integrated,
+            true_peak,
+            range: 4.0,
+            threshold: integrated - 10.0,
+            target_offset: 0.0,
+        }
+    }
 
     /// One preview asked for.
     #[derive(Debug, Clone)]
@@ -1691,6 +1739,15 @@ pub(crate) mod testing {
         /// copy in the project folder that gets probed); other files are
         /// not media.
         pub(crate) probes: Mutex<HashMap<String, MediaInfo>>,
+        /// The encoders that work; OpenH264 and Kvazaar unless set.
+        pub(crate) encoders: Mutex<Option<Encoders>>,
+        /// Encoders whose renders fail.
+        pub(crate) broken_encoders: Mutex<Vec<VideoEncoder>>,
+        /// What measuring the mix finds; -20 LUFS, -8 dBTP unless set.
+        pub(crate) mix: Mutex<Option<Loudness>>,
+        /// Holds renders (they wait to be cancelled) while set.
+        pub(crate) render_hold: AtomicBool,
+        pub(crate) renders: Mutex<Vec<RenderCall>>,
     }
 
     impl FakeMedia {
@@ -1703,6 +1760,10 @@ pub(crate) mod testing {
 
         pub(crate) fn previews(&self) -> Vec<PreviewCall> {
             self.previews.lock().unwrap().clone()
+        }
+
+        pub(crate) fn renders(&self) -> Vec<RenderCall> {
+            self.renders.lock().unwrap().clone()
         }
 
         fn check(&self, source: &Path) -> Result<(), MediaError> {
@@ -1834,6 +1895,81 @@ pub(crate) mod testing {
             _from: Duration,
         ) -> Result<PcmStream, MediaError> {
             Ok(PcmStream::from_samples(2, 48_000, vec![0.0; 96]))
+        }
+
+        fn encoders(&self) -> Result<Encoders, MediaError> {
+            if self.not_found.load(Ordering::SeqCst) {
+                return Err(MediaError::NotFound { tried: Vec::new() });
+            }
+            Ok(self.encoders.lock().unwrap().clone().unwrap_or(Encoders {
+                working: vec![VideoEncoder::OpenH264, VideoEncoder::Kvazaar],
+            }))
+        }
+
+        fn measure_mix(
+            &self,
+            _plan: &RenderPlan,
+            _monitor: &dyn Monitor,
+        ) -> Result<Loudness, MediaError> {
+            if self.not_found.load(Ordering::SeqCst) {
+                return Err(MediaError::NotFound { tried: Vec::new() });
+            }
+            Ok(self
+                .mix
+                .lock()
+                .unwrap()
+                .unwrap_or_else(|| loudness(-20.0, -8.0)))
+        }
+
+        fn render(
+            &self,
+            plan: &RenderPlan,
+            output: &Output,
+            loudness: Option<LoudnessTarget>,
+            destination: &Path,
+            monitor: &dyn Monitor,
+        ) -> Result<(), MediaError> {
+            let mut call = RenderCall {
+                plan: plan.clone(),
+                output: *output,
+                loudness,
+                destination: destination.to_owned(),
+                made: false,
+            };
+            while self.render_hold.load(Ordering::SeqCst) {
+                if monitor.should_stop() {
+                    self.renders.lock().unwrap().push(call);
+                    return Err(MediaError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if self
+                .broken_encoders
+                .lock()
+                .unwrap()
+                .contains(&output.encoder)
+            {
+                self.renders.lock().unwrap().push(call);
+                return Err(MediaError::Failed {
+                    program: "ffmpeg".into(),
+                    status: "exit status: 1".into(),
+                    log: "OpenEncodeSessionEx failed: unsupported device".into(),
+                });
+            }
+            monitor.progress(1.0);
+            self.write(destination);
+            call.made = true;
+            self.renders.lock().unwrap().push(call);
+            Ok(())
+        }
+
+        fn measure_loudness(
+            &self,
+            path: &Path,
+            _monitor: &dyn Monitor,
+        ) -> Result<Loudness, MediaError> {
+            self.check(path)?;
+            Ok(loudness(-14.2, -1.6))
         }
     }
 }

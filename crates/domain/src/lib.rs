@@ -63,6 +63,7 @@ mod persona;
 mod profile;
 mod provider_key;
 mod redaction;
+mod render;
 mod repository;
 mod research;
 mod scene;
@@ -143,6 +144,10 @@ pub use provider_key::{
     ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,
 };
 pub use redaction::Redactor;
+pub use render::{
+    CutFacts, Gate, GateLevel, LOUDNESS_GAIN_WARNING, LOUDNESS_TOLERANCE, MeasuredLoudness, Render,
+    RenderId, RenderRepository, SILENCE, TRUE_PEAK_CEILING, cut_gates, output_gates,
+};
 pub use repository::RepositoryError;
 pub use research::{
     MarketData, MarketSample, Niche, NicheResearch, NicheResearchRepository, NicheScores,

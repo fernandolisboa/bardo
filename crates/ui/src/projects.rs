@@ -16,13 +16,14 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource, PersonaId,
-    SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
+    Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource,
+    NetworkAccountId, PersonaId, SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind,
+    VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, Destination, MusicPromptView, NarrationError, NarrationPlayer,
-    NarrationView, Recording, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage,
-    StageState, StageStatus, Text, opening_stage, project_stages,
+    NarrationView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView,
+    SpendEstimate, Stage, StageState, StageStatus, Text, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
@@ -48,6 +49,7 @@ use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
 mod music;
+mod render;
 mod scenes;
 
 /// How often the screen checks the job queue for changes, and moves the
@@ -151,6 +153,25 @@ pub struct ProjectsScreen {
     music_notice: Option<Text>,
     /// The music prompt waiting on a budget answer.
     music_ask: Option<SpendEstimate>,
+    /// The Render stage's review of the project's cut.
+    render_review: Option<RenderReview>,
+    /// Where the project's renders stand, for its Render stage.
+    render_summary: Option<RenderSummary>,
+    /// What the last check found; applies while the cut stays the same.
+    render_found: Option<bardo_app::CheckFound>,
+    /// The encoders and the mix being checked off the UI thread; dropping
+    /// it stops waiting for the result.
+    render_checking: Option<Task<()>>,
+    /// The last check failed: no new one starts until "Check again".
+    render_check_failed: bool,
+    /// Targets the user ticked in or out of the render; the others follow
+    /// whether their last file is current.
+    render_choices: Vec<(NetworkAccountId, bool)>,
+    /// The target open in the inspector.
+    selected_target: Option<NetworkAccountId>,
+    /// "Render" was clicked: the page asks before the job starts.
+    confirm_render: bool,
+    render_error: Option<Text>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -249,6 +270,15 @@ impl ProjectsScreen {
             music_error: None,
             music_notice: None,
             music_ask: None,
+            render_review: None,
+            render_summary: None,
+            render_found: None,
+            render_checking: None,
+            render_check_failed: false,
+            render_choices: Vec::new(),
+            selected_target: None,
+            confirm_render: false,
+            render_error: None,
             editor,
             loaded: None,
             field_error: None,
@@ -362,12 +392,20 @@ impl ProjectsScreen {
         self.music_error = None;
         self.music_notice = None;
         self.music_ask = None;
+        self.render_found = None;
+        self.render_checking = None;
+        self.render_check_failed = false;
+        self.render_choices.clear();
+        self.selected_target = None;
+        self.confirm_render = false;
+        self.render_error = None;
         self.selected_scene = None;
         self.pending_only = false;
         self.load(window, cx);
         self.stage = self
             .stages()
             .map_or(Stage::Script, |stages| opening_stage(&stages));
+        self.ensure_render_checked(cx);
         self.fill_narrator(window, cx);
         cx.notify();
     }
@@ -378,6 +416,7 @@ impl ProjectsScreen {
             self.view.as_ref()?,
             self.narration.as_ref()?,
             self.scenes.as_ref()?,
+            self.render_summary.as_ref()?,
         ))
     }
 
@@ -389,8 +428,15 @@ impl ProjectsScreen {
             }
         } else if stage.is_page() {
             self.stage = stage;
+            self.ensure_render_checked(cx);
             cx.notify();
         }
+    }
+
+    /// Shows a stage of the open project, as the editor's "Review &
+    /// render" asks.
+    pub fn show_stage(&mut self, stage: Stage, _window: &mut Window, cx: &mut Context<Self>) {
+        self.pick_stage(stage, cx);
     }
 
     /// The narrator choices: the channel's default (named), then every
@@ -467,11 +513,14 @@ impl ProjectsScreen {
             self.player = None;
             self.scenes = None;
             self.music = None;
+            self.render_review = None;
+            self.render_summary = None;
             return;
         };
         self.load_narration(id, cx);
         self.load_scenes(id, cx);
         self.load_music(id, window, cx);
+        self.load_render(id, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -1709,7 +1758,8 @@ impl Render for ProjectsScreen {
             Stage::Script => parts.content = self.script_page(cx),
             Stage::Narration => parts.content.extend(self.render_narration(cx)),
             Stage::Scenes | Stage::Clips => self.scene_parts(current, &mut parts, cx),
-            Stage::Edit | Stage::Render | Stage::Publish => {}
+            Stage::Render => self.render_parts(&mut parts, cx),
+            Stage::Edit | Stage::Publish => {}
         }
         let screen = cx.entity().downgrade();
         let bardo = self.bardo.read(cx);
