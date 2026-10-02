@@ -61,7 +61,8 @@ impl CropPosition {
 
     /// The position after dragging the window of `target`'s shape over
     /// `source` by `dx`, `dy` pixels of the source, the window stopping at
-    /// the picture's edges. An axis the window fills keeps its step.
+    /// the picture's edges. An axis the window fills, or that is not
+    /// dragged, keeps its step.
     pub fn dragged(
         self,
         source: PictureSize,
@@ -71,7 +72,7 @@ impl CropPosition {
     ) -> CropPosition {
         let window = crop_window(source, target, self);
         let axis = |step: u16, offset: u32, slack: u32, by: f64| -> u16 {
-            if slack == 0 {
+            if slack == 0 || by == 0.0 {
                 return step;
             }
             let moved = (f64::from(offset) + by).clamp(0.0, f64::from(slack));
@@ -146,7 +147,9 @@ pub struct CropRect {
 /// frame of `target`'s shape: as large as the picture allows (its sides
 /// even, as 4:2:0 video needs), slid across the room left over by
 /// `position`. The renderer's crop (`bardo_media::ffmpeg::Framing::Crop`)
-/// takes the same window from whatever size of the picture it reads.
+/// places its window the same way from whatever size of the picture it
+/// reads, sized to the output's exact shape, so it can differ from this one
+/// by a pixel or two.
 pub fn crop_window(source: PictureSize, target: AspectRatio, position: CropPosition) -> CropRect {
     let (across, down) = target.ratio();
     let (source_width, source_height) = (u64::from(source.width), u64::from(source.height));
@@ -276,6 +279,9 @@ mod tests {
         // Nothing to move in a picture of the frame's shape.
         let same = CropPosition::new(200, 700).dragged(source, AspectRatio::Landscape, 90.0, 90.0);
         assert_eq!(same, CropPosition::new(200, 700));
+        // A step between two pixels stays where it is when not dragged.
+        let still = CropPosition::new(250, 500).dragged(source, AspectRatio::Vertical, 0.0, 3.0);
+        assert_eq!(still, CropPosition::new(250, 500));
     }
 
     #[test]

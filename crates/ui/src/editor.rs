@@ -1027,6 +1027,11 @@ impl EditorScreen {
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 let width: f32 = this.framing_box.get().size.width.into();
+                if event.pressed_button != Some(MouseButton::Left) {
+                    // The button came up where this view did not see it.
+                    this.crop_drag = None;
+                    return;
+                }
                 let Some(drag) = this.crop_drag.as_mut() else {
                     return;
                 };
@@ -1971,6 +1976,13 @@ impl Render for EditorScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.advance(window, cx);
         self.sync_caption_input(window, cx);
+        // A drag whose clip left the preview (playback moved on, the clip
+        // changed) never sees its mouse-up: drop it without an edit.
+        if let Some(drag) = self.crop_drag
+            && self.editor.as_ref().and_then(Editor::framed_clip) != Some(drag.index)
+        {
+            self.crop_drag = None;
+        }
         let view = self.editor.as_ref().map(|editor| editor.view().clone());
         let top_bar = self.render_top_bar(view.as_ref(), cx);
         let root =
