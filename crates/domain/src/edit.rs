@@ -2,7 +2,9 @@
 //! delete items of a timeline, each an [`Edit`] that, applied, hands back
 //! the edit undoing it. A [`History`] keeps those to undo and redo. Mix
 //! changes (stories 61-63: a lane's level, mute and solo, the ducking, an
-//! audio item's fades) are edits too, so they undo the same way.
+//! audio item's fades) are edits too, so they undo the same way, and so are
+//! caption changes (stories 65, 66: a caption's text and ends, deleting
+//! one, showing them or not, their style).
 //!
 //! Edits are exact: they cut where they are told, and the caller snaps the
 //! time first (to a frame, and to a word when snapping is on). Trims and
@@ -10,12 +12,16 @@
 //! end of its file, at the item beside it on an audio track. A video clip
 //! is the one exception at its end: played past it, it holds its last
 //! frame, as the rough cut does with a clip shorter than its scene.
+//!
+//! Captions live in narration-file time (`crate::Captions`): trimming one
+//! moves its end in the file by the shift asked, and it stops at the
+//! captions beside it, at one frame long and at the narration's ends.
 
 use std::time::Duration;
 
 use crate::{
-    AudioItem, AudioLane, DUCK_RANGE, Ducking, GAIN_RANGE, LaneMix, Timeline, VideoItem,
-    VideoSource, min_length,
+    AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, GAIN_RANGE, LaneMix,
+    Timeline, VideoItem, VideoSource, caption_text, min_length,
 };
 
 /// A track of the timeline that edits reach.
@@ -25,6 +31,8 @@ pub enum Track {
     Video,
     /// A1: the narration.
     Narration,
+    /// CC: the captions, by index in `Captions::lines`.
+    Captions,
 }
 
 /// One item of the timeline.
@@ -45,6 +53,13 @@ impl ItemRef {
     pub fn narration(index: usize) -> Self {
         Self {
             track: Track::Narration,
+            index,
+        }
+    }
+
+    pub fn caption(index: usize) -> Self {
+        Self {
+            track: Track::Captions,
             index,
         }
     }
@@ -112,6 +127,7 @@ impl std::ops::Neg for Shift {
 pub enum Item {
     Video(VideoItem),
     Audio(AudioItem),
+    Caption(Caption),
 }
 
 /// One change to a timeline.
@@ -126,7 +142,10 @@ pub enum Edit {
     },
     /// Joins the item to the next one when they are the two halves of a
     /// split: the undo of `Split`.
-    Join { track: Track, index: usize },
+    Join {
+        track: Track,
+        index: usize,
+    },
     /// Moves one edge of the item. On the video track the items after it
     /// follow (the track is magnetic); moving the start edge of a video
     /// item cuts into or out of its source while the item stays put.
@@ -143,9 +162,15 @@ pub enum Edit {
         to: Duration,
     },
     /// Takes the video item at `from` to position `to`.
-    Reorder { from: usize, to: usize },
+    Reorder {
+        from: usize,
+        to: usize,
+    },
     /// Removes the item; on the video track the ones after it close up.
-    Delete { track: Track, index: usize },
+    Delete {
+        track: Track,
+        index: usize,
+    },
     /// Puts an item at `index`: the undo of `Delete`. An audio item keeps
     /// its time and must fit there.
     Insert {
@@ -155,7 +180,10 @@ pub enum Edit {
     },
     /// Sets an audio lane's level (kept within [`GAIN_RANGE`]), mute and
     /// solo.
-    SetLane { lane: AudioLane, mix: LaneMix },
+    SetLane {
+        lane: AudioLane,
+        mix: LaneMix,
+    },
     /// Turns the music's ducking on or off and sets its depth (kept within
     /// [`DUCK_RANGE`]).
     SetDucking(Ducking),
@@ -168,6 +196,14 @@ pub enum Edit {
         fade_in: Duration,
         fade_out: Duration,
     },
+    /// Sets a caption's text, kept as `crate::caption_text` gives it.
+    SetCaptionText {
+        index: usize,
+        text: String,
+    },
+    /// Burns the captions in, or not.
+    ShowCaptions(bool),
+    SetCaptionStyle(CaptionStyle),
 }
 
 /// Why an edit was not made. The timeline is left as it was.
@@ -188,6 +224,9 @@ pub enum EditError {
     /// The item is already there, or cannot go further that way.
     #[error("the edit changes nothing")]
     NoChange,
+    /// A caption needs some text, and not too much.
+    #[error("the caption text is empty or too long")]
+    InvalidText,
 }
 
 impl Timeline {
@@ -195,6 +234,7 @@ impl Timeline {
         match track {
             Track::Video => self.video.len(),
             Track::Narration => self.narration.len(),
+            Track::Captions => self.captions.lines.len(),
         }
     }
 
@@ -206,11 +246,14 @@ impl Timeline {
         }
     }
 
-    /// Where on the timeline the item starts and how long it is.
+    /// Where on the timeline the item starts and how long it is; for a
+    /// caption, from its first stretch shown to its last, and `None` when
+    /// the cut shows none of it.
     pub fn span(&self, item: ItemRef) -> Option<(Duration, Duration)> {
         match item.track {
             Track::Video => self.video.get(item.index).map(|v| (v.at, v.duration)),
             Track::Narration => self.narration.get(item.index).map(|a| (a.at, a.duration)),
+            Track::Captions => self.caption_hull(item.index),
         }
     }
 
@@ -225,6 +268,10 @@ impl Timeline {
     /// a trim of `edge` makes.
     pub fn trim_limits(&self, item: ItemRef, edge: Edge) -> Result<(Shift, Shift), EditError> {
         self.check(item.track, item.index)?;
+        // A caption's ends live in the narration file, cut away or not.
+        if item.track == Track::Captions {
+            return Ok(self.caption_trim_limits(item.index, edge));
+        }
         let (_, duration) = self.span(item).ok_or(EditError::NoSuchItem)?;
         // Each edge stops a frame short of the other.
         let shrink = Shift::later(duration.saturating_sub(min_length()));
@@ -247,6 +294,7 @@ impl Timeline {
                 let room = audio.at - self.audio_floor(item.index);
                 (Shift::earlier(audio.start.min(room)), shrink)
             }
+            (Track::Captions, _) => unreachable!("captions return above"),
             (Track::Narration, Edge::End) => {
                 let audio = &self.narration[item.index];
                 let in_file = audio.length.saturating_sub(audio.start + audio.duration);
@@ -257,6 +305,29 @@ impl Timeline {
                 (-shrink, Shift::later(room))
             }
         })
+    }
+
+    /// How far a caption's edge can go, in the narration file: to the
+    /// caption beside it or the file's end, and a frame short of its other
+    /// edge.
+    fn caption_trim_limits(&self, index: usize, edge: Edge) -> (Shift, Shift) {
+        let lines = &self.captions.lines;
+        let caption = &lines[index];
+        let shrink = Shift::later((caption.end - caption.start).saturating_sub(min_length()));
+        match edge {
+            Edge::Start => {
+                let floor = index
+                    .checked_sub(1)
+                    .map_or(Duration::ZERO, |before| lines[before].end);
+                (Shift::earlier(caption.start.saturating_sub(floor)), shrink)
+            }
+            Edge::End => {
+                let ceiling = lines
+                    .get(index + 1)
+                    .map_or(self.captions.length, |next| next.start);
+                (-shrink, Shift::later(ceiling.saturating_sub(caption.end)))
+            }
+        }
     }
 
     /// The earliest and latest start an audio item can move to; the latest
@@ -298,12 +369,18 @@ impl Timeline {
                 fade_in,
                 fade_out,
             } => self.set_fades(*track, *index, *fade_in, *fade_out)?,
+            Edit::SetCaptionText { index, text } => self.set_caption_text(*index, text)?,
+            Edit::ShowCaptions(shown) => self.show_captions(*shown)?,
+            Edit::SetCaptionStyle(style) => self.set_caption_style(*style)?,
         };
         self.relayout();
         Ok(undo)
     }
 
     fn split(&mut self, track: Track, index: usize, at: Duration) -> Result<Edit, EditError> {
+        if track == Track::Captions {
+            return Err(EditError::WrongTrack);
+        }
         self.check(track, index)?;
         let (start, duration) = self
             .span(ItemRef { track, index })
@@ -335,11 +412,15 @@ impl Timeline {
                 first_part.fade_out = Duration::ZERO;
                 self.narration.insert(index + 1, second);
             }
+            Track::Captions => return Err(EditError::WrongTrack),
         }
         Ok(Edit::Join { track, index })
     }
 
     fn join(&mut self, track: Track, index: usize) -> Result<Edit, EditError> {
+        if track == Track::Captions {
+            return Err(EditError::WrongTrack);
+        }
         self.check(track, index)?;
         self.check(track, index + 1)
             .map_err(|_| EditError::CannotJoin)?;
@@ -373,6 +454,7 @@ impl Timeline {
                 joined.fade_out = second.fade_out;
                 second.at
             }
+            Track::Captions => return Err(EditError::WrongTrack),
         };
         Ok(Edit::Split { track, index, at })
     }
@@ -415,6 +497,14 @@ impl Timeline {
                 let item = &mut self.narration[index];
                 item.duration = moved(item.duration)?;
             }
+            (Track::Captions, Edge::Start) => {
+                let caption = &mut self.captions.lines[index];
+                caption.start = moved(caption.start)?;
+            }
+            (Track::Captions, Edge::End) => {
+                let caption = &mut self.captions.lines[index];
+                caption.end = moved(caption.end)?;
+            }
         }
         Ok(Edit::Trim {
             track,
@@ -455,6 +545,7 @@ impl Timeline {
         let item = match track {
             Track::Video => Item::Video(self.video.remove(index)),
             Track::Narration => Item::Audio(self.narration.remove(index)),
+            Track::Captions => Item::Caption(self.captions.lines.remove(index)),
         };
         Ok(Edit::Insert { track, index, item })
     }
@@ -483,6 +574,26 @@ impl Timeline {
                     return Err(EditError::OutsideItem);
                 }
                 self.narration.insert(index, audio.clone());
+            }
+            (Track::Captions, Item::Caption(caption)) => {
+                let lines = &self.captions.lines;
+                let after_previous = index
+                    .checked_sub(1)
+                    .is_none_or(|before| lines[before].end <= caption.start);
+                let before_next = lines
+                    .get(index)
+                    .is_none_or(|next| caption.end <= next.start);
+                if !after_previous || !before_next {
+                    return Err(EditError::Overlaps);
+                }
+                if caption.start + min_length() > caption.end || caption.end > self.captions.length
+                {
+                    return Err(EditError::OutsideItem);
+                }
+                if caption_text(&caption.text).as_deref() != Some(caption.text.as_str()) {
+                    return Err(EditError::InvalidText);
+                }
+                self.captions.lines.insert(index, caption.clone());
             }
             _ => return Err(EditError::WrongTrack),
         }
@@ -539,6 +650,38 @@ impl Timeline {
             fade_in: before.0,
             fade_out: before.1,
         })
+    }
+}
+
+impl Timeline {
+    fn set_caption_text(&mut self, index: usize, text: &str) -> Result<Edit, EditError> {
+        self.check(Track::Captions, index)?;
+        let text = caption_text(text).ok_or(EditError::InvalidText)?;
+        let caption = &mut self.captions.lines[index];
+        if caption.text == text {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut caption.text, text);
+        Ok(Edit::SetCaptionText {
+            index,
+            text: before,
+        })
+    }
+
+    fn show_captions(&mut self, shown: bool) -> Result<Edit, EditError> {
+        if self.captions.shown == shown {
+            return Err(EditError::NoChange);
+        }
+        self.captions.shown = shown;
+        Ok(Edit::ShowCaptions(!shown))
+    }
+
+    fn set_caption_style(&mut self, style: CaptionStyle) -> Result<Edit, EditError> {
+        if self.captions.style == style {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut self.captions.style, style);
+        Ok(Edit::SetCaptionStyle(before))
     }
 }
 
@@ -1531,5 +1674,244 @@ mod tests {
         history.undo(&mut timeline).unwrap();
         history.undo(&mut timeline).unwrap();
         assert_eq!(timeline, original);
+    }
+
+    /// "One. Two. Three." over a 3 s narration: each word 0.5 s, a second
+    /// apart, each its own caption.
+    fn captioned() -> Timeline {
+        let narration = crate::timeline::tests::narrated(
+            "One. Two. Three.",
+            &[(0, 500), (1_000, 1_500), (2_000, 2_500)],
+            3_000,
+        );
+        Timeline::rough_cut(&plan(vec![scene(0, 3_000)]), &narration)
+    }
+
+    fn caption_times(timeline: &Timeline) -> Vec<(Duration, Duration)> {
+        timeline
+            .captions()
+            .lines()
+            .iter()
+            .map(|caption| (caption.start, caption.end))
+            .collect()
+    }
+
+    #[test]
+    fn trimming_a_caption_stops_at_its_neighbours_and_a_frame_short() {
+        let before = captioned();
+        let after = round_trip(
+            &before,
+            Edit::Trim {
+                track: Track::Captions,
+                index: 1,
+                edge: Edge::Start,
+                by: Shift::earlier(ms(300)),
+            },
+        );
+        assert_eq!(caption_times(&after)[1], (ms(700), ms(1_500)));
+        assert_eq!(after.span(ItemRef::caption(1)), Some((ms(700), ms(800))));
+
+        let limits = |edge| before.trim_limits(ItemRef::caption(1), edge).unwrap();
+        assert_eq!(
+            limits(Edge::Start),
+            (
+                Shift::earlier(ms(500)),
+                Shift::later(ms(500) - frame_time(1))
+            )
+        );
+        assert_eq!(
+            limits(Edge::End),
+            (
+                Shift::earlier(ms(500) - frame_time(1)),
+                Shift::later(ms(500))
+            )
+        );
+        // The last one stops at the narration's end, the first at its start.
+        let last = before.trim_limits(ItemRef::caption(2), Edge::End).unwrap();
+        assert_eq!(last.1, Shift::later(ms(500)));
+        let first = before
+            .trim_limits(ItemRef::caption(0), Edge::Start)
+            .unwrap();
+        assert_eq!(first.0, Shift::ZERO);
+
+        let mut far = before.clone();
+        far.apply(&Edit::Trim {
+            track: Track::Captions,
+            index: 1,
+            edge: Edge::End,
+            by: Shift::later(ms(5_000)),
+        })
+        .unwrap();
+        assert_eq!(
+            caption_times(&far)[1],
+            (ms(1_000), ms(2_000)),
+            "up to the next"
+        );
+    }
+
+    #[test]
+    fn a_caption_s_text_changes_and_undoes() {
+        let after = round_trip(
+            &captioned(),
+            Edit::SetCaptionText {
+                index: 0,
+                text: "  Uno,\n dos ".into(),
+            },
+        );
+        assert_eq!(after.captions().lines()[0].text, "Uno, dos");
+        let mut timeline = captioned();
+        for text in ["", "   ", &"a".repeat(crate::MAX_CAPTION_CHARS + 1)] {
+            assert_eq!(
+                timeline.apply(&Edit::SetCaptionText {
+                    index: 0,
+                    text: text.into()
+                }),
+                Err(EditError::InvalidText)
+            );
+        }
+        assert_eq!(
+            timeline.apply(&Edit::SetCaptionText {
+                index: 0,
+                text: "One.".into()
+            }),
+            Err(EditError::NoChange)
+        );
+        assert_eq!(
+            timeline.apply(&Edit::SetCaptionText {
+                index: 9,
+                text: "Nine.".into()
+            }),
+            Err(EditError::NoSuchItem)
+        );
+        assert_eq!(timeline, captioned());
+    }
+
+    #[test]
+    fn a_deleted_caption_comes_back_where_it_was() {
+        let after = round_trip(
+            &captioned(),
+            Edit::Delete {
+                track: Track::Captions,
+                index: 1,
+            },
+        );
+        assert_eq!(
+            caption_times(&after),
+            [(ms(0), ms(500)), (ms(2_000), ms(2_500))]
+        );
+
+        let mut timeline = captioned();
+        let overlapping = Item::Caption(crate::Caption {
+            text: "Over.".into(),
+            start: ms(400),
+            end: ms(900),
+        });
+        assert_eq!(
+            timeline.apply(&Edit::Insert {
+                track: Track::Captions,
+                index: 1,
+                item: overlapping
+            }),
+            Err(EditError::Overlaps)
+        );
+        let blank = Item::Caption(crate::Caption {
+            text: " ".into(),
+            start: ms(600),
+            end: ms(900),
+        });
+        assert_eq!(
+            timeline.apply(&Edit::Insert {
+                track: Track::Captions,
+                index: 1,
+                item: blank
+            }),
+            Err(EditError::InvalidText)
+        );
+        assert_eq!(timeline, captioned());
+    }
+
+    #[test]
+    fn captions_turn_off_and_change_style_and_undo() {
+        let hidden = round_trip(&captioned(), Edit::ShowCaptions(false));
+        assert!(!hidden.captions().shown());
+        let styled = round_trip(&captioned(), Edit::SetCaptionStyle(CaptionStyle::Punch));
+        assert_eq!(styled.captions().style(), CaptionStyle::Punch);
+        let mut timeline = captioned();
+        assert_eq!(
+            timeline.apply(&Edit::ShowCaptions(true)),
+            Err(EditError::NoChange)
+        );
+        assert_eq!(
+            timeline.apply(&Edit::SetCaptionStyle(CaptionStyle::Clean)),
+            Err(EditError::NoChange)
+        );
+    }
+
+    #[test]
+    fn captions_are_not_split_moved_or_faded() {
+        let before = captioned();
+        for edit in [
+            Edit::Split {
+                track: Track::Captions,
+                index: 0,
+                at: ms(200),
+            },
+            Edit::Join {
+                track: Track::Captions,
+                index: 0,
+            },
+            Edit::Move {
+                track: Track::Captions,
+                index: 0,
+                to: ms(200),
+            },
+            Edit::SetFades {
+                track: Track::Captions,
+                index: 0,
+                fade_in: ms(100),
+                fade_out: ms(100),
+            },
+        ] {
+            let mut timeline = before.clone();
+            assert_eq!(
+                timeline.apply(&edit),
+                Err(EditError::WrongTrack),
+                "{edit:?}"
+            );
+            assert_eq!(timeline, before);
+        }
+    }
+
+    #[test]
+    fn cutting_narration_away_takes_its_captions_and_undoing_brings_them_back() {
+        let mut timeline = captioned();
+        let mut history = History::default();
+        history
+            .apply(
+                &mut timeline,
+                &Edit::Split {
+                    track: Track::Narration,
+                    index: 0,
+                    at: ms(1_800),
+                },
+            )
+            .unwrap();
+        history
+            .apply(
+                &mut timeline,
+                &Edit::Delete {
+                    track: Track::Narration,
+                    index: 1,
+                },
+            )
+            .unwrap();
+        let shown: Vec<usize> = timeline.caption_spans().iter().map(|s| s.index).collect();
+        assert_eq!(shown, [0, 1], "\"Three.\" went with its narration");
+        assert_eq!(timeline.span(ItemRef::caption(2)), None);
+        assert_eq!(timeline.captions().lines().len(), 3, "kept, to come back");
+
+        history.undo(&mut timeline).unwrap();
+        let shown: Vec<usize> = timeline.caption_spans().iter().map(|s| s.index).collect();
+        assert_eq!(shown, [0, 1, 2]);
     }
 }

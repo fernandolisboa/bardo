@@ -37,6 +37,8 @@ use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryProjectFiles};
 
 pub use bardo_domain;
+/// How each caption style looks, for the editor's style swatches.
+pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
 pub use channels::ChannelError;
 pub use clips::{ClipsView, SceneClipView};
 pub use costs::{

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKeyError, AspectRatio, ChannelFieldError, ContentLanguage, Country, Decibels,
+    ApiKeyError, AspectRatio, CaptionStyle, ChannelFieldError, ContentLanguage, Country, Decibels,
     JobFailureKind, JobKind, JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network,
     NetworkAccountFieldError, NicheSeedError, PersonaFieldError, Provider, RateFieldError,
     SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem, TemplateVariable,
@@ -57,6 +57,8 @@ pub enum Text {
     /// Placeholder: `{model}`.
     ChannelClipModelDefault,
     ChannelClipModelHint,
+    ChannelCaptionStyle,
+    ChannelCaptionStyleHint,
     ChannelClipModelNotOffered,
     ChannelAccountsTitle,
     ChannelAccountsHint,
@@ -119,6 +121,7 @@ pub enum Text {
     NetworkName(Network),
     VisibilityName(Visibility),
     AspectRatioName(AspectRatio),
+    CaptionStyleName(CaptionStyle),
     NetworkAccountFieldError(NetworkAccountFieldError),
     PersonasTitle,
     PersonasHint,
@@ -694,6 +697,7 @@ pub enum Text {
     EditorNoSound,
     EditorNothingToCut,
     EditorCannotEdit,
+    EditorCaptionTextInvalid,
     EditorEditNotSaved,
     EditorCutReset,
     EditorInspectorAudio,
@@ -718,6 +722,12 @@ pub enum Text {
     /// Placeholder: `{n}`, signed, with the decimal separator.
     EditorDecibels,
     EditorLaneHint,
+    EditorInspectorCaption,
+    EditorCaptionText,
+    EditorCaptionTextHint,
+    EditorCaptionStyle,
+    EditorCaptionStyleHint,
+    EditorShowCaptions,
 }
 
 impl Text {
@@ -764,6 +774,8 @@ impl Text {
             Text::ChannelClipModel => "channel.clip_model",
             Text::ChannelClipModelDefault => "channel.clip_model_default",
             Text::ChannelClipModelHint => "channel.clip_model_hint",
+            Text::ChannelCaptionStyle => "channel.caption_style",
+            Text::ChannelCaptionStyleHint => "channel.caption_style_hint",
             Text::ChannelClipModelNotOffered => "channel.error.clip_model_not_offered",
             Text::ChannelAccountsTitle => "network_accounts.title",
             Text::ChannelAccountsHint => "network_accounts.hint",
@@ -829,6 +841,11 @@ impl Text {
             Text::AspectRatioName(aspect) => match aspect {
                 AspectRatio::Vertical => "aspect_ratio.vertical",
                 AspectRatio::Landscape => "aspect_ratio.landscape",
+            },
+            Text::CaptionStyleName(style) => match style {
+                CaptionStyle::Clean => "caption_style.clean",
+                CaptionStyle::Boxed => "caption_style.boxed",
+                CaptionStyle::Punch => "caption_style.punch",
             },
             Text::NetworkAccountFieldError(error) => match error {
                 NetworkAccountFieldError::HandleRequired => "network_account.error.handle_required",
@@ -1436,6 +1453,7 @@ impl Text {
             Text::EditorNoSound => "editor.error.no_sound",
             Text::EditorNothingToCut => "editor.error.nothing_to_cut",
             Text::EditorCannotEdit => "editor.error.cannot_edit",
+            Text::EditorCaptionTextInvalid => "editor.error.caption_text",
             Text::EditorEditNotSaved => "editor.error.edit_not_saved",
             Text::EditorCutReset => "editor.cut_reset",
             Text::EditorInspectorAudio => "editor.inspector.audio",
@@ -1458,6 +1476,12 @@ impl Text {
             Text::EditorFadeOut => "editor.mix.fade_out",
             Text::EditorDecibels => "editor.mix.decibels",
             Text::EditorLaneHint => "editor.mix.lane_hint",
+            Text::EditorInspectorCaption => "editor.inspector.caption",
+            Text::EditorCaptionText => "editor.captions.text",
+            Text::EditorCaptionTextHint => "editor.captions.text_hint",
+            Text::EditorCaptionStyle => "editor.captions.style",
+            Text::EditorCaptionStyleHint => "editor.captions.style_hint",
+            Text::EditorShowCaptions => "editor.captions.show",
         };
         Cow::Borrowed(key)
     }
@@ -1687,6 +1711,8 @@ mod tests {
             Text::ChannelClipModel,
             Text::ChannelClipModelDefault,
             Text::ChannelClipModelHint,
+            Text::ChannelCaptionStyle,
+            Text::ChannelCaptionStyleHint,
             Text::ChannelClipModelNotOffered,
             Text::ChannelAccountsTitle,
             Text::ChannelAccountsHint,
@@ -2213,6 +2239,7 @@ mod tests {
             Text::EditorNoSound,
             Text::EditorNothingToCut,
             Text::EditorCannotEdit,
+            Text::EditorCaptionTextInvalid,
             Text::EditorEditNotSaved,
             Text::EditorCutReset,
             Text::EditorInspectorAudio,
@@ -2235,6 +2262,12 @@ mod tests {
             Text::EditorFadeOut,
             Text::EditorDecibels,
             Text::EditorLaneHint,
+            Text::EditorInspectorCaption,
+            Text::EditorCaptionText,
+            Text::EditorCaptionTextHint,
+            Text::EditorCaptionStyle,
+            Text::EditorCaptionStyleHint,
+            Text::EditorShowCaptions,
         ];
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));
@@ -2253,6 +2286,7 @@ mod tests {
         texts.extend(Network::ALL.map(Text::NetworkName));
         texts.extend(Visibility::ALL.map(Text::VisibilityName));
         texts.extend(AspectRatio::ALL.map(Text::AspectRatioName));
+        texts.extend(CaptionStyle::ALL.map(Text::CaptionStyleName));
         texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
         for flag in [VoiceFlag::Unchecked, VoiceFlag::Unavailable] {

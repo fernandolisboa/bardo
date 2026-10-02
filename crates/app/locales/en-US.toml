@@ -66,6 +66,8 @@ persona_hint = "The narrator of this channel's scripts and narration. Manage per
 clip_model = "Video model"
 clip_model_default = "{model} (default)"
 clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield or Google. Any scene can pick another."
+caption_style = "Caption style"
+caption_style_hint = "How captions look in this channel's new projects. Each project can pick another in the editor."
 
 [channel.error]
 name_required = "Give the channel a name."
@@ -158,6 +160,11 @@ kick = "Kick"
 public = "Public"
 unlisted = "Unlisted"
 private = "Private"
+
+[caption_style]
+clean = "Clean"
+boxed = "Boxed"
+punch = "Punch"
 
 [aspect_ratio]
 vertical = "Vertical (9:16)"
@@ -854,6 +861,7 @@ media = "Media"
 caption_styles = "Caption styles"
 
 [editor.inspector]
+caption = "Caption"
 empty = "Select a clip to edit its properties"
 clip = "Clip"
 source_image = "{provider} image · {model}"
@@ -870,6 +878,14 @@ audio = "Audio"
 source_in = "Source in"
 remove = "Remove from the cut"
 shortcuts = "S split · [ and ] trim to the playhead · Alt+← and Alt+→ move · Delete remove"
+
+[editor.captions]
+text = "Text"
+text_hint = "Enter applies the text; the timing stays."
+style = "Style"
+style_hint = "The style applies to every caption in this project."
+show = "Show captions"
+
 [editor.mix]
 inspector_track = "Track"
 level = "Level"
@@ -937,3 +953,4 @@ no_sound = "No sound device: the preview plays muted."
 nothing_to_cut = "Nothing to cut there: put the playhead inside a clip, or select one."
 cannot_edit = "That edit does not fit there."
 edit_not_saved = "Could not save the edit, so the cut is as it was."
+caption_text = "A caption needs some text, up to 200 characters."

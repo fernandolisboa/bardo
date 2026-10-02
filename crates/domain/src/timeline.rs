@@ -15,14 +15,15 @@
 //!
 //! The timeline also carries its mix (`crate::Mix`): each audio lane's
 //! level, mute and solo, the music's ducking under the narration, and each
-//! audio item's fades.
+//! audio item's fades; and its captions (`crate::Captions`), which show
+//! wherever the cut plays the words they caption.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    DuckEnvelope, Mix, Narration, NarrationId, ProfileId, RepositoryError, Scene, ScenePlan,
-    ScenePlanId, VideoProjectId,
+    CaptionStyle, Captions, DuckEnvelope, Edge, Mix, Narration, NarrationId, ProfileId,
+    RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -171,13 +172,30 @@ pub fn min_length() -> Duration {
     frame_time(1)
 }
 
-/// A video project's edit: the video track, the narration track and the
-/// mix.
+/// Where a caption shows on the timeline: one stretch of it the cut plays.
+/// A caption over a cut shows in two stretches; one cut away, in none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptionSpan {
+    /// The caption, by index in `Captions::lines`.
+    pub index: usize,
+    pub at: Duration,
+    pub duration: Duration,
+}
+
+impl CaptionSpan {
+    pub fn end(&self) -> Duration {
+        self.at + self.duration
+    }
+}
+
+/// A video project's edit: the video track, the narration track, the mix
+/// and the captions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeline {
     pub(crate) video: Vec<VideoItem>,
     pub(crate) narration: Vec<AudioItem>,
     pub(crate) mix: Mix,
+    pub(crate) captions: Captions,
 }
 
 impl Timeline {
@@ -187,7 +205,8 @@ impl Timeline {
     /// scene no longer shows. The video runs as long as the narration, or
     /// as the scenes when they run longer; the last scene fills to the
     /// end. Scenes too short to fill a frame are left out, and the scene
-    /// before them runs on.
+    /// before them runs on. The narration's words come captioned
+    /// (`crate::caption_lines`), in the default style.
     pub fn rough_cut(plan: &ScenePlan, narration: &Narration) -> Timeline {
         let end_frame = plan
             .scenes()
@@ -229,6 +248,7 @@ impl Timeline {
                 }
             })
             .collect();
+        let captions = captions_of(narration);
         let narration = vec![AudioItem {
             file: narration.audio_file.clone(),
             start: Duration::ZERO,
@@ -242,13 +262,22 @@ impl Timeline {
             video,
             narration,
             mix: Mix::default(),
+            captions,
         }
+    }
+
+    /// This timeline with its captions in `style` (a channel's default, for
+    /// a new cut).
+    pub fn with_caption_style(mut self, style: CaptionStyle) -> Timeline {
+        self.captions.style = style;
+        self
     }
 
     /// The timeline `saved` keeps, on the scenes of `plan` as they are now
     /// (a scene's new image shows where its old one did). `None` when it was
     /// cut on another scene plan or narration, or does not hold together:
-    /// the editor then starts over from the rough cut.
+    /// the editor then starts over from the rough cut. A cut saved before
+    /// captions existed gets them from the narration's words.
     pub fn restore(saved: &SavedTimeline, plan: &ScenePlan, narration: &Narration) -> Option<Self> {
         if saved.scene_plan != plan.id
             || saved.narration != narration.id
@@ -259,6 +288,15 @@ impl Timeline {
         {
             return None;
         }
+        let captions = match &saved.captions {
+            Some(saved) => Captions {
+                lines: saved.lines.clone(),
+                shown: saved.shown,
+                style: saved.style,
+                length: narration.duration,
+            },
+            None => captions_of(narration),
+        };
         let video = saved
             .video
             .iter()
@@ -290,6 +328,7 @@ impl Timeline {
             video,
             narration,
             mix: saved.mix,
+            captions,
         };
         timeline.relayout();
         timeline.holds_together().then_some(timeline)
@@ -331,6 +370,11 @@ impl Timeline {
                 })
                 .collect(),
             mix: self.mix,
+            captions: Some(SavedCaptions {
+                lines: self.captions.lines.clone(),
+                shown: self.captions.shown,
+                style: self.captions.style,
+            }),
             updated_at: now,
         }
     }
@@ -345,7 +389,8 @@ impl Timeline {
     }
 
     /// Every item at least a frame long; audio items in order, apart, and
-    /// within their file; every level of the mix in range.
+    /// within their file; every level of the mix in range; captions in
+    /// order, apart and within the narration.
     fn holds_together(&self) -> bool {
         let video = self.video.iter().all(|item| item.duration >= min_length());
         let audio = self
@@ -356,7 +401,11 @@ impl Timeline {
             .narration
             .windows(2)
             .all(|pair| pair[0].end() <= pair[1].at);
-        video && audio && apart && self.mix.holds_together()
+        video
+            && audio
+            && apart
+            && self.mix.holds_together()
+            && self.captions.holds_together(min_length())
     }
 
     pub fn video(&self) -> &[VideoItem] {
@@ -370,6 +419,67 @@ impl Timeline {
 
     pub fn mix(&self) -> &Mix {
         &self.mix
+    }
+
+    pub fn captions(&self) -> &Captions {
+        &self.captions
+    }
+
+    /// Where the captions show: each stretch of a caption the cut plays, in
+    /// timeline order. A caption over a cut shows in two stretches; one
+    /// whose narration was cut away does not show.
+    pub fn caption_spans(&self) -> Vec<CaptionSpan> {
+        let mut spans: Vec<CaptionSpan> = self
+            .narration
+            .iter()
+            .flat_map(|item| {
+                let (from, to) = (item.start, item.start + item.duration);
+                self.captions
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(index, caption)| {
+                        let (start, end) = (caption.start.max(from), caption.end.min(to));
+                        (start < end).then(|| CaptionSpan {
+                            index,
+                            at: item.at + (start - from),
+                            duration: end - start,
+                        })
+                    })
+            })
+            .collect();
+        spans.sort_by_key(|span| (span.at, span.index));
+        spans
+    }
+
+    /// Where on the timeline caption `index` shows, first to last stretch.
+    pub fn caption_hull(&self, index: usize) -> Option<(Duration, Duration)> {
+        let spans = self.caption_spans();
+        let mut shown = spans.iter().filter(|span| span.index == index);
+        let first = shown.next()?;
+        let end = shown.map(CaptionSpan::end).fold(first.end(), Duration::max);
+        Some((first.at, end - first.at))
+    }
+
+    /// Where caption `index`'s `edge` shows: on the timeline, and in the
+    /// narration file at that point. A caption clipped by a cut shows its
+    /// edge where the clip falls, not where the caption ends in the file.
+    pub fn caption_edge(&self, index: usize, edge: Edge) -> Option<(Duration, Duration)> {
+        let caption = self.captions.lines.get(index)?;
+        let shown = self.narration.iter().filter_map(|item| {
+            let (start, end) = (
+                caption.start.max(item.start),
+                caption.end.min(item.start + item.duration),
+            );
+            (start < end).then(|| match edge {
+                Edge::Start => (item.at + (start - item.start), start),
+                Edge::End => (item.at + (end - item.start), end),
+            })
+        });
+        match edge {
+            Edge::Start => shown.min_by_key(|(at, _)| *at),
+            Edge::End => shown.max_by_key(|(at, _)| *at),
+        }
     }
 
     /// The end of the video track.
@@ -486,6 +596,16 @@ impl Timeline {
     }
 }
 
+/// The captions a narration's words make.
+fn captions_of(narration: &Narration) -> Captions {
+    Captions::from_words(
+        narration
+            .words()
+            .map(|(text, timing)| (text, timing.start, timing.end)),
+        narration.duration,
+    )
+}
+
 /// The target nearest `time` within `within` of it, if any: where a cut
 /// snaps.
 pub fn snap(time: Duration, targets: &[Duration], within: Duration) -> Option<Duration> {
@@ -530,6 +650,8 @@ pub struct SavedTimeline {
     /// The narration track (A1), in order.
     pub narration_items: Vec<SavedAudioItem>,
     pub mix: Mix,
+    /// `None` for a cut saved before captions existed.
+    pub captions: Option<SavedCaptions>,
     pub updated_at: SystemTime,
 }
 
@@ -1049,6 +1171,206 @@ pub(crate) mod tests {
         assert_eq!(timeline.ducking(words), Some(envelope));
         timeline.mix.ducking.on = false;
         assert_eq!(timeline.ducking(words), None);
+    }
+
+    /// A narration of `text` whose words are timed `words` (ms).
+    pub(crate) fn narrated(text: &str, words: &[(u64, u64)], duration: u64) -> Narration {
+        let mut narrated = narration(duration);
+        narrated.text = ScriptText::new(text).unwrap();
+        let timings = crate::spoken_words(text)
+            .into_iter()
+            .zip(words)
+            .map(|(range, &(start, end))| crate::WordTiming {
+                text: range,
+                start: ms(start),
+                end: ms(end),
+            })
+            .collect();
+        narrated.words = WordTimings::restore(text, timings).unwrap();
+        narrated
+    }
+
+    #[test]
+    fn captions_from_odd_word_timings_still_hold_together() {
+        let plan = plan(vec![scene(0, 2_000)]);
+        for words in [
+            // A word with no length.
+            [(500, 500), (600, 900), (900, 1_200), (1_200, 1_500)],
+            // A line shorter than a frame.
+            [(500, 520), (600, 900), (900, 1_200), (1_200, 1_500)],
+            // Lines that overlap.
+            [(0, 1_000), (500, 900), (900, 1_200), (1_200, 1_500)],
+            // The last word past the end of the file.
+            [(0, 500), (600, 900), (900, 1_200), (1_200, 2_100)],
+        ] {
+            let narration = narrated("Oh. Then the rest.", &words, 2_000);
+            let timeline = Timeline::rough_cut(&plan, &narration);
+            assert!(
+                timeline.captions().holds_together(min_length()),
+                "{words:?}"
+            );
+            let saved = saved(&timeline, &plan, &narration);
+            assert_eq!(
+                Timeline::restore(&saved, &plan, &narration),
+                Some(timeline),
+                "{words:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_rough_cut_captions_the_narrated_words() {
+        let narration = narrated(
+            "The keeper woke. He lit the lamp.",
+            &[
+                (0, 300),
+                (300, 600),
+                (600, 1_000),
+                (1_200, 1_400),
+                (1_400, 1_600),
+                (1_600, 1_800),
+                (1_800, 2_200),
+            ],
+            2_500,
+        );
+        let timeline = Timeline::rough_cut(&plan(vec![scene(0, 2_500)]), &narration);
+        let captions = timeline.captions();
+        assert!(captions.shown());
+        assert_eq!(captions.style(), CaptionStyle::Clean);
+        assert_eq!(
+            captions.lines(),
+            &[
+                crate::Caption {
+                    text: "The keeper woke.".into(),
+                    start: ms(0),
+                    end: ms(1_000),
+                },
+                crate::Caption {
+                    text: "He lit the lamp.".into(),
+                    start: ms(1_200),
+                    end: ms(2_200),
+                },
+            ]
+        );
+        let styled = timeline.with_caption_style(CaptionStyle::Punch);
+        assert_eq!(styled.captions().style(), CaptionStyle::Punch);
+    }
+
+    #[test]
+    fn captions_show_where_the_cut_plays_their_words() {
+        let narration = narrated(
+            "One. Two. Three.",
+            &[(0, 500), (1_000, 1_500), (2_000, 2_500)],
+            3_000,
+        );
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 3_000)]), &narration);
+        let spans = |timeline: &Timeline| -> Vec<(usize, Duration, Duration)> {
+            timeline
+                .caption_spans()
+                .iter()
+                .map(|span| (span.index, span.at, span.duration))
+                .collect()
+        };
+        assert_eq!(
+            spans(&timeline),
+            vec![
+                (0, ms(0), ms(500)),
+                (1, ms(1_000), ms(500)),
+                (2, ms(2_000), ms(500))
+            ]
+        );
+        // 0-1.2 s of the file at 0, then 2.2-3 s of it at 2 s: "Two" is cut
+        // short, "Three" partly cut away and later.
+        let item = timeline.narration[0].clone();
+        timeline.narration = vec![
+            AudioItem {
+                duration: ms(1_200),
+                ..item.clone()
+            },
+            AudioItem {
+                start: ms(2_200),
+                at: ms(2_000),
+                duration: ms(800),
+                ..item
+            },
+        ];
+        assert_eq!(
+            spans(&timeline),
+            vec![
+                (0, ms(0), ms(500)),
+                (1, ms(1_000), ms(200)),
+                (2, ms(2_000), ms(300))
+            ]
+        );
+        assert_eq!(timeline.caption_hull(1), Some((ms(1_000), ms(200))));
+        // Cutting the last piece away takes "Three" with it.
+        timeline.narration.truncate(1);
+        assert_eq!(spans(&timeline).len(), 2);
+        assert_eq!(timeline.caption_hull(2), None);
+    }
+
+    #[test]
+    fn a_caption_over_a_cut_shows_on_both_sides_of_it() {
+        let narration = narrated("Slowly spoken", &[(0, 1_000), (1_000, 2_000)], 2_000);
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 2_000)]), &narration);
+        let item = timeline.narration[0].clone();
+        timeline.narration = vec![
+            AudioItem {
+                duration: ms(500),
+                ..item.clone()
+            },
+            AudioItem {
+                start: ms(1_500),
+                at: ms(1_000),
+                duration: ms(500),
+                ..item
+            },
+        ];
+        let spans = timeline.caption_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!((spans[1].at, spans[1].end()), (ms(1_000), ms(1_500)));
+        assert_eq!(timeline.caption_hull(0), Some((ms(0), ms(1_500))));
+    }
+
+    #[test]
+    fn a_saved_timeline_keeps_its_captions() {
+        let plan = drawn(&[(0, 2_000, "a.png")]);
+        let narration = narrated("One. Two.", &[(0, 500), (1_000, 1_500)], 2_000);
+        let mut timeline =
+            Timeline::rough_cut(&plan, &narration).with_caption_style(CaptionStyle::Boxed);
+        timeline.captions.lines[0].text = "Uno.".into();
+        timeline.captions.shown = false;
+        let saved = saved(&timeline, &plan, &narration);
+        assert_eq!(
+            saved
+                .captions
+                .as_ref()
+                .map(|c| (c.shown, c.style, c.lines.len())),
+            Some((false, CaptionStyle::Boxed, 2))
+        );
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration),
+            Some(timeline.clone())
+        );
+
+        // A cut saved before captions gets them from the words.
+        let mut older = saved.clone();
+        older.captions = None;
+        let restored = Timeline::restore(&older, &plan, &narration).unwrap();
+        assert_eq!(texts(restored.captions()), ["One.", "Two."]);
+        assert!(restored.captions().shown());
+
+        let mut broken = saved.clone();
+        broken.captions.as_mut().unwrap().lines[1].end = ms(2_500);
+        assert_eq!(
+            Timeline::restore(&broken, &plan, &narration),
+            None,
+            "a caption past the narration"
+        );
+    }
+
+    fn texts(captions: &Captions) -> Vec<&str> {
+        captions.lines().iter().map(|c| c.text.as_str()).collect()
     }
 
     #[test]

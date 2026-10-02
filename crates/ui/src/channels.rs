@@ -3,8 +3,8 @@
 //! a `ChannelDraft` and errors back to fields.
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModelRef, ContentLanguage, Country,
-    PersonaId,
+    CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModelRef,
+    ContentLanguage, Country, PersonaId,
 };
 use bardo_app::{Bardo, ChannelError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -98,6 +98,13 @@ fn clip_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef
     )
 }
 
+fn caption_style_choices(bardo: &Bardo) -> SearchableVec<Choice<CaptionStyle>> {
+    SearchableVec::new(CaptionStyle::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::CaptionStyleName(value)),
+    }))
+}
+
 fn index_of<T: PartialEq>(all: &[T], value: &T) -> Option<IndexPath> {
     all.iter().position(|v| v == value).map(IndexPath::new)
 }
@@ -134,6 +141,7 @@ pub struct ChannelsScreen {
     country: ChoiceSelect<Country>,
     persona: ChoiceSelect<Option<PersonaId>>,
     clip_model: ChoiceSelect<Option<ClipModelRef>>,
+    caption_style: ChoiceSelect<CaptionStyle>,
     /// The edited channel's network accounts, under the form.
     accounts: Entity<NetworkAccountsPanel>,
     field_errors: Vec<ChannelFieldError>,
@@ -154,13 +162,14 @@ impl ChannelsScreen {
         let aesthetic_notes = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
 
         let defaults = ChannelDraft::default();
-        let (languages, countries, personas, clip_models) = {
+        let (languages, countries, personas, clip_models, caption_styles) = {
             let bardo = bardo.read(cx);
             (
                 language_choices(bardo),
                 country_choices(bardo),
                 persona_choices(bardo),
                 clip_model_choices(bardo),
+                caption_style_choices(bardo),
             )
         };
         let language = cx.new(|cx| {
@@ -176,6 +185,10 @@ impl ChannelsScreen {
         });
         let clip_model =
             cx.new(|cx| SelectState::new(clip_models, Some(IndexPath::new(0)), window, cx));
+        let caption_style = cx.new(|cx| {
+            let selected = index_of(&CaptionStyle::ALL, &defaults.caption_style);
+            SelectState::new(caption_styles, selected, window, cx)
+        });
 
         let accounts = cx.new(|cx| NetworkAccountsPanel::new(bardo.clone(), window, cx));
 
@@ -210,6 +223,7 @@ impl ChannelsScreen {
             country,
             persona,
             clip_model,
+            caption_style,
             accounts,
             field_errors: Vec::new(),
             notice: None,
@@ -244,6 +258,7 @@ impl ChannelsScreen {
         let countries = country_choices(bardo);
         let personas = persona_choices(bardo);
         let clip_models = clip_model_choices(bardo);
+        let caption_styles = caption_style_choices(bardo);
 
         self.name
             .update(cx, |input, cx| input.set_placeholder(name, window, cx));
@@ -272,6 +287,13 @@ impl ChannelsScreen {
             let selected = select.selected_value().cloned().flatten();
             select.set_items(clip_models, window, cx);
             select.set_selected_value(&selected, window, cx);
+        });
+        self.caption_style.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(caption_styles, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
         });
         cx.notify();
     }
@@ -332,6 +354,9 @@ impl ChannelsScreen {
                 select.set_selected_value(&None, window, cx);
             }
         });
+        self.caption_style.update(cx, |select, cx| {
+            select.set_selected_value(&draft.caption_style, window, cx)
+        });
     }
 
     fn draft(&self, cx: &App) -> ChannelDraft {
@@ -360,6 +385,12 @@ impl ChannelsScreen {
                 .unwrap_or_default(),
             default_persona: self.persona.read(cx).selected_value().copied().flatten(),
             clip_model: self.clip_model.read(cx).selected_value().cloned().flatten(),
+            caption_style: self
+                .caption_style
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
         }
     }
 
@@ -620,6 +651,11 @@ impl ChannelsScreen {
                         Text::ChannelClipModel,
                         Select::new(&self.clip_model).into_any_element(),
                         Some(hint(Text::ChannelClipModelHint)),
+                    ))
+                    .child(field(
+                        Text::ChannelCaptionStyle,
+                        Select::new(&self.caption_style).into_any_element(),
+                        Some(hint(Text::ChannelCaptionStyleHint)),
                     ))
                     .child(
                         h_flex()

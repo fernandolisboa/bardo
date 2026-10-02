@@ -66,6 +66,8 @@ persona_hint = "O narrador dos roteiros e narrações deste canal. Gerencie as p
 clip_model = "Modelo de vídeo"
 clip_model_default = "{model} (padrão)"
 clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield ou pelo Google. Qualquer cena pode escolher outro."
+caption_style = "Estilo de legenda"
+caption_style_hint = "Como as legendas aparecem nos novos projetos deste canal. Cada projeto pode escolher outro no editor."
 
 [channel.error]
 name_required = "Dê um nome ao canal."
@@ -158,6 +160,11 @@ kick = "Kick"
 public = "Público"
 unlisted = "Não listado"
 private = "Privado"
+
+[caption_style]
+clean = "Limpa"
+boxed = "Tarja"
+punch = "Impacto"
 
 [aspect_ratio]
 vertical = "Vertical (9:16)"
@@ -854,6 +861,7 @@ media = "Mídia"
 caption_styles = "Estilos de legenda"
 
 [editor.inspector]
+caption = "Legenda"
 empty = "Selecione um clipe para editar as propriedades"
 clip = "Clipe"
 source_image = "Imagem {provider} · {model}"
@@ -870,6 +878,14 @@ audio = "Áudio"
 source_in = "Início na fonte"
 remove = "Remover do corte"
 shortcuts = "S divide · [ e ] aparam até o cursor · Alt+← e Alt+→ movem · Delete remove"
+
+[editor.captions]
+text = "Texto"
+text_hint = "Enter aplica o texto; o tempo de exibição não muda."
+style = "Estilo"
+style_hint = "O estilo vale para todas as legendas deste projeto."
+show = "Mostrar legendas"
+
 [editor.mix]
 inspector_track = "Faixa"
 level = "Volume"
@@ -937,3 +953,4 @@ no_sound = "Sem dispositivo de som: a pré-visualização toca sem áudio."
 nothing_to_cut = "Nada para cortar aí: coloque o cursor dentro de um clipe ou selecione um."
 cannot_edit = "Essa edição não cabe aí."
 edit_not_saved = "Não foi possível salvar a edição, então o corte continua como estava."
+caption_text = "A legenda precisa de texto, com até 200 caracteres."

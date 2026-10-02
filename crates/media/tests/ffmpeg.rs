@@ -5,10 +5,11 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use bardo_domain::CaptionStyle;
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize, Framing, LoudnessTarget,
-    MIN_VERSION, MediaError, Monitor, Output, ProxyCodec, ProxySettings, RenderPlan, VideoClip,
-    VideoEncoder,
+    AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
+    Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Output, ProxyCodec, ProxySettings,
+    RenderPlan, VideoClip, VideoEncoder,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -101,6 +102,7 @@ fn short_plan() -> RenderPlan {
                 duck: None,
             },
         ],
+        captions: None,
     }
 }
 
@@ -330,6 +332,7 @@ fn music_plan() -> RenderPlan {
             gain_db: 0.0,
             duck: None,
         }],
+        captions: None,
     }
 }
 
@@ -525,6 +528,7 @@ fn rough_cut_plan() -> RenderPlan {
             gain_db: 0.0,
             duck: None,
         }],
+        captions: None,
     }
 }
 
@@ -563,4 +567,82 @@ fn preview_audio_streams_the_mix_from_the_playhead() {
         "{samples} samples"
     );
     assert!(loudest > 0.01, "the voice is heard");
+}
+
+/// Two seconds of black with one caption from 0.5 s to 1.5 s.
+fn captioned_plan(style: CaptionStyle) -> RenderPlan {
+    RenderPlan {
+        video: vec![VideoClip {
+            source: ClipSource::Black,
+            start: Duration::ZERO,
+            duration: secs(2.0),
+            framing: Framing::Fit,
+        }],
+        audio: Vec::new(),
+        captions: Some(CaptionTrack {
+            style,
+            lines: vec![CaptionLine {
+                text: "The keeper {lit} the lamp".into(),
+                at: secs(0.5),
+                duration: secs(1.0),
+            }],
+        }),
+    }
+}
+
+/// How many pixels of a frame are bright: caption letters on black.
+fn bright_pixels(bgra: &[u8]) -> usize {
+    bgra.chunks(4)
+        .filter(|pixel| pixel[..3].iter().any(|channel| *channel > 160))
+        .count()
+}
+
+#[test]
+fn renders_captions_burned_in_while_they_show() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("captions");
+    for style in CaptionStyle::ALL {
+        let destination = dir.join(format!("{style}.mp4"));
+        let output = vertical(VideoEncoder::OpenH264);
+        ffmpeg
+            .render(&captioned_plan(style), &output, None, &destination, &())
+            .unwrap_or_else(|error| panic!("{style}: {error}"));
+        let frame = |at: f64| {
+            ffmpeg
+                .frame_at(&destination, secs(at), output.size)
+                .unwrap()
+        };
+        assert_eq!(bright_pixels(&frame(0.2).bgra), 0, "{style}: before");
+        let shown = bright_pixels(&frame(1.0).bgra);
+        assert!(shown > 200, "{style}: {shown} bright pixels");
+        assert_eq!(bright_pixels(&frame(1.8).bgra), 0, "{style}: after");
+    }
+    let mut hidden = captioned_plan(CaptionStyle::Clean);
+    hidden.captions = None;
+    let destination = dir.join("none.mp4");
+    let output = vertical(VideoEncoder::OpenH264);
+    ffmpeg
+        .render(&hidden, &output, None, &destination, &())
+        .unwrap();
+    let frame = ffmpeg
+        .frame_at(&destination, secs(1.0), output.size)
+        .unwrap();
+    assert_eq!(bright_pixels(&frame.bgra), 0, "captions off");
+}
+
+#[test]
+fn the_preview_shows_captions_from_the_playhead() {
+    let size = FrameSize::new(304, 540);
+    let stream = ffmpeg()
+        .preview(
+            &captioned_plan(CaptionStyle::Punch),
+            secs(1.0),
+            size,
+            (30, 1),
+        )
+        .unwrap();
+    let frames: Vec<_> = stream.collect();
+    assert_eq!(frames.len(), 30);
+    assert!(bright_pixels(&frames[0].bgra) > 100, "at 1.0 s");
+    assert_eq!(bright_pixels(&frames[20].bgra), 0, "at 1.67 s");
 }
