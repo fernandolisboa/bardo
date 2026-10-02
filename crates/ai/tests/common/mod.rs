@@ -75,12 +75,16 @@ impl Transport for Scripted {
             headers: request
                 .headers
                 .iter()
-                .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                .map(|(name, value)| (name.to_string(), value.clone()))
                 .collect(),
             body: request
                 .body
                 .as_deref()
-                .map(|body| serde_json::from_str(body).expect("a JSON body"))
+                .map(|body| {
+                    serde_json::from_slice(body).unwrap_or_else(|_| {
+                        serde_json::Value::String(format!("{} bytes", body.len()))
+                    })
+                })
                 .unwrap_or_default(),
         });
         self.answers

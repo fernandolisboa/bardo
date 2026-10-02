@@ -1,6 +1,6 @@
 use bardo_domain::{
-    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, PersonaId, ProfileId,
-    RepositoryError,
+    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipModelRef, PersonaId,
+    ProfileId, Provider, RepositoryError,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -8,13 +8,14 @@ use uuid::Uuid;
 use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
-     country, default_persona_id FROM channel";
+     country, default_persona_id, clip_provider, clip_model FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
     id: String,
     profile_id: String,
     default_persona: Option<String>,
+    clip_model: (Option<String>, Option<String>),
     draft: ChannelDraft,
 }
 
@@ -25,6 +26,7 @@ impl ChannelRow {
                 id: row.get(0)?,
                 profile_id: row.get(1)?,
                 default_persona: row.get(7)?,
+                clip_model: (row.get(8)?, row.get(9)?),
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -54,6 +56,7 @@ impl ChannelRow {
             .map(|id| Uuid::parse_str(&id).map(PersonaId::from))
             .transpose()
             .map_err(boxed)?;
+        draft.clip_model = clip_model(self.clip_model)?;
         let details = ChannelDetails::validate(draft)
             .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
         Ok(Channel {
@@ -67,6 +70,22 @@ impl ChannelRow {
 #[derive(Debug, thiserror::Error)]
 #[error("stored channel is invalid: {0}")]
 struct InvalidRow(String);
+
+/// A video model as stored: provider and model, both or neither.
+pub(crate) fn clip_model(
+    (provider, model): (Option<String>, Option<String>),
+) -> Result<Option<ClipModelRef>, RepositoryError> {
+    match (provider, model) {
+        (Some(provider), Some(model)) => {
+            let provider: Provider = provider.parse().map_err(boxed)?;
+            ClipModelRef::new(provider, &model).map(Some).map_err(boxed)
+        }
+        (None, None) => Ok(None),
+        _ => Err(boxed(InvalidRow(
+            "a video model without its provider".into(),
+        ))),
+    }
+}
 
 fn themes(conn: &Connection, channel_id: &str) -> rusqlite::Result<Vec<String>> {
     conn.prepare_cached("SELECT theme FROM channel_theme WHERE channel_id = ?1 ORDER BY position")?
@@ -113,8 +132,8 @@ impl ChannelRepository for Database {
         let details = &channel.details;
         tx.execute(
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
-                                  default_persona_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                                  default_persona_id, clip_provider, clip_model)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -122,6 +141,8 @@ impl ChannelRepository for Database {
                  language = excluded.language,
                  country = excluded.country,
                  default_persona_id = excluded.default_persona_id,
+                 clip_provider = excluded.clip_provider,
+                 clip_model = excluded.clip_model,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -132,6 +153,8 @@ impl ChannelRepository for Database {
                 details.language().code(),
                 details.country().code(),
                 details.default_persona().map(|id| id.to_string()),
+                details.clip_model().map(|model| model.provider().code()),
+                details.clip_model().map(ClipModelRef::model),
             ],
         )
         .map_err(boxed)?;
@@ -170,6 +193,10 @@ mod tests {
             language: ContentLanguage::Portuguese,
             country: Country::Brazil,
             default_persona: None,
+            clip_model: Some(
+                ClipModelRef::new(Provider::Higgsfield, "kling-video/v2.6/pro/image-to-video")
+                    .unwrap(),
+            ),
         })
         .unwrap();
         Channel::new(owner, details)

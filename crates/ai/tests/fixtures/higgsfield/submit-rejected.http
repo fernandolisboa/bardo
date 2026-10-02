@@ -1,0 +1,5 @@
+HTTP/2 401 
+content-type: application/json
+server: cloudflare
+
+{"detail":"Invalid credentials"}

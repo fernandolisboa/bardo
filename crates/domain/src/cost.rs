@@ -151,6 +151,8 @@ pub enum Meter {
     ImageTokens,
     /// Characters read aloud.
     Characters,
+    /// Seconds of video generated.
+    VideoSeconds,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -158,11 +160,12 @@ pub enum Meter {
 pub struct UnknownMeter(pub String);
 
 impl Meter {
-    pub const ALL: [Meter; 4] = [
+    pub const ALL: [Meter; 5] = [
         Meter::InputTokens,
         Meter::OutputTokens,
         Meter::ImageTokens,
         Meter::Characters,
+        Meter::VideoSeconds,
     ];
 
     /// Stable identifier for storage and the rate file. Never change one.
@@ -172,15 +175,17 @@ impl Meter {
             Meter::OutputTokens => "output_tokens",
             Meter::ImageTokens => "image_tokens",
             Meter::Characters => "characters",
+            Meter::VideoSeconds => "video_seconds",
         }
     }
 
     /// How many units a price is for, as providers publish them: tokens
-    /// per million, characters per thousand.
+    /// per million, characters per thousand, video per second.
     pub fn units_per_price(self) -> u64 {
         match self {
             Meter::InputTokens | Meter::OutputTokens | Meter::ImageTokens => 1_000_000,
             Meter::Characters => 1_000,
+            Meter::VideoSeconds => 1,
         }
     }
 }
@@ -203,6 +208,7 @@ pub struct Metered {
     pub output_tokens: u64,
     pub image_tokens: u64,
     pub characters: u64,
+    pub video_seconds: u64,
 }
 
 impl Metered {
@@ -213,12 +219,20 @@ impl Metered {
         }
     }
 
+    pub fn video_seconds(video_seconds: u64) -> Self {
+        Metered {
+            video_seconds,
+            ..Metered::default()
+        }
+    }
+
     pub fn get(&self, meter: Meter) -> u64 {
         match meter {
             Meter::InputTokens => self.input_tokens,
             Meter::OutputTokens => self.output_tokens,
             Meter::ImageTokens => self.image_tokens,
             Meter::Characters => self.characters,
+            Meter::VideoSeconds => self.video_seconds,
         }
     }
 
@@ -228,6 +242,7 @@ impl Metered {
             Meter::OutputTokens => self.output_tokens = value,
             Meter::ImageTokens => self.image_tokens = value,
             Meter::Characters => self.characters = value,
+            Meter::VideoSeconds => self.video_seconds = value,
         }
     }
 
@@ -446,6 +461,8 @@ pub enum CostPurpose {
     /// Claude splitting the narration into scenes with image prompts.
     ScenePlan,
     SceneImage,
+    /// A video provider animating a scene's image.
+    SceneClip,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -453,13 +470,14 @@ pub enum CostPurpose {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 6] = [
+    pub const ALL: [CostPurpose; 7] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
         CostPurpose::Narration,
         CostPurpose::ScenePlan,
         CostPurpose::SceneImage,
+        CostPurpose::SceneClip,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -471,6 +489,7 @@ impl CostPurpose {
             CostPurpose::Narration => "narration",
             CostPurpose::ScenePlan => "scene_plan",
             CostPurpose::SceneImage => "scene_image",
+            CostPurpose::SceneClip => "scene_clip",
         }
     }
 }
@@ -878,7 +897,7 @@ mod tests {
             input_tokens: 14,
             output_tokens: 218,
             image_tokens: 1_680,
-            characters: 0,
+            ..Metered::default()
         };
         assert_eq!(
             table.price(Provider::Gemini, "gemini-3.1-flash-image", &image),
@@ -903,6 +922,44 @@ mod tests {
             table.price(Provider::Claude, "any", &Metered::default()),
             Some(Money::ZERO)
         );
+    }
+
+    #[test]
+    fn video_is_priced_per_second_of_the_model() {
+        let table = RateTable::new(vec![
+            rate(
+                Provider::Higgsfield,
+                "kling-video/",
+                Meter::VideoSeconds,
+                "0.07",
+            ),
+            rate(
+                Provider::Higgsfield,
+                "kling-video/v3.0/",
+                Meter::VideoSeconds,
+                "0.112",
+            ),
+        ]);
+        let eight = Metered::video_seconds(8);
+        assert_eq!(
+            table.price(
+                Provider::Higgsfield,
+                "kling-video/v3.0/std/image-to-video",
+                &eight
+            ),
+            Some(dollars("0.896"))
+        );
+        assert_eq!(
+            table.price(
+                Provider::Higgsfield,
+                "kling-video/v2.6/pro/image-to-video",
+                &eight
+            ),
+            Some(dollars("0.56")),
+            "the most specific rate wins"
+        );
+        assert_eq!(Meter::VideoSeconds.code().parse(), Ok(Meter::VideoSeconds));
+        assert_eq!("scene_clip".parse(), Ok(CostPurpose::SceneClip));
     }
 
     #[test]
@@ -1006,7 +1063,7 @@ mod tests {
             input_tokens: 14,
             output_tokens: 218,
             image_tokens: 1_680,
-            characters: 0,
+            ..Metered::default()
         };
         assert_eq!(
             image.tokens(),

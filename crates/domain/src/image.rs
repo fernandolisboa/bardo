@@ -28,6 +28,15 @@ impl ImageFormat {
         }
     }
 
+    /// The MIME type, e.g. `image/png`.
+    pub fn mime(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "image/png",
+            ImageFormat::Jpeg => "image/jpeg",
+            ImageFormat::Webp => "image/webp",
+        }
+    }
+
     /// The file extension, without the dot.
     pub fn extension(self) -> &'static str {
         match self {
@@ -97,5 +106,8 @@ mod tests {
         );
         assert_eq!(ImageFormat::from_mime("text/plain"), None);
         assert_eq!(ImageFormat::Jpeg.extension(), "jpg");
+        for format in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Webp] {
+            assert_eq!(ImageFormat::from_mime(format.mime()), Some(format));
+        }
     }
 }

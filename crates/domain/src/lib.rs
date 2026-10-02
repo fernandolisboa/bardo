@@ -41,6 +41,7 @@ macro_rules! uuid_id {
 
 mod budget;
 mod channel;
+mod clip;
 mod cost;
 mod decision;
 mod files;
@@ -68,6 +69,10 @@ mod voice;
 pub use budget::{Budget, BudgetLevel, Month};
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
+};
+pub use clip::{
+    ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelError, ClipModelRef,
+    ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, StagedImage,
 };
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
@@ -117,9 +122,9 @@ pub use research::{
     NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,
 };
 pub use scene::{
-    MAX_SENTENCE_WORDS, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneDraft, SceneFieldError,
-    SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
-    SceneRecord, Sentence, sentences,
+    MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneClip,
+    SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
+    ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, sentences,
 };
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,

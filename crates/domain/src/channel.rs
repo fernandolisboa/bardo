@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{ContentLanguage, Country, Market, PersonaId, ProfileId, RepositoryError};
+use crate::{
+    ClipModelRef, ContentLanguage, Country, Market, PersonaId, ProfileId, RepositoryError,
+};
 
 /// Identifies a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,6 +51,9 @@ pub struct ChannelDraft {
     pub country: Country,
     /// The persona the channel's videos use unless a video overrides it.
     pub default_persona: Option<PersonaId>,
+    /// The video model the channel's clips use unless a scene picks
+    /// another; `None` uses the app's default.
+    pub clip_model: Option<ClipModelRef>,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -85,6 +90,7 @@ pub struct ChannelDetails {
     language: ContentLanguage,
     country: Country,
     default_persona: Option<PersonaId>,
+    clip_model: Option<ClipModelRef>,
 }
 
 impl ChannelDetails {
@@ -140,6 +146,7 @@ impl ChannelDetails {
             language: draft.language,
             country: draft.country,
             default_persona: draft.default_persona,
+            clip_model: draft.clip_model,
         })
     }
 
@@ -172,6 +179,11 @@ impl ChannelDetails {
         self.default_persona
     }
 
+    /// Whether the provider offers the model is the app's to check.
+    pub fn clip_model(&self) -> Option<&ClipModelRef> {
+        self.clip_model.as_ref()
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -193,6 +205,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             language: details.language,
             country: details.country,
             default_persona: details.default_persona,
+            clip_model: details.clip_model.clone(),
         }
     }
 }
@@ -378,6 +391,7 @@ mod tests {
             language: ContentLanguage::Portuguese,
             country: Country::Brazil,
             default_persona: Some(PersonaId::new()),
+            clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
         })
         .unwrap();
         assert_eq!(

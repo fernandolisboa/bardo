@@ -127,7 +127,7 @@ pub fn parse_image(response: &HttpResponse) -> Result<GeneratedImage, ProviderFa
             // Reasoning and any text are billed as text output.
             output_tokens: candidates.saturating_sub(image_tokens) + count("thoughtsTokenCount"),
             image_tokens,
-            characters: 0,
+            ..Metered::default()
         },
     })
 }

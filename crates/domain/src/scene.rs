@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    Generation, JobFailureKind, Narration, NarrationId, ProfileId, RepositoryError, VideoProjectId,
+    ClipModelRef, Generation, GenerationId, JobFailureKind, Narration, NarrationId, ProfileId,
+    RepositoryError, VideoProjectId,
 };
 
 uuid_id!(
@@ -123,7 +124,26 @@ pub struct SceneImage {
 #[error("no new image of this scene is waiting for review")]
 pub struct NoPendingImage;
 
-/// One scene: a stretch of the narration and the image shown over it.
+/// A clip made from a scene's image: the file in the project folder, its
+/// length, the image it animated and the generation that made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneClip {
+    /// The file's name in the project folder.
+    pub file: String,
+    /// The length asked for, in seconds.
+    pub seconds: u32,
+    /// The generation of the image it starts from.
+    pub source_image: GenerationId,
+    pub generation: Generation,
+}
+
+/// A user action on a scene's clip that does not apply right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no new clip of this scene is waiting for review")]
+pub struct NoPendingClip;
+
+/// One scene: a stretch of the narration and the image shown over it, or
+/// a clip animating that image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scene {
     pub start: Duration,
@@ -138,6 +158,17 @@ pub struct Scene {
     pending: Option<SceneImage>,
     /// Why the last attempt to draw it failed, until one succeeds.
     failure: Option<JobFailureKind>,
+    /// How the clip moves, when the user wrote it; the image prompt
+    /// otherwise.
+    motion_prompt: Option<ScenePrompt>,
+    /// The video model for this scene, instead of the channel's.
+    clip_model: Option<ClipModelRef>,
+    /// The clip the rough cut uses instead of the still image.
+    clip: Option<SceneClip>,
+    /// A new clip waiting for the user to accept or reject it.
+    pending_clip: Option<SceneClip>,
+    /// Why the last attempt to make a clip failed, until one succeeds.
+    clip_failure: Option<JobFailureKind>,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -151,6 +182,11 @@ pub struct SceneRecord {
     pub image: Option<SceneImage>,
     pub pending: Option<SceneImage>,
     pub failure: Option<JobFailureKind>,
+    pub motion_prompt: Option<ScenePrompt>,
+    pub clip_model: Option<ClipModelRef>,
+    pub clip: Option<SceneClip>,
+    pub pending_clip: Option<SceneClip>,
+    pub clip_failure: Option<JobFailureKind>,
 }
 
 impl Scene {
@@ -164,6 +200,30 @@ impl Scene {
             image: record.image,
             pending: record.pending,
             failure: record.failure,
+            motion_prompt: record.motion_prompt,
+            clip_model: record.clip_model,
+            clip: record.clip,
+            pending_clip: record.pending_clip,
+            clip_failure: record.clip_failure,
+        }
+    }
+
+    /// A scene of a new plan: no image or clip yet.
+    fn planned(start: Duration, end: Duration, text: String, prompt: ScenePrompt) -> Self {
+        Self {
+            start,
+            end,
+            text,
+            generated_prompt: prompt.clone(),
+            prompt,
+            image: None,
+            pending: None,
+            failure: None,
+            motion_prompt: None,
+            clip_model: None,
+            clip: None,
+            pending_clip: None,
+            clip_failure: None,
         }
     }
 
@@ -236,12 +296,114 @@ impl Scene {
         self.pending.take().ok_or(NoPendingImage)
     }
 
-    /// Every image file the scene holds.
+    /// What moves the clip: the user's motion prompt, else the image
+    /// prompt.
+    pub fn motion_prompt(&self) -> &ScenePrompt {
+        self.motion_prompt.as_ref().unwrap_or(&self.prompt)
+    }
+
+    /// The motion prompt the user wrote, if any.
+    pub fn own_motion_prompt(&self) -> Option<&ScenePrompt> {
+        self.motion_prompt.as_ref()
+    }
+
+    /// Sets the user's motion prompt; `None` goes back to the image prompt.
+    /// Returns whether it changed.
+    pub fn set_motion_prompt(&mut self, prompt: Option<ScenePrompt>) -> bool {
+        let prompt = prompt.filter(|prompt| *prompt != self.prompt);
+        if prompt == self.motion_prompt {
+            return false;
+        }
+        self.motion_prompt = prompt;
+        true
+    }
+
+    /// The video model the scene picked over its channel's.
+    pub fn clip_model(&self) -> Option<&ClipModelRef> {
+        self.clip_model.as_ref()
+    }
+
+    /// Picks the scene's video model; `None` follows the channel. Returns
+    /// whether it changed.
+    pub fn set_clip_model(&mut self, model: Option<ClipModelRef>) -> bool {
+        if model == self.clip_model {
+            return false;
+        }
+        self.clip_model = model;
+        true
+    }
+
+    pub fn clip(&self) -> Option<&SceneClip> {
+        self.clip.as_ref()
+    }
+
+    pub fn pending_clip(&self) -> Option<&SceneClip> {
+        self.pending_clip.as_ref()
+    }
+
+    pub fn clip_failure(&self) -> Option<JobFailureKind> {
+        self.clip_failure
+    }
+
+    /// Whether the clip animates an image the scene no longer shows.
+    pub fn is_clip_stale(&self) -> bool {
+        self.clip.as_ref().is_some_and(|clip| {
+            self.image
+                .as_ref()
+                .is_none_or(|image| image.generation.id != clip.source_image)
+        })
+    }
+
+    /// Takes a new clip. Clips cost money and replace the still image in
+    /// the cut, so every one waits for review, beside the current clip if
+    /// there is one. Returns the clip it pushed out (an earlier one
+    /// waiting), whose file can go.
+    pub fn add_clip(&mut self, clip: SceneClip) -> Option<SceneClip> {
+        self.clip_failure = None;
+        self.pending_clip.replace(clip)
+    }
+
+    /// Records that making a clip failed. The clips it has stay.
+    pub fn fail_clip(&mut self, kind: JobFailureKind) {
+        self.clip_failure = Some(kind);
+    }
+
+    /// Makes the clip waiting for review the scene's clip. Returns the
+    /// replaced one, whose file can go.
+    pub fn accept_clip(&mut self) -> Result<Option<SceneClip>, NoPendingClip> {
+        let pending = self.pending_clip.take().ok_or(NoPendingClip)?;
+        Ok(self.clip.replace(pending))
+    }
+
+    /// Drops the clip waiting for review and keeps what the scene had.
+    /// Returns the dropped one, whose file can go.
+    pub fn reject_clip(&mut self) -> Result<SceneClip, NoPendingClip> {
+        self.pending_clip.take().ok_or(NoPendingClip)
+    }
+
+    /// Goes back to the still image. Returns the clip it dropped, whose
+    /// file can go.
+    pub fn remove_clip(&mut self) -> Option<SceneClip> {
+        self.clip.take()
+    }
+
+    /// Whether a clip can be made: it needs the image to start from.
+    pub fn can_animate(&self) -> bool {
+        self.image.is_some()
+    }
+
+    /// Every image and clip file the scene holds.
     pub fn files(&self) -> impl Iterator<Item = &str> {
         self.image
             .iter()
             .chain(&self.pending)
             .map(|image| image.file.as_str())
+            .chain(
+                self.clip
+                    .iter()
+                    .chain(&self.pending_clip)
+                    .map(|clip| clip.file.as_str()),
+            )
     }
 }
 
@@ -331,20 +493,16 @@ impl ScenePlan {
             .map(|(index, (first, prompt))| {
                 let next = starts.get(index + 1).map(|(next, _)| *next);
                 let last = &sentences[next.unwrap_or(sentences.len()) - 1];
-                Scene {
-                    start: if index == 0 {
+                Scene::planned(
+                    if index == 0 {
                         Duration::ZERO
                     } else {
                         sentences[*first].start
                     },
-                    end: next.map_or(end, |next| sentences[next].start),
-                    text: text[sentences[*first].text.start..last.text.end].to_owned(),
-                    generated_prompt: prompt.clone(),
-                    prompt: prompt.clone(),
-                    image: None,
-                    pending: None,
-                    failure: None,
-                }
+                    next.map_or(end, |next| sentences[next].start),
+                    text[sentences[*first].text.start..last.text.end].to_owned(),
+                    prompt.clone(),
+                )
             })
             .collect();
         Ok(Self {
@@ -398,7 +556,18 @@ impl ScenePlan {
             .collect()
     }
 
-    /// Every image file of every scene.
+    /// Scenes a clip can be made for that have none, accepted or waiting:
+    /// what a new clip run animates.
+    pub fn missing_clips(&self) -> Vec<usize> {
+        (0..self.scenes.len())
+            .filter(|&index| {
+                let scene = &self.scenes[index];
+                scene.can_animate() && scene.clip.is_none() && scene.pending_clip.is_none()
+            })
+            .collect()
+    }
+
+    /// Every image and clip file of every scene.
     pub fn files(&self) -> impl Iterator<Item = &str> {
         self.scenes.iter().flat_map(Scene::files)
     }
@@ -413,9 +582,10 @@ pub trait ScenePlanRepository: Send + Sync {
     /// other, and saves the generations it refers to; all or none.
     fn save_scene_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError>;
 
-    /// Saves scene `index` of the saved plan `plan` (prompt, images,
-    /// failure) and its images' generations, leaving the other scenes as
-    /// they are. Fails when the plan is no longer saved.
+    /// Saves scene `index` of the saved plan `plan` (prompts, model,
+    /// images, clips, failures) and the generations of its images and
+    /// clips, leaving the other scenes as they are. Fails when the plan is
+    /// no longer saved.
     fn save_scene(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError>;
 }
 
@@ -673,6 +843,119 @@ mod tests {
         assert_eq!(scene.reject_image(), Err(NoPendingImage));
         assert_eq!(plan.missing_images(), [1], "the other scene is untouched");
         assert_eq!(plan.files().collect::<Vec<_>>(), ["three.png"]);
+    }
+
+    fn clip(narration: &Narration, file: &str, source: &SceneImage) -> SceneClip {
+        SceneClip {
+            file: file.into(),
+            seconds: 5,
+            source_image: source.generation.id,
+            generation: generation(narration, Provider::Higgsfield, file),
+        }
+    }
+
+    #[test]
+    fn every_new_clip_waits_for_review_and_the_still_can_come_back() {
+        let n = narration(STORY, 0);
+        let mut plan = plan(&n, vec![draft(0, "A."), draft(2, "B.")]);
+        assert_eq!(plan.missing_clips(), Vec::<usize>::new(), "no image yet");
+        let still = image(&n, "still.png");
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        assert!(!scene.can_animate());
+        scene.add_image(still.clone());
+        assert_eq!(plan.missing_clips(), [0]);
+
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        scene.fail_clip(JobFailureKind::Declined);
+        assert_eq!(scene.add_clip(clip(&n, "one.mp4", &still)), None);
+        assert_eq!(scene.clip_failure(), None, "a success clears the failure");
+        assert_eq!(scene.clip(), None, "even the first clip is reviewed");
+        assert_eq!(scene.pending_clip().unwrap().file, "one.mp4");
+        assert_eq!(plan.missing_clips(), Vec::<usize>::new(), "one is waiting");
+
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        let pushed = scene.add_clip(clip(&n, "two.mp4", &still)).unwrap();
+        assert_eq!(
+            pushed.file, "one.mp4",
+            "a newer one replaces the one waiting"
+        );
+        assert_eq!(scene.accept_clip().unwrap(), None);
+        assert_eq!(scene.clip().unwrap().file, "two.mp4");
+        assert_eq!(scene.accept_clip(), Err(NoPendingClip));
+
+        scene.add_clip(clip(&n, "three.mp4", &still));
+        assert_eq!(scene.reject_clip().unwrap().file, "three.mp4");
+        assert_eq!(scene.clip().unwrap().file, "two.mp4", "kept");
+        assert_eq!(scene.reject_clip(), Err(NoPendingClip));
+        assert_eq!(
+            plan.files().collect::<Vec<_>>(),
+            ["still.png", "two.mp4"],
+            "images and clips"
+        );
+
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(scene.remove_clip().unwrap().file, "two.mp4");
+        assert_eq!(scene.clip(), None, "back to the still image");
+        assert_eq!(scene.image().unwrap().file, "still.png");
+    }
+
+    #[test]
+    fn a_clip_goes_stale_when_the_scene_takes_another_image() {
+        let n = narration(STORY, 0);
+        let mut plan = plan(&n, vec![draft(0, "A.")]);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        let first = image(&n, "first.png");
+        scene.add_image(first.clone());
+        scene.add_clip(clip(&n, "clip.mp4", &first));
+        scene.accept_clip().unwrap();
+        assert!(!scene.is_clip_stale());
+        scene.add_image(image(&n, "second.png"));
+        assert!(!scene.is_clip_stale(), "the new image is only waiting");
+        scene.accept_image().unwrap();
+        assert!(scene.is_clip_stale());
+    }
+
+    #[test]
+    fn the_motion_prompt_follows_the_image_prompt_until_the_user_writes_one() {
+        let n = narration(STORY, 0);
+        let mut plan = plan(&n, vec![draft(0, "A ship at dawn.")]);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(scene.motion_prompt().as_str(), "A ship at dawn.");
+        assert_eq!(scene.own_motion_prompt(), None);
+        let slow = ScenePrompt::new("Slow push in, waves rolling.").unwrap();
+        assert!(scene.set_motion_prompt(Some(slow.clone())));
+        assert!(!scene.set_motion_prompt(Some(slow)));
+        assert_eq!(
+            scene.motion_prompt().as_str(),
+            "Slow push in, waves rolling."
+        );
+        scene.edit_prompt(ScenePrompt::new("A ship at dusk.").unwrap());
+        assert_eq!(
+            scene.motion_prompt().as_str(),
+            "Slow push in, waves rolling.",
+            "the user's motion prompt stays"
+        );
+        assert!(scene.set_motion_prompt(None));
+        assert_eq!(scene.motion_prompt().as_str(), "A ship at dusk.");
+        let same = ScenePrompt::new("A ship at dusk.").unwrap();
+        assert!(
+            !scene.set_motion_prompt(Some(same)),
+            "same as the image prompt"
+        );
+        assert_eq!(scene.own_motion_prompt(), None);
+    }
+
+    #[test]
+    fn a_scene_can_pick_its_own_video_model() {
+        let n = narration(STORY, 0);
+        let mut plan = plan(&n, vec![draft(0, "A.")]);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(scene.clip_model(), None, "follows the channel");
+        let model = ClipModelRef::new(Provider::Higgsfield, "kling").unwrap();
+        assert!(scene.set_clip_model(Some(model.clone())));
+        assert!(!scene.set_clip_model(Some(model.clone())));
+        assert_eq!(scene.clip_model(), Some(&model));
+        assert!(scene.set_clip_model(None));
     }
 
     #[test]

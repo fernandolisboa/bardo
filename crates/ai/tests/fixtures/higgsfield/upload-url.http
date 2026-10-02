@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: application/json
+
+{"public_url":"https://cdn.higgsfield.example/input/3f1c9a52.png","upload_url":"https://storage.higgsfield.example/presigned/3f1c9a52.png?X-Amz-Signature=abc123","content_type":"image/png","upload_headers":{"Content-Type":"image/png","x-amz-tagging":"retention=temporary"}}
