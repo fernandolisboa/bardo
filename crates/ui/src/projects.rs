@@ -1,5 +1,6 @@
-//! Video projects screen: pick a channel and one of its projects, then
-//! generate, edit and review the project's script, generate and play its
+//! Video projects screen: pick a channel and one of its projects, choose
+//! who narrates it (the channel's default persona or one for this video),
+//! then generate, edit and review the project's script, generate and play its
 //! narration with the spoken word highlighted, and plan its scenes and draw
 //! their images. Generation runs as jobs in `bardo_app`; this view polls
 //! the job revision and re-reads the script, narration and scenes when it
@@ -10,8 +11,8 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, Job, JobState, Narration, SceneFieldError, ScenePlanId,
-    ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
+    Channel, ChannelId, Generation, Job, JobState, Narration, PersonaId, SceneFieldError,
+    ScenePlanId, ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, NarrationError, NarrationPlayer, NarrationView, ScenesView, ScriptError,
@@ -40,24 +41,26 @@ mod scenes;
 /// highlighted word while the narration plays.
 const POLL_EVERY: Duration = Duration::from_millis(50);
 
-/// One option of the channel select.
+/// One option of a select: a value and its name.
 #[derive(Clone)]
-struct Choice {
-    value: ChannelId,
+struct Choice<T> {
+    value: T,
     title: SharedString,
 }
 
-impl SearchableListItem for Choice {
-    type Value = ChannelId;
+impl<T: Clone + PartialEq> SearchableListItem for Choice<T> {
+    type Value = T;
 
     fn title(&self) -> SharedString {
         self.title.clone()
     }
 
-    fn value(&self) -> &ChannelId {
+    fn value(&self) -> &T {
         &self.value
     }
 }
+
+type ChoiceSelect<T> = Entity<SelectState<SearchableVec<Choice<T>>>>;
 
 /// Which generation's prompt is open.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -70,7 +73,9 @@ enum PromptShown {
 pub struct ProjectsScreen {
     bardo: Entity<Bardo>,
     channels: Vec<Channel>,
-    channel_select: Entity<SelectState<SearchableVec<Choice>>>,
+    channel_select: ChoiceSelect<ChannelId>,
+    /// The project's narrator: the channel's default (`None`) or a persona.
+    narrator_select: ChoiceSelect<Option<PersonaId>>,
     channel: Option<ChannelId>,
     projects: Vec<VideoProject>,
     project: Option<VideoProjectId>,
@@ -114,6 +119,9 @@ impl ProjectsScreen {
     pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let channel_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let narrator_select = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true)
+        });
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let poll = cx.spawn(async move |this, cx| {
@@ -127,23 +135,39 @@ impl ProjectsScreen {
                 }
             }
         });
-        let subscriptions = vec![cx.subscribe_in(
-            &channel_select,
-            window,
-            |this, _, event: &SelectEvent<SearchableVec<Choice>>, window, cx| {
-                let SelectEvent::Confirm(Some(id)) = event else {
-                    return;
-                };
-                if this.channel != Some(*id) {
-                    this.select_channel(*id, window, cx);
-                }
-            },
-        )];
+        let subscriptions = vec![
+            cx.subscribe_in(
+                &channel_select,
+                window,
+                |this, _, event: &SelectEvent<SearchableVec<Choice<ChannelId>>>, window, cx| {
+                    let SelectEvent::Confirm(Some(id)) = event else {
+                        return;
+                    };
+                    if this.channel != Some(*id) {
+                        this.select_channel(*id, window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &narrator_select,
+                window,
+                |this,
+                 _,
+                 event: &SelectEvent<SearchableVec<Choice<Option<PersonaId>>>>,
+                 window,
+                 cx| {
+                    if let SelectEvent::Confirm(Some(persona)) = event {
+                        this.set_narrator(*persona, window, cx);
+                    }
+                },
+            ),
+        ];
         let revision = bardo.read(cx).jobs_revision();
         let mut screen = Self {
             bardo,
             channels: Vec::new(),
             channel_select,
+            narrator_select,
             channel: None,
             projects: Vec::new(),
             project: None,
@@ -204,6 +228,8 @@ impl ProjectsScreen {
             Some(_) if keep.is_some() => {
                 self.load_projects(cx);
                 self.load(window, cx);
+                // Personas may have been added or renamed elsewhere.
+                self.fill_narrator(window, cx);
             }
             Some(id) => self.select_channel(id, window, cx),
             None => {
@@ -265,6 +291,74 @@ impl ProjectsScreen {
         self.script_ask = None;
         self.narration_ask = None;
         self.load(window, cx);
+        self.fill_narrator(window, cx);
+        cx.notify();
+    }
+
+    /// The narrator choices: the channel's default (named), then every
+    /// persona; selects the project's own persona or the default.
+    fn fill_narrator(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.view.as_ref().map(|view| view.project.clone()) else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let personas = bardo.personas().unwrap_or_default();
+        let channel_default = self
+            .channels
+            .iter()
+            .find(|channel| channel.id == project.channel)
+            .and_then(|channel| channel.details.default_persona())
+            .and_then(|id| personas.iter().find(|persona| persona.id == id));
+        let default_title = match channel_default {
+            Some(persona) => SharedString::from(bardo.text_with(
+                Text::ProjectNarratorChannel,
+                &[("name", persona.details.name())],
+            )),
+            None => tr(bardo, Text::ProjectNarratorChannelNone),
+        };
+        let choices = SearchableVec::new(
+            std::iter::once(Choice {
+                value: None,
+                title: default_title,
+            })
+            .chain(personas.iter().map(|persona| Choice {
+                value: Some(persona.id),
+                title: SharedString::from(persona.details.name().to_owned()),
+            }))
+            .collect::<Vec<_>>(),
+        );
+        self.narrator_select.update(cx, |select, cx| {
+            select.set_items(choices, window, cx);
+            select.set_selected_value(&project.persona, window, cx);
+            if select.selected_value().is_none() {
+                select.set_selected_value(&None, window, cx);
+            }
+        });
+    }
+
+    /// Saves the project's narrator and re-reads what depends on it.
+    fn set_narrator(
+        &mut self,
+        persona: Option<PersonaId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.view.as_ref().map(|view| &view.project) else {
+            return;
+        };
+        if project.persona == persona {
+            return;
+        }
+        let id = project.id;
+        match self.bardo.read(cx).set_project_persona(id, persona) {
+            Ok(_) => {
+                self.error = None;
+                self.narration_error = None;
+            }
+            Err(error) => self.error = error.form_message(),
+        }
+        self.load(window, cx);
+        self.fill_narrator(window, cx);
         cx.notify();
     }
 
@@ -593,7 +687,36 @@ impl ProjectsScreen {
                             &[("amount", &bardo.money(view.spent))],
                         )),
                     ))
-                });
+                })
+                .child(
+                    v_flex()
+                        .pt_2()
+                        .gap_1()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_medium()
+                                        .child(tr(bardo, Text::ProjectNarrator)),
+                                )
+                                .child(
+                                    div().w(px(440.)).child(
+                                        Select::new(&self.narrator_select)
+                                            .small()
+                                            .search_placeholder(tr(bardo, Text::PersonasTitle)),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(tr(bardo, Text::ProjectNarratorHint)),
+                        ),
+                );
 
         let title_row = h_flex()
             .gap_2()
@@ -1028,8 +1151,10 @@ impl ProjectsScreen {
                 )
             });
 
-        let hint = match &view.persona {
-            Some(persona) => SharedString::from(bardo.text_with(
+        let flag = view.persona.as_ref().and_then(|persona| persona.voice_flag);
+        let hint = match (&view.persona, flag) {
+            (Some(_), Some(flag)) => tr(bardo, Text::NarrationVoiceFlagged(flag)),
+            (Some(persona), None) => SharedString::from(bardo.text_with(
                 Text::NarrationGenerateHint,
                 &[
                     ("persona", persona.details.name()),
@@ -1037,9 +1162,10 @@ impl ProjectsScreen {
                     ("n", &view.characters().to_string()),
                 ],
             )),
-            None => tr(bardo, Text::NarrationNoPersona),
+            (None, _) => tr(bardo, Text::NarrationNoPersona),
         };
-        let can_generate = !running && view.script.is_some() && view.persona.is_some();
+        let can_generate =
+            !running && view.script.is_some() && view.persona.is_some() && flag.is_none();
         let generate = Button::new("generate-narration")
             .label(tr(
                 bardo,
@@ -1091,7 +1217,11 @@ impl ProjectsScreen {
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(theme.muted_foreground)
+                                .text_color(if flag.is_some() {
+                                    theme.warning
+                                } else {
+                                    theme.muted_foreground
+                                })
                                 .child(hint),
                         )
                         .children(view.estimate.as_ref().and_then(|estimate| {

@@ -374,6 +374,10 @@ title = "Projetos de vídeo"
 empty = "Aprove uma ideia para começar um projeto de vídeo."
 started = "Projeto de vídeo iniciado: {title}"
 no_channels = "Crie um canal e aprove um dos temas dele para começar um projeto de vídeo."
+narrator = "Narrador"
+narrator_channel = "Padrão do canal: {name}"
+narrator_channel_none = "Padrão do canal (nenhuma definida)"
+narrator_hint = "Lê a narração deste vídeo e molda o roteiro dele. Escolha uma persona para usá-la só neste vídeo."
 
 [projects.error]
 not_loaded = "Não foi possível carregar os projetos de vídeo."
@@ -430,7 +434,9 @@ duration = "Duração"
 
 [narration.error]
 no_script = "Gere o roteiro primeiro; a narração lê o roteiro."
-no_persona = "Escolha uma persona padrão para este canal na tela Canais; é ela que lê a narração."
+no_persona = "Escolha um narrador para este vídeo, ou uma persona padrão para o canal dele na tela Canais."
+voice_unchecked = "A voz do narrador ainda não foi verificada na sua conta ElevenLabs. Verifique na tela Personas."
+voice_unavailable = "A voz do narrador não está na sua conta ElevenLabs. Resolva na tela Personas ou escolha outro narrador."
 missing_key = "Salve uma chave da ElevenLabs em Configurações para gerar narração."
 busy = "Já há uma narração sendo gravada para este projeto."
 missing = "Gere a narração primeiro."
@@ -591,6 +597,8 @@ hint = "Narradores que você reutiliza entre canais: voz, tom, estilo de roteiro
 empty = "Nenhuma persona ainda. Crie uma para dar um narrador aos seus canais."
 not_loaded = "Não foi possível carregar suas personas. Reinicie o Bardo para tentar de novo."
 new = "Nova persona"
+import = "Importar de arquivo…"
+import_dialog = "Importar persona"
 
 [persona]
 new_title = "Nova persona"
@@ -614,6 +622,26 @@ duplicated = "{name} criada. Edite à vontade; a original continua como estava."
 used_by = "Persona padrão de: {channels}"
 unused = "Nenhum canal a usa como padrão ainda."
 copy_suffix = "cópia"
+imported_suffix = "importada"
+export = "Exportar para arquivo…"
+export_hint = "Exporta um pacote com a persona e uma referência à voz dela, nunca áudio nem chaves. Quem importar precisa ter a mesma voz na própria conta ElevenLabs."
+exported = "Exportada para {path}."
+imported = "{name} importada."
+
+[persona.voice_flag]
+unchecked_tag = "Voz não verificada"
+unavailable_tag = "Voz indisponível"
+unchecked = "Esta persona foi importada e a voz dela ainda não foi procurada na sua conta ElevenLabs. Ela não narra até isso acontecer. Salve sua chave da ElevenLabs em Configurações e verifique suas vozes."
+unavailable = "Esta persona foi importada e a voz dela não está na sua conta ElevenLabs, então ela não pode narrar. Adicione a voz na ElevenLabs (o dono pode compartilhá-la, ou você a clona lá com o consentimento de quem fala) e verifique de novo, ou escolha outra voz e salve."
+check = "Verificar minhas vozes da ElevenLabs"
+
+[persona.package]
+unreadable = "Não foi possível ler esse arquivo."
+not_a_package = "Esse arquivo não é um pacote de persona do Bardo."
+newer = "Este pacote foi feito por uma versão mais nova do Bardo. Atualize o Bardo para importá-lo."
+invalid = "A persona deste pacote é inválida; o arquivo pode ter sido editado."
+export_failed = "Não foi possível salvar o pacote aí. Escolha outra pasta."
+dialog_failed = "Não foi possível abrir a janela de arquivos."
 
 [persona.preset]
 stability = "Estabilidade"

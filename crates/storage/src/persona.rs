@@ -1,6 +1,6 @@
 use bardo_domain::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaRepository,
-    ProfileId, Provider, RepositoryError, VoiceRef,
+    ProfileId, Provider, RepositoryError, VoiceFlag, VoiceRef,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{Database, boxed};
 
 const SELECT_PERSONA: &str = "SELECT id, profile_id, name, voice_provider, voice_id, voice_name, \
-     tone, script_style, stability, similarity, style, speed FROM persona";
+     tone, script_style, stability, similarity, style, speed, voice_flag FROM persona";
 
 /// A persona row as stored, before domain validation.
 struct PersonaRow {
@@ -21,6 +21,7 @@ struct PersonaRow {
     tone: String,
     script_style: String,
     presets: [i64; 4],
+    voice_flag: Option<String>,
 }
 
 impl PersonaRow {
@@ -35,6 +36,7 @@ impl PersonaRow {
             tone: row.get(6)?,
             script_style: row.get(7)?,
             presets: [row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?],
+            voice_flag: row.get(12)?,
         })
     }
 
@@ -60,12 +62,26 @@ impl PersonaRow {
         };
         let details = PersonaDetails::validate(draft)
             .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
+        let voice_flag = match self.voice_flag.as_deref() {
+            None => None,
+            Some("unchecked") => Some(VoiceFlag::Unchecked),
+            Some("unavailable") => Some(VoiceFlag::Unavailable),
+            Some(other) => return Err(boxed(InvalidRow(format!("voice flag {other:?}")))),
+        };
         Ok(Persona {
             id: PersonaId::from(Uuid::parse_str(&self.id).map_err(boxed)?),
             owner: ProfileId::from(Uuid::parse_str(&self.profile_id).map_err(boxed)?),
             details,
+            voice_flag,
         })
     }
+}
+
+fn flag_code(flag: Option<VoiceFlag>) -> Option<&'static str> {
+    flag.map(|flag| match flag {
+        VoiceFlag::Unchecked => "unchecked",
+        VoiceFlag::Unavailable => "unavailable",
+    })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -78,8 +94,8 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
     let presets = details.presets();
     tx.execute(
         "INSERT INTO persona (id, profile_id, name, voice_provider, voice_id, voice_name, tone,
-                              script_style, stability, similarity, style, speed)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                              script_style, stability, similarity, style, speed, voice_flag)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT (id) DO UPDATE SET
              name = excluded.name,
              voice_provider = excluded.voice_provider,
@@ -91,6 +107,7 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
              similarity = excluded.similarity,
              style = excluded.style,
              speed = excluded.speed,
+             voice_flag = excluded.voice_flag,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![
             persona.id.to_string(),
@@ -105,6 +122,7 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
             presets.similarity,
             presets.style,
             presets.speed,
+            flag_code(persona.voice_flag),
         ],
     )?;
     Ok(())
@@ -276,7 +294,41 @@ mod tests {
                 "speed",
                 "created_at",
                 "updated_at",
+                "voice_flag",
             ]
+        );
+    }
+
+    #[test]
+    fn the_voice_flag_is_kept_and_cleared() {
+        let (db, owner) = database_with_profile();
+        let mut saved = persona(owner, "Imported");
+        for flag in [
+            Some(VoiceFlag::Unchecked),
+            Some(VoiceFlag::Unavailable),
+            None,
+        ] {
+            saved.voice_flag = flag;
+            PersonaRepository::save(&db, &saved).unwrap();
+            assert_eq!(
+                PersonaRepository::get(&db, saved.id)
+                    .unwrap()
+                    .unwrap()
+                    .voice_flag,
+                flag
+            );
+        }
+    }
+
+    #[test]
+    fn the_schema_refuses_an_unknown_voice_flag() {
+        let (db, owner) = database_with_profile();
+        let saved = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &saved).unwrap();
+        assert!(
+            db.conn()
+                .execute("UPDATE persona SET voice_flag = 'lost'", [])
+                .is_err()
         );
     }
 

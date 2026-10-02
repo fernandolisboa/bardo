@@ -10,7 +10,7 @@ use bardo_domain::{
     JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network, NetworkAccountFieldError,
     NicheSeedError, PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError,
     TemplateKind, TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage, Visibility,
-    VoiceCategory,
+    VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -179,7 +179,31 @@ pub enum Text {
     PersonaNotSaved,
     /// Appended to a duplicated persona's name, e.g. `Narrator (copy)`.
     PersonaCopySuffix,
+    /// Appended to an imported persona's name when the name is taken.
+    PersonaImportedSuffix,
     PersonaFieldError(PersonaFieldError),
+    ImportPersona,
+    ImportPersonaDialog,
+    ExportPersona,
+    PersonaExportHint,
+    /// Placeholder: `{path}`.
+    PersonaExported,
+    /// Placeholder: `{name}`.
+    PersonaImported,
+    VoiceFlagTag(VoiceFlag),
+    VoiceFlagExplanation(VoiceFlag),
+    CheckVoices,
+    PersonaPackageUnreadable,
+    PersonaPackageNotOne,
+    PersonaPackageNewer,
+    PersonaPackageInvalid,
+    PersonaExportFailed,
+    FileDialogFailed,
+    ProjectNarrator,
+    /// Placeholder: `{name}`.
+    ProjectNarratorChannel,
+    ProjectNarratorChannelNone,
+    ProjectNarratorHint,
     JobsTitle,
     JobsEmpty,
     JobsRunning,
@@ -369,6 +393,7 @@ pub enum Text {
     NarrationDuration,
     NarrationNoScript,
     NarrationNoPersona,
+    NarrationVoiceFlagged(VoiceFlag),
     NarrationMissingKey,
     NarrationBusy,
     NarrationMissing,
@@ -767,6 +792,32 @@ impl Text {
             Text::PersonaNotFound => "persona.error.not_found",
             Text::PersonaNotSaved => "persona.error.not_saved",
             Text::PersonaCopySuffix => "persona.copy_suffix",
+            Text::PersonaImportedSuffix => "persona.imported_suffix",
+            Text::ImportPersona => "personas.import",
+            Text::ImportPersonaDialog => "personas.import_dialog",
+            Text::ExportPersona => "persona.export",
+            Text::PersonaExportHint => "persona.export_hint",
+            Text::PersonaExported => "persona.exported",
+            Text::PersonaImported => "persona.imported",
+            Text::VoiceFlagTag(flag) => match flag {
+                VoiceFlag::Unchecked => "persona.voice_flag.unchecked_tag",
+                VoiceFlag::Unavailable => "persona.voice_flag.unavailable_tag",
+            },
+            Text::VoiceFlagExplanation(flag) => match flag {
+                VoiceFlag::Unchecked => "persona.voice_flag.unchecked",
+                VoiceFlag::Unavailable => "persona.voice_flag.unavailable",
+            },
+            Text::CheckVoices => "persona.voice_flag.check",
+            Text::PersonaPackageUnreadable => "persona.package.unreadable",
+            Text::PersonaPackageNotOne => "persona.package.not_a_package",
+            Text::PersonaPackageNewer => "persona.package.newer",
+            Text::PersonaPackageInvalid => "persona.package.invalid",
+            Text::PersonaExportFailed => "persona.package.export_failed",
+            Text::FileDialogFailed => "persona.package.dialog_failed",
+            Text::ProjectNarrator => "projects.narrator",
+            Text::ProjectNarratorChannel => "projects.narrator_channel",
+            Text::ProjectNarratorChannelNone => "projects.narrator_channel_none",
+            Text::ProjectNarratorHint => "projects.narrator_hint",
             Text::PersonaFieldError(error) => match error {
                 PersonaFieldError::NameRequired => "persona.error.name_required",
                 PersonaFieldError::NameTooLong => "persona.error.name_too_long",
@@ -986,6 +1037,10 @@ impl Text {
             Text::NarrationDuration => "narration.duration",
             Text::NarrationNoScript => "narration.error.no_script",
             Text::NarrationNoPersona => "narration.error.no_persona",
+            Text::NarrationVoiceFlagged(flag) => match flag {
+                VoiceFlag::Unchecked => "narration.error.voice_unchecked",
+                VoiceFlag::Unavailable => "narration.error.voice_unavailable",
+            },
             Text::NarrationMissingKey => "narration.error.missing_key",
             Text::NarrationBusy => "narration.error.busy",
             Text::NarrationMissing => "narration.error.missing",
@@ -1492,6 +1547,24 @@ mod tests {
             Text::PersonaNotFound,
             Text::PersonaNotSaved,
             Text::PersonaCopySuffix,
+            Text::PersonaImportedSuffix,
+            Text::ImportPersona,
+            Text::ImportPersonaDialog,
+            Text::ExportPersona,
+            Text::PersonaExportHint,
+            Text::PersonaExported,
+            Text::PersonaImported,
+            Text::CheckVoices,
+            Text::PersonaPackageUnreadable,
+            Text::PersonaPackageNotOne,
+            Text::PersonaPackageNewer,
+            Text::PersonaPackageInvalid,
+            Text::PersonaExportFailed,
+            Text::FileDialogFailed,
+            Text::ProjectNarrator,
+            Text::ProjectNarratorChannel,
+            Text::ProjectNarratorChannelNone,
+            Text::ProjectNarratorHint,
             Text::JobsTitle,
             Text::JobsEmpty,
             Text::JobsRunning,
@@ -1833,6 +1906,11 @@ mod tests {
         texts.extend(AspectRatio::ALL.map(Text::AspectRatioName));
         texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
+        for flag in [VoiceFlag::Unchecked, VoiceFlag::Unavailable] {
+            texts.push(Text::VoiceFlagTag(flag));
+            texts.push(Text::VoiceFlagExplanation(flag));
+            texts.push(Text::NarrationVoiceFlagged(flag));
+        }
         texts.extend(ThemeFieldError::ALL.map(Text::ThemeFieldError));
         texts.extend(ScriptFieldError::ALL.map(Text::ScriptFieldError));
         texts.extend(SceneFieldError::ALL.map(Text::SceneFieldError));

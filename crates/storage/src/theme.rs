@@ -1,6 +1,7 @@
 use bardo_domain::{
-    ChannelId, Confidence, JobId, Niche, ProfileId, Reason, RepositoryError, Score, Theme, ThemeId,
-    ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository, VideoProject, VideoProjectId,
+    ChannelId, Confidence, JobId, Niche, PersonaId, ProfileId, Reason, RepositoryError, Score,
+    Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository, VideoProject,
+    VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -13,8 +14,8 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
         competition_score, competition_confidence, ranked_by, ranked_at
     FROM theme";
 
-const SELECT_PROJECT: &str =
-    "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at FROM video_project";
+const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id \
+     FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored theme is invalid: {0}")]
@@ -178,6 +179,7 @@ struct ProjectRow {
     theme: String,
     title: String,
     created_at: i64,
+    persona: Option<String>,
 }
 
 impl ProjectRow {
@@ -190,6 +192,7 @@ impl ProjectRow {
             theme: row.get(4)?,
             title: row.get(5)?,
             created_at: row.get(6)?,
+            persona: row.get(7)?,
         })
     }
 
@@ -202,6 +205,10 @@ impl ProjectRow {
             theme: ThemeId::from(uuid(&self.theme)?),
             title: self.title,
             created_at: from_unix_millis(self.created_at),
+            persona: self
+                .persona
+                .map(|id| uuid(&id).map(PersonaId::from))
+                .transpose()?,
         })
     }
 }
@@ -249,8 +256,9 @@ impl ThemeRepository for Database {
         let tx = conn.transaction().map_err(boxed)?;
         upsert_theme(&tx, theme)?;
         tx.execute(
-            "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
+                                        created_at, persona_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 project.id.to_string(),
                 project.owner.to_string(),
@@ -259,6 +267,7 @@ impl ThemeRepository for Database {
                 project.theme.to_string(),
                 project.title,
                 to_unix_millis(project.created_at),
+                project.persona.map(|id| id.to_string()),
             ],
         )
         .map_err(boxed)?;
@@ -291,6 +300,20 @@ impl ThemeRepository for Database {
             .optional()
             .map_err(boxed)?;
         row.map(ProjectRow::into_project).transpose()
+    }
+
+    fn set_project_persona(
+        &self,
+        id: VideoProjectId,
+        persona: Option<PersonaId>,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE video_project SET persona_id = ?2 WHERE id = ?1",
+                params![id.to_string(), persona.map(|id| id.to_string())],
+            )
+            .map_err(boxed)?;
+        Ok(())
     }
 }
 
@@ -427,6 +450,54 @@ mod tests {
             .map(|project| project.title)
             .collect();
         assert_eq!(titles, ["Second", "First"]);
+    }
+
+    #[test]
+    fn a_project_keeps_its_own_persona_until_the_persona_is_gone() {
+        let (db, channel) = setup();
+        let mut approved = theme(&channel, "The lost cosmonauts", 0);
+        db.save_themes(std::slice::from_ref(&approved)).unwrap();
+        let project = approved.approve(time(1_800_000_200)).unwrap();
+        db.start_project(&approved, &project).unwrap();
+
+        let narrator = bardo_domain::Persona::defaults(channel.owner).remove(0);
+        bardo_domain::PersonaRepository::save(&db, &narrator).unwrap();
+        db.set_project_persona(project.id, Some(narrator.id))
+            .unwrap();
+        assert_eq!(
+            db.project(project.id).unwrap().unwrap().persona,
+            Some(narrator.id)
+        );
+
+        db.set_project_persona(project.id, None).unwrap();
+        assert_eq!(db.project(project.id).unwrap().unwrap().persona, None);
+
+        db.set_project_persona(project.id, Some(narrator.id))
+            .unwrap();
+        db.conn()
+            .execute(
+                "DELETE FROM persona WHERE id = ?1",
+                [narrator.id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            db.project(project.id).unwrap().unwrap().persona,
+            None,
+            "falls back to the channel's persona"
+        );
+    }
+
+    #[test]
+    fn a_project_cannot_point_at_a_persona_that_does_not_exist() {
+        let (db, channel) = setup();
+        let mut approved = theme(&channel, "The lost cosmonauts", 0);
+        db.save_themes(std::slice::from_ref(&approved)).unwrap();
+        let project = approved.approve(time(1_800_000_200)).unwrap();
+        db.start_project(&approved, &project).unwrap();
+        assert!(
+            db.set_project_persona(project.id, Some(PersonaId::new()))
+                .is_err()
+        );
     }
 
     #[test]

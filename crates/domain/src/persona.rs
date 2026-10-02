@@ -245,12 +245,42 @@ fn too_long(text: &str, max_chars: usize) -> bool {
     text.chars().count() > max_chars
 }
 
+/// Why a persona's voice may not work for narration. Imported personas
+/// point at a voice in someone else's provider account; until the user's
+/// own account is seen to have it, the persona is flagged and cannot
+/// narrate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VoiceFlag {
+    /// The voice has not been looked up in the user's account yet (no key,
+    /// or the listing failed).
+    Unchecked,
+    /// The user's account does not have the voice: add it there (share or
+    /// clone it with the voice owner's consent) or pick another voice.
+    Unavailable,
+}
+
+impl VoiceFlag {
+    /// The flag a persona's voice gets from a lookup in the user's
+    /// account: `Some(true)` if listed, `Some(false)` if not, `None` if
+    /// the account could not be listed.
+    pub fn from_lookup(listed: Option<bool>) -> Option<VoiceFlag> {
+        match listed {
+            Some(true) => None,
+            Some(false) => Some(VoiceFlag::Unavailable),
+            None => Some(VoiceFlag::Unchecked),
+        }
+    }
+}
+
 /// A narrator identity in the user's library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Persona {
     pub id: PersonaId,
     pub owner: ProfileId,
     pub details: PersonaDetails,
+    /// Set while the voice is not known to be in the user's account; a
+    /// flagged persona cannot narrate.
+    pub voice_flag: Option<VoiceFlag>,
 }
 
 impl Persona {
@@ -259,7 +289,13 @@ impl Persona {
             id: PersonaId::new(),
             owner,
             details,
+            voice_flag: None,
         }
+    }
+
+    /// Whether it can read a narration now.
+    pub fn can_narrate(&self) -> bool {
+        self.voice_flag.is_none()
     }
 
     /// The personas a new profile starts with (PRD story 12): a sober
@@ -551,6 +587,24 @@ mod tests {
         assert_eq!(name.chars().count(), PersonaDetails::MAX_NAME_CHARS);
         assert!(name.ends_with(" (copy)"));
         assert!(PersonaDetails::validate(draft(&name)).is_ok());
+    }
+
+    #[test]
+    fn a_voice_lookup_sets_or_clears_the_flag() {
+        assert_eq!(VoiceFlag::from_lookup(Some(true)), None);
+        assert_eq!(
+            VoiceFlag::from_lookup(Some(false)),
+            Some(VoiceFlag::Unavailable)
+        );
+        assert_eq!(VoiceFlag::from_lookup(None), Some(VoiceFlag::Unchecked));
+
+        let mut persona = Persona::new(
+            ProfileId::new(),
+            PersonaDetails::validate(draft("Narrator")).unwrap(),
+        );
+        assert!(persona.can_narrate(), "a persona made here is not flagged");
+        persona.voice_flag = Some(VoiceFlag::Unchecked);
+        assert!(!persona.can_narrate());
     }
 
     #[test]

@@ -3,8 +3,10 @@
 //! timing of every word, and the user plays it back with the current word
 //! highlighted.
 //!
-//! The reader is the channel's default persona (a per-video override comes
-//! with persona sharing). Generating calls ElevenLabs, so it runs as a job.
+//! The reader is the project's own persona when it picked one, else the
+//! channel's default; a persona whose voice is flagged (an imported voice
+//! not seen in the user's account) cannot read it. Generating calls
+//! ElevenLabs, so it runs as a job.
 //! Long scripts are read in parts, one request each; every finished part
 //! is saved in the project folder before the next starts, so a cancelled,
 //! failed or interrupted job resumes without paying for parts again. When
@@ -18,8 +20,8 @@ use bardo_domain::{
     Alignment, ApiKey, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind,
     JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, Persona, ProfileId,
     Progress, ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore,
-    SpeechRequest, SpeechSynthesizer, VideoProject, VideoProjectId, VoiceRef, WordTimings,
-    split_for_speech,
+    SpeechRequest, SpeechSynthesizer, VideoProject, VideoProjectId, VoiceFlag, VoiceRef,
+    WordTimings, split_for_speech,
 };
 use bardo_media::{Playback, PlaybackError, mp3};
 use serde::{Deserialize, Serialize};
@@ -35,9 +37,12 @@ pub enum NarrationError {
     /// Narration reads the script: generate one first.
     #[error("the project has no script yet")]
     NoScript,
-    /// The channel has no default persona to read it.
-    #[error("the channel has no default persona")]
+    /// Neither the project nor its channel has a persona to read it.
+    #[error("no persona reads this project")]
     NoPersona,
+    /// The persona's voice is flagged: fix it on the personas screen.
+    #[error("the persona's voice is flagged ({0:?})")]
+    VoiceFlagged(VoiceFlag),
     /// Generation calls this provider, and no key is saved for it.
     #[error("no {0} key saved")]
     MissingKey(Provider),
@@ -67,6 +72,7 @@ impl NarrationError {
             NarrationError::ProjectNotFound => Text::ProjectNotFound,
             NarrationError::NoScript => Text::NarrationNoScript,
             NarrationError::NoPersona => Text::NarrationNoPersona,
+            NarrationError::VoiceFlagged(flag) => Text::NarrationVoiceFlagged(*flag),
             NarrationError::MissingKey(_) => Text::NarrationMissingKey,
             NarrationError::Busy => Text::NarrationBusy,
             NarrationError::OverBudget(_) => Text::BudgetReachedTitle,
@@ -90,7 +96,8 @@ pub struct NarrationView {
     pub stale: bool,
     /// The project's latest narration job.
     pub job: Option<Job>,
-    /// Who reads the next narration: the channel's default persona.
+    /// Who reads the next narration: the project's own persona, else the
+    /// channel's default. A flagged one cannot read it yet.
     pub persona: Option<Persona>,
     /// What reading the current script would cost; `None` without one.
     pub estimate: Option<SpendEstimate>,
@@ -504,12 +511,17 @@ impl Bardo {
         })
     }
 
-    /// The channel's default persona, which reads the project's narration.
-    fn narrator(&self, project: &VideoProject) -> Result<Option<Persona>, NarrationError> {
-        let Some(channel) = self.channels.get(project.channel)? else {
-            return Ok(None);
-        };
-        let Some(id) = channel.details.default_persona() else {
+    /// The persona that reads the project's narration: its own, else the
+    /// channel's default.
+    pub(crate) fn narrator(
+        &self,
+        project: &VideoProject,
+    ) -> Result<Option<Persona>, RepositoryError> {
+        let channel_default = self
+            .channels
+            .get(project.channel)?
+            .and_then(|channel| channel.details.default_persona());
+        let Some(id) = project.narrator(channel_default) else {
             return Ok(None);
         };
         Ok(self
@@ -542,8 +554,8 @@ impl Bardo {
         })
     }
 
-    /// Starts a job in which the channel's default persona reads the
-    /// project's current script. The new narration replaces the current
+    /// Starts a job in which the project's persona reads its current
+    /// script. The new narration replaces the current
     /// one once it is complete. Past the voice provider's budget it needs
     /// `consent`.
     pub fn generate_narration(
@@ -557,6 +569,9 @@ impl Bardo {
             .script(project.id)?
             .ok_or(NarrationError::NoScript)?;
         let persona = self.narrator(&project)?.ok_or(NarrationError::NoPersona)?;
+        if let Some(flag) = persona.voice_flag {
+            return Err(NarrationError::VoiceFlagged(flag));
+        }
         if self
             .latest_narration_job(project.id)
             .is_some_and(|job| job.state().is_active())
@@ -1054,6 +1069,72 @@ mod tests {
             !h.files.exists(project.id, &first.audio_file),
             "the replaced audio is removed"
         );
+    }
+
+    #[test]
+    fn the_videos_own_persona_reads_instead_of_the_channels() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = project(&app);
+        let storyteller = app
+            .personas()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.details.name() == "Dramatic Storyteller (en-US)")
+            .unwrap();
+        app.set_project_persona(project.id, Some(storyteller.id))
+            .unwrap();
+        assert_eq!(
+            app.narration(project.id).unwrap().persona.as_ref(),
+            Some(&storyteller)
+        );
+
+        let narration = narrate(&app, &project);
+        let requests = h.speech.requests();
+        assert_eq!(&requests[0].voice, storyteller.details.voice());
+        assert_eq!(requests[0].presets, storyteller.details.presets());
+        assert_eq!(narration.voice.name(), "Florence");
+
+        // Back to the channel's default.
+        app.set_project_persona(project.id, None).unwrap();
+        assert_eq!(
+            app.narration(project.id).unwrap().persona,
+            Some(documentary_narrator(&app))
+        );
+    }
+
+    #[test]
+    fn a_persona_with_a_flagged_voice_cannot_narrate_until_fixed() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = project(&app);
+        let mut narrator = documentary_narrator(&app);
+        for flag in [VoiceFlag::Unchecked, VoiceFlag::Unavailable] {
+            narrator.voice_flag = Some(flag);
+            app.personas.save(&narrator).unwrap();
+            let error = app
+                .generate_narration(project.id, BudgetConsent::Ask)
+                .unwrap_err();
+            assert!(
+                matches!(error, NarrationError::VoiceFlagged(f) if f == flag),
+                "{error:?}"
+            );
+            assert_eq!(error.message(), Text::NarrationVoiceFlagged(flag));
+            assert_eq!(
+                app.narration(project.id)
+                    .unwrap()
+                    .persona
+                    .unwrap()
+                    .voice_flag,
+                Some(flag),
+                "the panel can say why"
+            );
+        }
+        assert!(h.speech.requests().is_empty(), "nothing was sent");
+
+        narrator.voice_flag = None;
+        app.personas.save(&narrator).unwrap();
+        narrate(&app, &project);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::{ChannelId, Confidence, JobId, Niche, ProfileId, RepositoryError, Score};
+use crate::{ChannelId, Confidence, JobId, Niche, PersonaId, ProfileId, RepositoryError, Score};
 
 uuid_id!(
     /// Identifies a theme.
@@ -328,6 +328,7 @@ impl Theme {
             theme: self.id,
             title: self.idea.title.clone(),
             created_at: now,
+            persona: None,
         })
     }
 }
@@ -357,6 +358,16 @@ pub struct VideoProject {
     /// The working title, copied from the theme when approved.
     pub title: String,
     pub created_at: SystemTime,
+    /// The persona that narrates this video instead of the channel's
+    /// default; `None` follows the channel.
+    pub persona: Option<PersonaId>,
+}
+
+impl VideoProject {
+    /// Who narrates the video: its own persona, else the channel's default.
+    pub fn narrator(&self, channel_default: Option<PersonaId>) -> Option<PersonaId> {
+        self.persona.or(channel_default)
+    }
 }
 
 /// Persistence port for themes and the video projects they start. Shared
@@ -377,6 +388,13 @@ pub trait ThemeRepository: Send + Sync {
     fn projects(&self, channel: ChannelId) -> Result<Vec<VideoProject>, RepositoryError>;
 
     fn project(&self, id: VideoProjectId) -> Result<Option<VideoProject>, RepositoryError>;
+
+    /// Sets or clears (`None`) the persona that narrates the project.
+    fn set_project_persona(
+        &self,
+        id: VideoProjectId,
+        persona: Option<PersonaId>,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
@@ -402,6 +420,14 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
 
     fn project(&self, id: VideoProjectId) -> Result<Option<VideoProject>, RepositoryError> {
         (**self).project(id)
+    }
+
+    fn set_project_persona(
+        &self,
+        id: VideoProjectId,
+        persona: Option<PersonaId>,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_project_persona(id, persona)
     }
 }
 
@@ -531,6 +557,23 @@ mod tests {
         assert_eq!(project.theme, theme.id);
         assert_eq!(project.title, "The lost cosmonauts");
         assert_eq!(project.created_at, at(99));
+        assert_eq!(project.persona, None, "follows the channel's persona");
+    }
+
+    #[test]
+    fn a_projects_own_persona_overrides_the_channels_default() {
+        let mut project = theme("The lost cosmonauts").approve(at(1)).unwrap();
+        let channel_default = PersonaId::new();
+        assert_eq!(
+            project.narrator(Some(channel_default)),
+            Some(channel_default)
+        );
+        assert_eq!(project.narrator(None), None);
+
+        let own = PersonaId::new();
+        project.persona = Some(own);
+        assert_eq!(project.narrator(Some(channel_default)), Some(own));
+        assert_eq!(project.narrator(None), Some(own));
     }
 
     #[test]

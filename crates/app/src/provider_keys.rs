@@ -233,6 +233,7 @@ impl Bardo {
             .map_err(|error| store_failure(&keys.redactor, provider, "save", error))?;
         tracing::info!(provider = provider.code(), "saved provider key");
         keys.replaced(provider, KeyState::Saved { hint: key.hint() });
+        self.forget_voice_list(provider);
         Ok(())
     }
 
@@ -244,6 +245,7 @@ impl Bardo {
             .map_err(|error| store_failure(&keys.redactor, provider, "remove", error))?;
         tracing::info!(provider = provider.code(), "removed provider key");
         keys.replaced(provider, KeyState::NotSet);
+        self.forget_voice_list(provider);
         Ok(())
     }
 
