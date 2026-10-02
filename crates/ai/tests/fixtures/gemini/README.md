@@ -20,4 +20,6 @@ real key (re-record when image generation misbehaves with a real key):
   `generate-rate-limited.http`, `generate-overloaded.http`.
 
 Synthetic, for edge cases: `generate-text-only.http` (text, no image),
+`generate-image-no-breakdown.http` (usage without the per-modality
+breakdown),
 `generate-not-an-image.http` (inline data that is not an image).

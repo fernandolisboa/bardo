@@ -2,6 +2,7 @@
 //! keys (Windows Credential Manager).
 
 mod channel;
+mod cost;
 mod files;
 mod job;
 mod migrations;

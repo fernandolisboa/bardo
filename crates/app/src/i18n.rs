@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use bardo_domain::{
     ApiKeyError, AspectRatio, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind,
-    JobState, KeyCheckOutcome, Network, NetworkAccountFieldError, NicheSeedError,
-    PersonaFieldError, Provider, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFieldError, UiLanguage, Visibility, VoiceCategory,
+    JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network, NetworkAccountFieldError,
+    NicheSeedError, PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError,
+    TemplateKind, TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage, Visibility,
+    VoiceCategory,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -455,6 +456,88 @@ pub enum Text {
     /// Placeholder: `{n}`.
     NumberBillions,
     DecimalSeparator,
+    /// Placeholder: `{n}`, the amount with its separators.
+    MoneyFormat,
+    ThousandsSeparator,
+    /// Placeholder: `{amount}`.
+    MoneyUnder,
+    MoneyError(MoneyError),
+    /// Placeholders: `{month}`, `{year}`.
+    MonthFormat,
+    /// 1 to 12.
+    MonthName(u8),
+    MeterName(Meter),
+    MeterUnit(Meter),
+    CostsTitle,
+    CostsHint,
+    CostsPreviousMonth,
+    CostsNextMonth,
+    /// Placeholder: `{month}`.
+    CostsTotal,
+    /// Placeholder: `{month}`.
+    CostsEmpty,
+    /// Placeholder: `{models}`.
+    CostsUnpriced,
+    CostsNotLoaded,
+    CostsNotSaved,
+    CostsNotPaid,
+    CostsProvidersTitle,
+    CostsProvidersHint,
+    CostsChannelsTitle,
+    CostsVideosTitle,
+    CostsUnknownChannel,
+    CostsUnknownVideo,
+    BudgetNone,
+    /// Placeholders: `{budget}`, `{percent}`.
+    BudgetUsed,
+    BudgetNear,
+    BudgetReached,
+    SetBudget,
+    ChangeBudget,
+    RemoveBudget,
+    SaveBudget,
+    CancelBudget,
+    BudgetPlaceholder,
+    BudgetSaved,
+    BudgetRemoved,
+    RatesTitle,
+    RatesHint,
+    RateAllModels,
+    RateChanged,
+    RateAdded,
+    EditRate,
+    SaveRate,
+    CancelRate,
+    /// Placeholder: `{price}`.
+    ResetRate,
+    RemoveRate,
+    RateSaved,
+    AddRateTitle,
+    RateProvider,
+    RateModel,
+    RateModelPlaceholder,
+    RateMeter,
+    RatePrice,
+    RatePricePlaceholder,
+    AddRate,
+    RateFieldError(RateFieldError),
+    /// Placeholder: `{amount}`.
+    EstimateCost,
+    /// Placeholder: `{amount}`.
+    EstimatePartial,
+    EstimateUnknown,
+    /// Placeholders: `{provider}`, `{spent}`, `{budget}`.
+    EstimateNear,
+    /// Placeholder: `{amount}`.
+    EstimateRedraw,
+    /// Placeholder: `{amount}`.
+    ProjectSpent,
+    BudgetReachedTitle,
+    /// Placeholders: `{provider}`, `{spent}`, `{budget}`, `{amount}`.
+    BudgetReachedLine,
+    BudgetQuestion,
+    BudgetConfirm,
+    BudgetCancel,
 }
 
 impl Text {
@@ -951,6 +1034,83 @@ impl Text {
             Text::NumberMillions => "number.millions",
             Text::NumberBillions => "number.billions",
             Text::DecimalSeparator => "number.decimal_separator",
+            Text::MoneyFormat => "money.format",
+            Text::ThousandsSeparator => "money.thousands_separator",
+            Text::MoneyUnder => "money.under",
+            Text::MoneyError(error) => match error {
+                MoneyError::Required => "money.error.required",
+                MoneyError::Invalid => "money.error.invalid",
+                MoneyError::TooPrecise => "money.error.too_precise",
+                MoneyError::TooLarge => "money.error.too_large",
+            },
+            Text::MonthFormat => "month.format",
+            Text::MonthName(number) => return format!("month.{number}").into(),
+            Text::MeterName(meter) => return format!("meter.{}", meter.code()).into(),
+            Text::MeterUnit(meter) => return format!("meter.unit.{}", meter.code()).into(),
+            Text::CostsTitle => "costs.title",
+            Text::CostsHint => "costs.hint",
+            Text::CostsPreviousMonth => "costs.previous_month",
+            Text::CostsNextMonth => "costs.next_month",
+            Text::CostsTotal => "costs.total",
+            Text::CostsEmpty => "costs.empty",
+            Text::CostsUnpriced => "costs.unpriced",
+            Text::CostsNotLoaded => "costs.not_loaded",
+            Text::CostsNotSaved => "costs.not_saved",
+            Text::CostsNotPaid => "costs.not_paid",
+            Text::CostsProvidersTitle => "costs.providers_title",
+            Text::CostsProvidersHint => "costs.providers_hint",
+            Text::CostsChannelsTitle => "costs.channels_title",
+            Text::CostsVideosTitle => "costs.videos_title",
+            Text::CostsUnknownChannel => "costs.unknown_channel",
+            Text::CostsUnknownVideo => "costs.unknown_video",
+            Text::BudgetNone => "costs.budget.none",
+            Text::BudgetUsed => "costs.budget.used",
+            Text::BudgetNear => "costs.budget.near",
+            Text::BudgetReached => "costs.budget.reached",
+            Text::SetBudget => "costs.budget.set",
+            Text::ChangeBudget => "costs.budget.change",
+            Text::RemoveBudget => "costs.budget.remove",
+            Text::SaveBudget => "costs.budget.save",
+            Text::CancelBudget => "costs.budget.cancel",
+            Text::BudgetPlaceholder => "costs.budget.placeholder",
+            Text::BudgetSaved => "costs.budget.saved",
+            Text::BudgetRemoved => "costs.budget.removed",
+            Text::RatesTitle => "costs.rates.title",
+            Text::RatesHint => "costs.rates.hint",
+            Text::RateAllModels => "costs.rates.all_models",
+            Text::RateChanged => "costs.rates.changed",
+            Text::RateAdded => "costs.rates.added",
+            Text::EditRate => "costs.rates.edit",
+            Text::SaveRate => "costs.rates.save",
+            Text::CancelRate => "costs.rates.cancel",
+            Text::ResetRate => "costs.rates.reset",
+            Text::RemoveRate => "costs.rates.remove",
+            Text::RateSaved => "costs.rates.saved",
+            Text::AddRateTitle => "costs.rates.add_title",
+            Text::RateProvider => "costs.rates.provider",
+            Text::RateModel => "costs.rates.model",
+            Text::RateModelPlaceholder => "costs.rates.model_placeholder",
+            Text::RateMeter => "costs.rates.meter",
+            Text::RatePrice => "costs.rates.price",
+            Text::RatePricePlaceholder => "costs.rates.price_placeholder",
+            Text::AddRate => "costs.rates.add",
+            Text::RateFieldError(error) => match error {
+                RateFieldError::ModelTooLong => "costs.rates.error.model_too_long",
+                RateFieldError::ModelHasSpaces => "costs.rates.error.model_has_spaces",
+                RateFieldError::NotPaid => "costs.not_paid",
+                RateFieldError::Price(error) => return Text::MoneyError(error).key(),
+            },
+            Text::EstimateCost => "estimate.cost",
+            Text::EstimatePartial => "estimate.partial",
+            Text::EstimateUnknown => "estimate.unknown",
+            Text::EstimateNear => "estimate.near",
+            Text::EstimateRedraw => "estimate.redraw",
+            Text::ProjectSpent => "estimate.project_spent",
+            Text::BudgetReachedTitle => "budget.reached_title",
+            Text::BudgetReachedLine => "budget.reached_line",
+            Text::BudgetQuestion => "budget.question",
+            Text::BudgetConfirm => "budget.confirm",
+            Text::BudgetCancel => "budget.cancel",
         };
         Cow::Borrowed(key)
     }
@@ -1026,6 +1186,65 @@ impl Catalog {
             (tenths / 10).to_string()
         };
         self.format(text, &[("n", &number)])
+    }
+
+    /// Digits grouped by thousands: `1,234,567` in en-US.
+    fn grouped(&self, n: u64) -> String {
+        let digits = n.to_string();
+        let separator = self.get(Text::ThousandsSeparator);
+        let mut out = String::new();
+        for (index, digit) in digits.chars().enumerate() {
+            if index > 0 && (digits.len() - index).is_multiple_of(3) {
+                out.push_str(&separator);
+            }
+            out.push(digit);
+        }
+        out
+    }
+
+    /// Dollars with `decimals` decimal places (2 to 6) and trailing zeros
+    /// past the cents dropped, rounded half up.
+    fn dollars(&self, amount: Money, decimals: u32) -> String {
+        let unit = 10u64.pow(6 - decimals);
+        let rounded = amount.micros().saturating_add(unit / 2) / unit;
+        let scale = 10u64.pow(decimals);
+        let (whole, fraction) = (rounded / scale, rounded % scale);
+        let mut fraction = format!("{fraction:0width$}", width = decimals as usize);
+        while fraction.len() > 2 && fraction.ends_with('0') {
+            fraction.pop();
+        }
+        let n = format!(
+            "{}{}{fraction}",
+            self.grouped(whole),
+            self.get(Text::DecimalSeparator)
+        );
+        self.format(Text::MoneyFormat, &[("n", &n)])
+    }
+
+    /// An amount spent or estimated, to the cent: `$1,234.56`, `US$ 0,05`.
+    /// A non-zero amount that rounds to nothing reads `under $0.01`.
+    pub fn money(&self, amount: Money) -> String {
+        if !amount.is_zero() && amount < Money::from_micros(5_000) {
+            let cent = self.dollars(Money::from_cents(1), 2);
+            return self.format(Text::MoneyUnder, &[("amount", &cent)]);
+        }
+        self.dollars(amount, 2)
+    }
+
+    /// A price, to the millionth when it needs it: `$4.00`, `$0.042`.
+    pub fn price(&self, amount: Money) -> String {
+        self.dollars(amount, 6)
+    }
+
+    /// A month and its year: `October 2026`, `outubro de 2026`.
+    pub fn month(&self, month: Month) -> String {
+        self.format(
+            Text::MonthFormat,
+            &[
+                ("month", &self.get(Text::MonthName(month.number()))),
+                ("year", &month.year().to_string()),
+            ],
+        )
     }
 
     /// How long ago something happened, e.g. `3 h ago`.
@@ -1433,6 +1652,68 @@ mod tests {
             Text::NumberMillions,
             Text::NumberBillions,
             Text::DecimalSeparator,
+            Text::MoneyFormat,
+            Text::ThousandsSeparator,
+            Text::MoneyUnder,
+            Text::MonthFormat,
+            Text::CostsTitle,
+            Text::CostsHint,
+            Text::CostsPreviousMonth,
+            Text::CostsNextMonth,
+            Text::CostsTotal,
+            Text::CostsEmpty,
+            Text::CostsUnpriced,
+            Text::CostsNotLoaded,
+            Text::CostsNotSaved,
+            Text::CostsNotPaid,
+            Text::CostsProvidersTitle,
+            Text::CostsProvidersHint,
+            Text::CostsChannelsTitle,
+            Text::CostsVideosTitle,
+            Text::CostsUnknownChannel,
+            Text::CostsUnknownVideo,
+            Text::BudgetNone,
+            Text::BudgetUsed,
+            Text::BudgetNear,
+            Text::BudgetReached,
+            Text::SetBudget,
+            Text::ChangeBudget,
+            Text::RemoveBudget,
+            Text::SaveBudget,
+            Text::CancelBudget,
+            Text::BudgetPlaceholder,
+            Text::BudgetSaved,
+            Text::BudgetRemoved,
+            Text::RatesTitle,
+            Text::RatesHint,
+            Text::RateAllModels,
+            Text::RateChanged,
+            Text::RateAdded,
+            Text::EditRate,
+            Text::SaveRate,
+            Text::CancelRate,
+            Text::ResetRate,
+            Text::RemoveRate,
+            Text::RateSaved,
+            Text::AddRateTitle,
+            Text::RateProvider,
+            Text::RateModel,
+            Text::RateModelPlaceholder,
+            Text::RateMeter,
+            Text::RatePrice,
+            Text::RatePricePlaceholder,
+            Text::AddRate,
+            Text::EstimateCost,
+            Text::EstimatePartial,
+            Text::EstimateUnknown,
+            Text::EstimateNear,
+            Text::EstimateRedraw,
+            Text::ProjectSpent,
+            Text::BudgetReachedTitle,
+            Text::BudgetReachedLine,
+            Text::BudgetQuestion,
+            Text::BudgetConfirm,
+            Text::BudgetCancel,
         ];
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));
@@ -1459,6 +1740,27 @@ mod tests {
         texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
         texts.extend(TemplateVariable::ALL.map(Text::TemplateVariableHint));
         texts.extend(TemplateProblem::ALL.map(Text::TemplateProblem));
+        texts.extend(
+            [
+                MoneyError::Required,
+                MoneyError::Invalid,
+                MoneyError::TooPrecise,
+                MoneyError::TooLarge,
+            ]
+            .map(Text::MoneyError),
+        );
+        texts.extend(
+            [
+                RateFieldError::ModelTooLong,
+                RateFieldError::ModelHasSpaces,
+                RateFieldError::Price(MoneyError::Invalid),
+                RateFieldError::NotPaid,
+            ]
+            .map(Text::RateFieldError),
+        );
+        texts.extend((1..=12).map(Text::MonthName));
+        texts.extend(Meter::ALL.map(Text::MeterName));
+        texts.extend(Meter::ALL.map(Text::MeterUnit));
         texts
     }
 
@@ -1553,6 +1855,78 @@ mod tests {
                 (
                     Text::SceneImageRecord,
                     &[("model", "nano"), ("tokens", "1290"), ("n", "2")][..],
+                ),
+            ] {
+                let filled = catalog.format(text, args);
+                assert!(!filled.contains('{'), "{filled}");
+                for (_, value) in args {
+                    assert!(filled.contains(value), "{language}: {filled}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn money_reads_in_each_language() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        let amount = Money::from_micros(1_234_567_891);
+        assert_eq!(en.money(amount), "$1,234.57");
+        assert_eq!(pt.money(amount), "US$ 1.234,57");
+        assert_eq!(en.money(Money::ZERO), "$0.00");
+        assert_eq!(en.money(Money::from_micros(5_000)), "$0.01");
+        assert_eq!(en.money(Money::from_micros(4_999)), "under $0.01");
+        assert_eq!(pt.money(Money::from_micros(1)), "menos de US$ 0,01");
+    }
+
+    #[test]
+    fn prices_keep_the_digits_they_need() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        assert_eq!(en.price(Money::from_cents(400)), "$4.00");
+        assert_eq!(en.price(Money::from_micros(42_000)), "$0.042");
+        assert_eq!(en.price(Money::from_micros(1)), "$0.000001");
+        assert_eq!(en.price(Money::from_micros(60_000_000)), "$60.00");
+    }
+
+    #[test]
+    fn months_read_in_each_language() {
+        let october = Month::new(2026, 10).unwrap();
+        assert_eq!(
+            Catalog::load(UiLanguage::EnUs).month(october),
+            "October 2026"
+        );
+        assert_eq!(
+            Catalog::load(UiLanguage::PtBr).month(october),
+            "outubro de 2026"
+        );
+    }
+
+    #[test]
+    fn cost_placeholders_are_filled_in_every_language() {
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for (text, args) in [
+                (Text::CostsTotal, &[("month", "May 2026")][..]),
+                (Text::CostsEmpty, &[("month", "May 2026")][..]),
+                (Text::CostsUnpriced, &[("models", "claude-x")][..]),
+                (Text::BudgetUsed, &[("budget", "$9"), ("percent", "81")][..]),
+                (Text::ResetRate, &[("price", "$4.00")][..]),
+                (Text::EstimateCost, &[("amount", "$0.12")][..]),
+                (Text::EstimatePartial, &[("amount", "$0.12")][..]),
+                (Text::ProjectSpent, &[("amount", "$0.12")][..]),
+                (Text::EstimateRedraw, &[("amount", "$0.12")][..]),
+                (
+                    Text::EstimateNear,
+                    &[("provider", "Claude"), ("spent", "$8"), ("budget", "$9")][..],
+                ),
+                (
+                    Text::BudgetReachedLine,
+                    &[
+                        ("provider", "Claude"),
+                        ("spent", "$8"),
+                        ("budget", "$9"),
+                        ("amount", "$2"),
+                    ][..],
                 ),
             ] {
                 let filled = catalog.format(text, args);

@@ -631,3 +631,113 @@ professional = "Clone profissional"
 generated = "Criada por descrição"
 default = "Padrão da ElevenLabs"
 other = "Adicionada da biblioteca"
+
+[money]
+format = "US$ {n}"
+thousands_separator = "."
+under = "menos de {amount}"
+
+[money.error]
+required = "Digite um valor."
+invalid = "Digite um valor em dólares, como 12,50."
+too_precise = "Use no máximo seis casas decimais."
+too_large = "Esse valor é grande demais."
+
+[month]
+format = "{month} de {year}"
+1 = "janeiro"
+2 = "fevereiro"
+3 = "março"
+4 = "abril"
+5 = "maio"
+6 = "junho"
+7 = "julho"
+8 = "agosto"
+9 = "setembro"
+10 = "outubro"
+11 = "novembro"
+12 = "dezembro"
+
+[meter]
+input_tokens = "Tokens de entrada"
+output_tokens = "Tokens de saída"
+image_tokens = "Tokens de imagem"
+characters = "Caracteres"
+
+[meter.unit]
+input_tokens = "por milhão de tokens"
+output_tokens = "por milhão de tokens"
+image_tokens = "por milhão de tokens"
+characters = "por mil caracteres"
+
+[costs]
+title = "Custos"
+hint = "Quanto as gerações custaram, por provedor, canal e vídeo. Os meses seguem o UTC, como os provedores cobram."
+previous_month = "Mês anterior"
+next_month = "Próximo mês"
+total = "Gasto em {month}"
+empty = "Nada foi gasto em {month}."
+unpriced = "Sem tarifa para {models}: essas chamadas contam como zero até você adicionar uma em Tarifas."
+not_loaded = "Não foi possível carregar os custos. Reinicie o Bardo para tentar de novo."
+not_saved = "Não foi possível salvar. Tente de novo."
+not_paid = "Este provedor é gratuito dentro da cota, então não tem orçamento."
+providers_title = "Por provedor"
+providers_hint = "Defina um orçamento mensal por provedor. A partir de 80% o Bardo avisa antes de uma geração; quando um job atingiria o orçamento, o Bardo pergunta antes de começar."
+channels_title = "Por canal"
+videos_title = "Por vídeo"
+unknown_channel = "Canal desconhecido"
+unknown_video = "Vídeo removido"
+
+[costs.budget]
+none = "Sem orçamento"
+used = "de {budget} de orçamento · {percent}%"
+near = "Perto do orçamento"
+reached = "Orçamento atingido"
+set = "Definir orçamento"
+change = "Alterar"
+remove = "Remover"
+save = "Salvar"
+cancel = "Cancelar"
+placeholder = "Orçamento mensal, ex.: 20"
+saved = "Orçamento salvo."
+removed = "Orçamento removido."
+
+[costs.rates]
+title = "Tarifas"
+hint = "Preços em dólares, por milhão de tokens ou por mil caracteres. Um modelo vale para todo modelo cujo nome começa com ele. Um preço alterado vale para as próximas chamadas; os custos já registrados não mudam."
+all_models = "Todos os modelos"
+changed = "Alterada"
+added = "Adicionada"
+edit = "Editar"
+save = "Salvar"
+cancel = "Cancelar"
+reset = "Restaurar {price}"
+remove = "Remover"
+saved = "Tarifa salva."
+add_title = "Adicionar tarifa"
+provider = "Provedor"
+model = "Modelo"
+model_placeholder = "Nome do modelo ou o começo dele, ex.: claude-sonnet-5-5"
+meter = "Medida"
+price = "Preço (US$)"
+price_placeholder = "ex.: 3,00"
+add = "Adicionar tarifa"
+
+[costs.rates.error]
+model_too_long = "Use no máximo 100 caracteres no modelo."
+model_has_spaces = "Nomes de modelo não têm espaços."
+
+[estimate]
+cost = "Custo estimado: cerca de {amount}"
+partial = "Custo estimado: cerca de {amount}, mais chamadas sem tarifa"
+unknown = "Custo estimado desconhecido: nenhuma tarifa cobre este modelo. Adicione uma na tela Custos."
+near = "{provider}: {spent} do orçamento de {budget} gastos este mês; isto passa de 80%."
+redraw = "Desenhar uma cena de novo custa cerca de {amount}."
+project_spent = "Este vídeo até agora: {amount}"
+
+[budget]
+reached_title = "Orçamento atingido"
+reached_line = "{provider}: {spent} do orçamento de {budget} gastos este mês, e isto custa cerca de {amount}."
+question = "Gerar mesmo assim?"
+confirm = "Gerar mesmo assim"
+cancel = "Cancelar"

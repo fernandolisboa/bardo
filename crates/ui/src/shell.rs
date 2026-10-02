@@ -7,6 +7,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::channels::ChannelsScreen;
+use crate::costs::CostsScreen;
 use crate::jobs::JobsPanel;
 use crate::personas::PersonasScreen;
 use crate::projects::ProjectsScreen;
@@ -29,17 +30,19 @@ enum Screen {
     Themes,
     Projects,
     Templates,
+    Costs,
     Settings,
 }
 
 impl Screen {
-    const ALL: [Screen; 7] = [
+    const ALL: [Screen; 8] = [
         Screen::Channels,
         Screen::Personas,
         Screen::Research,
         Screen::Themes,
         Screen::Projects,
         Screen::Templates,
+        Screen::Costs,
         Screen::Settings,
     ];
 
@@ -51,6 +54,7 @@ impl Screen {
             Screen::Themes => Text::ThemesTitle,
             Screen::Projects => Text::ProjectsNav,
             Screen::Templates => Text::TemplatesTitle,
+            Screen::Costs => Text::CostsTitle,
             Screen::Settings => Text::SettingsTitle,
         }
     }
@@ -69,6 +73,7 @@ pub struct Shell {
     themes: Entity<ThemesScreen>,
     projects: Entity<ProjectsScreen>,
     templates: Entity<TemplatesScreen>,
+    costs: Entity<CostsScreen>,
     settings: Entity<SettingsScreen>,
     /// Kept alive while closed, so the toggle's count stays current.
     jobs: Entity<JobsPanel>,
@@ -86,6 +91,7 @@ impl Shell {
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
         let projects = cx.new(|cx| ProjectsScreen::new(bardo.clone(), window, cx));
         let templates = cx.new(|cx| TemplatesScreen::new(bardo.clone(), window, cx));
+        let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let subscriptions = vec![cx.observe(&jobs, |_, _, cx| cx.notify())];
@@ -98,6 +104,7 @@ impl Shell {
             themes,
             projects,
             templates,
+            costs,
             settings,
             jobs,
             jobs_open: false,
@@ -130,6 +137,7 @@ impl Shell {
                 Screen::Templates => self
                     .templates
                     .update(cx, |templates, cx| templates.reload(window, cx)),
+                Screen::Costs => self.costs.update(cx, |costs, cx| costs.reload(cx)),
                 Screen::Settings => {}
             }
         }
@@ -252,6 +260,7 @@ impl Render for Shell {
                                 Screen::Themes => main.child(self.themes.clone()),
                                 Screen::Projects => main.child(self.projects.clone()),
                                 Screen::Templates => main.child(self.templates.clone()),
+                                Screen::Costs => main.child(self.costs.clone()),
                                 Screen::Settings => main.child(self.settings.clone()),
                             }),
                     )

@@ -9,8 +9,8 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKey, GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, Provider, ProviderFailure,
-    ProviderFailureKind, TokenUsage,
+    ApiKey, GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, Metered, Provider,
+    ProviderFailure, ProviderFailureKind,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -103,6 +103,18 @@ pub fn parse_image(response: &HttpResponse) -> Result<GeneratedImage, ProviderFa
     }
     let usage = &body["usageMetadata"];
     let count = |name: &str| usage[name].as_u64().unwrap_or(0);
+    let candidates = count("candidatesTokenCount");
+    // Image tokens are priced apart from text; without a breakdown, the
+    // whole answer is the image.
+    let image_tokens = usage["candidatesTokensDetails"]
+        .as_array()
+        .map_or(candidates, |details| {
+            details
+                .iter()
+                .filter(|detail| detail["modality"].as_str() == Some("IMAGE"))
+                .filter_map(|detail| detail["tokenCount"].as_u64())
+                .sum()
+        });
     Ok(GeneratedImage {
         bytes,
         format,
@@ -110,10 +122,12 @@ pub fn parse_image(response: &HttpResponse) -> Result<GeneratedImage, ProviderFa
             .as_str()
             .unwrap_or(IMAGE_MODEL)
             .to_owned(),
-        usage: TokenUsage {
+        usage: Metered {
             input_tokens: count("promptTokenCount"),
-            // Reasoning is billed as output, like the image.
-            output_tokens: count("candidatesTokenCount") + count("thoughtsTokenCount"),
+            // Reasoning and any text are billed as text output.
+            output_tokens: candidates.saturating_sub(image_tokens) + count("thoughtsTokenCount"),
+            image_tokens,
+            characters: 0,
         },
     })
 }

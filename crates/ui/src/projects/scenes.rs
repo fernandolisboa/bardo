@@ -3,7 +3,7 @@
 //! and choose between the current image and the new one.
 
 use bardo_app::bardo_domain::{Job, JobState, Scene, SceneImage, TemplateKind, VideoProjectId};
-use bardo_app::{SceneError, Text};
+use bardo_app::{BudgetConsent, SceneError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::spinner::Spinner;
@@ -16,10 +16,19 @@ use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div
 
 use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::shell::tr;
+use crate::spend::{budget_question, estimate_note};
 
 /// Thumbnails are 16:9, like the images.
 const THUMB_WIDTH: f32 = 192.;
 const THUMB_HEIGHT: f32 = 108.;
+
+/// A scene action that starts a paid job.
+#[derive(Clone, Copy)]
+pub(super) enum SceneAction {
+    Plan { discard_images: bool },
+    DrawMissing,
+    Redraw(usize),
+}
 
 impl ProjectsScreen {
     pub(super) fn load_scenes(&mut self, id: VideoProjectId, cx: &mut Context<Self>) {
@@ -55,20 +64,40 @@ impl ProjectsScreen {
         result.ok()
     }
 
-    fn plan_scenes(&mut self, discard_images: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Starts a paid scene job. Discarding images and going past a budget
+    /// are asked in the panel instead of shown as errors.
+    fn run_scene(
+        &mut self,
+        action: SceneAction,
+        consent: BudgetConsent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.confirm_replan = false;
-        let result = self.scene_action(window, cx, |bardo, id| {
-            bardo.plan_scenes(id, discard_images)
-        });
-        if result.is_none()
-            && self
-                .scenes_error
-                .is_some_and(|error| error == Text::ScenesWouldDiscardImages)
-        {
-            // Ask in the panel instead of showing the error.
-            self.scenes_error = None;
-            self.confirm_replan = true;
-        }
+        self.scenes_ask = None;
+        let Some(id) = self.project else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let result = match action {
+            SceneAction::Plan { discard_images } => bardo.plan_scenes(id, discard_images, consent),
+            SceneAction::DrawMissing => bardo.generate_scene_images(id, consent),
+            SceneAction::Redraw(index) => bardo.regenerate_scene_image(id, index, consent),
+        };
+        self.scenes_error = match result {
+            Ok(_) => None,
+            Err(SceneError::WouldDiscardImages(_)) => {
+                self.confirm_replan = true;
+                None
+            }
+            Err(SceneError::OverBudget(estimate)) => {
+                self.scenes_ask = Some((action, estimate));
+                None
+            }
+            Err(error) => Some(error.message()),
+        };
+        self.load(window, cx);
+        cx.notify();
     }
 
     fn edit_scene(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -175,9 +204,16 @@ impl ProjectsScreen {
                 },
             ))
             .disabled(busy || view.narration.is_none())
-            .on_click(
-                cx.listener(|this, _: &ClickEvent, window, cx| this.plan_scenes(false, window, cx)),
-            );
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.run_scene(
+                    SceneAction::Plan {
+                        discard_images: false,
+                    },
+                    BudgetConsent::Ask,
+                    window,
+                    cx,
+                )
+            }));
         let plan_button = if plan.is_none() || view.stale {
             plan_button.primary()
         } else {
@@ -194,7 +230,7 @@ impl ProjectsScreen {
                 )))
                 .disabled(busy)
                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.scene_action(window, cx, |bardo, id| bardo.generate_scene_images(id));
+                    this.run_scene(SceneAction::DrawMissing, BudgetConsent::Ask, window, cx);
                 }))
         });
         let files = plan.map_or(0, |plan| plan.files().count());
@@ -217,7 +253,14 @@ impl ProjectsScreen {
                                 .small()
                                 .label(tr(bardo, Text::ConfirmReplanScenes))
                                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                    this.plan_scenes(true, window, cx)
+                                    this.run_scene(
+                                        SceneAction::Plan {
+                                            discard_images: true,
+                                        },
+                                        BudgetConsent::Ask,
+                                        window,
+                                        cx,
+                                    )
                                 })),
                         )
                         .child(
@@ -240,6 +283,37 @@ impl ProjectsScreen {
             )),
             (Some(_), Some(_)) => tr(bardo, Text::SceneImagesHint),
         };
+        // The estimate of the button that leads: planning, drawing the
+        // missing images, or drawing one scene again.
+        let estimate = if plan.is_none() || view.stale {
+            view.plan_estimate
+                .as_ref()
+                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
+        } else if missing > 0 {
+            view.images_estimate
+                .as_ref()
+                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
+        } else {
+            view.image_estimate
+                .as_ref()
+                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateRedraw, cx))
+        };
+        let ask = self.scenes_ask.as_ref().map(|(action, estimate)| {
+            let action = *action;
+            budget_question(
+                "scenes-budget",
+                bardo,
+                estimate,
+                cx,
+                cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.run_scene(action, BudgetConsent::Confirmed, window, cx)
+                }),
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.scenes_ask = None;
+                    cx.notify();
+                }),
+            )
+        });
 
         Some(
             v_flex()
@@ -275,9 +349,11 @@ impl ProjectsScreen {
                                 .text_color(theme.muted_foreground)
                                 .child(hint),
                         )
+                        .children(estimate)
                         .child(h_flex().gap_2().children(draw_button).child(plan_button)),
                 )
                 .children(confirm)
+                .children(ask)
                 .children(cards)
                 .children(provenance)
                 .into_any_element(),
@@ -480,9 +556,12 @@ impl ProjectsScreen {
                             .label(tr(bardo, Text::RegenerateSceneImage))
                             .disabled(busy || scene.pending().is_some())
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.scene_action(window, cx, |bardo, id| {
-                                    bardo.regenerate_scene_image(id, index)
-                                });
+                                this.run_scene(
+                                    SceneAction::Redraw(index),
+                                    BudgetConsent::Ask,
+                                    window,
+                                    cx,
+                                );
                             })),
                     )
                 })

@@ -1,0 +1,33 @@
+# Built-in prices of the models Bardo calls, in US dollars, as text so they
+# stay exact: per million tokens, or per thousand characters.
+#
+# Checked on 2026-10-02 against each provider's published API prices. The
+# user can change any of them, or add models, on the costs screen; a price
+# changed here reaches every user who has not changed it.
+#
+# Layout: [provider."model"] with one price per meter (input_tokens,
+# output_tokens, image_tokens, characters). A model covers every model whose
+# name starts with it, so `jev` covers `jev-1.13.0`, and an empty model
+# covers all of the provider's models.
+
+# Anthropic, standard API prices.
+[claude."claude-opus-5-5"]
+input_tokens = "4.00"
+output_tokens = "20.00"
+
+# ElevenLabs bills credits from the plan; this is the pay-as-you-go API
+# price of Multilingual v2 and v3.
+[elevenlabs."eleven_multilingual_v2"]
+characters = "0.10"
+
+# Google Gemini API, paid tier. Images are priced per output image token
+# (a 2K image is 1,680 of them); reasoning is billed as text output.
+[gemini."gemini-3.1-flash-image"]
+input_tokens = "0.50"
+output_tokens = "3.00"
+image_tokens = "60.00"
+
+# TypeSafe charges JEV's input tokens only.
+[typesafe."jev"]
+input_tokens = "0.042"
+output_tokens = "0"

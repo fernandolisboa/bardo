@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod channels;
+mod costs;
 mod jobs;
 mod network_accounts;
 mod personas;
@@ -11,6 +12,7 @@ mod projects;
 mod research;
 mod settings;
 mod shell;
+mod spend;
 mod templates;
 mod themes;
 
@@ -48,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
-                size(px(1120.), px(760.)),
+                size(px(1260.), px(780.)),
                 cx,
             ))),
             titlebar: Some(TitlebarOptions {
