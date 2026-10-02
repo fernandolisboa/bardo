@@ -509,6 +509,7 @@ mod tests {
             tone: "Warm.".into(),
             script_style: "Short sentences.".into(),
             presets: GenerationPresets::default(),
+            realistic_voice: false,
         }
     }
 

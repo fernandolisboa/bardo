@@ -311,6 +311,12 @@ impl ProjectsScreen {
         job: Option<&Job>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // An export copies the rendered files: rendering waits for it.
+        let exporting = is_running(
+            self.export_summary
+                .as_ref()
+                .and_then(|summary| summary.job.as_ref()),
+        );
         let chosen = self.chosen_targets().len();
         let running = is_running(job);
         let stopped = job.is_some_and(|job| {
@@ -380,7 +386,7 @@ impl ProjectsScreen {
                     })),
             );
         }
-        if stopped {
+        if stopped && !exporting {
             row = row.child(
                 Button::new("render-resume")
                     .small()
@@ -391,7 +397,7 @@ impl ProjectsScreen {
                     })),
             );
         }
-        if chosen > 0 && !self.confirm_render {
+        if chosen > 0 && !self.confirm_render && !exporting {
             row = row.child(
                 Button::new("render-start")
                     .small()

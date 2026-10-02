@@ -9,7 +9,7 @@ use bardo_domain::Scene;
 
 use bardo_domain::JobState;
 
-use crate::{Bardo, NarrationView, RenderSummary, ScenesView, ScriptView, Text};
+use crate::{Bardo, ExportSummary, NarrationView, RenderSummary, ScenesView, ScriptView, Text};
 
 /// A step of making a video, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,7 +39,12 @@ impl Stage {
     pub fn is_page(self) -> bool {
         matches!(
             self,
-            Stage::Script | Stage::Narration | Stage::Scenes | Stage::Clips | Stage::Render
+            Stage::Script
+                | Stage::Narration
+                | Stage::Scenes
+                | Stage::Clips
+                | Stage::Render
+                | Stage::Publish
         )
     }
 }
@@ -93,11 +98,19 @@ pub enum StageNote {
     Rendering,
     /// The last render failed or was cancelled; it can resume.
     RenderStopped,
+    /// Rendered files wait for their metadata and export.
+    ExportReady,
+    /// Networks exported with their render and metadata as they are now.
+    Exported(usize),
+    /// Networks exported from an earlier render or metadata.
+    ExportOutdated(usize),
+    /// An export job is running.
+    Exporting,
+    /// The last export failed or was cancelled; it can resume.
+    ExportStopped,
     Working,
     /// Locked until that stage has something to give.
     After(Stage),
-    /// Locked: Bardo does not do it yet.
-    NotYet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,13 +134,14 @@ impl StageStatus {
     }
 }
 
-/// Every stage of a project, in order, from its script, narration, scenes
-/// and renders as the projects screen loads them.
+/// Every stage of a project, in order, from its script, narration, scenes,
+/// renders and exports as the projects screen loads them.
 pub fn project_stages(
     script: &ScriptView,
     narration: &NarrationView,
     scenes: &ScenesView,
     renders: &RenderSummary,
+    exports: &ExportSummary,
 ) -> Vec<StageStatus> {
     let running = |job: Option<&bardo_domain::Job>| job.is_some_and(|job| job.state().is_active());
 
@@ -273,6 +287,34 @@ pub fn project_stages(
         StageStatus::new(Stage::Render, StageState::Open, StageNote::RenderReady)
     };
 
+    let export_job = exports.job.as_ref().map(|job| job.state());
+    let publish_stage = if exports.rendered == 0 {
+        StageStatus::locked(Stage::Publish, StageNote::After(Stage::Render))
+    } else if export_job.is_some_and(JobState::is_active) {
+        StageStatus::new(Stage::Publish, StageState::Working, StageNote::Exporting)
+    } else if matches!(export_job, Some(JobState::Failed | JobState::Cancelled)) {
+        StageStatus::new(
+            Stage::Publish,
+            StageState::Attention,
+            StageNote::ExportStopped,
+        )
+    } else if exports.outdated > 0 {
+        StageStatus::new(
+            Stage::Publish,
+            StageState::Attention,
+            StageNote::ExportOutdated(exports.outdated),
+        )
+    } else if exports.exported > 0 {
+        let state = if exports.exported == exports.rendered {
+            StageState::Done
+        } else {
+            StageState::Partial
+        };
+        StageStatus::new(Stage::Publish, state, StageNote::Exported(exports.exported))
+    } else {
+        StageStatus::new(Stage::Publish, StageState::Open, StageNote::ExportReady)
+    };
+
     vec![
         script_stage,
         narration_stage,
@@ -280,7 +322,7 @@ pub fn project_stages(
         clips_stage,
         edit_stage,
         render_stage,
-        StageStatus::locked(Stage::Publish, StageNote::NotYet),
+        publish_stage,
     ]
 }
 
@@ -317,9 +359,13 @@ impl Bardo {
             StageNote::RenderOutdated(files) => n(Text::StageRenderOutdated, files),
             StageNote::Rendering => self.text(Text::StageRendering).into_owned(),
             StageNote::RenderStopped => self.text(Text::StageRenderStopped).into_owned(),
+            StageNote::ExportReady => self.text(Text::StageExportReady).into_owned(),
+            StageNote::Exported(networks) => n(Text::StageExported, networks),
+            StageNote::ExportOutdated(networks) => n(Text::StageExportOutdated, networks),
+            StageNote::Exporting => self.text(Text::StageExporting).into_owned(),
+            StageNote::ExportStopped => self.text(Text::StageExportStopped).into_owned(),
             StageNote::Working => self.text(Text::StageWorking).into_owned(),
             StageNote::After(stage) => self.text(Text::StageAfter(stage)).into_owned(),
-            StageNote::NotYet => self.text(Text::StageNotYet).into_owned(),
         }
     }
 }
@@ -420,6 +466,7 @@ mod tests {
             &app.narration(project.id).unwrap(),
             &app.scenes(project.id).unwrap(),
             &app.render_summary(project.id).unwrap(),
+            &app.export_summary(project.id).unwrap(),
         )
     }
 
@@ -463,7 +510,7 @@ mod tests {
         );
         assert_eq!(
             of(&stages, Stage::Publish),
-            (StageState::Locked, StageNote::NotYet)
+            (StageState::Locked, StageNote::After(Stage::Render))
         );
         assert_eq!(opening_stage(&stages), Stage::Script);
     }
@@ -659,6 +706,8 @@ mod tests {
     fn with_every_page_done_the_project_opens_on_its_last_page() {
         let done = |stage| StageStatus::new(stage, StageState::Done, StageNote::Working);
         let mut stages: Vec<_> = Stage::ALL.into_iter().map(done).collect();
+        assert_eq!(opening_stage(&stages), Stage::Publish);
+        stages[6] = StageStatus::locked(Stage::Publish, StageNote::After(Stage::Render));
         assert_eq!(opening_stage(&stages), Stage::Render);
         stages[5] = StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit));
         assert_eq!(opening_stage(&stages), Stage::Clips);
@@ -677,6 +726,7 @@ mod tests {
                 has_cut: true,
                 ..summary
             },
+            &ExportSummary::default(),
         );
         of(&stages, Stage::Render)
     }
@@ -726,6 +776,89 @@ mod tests {
                 ..RenderSummary::default()
             }),
             (StageState::Attention, StageNote::RenderStopped)
+        );
+    }
+
+    /// The Publish stage of a project with a cut, from its summary.
+    fn publish_stage(summary: ExportSummary) -> (StageState, StageNote) {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        let stages = project_stages(
+            &app.script(project.id).unwrap(),
+            &app.narration(project.id).unwrap(),
+            &app.scenes(project.id).unwrap(),
+            &RenderSummary {
+                has_cut: true,
+                current: summary.rendered,
+                ..RenderSummary::default()
+            },
+            &summary,
+        );
+        of(&stages, Stage::Publish)
+    }
+
+    #[test]
+    fn the_publish_stage_opens_with_a_render_and_follows_its_exports() {
+        let job = |cancelled: bool| {
+            let mut job = Job::new(ProfileId::new(), JobKind::Export, "{}");
+            if cancelled {
+                job.cancel().unwrap();
+            }
+            Some(job)
+        };
+        assert_eq!(
+            publish_stage(ExportSummary::default()),
+            (StageState::Locked, StageNote::After(Stage::Render))
+        );
+        assert_eq!(
+            publish_stage(ExportSummary {
+                rendered: 2,
+                ..ExportSummary::default()
+            }),
+            (StageState::Open, StageNote::ExportReady)
+        );
+        assert_eq!(
+            publish_stage(ExportSummary {
+                rendered: 2,
+                exported: 1,
+                ..ExportSummary::default()
+            }),
+            (StageState::Partial, StageNote::Exported(1))
+        );
+        assert_eq!(
+            publish_stage(ExportSummary {
+                rendered: 2,
+                exported: 2,
+                ..ExportSummary::default()
+            }),
+            (StageState::Done, StageNote::Exported(2))
+        );
+        assert_eq!(
+            publish_stage(ExportSummary {
+                rendered: 2,
+                exported: 1,
+                outdated: 1,
+                ..ExportSummary::default()
+            }),
+            (StageState::Attention, StageNote::ExportOutdated(1))
+        );
+        assert_eq!(
+            publish_stage(ExportSummary {
+                rendered: 2,
+                job: job(false),
+                ..ExportSummary::default()
+            }),
+            (StageState::Working, StageNote::Exporting)
+        );
+        assert_eq!(
+            publish_stage(ExportSummary {
+                rendered: 2,
+                exported: 2,
+                job: job(true),
+                ..ExportSummary::default()
+            }),
+            (StageState::Attention, StageNote::ExportStopped)
         );
     }
 }

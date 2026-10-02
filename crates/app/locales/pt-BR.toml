@@ -208,6 +208,8 @@ scene_images = "Imagens das cenas"
 scene_clips = "Clipes das cenas"
 proxies = "Proxies de pré-visualização"
 music_prompt = "Prompt de música"
+metadata = "Metadados"
+export = "Exportação"
 
 [job.state]
 queued = "Na fila"
@@ -590,6 +592,7 @@ unchanged = "Nada mudou, então nenhuma versão foi criada."
 script = "Roteiro"
 image_prompt = "Prompts de imagem"
 music_prompt = "Prompt de música"
+metadata = "Metadados"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -604,6 +607,8 @@ theme_title = "O título provisório do vídeo."
 theme_angle = "O ângulo do tema aprovado."
 narration_sentences = "A narração, uma frase numerada por linha com o momento em que é falada."
 video_length = "A duração do vídeo, pela narração (\"not known yet\" enquanto não houver uma)."
+script = "O roteiro aprovado."
+networks = "As contas de rede do canal, uma por linha, com os campos e limites de cada rede, o idioma, as tags padrão e o rodapé da conta."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -662,6 +667,8 @@ export = "Exportar para arquivo…"
 export_hint = "Exporta um pacote com a persona e uma referência à voz dela, nunca áudio nem chaves. Quem importar precisa ter a mesma voz na própria conta ElevenLabs."
 exported = "Exportada para {path}."
 imported = "{name} importada."
+realistic_voice = "Voz sintética realista ou clone de uma pessoa real"
+realistic_voice_hint = "Marque quando a voz soa como uma pessoa real: um clone, ou uma voz profissional feita a partir das gravações de alguém. As redes pedem que esses vídeos sejam marcados como conteúdo alterado ou sintético; o Bardo lembra você na exportação. Escolher uma voz clonada ou profissional marca a opção."
 
 [persona.voice_flag]
 unchecked_tag = "Voz não verificada"
@@ -1081,7 +1088,11 @@ images = "{done} de {total} imagens"
 clips = "{done} de {total} clipes"
 editor_ready = "Abre o editor"
 working = "Gerando…"
-not_yet = "Ainda não disponível"
+export_ready = "Pronto para exportar"
+exported = "Exportadas: {n}"
+export_outdated = "Desatualizadas: {n}"
+exporting = "Exportando…"
+export_stopped = "Parada"
 
 [scenes.filter]
 all = "Todas"
@@ -1190,6 +1201,7 @@ nothing_chosen = "Escolha pelo menos uma rede para renderizar."
 blocked = "Uma rede escolhida não pode ser renderizada. Veja as verificações dela."
 cut_changed = "O corte mudou depois desta revisão. Revise de novo antes de renderizar."
 already_running = "Este projeto já está renderizando."
+while_exporting = "Espere a exportação terminar antes de renderizar de novo."
 check_failed = "O Bardo não conseguiu verificar este corte com o ffmpeg. Verifique de novo ou veja os detalhes em Tarefas."
 not_loaded = "Não foi possível carregar a revisão do render. Tente de novo."
 
@@ -1261,3 +1273,112 @@ body = "O render leva um tempo e substitui o último arquivo de cada rede. Ele r
 warnings = "{n} avisos ficam como estão."
 go = "Renderizar agora"
 back = "Voltar"
+
+[export.error]
+no_accounts = "Este canal não tem contas de rede. Adicione uma em Contas para exportar para ela."
+nothing_chosen = "Escolha ao menos uma rede para exportar."
+blocked = "Uma rede escolhida ainda não pode ser exportada. Veja o que falta nela."
+already_running = "Este projeto já está exportando."
+while_rendering = "Espere o render terminar antes de exportar."
+not_loaded = "Não foi possível carregar a etapa de publicação. Tente de novo."
+
+[metadata.error]
+missing_key = "Salve sua chave do Claude em Configurações para escrever os metadados."
+busy = "Os metadados já estão sendo escritos."
+missing = "Esta rede ainda não tem metadados. Escreva-os primeiro."
+not_saved = "Não foi possível salvar os metadados. Tente de novo."
+
+[export.file]
+video = "Vídeo: {file} ({size}, {aspect}, {length})"
+title = "Título"
+description = "Descrição"
+caption = "Legenda"
+tags = "Tags"
+visibility = "Visibilidade: {visibility}"
+
+[disclosure]
+reminder = "Voz sintética: marque este vídeo como conteúdo alterado ou sintético."
+notice = "A voz do narrador está marcada como clone ou voz sintética realista. Ao postar, marque cada vídeo como conteúdo alterado ou sintético; o arquivo de metadados de cada rede diz onde."
+
+[export]
+info = "A publicação prepara o post de cada rede para você subir à mão. O Claude escreve título, descrição e tags a partir do roteiro e dos padrões da conta; você edita dentro dos limites de cada rede. Exportar grava uma pasta por rede com o arquivo renderizado e um metadata.txt para copiar. Upload e agendamento automáticos vêm depois."
+chosen = "{n} de {total} escolhidas"
+targets = "Redes"
+include = "Exportar para esta rede"
+start = "Exportar ({n})"
+running = "Exportando {done} de {total}…"
+stopped = "A exportação parou."
+cancelled = "Exportação cancelada. Retomar exporta as redes que faltam; as prontas ficam."
+show_folder = "Mostrar na pasta"
+column_render = "Render"
+column_last = "Última exportação"
+render_outdated_hint = "O corte ou o preset mudou depois que este arquivo foi renderizado. Ele exporta como está; renderize de novo na etapa Render para incluir as mudanças."
+no_render_hint = "Renderize primeiro o arquivo desta rede na etapa Render."
+
+[export.figure]
+rendered = "Renderizadas"
+metadata = "Metadados"
+exported = "Exportadas"
+cost = "Custo dos metadados"
+networks = "{n} de {total}"
+
+[export.state]
+ready = "Pronta"
+no_render = "Sem render"
+no_metadata = "Sem metadados"
+problems = "{n} a corrigir"
+
+[export.last]
+current = "Exportada"
+outdated = "Desatualizada"
+none = "Não exportada"
+outdated_hint = "O render ou os metadados mudaram depois desta exportação. Exporte de novo para atualizar a pasta."
+
+[metadata]
+generate = "Escrever metadados"
+regenerate = "Escrever de novo"
+generate_hint = "O Claude escreve título, descrição e tags de todas as redes a partir do roteiro e dos padrões de cada conta (idioma, tags padrão, rodapé), usando a versão {n} do template de metadados."
+regenerate_hint = "Escrever de novo substitui os metadados de todas as redes, inclusive as edições."
+running = "O Claude está escrevendo os metadados…"
+stopped = "A escrita dos metadados parou."
+confirm_title = "Escrever os metadados de novo?"
+confirm_body = "Redes com edições suas: {n}. O que o Claude escrever substitui essas edições."
+none = "Escreva os metadados para editar o post desta rede."
+empty = "Ainda sem metadados. O Claude escreve para todas as redes de uma vez."
+state_none = "Não escritos"
+state_generated = "Pelo Claude"
+state_edited = "Editados"
+edited = "Editado"
+title = "Título"
+description = "Descrição"
+caption = "Legenda"
+tags = "Tags"
+tags_placeholder = "Separadas por vírgula"
+counter = "{n}/{limit}"
+tags_count = "{n} tags"
+tags_count_of = "{n}/{limit} tags"
+footer_note = "O rodapé da conta é adicionado depois da descrição."
+hashtags_note = "As tags vão no fim da legenda como hashtags; a contagem as inclui."
+save = "Salvar"
+revert = "Reverter"
+saved = "Metadados salvos."
+copy = "Copiar"
+copied = "Copiado. Cole no formulário de upload da rede."
+preview = "Como será postado"
+cost_unpriced = "Sem tarifa ainda"
+
+[disclosure.how]
+youtube = "No YouTube, responda Sim em \"Conteúdo alterado ou sintético\" nos Detalhes do upload."
+tiktok = "No TikTok, ative \"Conteúdo gerado por IA\" em Mais opções antes de postar."
+instagram_reels = "No Instagram, ative o rótulo de IA em Configurações avançadas antes de compartilhar."
+x = "O X não tem opção de rótulo: diga no post que a voz é sintética."
+kick = "A Kick não tem opção de rótulo nem descrição: diga no título que a voz é sintética."
+
+[metadata.problem]
+title_required = "Escreva um título."
+title_too_long = "O título passa de {limit} caracteres."
+text_required = "Escreva a legenda."
+text_too_long = "O texto passa de {limit} caracteres, com o rodapé e as hashtags."
+too_many_tags = "Mais de {limit} tags."
+tags_too_long = "As tags passam de {limit} caracteres no total."
+angle_brackets = "Esta rede não aceita < ou >. Remova-os."

@@ -62,6 +62,10 @@ pub enum RenderError {
     /// A render of this project is running or waiting.
     #[error("the project is already rendering")]
     AlreadyRendering,
+    /// An export of this project is running or waiting: it copies the
+    /// files a render would rewrite.
+    #[error("the project is exporting")]
+    Exporting,
     #[error(transparent)]
     Media(#[from] MediaError),
     #[error(transparent)]
@@ -79,6 +83,7 @@ impl RenderError {
             RenderError::Blocked => Text::RenderBlocked,
             RenderError::CutChanged => Text::RenderCutChanged,
             RenderError::AlreadyRendering => Text::RenderAlreadyRunning,
+            RenderError::Exporting => Text::RenderWhileExporting,
             RenderError::Media(MediaError::NotFound { .. }) => Text::EditorFfmpegMissing,
             RenderError::Media(_) => Text::RenderCheckFailed,
             RenderError::Repository(_) => Text::RenderNotLoaded,
@@ -497,6 +502,12 @@ impl Bardo {
         {
             return Err(RenderError::AlreadyRendering);
         }
+        if self
+            .export_job(review.project)
+            .is_some_and(|job| job.state().is_active())
+        {
+            return Err(RenderError::Exporting);
+        }
         let reviewed: Vec<CutPlan> = review
             .plans
             .iter()
@@ -819,7 +830,7 @@ impl JobHandler for RenderHandler {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Instant;
 
@@ -866,10 +877,17 @@ mod tests {
         (project, youtube, kick)
     }
 
-    fn checked(app: &Bardo, project: VideoProjectId) -> RenderReview {
+    pub(crate) fn checked(app: &Bardo, project: VideoProjectId) -> RenderReview {
         let review = app.render_review(project).unwrap();
         let found = app.render_checks(&review).run().unwrap();
         review.checked(&found)
+    }
+
+    /// Checks the project's cut and renders every account it can.
+    pub(crate) fn render_all(app: &Bardo, project: VideoProjectId) {
+        let review = checked(app, project);
+        let chosen = review.renderable();
+        done(app, app.start_render(&review, &chosen).unwrap());
     }
 
     fn target(review: &RenderReview, account: NetworkAccountId) -> &RenderTarget {

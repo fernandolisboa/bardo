@@ -54,6 +54,7 @@ mod image;
 mod job;
 mod market;
 mod media;
+mod metadata;
 mod mix;
 mod music_prompt;
 mod narration;
@@ -115,6 +116,11 @@ pub use market::{
 pub use media::{
     AssetSource, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, UnknownAssetSource,
     UnknownMediaKind,
+};
+pub use metadata::{
+    DisclosureLabel, Export, ExportFiles, ExportRepository, METADATA_FILE, MetadataProblem,
+    MetadataRules, Post, TagPlacement, VideoMetadata, VideoMetadataDraft, compose, normalize_tags,
+    package_folder, problems, text_length, video_file_name,
 };
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,

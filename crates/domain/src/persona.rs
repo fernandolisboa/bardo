@@ -52,6 +52,10 @@ pub struct PersonaDraft {
     pub tone: String,
     pub script_style: String,
     pub presets: GenerationPresets,
+    /// The voice is a clone of a real person or a realistic synthetic
+    /// voice: posts made with it need the network's synthetic-content
+    /// disclosure.
+    pub realistic_voice: bool,
 }
 
 /// Why a draft is not a valid persona. One entry per offending field.
@@ -91,6 +95,7 @@ pub struct PersonaDetails {
     tone: String,
     script_style: String,
     presets: GenerationPresets,
+    realistic_voice: bool,
 }
 
 impl PersonaDetails {
@@ -155,6 +160,7 @@ impl PersonaDetails {
                 tone,
                 script_style,
                 presets,
+                realistic_voice: draft.realistic_voice,
             }),
             _ => Err(errors),
         }
@@ -178,6 +184,13 @@ impl PersonaDetails {
 
     pub fn presets(&self) -> GenerationPresets {
         self.presets
+    }
+
+    /// Whether posts narrated by this voice need a synthetic-content
+    /// disclosure (a clone of a real person, or a realistic synthetic
+    /// voice).
+    pub fn realistic_voice(&self) -> bool {
+        self.realistic_voice
     }
 
     /// Whether two persona names would read as the same to the user.
@@ -237,6 +250,7 @@ impl From<&PersonaDetails> for PersonaDraft {
             tone: details.tone.clone(),
             script_style: details.script_style.clone(),
             presets: details.presets,
+            realistic_voice: details.realistic_voice,
         }
     }
 }
@@ -316,6 +330,8 @@ impl Persona {
                     tone: default.tone.to_owned(),
                     script_style: default.script_style.to_owned(),
                     presets: default.presets,
+                    // The provider's stock voices are of no real person.
+                    realistic_voice: false,
                 };
                 let details = PersonaDetails::validate(draft).expect("default personas are valid");
                 Persona::new(owner, details)

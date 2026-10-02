@@ -889,6 +889,21 @@ pub(crate) mod tests {
             ))
         }
 
+        /// `start` with export packages written to `export_files`.
+        pub(crate) fn start_with_exports(
+            &self,
+            export_files: Arc<dyn bardo_domain::ExportFiles>,
+        ) -> Bardo {
+            self.start_from(Repositories {
+                export_files,
+                ..Repositories::shared_with_files(
+                    Arc::clone(&self.db),
+                    Arc::clone(&self.secrets) as _,
+                    Arc::clone(&self.files) as _,
+                )
+            })
+        }
+
         /// `start` with the editor's cuts kept by `timelines`.
         pub(crate) fn start_with_timelines(
             &self,

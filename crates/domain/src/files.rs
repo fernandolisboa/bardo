@@ -30,6 +30,14 @@ pub trait ProjectFiles: Send + Sync {
 
     fn read(&self, project: VideoProjectId, name: &str) -> Result<Vec<u8>, ProjectFileError>;
 
+    /// Opens the file to read it as a stream, for files too large to hold
+    /// in memory (renders).
+    fn open(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+    ) -> Result<Box<dyn std::io::Read + Send>, ProjectFileError>;
+
     /// Copies the file at `source`, outside the project, in as `name`,
     /// replacing any file of that name. The source is left as it was, and
     /// a reader never sees the copy half written.
@@ -61,6 +69,14 @@ impl<T: ProjectFiles + ?Sized> ProjectFiles for Arc<T> {
 
     fn read(&self, project: VideoProjectId, name: &str) -> Result<Vec<u8>, ProjectFileError> {
         (**self).read(project, name)
+    }
+
+    fn open(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+    ) -> Result<Box<dyn std::io::Read + Send>, ProjectFileError> {
+        (**self).open(project, name)
     }
 
     fn copy_in(

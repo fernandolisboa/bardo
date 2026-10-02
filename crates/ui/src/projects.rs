@@ -16,17 +16,18 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource,
+    Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource, Network,
     NetworkAccountId, PersonaId, SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind,
-    VideoProject, VideoProjectId,
+    VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, Destination, MusicPromptView, NarrationError, NarrationPlayer,
-    NarrationView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView,
-    SpendEstimate, Stage, StageState, StageStatus, Text, opening_stage, project_stages,
+    Bardo, BudgetConsent, Destination, ExportSummary, ExportView, MusicPromptView, NarrationError,
+    NarrationPlayer, NarrationView, Recording, RenderReview, RenderSummary, ScenesView,
+    ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text, opening_stage,
+    project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -48,6 +49,7 @@ use crate::parts::{Header, ScreenParts, Stages};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
+mod export;
 mod music;
 mod render;
 mod scenes;
@@ -84,6 +86,7 @@ enum PromptShown {
     Pending,
     ScenePlan,
     MusicPrompt,
+    Metadata,
 }
 
 /// Asks the window to open a project in the editor.
@@ -172,6 +175,28 @@ pub struct ProjectsScreen {
     /// "Render" was clicked: the page asks before the job starts.
     confirm_render: bool,
     render_error: Option<Text>,
+    /// The Publish stage: every network's metadata and export.
+    export_view: Option<ExportView>,
+    /// Where the project's exports stand, for its Publish stage.
+    export_summary: Option<ExportSummary>,
+    export_error: Option<Text>,
+    /// Reading the Publish stage failed; cleared by the next good read.
+    export_load_error: Option<Text>,
+    export_notice: Option<Text>,
+    /// Writing the metadata waits on a budget answer.
+    metadata_ask: Option<SpendEstimate>,
+    /// "Write again" was clicked over edited metadata: the page asks first.
+    confirm_metadata: bool,
+    /// Networks the user ticked in or out of the export; the others follow
+    /// whether their last export is current.
+    export_choices: Vec<(Network, bool)>,
+    /// The network open in the inspector.
+    selected_network: Option<Network>,
+    metadata_title: Entity<InputState>,
+    metadata_description: Entity<TextareaState>,
+    metadata_tags: Entity<InputState>,
+    /// The network and stored metadata the fields were last filled with.
+    metadata_loaded: Option<(Network, VideoMetadataDraft)>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -194,6 +219,9 @@ impl ProjectsScreen {
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+        let metadata_title = cx.new(|cx| InputState::new(window, cx));
+        let metadata_description = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12));
+        let metadata_tags = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -205,7 +233,25 @@ impl ProjectsScreen {
                 }
             }
         });
+        // Typing updates the counters and retires a "saved" notice.
+        let typed = |this: &mut Self, event: &InputEvent, cx: &mut Context<Self>| {
+            if matches!(event, InputEvent::Change) {
+                if this.export_notice == Some(Text::MetadataSaved) {
+                    this.export_notice = None;
+                }
+                cx.notify();
+            }
+        };
         let subscriptions = vec![
+            cx.subscribe(&metadata_title, move |this, _, event, cx| {
+                typed(this, event, cx)
+            }),
+            cx.subscribe(&metadata_description, move |this, _, event, cx| {
+                typed(this, event, cx)
+            }),
+            cx.subscribe(&metadata_tags, move |this, _, event, cx| {
+                typed(this, event, cx)
+            }),
             cx.subscribe_in(
                 &channel_select,
                 window,
@@ -279,6 +325,19 @@ impl ProjectsScreen {
             selected_target: None,
             confirm_render: false,
             render_error: None,
+            export_view: None,
+            export_summary: None,
+            export_error: None,
+            export_load_error: None,
+            export_notice: None,
+            metadata_ask: None,
+            confirm_metadata: false,
+            export_choices: Vec::new(),
+            selected_network: None,
+            metadata_title,
+            metadata_description,
+            metadata_tags,
+            metadata_loaded: None,
             editor,
             loaded: None,
             field_error: None,
@@ -399,6 +458,14 @@ impl ProjectsScreen {
         self.selected_target = None;
         self.confirm_render = false;
         self.render_error = None;
+        self.export_error = None;
+        self.export_load_error = None;
+        self.export_notice = None;
+        self.metadata_ask = None;
+        self.confirm_metadata = false;
+        self.export_choices.clear();
+        self.selected_network = None;
+        self.metadata_loaded = None;
         self.selected_scene = None;
         self.pending_only = false;
         self.load(window, cx);
@@ -417,6 +484,7 @@ impl ProjectsScreen {
             self.narration.as_ref()?,
             self.scenes.as_ref()?,
             self.render_summary.as_ref()?,
+            self.export_summary.as_ref()?,
         ))
     }
 
@@ -515,12 +583,15 @@ impl ProjectsScreen {
             self.music = None;
             self.render_review = None;
             self.render_summary = None;
+            self.export_view = None;
+            self.export_summary = None;
             return;
         };
         self.load_narration(id, cx);
         self.load_scenes(id, cx);
         self.load_music(id, window, cx);
         self.load_render(id, cx);
+        self.load_export(id, window, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -1235,6 +1306,7 @@ impl ProjectsScreen {
             PromptShown::Pending => ("pending-details", "toggle-pending-prompt"),
             PromptShown::ScenePlan => ("scene-plan-details", "toggle-scene-plan-prompt"),
             PromptShown::MusicPrompt => ("music-prompt-details", "toggle-music-prompt"),
+            PromptShown::Metadata => ("metadata-details", "toggle-metadata-prompt"),
         };
 
         v_flex()
@@ -1759,7 +1831,8 @@ impl Render for ProjectsScreen {
             Stage::Narration => parts.content.extend(self.render_narration(cx)),
             Stage::Scenes | Stage::Clips => self.scene_parts(current, &mut parts, cx),
             Stage::Render => self.render_parts(&mut parts, cx),
-            Stage::Edit | Stage::Publish => {}
+            Stage::Publish => self.export_parts(&mut parts, cx),
+            Stage::Edit => {}
         }
         let screen = cx.entity().downgrade();
         let bardo = self.bardo.read(cx);

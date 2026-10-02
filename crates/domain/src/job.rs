@@ -87,10 +87,17 @@ pub enum JobKind {
     /// account, in that account's preset, after the user reviewed it.
     /// Outputs already finished are not rendered again on resume.
     Render,
+    /// Has Claude write each network's title, description and tags for a
+    /// video project, from the metadata template.
+    Metadata,
+    /// Writes a video project's export package: one folder per chosen
+    /// network with its rendered file and metadata. Networks already
+    /// written are not written again on resume.
+    Export,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 13] = [
+    pub const ALL: [JobKind; 15] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -104,6 +111,8 @@ impl JobKind {
         JobKind::Proxies,
         JobKind::MusicPrompt,
         JobKind::Render,
+        JobKind::Metadata,
+        JobKind::Export,
     ];
 
     /// Stable name stored in the database.
@@ -122,6 +131,8 @@ impl JobKind {
             JobKind::Proxies => "proxies",
             JobKind::MusicPrompt => "music_prompt",
             JobKind::Render => "render",
+            JobKind::Metadata => "metadata",
+            JobKind::Export => "export",
         }
     }
 }

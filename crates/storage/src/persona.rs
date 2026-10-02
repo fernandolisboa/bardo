@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{Database, boxed};
 
 const SELECT_PERSONA: &str = "SELECT id, profile_id, name, voice_provider, voice_id, voice_name, \
-     tone, script_style, stability, similarity, style, speed, voice_flag FROM persona";
+     tone, script_style, stability, similarity, style, speed, voice_flag, realistic_voice FROM persona";
 
 /// A persona row as stored, before domain validation.
 struct PersonaRow {
@@ -22,6 +22,7 @@ struct PersonaRow {
     script_style: String,
     presets: [i64; 4],
     voice_flag: Option<String>,
+    realistic_voice: bool,
 }
 
 impl PersonaRow {
@@ -37,6 +38,7 @@ impl PersonaRow {
             script_style: row.get(7)?,
             presets: [row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?],
             voice_flag: row.get(12)?,
+            realistic_voice: row.get(13)?,
         })
     }
 
@@ -59,6 +61,7 @@ impl PersonaRow {
                 style,
                 speed,
             },
+            realistic_voice: self.realistic_voice,
         };
         let details = PersonaDetails::validate(draft)
             .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
@@ -94,8 +97,9 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
     let presets = details.presets();
     tx.execute(
         "INSERT INTO persona (id, profile_id, name, voice_provider, voice_id, voice_name, tone,
-                              script_style, stability, similarity, style, speed, voice_flag)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                              script_style, stability, similarity, style, speed, voice_flag,
+                              realistic_voice)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT (id) DO UPDATE SET
              name = excluded.name,
              voice_provider = excluded.voice_provider,
@@ -108,6 +112,7 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
              style = excluded.style,
              speed = excluded.speed,
              voice_flag = excluded.voice_flag,
+             realistic_voice = excluded.realistic_voice,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
         params![
             persona.id.to_string(),
@@ -123,6 +128,7 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
             presets.style,
             presets.speed,
             flag_code(persona.voice_flag),
+            details.realistic_voice(),
         ],
     )?;
     Ok(())
@@ -199,6 +205,7 @@ mod tests {
                 style: 10,
                 speed: 95,
             },
+            realistic_voice: true,
         })
         .unwrap();
         Persona::new(owner, details)
@@ -295,6 +302,7 @@ mod tests {
                 "created_at",
                 "updated_at",
                 "voice_flag",
+                "realistic_voice",
             ]
         );
     }

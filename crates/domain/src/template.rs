@@ -28,13 +28,16 @@ pub enum TemplateKind {
     /// The prompt for a video's music, which the user takes to the music
     /// tool of their choice.
     MusicPrompt,
+    /// Each network's title, description and tags for a video.
+    Metadata,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 3] = [
+    pub const ALL: [TemplateKind; 4] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
+        TemplateKind::Metadata,
     ];
 
     /// Stable name stored in the database.
@@ -43,6 +46,7 @@ impl TemplateKind {
             TemplateKind::Script => "script",
             TemplateKind::ImagePrompt => "image_prompt",
             TemplateKind::MusicPrompt => "music_prompt",
+            TemplateKind::Metadata => "metadata",
         }
     }
 
@@ -80,6 +84,17 @@ impl TemplateKind {
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::ThemeAngle,
                 TemplateVariable::VideoLength,
+            ],
+            TemplateKind::Metadata => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::Language,
+                TemplateVariable::Country,
+                TemplateVariable::Niche,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::Script,
+                TemplateVariable::Networks,
             ],
         }
     }
@@ -132,10 +147,15 @@ pub enum TemplateVariable {
     NarrationSentences,
     /// How long the video runs: its narration's length.
     VideoLength,
+    /// The video's script as the user left it.
+    Script,
+    /// The networks to write for, one per line: each one's fields and
+    /// limits, its language and the account's default tags.
+    Networks,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 12] = [
+    pub const ALL: [TemplateVariable; 14] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -148,6 +168,8 @@ impl TemplateVariable {
         TemplateVariable::ThemeAngle,
         TemplateVariable::NarrationSentences,
         TemplateVariable::VideoLength,
+        TemplateVariable::Script,
+        TemplateVariable::Networks,
     ];
 
     /// The name written between the braces.
@@ -165,6 +187,8 @@ impl TemplateVariable {
             TemplateVariable::ThemeAngle => "theme_angle",
             TemplateVariable::NarrationSentences => "narration_sentences",
             TemplateVariable::VideoLength => "video_length",
+            TemplateVariable::Script => "script",
+            TemplateVariable::Networks => "networks",
         }
     }
 
