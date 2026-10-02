@@ -43,6 +43,7 @@ mod channel;
 mod decision;
 mod files;
 mod generation;
+mod image;
 mod job;
 mod market;
 mod narration;
@@ -52,6 +53,7 @@ mod provider_key;
 mod redaction;
 mod repository;
 mod research;
+mod scene;
 mod script;
 mod speech;
 mod template;
@@ -68,6 +70,7 @@ pub use decision::{
 };
 pub use files::{ProjectFileError, ProjectFiles};
 pub use generation::{Generation, GenerationId, TemplateUsed};
+pub use image::{GeneratedImage, ImageFormat, ImageGenerator, ImageRequest};
 pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
     JobRecord, JobRepository, JobState, Progress, RetryPolicy, UnknownJobFailureKind,
@@ -94,6 +97,11 @@ pub use repository::RepositoryError;
 pub use research::{
     MarketData, MarketSample, Niche, NicheResearch, NicheResearchRepository, NicheScores,
     NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,
+};
+pub use scene::{
+    MAX_SENTENCE_WORDS, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneDraft, SceneFieldError,
+    SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
+    SceneRecord, Sentence, sentences,
 };
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,

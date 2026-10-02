@@ -9,6 +9,7 @@ mod narration;
 mod persona;
 mod profile;
 mod research;
+mod scene;
 mod script;
 mod secrets;
 mod template;
@@ -22,6 +23,7 @@ use bardo_domain::RepositoryError;
 use rusqlite::Connection;
 
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
+pub use migrations::{BrokenReferences, MigrationError};
 #[cfg(windows)]
 pub use secrets::CredentialManager;
 pub use secrets::{MemorySecretStore, credential_target, platform_secret_store};
@@ -30,6 +32,8 @@ pub use secrets::{MemorySecretStore, credential_target, platform_secret_store};
 pub enum StorageError {
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Migration(#[from] migrations::MigrationError),
     #[error("could not create the data directory {path}: {source}")]
     DataDir {
         path: PathBuf,

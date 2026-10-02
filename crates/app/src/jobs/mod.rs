@@ -15,6 +15,7 @@ pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::narrations::NarrationHandler;
 use crate::research::NicheResearchHandler;
+use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
 use crate::{AppError, Bardo, Text};
@@ -25,6 +26,7 @@ pub(crate) fn built_in_handlers(
     themes: ThemeHandler,
     scripts: ScriptHandler,
     narrations: NarrationHandler,
+    scenes: SceneHandler,
 ) -> HashMap<JobKind, Arc<dyn JobHandler>> {
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -34,6 +36,9 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ThemeRanking, themes);
     handlers.insert(JobKind::ScriptGeneration, Arc::new(scripts));
     handlers.insert(JobKind::Narration, Arc::new(narrations));
+    let scenes = Arc::new(scenes);
+    handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
+    handlers.insert(JobKind::SceneImages, scenes);
     handlers
 }
 
@@ -642,6 +647,7 @@ mod tests {
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
+            scene_plans: Arc::clone(db) as _,
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),

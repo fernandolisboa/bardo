@@ -9,6 +9,7 @@ mod narrations;
 mod personas;
 mod provider_keys;
 mod research;
+mod scenes;
 mod scripts;
 mod templates;
 mod themes;
@@ -18,10 +19,11 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, DecisionEngine, JobRepository, KeyChecker, MarketData, NarrationRepository,
-    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
-    RepositoryError, ScriptRepository, SecretStore, SpeechSynthesizer, TemplateRepository,
-    TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
+    ChannelRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker, MarketData,
+    NarrationRepository, NicheResearchRepository, Persona, PersonaRepository, ProfileRepository,
+    ProjectFiles, Redactor, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
+    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
+    VoiceLibrary,
 };
 use bardo_media::AudioOutput;
 use bardo_storage::{Database, MemoryProjectFiles};
@@ -34,6 +36,7 @@ pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
+pub use scenes::{SceneError, ScenesView};
 pub use scripts::{ScriptError, ScriptView};
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
@@ -42,6 +45,7 @@ use crate::jobs::JobQueue;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
 use crate::research::NicheResearchHandler;
+use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
 
@@ -70,6 +74,8 @@ pub struct Repositories {
     pub personas: Arc<dyn PersonaRepository>,
     /// Narrations and their word timings. Shared with the job queue.
     pub narrations: Arc<dyn NarrationRepository>,
+    /// Scene plans, their prompts and images. Shared with the job queue.
+    pub scene_plans: Arc<dyn ScenePlanRepository>,
     /// Each video project's media folder. Shared with the job queue.
     pub files: Arc<dyn ProjectFiles>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
@@ -109,6 +115,7 @@ impl Repositories {
             scripts: Arc::clone(&db) as _,
             personas: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
+            scene_plans: Arc::clone(&db) as _,
             research: db,
             files,
             secrets,
@@ -130,6 +137,8 @@ pub struct Providers {
     pub voices: Arc<dyn VoiceLibrary>,
     /// Narration (ElevenLabs).
     pub speech: Arc<dyn SpeechSynthesizer>,
+    /// Scene images (Nano Banana, through the Gemini API).
+    pub images: Arc<dyn ImageGenerator>,
     /// The local audio device, for playback.
     pub audio: Arc<dyn AudioOutput>,
 }
@@ -144,6 +153,7 @@ impl Providers {
             decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
+            images: Arc::new(bardo_ai::GeminiImages::new()),
             audio: Arc::new(bardo_media::DeviceAudio),
         }
     }
@@ -159,6 +169,7 @@ pub struct Bardo {
     scripts: Arc<dyn ScriptRepository>,
     personas: Arc<dyn PersonaRepository>,
     narrations: Arc<dyn NarrationRepository>,
+    scene_plans: Arc<dyn ScenePlanRepository>,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
     market_data: Arc<dyn MarketData>,
@@ -206,6 +217,7 @@ impl Bardo {
             scripts,
             personas,
             narrations,
+            scene_plans,
             files,
             secrets,
         } = repositories;
@@ -248,6 +260,15 @@ impl Bardo {
             speech: Arc::clone(&providers.speech),
             secrets: Arc::clone(&secrets),
         };
+        let scene_handler = SceneHandler {
+            owner: profile.id,
+            plans: Arc::clone(&scene_plans),
+            narrations: Arc::clone(&narrations),
+            files: Arc::clone(&files),
+            text: Arc::clone(&providers.text),
+            images: Arc::clone(&providers.images),
+            secrets: Arc::clone(&secrets),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
@@ -258,6 +279,7 @@ impl Bardo {
                 theme_handler,
                 script_handler,
                 narration_handler,
+                scene_handler,
             ),
             job_settings,
             redactor,
@@ -271,6 +293,7 @@ impl Bardo {
             scripts,
             personas,
             narrations,
+            scene_plans,
             files,
             audio: providers.audio,
             market_data: providers.market_data,
@@ -353,8 +376,9 @@ pub(crate) mod testing {
 
     use bardo_domain::{
         Alignment, Answer, ApiKey, CharTiming, Confidence, DecisionEngine, Decisions,
-        GeneratedText, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample,
-        Niche, Provider, ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
+        GeneratedImage, GeneratedText, ImageFormat, ImageGenerator, ImageRequest, KeyCheck,
+        KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche, Provider,
+        ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
         SpeechSynthesizer, TextGenerator, TextRequest, TokenUsage, UploadSample, Voice,
         VoiceLibrary,
     };
@@ -705,6 +729,79 @@ pub(crate) mod testing {
         }
     }
 
+    /// A tiny PNG, the image of every fake drawing.
+    pub(crate) const SCENE_IMAGE: &[u8] =
+        include_bytes!("../../ai/tests/fixtures/gemini/scene-16x9.png");
+
+    /// Draws every prompt as `SCENE_IMAGE`; a prompt containing a word in
+    /// `declined` is declined, and `failure` wins when set. Keeps the
+    /// requests.
+    #[derive(Default)]
+    pub(crate) struct FakeImages {
+        pub(crate) requests: Mutex<Vec<ImageRequest>>,
+        pub(crate) declined: Mutex<Vec<String>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// How long each call takes, to catch a job mid-run.
+        pub(crate) delay: Mutex<Duration>,
+    }
+
+    impl FakeImages {
+        pub(crate) fn prompts(&self) -> Vec<String> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|request| request.prompt.clone())
+                .collect()
+        }
+
+        /// Declines every prompt containing `word` from now on.
+        pub(crate) fn decline(&self, word: &str) {
+            self.declined.lock().unwrap().push(word.to_owned());
+        }
+
+        /// Draws everything again.
+        pub(crate) fn accept_all(&self) {
+            self.declined.lock().unwrap().clear();
+        }
+    }
+
+    impl ImageGenerator for FakeImages {
+        fn generate(
+            &self,
+            _key: &ApiKey,
+            request: &ImageRequest,
+        ) -> Result<GeneratedImage, ProviderFailure> {
+            let delay = *self.delay.lock().unwrap();
+            std::thread::sleep(delay);
+            self.requests.lock().unwrap().push(request.clone());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            if let Some(word) = self
+                .declined
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|word| request.prompt.contains(word.as_str()))
+            {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Declined,
+                    format!("blocked: {word}"),
+                ));
+            }
+            Ok(GeneratedImage {
+                bytes: SCENE_IMAGE.to_vec(),
+                format: ImageFormat::Png,
+                model: "nano-banana-fake".into(),
+                usage: TokenUsage {
+                    input_tokens: 12,
+                    output_tokens: 1_290,
+                },
+            })
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -718,6 +815,7 @@ pub(crate) mod testing {
             decisions: Arc::new(FakeDecisionEngine::default()),
             voices: Arc::new(FakeVoiceLibrary::default()),
             speech: Arc::new(FakeSpeech::default()),
+            images: Arc::new(FakeImages::default()),
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
         }
     }
@@ -794,6 +892,7 @@ mod tests {
             scripts: Arc::clone(&db) as _,
             personas: Arc::new(FakePersonas::default()),
             narrations: Arc::clone(&db) as _,
+            scene_plans: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),

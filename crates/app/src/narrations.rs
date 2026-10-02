@@ -695,6 +695,7 @@ mod tests {
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::clone(&self.speech) as _,
+                images: Arc::new(crate::testing::FakeImages::default()),
                 audio: Arc::clone(&self.audio) as _,
             };
             let mut app = Bardo::start_with(

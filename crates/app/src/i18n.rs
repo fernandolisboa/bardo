@@ -7,8 +7,9 @@ use std::time::Duration;
 
 use bardo_domain::{
     ApiKeyError, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, NicheSeedError, PersonaFieldError, Provider, ScriptFieldError, TemplateKind,
-    TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage, VoiceCategory,
+    KeyCheckOutcome, NicheSeedError, PersonaFieldError, Provider, SceneFieldError,
+    ScriptFieldError, TemplateKind, TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage,
+    VoiceCategory,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -306,6 +307,52 @@ pub enum Text {
     NarrationAudioMissing,
     NarrationCannotPlay,
     NarrationNotLoaded,
+    ScenesTitle,
+    ScenesEmpty,
+    PlanScenes,
+    /// Placeholder: `{n}` (template version).
+    PlanScenesHint,
+    ReplanScenes,
+    /// Placeholder: `{n}` (images).
+    ReplanScenesConfirm,
+    ConfirmReplanScenes,
+    CancelReplanScenes,
+    ScenesPlanning,
+    ScenesDrawing,
+    ScenesStopped,
+    ScenesStale,
+    ScenesStaleTag,
+    /// Placeholder: `{n}`.
+    ScenesCount,
+    /// Placeholder: `{n}`.
+    GenerateSceneImages,
+    SceneImagesHint,
+    /// Placeholders: `{n}`, `{start}`, `{end}`.
+    SceneLabel,
+    SceneEdited,
+    EditScenePrompt,
+    SaveScenePrompt,
+    CancelScenePrompt,
+    RegenerateSceneImage,
+    SceneNoImage,
+    SceneFailed,
+    /// Placeholders: `{model}`, `{tokens}`, `{n}` (template version).
+    SceneImageRecord,
+    ScenePendingTitle,
+    ScenePendingHint,
+    AcceptSceneImage,
+    RejectSceneImage,
+    ScenesNoNarration,
+    ScenesNoPlan,
+    SceneNotFound,
+    ScenesMissingClaudeKey,
+    ScenesMissingGeminiKey,
+    ScenesBusy,
+    ScenesWouldDiscardImages,
+    ScenesNothingToGenerate,
+    SceneNothingToReview,
+    ScenesNotLoaded,
+    SceneFieldError(SceneFieldError),
     TemplatesTitle,
     TemplatesHint,
     TemplateKindName(TemplateKind),
@@ -674,6 +721,49 @@ impl Text {
             Text::NarrationAudioMissing => "narration.error.audio_missing",
             Text::NarrationCannotPlay => "narration.error.cannot_play",
             Text::NarrationNotLoaded => "narration.error.not_loaded",
+            Text::ScenesTitle => "scenes.title",
+            Text::ScenesEmpty => "scenes.empty",
+            Text::PlanScenes => "scenes.plan",
+            Text::PlanScenesHint => "scenes.plan_hint",
+            Text::ReplanScenes => "scenes.replan",
+            Text::ReplanScenesConfirm => "scenes.replan_confirm",
+            Text::ConfirmReplanScenes => "scenes.replan_confirm_button",
+            Text::CancelReplanScenes => "scenes.replan_cancel",
+            Text::ScenesPlanning => "scenes.planning",
+            Text::ScenesDrawing => "scenes.drawing",
+            Text::ScenesStopped => "scenes.stopped",
+            Text::ScenesStale => "scenes.stale",
+            Text::ScenesStaleTag => "scenes.stale_tag",
+            Text::ScenesCount => "scenes.count",
+            Text::GenerateSceneImages => "scenes.generate_images",
+            Text::SceneImagesHint => "scenes.images_hint",
+            Text::SceneLabel => "scenes.scene",
+            Text::SceneEdited => "scenes.edited",
+            Text::EditScenePrompt => "scenes.edit_prompt",
+            Text::SaveScenePrompt => "scenes.save_prompt",
+            Text::CancelScenePrompt => "scenes.cancel_prompt",
+            Text::RegenerateSceneImage => "scenes.regenerate_image",
+            Text::SceneNoImage => "scenes.no_image",
+            Text::SceneFailed => "scenes.failed",
+            Text::SceneImageRecord => "scenes.image_record",
+            Text::ScenePendingTitle => "scenes.pending.title",
+            Text::ScenePendingHint => "scenes.pending.hint",
+            Text::AcceptSceneImage => "scenes.pending.accept",
+            Text::RejectSceneImage => "scenes.pending.reject",
+            Text::ScenesNoNarration => "scenes.error.no_narration",
+            Text::ScenesNoPlan => "scenes.error.no_plan",
+            Text::SceneNotFound => "scenes.error.scene_not_found",
+            Text::ScenesMissingClaudeKey => "scenes.error.missing_claude_key",
+            Text::ScenesMissingGeminiKey => "scenes.error.missing_gemini_key",
+            Text::ScenesBusy => "scenes.error.busy",
+            Text::ScenesWouldDiscardImages => "scenes.error.would_discard_images",
+            Text::ScenesNothingToGenerate => "scenes.error.nothing_to_generate",
+            Text::SceneNothingToReview => "scenes.error.nothing_to_review",
+            Text::ScenesNotLoaded => "scenes.error.not_loaded",
+            Text::SceneFieldError(error) => match error {
+                SceneFieldError::PromptRequired => "scenes.error.prompt_required",
+                SceneFieldError::PromptTooLong => "scenes.error.prompt_too_long",
+            },
             Text::TemplatesTitle => "templates.title",
             Text::TemplatesHint => "templates.hint",
             Text::TemplateKindName(kind) => {
@@ -1080,6 +1170,45 @@ mod tests {
             Text::NarrationAudioMissing,
             Text::NarrationCannotPlay,
             Text::NarrationNotLoaded,
+            Text::ScenesTitle,
+            Text::ScenesEmpty,
+            Text::PlanScenes,
+            Text::PlanScenesHint,
+            Text::ReplanScenes,
+            Text::ReplanScenesConfirm,
+            Text::ConfirmReplanScenes,
+            Text::CancelReplanScenes,
+            Text::ScenesPlanning,
+            Text::ScenesDrawing,
+            Text::ScenesStopped,
+            Text::ScenesStale,
+            Text::ScenesStaleTag,
+            Text::ScenesCount,
+            Text::GenerateSceneImages,
+            Text::SceneImagesHint,
+            Text::SceneLabel,
+            Text::SceneEdited,
+            Text::EditScenePrompt,
+            Text::SaveScenePrompt,
+            Text::CancelScenePrompt,
+            Text::RegenerateSceneImage,
+            Text::SceneNoImage,
+            Text::SceneFailed,
+            Text::SceneImageRecord,
+            Text::ScenePendingTitle,
+            Text::ScenePendingHint,
+            Text::AcceptSceneImage,
+            Text::RejectSceneImage,
+            Text::ScenesNoNarration,
+            Text::ScenesNoPlan,
+            Text::SceneNotFound,
+            Text::ScenesMissingClaudeKey,
+            Text::ScenesMissingGeminiKey,
+            Text::ScenesBusy,
+            Text::ScenesWouldDiscardImages,
+            Text::ScenesNothingToGenerate,
+            Text::SceneNothingToReview,
+            Text::ScenesNotLoaded,
             Text::TemplatesTitle,
             Text::TemplatesHint,
             Text::TemplateVersionsTitle,
@@ -1126,6 +1255,7 @@ mod tests {
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
         texts.extend(ThemeFieldError::ALL.map(Text::ThemeFieldError));
         texts.extend(ScriptFieldError::ALL.map(Text::ScriptFieldError));
+        texts.extend(SceneFieldError::ALL.map(Text::SceneFieldError));
         texts.extend(TemplateKind::ALL.map(Text::TemplateKindName));
         texts.extend(TemplateVariable::ALL.map(Text::TemplateVariableHint));
         texts.extend(TemplateProblem::ALL.map(Text::TemplateProblem));
@@ -1198,6 +1328,39 @@ mod tests {
                 text.contains("Invalid API key") && !text.contains('{'),
                 "{text}"
             );
+        }
+    }
+
+    #[test]
+    fn scene_messages_match_the_domain_and_fill_their_placeholders() {
+        let catalog = Catalog::load(UiLanguage::EnUs);
+        let too_long = catalog.get(Text::SceneFieldError(SceneFieldError::PromptTooLong));
+        assert!(
+            too_long.contains(&bardo_domain::ScenePrompt::MAX_CHARS.to_string()),
+            "{too_long}"
+        );
+        for language in UiLanguage::ALL {
+            let catalog = Catalog::load(language);
+            for (text, args) in [
+                (Text::PlanScenesHint, &[("n", "3")][..]),
+                (Text::ReplanScenesConfirm, &[("n", "12")][..]),
+                (Text::ScenesCount, &[("n", "24")][..]),
+                (Text::GenerateSceneImages, &[("n", "24")][..]),
+                (
+                    Text::SceneLabel,
+                    &[("n", "7"), ("start", "0:41"), ("end", "0:47")][..],
+                ),
+                (
+                    Text::SceneImageRecord,
+                    &[("model", "nano"), ("tokens", "1290"), ("n", "2")][..],
+                ),
+            ] {
+                let filled = catalog.format(text, args);
+                assert!(!filled.contains('{'), "{filled}");
+                for (_, value) in args {
+                    assert!(filled.contains(value), "{language}: {filled}");
+                }
+            }
         }
     }
 

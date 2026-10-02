@@ -1,18 +1,19 @@
 //! Video projects screen: pick a channel and one of its projects, then
-//! generate, edit and review the project's script, and generate and play
-//! its narration with the spoken word highlighted. Generation runs as jobs
-//! in `bardo_app`; this view polls the job revision and re-reads the script
-//! and narration when it moves, and re-renders while the narration plays.
+//! generate, edit and review the project's script, generate and play its
+//! narration with the spoken word highlighted, and plan its scenes and draw
+//! their images. Generation runs as jobs in `bardo_app`; this view polls
+//! the job revision and re-reads the script, narration and scenes when it
+//! moves, and re-renders while the narration plays.
 //! The editor keeps the user's typing: it is refilled only when the stored
 //! text changes (first generation, accepting a new script).
 
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, Job, JobState, Narration, ScriptFieldError, VideoProject,
-    VideoProjectId,
+    Channel, ChannelId, Generation, Job, JobState, Narration, SceneFieldError, ScenePlanId,
+    ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
 };
-use bardo_app::{Bardo, NarrationPlayer, NarrationView, ScriptView, Text};
+use bardo_app::{Bardo, NarrationPlayer, NarrationView, ScenesView, ScriptView, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -28,6 +29,8 @@ use gpui_kit::{
 };
 
 use crate::shell::tr;
+
+mod scenes;
 
 /// How often the screen checks the job queue for changes, and moves the
 /// highlighted word while the narration plays.
@@ -57,6 +60,7 @@ impl SearchableListItem for Choice {
 enum PromptShown {
     Source,
     Pending,
+    ScenePlan,
 }
 
 pub struct ProjectsScreen {
@@ -74,6 +78,15 @@ pub struct ProjectsScreen {
     /// redraws once when playback reaches the end on its own.
     was_playing: bool,
     narration_error: Option<Text>,
+    scenes: Option<ScenesView>,
+    scenes_error: Option<Text>,
+    /// The scene whose prompt is open in `scene_editor`.
+    editing_scene: Option<(ScenePlanId, usize)>,
+    scene_editor: Entity<TextareaState>,
+    scene_field_error: Option<SceneFieldError>,
+    /// "Plan again" was clicked on scenes that have images: the panel asks
+    /// before discarding them.
+    confirm_replan: bool,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -91,6 +104,7 @@ impl ProjectsScreen {
         let channel_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
+        let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -127,6 +141,12 @@ impl ProjectsScreen {
             player: None,
             was_playing: false,
             narration_error: None,
+            scenes: None,
+            scenes_error: None,
+            editing_scene: None,
+            scene_editor,
+            scene_field_error: None,
+            confirm_replan: false,
             editor,
             loaded: None,
             field_error: None,
@@ -223,6 +243,10 @@ impl ProjectsScreen {
         self.prompt_shown = None;
         self.player = None;
         self.narration_error = None;
+        self.scenes_error = None;
+        self.editing_scene = None;
+        self.scene_field_error = None;
+        self.confirm_replan = false;
         self.load(window, cx);
         cx.notify();
     }
@@ -232,9 +256,11 @@ impl ProjectsScreen {
             self.view = None;
             self.narration = None;
             self.player = None;
+            self.scenes = None;
             return;
         };
         self.load_narration(id, cx);
+        self.load_scenes(id, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -660,9 +686,15 @@ impl ProjectsScreen {
             }))
             .child(body)
             .children(script.map(|script| {
-                self.render_provenance(script.source().generation(), PromptShown::Source, cx)
+                self.render_provenance(
+                    script.source().generation(),
+                    TemplateKind::Script,
+                    PromptShown::Source,
+                    cx,
+                )
             }))
             .children(self.render_narration(cx))
+            .children(self.render_scenes(cx))
             .into_any_element()
     }
 
@@ -768,7 +800,12 @@ impl ProjectsScreen {
                             .child(tr(bardo, Text::ScriptPendingHint)),
                     ),
             )
-            .child(self.render_provenance(generation, PromptShown::Pending, cx))
+            .child(self.render_provenance(
+                generation,
+                TemplateKind::Script,
+                PromptShown::Pending,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -776,6 +813,7 @@ impl ProjectsScreen {
     fn render_provenance(
         &self,
         generation: &Generation,
+        kind: TemplateKind,
         which: PromptShown,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -835,9 +873,7 @@ impl ProjectsScreen {
                         Text::ProvenanceTemplate,
                         format!(
                             "{} {}",
-                            bardo.text(Text::TemplateKindName(
-                                bardo_app::bardo_domain::TemplateKind::Script
-                            )),
+                            bardo.text(Text::TemplateKindName(kind)),
                             bardo.text_with(
                                 Text::ProvenanceTemplateVersion,
                                 &[("n", &generation.template.number.to_string())],
@@ -864,6 +900,7 @@ impl ProjectsScreen {
                     Button::new(match which {
                         PromptShown::Source => "toggle-source-prompt",
                         PromptShown::Pending => "toggle-pending-prompt",
+                        PromptShown::ScenePlan => "toggle-scene-plan-prompt",
                     })
                     .ghost()
                     .xsmall()

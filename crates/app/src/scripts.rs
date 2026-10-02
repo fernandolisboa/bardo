@@ -242,7 +242,10 @@ impl Bardo {
 
     /// The facts a script template is filled with, in English as providers
     /// read them best.
-    fn script_values(&self, project: &VideoProject) -> Result<TemplateValues, ScriptError> {
+    pub(crate) fn script_values(
+        &self,
+        project: &VideoProject,
+    ) -> Result<TemplateValues, ScriptError> {
         let channel = self
             .channels
             .get(project.channel)?
@@ -434,6 +437,7 @@ mod tests {
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
+                images: Arc::new(crate::testing::FakeImages::default()),
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             Bardo::start_with(
