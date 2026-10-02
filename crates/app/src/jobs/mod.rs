@@ -142,7 +142,10 @@ mod tests {
     use super::*;
     use crate::Repositories;
 
-    const PATIENCE: Duration = Duration::from_secs(10);
+    /// How long a wait may take before the test fails. Generous: a loaded
+    /// CI runner can stall the worker threads for over ten seconds, and a
+    /// passing test never waits this long.
+    const PATIENCE: Duration = Duration::from_secs(60);
 
     type RunFn = dyn Fn(&str, &mut JobContext) -> Result<(), JobFailure> + Send + Sync;
 

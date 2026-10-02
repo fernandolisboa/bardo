@@ -286,16 +286,10 @@ impl Bardo {
             .unwrap_or_default();
         let english = Catalog::load(UiLanguage::EnUs);
         let details = &channel.details;
-        // Per-video overrides arrive with persona sharing; until then the
-        // channel's default speaks for every video.
-        let persona = match details.default_persona() {
-            Some(id) => self
-                .personas
-                .get(id)?
-                .filter(|persona| persona.owner == self.profile.id)
-                .map(|persona| persona.details.describe()),
-            None => None,
-        };
+        // The project's own persona, else the channel's default.
+        let persona = self
+            .narrator(project)?
+            .map(|persona| persona.details.describe());
         Ok(TemplateValues::from([
             (TemplateVariable::ChannelName, details.name().to_owned()),
             (TemplateVariable::ChannelNiche, or_not_set(details.niche())),
@@ -672,6 +666,29 @@ mod tests {
         assert!(prompt.contains("Voice: Wyatt."), "{prompt}");
         assert!(prompt.contains("Tone: Sober, measured"), "{prompt}");
         assert!(!prompt.contains("no persona chosen"), "{prompt}");
+    }
+
+    #[test]
+    fn the_videos_own_persona_shapes_its_script() {
+        let h = Harness::new();
+        h.answer(&["Script."]);
+        let app = h.start_with_key();
+        let project = project(&app);
+        let storyteller = app
+            .personas()
+            .unwrap()
+            .into_iter()
+            .find(|p| p.details.name() == "Dramatic Storyteller (en-US)")
+            .unwrap();
+        app.set_project_persona(project.id, Some(storyteller.id))
+            .unwrap();
+
+        generate(&app, &project);
+        let prompt = &h.text.requests()[0].prompt;
+        assert!(
+            prompt.contains(&format!("Narrator: {}", storyteller.details.describe())),
+            "{prompt}"
+        );
     }
 
     #[test]

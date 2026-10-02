@@ -108,7 +108,7 @@ pub use network_account::{
 };
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
-    PersonaRepository,
+    PersonaRepository, VoiceFlag,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{

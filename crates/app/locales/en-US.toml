@@ -374,6 +374,10 @@ title = "Video projects"
 empty = "Approve an idea to start a video project."
 started = "Video project started: {title}"
 no_channels = "Create a channel and approve one of its themes to start a video project."
+narrator = "Narrator"
+narrator_channel = "Channel default: {name}"
+narrator_channel_none = "Channel default (none set)"
+narrator_hint = "Reads this video's narration and shapes its script. Pick a persona to use it for this video only."
 
 [projects.error]
 not_loaded = "Could not load the video projects."
@@ -430,7 +434,9 @@ duration = "Length"
 
 [narration.error]
 no_script = "Generate the script first; the narration reads it."
-no_persona = "Choose a default persona for this channel on the Channels screen; it reads the narration."
+no_persona = "Choose a narrator for this video, or a default persona for its channel on the Channels screen."
+voice_unchecked = "The narrator's voice has not been checked in your ElevenLabs account yet. Check it on the Personas screen."
+voice_unavailable = "The narrator's voice is not in your ElevenLabs account. Fix it on the Personas screen or choose another narrator."
 missing_key = "Save an ElevenLabs key under Settings to generate narration."
 busy = "A narration is already being recorded for this project."
 missing = "Generate the narration first."
@@ -591,6 +597,8 @@ hint = "Narrators you reuse across channels: voice, tone, script style and prese
 empty = "No personas yet. Create one to give your channels a narrator."
 not_loaded = "Could not load your personas. Restart Bardo to try again."
 new = "New persona"
+import = "Import from file…"
+import_dialog = "Import persona"
 
 [persona]
 new_title = "New persona"
@@ -614,6 +622,26 @@ duplicated = "Created {name}. Edit it freely; the original stays as it was."
 used_by = "Default persona of: {channels}"
 unused = "No channel uses it as default yet."
 copy_suffix = "copy"
+imported_suffix = "imported"
+export = "Export to file…"
+export_hint = "Exports a package with the persona and a reference to its voice, never audio or keys. Whoever imports it needs the same voice in their own ElevenLabs account."
+exported = "Exported to {path}."
+imported = "Imported {name}."
+
+[persona.voice_flag]
+unchecked_tag = "Voice not checked"
+unavailable_tag = "Voice unavailable"
+unchecked = "This persona was imported and its voice has not been looked up in your ElevenLabs account yet. It cannot narrate until it is. Save your ElevenLabs key under Settings, then check your voices."
+unavailable = "This persona was imported and its voice is not in your ElevenLabs account, so it cannot narrate. Add the voice in ElevenLabs (the owner can share it, or clone it there with the speaker's consent) and check again, or choose another voice and save."
+check = "Check my ElevenLabs voices"
+
+[persona.package]
+unreadable = "Could not read that file."
+not_a_package = "That file is not a Bardo persona package."
+newer = "This package was made by a newer version of Bardo. Update Bardo to import it."
+invalid = "The persona in this package is invalid; the file may have been edited."
+export_failed = "Could not save the package there. Choose another folder."
+dialog_failed = "Could not open the file dialog."
 
 [persona.preset]
 stability = "Stability"

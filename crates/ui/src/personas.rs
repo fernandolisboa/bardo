@@ -1,22 +1,27 @@
 //! Personas screen: the library on the left, the create/edit form on the
 //! right with the ElevenLabs voice picker and the generation presets.
+//! Personas are exported to and imported from package files through the
+//! system's file dialogs; an imported persona whose voice is not (yet)
+//! seen in the user's account shows a flag and how to fix it.
 //! Rules, storage and the voice listing live in `bardo_app`; this file maps
 //! the form to a `PersonaDraft` and results back to the screen.
 
 use bardo_app::bardo_domain::{
     Channel, ChannelId, GenerationPresets, Persona, PersonaDraft, PersonaFieldError, PersonaId,
-    Voice, VoiceRef,
+    Voice, VoiceFlag, VoiceRef,
 };
-use bardo_app::{Bardo, PersonaError, Text, VoiceStatus};
+use bardo_app::{Bardo, PersonaError, Text, VoiceStatus, persona_package_folder};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, PathPromptOptions, SharedString, Subscription, Task,
+    Window, div, px,
 };
 
 use crate::shell::tr;
@@ -104,6 +109,8 @@ impl Preset {
 enum Notice {
     Saved,
     Duplicated(String),
+    Exported(String),
+    Imported(String),
     Error(Text),
 }
 
@@ -123,6 +130,8 @@ pub struct PersonasScreen {
     picker_open: bool,
     /// The voice listing in flight; dropping it cancels the wait.
     listing: Option<Task<()>>,
+    /// An export or import dialog that is open.
+    dialog: Option<Task<()>>,
     picker_error: Option<Text>,
     /// Channels to confirm before the pending save goes through.
     confirm: Option<Vec<Channel>>,
@@ -189,6 +198,7 @@ impl PersonasScreen {
             sliders,
             picker_open: false,
             listing: None,
+            dialog: None,
             picker_error: None,
             confirm: None,
             field_errors: Vec::new(),
@@ -232,7 +242,10 @@ impl PersonasScreen {
     /// Any edit hides the "saved" notice, so it never describes unsaved
     /// edits, and drops a pending confirmation made for other values.
     fn touched(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.notice, Some(Notice::Saved | Notice::Duplicated(_))) {
+        if matches!(
+            self.notice,
+            Some(Notice::Saved | Notice::Duplicated(_) | Notice::Imported(_))
+        ) {
             self.notice = None;
         }
         self.confirm = None;
@@ -379,6 +392,87 @@ impl PersonasScreen {
         cx.notify();
     }
 
+    /// Asks where to save the edited persona's package, then writes it.
+    fn export(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.editing else {
+            return;
+        };
+        let name = match self.bardo.read(cx).persona_package_name(id) {
+            Ok(name) => name,
+            Err(error) => {
+                self.show_error(&error);
+                cx.notify();
+                return;
+            }
+        };
+        let chosen = cx.prompt_for_new_path(&persona_package_folder(), Some(&name));
+        self.dialog = Some(cx.spawn(async move |this, cx| {
+            let chosen = chosen.await;
+            let _ = this.update(cx, |this, cx| {
+                this.dialog = None;
+                match chosen {
+                    Ok(Ok(Some(path))) => match this.bardo.read(cx).export_persona_to(id, &path) {
+                        Ok(()) => {
+                            this.notice = Some(Notice::Exported(path.display().to_string()));
+                        }
+                        Err(error) => this.show_error(&error),
+                    },
+                    // Cancelled.
+                    Ok(Ok(None)) | Err(_) => {}
+                    Ok(Err(_)) => this.notice = Some(Notice::Error(Text::FileDialogFailed)),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Asks for a package file, imports it and opens the new persona. Its
+    /// voice is checked right away when no listing has been made yet.
+    fn import(&mut self, cx: &mut Context<Self>) {
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr(self.bardo.read(cx), Text::ImportPersonaDialog)),
+        });
+        self.dialog = Some(cx.spawn(async move |this, cx| {
+            let chosen = chosen.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.dialog = None;
+                match chosen {
+                    Ok(Ok(Some(paths))) => {
+                        if let Some(path) = paths.first() {
+                            this.import_from(path, window, cx);
+                        }
+                    }
+                    Ok(Ok(None)) | Err(_) => {}
+                    Ok(Err(_)) => this.notice = Some(Notice::Error(Text::FileDialogFailed)),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn import_from(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
+        match self.bardo.read(cx).import_persona_from(path) {
+            Ok(imported) => {
+                self.reload_list(cx);
+                self.edit(imported.id, window, cx);
+                self.notice = Some(Notice::Imported(imported.details.name().to_owned()));
+                if imported.voice_flag == Some(VoiceFlag::Unchecked) && self.listing.is_none() {
+                    self.load_voices(cx);
+                }
+            }
+            Err(error) => self.show_error(&error),
+        }
+    }
+
+    /// The stored flag of the persona being edited.
+    fn edited_flag(&self) -> Option<VoiceFlag> {
+        let id = self.editing?;
+        self.personas.iter().find(|p| p.id == id)?.voice_flag
+    }
+
     fn show_error(&mut self, error: &PersonaError) {
         self.field_errors = error.field_errors().to_vec();
         self.notice = error.form_message().map(Notice::Error);
@@ -416,6 +510,8 @@ impl PersonasScreen {
             });
             let _ = this.update(cx, |this, cx| {
                 this.listing = None;
+                // The listing may have cleared or set voice flags.
+                this.reload_list(cx);
                 cx.notify();
             });
         });
@@ -455,6 +551,13 @@ impl PersonasScreen {
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         SharedString::from(persona.details.voice().name().to_owned()),
                     ))
+                    .children(persona.voice_flag.map(|flag| {
+                        h_flex().child(
+                            Tag::warning()
+                                .small()
+                                .child(tr(bardo, Text::VoiceFlagTag(flag))),
+                        )
+                    }))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.edit(id, window, cx)
                     }))
@@ -514,6 +617,16 @@ impl PersonasScreen {
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .child(tr(bardo, Text::PersonasHint)),
+            )
+            .child(
+                h_flex().px_3().pb_2().child(
+                    Button::new("import-persona")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::ImportPersona))
+                        .disabled(self.dialog.is_some())
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.import(cx))),
+                ),
             )
             .child(body)
     }
@@ -876,7 +989,60 @@ impl PersonasScreen {
             .into_any_element()
     }
 
+    /// Why the edited persona cannot narrate, and how to fix it.
+    fn render_flag(&self, flag: VoiceFlag, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let loading = self.listing.is_some();
+        v_flex()
+            .p_3()
+            .gap_2()
+            .border_1()
+            .border_color(theme.warning)
+            .rounded_lg()
+            .child(
+                h_flex().child(
+                    Tag::warning()
+                        .small()
+                        .child(tr(bardo, Text::VoiceFlagTag(flag))),
+                ),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr(bardo, Text::VoiceFlagExplanation(flag))),
+            )
+            .children(
+                self.picker_error
+                    .or_else(|| {
+                        // The last check reached nothing to compare with.
+                        matches!(bardo.voice_list().map(|list| &list.voices), Some(Err(_)))
+                            .then_some(Text::VoicesFailed)
+                    })
+                    .filter(|_| !loading)
+                    .map(|error| {
+                        div()
+                            .text_xs()
+                            .text_color(theme.danger)
+                            .child(tr(bardo, error))
+                    }),
+            )
+            .child(
+                h_flex().child(
+                    Button::new("check-voices")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::CheckVoices))
+                        .loading(loading)
+                        .disabled(loading)
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.load_voices(cx))),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn render_form(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let flag = self.edited_flag().map(|flag| self.render_flag(flag, cx));
         let voice = self.render_voice(cx);
         let presets = self.render_presets(cx);
         let confirm = self
@@ -935,6 +1101,22 @@ impl PersonasScreen {
                         bardo.text_with(Text::PersonaDuplicated, &[("name", name)]),
                     ))
             }
+            Notice::Exported(path) => {
+                div()
+                    .text_sm()
+                    .text_color(theme.success)
+                    .child(SharedString::from(
+                        bardo.text_with(Text::PersonaExported, &[("path", path)]),
+                    ))
+            }
+            Notice::Imported(name) => {
+                div()
+                    .text_sm()
+                    .text_color(theme.success)
+                    .child(SharedString::from(
+                        bardo.text_with(Text::PersonaImported, &[("name", name)]),
+                    ))
+            }
             Notice::Error(text) => div()
                 .text_sm()
                 .text_color(theme.danger)
@@ -957,6 +1139,7 @@ impl PersonasScreen {
                             .child(div().text_xl().font_semibold().child(tr(bardo, title)))
                             .children(usage),
                     )
+                    .children(flag)
                     .child(field(
                         Text::PersonaName,
                         Input::new(&self.name).into_any_element(),
@@ -998,9 +1181,26 @@ impl PersonasScreen {
                                             },
                                         )),
                                 )
+                                .child(
+                                    Button::new("export-persona")
+                                        .outline()
+                                        .label(tr(bardo, Text::ExportPersona))
+                                        .disabled(self.dialog.is_some())
+                                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                            this.export(cx)
+                                        })),
+                                )
                             })
                             .children(notice.map(|notice| notice.flex_1().min_w_0())),
-                    ),
+                    )
+                    .when(self.editing.is_some(), |form| {
+                        form.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(tr(bardo, Text::PersonaExportHint)),
+                        )
+                    }),
             )
     }
 }
