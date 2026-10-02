@@ -197,6 +197,14 @@ pub struct ProjectsScreen {
     metadata_tags: Entity<InputState>,
     /// The network and stored metadata the fields were last filled with.
     metadata_loaded: Option<(Network, VideoMetadataDraft)>,
+    /// The post's link as the user pastes it.
+    post_link: Entity<InputState>,
+    /// "Change link" was clicked on a linked post.
+    post_editing: bool,
+    /// "Unlink" was clicked: the inspector asks first.
+    post_confirm_remove: bool,
+    /// Why the last link, unlink or sync did not happen, as said.
+    post_error: Option<SharedString>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -222,6 +230,7 @@ impl ProjectsScreen {
         let metadata_title = cx.new(|cx| InputState::new(window, cx));
         let metadata_description = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12));
         let metadata_tags = cx.new(|cx| InputState::new(window, cx));
+        let post_link = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -251,6 +260,12 @@ impl ProjectsScreen {
             }),
             cx.subscribe(&metadata_tags, move |this, _, event, cx| {
                 typed(this, event, cx)
+            }),
+            cx.subscribe(&post_link, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && this.post_error.is_some() {
+                    this.post_error = None;
+                    cx.notify();
+                }
             }),
             cx.subscribe_in(
                 &channel_select,
@@ -338,6 +353,10 @@ impl ProjectsScreen {
             metadata_description,
             metadata_tags,
             metadata_loaded: None,
+            post_link,
+            post_editing: false,
+            post_confirm_remove: false,
+            post_error: None,
             editor,
             loaded: None,
             field_error: None,
@@ -466,6 +485,7 @@ impl ProjectsScreen {
         self.export_choices.clear();
         self.selected_network = None;
         self.metadata_loaded = None;
+        self.reset_post(window, cx);
         self.selected_scene = None;
         self.pending_only = false;
         self.load(window, cx);

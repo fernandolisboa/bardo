@@ -1,0 +1,12 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=UTF-8
+
+{
+  "items": [
+    {
+      "id": "Zz9z9z9z9z9",
+      "snippet": { "publishedAt": "2026-09-01T00:00:00Z" },
+      "statistics": { "viewCount": "999999", "likeCount": "1", "commentCount": "1" }
+    }
+  ]
+}

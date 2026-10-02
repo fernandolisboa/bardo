@@ -212,6 +212,7 @@ mod tests {
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
+                video_stats: Arc::new(crate::testing::FakeVideoStats::default()),
                 text: Arc::new(crate::testing::FakeTextGenerator::default()),
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),

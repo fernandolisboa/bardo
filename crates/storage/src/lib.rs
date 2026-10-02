@@ -13,6 +13,7 @@ mod narration;
 mod network_account;
 mod persona;
 mod profile;
+mod publication;
 mod render;
 mod research;
 mod scene;

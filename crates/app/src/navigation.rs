@@ -19,6 +19,7 @@ impl Pillar {
 pub enum Destination {
     Research,
     Themes,
+    Performance,
     Projects,
     Personas,
     Templates,
@@ -30,9 +31,10 @@ pub enum Destination {
 }
 
 impl Destination {
-    pub const ALL: [Destination; 10] = [
+    pub const ALL: [Destination; 11] = [
         Destination::Research,
         Destination::Themes,
+        Destination::Performance,
         Destination::Projects,
         Destination::Personas,
         Destination::Templates,
@@ -47,7 +49,11 @@ impl Destination {
     pub const GROUPS: [(Pillar, &'static [Destination]); 3] = [
         (
             Pillar::Strategy,
-            &[Destination::Research, Destination::Themes],
+            &[
+                Destination::Research,
+                Destination::Themes,
+                Destination::Performance,
+            ],
         ),
         (
             Pillar::Production,
@@ -100,6 +106,7 @@ mod tests {
     fn the_pillars_hold_their_screens() {
         assert_eq!(Destination::Research.pillar(), Some(Pillar::Strategy));
         assert_eq!(Destination::Themes.pillar(), Some(Pillar::Strategy));
+        assert_eq!(Destination::Performance.pillar(), Some(Pillar::Strategy));
         assert_eq!(Destination::Projects.pillar(), Some(Pillar::Production));
         assert_eq!(Destination::Templates.pillar(), Some(Pillar::Production));
         assert_eq!(Destination::Accounts.pillar(), Some(Pillar::Publishing));

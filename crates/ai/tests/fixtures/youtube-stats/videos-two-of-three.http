@@ -1,0 +1,17 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=UTF-8
+
+{
+  "items": [
+    {
+      "id": "Qm4f1rT8vXa",
+      "snippet": { "publishedAt": "2026-09-27T14:00:08Z" },
+      "statistics": { "viewCount": "125431", "likeCount": "8812", "commentCount": "214" }
+    },
+    {
+      "id": "Hy6j8Pm1gFd",
+      "snippet": { "publishedAt": "2026-09-30T09:15:42Z" },
+      "statistics": { "viewCount": "2210" }
+    }
+  ]
+}

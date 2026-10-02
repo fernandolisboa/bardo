@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{LayoutId, RepositoryError, UiThemePreference};
+use crate::{LayoutId, MetricsSyncOnStart, RepositoryError, UiThemePreference};
 
 /// Identifies a user profile. Every entity carries the owning profile so more
 /// profiles can exist later without a migration (ADR-0005).
@@ -87,6 +87,8 @@ pub struct UserProfile {
     pub ui_language: UiLanguage,
     pub ui_theme: UiThemePreference,
     pub ui_layout: LayoutId,
+    /// When a start syncs publication metrics by itself.
+    pub metrics_sync: MetricsSyncOnStart,
 }
 
 impl UserProfile {
@@ -96,6 +98,7 @@ impl UserProfile {
             ui_language,
             ui_theme: UiThemePreference::default(),
             ui_layout: LayoutId::default(),
+            metrics_sync: MetricsSyncOnStart::default(),
         }
     }
 }

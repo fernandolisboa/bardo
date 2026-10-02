@@ -13,6 +13,7 @@ use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
 use crate::parts::{BudgetMeter, Navigation};
+use crate::performance::PerformanceScreen;
 use crate::personas::PersonasScreen;
 use crate::projects::{OpenEditor, ProjectsScreen};
 use crate::research::ResearchScreen;
@@ -37,6 +38,7 @@ pub struct Shell {
     personas: Entity<PersonasScreen>,
     research: Entity<ResearchScreen>,
     themes: Entity<ThemesScreen>,
+    performance: Entity<PerformanceScreen>,
     projects: Entity<ProjectsScreen>,
     templates: Entity<TemplatesScreen>,
     costs: Entity<CostsScreen>,
@@ -61,6 +63,7 @@ impl Shell {
         let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
+        let performance = cx.new(|cx| PerformanceScreen::new(bardo.clone(), window, cx));
         let projects = cx.new(|cx| ProjectsScreen::new(bardo.clone(), window, cx));
         let templates = cx.new(|cx| TemplatesScreen::new(bardo.clone(), window, cx));
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
@@ -111,6 +114,7 @@ impl Shell {
             personas,
             research,
             themes,
+            performance,
             projects,
             templates,
             costs,
@@ -161,6 +165,9 @@ impl Shell {
                 Destination::Themes => self
                     .themes
                     .update(cx, |themes, cx| themes.reload_channels(window, cx)),
+                Destination::Performance => self
+                    .performance
+                    .update(cx, |performance, cx| performance.reload(window, cx)),
                 Destination::Projects => self
                     .projects
                     .update(cx, |projects, cx| projects.reload(window, cx)),
@@ -271,6 +278,7 @@ impl Render for Shell {
             Destination::Personas => self.personas.clone().into_any_element(),
             Destination::Research => self.research.clone().into_any_element(),
             Destination::Themes => self.themes.clone().into_any_element(),
+            Destination::Performance => self.performance.clone().into_any_element(),
             Destination::Projects | Destination::Jobs => self.projects.clone().into_any_element(),
             Destination::Templates => self.templates.clone().into_any_element(),
             Destination::Costs => self.costs.clone().into_any_element(),

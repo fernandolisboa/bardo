@@ -938,6 +938,7 @@ mod tests {
                 network_accounts: Arc::clone(&self.db) as _,
                 renders: Arc::clone(&self.db) as _,
                 exports: Arc::clone(&self.db) as _,
+                publications: Arc::clone(&self.db) as _,
                 export_files: Arc::new(bardo_storage::MemoryExportFiles::default()),
                 costs: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
@@ -947,6 +948,7 @@ mod tests {
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
+                video_stats: Arc::new(crate::testing::FakeVideoStats::default()),
                 text: Arc::clone(&self.text) as _,
                 decisions: Arc::clone(&self.decisions) as _,
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),

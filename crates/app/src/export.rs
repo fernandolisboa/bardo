@@ -37,7 +37,9 @@ use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate
 use crate::jobs::{JobContext, JobHandler};
 use crate::render::RenderError;
 use crate::scenes::{id, parse, to_json};
-use crate::{Bardo, Catalog, KeyState, ScriptError, TemplateError, Text};
+use crate::{
+    Bardo, Catalog, KeyState, MetricsStatus, PublishedPost, ScriptError, TemplateError, Text,
+};
 
 /// What Claude answers: one post per network asked for.
 const METADATA_SCHEMA: &str = r#"{
@@ -175,6 +177,8 @@ pub struct ExportTarget {
     pub last: Option<Export>,
     /// Whether `last` holds the render and post as they are now.
     pub last_current: bool,
+    /// The post the user linked for this network, with its metrics.
+    pub posted: Option<PublishedPost>,
 }
 
 impl ExportTarget {
@@ -201,6 +205,12 @@ impl ExportTarget {
     pub fn can_export(&self) -> bool {
         self.block().is_none()
     }
+
+    /// Whether the user may link a post: there is an export to have
+    /// posted.
+    pub fn can_mark_posted(&self) -> bool {
+        self.last.is_some()
+    }
 }
 
 /// The project's Publishing stage: every network account and where its
@@ -224,6 +234,8 @@ pub struct ExportView {
     pub metadata_cost: Option<Cost>,
     /// The project's folder under the export root.
     pub package: String,
+    /// Where metrics syncing stands for the project's posts.
+    pub metrics: MetricsStatus,
 }
 
 impl ExportView {
@@ -801,6 +813,13 @@ impl Bardo {
         let metadata = self.exports.video_metadata(project.id)?;
         let exports = self.exports.exports(project.id)?;
         let disclosure = self.needs_disclosure(project.id)?;
+        let mut posted = self.published_posts(project.id)?;
+        let metrics = self.metrics_status(
+            &posted
+                .iter()
+                .map(|post| post.publication.clone())
+                .collect::<Vec<_>>(),
+        );
         let targets = accounts
             .iter()
             .map(|account| {
@@ -846,6 +865,10 @@ impl Bardo {
                     problems,
                     last,
                     last_current,
+                    posted: posted
+                        .iter()
+                        .position(|post| post.publication.network() == account.network)
+                        .map(|at| posted.remove(at)),
                 }
             })
             .collect::<Vec<_>>();
@@ -866,6 +889,7 @@ impl Bardo {
             metadata_cost,
             package: package_folder(&project.title, project.id),
             targets,
+            metrics,
         })
     }
 
@@ -1126,7 +1150,7 @@ impl Bardo {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use bardo_domain::{
         CostRepository, JobState, Meter, Money, NetworkAccountDraft, PersonaDetails, PersonaDraft,
         PersonaRepository, TokenUsage,
@@ -1192,7 +1216,7 @@ mod tests {
 
     const CLAUDE_KEY: &str = "sk-ant-api03-test-key-0001";
 
-    fn add_account(
+    pub(crate) fn add_account(
         app: &Bardo,
         project: &VideoProject,
         network: Network,
@@ -1213,7 +1237,7 @@ mod tests {
         serde_json::json!({ "posts": posts }).to_string()
     }
 
-    fn youtube_and_tiktok() -> String {
+    pub(crate) fn youtube_and_tiktok() -> String {
         answer(serde_json::json!([
             {
                 "network": "youtube",
@@ -1230,16 +1254,16 @@ mod tests {
         ]))
     }
 
-    struct Setup {
-        h: Harness,
-        app: Bardo,
+    pub(crate) struct Setup {
+        pub(crate) h: Harness,
+        pub(crate) app: Bardo,
         exports: Arc<MemoryExportFiles>,
         held: Arc<HeldExports>,
-        project: VideoProject,
+        pub(crate) project: VideoProject,
     }
 
     /// A drawn project with YouTube and TikTok accounts, rendered for both.
-    fn rendered() -> Setup {
+    pub(crate) fn rendered() -> Setup {
         let h = Harness::new();
         let held: Arc<HeldExports> = Arc::default();
         let exports = Arc::clone(&held.inner);
@@ -1272,7 +1296,7 @@ mod tests {
         }
     }
 
-    fn generated(s: &Setup) -> ExportView {
+    pub(crate) fn generated(s: &Setup) -> ExportView {
         s.h.text.answers.lock().unwrap().push(youtube_and_tiktok());
         *s.h.text.usage.lock().unwrap() = TokenUsage {
             input_tokens: 2_000,
@@ -1287,7 +1311,7 @@ mod tests {
         s.app.export_view(s.project.id).unwrap()
     }
 
-    fn target(view: &ExportView, network: Network) -> &ExportTarget {
+    pub(crate) fn target(view: &ExportView, network: Network) -> &ExportTarget {
         view.targets
             .iter()
             .find(|target| target.network == network)

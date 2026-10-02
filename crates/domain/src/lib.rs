@@ -63,6 +63,7 @@ mod network_account;
 mod persona;
 mod profile;
 mod provider_key;
+mod publication;
 mod redaction;
 mod render;
 mod repository;
@@ -148,6 +149,11 @@ pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage,
 pub use provider_key::{
     ApiKey, ApiKeyError, KeyCheck, KeyCheckOutcome, KeyChecker, Provider, ProviderFailure,
     ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,
+};
+pub use publication::{
+    ChannelPoint, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, PostLink, PostLinkError,
+    Publication, PublicationId, PublicationRepository, STATS_BATCH, UnknownMetricsSync,
+    VideoStatistics, VideoStats, channel_history, latest_of_each, sync_quota_units,
 };
 pub use redaction::Redactor;
 pub use render::{

@@ -91,7 +91,7 @@ pub fn channels_request(key: &ApiKey, ids: &[&str]) -> HttpRequest {
 
 /// The key goes in a header, keeping it out of the URL and so out of any
 /// error that quotes the URL.
-fn request(key: &ApiKey, resource: &str, params: &[(&str, &str)]) -> HttpRequest {
+pub(crate) fn request(key: &ApiKey, resource: &str, params: &[(&str, &str)]) -> HttpRequest {
     let query = form_urlencoded::Serializer::new(String::new())
         .extend_pairs(params)
         .finish();
@@ -125,17 +125,34 @@ fn parse_search(body: &Value) -> Result<(u64, Vec<Hit>), ProviderFailure> {
 
 /// `items[]`, empty when absent (the API leaves it out when nothing
 /// matches).
-fn items(body: &Value) -> impl Iterator<Item = &Value> {
+pub(crate) fn items(body: &Value) -> impl Iterator<Item = &Value> {
     body["items"].as_array().into_iter().flatten()
 }
 
 /// YouTube sends counts as decimal strings.
-fn count(value: &Value) -> Option<u64> {
+pub(crate) fn count(value: &Value) -> Option<u64> {
     value.as_str()?.parse().ok()
 }
 
-fn unexpected(detail: &str) -> ProviderFailure {
+pub(crate) fn unexpected(detail: &str) -> ProviderFailure {
     ProviderFailure::new(ProviderFailureKind::Unexpected, detail)
+}
+
+/// Sends the request and reads the JSON body of a successful answer.
+/// Failed answers are classified like key checks, since YouTube reports a
+/// bad key, a disabled API or a spent quota the same way everywhere.
+pub(crate) fn call<T: Transport>(
+    transport: &T,
+    request: &HttpRequest,
+) -> Result<Value, ProviderFailure> {
+    let response = transport
+        .send(request)
+        .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+    if !(200..=299).contains(&response.status) {
+        return Err(failure(Provider::YouTubeData, &response));
+    }
+    serde_json::from_str(&response.body)
+        .map_err(|error| unexpected(&format!("unreadable response: {error}")))
 }
 
 /// Fetches market data over HTTPS.
@@ -167,19 +184,8 @@ impl<T: Transport> YouTubeMarketData<T> {
         &self.transport
     }
 
-    /// Sends the request and reads the JSON body of a successful answer.
-    /// Failed answers are classified like key checks, since YouTube reports
-    /// a bad key, a disabled API or a spent quota the same way everywhere.
     fn call(&self, request: &HttpRequest) -> Result<Value, ProviderFailure> {
-        let response = self
-            .transport
-            .send(request)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
-        if !(200..=299).contains(&response.status) {
-            return Err(failure(Provider::YouTubeData, &response));
-        }
-        serde_json::from_str(&response.body)
-            .map_err(|error| unexpected(&format!("unreadable response: {error}")))
+        call(&self.transport, request)
     }
 }
 

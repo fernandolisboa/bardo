@@ -1,5 +1,5 @@
-//! Adapters for the decision engine, generative providers, voices and
-//! market data.
+//! Adapters for the decision engine, generative providers, voices, market
+//! data and public video statistics.
 
 pub mod claude;
 pub mod elevenlabs;
@@ -11,6 +11,7 @@ pub mod jev;
 pub mod key_check;
 pub mod market;
 pub mod retry;
+pub mod youtube_stats;
 
 pub use claude::ClaudeTextGenerator;
 pub use elevenlabs::{ElevenLabsAlignment, ElevenLabsSpeech, ElevenLabsVoices};
@@ -20,3 +21,4 @@ pub use higgsfield::HiggsfieldClips;
 pub use jev::JevDecisionEngine;
 pub use key_check::HttpKeyChecker;
 pub use market::YouTubeMarketData;
+pub use youtube_stats::YouTubeStats;

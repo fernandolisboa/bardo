@@ -861,6 +861,8 @@ pub(crate) mod tests {
         /// Writes its proxies into `files`.
         pub(crate) media: Arc<crate::editor::testing::FakeMedia>,
         pub(crate) audio: Arc<crate::narrations::testing::FakeAudioOutput>,
+        /// Public statistics of linked posts.
+        pub(crate) stats: Arc<crate::testing::FakeVideoStats>,
     }
 
     impl Harness {
@@ -878,6 +880,7 @@ pub(crate) mod tests {
                 clips: Arc::default(),
                 more_clips: Vec::new(),
                 secrets: Arc::default(),
+                stats: Arc::default(),
             }
         }
 
@@ -923,6 +926,7 @@ pub(crate) mod tests {
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
+                video_stats: Arc::clone(&self.stats) as _,
                 text: Arc::clone(&self.text) as _,
                 decisions: Arc::new(FakeDecisionEngine::default()),
                 voices: Arc::new(FakeVoiceLibrary::default()),
