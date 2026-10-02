@@ -45,26 +45,30 @@ fn main() -> anyhow::Result<()> {
         let _ = bardo_app::logging::init(&log_path, bardo.redactor());
     }
 
-    gpui_kit::application().run(move |cx: &mut App| {
-        gpui_kit::init(cx);
-        let title = SharedString::from(bardo.text(bardo_app::Text::AppName).into_owned());
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(1260.), px(780.)),
-                cx,
-            ))),
-            titlebar: Some(TitlebarOptions {
-                title: Some(title),
+    // The bundled icons (gpui-kit's default set); without them icons draw
+    // nothing.
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::Assets)
+        .run(move |cx: &mut App| {
+            gpui_kit::init(cx);
+            let title = SharedString::from(bardo.text(bardo_app::Text::AppName).into_owned());
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(1260.), px(780.)),
+                    cx,
+                ))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(title),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| Shell::new(bardo, window, cx))
-        })
-        .expect("failed to open the main window");
-        cx.activate(true);
-    });
+            };
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| Shell::new(bardo, window, cx))
+            })
+            .expect("failed to open the main window");
+            cx.activate(true);
+        });
     Ok(())
 }

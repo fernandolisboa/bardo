@@ -128,6 +128,15 @@ impl TimelineState {
         self.scroll = self.scroll.clamp(0., (content - width).max(0.));
     }
 
+    /// Keeps a playing playhead in view: a page on when it runs off.
+    fn follow(&mut self, playhead: Duration) {
+        let x = self.x(playhead);
+        let width = self.width();
+        if width > 0. && (x < 0. || x > width - END_GAP) {
+            self.scroll = (playhead.as_secs_f32() * self.zoom - width * 0.1).max(0.);
+        }
+    }
+
     fn x(&self, time: Duration) -> f32 {
         time.as_secs_f32() * self.zoom - self.scroll
     }
@@ -165,6 +174,10 @@ impl EditorScreen {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.timeline.layout(view.duration());
+        if let Some(editor) = self.editor.as_ref().filter(|editor| editor.is_playing()) {
+            self.timeline.follow(editor.playhead());
+            self.timeline.layout(view.duration());
+        }
         let toolbar = self.render_timeline_toolbar(cx);
         let bardo = self.bardo.read(cx);
         let headers = v_flex()

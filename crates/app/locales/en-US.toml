@@ -843,7 +843,7 @@ play = "Play"
 pause = "Pause"
 previous_frame = "Previous frame"
 next_frame = "Next frame"
-building = "Building preview proxies… {ready} of {total} clips"
+building = "Building preview proxies… {ready} of {total} files"
 keep_editing = "You can keep editing while this runs"
 stale = "The narration changed after the scenes were planned. Plan them again to match it."
 

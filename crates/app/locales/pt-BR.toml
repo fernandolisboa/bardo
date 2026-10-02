@@ -843,7 +843,7 @@ play = "Reproduzir"
 pause = "Pausar"
 previous_frame = "Quadro anterior"
 next_frame = "Próximo quadro"
-building = "Gerando proxies de pré-visualização… {ready} de {total} clipes"
+building = "Gerando proxies de pré-visualização… {ready} de {total} arquivos"
 keep_editing = "Você pode continuar editando enquanto isso roda"
 stale = "A narração mudou depois que as cenas foram planejadas. Planeje-as de novo para acompanhar."
 
