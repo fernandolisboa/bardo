@@ -29,14 +29,14 @@ Top to bottom, filling the window:
 3. **Timeline** (bottom, about 40% of the height):
    - Toolbar: playhead timecode (in the 200 px header column), Select (V) and Split (S) tools, toggles **Snap to words**, **AI cut suggestions** (with pending count) and **Duck music under narration**, zoom out / slider / zoom in.
    - Ruler with timecodes and AI suggestion pins.
-   - Tracks, each with a 200 px header (type chip, name, M/S, gain readout):
+   - Tracks, each with a 200 px header (type chip, name, gain readout, **M**/**S**). On audio tracks, M and S toggle mute and solo; a track that will not play (muted, or not soloed while another is) dims its name and, on A1, its pieces. Clicking an audio header picks the track for the inspector (raised fill, 2 px accent bar on its left edge); picking a track and selecting an item exclude each other.
 
      | Chip | Track | Height | Content |
      | --- | --- | --- | --- |
      | CC | Captions | 30 px | caption chips with text |
      | V1 | Video | 64 px | clips with thumbnail strip and `N · scene name` |
      | A1 | Narration | 82 px | waveform plus word markers (labels on two alternating rows; hidden when zoomed out) |
-     | A2 | Music | 54 px | waveform plus ducking envelope dipping under narration; header shows `−6.0 dB · Duck −12 dB` |
+     | A2 | Music | 54 px | waveform plus ducking envelope dipping under narration; header shows the level and, below it while ducking is on, `Duck −12.0 dB` |
      | A3 | SFX | 34 px | short clips |
 
    - Playhead: one accent line across ruler and all tracks.
@@ -64,7 +64,8 @@ Track colors differ in lightness as well as hue, so they stay distinguishable fo
 
 - **Clip (V1)**: name; source provenance (e.g. "Nano Banana image · Animated with Higgsfield · Kling 2.5", file, resolution, fps); In / Out / Duration; Crop position `Fit | Fill | Custom` with X/Y (applies in 9:16; in 16:9 the clip fits the frame); Speed; **Replace asset**, **Regenerate** (#15, #16).
 - **Caption (CC)**: text; In / Out / Duration with "snapped to words" hint; channel caption styles as swatches (three per channel); vertical position (Top / Center / Bottom plus offset); "Apply style to all captions".
-- **Audio region (A1–A3)**: gain, fade in / fade out; on A2, ducking amount (#22).
+- **Audio region (A1–A3)**: In / Out / Duration, **Fades** (fade in, fade out; − / + in 0.1 s steps, never longer than the region together; a split inside a fade ends it at the split), file, **Remove from the cut**. Fades draw as ramps over the region.
+- **Track (A1–A3, picked by its header)**: **Level** (− / + in 0.5 dB steps, −30 to +12 dB), **Mute**, **Solo**; on A2, **Duck under the narration** and **Duck by** (1 to 30 dB in 1 dB steps; − ducks deeper) with a hint on what ducking follows. Every change is one undoable edit (#22).
 - **Missing media**: alert at the top of the clip inspector with **Relink…**; crop and speed hidden.
 
 ## States

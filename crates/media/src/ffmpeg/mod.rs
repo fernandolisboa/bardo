@@ -26,8 +26,8 @@ pub use frames::{FramePoll, FrameSize, FrameStream, VideoFrame};
 pub use probe::{AudioStream, MediaInfo, VideoStream};
 pub use proxy::{ProxyCodec, ProxySettings};
 pub use render::{
-    AudioClip, AudioTrack, ClipSource, Framing, Loudness, LoudnessTarget, Output, RenderPlan,
-    VideoClip,
+    AudioClip, AudioTrack, ClipSource, Dip, Duck, Framing, Loudness, LoudnessTarget, Output,
+    RenderPlan, VideoClip,
 };
 pub use waveform::Waveform;
 

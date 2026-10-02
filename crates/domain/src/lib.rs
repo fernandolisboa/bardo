@@ -50,6 +50,7 @@ mod generation;
 mod image;
 mod job;
 mod market;
+mod mix;
 mod narration;
 mod network;
 mod network_account;
@@ -95,6 +96,10 @@ pub use job::{
 };
 pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
+};
+pub use mix::{
+    AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,
+    DuckEnvelope, Ducking, GAIN_RANGE, LaneMix, Mix,
 };
 pub use narration::{
     InvalidWordTimings, Narration, NarrationId, NarrationRepository, NarrationSource, WordTiming,

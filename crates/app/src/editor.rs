@@ -10,6 +10,11 @@
 //! was made on: a new plan or narration starts the editor over from the
 //! rough cut, and says so. A scene's new image takes its place in the cut.
 //!
+//! The mix (stories 61-63) is part of the cut: each audio lane's level,
+//! mute and solo, the music's ducking under the narration's words, and each
+//! audio item's fades. Changing it is an edit like any other, saved and
+//! undoable, and the preview plays it as the render will.
+//!
 //! Opening or refreshing the editor queues a job for the proxies the
 //! timeline lacks; editing never waits on it, clips without a proxy show
 //! that they are building, and the preview waits until none is.
@@ -27,14 +32,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    Edge, Edit, EditError, FPS, Generation, History, ItemRef, Job, JobKind, JobState, NarrationId,
-    NarrationRepository, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
-    Shift, ThemeRepository, Timeline, TimelineRepository, Track, VideoProject, VideoProjectId,
-    VideoSource, frame_at, frame_time, nearest_frame, snap,
+    AudioLane, DuckEnvelope, Ducking, Edge, Edit, EditError, FPS, Generation, History, ItemRef,
+    Job, JobKind, JobState, LaneMix, NarrationId, NarrationRepository, ProjectFiles,
+    RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
+    TimelineRepository, Track, VideoProject, VideoProjectId, VideoSource, frame_at, frame_time,
+    nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, ClipSource, FramePoll, FrameSize, FrameStream, Framing, MediaError,
-    RenderPlan, VideoClip, VideoFrame,
+    AudioClip, AudioTrack, ClipSource, Dip, Duck, FramePoll, FrameSize, FrameStream, Framing,
+    MediaError, RenderPlan, VideoClip, VideoFrame,
 };
 use bardo_media::{AudioOutput, MediaEngine, StreamPlayback};
 use serde::Deserialize;
@@ -204,6 +210,8 @@ pub struct EditorView {
     /// Where the narration's words start and end on the timeline: what
     /// cuts snap to.
     pub word_boundaries: Vec<Duration>,
+    /// How the music ducks under the narration, while ducking is on.
+    pub ducking: Option<DuckEnvelope>,
     /// Whether the project has a narration (the empty state says what is
     /// missing).
     pub has_narration: bool,
@@ -298,6 +306,19 @@ pub enum EditAction {
     },
     /// Removes the selected item.
     DeleteSelection,
+    /// Sets an audio lane's level, mute and solo.
+    SetLane {
+        lane: AudioLane,
+        mix: LaneMix,
+    },
+    /// Turns the music's ducking on or off, or changes its depth.
+    SetDucking(Ducking),
+    /// Sets a narration item's fades, cut short to fit in it.
+    SetFades {
+        item: ItemRef,
+        fade_in: Duration,
+        fade_out: Duration,
+    },
     Undo,
     Redo,
 }
@@ -353,6 +374,9 @@ pub struct Editor {
     files: Arc<dyn ProjectFiles>,
     playhead: Duration,
     selection: Option<ItemRef>,
+    /// An audio lane picked by its header, whose mix the inspector shows;
+    /// never with an item selected.
+    lane: Option<AudioLane>,
     aspect: PreviewAspect,
     playing: Option<Playing>,
     /// The one picture asked for while paused.
@@ -383,6 +407,11 @@ impl Editor {
 
     pub fn selection(&self) -> Option<ItemRef> {
         self.selection
+    }
+
+    /// The audio lane picked by its header.
+    pub fn selected_lane(&self) -> Option<AudioLane> {
+        self.lane
     }
 
     /// The selected video clip, if a clip is selected.
@@ -491,8 +520,9 @@ impl Editor {
         Some(if slot > from { slot - 1 } else { slot })
     }
 
-    /// The edit an action makes, and what is selected after it.
-    fn edit_for(&self, action: EditAction) -> Result<(Edit, Option<ItemRef>), EditorError> {
+    /// The edit an action makes, and what is selected after it (`None`
+    /// keeps the selection as it is).
+    fn edit_for(&self, action: EditAction) -> Result<(Edit, Option<Option<ItemRef>>), EditorError> {
         let timeline = self
             .view
             .timeline
@@ -520,10 +550,10 @@ impl Editor {
                 // The part after the cut, where the playhead goes on.
                 (
                     edit,
-                    Some(ItemRef {
+                    Some(Some(ItemRef {
                         index: item.index + 1,
                         ..item
-                    }),
+                    })),
                 )
             }
             EditAction::Trim {
@@ -542,7 +572,7 @@ impl Editor {
                         edge,
                         by,
                     },
-                    Some(item),
+                    Some(Some(item)),
                 )
             }
             EditAction::Move { item, to } => {
@@ -553,11 +583,11 @@ impl Editor {
                         index: item.index,
                         to,
                     },
-                    Some(item),
+                    Some(Some(item)),
                 )
             }
             EditAction::Reorder { from, to } => {
-                (Edit::Reorder { from, to }, Some(ItemRef::video(to)))
+                (Edit::Reorder { from, to }, Some(Some(ItemRef::video(to))))
             }
             EditAction::DeleteSelection => {
                 let item = self.selection.ok_or(EditorError::NothingToCut)?;
@@ -565,6 +595,25 @@ impl Editor {
                     Edit::Delete {
                         track: item.track,
                         index: item.index,
+                    },
+                    Some(None),
+                )
+            }
+            EditAction::SetLane { lane, mix } => (Edit::SetLane { lane, mix }, None),
+            EditAction::SetDucking(ducking) => (Edit::SetDucking(ducking), None),
+            EditAction::SetFades {
+                item,
+                fade_in,
+                fade_out,
+            } => {
+                let (_, duration) = timeline.span(item).ok_or(EditError::NoSuchItem)?;
+                let fade_in = fade_in.min(duration);
+                (
+                    Edit::SetFades {
+                        track: item.track,
+                        index: item.index,
+                        fade_in,
+                        fade_out: fade_out.min(duration - fade_in),
                     },
                     None,
                 )
@@ -599,6 +648,13 @@ impl Editor {
     /// Selects an item of the timeline, or nothing.
     pub fn select(&mut self, item: Option<ItemRef>) {
         self.selection = item.filter(|&item| self.view.span(item).is_some());
+        self.lane = None;
+    }
+
+    /// Picks an audio lane to show its mix in the inspector, or none.
+    pub fn select_lane(&mut self, lane: Option<AudioLane>) {
+        self.selection = None;
+        self.lane = lane.filter(|_| self.view.timeline.is_some());
     }
 
     /// Switches the preview's shape.
@@ -648,25 +704,46 @@ impl Editor {
                 framing,
             });
         }
-        let narration = timeline
-            .narration()
-            .iter()
-            .filter(|item| self.files.exists(project, &item.file))
-            .map(|item| AudioClip {
-                source: self.files.path(project, &item.file),
-                start: item.start,
-                duration: item.duration,
-                at: item.at,
-                gain_db: 0.0,
+        // A2 and A3 have nothing to play until media can be placed there;
+        // the music's ducking is already in place for it.
+        let mix = timeline.mix();
+        let audio = AudioLane::ALL
+            .map(|lane| {
+                let items = match lane {
+                    AudioLane::Narration => timeline.narration(),
+                    AudioLane::Music | AudioLane::Sfx => &[],
+                };
+                let clips = items
+                    .iter()
+                    .filter(|_| mix.is_audible(lane))
+                    .filter(|item| self.files.exists(project, &item.file))
+                    .map(|item| {
+                        let (fade_in, fade_out) = item.fades();
+                        AudioClip {
+                            source: self.files.path(project, &item.file),
+                            start: item.start,
+                            duration: item.duration,
+                            at: item.at,
+                            gain_db: 0.0,
+                            fade_in,
+                            fade_out,
+                            skipped: Duration::ZERO,
+                        }
+                    })
+                    .collect();
+                AudioTrack {
+                    clips,
+                    gain_db: mix.lane(lane).gain.db(),
+                    duck: self
+                        .view
+                        .ducking
+                        .as_ref()
+                        .filter(|_| lane == AudioLane::Music)
+                        .map(duck),
+                }
             })
-            .collect();
-        Some(RenderPlan {
-            video,
-            audio: vec![AudioTrack {
-                clips: narration,
-                gain_db: 0.0,
-            }],
-        })
+            .to_vec();
+        Some(RenderPlan { video, audio })
     }
 
     /// Plays from the playhead (from the start when it is at the end).
@@ -904,6 +981,24 @@ impl Editor {
     }
 }
 
+/// The music's ducking as the media engine plays it.
+fn duck(envelope: &DuckEnvelope) -> Duck {
+    let seconds = |time: Duration| time.as_secs_f64();
+    Duck {
+        depth_db: envelope.depth.db(),
+        dips: envelope
+            .dips
+            .iter()
+            .map(|dip| Dip {
+                start: seconds(dip.start),
+                full: seconds(dip.full),
+                release: seconds(dip.release),
+                end: seconds(dip.end),
+            })
+            .collect(),
+    }
+}
+
 /// What the preview says when ffmpeg stopped before giving a picture.
 fn preview_failure(finished: Option<Result<(), MediaError>>) -> Text {
     match finished {
@@ -1069,14 +1164,18 @@ impl Bardo {
                 peaks,
             }
         });
-        let word_boundaries = match (&timeline, &narration) {
-            (Some(timeline), Some(narration)) => timeline.word_boundaries(
-                narration
-                    .words()
-                    .map(|(_, timing)| (timing.start, timing.end)),
-            ),
-            _ => Vec::new(),
+        let words = || {
+            narration
+                .iter()
+                .flat_map(|narration| narration.words())
+                .map(|(_, timing)| (timing.start, timing.end))
         };
+        let word_boundaries = timeline
+            .as_ref()
+            .map_or_else(Vec::new, |timeline| timeline.word_boundaries(words()));
+        let ducking = timeline
+            .as_ref()
+            .and_then(|timeline| timeline.ducking(words()));
         Ok(EditorView {
             channel_name,
             stale: plan
@@ -1087,6 +1186,7 @@ impl Bardo {
             basis,
             cut_outdated,
             word_boundaries,
+            ducking,
             clips,
             scenes,
             narration: narration_track,
@@ -1114,6 +1214,7 @@ impl Bardo {
             files: Arc::clone(&self.files),
             playhead: Duration::ZERO,
             selection: None,
+            lane: None,
             aspect: PreviewAspect::default(),
             playing: None,
             still: None,
@@ -1186,8 +1287,13 @@ impl Bardo {
         };
         let mut history = editor.history.clone();
         let made = match action {
-            EditAction::Undo => history.undo(&mut timeline).map(|done| (done, None)),
-            EditAction::Redo => history.redo(&mut timeline).map(|done| (done, None)),
+            // Items may have moved: the selection goes, a picked lane stays.
+            EditAction::Undo => history
+                .undo(&mut timeline)
+                .map(|done| (done, editor.lane.is_none().then_some(None))),
+            EditAction::Redo => history
+                .redo(&mut timeline)
+                .map(|done| (done, editor.lane.is_none().then_some(None))),
             action => {
                 let (edit, selection) = editor.edit_for(action)?;
                 history
@@ -1210,7 +1316,9 @@ impl Bardo {
         editor.history = history;
         editor.cut_reset = false;
         editor.update(view);
-        editor.select(selection);
+        if let Some(selection) = selection {
+            editor.select(selection);
+        }
         Ok(())
     }
 
@@ -2505,5 +2613,210 @@ mod tests {
         )
         .unwrap();
         assert!(!editor.can_undo());
+    }
+
+    fn music(gain: i16) -> LaneMix {
+        LaneMix {
+            gain: bardo_domain::Decibels::from_tenths(gain),
+            ..LaneMix::default()
+        }
+    }
+
+    /// The plan the preview plays now.
+    fn playing_plan(h: &Harness, editor: &mut Editor) -> RenderPlan {
+        editor.pause();
+        editor.play().unwrap();
+        h.media.previews().pop().unwrap().plan
+    }
+
+    #[test]
+    fn levels_mutes_and_solos_change_what_the_preview_plays() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let plan = playing_plan(&h, &mut editor);
+        assert_eq!(plan.audio.len(), 3, "narration, music, SFX");
+        assert_eq!(plan.audio[0].clips.len(), 1);
+        assert_eq!(plan.audio[0].gain_db, 0.0);
+
+        app.edit(
+            &mut editor,
+            EditAction::SetLane {
+                lane: AudioLane::Narration,
+                mix: music(-60),
+            },
+        )
+        .unwrap();
+        assert_eq!(playing_plan(&h, &mut editor).audio[0].gain_db, -6.0);
+
+        let muted = LaneMix {
+            muted: true,
+            ..music(-60)
+        };
+        app.edit(
+            &mut editor,
+            EditAction::SetLane {
+                lane: AudioLane::Narration,
+                mix: muted,
+            },
+        )
+        .unwrap();
+        assert!(playing_plan(&h, &mut editor).audio[0].clips.is_empty());
+        app.edit(
+            &mut editor,
+            EditAction::SetLane {
+                lane: AudioLane::Narration,
+                mix: music(-60),
+            },
+        )
+        .unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::SetLane {
+                lane: AudioLane::Music,
+                mix: LaneMix {
+                    solo: true,
+                    ..LaneMix::default()
+                },
+            },
+        )
+        .unwrap();
+        assert!(
+            playing_plan(&h, &mut editor).audio[0].clips.is_empty(),
+            "soloing the music silences the narration"
+        );
+    }
+
+    #[test]
+    fn fades_play_in_the_preview_and_fit_their_item() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let item = ItemRef::narration(0);
+        let (_, length) = editor.view().span(item).unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::SetFades {
+                item,
+                fade_in: Duration::from_millis(500),
+                fade_out: Duration::from_secs(3_600),
+            },
+        )
+        .unwrap();
+        let clip = playing_plan(&h, &mut editor).audio[0].clips[0].clone();
+        assert_eq!(clip.fade_in, Duration::from_millis(500));
+        assert_eq!(
+            clip.fade_out,
+            length - Duration::from_millis(500),
+            "cut short to fit"
+        );
+        assert!(matches!(
+            app.edit(
+                &mut editor,
+                EditAction::SetFades {
+                    item: ItemRef::video(0),
+                    fade_in: Duration::from_millis(500),
+                    fade_out: Duration::ZERO,
+                },
+            ),
+            Err(EditorError::Edit(EditError::WrongTrack))
+        ));
+    }
+
+    #[test]
+    fn the_music_ducks_under_the_narrated_words_in_the_preview() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        let envelope = editor.view().ducking.clone().unwrap();
+        assert_eq!(envelope.depth, bardo_domain::DEFAULT_DUCK);
+        let narration = app.narrations.narration(project.id).unwrap().unwrap();
+        let first_word = narration.words().next().unwrap().1.start;
+        assert_eq!(envelope.dips[0].full, first_word);
+
+        let plan = playing_plan(&h, &mut editor);
+        assert_eq!(plan.audio[0].duck, None, "the narration is not ducked");
+        let duck = plan.audio[1].duck.clone().unwrap();
+        assert_eq!(duck.depth_db, 12.0);
+        assert_eq!(duck.dips.len(), envelope.dips.len());
+        assert_eq!(duck.dips[0].full, first_word.as_secs_f64());
+
+        app.edit(
+            &mut editor,
+            EditAction::SetDucking(Ducking {
+                on: true,
+                depth: bardo_domain::Decibels::from_tenths(200),
+            }),
+        )
+        .unwrap();
+        let plan = playing_plan(&h, &mut editor);
+        assert_eq!(plan.audio[1].duck.as_ref().unwrap().depth_db, 20.0);
+        app.edit(
+            &mut editor,
+            EditAction::SetDucking(Ducking {
+                on: false,
+                depth: bardo_domain::Decibels::from_tenths(200),
+            }),
+        )
+        .unwrap();
+        assert_eq!(editor.view().ducking, None);
+        assert_eq!(playing_plan(&h, &mut editor).audio[1].duck, None);
+    }
+
+    #[test]
+    fn mix_edits_undo_and_are_kept_with_the_cut() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        editor.select_lane(Some(AudioLane::Music));
+        app.edit(
+            &mut editor,
+            EditAction::SetLane {
+                lane: AudioLane::Music,
+                mix: music(-60),
+            },
+        )
+        .unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::SetDucking(Ducking {
+                on: false,
+                ..Ducking::default()
+            }),
+        )
+        .unwrap();
+        assert_eq!(editor.selected_lane(), Some(AudioLane::Music));
+
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        let mix = *editor.view().timeline.as_ref().unwrap().mix();
+        assert!(mix.ducking.on);
+        assert_eq!(mix.lane(AudioLane::Music), music(-60));
+        assert_eq!(
+            editor.selected_lane(),
+            Some(AudioLane::Music),
+            "the lane stays picked"
+        );
+
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(*reopened.view().timeline.as_ref().unwrap().mix(), mix);
+        assert!(!reopened.cut_reset());
+    }
+
+    #[test]
+    fn picking_a_lane_and_selecting_an_item_exclude_each_other() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        editor.select(Some(ItemRef::video(0)));
+        editor.select_lane(Some(AudioLane::Sfx));
+        assert_eq!(editor.selection(), None);
+        assert_eq!(editor.selected_lane(), Some(AudioLane::Sfx));
+        editor.select(Some(ItemRef::narration(0)));
+        assert_eq!(editor.selected_lane(), None);
+
+        let empty = app.open_editor(project(&app).id).unwrap();
+        let mut empty = empty;
+        empty.select_lane(Some(AudioLane::Music));
+        assert_eq!(empty.selected_lane(), None, "no cut, no mix");
     }
 }

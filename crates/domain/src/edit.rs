@@ -1,6 +1,8 @@
 //! Cut editing (PRD stories 58, 59, 70): split, trim, move, reorder and
 //! delete items of a timeline, each an [`Edit`] that, applied, hands back
-//! the edit undoing it. A [`History`] keeps those to undo and redo.
+//! the edit undoing it. A [`History`] keeps those to undo and redo. Mix
+//! changes (stories 61-63: a lane's level, mute and solo, the ducking, an
+//! audio item's fades) are edits too, so they undo the same way.
 //!
 //! Edits are exact: they cut where they are told, and the caller snaps the
 //! time first (to a frame, and to a word when snapping is on). Trims and
@@ -11,7 +13,10 @@
 
 use std::time::Duration;
 
-use crate::{AudioItem, Timeline, VideoItem, VideoSource, min_length};
+use crate::{
+    AudioItem, AudioLane, DUCK_RANGE, Ducking, GAIN_RANGE, LaneMix, Timeline, VideoItem,
+    VideoSource, min_length,
+};
 
 /// A track of the timeline that edits reach.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,6 +153,21 @@ pub enum Edit {
         index: usize,
         item: Item,
     },
+    /// Sets an audio lane's level (kept within [`GAIN_RANGE`]), mute and
+    /// solo.
+    SetLane { lane: AudioLane, mix: LaneMix },
+    /// Turns the music's ducking on or off and sets its depth (kept within
+    /// [`DUCK_RANGE`]).
+    SetDucking(Ducking),
+    /// Sets an audio item's fades. They are kept as given, so undoing gives
+    /// back exactly what was there; an item shorter than its fades plays
+    /// them cut short (`AudioItem::fades`).
+    SetFades {
+        track: Track,
+        index: usize,
+        fade_in: Duration,
+        fade_out: Duration,
+    },
 }
 
 /// Why an edit was not made. The timeline is left as it was.
@@ -270,6 +290,14 @@ impl Timeline {
             Edit::Reorder { from, to } => self.reorder(*from, *to)?,
             Edit::Delete { track, index } => self.delete(*track, *index)?,
             Edit::Insert { track, index, item } => self.insert(*track, *index, item)?,
+            Edit::SetLane { lane, mix } => self.set_lane(*lane, *mix)?,
+            Edit::SetDucking(ducking) => self.set_ducking(*ducking)?,
+            Edit::SetFades {
+                track,
+                index,
+                fade_in,
+                fade_out,
+            } => self.set_fades(*track, *index, *fade_in, *fade_out)?,
         };
         self.relayout();
         Ok(undo)
@@ -295,11 +323,16 @@ impl Timeline {
                 self.video.insert(index + 1, second);
             }
             Track::Narration => {
+                // The fade-in stays with the first part, the fade-out goes
+                // with the second; a split inside a fade ends it there.
                 let mut second = self.narration[index].clone();
                 second.start += first;
                 second.at = at;
                 second.duration = end - at;
-                self.narration[index].duration = first;
+                second.fade_in = Duration::ZERO;
+                let first_part = &mut self.narration[index];
+                first_part.duration = first;
+                first_part.fade_out = Duration::ZERO;
                 self.narration.insert(index + 1, second);
             }
         }
@@ -325,14 +358,19 @@ impl Timeline {
             }
             Track::Narration => {
                 let (first, second) = (&self.narration[index], &self.narration[index + 1]);
+                // Fades where they meet would be lost.
                 if first.file != second.file
                     || first.end() != second.at
                     || second.start != first.start + first.duration
+                    || !first.fade_out.is_zero()
+                    || !second.fade_in.is_zero()
                 {
                     return Err(EditError::CannotJoin);
                 }
                 let second = self.narration.remove(index + 1);
-                self.narration[index].duration += second.duration;
+                let joined = &mut self.narration[index];
+                joined.duration += second.duration;
+                joined.fade_out = second.fade_out;
                 second.at
             }
         };
@@ -449,6 +487,58 @@ impl Timeline {
             _ => return Err(EditError::WrongTrack),
         }
         Ok(Edit::Delete { track, index })
+    }
+
+    fn set_lane(&mut self, lane: AudioLane, mix: LaneMix) -> Result<Edit, EditError> {
+        let mix = LaneMix {
+            gain: mix.gain.clamp(GAIN_RANGE.0, GAIN_RANGE.1),
+            ..mix
+        };
+        let current = self.mix.lane_mut(lane);
+        if *current == mix {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(current, mix);
+        Ok(Edit::SetLane { lane, mix: before })
+    }
+
+    fn set_ducking(&mut self, ducking: Ducking) -> Result<Edit, EditError> {
+        let ducking = Ducking {
+            depth: ducking.depth.clamp(DUCK_RANGE.0, DUCK_RANGE.1),
+            ..ducking
+        };
+        if self.mix.ducking == ducking {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut self.mix.ducking, ducking);
+        Ok(Edit::SetDucking(before))
+    }
+
+    fn set_fades(
+        &mut self,
+        track: Track,
+        index: usize,
+        fade_in: Duration,
+        fade_out: Duration,
+    ) -> Result<Edit, EditError> {
+        if track != Track::Narration {
+            return Err(EditError::WrongTrack);
+        }
+        self.check(track, index)?;
+        let item = &mut self.narration[index];
+        if (item.fade_in, item.fade_out) == (fade_in, fade_out) {
+            return Err(EditError::NoChange);
+        }
+        let before = (
+            std::mem::replace(&mut item.fade_in, fade_in),
+            std::mem::replace(&mut item.fade_out, fade_out),
+        );
+        Ok(Edit::SetFades {
+            track,
+            index,
+            fade_in: before.0,
+            fade_out: before.1,
+        })
     }
 }
 
@@ -949,6 +1039,8 @@ mod tests {
                 at: ms(1_500),
                 duration: ms(1_000),
                 length: ms(4_000),
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
             }
         );
         // The start edge goes back to the first piece's end (0.5 s), not
@@ -1236,5 +1328,208 @@ mod tests {
         let mut other = Timeline::rough_cut(&plan(vec![scene(0, 1_000)]), &narration(1_000));
         assert!(history.undo(&mut other).is_err());
         assert!(!history.can_undo() && !history.can_redo());
+    }
+
+    #[test]
+    fn lane_levels_mutes_and_solos_undo() {
+        let music = LaneMix {
+            gain: crate::Decibels::from_tenths(-60),
+            muted: false,
+            solo: true,
+        };
+        let after = round_trip(
+            &timeline(),
+            Edit::SetLane {
+                lane: AudioLane::Music,
+                mix: music,
+            },
+        );
+        assert_eq!(after.mix().lane(AudioLane::Music), music);
+        assert!(!after.mix().is_audible(AudioLane::Narration), "soloed away");
+
+        // Past the range it stops at the loudest.
+        let after = round_trip(
+            &timeline(),
+            Edit::SetLane {
+                lane: AudioLane::Sfx,
+                mix: LaneMix {
+                    gain: crate::Decibels::from_tenths(400),
+                    ..LaneMix::default()
+                },
+            },
+        );
+        assert_eq!(after.mix().lane(AudioLane::Sfx).gain, GAIN_RANGE.1);
+        assert_unchanged(
+            Edit::SetLane {
+                lane: AudioLane::Narration,
+                mix: LaneMix::default(),
+            },
+            EditError::NoChange,
+        );
+    }
+
+    #[test]
+    fn ducking_turns_off_and_changes_depth_within_its_range() {
+        let after = round_trip(
+            &timeline(),
+            Edit::SetDucking(Ducking {
+                on: false,
+                depth: crate::DEFAULT_DUCK,
+            }),
+        );
+        assert!(!after.mix().ducking.on);
+        let after = round_trip(
+            &timeline(),
+            Edit::SetDucking(Ducking {
+                on: true,
+                depth: crate::Decibels::from_tenths(900),
+            }),
+        );
+        assert_eq!(after.mix().ducking.depth, DUCK_RANGE.1);
+        assert_unchanged(Edit::SetDucking(Ducking::default()), EditError::NoChange);
+    }
+
+    #[test]
+    fn fades_set_on_narration_undo_exactly() {
+        let after = round_trip(
+            &timeline(),
+            Edit::SetFades {
+                track: Track::Narration,
+                index: 0,
+                fade_in: ms(300),
+                fade_out: ms(1_200),
+            },
+        );
+        assert_eq!(after.narration()[0].fades(), (ms(300), ms(1_200)));
+
+        // Fades longer than a piece cut short later come back as they were.
+        let mut short = after.clone();
+        short
+            .apply(&Edit::Trim {
+                track: Track::Narration,
+                index: 0,
+                edge: Edge::End,
+                by: Shift::earlier(ms(3_600)),
+            })
+            .unwrap();
+        assert_eq!(short.narration()[0].fades(), (ms(300), ms(100)));
+        let refaded = round_trip(
+            &short,
+            Edit::SetFades {
+                track: Track::Narration,
+                index: 0,
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+            },
+        );
+        assert_eq!(
+            refaded.narration()[0].fades(),
+            (Duration::ZERO, Duration::ZERO)
+        );
+
+        assert_unchanged(
+            Edit::SetFades {
+                track: Track::Video,
+                index: 0,
+                fade_in: ms(100),
+                fade_out: ms(100),
+            },
+            EditError::WrongTrack,
+        );
+        assert_unchanged(
+            Edit::SetFades {
+                track: Track::Narration,
+                index: 0,
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+            },
+            EditError::NoChange,
+        );
+    }
+
+    #[test]
+    fn a_split_gives_the_fade_in_to_the_first_part_and_the_fade_out_to_the_second() {
+        let mut faded = timeline();
+        faded
+            .apply(&Edit::SetFades {
+                track: Track::Narration,
+                index: 0,
+                fade_in: ms(500),
+                fade_out: ms(700),
+            })
+            .unwrap();
+        let after = round_trip(
+            &faded,
+            Edit::Split {
+                track: Track::Narration,
+                index: 0,
+                at: ms(2_000),
+            },
+        );
+        let pieces = after.narration();
+        assert_eq!(pieces[0].fades(), (ms(500), Duration::ZERO));
+        assert_eq!(pieces[1].fades(), (Duration::ZERO, ms(700)));
+
+        // A split inside a fade ends the fade at the split.
+        let inside = round_trip(
+            &faded,
+            Edit::Split {
+                track: Track::Narration,
+                index: 0,
+                at: ms(300),
+            },
+        );
+        assert_eq!(inside.narration()[0].fades(), (ms(300), Duration::ZERO));
+        assert_eq!(inside.narration()[1].fades(), (Duration::ZERO, ms(700)));
+
+        // A fade added where the halves meet keeps them apart.
+        let mut faded_inside = after.clone();
+        faded_inside
+            .apply(&Edit::SetFades {
+                track: Track::Narration,
+                index: 1,
+                fade_in: ms(100),
+                fade_out: ms(700),
+            })
+            .unwrap();
+        assert_eq!(
+            faded_inside.apply(&Edit::Join {
+                track: Track::Narration,
+                index: 0,
+            }),
+            Err(EditError::CannotJoin)
+        );
+    }
+
+    #[test]
+    fn history_undoes_mix_edits_with_the_cuts() {
+        let original = timeline();
+        let mut timeline = original.clone();
+        let mut history = History::default();
+        history
+            .apply(
+                &mut timeline,
+                &Edit::SetLane {
+                    lane: AudioLane::Narration,
+                    mix: LaneMix {
+                        muted: true,
+                        ..LaneMix::default()
+                    },
+                },
+            )
+            .unwrap();
+        history
+            .apply(
+                &mut timeline,
+                &Edit::Split {
+                    track: Track::Narration,
+                    index: 0,
+                    at: ms(1_000),
+                },
+            )
+            .unwrap();
+        history.undo(&mut timeline).unwrap();
+        history.undo(&mut timeline).unwrap();
+        assert_eq!(timeline, original);
     }
 }

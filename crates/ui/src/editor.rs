@@ -15,7 +15,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
-    Edge, FPS, Generation, ItemRef, Track, VideoProjectId, frame_time, timecode,
+    AudioLane, DUCK_RANGE, Decibels, Ducking, Edge, FPS, GAIN_RANGE, Generation, ItemRef, LaneMix,
+    Track, VideoProjectId, frame_time, timecode,
 };
 use bardo_app::{
     Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PreviewAspect, Text,
@@ -31,6 +32,10 @@ use crate::shell::tr;
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
+/// What one click of a level's − or + changes.
+const GAIN_STEP: Decibels = Decibels::from_tenths(5);
+const DUCK_STEP: Decibels = Decibels::from_tenths(10);
+const FADE_STEP: Duration = Duration::from_millis(100);
 
 /// The design's tokens (`docs/design/editor.md`); the fills of tracks
 /// that have no content yet come with their slices.
@@ -878,8 +883,53 @@ impl EditorScreen {
                     .clone();
                 Some(piece)
             });
-        let body = match (selected, audio) {
-            (None, Some(piece)) => v_flex()
+        let lane = self.editor.as_ref().and_then(|editor| {
+            Some((
+                editor.selected_lane()?,
+                *editor.view().timeline.as_ref()?.mix(),
+            ))
+        });
+        let section = |text: Text| label(tr(bardo, text), TEXT_3);
+        let fades = selection
+            .filter(|item| item.track == Track::Narration)
+            .zip(audio.as_ref())
+            .map(|(item, piece)| {
+                let (fade_in, fade_out) = piece.fades();
+                let set = |fade_in: Duration, fade_out: Duration| EditAction::SetFades {
+                    item,
+                    fade_in,
+                    fade_out,
+                };
+                let room = piece.duration.saturating_sub(fade_in + fade_out);
+                v_flex()
+                    .gap_1p5()
+                    .child(section(Text::EditorFades))
+                    .child(
+                        self.stepper(
+                            "fade-in",
+                            tr(bardo, Text::EditorFadeIn),
+                            short_duration(fade_in),
+                            (!fade_in.is_zero())
+                                .then(|| set(fade_in.saturating_sub(FADE_STEP), fade_out)),
+                            (!room.is_zero()).then(|| set(fade_in + FADE_STEP.min(room), fade_out)),
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.stepper(
+                            "fade-out",
+                            tr(bardo, Text::EditorFadeOut),
+                            short_duration(fade_out),
+                            (!fade_out.is_zero())
+                                .then(|| set(fade_in, fade_out.saturating_sub(FADE_STEP))),
+                            (!room.is_zero()).then(|| set(fade_in, fade_out + FADE_STEP.min(room))),
+                            cx,
+                        ),
+                    )
+            });
+        let body = match (selected, audio, lane) {
+            (None, None, Some((lane, mix))) => self.render_lane_inspector(lane, mix, cx),
+            (None, Some(piece), _) => v_flex()
                 .p_3()
                 .gap_3()
                 .child(
@@ -897,6 +947,7 @@ impl EditorScreen {
                         .child(field(Text::EditorLength, short_duration(piece.duration)))
                         .child(field(Text::EditorSourceIn, timecode(piece.start))),
                 )
+                .children(fades)
                 .child(
                     v_flex()
                         .gap_1()
@@ -912,7 +963,7 @@ impl EditorScreen {
                 .child(remove())
                 .child(shortcuts())
                 .into_any_element(),
-            (None, None) => div()
+            (None, None, None) => div()
                 .flex_1()
                 .flex()
                 .items_center()
@@ -926,7 +977,7 @@ impl EditorScreen {
                         .child(tr(bardo, Text::EditorInspectorEmpty)),
                 )
                 .into_any_element(),
-            (Some(clip), _) => {
+            (Some(clip), _, _) => {
                 let provenance = provenance_lines(bardo, &clip);
                 v_flex()
                     .p_3()
@@ -1014,7 +1065,9 @@ impl EditorScreen {
                     .child(label(
                         tr(
                             bardo,
-                            if selection.is_some_and(|item| item.track == Track::Narration) {
+                            if lane.is_some() {
+                                Text::EditorInspectorTrack
+                            } else if selection.is_some_and(|item| item.track == Track::Narration) {
                                 Text::EditorInspectorAudio
                             } else {
                                 Text::EditorInspectorClip
@@ -1024,6 +1077,194 @@ impl EditorScreen {
                     )),
             )
             .child(body)
+            .into_any_element()
+    }
+
+    /// A labelled value with − and + buttons that make `less` and `more`;
+    /// a button with nothing to make is drawn disabled.
+    fn stepper(
+        &self,
+        id: &'static str,
+        name: SharedString,
+        value: String,
+        less: Option<EditAction>,
+        more: Option<EditAction>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let mono = cx.theme().mono_font_family.clone();
+        let button = |suffix: usize, glyph: IconName, action: Option<EditAction>| {
+            tool_button((id, suffix), action.is_some(), false)
+                .h(px(24.))
+                .min_w(px(24.))
+                .px_1()
+                .border_1()
+                .border_color(color(OUTLINE))
+                .child(icon(glyph, TEXT_2).size_3())
+                .when_some(action, |button, action| {
+                    button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.edit(action, cx);
+                    }))
+                })
+        };
+        h_flex()
+            .justify_between()
+            .gap_2()
+            .child(label(name, TEXT_3))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(button(0, IconName::Minus, less))
+                    .child(
+                        label(value, TEXT)
+                            .font_family(mono)
+                            .min_w(px(64.))
+                            .text_center(),
+                    )
+                    .child(button(1, IconName::Plus, more)),
+            )
+            .into_any_element()
+    }
+
+    /// A toggle row: a name and an on/off pill that makes `action`.
+    fn switch_row(
+        &self,
+        id: &'static str,
+        name: SharedString,
+        on: bool,
+        action: EditAction,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        h_flex()
+            .id(id)
+            .justify_between()
+            .gap_2()
+            .cursor_pointer()
+            .child(label(name, TEXT_2))
+            .child(
+                div()
+                    .w(px(28.))
+                    .h(px(16.))
+                    .p(px(2.))
+                    .rounded_full()
+                    .bg(color(if on { TEXT_2 } else { RAISED_HOVER }))
+                    .border_1()
+                    .border_color(color(OUTLINE))
+                    .flex()
+                    .when(on, |track| track.justify_end())
+                    .child(div().size(px(10.)).rounded_full().bg(color(if on {
+                        APP
+                    } else {
+                        TEXT_3
+                    }))),
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.edit(action, cx)))
+            .into_any_element()
+    }
+
+    /// A picked lane's mix: level, mute and solo, and on the music how deep
+    /// it ducks under the narration.
+    fn render_lane_inspector(
+        &self,
+        lane: AudioLane,
+        mix: bardo_app::bardo_domain::Mix,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let name = match lane {
+            AudioLane::Narration => Text::EditorTrackNarration,
+            AudioLane::Music => Text::EditorTrackMusic,
+            AudioLane::Sfx => Text::EditorTrackSfx,
+        };
+        let current = mix.lane(lane);
+        let set = |mix: LaneMix| EditAction::SetLane { lane, mix };
+        let gain = |by: i16| {
+            let gain = current
+                .gain
+                .nudged(Decibels::from_tenths(by * GAIN_STEP.tenths()), GAIN_RANGE);
+            (gain != current.gain).then(|| set(LaneMix { gain, ..current }))
+        };
+        let title = div()
+            .text_size(px(13.))
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .text_color(color(TEXT))
+            .child(tr(bardo, name));
+        let hint = |text: Text| {
+            div()
+                .text_size(px(11.))
+                .text_color(color(TEXT_3))
+                .child(tr(bardo, text))
+        };
+        let level = self.stepper(
+            "lane-gain",
+            tr(bardo, Text::EditorLevel),
+            bardo.decibels(current.gain),
+            gain(-1),
+            gain(1),
+            cx,
+        );
+        let mute = self.switch_row(
+            "lane-mute-row",
+            tr(bardo, Text::EditorMute),
+            current.muted,
+            set(LaneMix {
+                muted: !current.muted,
+                ..current
+            }),
+            cx,
+        );
+        let solo = self.switch_row(
+            "lane-solo-row",
+            tr(bardo, Text::EditorSolo),
+            current.solo,
+            set(LaneMix {
+                solo: !current.solo,
+                ..current
+            }),
+            cx,
+        );
+        let ducking = (lane == AudioLane::Music).then(|| {
+            let ducking = mix.ducking;
+            let depth = |by: i16| {
+                let depth = ducking
+                    .depth
+                    .nudged(Decibels::from_tenths(by * DUCK_STEP.tenths()), DUCK_RANGE);
+                (ducking.on && depth != ducking.depth)
+                    .then_some(EditAction::SetDucking(Ducking { depth, ..ducking }))
+            };
+            v_flex()
+                .gap_1p5()
+                .pt_2()
+                .border_t_1()
+                .border_color(color(HAIRLINE))
+                .child(self.switch_row(
+                    "lane-duck-row",
+                    tr(bardo, Text::EditorDuck),
+                    ducking.on,
+                    EditAction::SetDucking(Ducking {
+                        on: !ducking.on,
+                        ..ducking
+                    }),
+                    cx,
+                ))
+                .child(self.stepper(
+                    "duck-depth",
+                    tr(bardo, Text::EditorDuckDepth),
+                    bardo.decibels(Decibels::from_tenths(-ducking.depth.tenths())),
+                    // The readout is signed, so − ducks deeper.
+                    depth(1),
+                    depth(-1),
+                    cx,
+                ))
+                .child(hint(Text::EditorDuckHint))
+        });
+        v_flex()
+            .p_3()
+            .gap_3()
+            .child(title)
+            .child(v_flex().gap_1p5().child(level).child(mute).child(solo))
+            .children(ducking)
+            .child(hint(Text::EditorLaneHint))
             .into_any_element()
     }
 

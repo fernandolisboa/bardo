@@ -1,6 +1,8 @@
 //! Rendering a timeline description: one video track of clips back to
 //! back, audio tracks of clips placed on the timeline, cropped or fitted to
-//! the output frame, mixed, and normalized to a loudness target.
+//! the output frame, mixed, and normalized to a loudness target. Audio
+//! clips fade in and out, and a track can duck under a level envelope (the
+//! music under the narration).
 //!
 //! The same filter graph feeds preview (raw frames on a pipe, from the
 //! playhead on) and the final render (an MP4 file), so what the preview
@@ -65,6 +67,8 @@ pub enum Framing {
 pub struct AudioTrack {
     pub clips: Vec<AudioClip>,
     pub gain_db: f32,
+    /// Lowers the whole track where its dips are.
+    pub duck: Option<Duck>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,6 +80,32 @@ pub struct AudioClip {
     /// Where on the timeline it plays.
     pub at: Duration,
     pub gain_db: f32,
+    /// Linear fades from and to silence, over the clip as placed.
+    pub fade_in: Duration,
+    pub fade_out: Duration,
+    /// How much of the clip as placed comes before `start`: a plan
+    /// starting inside a clip leaves its head out, and its fade-in plays on
+    /// from where it was.
+    pub skipped: Duration,
+}
+
+/// A level envelope: down by `depth_db` in each dip, linear in decibels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Duck {
+    pub depth_db: f32,
+    /// In order and apart.
+    pub dips: Vec<Dip>,
+}
+
+/// One dip: down from `start` to the full depth at `full`, held until
+/// `release`, back up by `end`. Seconds on the plan's timeline; a plan
+/// starting inside a dip has it begin before zero.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Dip {
+    pub start: f64,
+    pub full: f64,
+    pub release: f64,
+    pub end: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -146,11 +176,29 @@ impl RenderPlan {
                             start: clip.start + skip,
                             duration: clip.duration - skip,
                             at: clip.at.saturating_sub(from),
+                            skipped: clip.skipped + skip,
                             ..clip.clone()
                         }
                     })
                     .collect(),
                 gain_db: track.gain_db,
+                duck: track.duck.as_ref().map(|duck| {
+                    let shift = from.as_secs_f64();
+                    Duck {
+                        depth_db: duck.depth_db,
+                        dips: duck
+                            .dips
+                            .iter()
+                            .filter(|dip| dip.end > shift)
+                            .map(|dip| Dip {
+                                start: dip.start - shift,
+                                full: dip.full - shift,
+                                release: dip.release - shift,
+                                end: dip.end - shift,
+                            })
+                            .collect(),
+                    }
+                }),
             })
             .collect();
         RenderPlan { video, audio }
@@ -173,13 +221,13 @@ impl RenderPlan {
         Ok(())
     }
 
-    fn audio_clips(&self) -> impl Iterator<Item = (&AudioClip, f32)> {
+    fn audio_clips(&self) -> impl Iterator<Item = (&AudioClip, f32, Option<&Duck>)> {
         self.audio.iter().flat_map(|track| {
             track
                 .clips
                 .iter()
                 .filter(|clip| !clip.duration.is_zero())
-                .map(move |clip| (clip, track.gain_db + clip.gain_db))
+                .map(move |clip| (clip, track.gain_db + clip.gain_db, track.duck.as_ref()))
         })
     }
 }
@@ -264,24 +312,94 @@ fn video_graph<'a>(
     (inputs, chains.join(";"))
 }
 
+/// A clip's fades, in its own time: the fade-in on from where a plan
+/// starting inside it left it, the fade-out from where it begins (or, when
+/// the clip starts inside it, from the level it had reached).
+fn fades(clip: &AudioClip) -> String {
+    let mut filters = String::new();
+    let fade_in = clip.fade_in.as_secs_f64();
+    let done = clip.skipped.as_secs_f64();
+    if fade_in > done {
+        filters.push_str(&format!(
+            ",afade=t=in:st=0:d={:.6}:silence={:.6}",
+            fade_in - done,
+            done / fade_in
+        ));
+    }
+    let fade_out = clip.fade_out.as_secs_f64();
+    let length = clip.duration.as_secs_f64();
+    if fade_out > 0.0 {
+        if fade_out <= length {
+            filters.push_str(&format!(
+                ",afade=t=out:st={:.6}:d={fade_out:.6}",
+                length - fade_out
+            ));
+        } else {
+            filters.push_str(&format!(
+                ",afade=t=out:st=0:d={length:.6}:unity={:.6}",
+                length / fade_out
+            ));
+        }
+    }
+    filters
+}
+
+/// The level envelope of `duck` over the timeline span `from`-`to` (in
+/// seconds), as a `volume` expression of the timeline time `t`; `None`
+/// where no dip reaches.
+fn duck_expression(duck: &Duck, from: f64, to: f64) -> Option<String> {
+    // Each dip adds how far down it is, from 0 to 1; dips never overlap.
+    let ramp = |start: f64, end: f64| {
+        if end > start {
+            format!("clip((t{:+.4})/{:.4},0,1)", -start, end - start)
+        } else {
+            format!("gte(t,{start:.4})")
+        }
+    };
+    let terms: Vec<String> = duck
+        .dips
+        .iter()
+        .filter(|dip| dip.end > from && dip.start < to)
+        .map(|dip| {
+            format!(
+                "{}-{}",
+                ramp(dip.start, dip.full),
+                ramp(dip.release, dip.end)
+            )
+        })
+        .collect();
+    (!terms.is_empty())
+        .then(|| format!("pow(10,{:.4}*({}))", -duck.depth_db / 20.0, terms.join("+")))
+}
+
 /// The mix of every audio clip, as long as the video, labelled `[amix]`.
 /// `first_input` is the index of the first audio input.
 fn audio_graph(plan: &RenderPlan, first_input: usize) -> (Vec<Input<'_>>, String) {
     let total = seconds(plan.duration());
     let mut inputs = Vec::new();
     let mut chains = Vec::new();
-    for (index, (clip, gain_db)) in plan.audio_clips().enumerate() {
+    for (index, (clip, gain_db, duck)) in plan.audio_clips().enumerate() {
         inputs.push(Input {
             source: InputSource::File(&clip.source),
             start: clip.start,
             duration: clip.duration,
         });
         let delay = (clip.at.as_secs_f64() * f64::from(SAMPLE_RATE)).round() as u64;
+        // After the delay the clip's time is the timeline's. Ten
+        // milliseconds a step keeps the envelope's ramps smooth.
+        let ducked = duck
+            .and_then(|duck| {
+                let at = clip.at.as_secs_f64();
+                duck_expression(duck, at, at + clip.duration.as_secs_f64())
+            })
+            .map(|volume| format!(",asetnsamples=n=480,volume=eval=frame:volume='{volume}'"))
+            .unwrap_or_default();
         chains.push(format!(
             "[{}:a:0]asetpts=PTS-STARTPTS,\
              aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo,\
-             volume={gain_db}dB,adelay=delays={delay}S:all=1[a{index}]",
-            first_input + index
+             volume={gain_db}dB{},adelay=delays={delay}S:all=1{ducked}[a{index}]",
+            first_input + index,
+            fades(clip)
         ));
     }
     let fit = format!("apad=whole_dur={total},atrim=duration={total}");
@@ -561,6 +679,9 @@ mod tests {
             duration: secs(duration),
             at: secs(at),
             gain_db: 0.0,
+            fade_in: Duration::ZERO,
+            fade_out: Duration::ZERO,
+            skipped: Duration::ZERO,
         }
     }
 
@@ -571,10 +692,12 @@ mod tests {
                 AudioTrack {
                     clips: vec![audio("voice.mp3", 0.0, 3.0, 0.5)],
                     gain_db: 0.0,
+                    duck: None,
                 },
                 AudioTrack {
                     clips: vec![audio("music.mp3", 10.0, 5.0, 0.0)],
                     gain_db: -12.0,
+                    duck: None,
                 },
             ],
         }
@@ -590,13 +713,17 @@ mod tests {
         let later = plan().starting_at(secs(2.5));
         assert_eq!(later.video, vec![video("b.mp4", 0.5, 2.5)]);
         assert_eq!(later.duration(), secs(2.5));
+        let skipped = |mut clip: AudioClip, by: f64| {
+            clip.skipped = secs(by);
+            clip
+        };
         assert_eq!(
             later.audio[0].clips,
-            vec![audio("voice.mp3", 2.0, 1.0, 0.0)]
+            vec![skipped(audio("voice.mp3", 2.0, 1.0, 0.0), 2.0)]
         );
         assert_eq!(
             later.audio[1].clips,
-            vec![audio("music.mp3", 12.5, 2.5, 0.0)]
+            vec![skipped(audio("music.mp3", 12.5, 2.5, 0.0), 2.5)]
         );
     }
 
@@ -773,5 +900,94 @@ mod tests {
             "loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=-23.5:measured_TP=-7.1:measured_LRA=1.2:\
              measured_thresh=-33.8:offset=0.1:linear=true,aresample=48000"
         );
+    }
+
+    fn dip(start: f64, full: f64, release: f64, end: f64) -> Dip {
+        Dip {
+            start,
+            full,
+            release,
+            end,
+        }
+    }
+
+    #[test]
+    fn clips_fade_in_and_out_over_their_length() {
+        let mut clip = audio("voice.mp3", 0.0, 3.0, 0.5);
+        assert_eq!(fades(&clip), "");
+        clip.fade_in = secs(0.5);
+        clip.fade_out = secs(1.0);
+        assert_eq!(
+            fades(&clip),
+            ",afade=t=in:st=0:d=0.500000:silence=0.000000\
+             ,afade=t=out:st=2.000000:d=1.000000"
+        );
+    }
+
+    #[test]
+    fn a_plan_starting_inside_a_fade_plays_it_on_from_its_level() {
+        let mut plan = plan();
+        let clip = &mut plan.audio[0].clips[0];
+        clip.fade_in = secs(1.0);
+        clip.fade_out = secs(2.0);
+        // The voice plays 0.5-3.5 s; from 0.75 s a quarter of its fade-in
+        // is behind it.
+        let later = plan.starting_at(secs(0.75));
+        assert_eq!(
+            fades(&later.audio[0].clips[0]),
+            ",afade=t=in:st=0:d=0.750000:silence=0.250000\
+             ,afade=t=out:st=0.750000:d=2.000000"
+        );
+        // From 2 s it starts three quarters into its fade-out.
+        let later = plan.starting_at(secs(3.0));
+        assert_eq!(
+            fades(&later.audio[0].clips[0]),
+            ",afade=t=out:st=0:d=0.500000:unity=0.250000"
+        );
+    }
+
+    #[test]
+    fn a_ducked_track_follows_its_envelope_on_the_timeline() {
+        let mut plan = plan();
+        plan.audio[1].duck = Some(Duck {
+            depth_db: 12.0,
+            dips: vec![dip(0.35, 0.5, 3.5, 4.0), dip(8.0, 8.0, 9.0, 9.5)],
+        });
+        let (_, graph) = audio_graph(&plan, 0);
+        assert!(graph.contains(
+            "adelay=delays=0S:all=1,asetnsamples=n=480,volume=eval=frame:\
+             volume='pow(10,-0.6000*(clip((t-0.3500)/0.1500,0,1)-clip((t-3.5000)/0.5000,0,1)))'[a1]"
+        ));
+        assert!(
+            !graph.contains("t-8.0000"),
+            "a dip past the clip is left out"
+        );
+        assert!(
+            graph.contains("volume=0dB,adelay=delays=24000S:all=1[a0]"),
+            "the voice is not ducked"
+        );
+
+        // From 3.75 s the dip is half way back up and began before zero.
+        let later = plan.starting_at(secs(3.75));
+        let duck = later.audio[1].duck.as_ref().unwrap();
+        assert_eq!(
+            duck_expression(duck, 0.0, 1.25).unwrap(),
+            "pow(10,-0.6000*(clip((t+3.4000)/0.1500,0,1)-clip((t+0.2500)/0.5000,0,1)))"
+        );
+        let dropped = plan.starting_at(secs(4.5));
+        assert_eq!(dropped.audio[1].duck.as_ref().unwrap().dips.len(), 1);
+    }
+
+    #[test]
+    fn a_dip_without_a_ramp_steps() {
+        let duck = Duck {
+            depth_db: 6.0,
+            dips: vec![dip(0.0, 0.0, 1.0, 1.5)],
+        };
+        assert_eq!(
+            duck_expression(&duck, 0.0, 2.0).unwrap(),
+            "pow(10,-0.3000*(gte(t,0.0000)-clip((t-1.0000)/0.5000,0,1)))"
+        );
+        assert_eq!(duck_expression(&duck, 1.5, 3.0), None);
     }
 }

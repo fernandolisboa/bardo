@@ -12,13 +12,17 @@
 //! overlapping on their track, with silence between them. The user's cuts
 //! (`crate::Edit`) change a timeline; a saved one ([`SavedTimeline`])
 //! remembers them against the scene plan and narration they were made on.
+//!
+//! The timeline also carries its mix (`crate::Mix`): each audio lane's
+//! level, mute and solo, the music's ducking under the narration, and each
+//! audio item's fades.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    Narration, NarrationId, ProfileId, RepositoryError, Scene, ScenePlan, ScenePlanId,
-    VideoProjectId,
+    DuckEnvelope, Mix, Narration, NarrationId, ProfileId, RepositoryError, Scene, ScenePlan,
+    ScenePlanId, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -142,11 +146,22 @@ pub struct AudioItem {
     pub duration: Duration,
     /// How long the whole file is: no item plays past its end.
     pub length: Duration,
+    /// How long it takes to come up from silence, and to go back down to
+    /// it, as the user set them.
+    pub fade_in: Duration,
+    pub fade_out: Duration,
 }
 
 impl AudioItem {
     pub fn end(&self) -> Duration {
         self.at + self.duration
+    }
+
+    /// The fades it plays with: as set, cut short where the item is now
+    /// shorter than they are (the fade-in first).
+    pub fn fades(&self) -> (Duration, Duration) {
+        let fade_in = self.fade_in.min(self.duration);
+        (fade_in, self.fade_out.min(self.duration - fade_in))
     }
 }
 
@@ -156,11 +171,13 @@ pub fn min_length() -> Duration {
     frame_time(1)
 }
 
-/// A video project's edit: the video track and the narration track.
+/// A video project's edit: the video track, the narration track and the
+/// mix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeline {
     pub(crate) video: Vec<VideoItem>,
     pub(crate) narration: Vec<AudioItem>,
+    pub(crate) mix: Mix,
 }
 
 impl Timeline {
@@ -218,8 +235,14 @@ impl Timeline {
             at: Duration::ZERO,
             duration: narration.duration,
             length: narration.duration,
+            fade_in: Duration::ZERO,
+            fade_out: Duration::ZERO,
         }];
-        Timeline { video, narration }
+        Timeline {
+            video,
+            narration,
+            mix: Mix::default(),
+        }
     }
 
     /// The timeline `saved` keeps, on the scenes of `plan` as they are now
@@ -259,9 +282,15 @@ impl Timeline {
                 at: item.at,
                 duration: item.duration,
                 length: narration.duration,
+                fade_in: item.fade_in,
+                fade_out: item.fade_out,
             })
             .collect();
-        let mut timeline = Timeline { video, narration };
+        let mut timeline = Timeline {
+            video,
+            narration,
+            mix: saved.mix,
+        };
         timeline.relayout();
         timeline.holds_together().then_some(timeline)
     }
@@ -297,8 +326,11 @@ impl Timeline {
                     start: item.start,
                     at: item.at,
                     duration: item.duration,
+                    fade_in: item.fade_in,
+                    fade_out: item.fade_out,
                 })
                 .collect(),
+            mix: self.mix,
             updated_at: now,
         }
     }
@@ -313,7 +345,7 @@ impl Timeline {
     }
 
     /// Every item at least a frame long; audio items in order, apart, and
-    /// within their file.
+    /// within their file; every level of the mix in range.
     fn holds_together(&self) -> bool {
         let video = self.video.iter().all(|item| item.duration >= min_length());
         let audio = self
@@ -324,7 +356,7 @@ impl Timeline {
             .narration
             .windows(2)
             .all(|pair| pair[0].end() <= pair[1].at);
-        video && audio && apart
+        video && audio && apart && self.mix.holds_together()
     }
 
     pub fn video(&self) -> &[VideoItem] {
@@ -334,6 +366,10 @@ impl Timeline {
     /// The narration track (A1).
     pub fn narration(&self) -> &[AudioItem] {
         &self.narration
+    }
+
+    pub fn mix(&self) -> &Mix {
+        &self.mix
     }
 
     /// The end of the video track.
@@ -397,6 +433,42 @@ impl Timeline {
         boundaries
     }
 
+    /// Where on the timeline the narration speaks: each of `words` (times
+    /// in the narration file) where the cut plays it, as much of it as the
+    /// cut keeps. A word cut in two plays in two stretches.
+    pub fn speech(
+        &self,
+        words: impl IntoIterator<Item = (Duration, Duration)>,
+    ) -> Vec<(Duration, Duration)> {
+        let words: Vec<(Duration, Duration)> = words.into_iter().collect();
+        let mut speech: Vec<(Duration, Duration)> = self
+            .narration
+            .iter()
+            .flat_map(|item| {
+                let (from, to) = (item.start, item.start + item.duration);
+                words.iter().filter_map(move |&(start, end)| {
+                    let (start, end) = (start.max(from), end.min(to));
+                    (start < end).then(|| (item.at + (start - from), item.at + (end - from)))
+                })
+            })
+            .collect();
+        speech.sort();
+        speech
+    }
+
+    /// How the music ducks under the narration's `words`, when ducking is
+    /// on. It follows the narration whether or not the narration lane is
+    /// heard, so soloing the music plays it as the mix will.
+    pub fn ducking(
+        &self,
+        words: impl IntoIterator<Item = (Duration, Duration)>,
+    ) -> Option<DuckEnvelope> {
+        let ducking = self.mix.ducking;
+        ducking
+            .on
+            .then(|| DuckEnvelope::under(&self.speech(words), ducking.depth))
+    }
+
     /// Every video and audio file the timeline plays, each once, in order.
     pub fn files(&self) -> Vec<&str> {
         let mut files: Vec<&str> = Vec::new();
@@ -441,6 +513,8 @@ pub struct SavedAudioItem {
     pub start: Duration,
     pub at: Duration,
     pub duration: Duration,
+    pub fade_in: Duration,
+    pub fade_out: Duration,
 }
 
 /// A video project's cut as the user left it, on the scene plan and the
@@ -455,6 +529,7 @@ pub struct SavedTimeline {
     pub video: Vec<SavedVideoItem>,
     /// The narration track (A1), in order.
     pub narration_items: Vec<SavedAudioItem>,
+    pub mix: Mix,
     pub updated_at: SystemTime,
 }
 
@@ -619,6 +694,8 @@ pub(crate) mod tests {
                 at: Duration::ZERO,
                 duration: ms(5_500),
                 length: ms(5_500),
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
             }]
         );
     }
@@ -744,6 +821,8 @@ pub(crate) mod tests {
                 at: ms(0),
                 duration: ms(1_000),
                 length: ms(4_000),
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
             },
             AudioItem {
                 file: "narration-1.mp3".into(),
@@ -751,6 +830,8 @@ pub(crate) mod tests {
                 at: ms(1_000),
                 duration: ms(2_000),
                 length: ms(4_000),
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
             },
         ];
         assert_eq!(timeline.on_narration(ms(500)), Some(ms(500)));
@@ -890,6 +971,108 @@ pub(crate) mod tests {
             Timeline::restore(&saved, &plan, &narration),
             None,
             "another file"
+        );
+    }
+
+    #[test]
+    fn fades_are_cut_short_on_an_item_shorter_than_them() {
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        let item = &mut timeline.narration[0];
+        item.fade_in = ms(1_000);
+        item.fade_out = ms(2_000);
+        assert_eq!(item.fades(), (ms(1_000), ms(2_000)));
+        item.duration = ms(2_500);
+        assert_eq!(
+            item.fades(),
+            (ms(1_000), ms(1_500)),
+            "the fade-out is cut short first"
+        );
+        item.duration = ms(600);
+        assert_eq!(item.fades(), (ms(600), Duration::ZERO));
+    }
+
+    #[test]
+    fn speech_is_where_the_cut_plays_each_word() {
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        // 0-1 s of the file at 0, 2-4 s of it at 1 s.
+        timeline.narration = vec![
+            AudioItem {
+                file: "narration-1.mp3".into(),
+                start: ms(0),
+                at: ms(0),
+                duration: ms(1_000),
+                length: ms(4_000),
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+            },
+            AudioItem {
+                file: "narration-1.mp3".into(),
+                start: ms(2_000),
+                at: ms(1_000),
+                duration: ms(2_000),
+                length: ms(4_000),
+                fade_in: Duration::ZERO,
+                fade_out: Duration::ZERO,
+            },
+        ];
+        let words = [
+            (ms(100), ms(400)),
+            (ms(800), ms(2_300)),
+            (ms(1_200), ms(1_800)),
+            (ms(3_500), ms(4_000)),
+        ];
+        assert_eq!(
+            timeline.speech(words),
+            vec![
+                (ms(100), ms(400)),
+                (ms(800), ms(1_000)),
+                (ms(1_000), ms(1_300)),
+                (ms(2_500), ms(3_000)),
+            ],
+            "a word cut in two plays in two stretches; one cut away is gone"
+        );
+    }
+
+    #[test]
+    fn the_music_ducks_under_the_words_while_ducking_is_on() {
+        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        let words = [(ms(1_000), ms(1_500)), (ms(1_600), ms(2_000))];
+        let envelope = timeline.ducking(words).unwrap();
+        assert_eq!(envelope.depth, crate::DEFAULT_DUCK);
+        assert_eq!(envelope.dips.len(), 1);
+        assert_eq!(
+            (envelope.dips[0].full, envelope.dips[0].release),
+            (ms(1_000), ms(2_000))
+        );
+        // Muting the narration does not change how the music ducks.
+        timeline.mix.lane_mut(crate::AudioLane::Narration).muted = true;
+        assert_eq!(timeline.ducking(words), Some(envelope));
+        timeline.mix.ducking.on = false;
+        assert_eq!(timeline.ducking(words), None);
+    }
+
+    #[test]
+    fn a_saved_timeline_keeps_its_mix_and_fades() {
+        let plan = drawn(&[(0, 2_000, "a.png")]);
+        let narration = narration(2_000);
+        let mut timeline = Timeline::rough_cut(&plan, &narration);
+        timeline.narration[0].fade_in = ms(300);
+        timeline.narration[0].fade_out = ms(700);
+        timeline.mix.lane_mut(crate::AudioLane::Music).gain = crate::Decibels::from_tenths(-60);
+        timeline.mix.lane_mut(crate::AudioLane::Sfx).solo = true;
+        timeline.mix.ducking.depth = crate::Decibels::from_tenths(180);
+
+        let saved = saved(&timeline, &plan, &narration);
+        assert_eq!(saved.narration_items[0].fade_out, ms(700));
+        assert_eq!(saved.mix, timeline.mix);
+        assert_eq!(Timeline::restore(&saved, &plan, &narration), Some(timeline));
+
+        let mut loud = saved.clone();
+        loud.mix.lane_mut(crate::AudioLane::Music).gain = crate::Decibels::from_tenths(500);
+        assert_eq!(
+            Timeline::restore(&loud, &plan, &narration),
+            None,
+            "a level out of range"
         );
     }
 }
