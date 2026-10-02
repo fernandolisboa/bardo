@@ -4,6 +4,7 @@
 mod channel;
 mod job;
 mod migrations;
+mod persona;
 mod profile;
 mod research;
 mod script;

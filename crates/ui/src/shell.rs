@@ -8,6 +8,7 @@ use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::channels::ChannelsScreen;
 use crate::jobs::JobsPanel;
+use crate::personas::PersonasScreen;
 use crate::projects::ProjectsScreen;
 use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
@@ -23,6 +24,7 @@ pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Channels,
+    Personas,
     Research,
     Themes,
     Projects,
@@ -31,8 +33,9 @@ enum Screen {
 }
 
 impl Screen {
-    const ALL: [Screen; 6] = [
+    const ALL: [Screen; 7] = [
         Screen::Channels,
+        Screen::Personas,
         Screen::Research,
         Screen::Themes,
         Screen::Projects,
@@ -43,6 +46,7 @@ impl Screen {
     fn title(self) -> Text {
         match self {
             Screen::Channels => Text::ChannelsTitle,
+            Screen::Personas => Text::PersonasTitle,
             Screen::Research => Text::ResearchTitle,
             Screen::Themes => Text::ThemesTitle,
             Screen::Projects => Text::ProjectsNav,
@@ -60,6 +64,7 @@ pub struct Shell {
     bardo: Entity<Bardo>,
     screen: Screen,
     channels: Entity<ChannelsScreen>,
+    personas: Entity<PersonasScreen>,
     research: Entity<ResearchScreen>,
     themes: Entity<ThemesScreen>,
     projects: Entity<ProjectsScreen>,
@@ -76,6 +81,7 @@ impl Shell {
     pub fn new(bardo: Bardo, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bardo = cx.new(|_| bardo);
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
+        let personas = cx.new(|cx| PersonasScreen::new(bardo.clone(), window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
         let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
         let projects = cx.new(|cx| ProjectsScreen::new(bardo.clone(), window, cx));
@@ -87,6 +93,7 @@ impl Shell {
             bardo,
             screen: Screen::Channels,
             channels,
+            personas,
             research,
             themes,
             projects,
@@ -100,10 +107,17 @@ impl Shell {
     }
 
     fn show(&mut self, screen: Screen, window: &mut Window, cx: &mut Context<Self>) {
-        // Channels may have changed on the channels screen, niches on the
-        // research screen, and projects on the themes screen.
+        // Channels may have changed on the channels screen, personas on the
+        // personas screen, niches on the research screen, and projects on
+        // the themes screen.
         if screen != self.screen {
             match screen {
+                Screen::Channels => self
+                    .channels
+                    .update(cx, |channels, cx| channels.reload_personas(window, cx)),
+                Screen::Personas => self
+                    .personas
+                    .update(cx, |personas, cx| personas.reload(window, cx)),
                 Screen::Research => self
                     .research
                     .update(cx, |research, cx| research.reload_channels(window, cx)),
@@ -116,7 +130,7 @@ impl Shell {
                 Screen::Templates => self
                     .templates
                     .update(cx, |templates, cx| templates.reload(window, cx)),
-                Screen::Channels | Screen::Settings => {}
+                Screen::Settings => {}
             }
         }
         self.screen = screen;
@@ -233,6 +247,7 @@ impl Render for Shell {
                             .min_w_0()
                             .map(|main| match self.screen {
                                 Screen::Channels => main.child(self.channels.clone()),
+                                Screen::Personas => main.child(self.personas.clone()),
                                 Screen::Research => main.child(self.research.clone()),
                                 Screen::Themes => main.child(self.themes.clone()),
                                 Screen::Projects => main.child(self.projects.clone()),

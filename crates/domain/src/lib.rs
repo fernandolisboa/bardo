@@ -44,6 +44,7 @@ mod decision;
 mod generation;
 mod job;
 mod market;
+mod persona;
 mod profile;
 mod provider_key;
 mod redaction;
@@ -53,6 +54,7 @@ mod script;
 mod template;
 mod text;
 mod theme;
+mod voice;
 
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
@@ -69,6 +71,10 @@ pub use job::{
 };
 pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
+};
+pub use persona::{
+    GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
+    PersonaRepository,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{
@@ -96,3 +102,4 @@ pub use theme::{
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,
     rank_themes,
 };
+pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

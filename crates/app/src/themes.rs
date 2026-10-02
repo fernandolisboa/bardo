@@ -838,6 +838,7 @@ mod tests {
                 themes: Arc::clone(&self.db) as _,
                 templates: Arc::clone(&self.db) as _,
                 scripts: Arc::clone(&self.db) as _,
+                personas: Arc::clone(&self.db) as _,
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
             };
@@ -846,6 +847,7 @@ mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 text: Arc::clone(&self.text) as _,
                 decisions: Arc::clone(&self.decisions) as _,
+                voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
             };
             Bardo::start_with(
                 repositories,

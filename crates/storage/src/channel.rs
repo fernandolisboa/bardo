@@ -1,18 +1,20 @@
 use bardo_domain::{
-    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ProfileId, RepositoryError,
+    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, PersonaId, ProfileId,
+    RepositoryError,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
 use crate::{Database, boxed};
 
-const SELECT_CHANNEL: &str =
-    "SELECT id, profile_id, name, niche, aesthetic_notes, language, country FROM channel";
+const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
+     country, default_persona_id FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
     id: String,
     profile_id: String,
+    default_persona: Option<String>,
     draft: ChannelDraft,
 }
 
@@ -22,6 +24,7 @@ impl ChannelRow {
             Self {
                 id: row.get(0)?,
                 profile_id: row.get(1)?,
+                default_persona: row.get(7)?,
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -46,6 +49,11 @@ impl ChannelRow {
         draft.language = language.parse().map_err(boxed)?;
         draft.country = country.parse().map_err(boxed)?;
         draft.themes = themes(conn, &self.id).map_err(boxed)?;
+        draft.default_persona = self
+            .default_persona
+            .map(|id| Uuid::parse_str(&id).map(PersonaId::from))
+            .transpose()
+            .map_err(boxed)?;
         let details = ChannelDetails::validate(draft)
             .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
         Ok(Channel {
@@ -104,14 +112,16 @@ impl ChannelRepository for Database {
         let id = channel.id.to_string();
         let details = &channel.details;
         tx.execute(
-            "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
+                                  default_persona_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
                  aesthetic_notes = excluded.aesthetic_notes,
                  language = excluded.language,
                  country = excluded.country,
+                 default_persona_id = excluded.default_persona_id,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -121,6 +131,7 @@ impl ChannelRepository for Database {
                 details.aesthetic_notes(),
                 details.language().code(),
                 details.country().code(),
+                details.default_persona().map(|id| id.to_string()),
             ],
         )
         .map_err(boxed)?;
@@ -158,6 +169,7 @@ mod tests {
             aesthetic_notes: "dark, archival".into(),
             language: ContentLanguage::Portuguese,
             country: Country::Brazil,
+            default_persona: None,
         })
         .unwrap();
         Channel::new(owner, details)
