@@ -5,6 +5,7 @@
 
 mod channels;
 mod jobs;
+mod network_accounts;
 mod personas;
 mod projects;
 mod research;

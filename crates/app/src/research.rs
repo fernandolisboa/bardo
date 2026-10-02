@@ -428,6 +428,7 @@ mod tests {
                 personas: Arc::clone(&self.db) as _,
                 narrations: Arc::clone(&self.db) as _,
                 scene_plans: Arc::clone(&self.db) as _,
+                network_accounts: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
