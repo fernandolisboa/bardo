@@ -12,6 +12,7 @@
 //! The rate table is data: the built-in prices in `data/rates.toml`, with
 //! the user's changes on top.
 
+use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 
@@ -138,17 +139,19 @@ pub enum BudgetConsent {
 }
 
 /// One kind of paid call a generation makes, `calls` times.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct PlannedCall {
     pub(crate) provider: Provider,
     /// The model the adapter calls.
-    pub(crate) model: &'static str,
+    pub(crate) model: Cow<'static, str>,
     pub(crate) purpose: CostPurpose,
     pub(crate) calls: u64,
     /// Characters of instructions and prompt, when known before the job.
     pub(crate) prompt_chars: Option<usize>,
     /// Characters read aloud, when known before the job.
     pub(crate) characters: Option<usize>,
+    /// Seconds of video, when known before the job.
+    pub(crate) video_seconds: Option<u32>,
 }
 
 impl PlannedCall {
@@ -158,16 +161,29 @@ impl PlannedCall {
             Provider::ElevenLabs => bardo_ai::elevenlabs::SPEECH_MODEL,
             Provider::Gemini => bardo_ai::gemini::IMAGE_MODEL,
             Provider::TypeSafe => bardo_ai::jev::MODEL,
-            Provider::Higgsfield | Provider::YouTubeData => "",
+            Provider::Higgsfield => bardo_ai::higgsfield::DEFAULT_MODEL,
+            Provider::YouTubeData => "",
         };
         Self {
             provider,
-            model,
+            model: Cow::Borrowed(model),
             purpose,
             calls,
             prompt_chars: None,
             characters: None,
+            video_seconds: None,
         }
+    }
+
+    /// For providers whose model the user picks.
+    pub(crate) fn with_model(mut self, model: &str) -> Self {
+        self.model = Cow::Owned(model.to_owned());
+        self
+    }
+
+    pub(crate) fn with_video_seconds(mut self, seconds: u32) -> Self {
+        self.video_seconds = Some(seconds);
+        self
     }
 
     pub(crate) fn with_prompt(mut self, instructions: &str, prompt: &str) -> Self {
@@ -201,8 +217,9 @@ fn first_guess(purpose: CostPurpose) -> Metered {
             input_tokens: 40,
             output_tokens: 250,
             image_tokens: 1_680,
-            characters: 0,
+            ..Metered::default()
         },
+        CostPurpose::SceneClip => Metered::video_seconds(5),
     }
 }
 
@@ -222,6 +239,9 @@ pub(crate) struct PaidCall<'a> {
     pub(crate) purpose: CostPurpose,
     pub(crate) usage: Metered,
     pub(crate) job: JobId,
+    /// What the provider said it charges, when it says; the rate table
+    /// prices the call otherwise.
+    pub(crate) reported: Option<Money>,
 }
 
 impl CostBook {
@@ -250,7 +270,13 @@ impl CostBook {
                 model: call.model.to_owned(),
                 purpose: call.purpose,
                 usage: call.usage,
-                cost: Cost::of(None, &rates, call.provider, call.model, &call.usage),
+                cost: Cost::of(
+                    call.reported,
+                    &rates,
+                    call.provider,
+                    call.model,
+                    &call.usage,
+                ),
                 channel,
                 project,
                 job: Some(call.job),
@@ -295,6 +321,9 @@ impl CostBook {
         if let Some(characters) = call.characters {
             usage.characters = characters as u64;
         }
+        if let Some(seconds) = call.video_seconds {
+            usage.video_seconds = u64::from(seconds);
+        }
         Ok(usage.times(call.calls))
     }
 
@@ -318,7 +347,7 @@ impl CostBook {
         let budgets = self.costs.budgets(self.owner)?;
         let mut providers: Vec<ProviderEstimate> = Vec::new();
         for call in calls.iter().filter(|call| call.calls > 0) {
-            let amount = rates.price(call.provider, call.model, &self.typical(call)?);
+            let amount = rates.price(call.provider, &call.model, &self.typical(call)?);
             match providers.iter_mut().find(|p| p.provider == call.provider) {
                 Some(estimate) => {
                     estimate.amount = estimate

@@ -69,10 +69,14 @@ pub enum JobKind {
     /// Draws the images of some of a project's scenes, one checkpoint per
     /// scene. A scene that fails does not stop the others.
     SceneImages,
+    /// Animates some of a project's scene images into video clips: submits
+    /// each to the video provider, then polls them all, saving each clip as
+    /// it is ready. A scene that fails does not stop the others.
+    SceneClips,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 8] = [
+    pub const ALL: [JobKind; 9] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -81,6 +85,7 @@ impl JobKind {
         JobKind::Narration,
         JobKind::ScenePlan,
         JobKind::SceneImages,
+        JobKind::SceneClips,
     ];
 
     /// Stable name stored in the database.
@@ -94,6 +99,7 @@ impl JobKind {
             JobKind::Narration => "narration",
             JobKind::ScenePlan => "scene_plan",
             JobKind::SceneImages => "scene_images",
+            JobKind::SceneClips => "scene_clips",
         }
     }
 }

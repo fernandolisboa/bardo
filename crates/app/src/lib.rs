@@ -2,6 +2,7 @@
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
 mod channels;
+mod clips;
 mod costs;
 pub mod i18n;
 mod jobs;
@@ -21,17 +22,18 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, CostRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker,
-    MarketData, NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
-    PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
-    ScenePlanRepository, ScriptRepository, SecretStore, SpeechSynthesizer, TemplateRepository,
-    TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
+    ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ImageGenerator,
+    JobRepository, KeyChecker, MarketData, NarrationRepository, NetworkAccountRepository,
+    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
+    RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechSynthesizer,
+    TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
 };
 use bardo_media::AudioOutput;
 use bardo_storage::{Database, MemoryProjectFiles};
 
 pub use bardo_domain;
 pub use channels::ChannelError;
+pub use clips::{ClipsView, SceneClipView};
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
     SpendRow,
@@ -48,6 +50,7 @@ pub use scripts::{ScriptError, ScriptView};
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
+use crate::clips::ClipHandler;
 use crate::costs::CostBook;
 use crate::jobs::JobQueue;
 use crate::narrations::NarrationHandler;
@@ -154,6 +157,8 @@ pub struct Providers {
     pub speech: Arc<dyn SpeechSynthesizer>,
     /// Scene images (Nano Banana, through the Gemini API).
     pub images: Arc<dyn ImageGenerator>,
+    /// Scene clips, one adapter per video provider (Higgsfield).
+    pub clips: Vec<Arc<dyn ClipGenerator>>,
     /// The local audio device, for playback.
     pub audio: Arc<dyn AudioOutput>,
 }
@@ -169,6 +174,7 @@ impl Providers {
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
             images: Arc::new(bardo_ai::GeminiImages::new()),
+            clips: vec![Arc::new(bardo_ai::HiggsfieldClips::new())],
             audio: Arc::new(bardo_media::DeviceAudio),
         }
     }
@@ -191,6 +197,7 @@ pub struct Bardo {
     audio: Arc<dyn AudioOutput>,
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
+    clips: Vec<Arc<dyn ClipGenerator>>,
     /// The last voice listing of this session, for the voice picker.
     voice_list: Option<VoiceList>,
     jobs: JobQueue,
@@ -297,6 +304,14 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let clip_handler = ClipHandler {
+            owner: profile.id,
+            plans: Arc::clone(&scene_plans),
+            files: Arc::clone(&files),
+            generators: providers.clips.clone(),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
@@ -308,6 +323,7 @@ impl Bardo {
                 script_handler,
                 narration_handler,
                 scene_handler,
+                clip_handler,
             ),
             job_settings,
             redactor,
@@ -328,6 +344,7 @@ impl Bardo {
             audio: providers.audio,
             market_data: providers.market_data,
             voices: providers.voices,
+            clips: providers.clips,
             voice_list: None,
             jobs,
             provider_keys,
@@ -420,12 +437,13 @@ pub(crate) mod testing {
     use std::time::{Duration, SystemTime};
 
     use bardo_domain::{
-        Alignment, Answer, ApiKey, CharTiming, Confidence, DecisionEngine, Decisions,
-        GeneratedImage, GeneratedText, ImageFormat, ImageGenerator, ImageRequest, KeyCheck,
-        KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche, Provider,
-        ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
-        SpeechSynthesizer, TextGenerator, TextRequest, TokenUsage, UploadSample, Voice,
-        VoiceLibrary,
+        Alignment, Answer, ApiKey, CharTiming, ClipDurations, ClipGenerator, ClipHandle, ClipImage,
+        ClipModel, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, Confidence,
+        DecisionEngine, Decisions, GeneratedClip, GeneratedImage, GeneratedText, ImageFormat,
+        ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData,
+        MarketSample, Money, Niche, Provider, ProviderFailure, Question, Questions, ScoreAnswer,
+        Speech, SpeechRequest, SpeechSynthesizer, StagedImage, TextGenerator, TextRequest,
+        TokenUsage, UploadSample, Voice, VoiceLibrary,
     };
 
     use crate::Providers;
@@ -847,9 +865,170 @@ pub(crate) mod testing {
                     input_tokens: 12,
                     output_tokens: 210,
                     image_tokens: 1_680,
-                    characters: 0,
+                    ..bardo_domain::Metered::default()
                 },
             })
+        }
+    }
+
+    /// The bytes of every fake clip: the start of an MP4 file.
+    pub(crate) const CLIP: &[u8] = b"\0\0\0\x18ftypmp42\0\0\0\0mp42isom";
+
+    /// One fake request.
+    #[derive(Debug, Clone)]
+    pub(crate) struct FakeClipRequest {
+        pub(crate) request: ClipRequest,
+        pub(crate) submission: String,
+    }
+
+    /// A video provider with two models: `fake/range` (3-15 s) and
+    /// `fake/choices` (5 or 10 s). Answers every request as running while
+    /// `hold` is set, else as done; a prompt containing a word in `failing`
+    /// fails at the provider. `submit_failure` makes submissions fail, and
+    /// `status_outages` the first status checks.
+    /// Resending a submission id returns its first request, as Higgsfield
+    /// does with an idempotency key.
+    #[derive(Default)]
+    pub(crate) struct FakeClips {
+        pub(crate) staged: Mutex<Vec<ClipImage>>,
+        pub(crate) requests: Mutex<Vec<FakeClipRequest>>,
+        pub(crate) polls: Mutex<Vec<String>>,
+        pub(crate) hold: std::sync::atomic::AtomicBool,
+        pub(crate) failing: Mutex<Vec<String>>,
+        pub(crate) submit_failure: Mutex<Option<ProviderFailure>>,
+        pub(crate) quote: Mutex<Option<Money>>,
+        /// How many status checks fail on the provider's side first.
+        pub(crate) status_outages: Mutex<u32>,
+    }
+
+    impl FakeClips {
+        pub(crate) fn submissions(&self) -> Vec<ClipRequest> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|sent| sent.request.clone())
+                .collect()
+        }
+
+        pub(crate) fn hold(&self, hold: bool) {
+            self.hold.store(hold, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        /// Fails every request whose prompt contains `word` from now on.
+        pub(crate) fn fail(&self, word: &str) {
+            self.failing.lock().unwrap().push(word.to_owned());
+        }
+
+        pub(crate) fn succeed_all(&self) {
+            self.failing.lock().unwrap().clear();
+        }
+    }
+
+    impl ClipGenerator for FakeClips {
+        fn provider(&self) -> Provider {
+            Provider::Higgsfield
+        }
+
+        fn models(&self) -> Vec<ClipModel> {
+            vec![
+                ClipModel {
+                    id: ClipModelRef::new(Provider::Higgsfield, "fake/range").unwrap(),
+                    name: "Fake Range".into(),
+                    durations: ClipDurations::Range { min: 3, max: 15 },
+                },
+                ClipModel {
+                    id: ClipModelRef::new(Provider::Higgsfield, "fake/choices").unwrap(),
+                    name: "Fake Choices".into(),
+                    durations: ClipDurations::Choices(vec![5, 10]),
+                },
+            ]
+        }
+
+        fn stage_image(
+            &self,
+            _key: &ApiKey,
+            image: &ClipImage,
+        ) -> Result<StagedImage, ProviderFailure> {
+            let mut staged = self.staged.lock().unwrap();
+            staged.push(image.clone());
+            Ok(StagedImage(format!("https://fake/image-{}", staged.len())))
+        }
+
+        fn submit(
+            &self,
+            _key: &ApiKey,
+            request: &ClipRequest,
+            submission: &str,
+        ) -> Result<ClipSubmission, ProviderFailure> {
+            if let Some(failure) = self.submit_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let mut requests = self.requests.lock().unwrap();
+            let index = match requests
+                .iter()
+                .position(|sent| sent.submission == submission)
+            {
+                Some(index) => index,
+                None => {
+                    requests.push(FakeClipRequest {
+                        request: request.clone(),
+                        submission: submission.to_owned(),
+                    });
+                    requests.len() - 1
+                }
+            };
+            Ok(ClipSubmission {
+                handle: ClipHandle(format!("req-{index}")),
+                quote: *self.quote.lock().unwrap(),
+            })
+        }
+
+        fn status(
+            &self,
+            _key: &ApiKey,
+            handle: &ClipHandle,
+        ) -> Result<ClipStatus, ProviderFailure> {
+            self.polls.lock().unwrap().push(handle.0.clone());
+            let mut outages = self.status_outages.lock().unwrap();
+            if *outages > 0 {
+                *outages -= 1;
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::ProviderDown,
+                    "HTTP 503",
+                ));
+            }
+            drop(outages);
+            let index: usize = handle.0.trim_start_matches("req-").parse().unwrap();
+            let prompt = self.requests.lock().unwrap()[index].request.prompt.clone();
+            if self.hold.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(ClipStatus::Running);
+            }
+            if let Some(word) = self
+                .failing
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|word| prompt.contains(word.as_str()))
+            {
+                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unexpected,
+                    format!("could not make the clip: {word}"),
+                )));
+            }
+            Ok(ClipStatus::Done {
+                video: format!("https://fake/{}.mp4", handle.0),
+            })
+        }
+
+        fn download(&self, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+            Ok(GeneratedClip {
+                bytes: CLIP.to_vec(),
+            })
+        }
+
+        fn poll_delay(&self, _polls: u32) -> Duration {
+            Duration::from_millis(1)
         }
     }
 
@@ -867,6 +1046,7 @@ pub(crate) mod testing {
             voices: Arc::new(FakeVoiceLibrary::default()),
             speech: Arc::new(FakeSpeech::default()),
             images: Arc::new(FakeImages::default()),
+            clips: vec![Arc::new(FakeClips::default())],
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
         }
     }

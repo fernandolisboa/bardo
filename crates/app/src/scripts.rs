@@ -199,6 +199,7 @@ impl ScriptHandler {
                 purpose: CostPurpose::Script,
                 usage: generated.usage.into(),
                 job,
+                reported: None,
             },
             project,
         );
@@ -486,6 +487,7 @@ mod tests {
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
                 images: Arc::new(crate::testing::FakeImages::default()),
+                clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             Bardo::start_with(

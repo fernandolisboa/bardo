@@ -477,6 +477,7 @@ impl ThemeHandler {
                 purpose: CostPurpose::ThemeIdeas,
                 usage: generated.usage.into(),
                 job,
+                reported: None,
             },
             Some(channel),
             None,
@@ -555,6 +556,7 @@ impl ThemeHandler {
                     purpose: CostPurpose::ThemeRanking,
                     usage: decisions.usage.into(),
                     job: cx.id(),
+                    reported: None,
                 },
                 Some(channel),
                 None,
@@ -944,6 +946,7 @@ mod tests {
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
                 images: Arc::new(crate::testing::FakeImages::default()),
+                clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             };
             Bardo::start_with(
