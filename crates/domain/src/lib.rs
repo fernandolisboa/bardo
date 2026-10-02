@@ -40,6 +40,7 @@ macro_rules! uuid_id {
 }
 
 mod budget;
+mod caption;
 mod channel;
 mod clip;
 mod cost;
@@ -70,6 +71,10 @@ mod timeline;
 mod voice;
 
 pub use budget::{Budget, BudgetLevel, Month};
+pub use caption::{
+    Caption, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS, SavedCaptions,
+    UnknownCaptionStyle, caption_lines, caption_text,
+};
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
 };
@@ -154,7 +159,8 @@ pub use theme::{
     rank_themes,
 };
 pub use timeline::{
-    AudioItem, FPS, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline, TimelineRepository,
-    VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame, snap, timecode,
+    AudioItem, CaptionSpan, FPS, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,
+    TimelineRepository, VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame,
+    snap, timecode,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

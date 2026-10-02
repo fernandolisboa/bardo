@@ -5,7 +5,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    ClipModelRef, ContentLanguage, Country, Market, PersonaId, ProfileId, RepositoryError,
+    CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, PersonaId, ProfileId,
+    RepositoryError,
 };
 
 /// Identifies a channel.
@@ -54,6 +55,8 @@ pub struct ChannelDraft {
     /// The video model the channel's clips use unless a scene picks
     /// another; `None` uses the app's default.
     pub clip_model: Option<ClipModelRef>,
+    /// How the captions of the channel's new projects look.
+    pub caption_style: CaptionStyle,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -91,6 +94,7 @@ pub struct ChannelDetails {
     country: Country,
     default_persona: Option<PersonaId>,
     clip_model: Option<ClipModelRef>,
+    caption_style: CaptionStyle,
 }
 
 impl ChannelDetails {
@@ -147,6 +151,7 @@ impl ChannelDetails {
             country: draft.country,
             default_persona: draft.default_persona,
             clip_model: draft.clip_model,
+            caption_style: draft.caption_style,
         })
     }
 
@@ -184,6 +189,11 @@ impl ChannelDetails {
         self.clip_model.as_ref()
     }
 
+    /// How the captions of the channel's new projects look.
+    pub fn caption_style(&self) -> CaptionStyle {
+        self.caption_style
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -206,6 +216,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             country: details.country,
             default_persona: details.default_persona,
             clip_model: details.clip_model.clone(),
+            caption_style: details.caption_style,
         }
     }
 }
@@ -392,6 +403,7 @@ mod tests {
             country: Country::Brazil,
             default_persona: Some(PersonaId::new()),
             clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
+            caption_style: crate::CaptionStyle::Punch,
         })
         .unwrap();
         assert_eq!(

@@ -5,6 +5,10 @@
 //! called every frame while the preview plays; each becomes a `RenderImage`
 //! and the previous one is dropped (ADR-0007).
 //!
+//! A selected caption's text is edited in the inspector and applied on
+//! Enter or when the field loses focus; the editor's shortcuts stay out of
+//! the way while it has focus.
+//!
 //! The editor keeps its own dark look whatever the rest of the app uses:
 //! the design's tokens are below, and amber marks only the playhead, the
 //! selection and the primary button.
@@ -15,17 +19,20 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
-    AudioLane, DUCK_RANGE, Decibels, Ducking, Edge, FPS, GAIN_RANGE, Generation, ItemRef, LaneMix,
-    Track, VideoProjectId, frame_time, timecode,
+    AudioLane, CaptionStyle, DUCK_RANGE, Decibels, Ducking, Edge, FPS, GAIN_RANGE, Generation,
+    ItemRef, LaneMix, Track, VideoProjectId, frame_time, timecode,
 };
 use bardo_app::{
     Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PreviewAspect, Text,
+    caption_look,
 };
-use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, Hsla, ImageSource,
-    KeyDownEvent, ObjectFit, RenderImage, SharedString, Task, Window, div, img, px, rgb,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, Focusable as _, Hsla,
+    ImageSource, KeyDownEvent, ObjectFit, RenderImage, SharedString, Subscription, Task, Window,
+    div, img, px, rgb,
 };
 
 use crate::shell::tr;
@@ -60,6 +67,7 @@ pub(crate) mod tokens {
     pub const MUSIC: u32 = 0xBBAEF7;
     pub const SFX_EDGE: u32 = 0xC8664A;
     pub const CAPTIONS: u32 = 0xD2D6DC;
+    pub const CAPTIONS_INK: u32 = 0x121417;
 }
 
 use tokens::*;
@@ -81,7 +89,12 @@ pub struct EditorScreen {
     focus: FocusHandle,
     timeline: timeline::TimelineState,
     revision: u64,
+    /// The selected caption's text, as the user types it.
+    caption_input: Entity<InputState>,
+    /// The caption the field holds, by index, and its text when loaded.
+    caption_loaded: Option<(usize, String)>,
     _poll: Task<()>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<EditorEvent> for EditorScreen {}
@@ -110,6 +123,17 @@ impl EditorScreen {
         });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let caption_input = cx.new(|cx| InputState::new(window, cx));
+        let subscriptions = vec![cx.subscribe_in(
+            &caption_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    this.apply_caption_text(window, cx)
+                }
+                _ => {}
+            },
+        )];
         Self {
             bardo,
             editor,
@@ -118,8 +142,89 @@ impl EditorScreen {
             focus,
             timeline: timeline::TimelineState::default(),
             revision,
+            caption_input,
+            caption_loaded: None,
             _poll: poll,
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// The selected caption: its index and text.
+    fn selected_caption(&self) -> Option<(usize, String)> {
+        let editor = self.editor.as_ref()?;
+        let item = editor
+            .selection()
+            .filter(|item| item.track == Track::Captions)?;
+        let caption = editor
+            .view()
+            .timeline
+            .as_ref()?
+            .captions()
+            .lines()
+            .get(item.index)?;
+        Some((item.index, caption.text.clone()))
+    }
+
+    /// Saves what the caption field holds into the caption it was loaded
+    /// from, if that caption is still there unchanged; a text the caption
+    /// cannot take is put back as it was, and the banner says why.
+    fn apply_caption_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((index, loaded)) = self.caption_loaded.clone() else {
+            return;
+        };
+        let typed = self.caption_input.read(cx).value().to_string();
+        if typed == loaded {
+            return;
+        }
+        let Self { bardo, editor, .. } = self;
+        let Some(editor) = editor.as_mut() else {
+            return;
+        };
+        let current = editor
+            .view()
+            .timeline
+            .as_ref()
+            .and_then(|timeline| timeline.captions().lines().get(index))
+            .map(|caption| caption.text.clone());
+        if current.as_ref() != Some(&loaded) {
+            return;
+        }
+        match bardo.read(cx).set_caption_text(editor, index, &typed) {
+            Ok(()) => self.error = None,
+            Err(error) => {
+                self.error = Some(error.message());
+                self.caption_input
+                    .update(cx, |input, cx| input.set_value(loaded, window, cx));
+            }
+        }
+        self.caption_loaded = None;
+        cx.notify();
+    }
+
+    /// Loads the selected caption into the field when the selection or its
+    /// text changes, after saving what was typed for the one before. What
+    /// the user is typing stays while the field has focus.
+    fn sync_caption_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.selected_caption();
+        if selected == self.caption_loaded {
+            return;
+        }
+        let same_caption = selected.as_ref().map(|(index, _)| index)
+            == self.caption_loaded.as_ref().map(|(index, _)| index);
+        let typing = self.caption_input.focus_handle(cx).is_focused(window);
+        if same_caption && typing {
+            return;
+        }
+        if !same_caption {
+            self.apply_caption_text(window, cx);
+        }
+        let selected = self.selected_caption();
+        let text = selected
+            .as_ref()
+            .map_or_else(String::new, |(_, text)| text.clone());
+        self.caption_input
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        self.caption_loaded = selected;
     }
 
     /// Reads the editor again when jobs moved (proxies, new scene media).
@@ -187,7 +292,11 @@ impl EditorScreen {
         }
     }
 
-    fn on_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn on_key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
+        // Keys typed into the caption's text are the text's.
+        if self.caption_input.focus_handle(cx).is_focused(window) {
+            return;
+        }
         let modifiers = event.keystroke.modifiers;
         let key = event.keystroke.key.as_str();
         if modifiers.control || modifiers.platform {
@@ -285,6 +394,8 @@ impl EditorScreen {
                 };
                 EditAction::Move { item, to }
             }
+            // A caption keeps to its words.
+            Track::Captions => return,
         };
         self.edit(action, cx);
     }
@@ -927,9 +1038,11 @@ impl EditorScreen {
                         ),
                     )
             });
-        let body = match (selected, audio, lane) {
-            (None, None, Some((lane, mix))) => self.render_lane_inspector(lane, mix, cx),
-            (None, Some(piece), _) => v_flex()
+        let caption = selection.filter(|item| item.track == Track::Captions);
+        let body = match (caption, selected, audio, lane) {
+            (Some(item), ..) => self.render_caption_inspector(item, cx),
+            (None, None, None, Some((lane, mix))) => self.render_lane_inspector(lane, mix, cx),
+            (None, None, Some(piece), _) => v_flex()
                 .p_3()
                 .gap_3()
                 .child(
@@ -963,7 +1076,7 @@ impl EditorScreen {
                 .child(remove())
                 .child(shortcuts())
                 .into_any_element(),
-            (None, None, None) => div()
+            (None, None, None, None) => div()
                 .flex_1()
                 .flex()
                 .items_center()
@@ -977,7 +1090,7 @@ impl EditorScreen {
                         .child(tr(bardo, Text::EditorInspectorEmpty)),
                 )
                 .into_any_element(),
-            (Some(clip), _, _) => {
+            (None, Some(clip), _, _) => {
                 let provenance = provenance_lines(bardo, &clip);
                 v_flex()
                     .p_3()
@@ -1067,6 +1180,8 @@ impl EditorScreen {
                             bardo,
                             if lane.is_some() {
                                 Text::EditorInspectorTrack
+                            } else if caption.is_some() {
+                                Text::EditorInspectorCaption
                             } else if selection.is_some_and(|item| item.track == Track::Narration) {
                                 Text::EditorInspectorAudio
                             } else {
@@ -1077,6 +1192,141 @@ impl EditorScreen {
                     )),
             )
             .child(body)
+            .into_any_element()
+    }
+
+    /// A selected caption: its text, where it shows, the project's caption
+    /// style and whether captions show at all.
+    fn render_caption_inspector(&self, item: ItemRef, cx: &Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let mono = cx.theme().mono_font_family.clone();
+        let Some(editor) = self.editor.as_ref() else {
+            return div().into_any_element();
+        };
+        let Some(captions) = editor
+            .view()
+            .timeline
+            .as_ref()
+            .map(|timeline| timeline.captions())
+        else {
+            return div().into_any_element();
+        };
+        let span = editor.view().span(item);
+        let field = |name: Text, value: String| {
+            h_flex()
+                .justify_between()
+                .gap_2()
+                .child(label(tr(bardo, name), TEXT_3))
+                .child(label(value, TEXT).font_family(mono.clone()))
+        };
+        let hint = |text: Text| {
+            div()
+                .text_size(px(11.))
+                .text_color(color(TEXT_3))
+                .child(tr(bardo, text))
+        };
+        let section = |text: Text| label(tr(bardo, text), TEXT_3);
+        let swatches = h_flex().gap_2().children(CaptionStyle::ALL.map(|style| {
+            let look = caption_look(style);
+            let picked = captions.style() == style;
+            let name = tr(bardo, Text::CaptionStyleName(style));
+            let sample = if look.uppercase {
+                name.to_uppercase()
+            } else {
+                name.to_string()
+            };
+            let text = div()
+                .px_1()
+                .text_size(px(12.))
+                .font_weight(if look.bold || look.uppercase {
+                    gpui_kit::FontWeight::BOLD
+                } else {
+                    gpui_kit::FontWeight::NORMAL
+                })
+                .text_color(color(look.fill))
+                .when_some(look.band, |text, (band, opacity, _)| {
+                    text.bg(color(band).opacity(opacity))
+                })
+                .child(sample);
+            v_flex()
+                .id(("caption-style", style as usize))
+                .flex_1()
+                .h(px(48.))
+                .items_center()
+                .justify_center()
+                .rounded(px(4.))
+                .cursor_pointer()
+                .bg(color(VIDEO_FILL))
+                .border_1()
+                .border_color(color(if picked { ACCENT } else { OUTLINE }))
+                .when(picked, |swatch| swatch.border_2())
+                .hover(|style| style.border_color(color(TEXT_2)))
+                .child(text)
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::SetCaptionStyle(style), cx);
+                }))
+        }));
+        let remove = tool_button("inspector-remove", true, false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(icon(IconName::Delete, TEXT_2))
+            .child(tr(bardo, Text::EditorRemove))
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.edit(EditAction::DeleteSelection, cx);
+            }));
+        v_flex()
+            .p_3()
+            .gap_3()
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(color(TEXT))
+                    .child(tr(bardo, Text::EditorInspectorCaption)),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(section(Text::EditorCaptionText))
+                    .child(
+                        // The field keeps the focus a click gives it.
+                        div()
+                            .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .child(
+                                // In the editor's dark look, not the app's.
+                                Input::new(&self.caption_input)
+                                    .small()
+                                    .bg(color(APP))
+                                    .text_color(color(TEXT))
+                                    .border_color(color(OUTLINE)),
+                            ),
+                    )
+                    .child(hint(Text::EditorCaptionTextHint)),
+            )
+            .children(span.map(|(at, duration)| {
+                v_flex()
+                    .gap_1p5()
+                    .child(field(Text::EditorIn, timecode(at)))
+                    .child(field(Text::EditorOut, timecode(at + duration)))
+                    .child(field(Text::EditorLength, short_duration(duration)))
+            }))
+            .child(
+                v_flex()
+                    .gap_1p5()
+                    .child(section(Text::EditorCaptionStyle))
+                    .child(swatches)
+                    .child(hint(Text::EditorCaptionStyleHint)),
+            )
+            .child(self.switch_row(
+                "captions-shown-row",
+                tr(bardo, Text::EditorShowCaptions),
+                captions.shown(),
+                EditAction::ShowCaptions(!captions.shown()),
+                cx,
+            ))
+            .child(remove)
             .into_any_element()
     }
 
@@ -1435,20 +1685,24 @@ fn problem_line(bardo: &Bardo, problem: &ClipProblem) -> String {
 impl Render for EditorScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.advance(window, cx);
+        self.sync_caption_input(window, cx);
         let view = self.editor.as_ref().map(|editor| editor.view().clone());
         let top_bar = self.render_top_bar(view.as_ref(), cx);
-        let root = v_flex()
-            .id("editor")
-            .track_focus(&self.focus)
-            .size_full()
-            .bg(color(APP))
-            .text_color(color(TEXT))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.on_key(event, cx)))
-            .on_mouse_down(
-                gpui_kit::MouseButton::Left,
-                cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
-            )
-            .child(top_bar);
+        let root =
+            v_flex()
+                .id("editor")
+                .track_focus(&self.focus)
+                .size_full()
+                .bg(color(APP))
+                .text_color(color(TEXT))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    this.on_key(event, window, cx)
+                }))
+                .on_mouse_down(
+                    gpui_kit::MouseButton::Left,
+                    cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
+                )
+                .child(top_bar);
         let Some(view) = view else {
             let bardo = self.bardo.read(cx);
             return root

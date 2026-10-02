@@ -7,6 +7,7 @@
 //! Every call here blocks until the child is done; the app runs them on its
 //! job threads and passes a [`Monitor`] for progress and cancel.
 
+mod captions;
 mod encoders;
 mod frames;
 mod probe;
@@ -21,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+pub use captions::{CaptionLine, CaptionLook, CaptionTrack, caption_look};
 pub use encoders::{Encoders, VideoEncoder};
 pub use frames::{FramePoll, FrameSize, FrameStream, VideoFrame};
 pub use probe::{AudioStream, MediaInfo, VideoStream};

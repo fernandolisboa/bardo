@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use super::captions::CaptionFiles;
 use super::{Ffmpeg, MediaError, path_arg, process, seconds};
 
 /// A frame size in pixels. ffmpeg needs even sizes for 4:2:0 video, so
@@ -113,6 +114,8 @@ pub struct FrameStream {
     child: Option<Child>,
     frames: mpsc::Receiver<VideoFrame>,
     stderr: Option<thread::JoinHandle<String>>,
+    /// Files the child reads while it runs (a caption script).
+    _files: Option<CaptionFiles>,
 }
 
 /// Frames decoded ahead of the reader.
@@ -164,7 +167,14 @@ impl FrameStream {
             child: Some(child),
             frames,
             stderr: Some(stderr),
+            _files: None,
         })
+    }
+
+    /// Keeps `files` until the stream is dropped, after its child.
+    pub(super) fn keeping(mut self, files: Option<CaptionFiles>) -> FrameStream {
+        self._files = files;
+        self
     }
 
     /// A stream of frames already decoded (tests, other decoders).
@@ -177,6 +187,7 @@ impl FrameStream {
             child: None,
             frames: receiver,
             stderr: None,
+            _files: None,
         }
     }
 

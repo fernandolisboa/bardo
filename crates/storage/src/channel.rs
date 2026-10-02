@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
-     country, default_persona_id, clip_provider, clip_model FROM channel";
+     country, default_persona_id, clip_provider, clip_model, caption_style FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
@@ -16,6 +16,7 @@ struct ChannelRow {
     profile_id: String,
     default_persona: Option<String>,
     clip_model: (Option<String>, Option<String>),
+    caption_style: String,
     draft: ChannelDraft,
 }
 
@@ -27,6 +28,7 @@ impl ChannelRow {
                 profile_id: row.get(1)?,
                 default_persona: row.get(7)?,
                 clip_model: (row.get(8)?, row.get(9)?),
+                caption_style: row.get(10)?,
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -57,6 +59,7 @@ impl ChannelRow {
             .transpose()
             .map_err(boxed)?;
         draft.clip_model = clip_model(self.clip_model)?;
+        draft.caption_style = self.caption_style.parse().map_err(boxed)?;
         let details = ChannelDetails::validate(draft)
             .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
         Ok(Channel {
@@ -132,8 +135,8 @@ impl ChannelRepository for Database {
         let details = &channel.details;
         tx.execute(
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
-                                  default_persona_id, clip_provider, clip_model)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                  default_persona_id, clip_provider, clip_model, caption_style)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -143,6 +146,7 @@ impl ChannelRepository for Database {
                  default_persona_id = excluded.default_persona_id,
                  clip_provider = excluded.clip_provider,
                  clip_model = excluded.clip_model,
+                 caption_style = excluded.caption_style,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -155,6 +159,7 @@ impl ChannelRepository for Database {
                 details.default_persona().map(|id| id.to_string()),
                 details.clip_model().map(|model| model.provider().code()),
                 details.clip_model().map(ClipModelRef::model),
+                details.caption_style().code(),
             ],
         )
         .map_err(boxed)?;
@@ -173,7 +178,9 @@ impl ChannelRepository for Database {
 
 #[cfg(test)]
 mod tests {
-    use bardo_domain::{ContentLanguage, Country, ProfileRepository, UiLanguage, UserProfile};
+    use bardo_domain::{
+        CaptionStyle, ContentLanguage, Country, ProfileRepository, UiLanguage, UserProfile,
+    };
 
     use super::*;
 
@@ -197,6 +204,7 @@ mod tests {
                 ClipModelRef::new(Provider::Higgsfield, "kling-video/v2.6/pro/image-to-video")
                     .unwrap(),
             ),
+            caption_style: CaptionStyle::Boxed,
         })
         .unwrap();
         Channel::new(owner, details)

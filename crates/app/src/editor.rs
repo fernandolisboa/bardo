@@ -15,6 +15,12 @@
 //! audio item's fades. Changing it is an edit like any other, saved and
 //! undoable, and the preview plays it as the render will.
 //!
+//! Captions (stories 64-66) come with the cut: the narration's words
+//! grouped into lines, in the channel's caption style. The user edits a
+//! caption's text and its ends, deletes one, turns them off or picks
+//! another style; each is an edit like any other. The preview burns them in
+//! as the render will.
+//!
 //! Opening or refreshing the editor queues a job for the proxies the
 //! timeline lacks; editing never waits on it, clips without a proxy show
 //! that they are building, and the preview waits until none is.
@@ -32,15 +38,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    AudioLane, DuckEnvelope, Ducking, Edge, Edit, EditError, FPS, Generation, History, ItemRef,
-    Job, JobKind, JobState, LaneMix, NarrationId, NarrationRepository, ProjectFiles,
-    RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
-    TimelineRepository, Track, VideoProject, VideoProjectId, VideoSource, frame_at, frame_time,
-    nearest_frame, snap,
+    AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit, EditError, FPS,
+    Generation, History, ItemRef, Job, JobKind, JobState, LaneMix, NarrationId,
+    NarrationRepository, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
+    Shift, ThemeRepository, Timeline, TimelineRepository, Track, VideoProject, VideoProjectId,
+    VideoSource, frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, ClipSource, Dip, Duck, FramePoll, FrameSize, FrameStream, Framing,
-    MediaError, RenderPlan, VideoClip, VideoFrame,
+    AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll, FrameSize,
+    FrameStream, Framing, MediaError, RenderPlan, VideoClip, VideoFrame,
 };
 use bardo_media::{AudioOutput, MediaEngine, StreamPlayback};
 use serde::Deserialize;
@@ -93,6 +99,7 @@ impl EditorError {
             EditorError::Preview(MediaError::NotFound { .. }) => Text::EditorFfmpegMissing,
             EditorError::Preview(_) => Text::EditorPreviewFailed,
             EditorError::NothingToCut => Text::EditorNothingToCut,
+            EditorError::Edit(EditError::InvalidText) => Text::EditorCaptionTextInvalid,
             EditorError::Edit(_) => Text::EditorCannotEdit,
             EditorError::NotSaved(_) => Text::EditorEditNotSaved,
             EditorError::Repository(_) => Text::EditorNotLoaded,
@@ -212,6 +219,8 @@ pub struct EditorView {
     pub word_boundaries: Vec<Duration>,
     /// How the music ducks under the narration, while ducking is on.
     pub ducking: Option<DuckEnvelope>,
+    /// Where the captions show on the timeline, in order.
+    pub captions: Vec<CaptionSpan>,
     /// Whether the project has a narration (the empty state says what is
     /// missing).
     pub has_narration: bool,
@@ -319,6 +328,9 @@ pub enum EditAction {
         fade_in: Duration,
         fade_out: Duration,
     },
+    /// Burns the captions in, or not.
+    ShowCaptions(bool),
+    SetCaptionStyle(CaptionStyle),
     Undo,
     Redo,
 }
@@ -536,8 +548,10 @@ impl Editor {
                         .span(*item)
                         .is_some_and(|(start, length)| start < at && at < start + length)
                 };
+                // Captions are not cut: their narration is.
                 let item = self
                     .selection
+                    .filter(|item| item.track != Track::Captions)
                     .filter(inside)
                     .or_else(|| timeline.video_at(at).map(ItemRef::video))
                     .filter(inside)
@@ -618,6 +632,8 @@ impl Editor {
                     None,
                 )
             }
+            EditAction::ShowCaptions(shown) => (Edit::ShowCaptions(shown), None),
+            EditAction::SetCaptionStyle(style) => (Edit::SetCaptionStyle(style), None),
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
     }
@@ -743,7 +759,25 @@ impl Editor {
                 }
             })
             .to_vec();
-        Some(RenderPlan { video, audio })
+        let captions = timeline.captions();
+        let captions = captions.shown().then(|| CaptionTrack {
+            style: captions.style(),
+            lines: self
+                .view
+                .captions
+                .iter()
+                .map(|span| CaptionLine {
+                    text: captions.lines()[span.index].text.clone(),
+                    at: span.at,
+                    duration: span.duration,
+                })
+                .collect(),
+        });
+        Some(RenderPlan {
+            video,
+            audio,
+            captions,
+        })
     }
 
     /// Plays from the playhead (from the start when it is at the end).
@@ -1033,11 +1067,15 @@ impl Bardo {
     /// What the editor shows for `project` now.
     pub fn editor_view(&self, project: VideoProjectId) -> Result<EditorView, EditorError> {
         let project = self.editor_project(project)?;
-        let channel_name = self
-            .channels
-            .get(project.channel)?
+        let channel = self.channels.get(project.channel)?;
+        let channel_name = channel
+            .as_ref()
             .map(|channel| channel.details.name().to_owned())
             .unwrap_or_default();
+        // A new cut's captions take the channel's style.
+        let caption_style = channel.as_ref().map_or(CaptionStyle::default(), |channel| {
+            channel.details.caption_style()
+        });
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
         let job = self.latest_proxies_job(project.id);
@@ -1052,19 +1090,24 @@ impl Bardo {
         let saved = self.timelines.saved_timeline(project.id)?;
         let (timeline, basis, cut_outdated) = match (&plan, &narration) {
             (Some(plan), Some(narration)) => {
-                let restored = saved
-                    .as_ref()
-                    .and_then(|saved| Timeline::restore(saved, plan, narration));
+                let restored = saved.as_ref().and_then(|saved| {
+                    let timeline = Timeline::restore(saved, plan, narration)?;
+                    // A cut saved before captions existed gets them now.
+                    Some(if saved.captions.is_none() {
+                        timeline.with_caption_style(caption_style)
+                    } else {
+                        timeline
+                    })
+                });
                 let outdated = saved.is_some() && restored.is_none();
                 let basis = CutBasis {
                     scene_plan: plan.id,
                     narration: narration.id,
                 };
-                (
-                    Some(restored.unwrap_or_else(|| Timeline::rough_cut(plan, narration))),
-                    Some(basis),
-                    outdated,
-                )
+                let timeline = restored.unwrap_or_else(|| {
+                    Timeline::rough_cut(plan, narration).with_caption_style(caption_style)
+                });
+                (Some(timeline), Some(basis), outdated)
             }
             _ => (None, None, false),
         };
@@ -1176,6 +1219,9 @@ impl Bardo {
         let ducking = timeline
             .as_ref()
             .and_then(|timeline| timeline.ducking(words()));
+        let captions = timeline
+            .as_ref()
+            .map_or_else(Vec::new, Timeline::caption_spans);
         Ok(EditorView {
             channel_name,
             stale: plan
@@ -1187,6 +1233,7 @@ impl Bardo {
             cut_outdated,
             word_boundaries,
             ducking,
+            captions,
             clips,
             scenes,
             narration: narration_track,
@@ -1277,6 +1324,27 @@ impl Bardo {
     /// Scenes or narration redone since the editor last read them take the
     /// cut the action aimed at away: the editor starts over and says so.
     pub fn edit(&self, editor: &mut Editor, action: EditAction) -> Result<(), EditorError> {
+        self.change(editor, Change::Action(action))
+    }
+
+    /// Sets caption `index`'s text (trimmed, on one line); empty or too
+    /// long text is refused.
+    pub fn set_caption_text(
+        &self,
+        editor: &mut Editor,
+        index: usize,
+        text: &str,
+    ) -> Result<(), EditorError> {
+        self.change(
+            editor,
+            Change::Edit(Edit::SetCaptionText {
+                index,
+                text: text.to_owned(),
+            }),
+        )
+    }
+
+    fn change(&self, editor: &mut Editor, change: Change) -> Result<(), EditorError> {
         let project = editor.project();
         if self.cut_basis(project)? != editor.view.basis {
             return self.refresh_editor(editor);
@@ -1286,20 +1354,21 @@ impl Bardo {
             return Err(EditorError::NothingToCut);
         };
         let mut history = editor.history.clone();
-        let made = match action {
+        let made = match change {
             // Items may have moved: the selection goes, a picked lane stays.
-            EditAction::Undo => history
+            Change::Action(EditAction::Undo) => history
                 .undo(&mut timeline)
                 .map(|done| (done, editor.lane.is_none().then_some(None))),
-            EditAction::Redo => history
+            Change::Action(EditAction::Redo) => history
                 .redo(&mut timeline)
                 .map(|done| (done, editor.lane.is_none().then_some(None))),
-            action => {
+            Change::Action(action) => {
                 let (edit, selection) = editor.edit_for(action)?;
                 history
                     .apply(&mut timeline, &edit)
                     .map(|()| (true, selection))
             }
+            Change::Edit(edit) => history.apply(&mut timeline, &edit).map(|()| (true, None)),
         };
         let selection = match made {
             Ok((true, selection)) => selection,
@@ -1375,6 +1444,13 @@ impl Bardo {
         // Read again, so the clips show as building under the new job.
         self.editor_view(project)
     }
+}
+
+/// What `Bardo::change` makes: an action from the timeline, or an edit
+/// that carries more than an action can (a caption's text).
+enum Change {
+    Action(EditAction),
+    Edit(Edit),
 }
 
 /// The files the latest proxies job could not do, and why: a failed job's
@@ -2818,5 +2894,197 @@ mod tests {
         let mut empty = empty;
         empty.select_lane(Some(AudioLane::Music));
         assert_eq!(empty.selected_lane(), None, "no cut, no mix");
+    }
+
+    /// Makes the channel of `project` start its projects' captions in
+    /// `style`.
+    fn channel_captions(app: &Bardo, project: &VideoProject, style: CaptionStyle) {
+        use bardo_domain::{ChannelDetails, ChannelDraft};
+        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        channel.details = ChannelDetails::validate(ChannelDraft {
+            caption_style: style,
+            ..ChannelDraft::from(&channel.details)
+        })
+        .unwrap();
+        app.channels.save(&channel).unwrap();
+    }
+
+    fn caption_texts(editor: &Editor) -> Vec<String> {
+        editor
+            .view()
+            .timeline
+            .as_ref()
+            .unwrap()
+            .captions()
+            .lines()
+            .iter()
+            .map(|caption| caption.text.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_narrated_project_opens_captioned_in_its_channel_s_style() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_captions(&app, &project, CaptionStyle::Punch);
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+
+        let narration = app.narrations.narration(project.id).unwrap().unwrap();
+        let expected = bardo_domain::caption_lines(
+            narration
+                .words()
+                .map(|(text, timing)| (text, timing.start, timing.end)),
+            bardo_domain::LINE_RULES,
+        );
+        assert!(!expected.is_empty());
+        let timeline = editor.view().timeline.clone().unwrap();
+        assert_eq!(timeline.captions().lines(), expected.as_slice());
+        assert_eq!(timeline.captions().style(), CaptionStyle::Punch);
+        assert_eq!(editor.view().captions.len(), expected.len());
+
+        let plan = playing_plan(&h, &mut editor);
+        let captions = plan.captions.unwrap();
+        assert_eq!(captions.style, CaptionStyle::Punch);
+        assert_eq!(captions.lines.len(), expected.len());
+        assert_eq!(captions.lines[0].text, expected[0].text);
+        assert_eq!(captions.lines[0].at, expected[0].start);
+
+        // The channel's style is for new cuts: a saved one keeps its own.
+        app.edit(
+            &mut editor,
+            EditAction::SetCaptionStyle(CaptionStyle::Boxed),
+        )
+        .unwrap();
+        channel_captions(&app, &project, CaptionStyle::Clean);
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(
+            reopened
+                .view()
+                .timeline
+                .as_ref()
+                .unwrap()
+                .captions()
+                .style(),
+            CaptionStyle::Boxed
+        );
+    }
+
+    #[test]
+    fn caption_edits_are_saved_undone_and_previewed() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        let before = caption_texts(&editor);
+
+        app.set_caption_text(&mut editor, 0, "  The keeper,\n awake ")
+            .unwrap();
+        assert_eq!(caption_texts(&editor)[0], "The keeper, awake");
+        assert_eq!(
+            playing_plan(&h, &mut editor).captions.unwrap().lines[0].text,
+            "The keeper, awake"
+        );
+        assert!(matches!(
+            app.set_caption_text(&mut editor, 0, "   "),
+            Err(EditorError::Edit(EditError::InvalidText))
+        ));
+        assert_eq!(
+            EditorError::Edit(EditError::InvalidText).message(),
+            Text::EditorCaptionTextInvalid
+        );
+
+        // Trimming its end to the playhead's word, as a drag would.
+        let item = ItemRef::caption(0);
+        let (at, length) = editor.view().span(item).unwrap();
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item,
+                edge: Edge::End,
+                to: at + length / 2,
+                reach: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        let (_, shorter) = editor.view().span(item).unwrap();
+        assert!(shorter < length, "{shorter:?} < {length:?}");
+
+        editor.select(Some(ItemRef::caption(1)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        assert_eq!(caption_texts(&editor).len(), before.len() - 1);
+        assert_eq!(editor.selection(), None);
+
+        app.edit(&mut editor, EditAction::ShowCaptions(false))
+            .unwrap();
+        assert_eq!(playing_plan(&h, &mut editor).captions, None);
+
+        let reopened = app.open_editor(project.id).unwrap();
+        let kept = reopened.view().timeline.as_ref().unwrap().captions();
+        assert!(!kept.shown());
+        assert_eq!(kept.lines()[0].text, "The keeper, awake");
+        assert_eq!(kept.lines().len(), before.len() - 1);
+
+        for _ in 0..4 {
+            app.edit(&mut editor, EditAction::Undo).unwrap();
+        }
+        assert_eq!(caption_texts(&editor), before);
+        assert!(editor.view().timeline.as_ref().unwrap().captions().shown());
+    }
+
+    #[test]
+    fn cutting_the_narration_away_takes_its_captions_out_of_the_preview() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        assert!(!editor.view().captions.is_empty());
+        editor.select(Some(ItemRef::narration(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        assert!(editor.view().captions.is_empty());
+        assert_eq!(editor.view().span(ItemRef::caption(0)), None);
+        let plan = playing_plan(&h, &mut editor);
+        assert!(plan.captions.unwrap().lines.is_empty());
+
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert!(!editor.view().captions.is_empty());
+    }
+
+    #[test]
+    fn splitting_with_a_caption_selected_cuts_the_clip_under_the_playhead() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let clips = editor.view().clips.len();
+        let (at, length) = editor.view().span(ItemRef::caption(0)).unwrap();
+        editor.seek(at + length / 2);
+        editor.select(Some(ItemRef::caption(0)));
+        app.edit(
+            &mut editor,
+            EditAction::SplitAtPlayhead {
+                reach: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        assert_eq!(editor.view().clips.len(), clips + 1);
+    }
+
+    #[test]
+    fn a_cut_saved_before_captions_gets_them_in_the_channel_style() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        app.edit(&mut editor, EditAction::ShowCaptions(false))
+            .unwrap();
+        let mut saved = app.timelines.saved_timeline(project.id).unwrap().unwrap();
+        saved.captions = None;
+        app.timelines.save_timeline(&saved).unwrap();
+        channel_captions(&app, &project, CaptionStyle::Boxed);
+
+        let reopened = app.open_editor(project.id).unwrap();
+        let captions = reopened.view().timeline.as_ref().unwrap().captions();
+        assert!(captions.shown());
+        assert_eq!(captions.style(), CaptionStyle::Boxed);
+        assert!(!captions.lines().is_empty());
+        assert!(!reopened.cut_reset());
     }
 }

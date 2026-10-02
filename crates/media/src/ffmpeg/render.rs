@@ -2,7 +2,8 @@
 //! back, audio tracks of clips placed on the timeline, cropped or fitted to
 //! the output frame, mixed, and normalized to a loudness target. Audio
 //! clips fade in and out, and a track can duck under a level envelope (the
-//! music under the narration).
+//! music under the narration). Captions are burned in over the joined
+//! picture (`captions`).
 //!
 //! The same filter graph feeds preview (raw frames on a pipe, from the
 //! playhead on) and the final render (an MP4 file), so what the preview
@@ -13,6 +14,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use super::captions::{CaptionFiles, CaptionTrack};
 use super::frames::{FrameSize, FrameStream};
 use super::process::{self, Span};
 use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, seconds};
@@ -28,6 +30,8 @@ pub struct RenderPlan {
     /// Played back to back; the timeline is as long as these together.
     pub video: Vec<VideoClip>,
     pub audio: Vec<AudioTrack>,
+    /// Burned in over the picture, when there are any.
+    pub captions: Option<CaptionTrack>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -201,7 +205,14 @@ impl RenderPlan {
                 }),
             })
             .collect();
-        RenderPlan { video, audio }
+        RenderPlan {
+            video,
+            audio,
+            captions: self
+                .captions
+                .as_ref()
+                .map(|captions| captions.starting_at(from)),
+        }
     }
 
     fn check(&self) -> Result<(), MediaError> {
@@ -258,12 +269,14 @@ fn frame_count(duration: Duration, (numerator, denominator): (u32, u32)) -> u64 
 }
 
 /// Inputs and the filter graph that turns them into `[vout]`: each clip
-/// trimmed, framed and set to the output rate, then joined.
+/// trimmed, framed and set to the output rate, then joined, with the
+/// captions (`overlay`: a filter such as `subtitles=…`) drawn over them.
 fn video_graph<'a>(
     plan: &'a RenderPlan,
     size: FrameSize,
     fps: (u32, u32),
     pixel_format: &str,
+    overlay: Option<&str>,
 ) -> (Vec<Input<'a>>, String) {
     let FrameSize { width, height } = size;
     let (numerator, denominator) = fps;
@@ -301,11 +314,14 @@ fn video_graph<'a>(
     let labels: String = (0..plan.video.len())
         .map(|index| format!("[v{index}]"))
         .collect();
+    let overlay = overlay
+        .map(|filter| format!("{filter},"))
+        .unwrap_or_default();
     chains.push(if plan.video.len() == 1 {
-        format!("{labels}format={pixel_format}[vout]")
+        format!("{labels}{overlay}format={pixel_format}[vout]")
     } else {
         format!(
-            "{labels}concat=n={}:v=1:a=0,format={pixel_format}[vout]",
+            "{labels}concat=n={}:v=1:a=0,{overlay}format={pixel_format}[vout]",
             plan.video.len()
         )
     });
@@ -535,7 +551,10 @@ impl Ffmpeg {
             None => None,
         };
 
-        let (mut inputs, video) = video_graph(plan, output.size, output.fps, "yuv420p");
+        let captions = CaptionFiles::write(plan.captions.as_ref(), output.size)?;
+        let overlay = captions.as_ref().map(CaptionFiles::filter);
+        let (mut inputs, video) =
+            video_graph(plan, output.size, output.fps, "yuv420p", overlay.as_deref());
         let (audio_inputs, mix) = audio_graph(plan, inputs.len());
         inputs.extend(audio_inputs);
         let audio_out = match measured {
@@ -593,13 +612,15 @@ impl Ffmpeg {
     ) -> Result<FrameStream, MediaError> {
         let plan = plan.starting_at(from);
         plan.check()?;
-        let (inputs, video) = video_graph(&plan, size, fps, "bgra");
+        let captions = CaptionFiles::write(plan.captions.as_ref(), size)?;
+        let overlay = captions.as_ref().map(CaptionFiles::filter);
+        let (inputs, video) = video_graph(&plan, size, fps, "bgra", overlay.as_deref());
         let mut command = self.ffmpeg();
         push_inputs(&mut command, &inputs);
         command
             .args(["-filter_complex", &video, "-map", "[vout]"])
             .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"]);
-        FrameStream::spawn(command, size, fps, from)
+        Ok(FrameStream::spawn(command, size, fps, from)?.keeping(captions))
     }
 
     /// The audio mix of `plan` from `from` on, as interleaved stereo f32
@@ -700,6 +721,7 @@ mod tests {
                     duck: None,
                 },
             ],
+            captions: None,
         }
     }
 
@@ -750,7 +772,8 @@ mod tests {
     #[test]
     fn video_graph_crops_each_clip_then_joins_them() {
         let plan = plan();
-        let (inputs, graph) = video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "yuv420p");
+        let (inputs, graph) =
+            video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "yuv420p", None);
         assert_eq!(inputs.len(), 2);
         assert_eq!(
             (inputs[0].start, inputs[0].duration),
@@ -765,11 +788,52 @@ mod tests {
     }
 
     #[test]
+    fn captions_are_drawn_over_the_joined_picture() {
+        let (_, graph) = video_graph(
+            &plan(),
+            FrameSize::new(960, 540),
+            (30, 1),
+            "bgra",
+            Some("subtitles=filename=c.ass"),
+        );
+        assert!(
+            graph
+                .ends_with("[v0][v1]concat=n=2:v=1:a=0,subtitles=filename=c.ass,format=bgra[vout]")
+        );
+        let mut single = plan();
+        single.video.truncate(1);
+        let (_, graph) = video_graph(
+            &single,
+            FrameSize::new(960, 540),
+            (30, 1),
+            "bgra",
+            Some("subtitles=filename=c.ass"),
+        );
+        assert!(graph.ends_with("[v0]subtitles=filename=c.ass,format=bgra[vout]"));
+    }
+
+    #[test]
+    fn starting_later_moves_the_captions_with_the_picture() {
+        let mut plan = plan();
+        plan.captions = Some(CaptionTrack {
+            style: bardo_domain::CaptionStyle::Clean,
+            lines: vec![super::super::CaptionLine {
+                text: "Hello".into(),
+                at: secs(1.0),
+                duration: secs(2.0),
+            }],
+        });
+        let later = plan.starting_at(secs(2.0));
+        let lines = &later.captions.unwrap().lines;
+        assert_eq!((lines[0].at, lines[0].duration), (secs(0.0), secs(1.0)));
+    }
+
+    #[test]
     fn stills_loop_and_black_comes_from_a_color_source() {
         let mut plan = plan();
         plan.video[0].source = ClipSource::Still(PathBuf::from("scene.png"));
         plan.video[1].source = ClipSource::Black;
-        let (inputs, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra");
+        let (inputs, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
         let mut command = std::process::Command::new("ffmpeg");
         push_inputs(&mut command, &inputs);
         let args: Vec<String> = command
@@ -812,7 +876,7 @@ mod tests {
         let mut plan = plan();
         plan.video.truncate(1);
         plan.video[0].framing = Framing::Fit;
-        let (_, graph) = video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "bgra");
+        let (_, graph) = video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "bgra", None);
         assert!(graph.contains("force_original_aspect_ratio=decrease"));
         assert!(graph.contains("pad=1080:1920:(ow-iw)/2:(oh-ih)/2"));
         assert!(graph.ends_with("[v0]format=bgra[vout]"));

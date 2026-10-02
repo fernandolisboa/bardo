@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    AudioLane, Decibels, Ducking, LaneMix, Mix, NarrationId, ProfileId, RepositoryError,
-    SavedAudioItem, SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, VideoProjectId,
+    AudioLane, Caption, CaptionStyle, Decibels, Ducking, LaneMix, Mix, NarrationId, ProfileId,
+    RepositoryError, SavedAudioItem, SavedCaptions, SavedTimeline, SavedVideoItem, ScenePlanId,
+    TimelineRepository, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -77,23 +78,34 @@ impl TimelineRepository for Database {
         let head = conn
             .query_row(
                 "SELECT profile_id, scene_plan_id, narration_id, updated_at, duck_music,
-                        duck_depth_tenths
+                        duck_depth_tenths, has_captions, captions_shown, caption_style
                  FROM timeline WHERE project_id = ?1",
                 [&project_id],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, bool>(4)?,
-                        row.get::<_, i64>(5)?,
+                        (
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ),
+                        (row.get::<_, bool>(4)?, row.get::<_, i64>(5)?),
+                        (
+                            row.get::<_, bool>(6)?,
+                            row.get::<_, bool>(7)?,
+                            row.get::<_, String>(8)?,
+                        ),
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
-        let Some((owner, plan, narration, updated_at, duck, depth)) = head else {
+        let Some((
+            (owner, plan, narration, updated_at),
+            (duck, depth),
+            (has_captions, captions_shown, caption_style),
+        )) = head
+        else {
             return Ok(None);
         };
         let mut mix = Mix::default();
@@ -151,6 +163,42 @@ impl TimelineRepository for Database {
             .map_err(boxed)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(boxed)?;
+        let captions = if has_captions {
+            let mut statement = conn
+                .prepare(
+                    "SELECT text, start_ns, end_ns FROM timeline_caption
+                     WHERE project_id = ?1 ORDER BY position",
+                )
+                .map_err(boxed)?;
+            let rows = statement
+                .query_map([&project_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(boxed)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(boxed)?;
+            let lines = rows
+                .into_iter()
+                .map(|(text, start, end)| {
+                    Ok(Caption {
+                        text,
+                        start: duration(start)?,
+                        end: duration(end)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, RepositoryError>>()?;
+            Some(SavedCaptions {
+                lines,
+                shown: captions_shown,
+                style: caption_style.parse::<CaptionStyle>().map_err(boxed)?,
+            })
+        } else {
+            None
+        };
         let mut saved = SavedTimeline {
             project,
             owner: ProfileId::from(uuid(&owner)?),
@@ -159,6 +207,7 @@ impl TimelineRepository for Database {
             video: Vec::new(),
             narration_items: Vec::new(),
             mix,
+            captions,
             updated_at: from_unix_millis(updated_at),
         };
         for row in rows {
@@ -191,8 +240,9 @@ impl TimelineRepository for Database {
             .map_err(boxed)?;
         tx.execute(
             "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at,
-                                   duck_music, duck_depth_tenths)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                   duck_music, duck_depth_tenths, has_captions, captions_shown,
+                                   caption_style)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 project,
                 timeline.owner.to_string(),
@@ -201,9 +251,38 @@ impl TimelineRepository for Database {
                 to_unix_millis(timeline.updated_at),
                 timeline.mix.ducking.on,
                 timeline.mix.ducking.depth.tenths(),
+                timeline.captions.is_some(),
+                timeline
+                    .captions
+                    .as_ref()
+                    .is_none_or(|captions| captions.shown),
+                timeline
+                    .captions
+                    .as_ref()
+                    .map_or(CaptionStyle::default(), |captions| captions.style)
+                    .code(),
             ],
         )
         .map_err(boxed)?;
+        if let Some(captions) = &timeline.captions {
+            let mut insert = tx
+                .prepare(
+                    "INSERT INTO timeline_caption (project_id, position, text, start_ns, end_ns)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                )
+                .map_err(boxed)?;
+            for (position, caption) in captions.lines.iter().enumerate() {
+                insert
+                    .execute(params![
+                        project,
+                        i64::try_from(position).map_err(boxed)?,
+                        caption.text,
+                        nanos(caption.start)?,
+                        nanos(caption.end)?,
+                    ])
+                    .map_err(boxed)?;
+            }
+        }
         for lane in AudioLane::ALL {
             let mix = timeline.mix.lane(lane);
             tx.execute(
@@ -367,6 +446,22 @@ mod tests {
                 };
                 mix
             },
+            captions: Some(SavedCaptions {
+                lines: vec![
+                    Caption {
+                        text: "The probe went quiet.".into(),
+                        start: Duration::from_nanos(120_000_001),
+                        end: Duration::from_millis(1_400),
+                    },
+                    Caption {
+                        text: "Nobody knows why — até hoje.".into(),
+                        start: Duration::from_millis(1_500),
+                        end: Duration::from_millis(3_000),
+                    },
+                ],
+                shown: false,
+                style: CaptionStyle::Punch,
+            }),
             updated_at: time(1_800_000_002_000),
         }
     }
@@ -395,6 +490,7 @@ mod tests {
         let mut shorter = cut(&project);
         shorter.video.truncate(1);
         shorter.narration_items.clear();
+        shorter.captions.as_mut().unwrap().lines.truncate(1);
         db.save_timeline(&shorter).unwrap();
         assert_eq!(db.saved_timeline(project.id).unwrap(), Some(shorter));
     }
@@ -418,6 +514,30 @@ mod tests {
         db.save_timeline(&saved).unwrap();
         // As a cut saved by an older Bardo: no lane rows.
         db.conn().execute("DELETE FROM timeline_lane", []).unwrap();
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn a_cut_saved_before_captions_existed_has_none() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut saved = cut(&project);
+        db.save_timeline(&saved).unwrap();
+        // As a cut saved by an older Bardo: the migration's defaults.
+        db.conn()
+            .execute(
+                "UPDATE timeline SET has_captions = 0, captions_shown = 1,
+                     caption_style = 'clean'",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute("DELETE FROM timeline_caption", [])
+            .unwrap();
+        saved.captions = None;
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved.clone()));
+        // Saving it so keeps it so.
+        db.save_timeline(&saved).unwrap();
         assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
     }
 }

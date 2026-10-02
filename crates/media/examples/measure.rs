@@ -268,6 +268,7 @@ fn plan(clips: &[PathBuf], sources: &Sources) -> RenderPlan {
             })
             .collect(),
         audio: vec![audio(&sources.voice, 0.0), audio(&sources.music, -12.0)],
+        captions: None,
     }
 }
 

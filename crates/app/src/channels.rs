@@ -165,6 +165,7 @@ mod tests {
             country: Country::UnitedStates,
             default_persona: None,
             clip_model: None,
+            caption_style: Default::default(),
         }
     }
 

@@ -12,8 +12,12 @@
 //! Each audio lane's header carries its mute and solo buttons and its
 //! level; clicking the header picks the lane, and the inspector shows its
 //! mix. The music lane draws how the music ducks under the narration.
+//!
+//! The caption lane shows each caption where the cut plays its words, as a
+//! chip with its text; dragging a chip's edge retimes it.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -142,6 +146,16 @@ impl Track {
             Track::Music => Some(AudioLane::Music),
             Track::Sfx => Some(AudioLane::Sfx),
             Track::Captions | Track::Video => None,
+        }
+    }
+
+    /// The track its items are edited on.
+    fn item_track(self) -> Option<Lane> {
+        match self {
+            Track::Captions => Some(Lane::Captions),
+            Track::Video => Some(Lane::Video),
+            Track::Narration => Some(Lane::Narration),
+            Track::Music | Track::Sfx => None,
         }
     }
 
@@ -306,7 +320,8 @@ impl EditorScreen {
         );
         let mut narration = Some(self.render_narration(view, selection, cx));
         let mut music = Some(self.render_music(view, cx));
-        let (mut video_ghost, mut narration_ghost, snap_line) = self.render_drag(view);
+        let mut captions = Some(self.render_captions(view, selection, cx));
+        let (mut ghost, snap_line) = self.render_drag(view);
         let lanes = Track::ALL.map(|track| {
             let lane = div()
                 .relative()
@@ -314,16 +329,17 @@ impl EditorScreen {
                 .overflow_hidden()
                 .border_b_1()
                 .border_color(color(HAIRLINE));
-            match track {
-                Track::Video => lane
-                    .children(video.take().into_iter().flatten())
-                    .children(video_ghost.take().into_iter().flatten()),
-                Track::Narration => lane
-                    .children(narration.take().into_iter().flatten())
-                    .children(narration_ghost.take().into_iter().flatten()),
+            let lane = match track {
+                Track::Captions => lane.children(captions.take().into_iter().flatten()),
+                Track::Video => lane.children(video.take().into_iter().flatten()),
+                Track::Narration => lane.children(narration.take().into_iter().flatten()),
                 Track::Music => lane.children(music.take().into_iter().flatten()),
-                _ => lane,
-            }
+                Track::Sfx => lane,
+            };
+            let ghost = ghost
+                .take_if(|(on, _)| track.item_track() == Some(*on))
+                .map(|(_, elements)| elements);
+            lane.children(ghost.into_iter().flatten())
         });
         let playhead_x = self.timeline.x(playhead);
         let playhead_line = (playhead_x >= 0. && playhead_x <= self.timeline.width()).then(|| {
@@ -472,6 +488,27 @@ impl EditorScreen {
                     );
                 }))
             });
+        let shown = self
+            .editor
+            .as_ref()
+            .and_then(|editor| editor.view().timeline.as_ref())
+            .map(|timeline| timeline.captions().shown());
+        let captions_on = shown == Some(true);
+        let captions = tool_button("toggle-captions", editing, captions_on)
+            .when(!captions_on, |button| {
+                button.border_1().border_color(color(HAIRLINE))
+            })
+            .child(div().size(px(6.)).rounded_full().bg(color(if captions_on {
+                CAPTIONS
+            } else {
+                OUTLINE
+            })))
+            .child(tr(bardo, Text::EditorShowCaptions))
+            .when_some(shown, |button, shown| {
+                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::ShowCaptions(!shown), cx);
+                }))
+            });
         h_flex()
             .h(px(36.))
             .flex_none()
@@ -508,6 +545,7 @@ impl EditorScreen {
                     .child(snap)
                     .child(toggle("toggle-ai", Text::EditorAiCuts))
                     .child(duck)
+                    .child(captions)
                     .child(div().flex_1())
                     .child(
                         tool_button("zoom-out", true, false)
@@ -856,11 +894,23 @@ impl EditorScreen {
 
     /// The grab zones at an item's two ends, for trimming.
     fn edge_handles(&self, item: ItemRef, width: f32, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.edge_handles_at(item, width, &[Edge::Start, Edge::End], cx)
+    }
+
+    /// The grab zones at some of an item's ends.
+    fn edge_handles_at(
+        &self,
+        item: ItemRef,
+        width: f32,
+        edges: &[Edge],
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         if width < EDGE_PX * 3. {
             return Vec::new();
         }
-        [Edge::Start, Edge::End]
-            .into_iter()
+        edges
+            .iter()
+            .copied()
             .map(|edge| {
                 div()
                     .absolute()
@@ -946,26 +996,23 @@ impl EditorScreen {
                 item,
                 to: drag.target(),
             },
+            // A caption keeps to its words; only its ends move.
+            (Grip::Body, Lane::Captions) => return,
         };
         self.edit(action, cx);
     }
 
-    /// The drag in progress: a ghost of the item where it will land (on
-    /// the video lane or the narration lane) and the line of the word it
-    /// snaps to.
+    /// The drag in progress: a ghost of the item where it will land, on
+    /// the item's track, and the line of the word it snaps to.
     fn render_drag(
         &self,
         view: &EditorView,
-    ) -> (
-        Option<Vec<AnyElement>>,
-        Option<Vec<AnyElement>>,
-        Option<AnyElement>,
-    ) {
+    ) -> (Option<(Lane, Vec<AnyElement>)>, Option<AnyElement>) {
         let (Some(drag), Some(editor)) = (self.timeline.drag, self.editor.as_ref()) else {
-            return (None, None, None);
+            return (None, None);
         };
         if !drag.moved {
-            return (None, None, None);
+            return (None, None);
         }
         let timeline = &self.timeline;
         let ghost = |at: Duration, duration: Duration| {
@@ -1030,6 +1077,7 @@ impl EditorScreen {
                     elements.push(ghost(at, duration));
                 }
             }
+            (Grip::Body, Lane::Captions) => {}
         }
         let line = snapped.map(|at| {
             div()
@@ -1041,10 +1089,89 @@ impl EditorScreen {
                 .bg(color(TEXT))
                 .into_any_element()
         });
-        match drag.item.track {
-            Lane::Video => (Some(elements), None, line),
-            Lane::Narration => (None, Some(elements), line),
+        (Some((drag.item.track, elements)), line)
+    }
+
+    /// The caption lane: a chip with each caption's text wherever the cut
+    /// plays its words, dimmed while the captions are off. Only a
+    /// caption's first and last stretches carry its ends.
+    fn render_captions(
+        &self,
+        view: &EditorView,
+        selection: Option<ItemRef>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(timeline) = &view.timeline else {
+            return Vec::new();
+        };
+        let captions = timeline.captions();
+        let state = &self.timeline;
+        // Each caption's first start and last end on the timeline.
+        let mut hulls: HashMap<usize, (Duration, Duration)> = HashMap::new();
+        for span in &view.captions {
+            hulls
+                .entry(span.index)
+                .and_modify(|(start, end)| {
+                    *start = (*start).min(span.at);
+                    *end = (*end).max(span.end());
+                })
+                .or_insert((span.at, span.end()));
         }
+        view.captions
+            .iter()
+            .enumerate()
+            .filter_map(|(position, span)| {
+                let left = state.x(span.at);
+                let width = (span.duration.as_secs_f32() * state.zoom).max(2.);
+                if left + width < 0. || left > state.width() {
+                    return None;
+                }
+                let item = ItemRef::caption(span.index);
+                let text = captions.lines().get(span.index)?.text.clone();
+                let (start, end) = hulls[&span.index];
+                let edges: Vec<Edge> = [
+                    (span.at == start).then_some(Edge::Start),
+                    (span.end() == end).then_some(Edge::End),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let selected = selection == Some(item);
+                Some(
+                    div()
+                        .id(("caption", position))
+                        .absolute()
+                        .top(px(4.))
+                        .bottom(px(4.))
+                        .left(px(left))
+                        .w(px(width))
+                        .px_1()
+                        .flex()
+                        .items_center()
+                        .overflow_hidden()
+                        .rounded(px(3.))
+                        .bg(color(CAPTIONS))
+                        .when(selected, |chip| chip.border_2().border_color(color(ACCENT)))
+                        .when(!captions.shown(), |chip| chip.opacity(0.4))
+                        .child(
+                            label(text, CAPTIONS_INK)
+                                .text_size(px(11.))
+                                .overflow_hidden()
+                                .text_ellipsis(),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                let time = this.timeline.time_at(event.position.x);
+                                this.seek(time, cx);
+                                this.grab(item, Grip::Body, event, cx);
+                            }),
+                        )
+                        .children(self.edge_handles_at(item, width, &edges, cx))
+                        .into_any_element(),
+                )
+            })
+            .collect()
     }
 
     /// The narration lane: each piece of the narration where the cut
