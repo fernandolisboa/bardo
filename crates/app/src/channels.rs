@@ -103,6 +103,7 @@ mod tests {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as _,
+            themes: Arc::clone(db) as _,
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
         };
@@ -265,6 +266,7 @@ mod tests {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Broken),
             jobs: Arc::clone(&db) as _,
+            themes: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };

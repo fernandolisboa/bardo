@@ -1,0 +1,21 @@
+HTTP/2 200 
+content-type: application/json
+
+{
+  "id": "msg_01RefusalFixture000000000",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-8",
+  "content": [],
+  "stop_reason": "refusal",
+  "stop_sequence": null,
+  "stop_details": {
+    "type": "refusal",
+    "category": "general_harms",
+    "explanation": "This request asks for content Claude does not write."
+  },
+  "usage": {
+    "input_tokens": 380,
+    "output_tokens": 0
+  }
+}

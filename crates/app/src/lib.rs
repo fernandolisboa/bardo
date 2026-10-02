@@ -7,14 +7,16 @@ mod jobs;
 pub mod logging;
 mod provider_keys;
 mod research;
+mod themes;
 
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, JobRepository, KeyChecker, MarketData, NicheResearchRepository,
-    ProfileRepository, Redactor, RepositoryError, SecretStore, UiLanguage, UserProfile,
+    ChannelRepository, DecisionEngine, JobRepository, KeyChecker, MarketData,
+    NicheResearchRepository, ProfileRepository, Redactor, RepositoryError, SecretStore,
+    TextGenerator, ThemeRepository, UiLanguage, UserProfile,
 };
 use bardo_storage::Database;
 
@@ -24,10 +26,12 @@ pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
+pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
 use crate::jobs::JobQueue;
 use crate::provider_keys::ProviderKeys;
 use crate::research::NicheResearchHandler;
+use crate::themes::ThemeHandler;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -44,6 +48,8 @@ pub struct Repositories {
     pub jobs: Arc<dyn JobRepository>,
     /// Niche research results and seeds. Shared with the job queue.
     pub research: Arc<dyn NicheResearchRepository>,
+    /// Themes and the video projects they start. Shared with the job queue.
+    pub themes: Arc<dyn ThemeRepository>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
@@ -57,6 +63,7 @@ impl Repositories {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Arc::clone(&db)),
             jobs: Arc::clone(&db) as Arc<dyn JobRepository>,
+            themes: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::from(secrets),
         }
@@ -69,6 +76,10 @@ pub struct Providers {
     pub key_checker: Arc<dyn KeyChecker>,
     /// Niche research (YouTube Data API).
     pub market_data: Arc<dyn MarketData>,
+    /// Generative text (Claude).
+    pub text: Arc<dyn TextGenerator>,
+    /// Typed decisions (JEV).
+    pub decisions: Arc<dyn DecisionEngine>,
 }
 
 impl Providers {
@@ -77,6 +88,8 @@ impl Providers {
         Self {
             key_checker: Arc::new(bardo_ai::HttpKeyChecker::new()),
             market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
+            text: Arc::new(bardo_ai::ClaudeTextGenerator::new()),
+            decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
         }
     }
 }
@@ -86,6 +99,7 @@ pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
     channels: Box<dyn ChannelRepository>,
     research: Arc<dyn NicheResearchRepository>,
+    themes: Arc<dyn ThemeRepository>,
     market_data: Arc<dyn MarketData>,
     jobs: JobQueue,
     provider_keys: ProviderKeys,
@@ -122,6 +136,7 @@ impl Bardo {
             channels,
             jobs,
             research,
+            themes,
             secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
@@ -140,12 +155,19 @@ impl Bardo {
             market_data: Arc::clone(&providers.market_data),
             secrets: Arc::clone(&secrets),
         };
+        let theme_handler = ThemeHandler {
+            owner: profile.id,
+            themes: Arc::clone(&themes),
+            text: Arc::clone(&providers.text),
+            decisions: Arc::clone(&providers.decisions),
+            secrets: Arc::clone(&secrets),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
             jobs,
             profile.id,
-            crate::jobs::built_in_handlers(research_handler),
+            crate::jobs::built_in_handlers(research_handler, theme_handler),
             job_settings,
             redactor,
         )?;
@@ -153,6 +175,7 @@ impl Bardo {
             profiles,
             channels,
             research,
+            themes,
             market_data: providers.market_data,
             jobs,
             provider_keys,
@@ -230,8 +253,10 @@ pub(crate) mod testing {
     use std::time::{Duration, SystemTime};
 
     use bardo_domain::{
-        ApiKey, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche,
-        Provider, ProviderFailure, UploadSample,
+        Answer, ApiKey, Confidence, DecisionEngine, Decisions, GeneratedText, KeyCheck,
+        KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche, Provider,
+        ProviderFailure, Question, Questions, ScoreAnswer, TextGenerator, TextRequest, TokenUsage,
+        UploadSample,
     };
 
     use crate::Providers;
@@ -339,6 +364,141 @@ pub(crate) mod testing {
         }
     }
 
+    /// Answers each request with the next queued text, or with ideas named
+    /// "Idea 1".."Idea 10" once the queue is empty; `failure` wins when set.
+    #[derive(Default)]
+    pub(crate) struct FakeTextGenerator {
+        pub(crate) requests: Mutex<Vec<TextRequest>>,
+        pub(crate) answers: Mutex<Vec<String>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+    }
+
+    impl FakeTextGenerator {
+        pub(crate) fn requests(&self) -> Vec<TextRequest> {
+            self.requests.lock().unwrap().clone()
+        }
+
+        /// Queues an answer proposing these titles, each with an angle.
+        pub(crate) fn answer_with(&self, titles: &[&str]) {
+            self.answers.lock().unwrap().push(ideas_json(titles));
+        }
+    }
+
+    pub(crate) fn ideas_json(titles: &[&str]) -> String {
+        let themes: Vec<_> = titles
+            .iter()
+            .map(|title| serde_json::json!({"title": title, "angle": format!("Why {title} matters.")}))
+            .collect();
+        serde_json::json!({ "themes": themes }).to_string()
+    }
+
+    impl TextGenerator for FakeTextGenerator {
+        fn generate(
+            &self,
+            _key: &ApiKey,
+            request: &TextRequest,
+        ) -> Result<GeneratedText, ProviderFailure> {
+            self.requests.lock().unwrap().push(request.clone());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let mut answers = self.answers.lock().unwrap();
+            let text = if answers.is_empty() {
+                let titles: Vec<String> = (1..=10).map(|n| format!("Idea {n}")).collect();
+                ideas_json(&titles.iter().map(String::as_str).collect::<Vec<_>>())
+            } else {
+                answers.remove(0)
+            };
+            Ok(GeneratedText {
+                text,
+                model: "claude-fake".into(),
+                usage: TokenUsage::default(),
+            })
+        }
+    }
+
+    /// Answers every score question from what its instructions mention:
+    /// the level set in `levels` for the first matching needle, the middle
+    /// level otherwise, always with `confidence`.
+    pub(crate) struct FakeDecisionEngine {
+        pub(crate) calls: Mutex<Vec<(String, Questions)>>,
+        pub(crate) levels: Mutex<Vec<(String, f64)>>,
+        pub(crate) confidence: Mutex<f64>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// How long each call takes, to catch a job mid-run.
+        pub(crate) delay: Mutex<Duration>,
+    }
+
+    impl Default for FakeDecisionEngine {
+        fn default() -> Self {
+            Self {
+                calls: Mutex::default(),
+                levels: Mutex::default(),
+                confidence: Mutex::new(0.8),
+                failure: Mutex::default(),
+                delay: Mutex::default(),
+            }
+        }
+    }
+
+    impl FakeDecisionEngine {
+        pub(crate) fn calls(&self) -> Vec<(String, Questions)> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        /// Questions whose instructions contain `needle` get `level`.
+        pub(crate) fn set_level(&self, needle: &str, level: f64) {
+            self.levels.lock().unwrap().push((needle.to_owned(), level));
+        }
+    }
+
+    impl DecisionEngine for FakeDecisionEngine {
+        fn decide(
+            &self,
+            _key: &ApiKey,
+            state: &str,
+            questions: &Questions,
+        ) -> Result<Decisions, ProviderFailure> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((state.to_owned(), questions.clone()));
+            let delay = *self.delay.lock().unwrap();
+            std::thread::sleep(delay);
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let levels = self.levels.lock().unwrap();
+            let confidence = Confidence::new(*self.confidence.lock().unwrap());
+            let mut answers = HashMap::new();
+            for (id, question) in questions.iter() {
+                let Question::Score {
+                    instructions,
+                    levels: names,
+                } = question
+                else {
+                    panic!("the fake only answers score questions");
+                };
+                let level = levels
+                    .iter()
+                    .find(|(needle, _)| instructions.contains(needle.as_str()))
+                    .map_or((names.len() - 1) as f64 / 2.0, |(_, level)| *level);
+                answers.insert(
+                    id.to_owned(),
+                    Answer::Score(ScoreAnswer {
+                        level,
+                        probabilities: vec![0.0; names.len()],
+                        confidence,
+                    }),
+                );
+            }
+            Ok(Decisions {
+                answers,
+                model: "jev-fake".into(),
+            })
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -348,6 +508,8 @@ pub(crate) mod testing {
         Providers {
             key_checker: Arc::new(FakeKeyChecker::default()),
             market_data,
+            text: Arc::new(FakeTextGenerator::default()),
+            decisions: Arc::new(FakeDecisionEngine::default()),
         }
     }
 }
@@ -389,6 +551,7 @@ mod tests {
             profiles: Box::new(profiles.clone()),
             channels: Box::new(Arc::clone(&db)),
             jobs: Arc::clone(&db) as _,
+            themes: Arc::clone(&db) as _,
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };

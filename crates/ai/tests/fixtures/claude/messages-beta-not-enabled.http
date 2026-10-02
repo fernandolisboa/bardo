@@ -1,0 +1,4 @@
+HTTP/2 400 
+content-type: application/json
+
+{"type":"error","error":{"type":"invalid_request_error","message":"Unexpected value(s) `server-side-fallback-2026-07-01` for the `anthropic-beta` header. Please consult our documentation at docs.claude.com or try again without the header."},"request_id":"req_011BetaNotEnabled0000"}

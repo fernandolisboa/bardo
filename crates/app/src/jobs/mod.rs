@@ -14,15 +14,20 @@ pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::research::NicheResearchHandler;
+use crate::themes::ThemeHandler;
 use crate::{AppError, Bardo, Text};
 
 /// The handler of every job kind Bardo ships.
 pub(crate) fn built_in_handlers(
     research: NicheResearchHandler,
+    themes: ThemeHandler,
 ) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+    let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
     handlers.insert(JobKind::Countdown, Arc::new(countdown::Countdown));
     handlers.insert(JobKind::NicheResearch, Arc::new(research));
+    handlers.insert(JobKind::ThemeSuggestion, Arc::clone(&themes) as _);
+    handlers.insert(JobKind::ThemeRanking, themes);
     handlers
 }
 
@@ -626,6 +631,7 @@ mod tests {
             profiles: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
+            themes: Arc::clone(db) as _,
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
         };

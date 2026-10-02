@@ -10,6 +10,7 @@ use crate::channels::ChannelsScreen;
 use crate::jobs::JobsPanel;
 use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
+use crate::themes::ThemesScreen;
 
 /// A UI string in the active language.
 pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
@@ -21,16 +22,23 @@ pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
 enum Screen {
     Channels,
     Research,
+    Themes,
     Settings,
 }
 
 impl Screen {
-    const ALL: [Screen; 3] = [Screen::Channels, Screen::Research, Screen::Settings];
+    const ALL: [Screen; 4] = [
+        Screen::Channels,
+        Screen::Research,
+        Screen::Themes,
+        Screen::Settings,
+    ];
 
     fn title(self) -> Text {
         match self {
             Screen::Channels => Text::ChannelsTitle,
             Screen::Research => Text::ResearchTitle,
+            Screen::Themes => Text::ThemesTitle,
             Screen::Settings => Text::SettingsTitle,
         }
     }
@@ -45,6 +53,7 @@ pub struct Shell {
     screen: Screen,
     channels: Entity<ChannelsScreen>,
     research: Entity<ResearchScreen>,
+    themes: Entity<ThemesScreen>,
     settings: Entity<SettingsScreen>,
     /// Kept alive while closed, so the toggle's count stays current.
     jobs: Entity<JobsPanel>,
@@ -58,6 +67,7 @@ impl Shell {
         let bardo = cx.new(|_| bardo);
         let channels = cx.new(|cx| ChannelsScreen::new(bardo.clone(), window, cx));
         let research = cx.new(|cx| ResearchScreen::new(bardo.clone(), window, cx));
+        let themes = cx.new(|cx| ThemesScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let subscriptions = vec![cx.observe(&jobs, |_, _, cx| cx.notify())];
@@ -66,6 +76,7 @@ impl Shell {
             screen: Screen::Channels,
             channels,
             research,
+            themes,
             settings,
             jobs,
             jobs_open: false,
@@ -75,10 +86,18 @@ impl Shell {
     }
 
     fn show(&mut self, screen: Screen, window: &mut Window, cx: &mut Context<Self>) {
-        // Channels may have changed on the channels screen.
-        if screen == Screen::Research && self.screen != Screen::Research {
-            self.research
-                .update(cx, |research, cx| research.reload_channels(window, cx));
+        // Channels may have changed on the channels screen, and niches on
+        // the research screen.
+        if screen != self.screen {
+            match screen {
+                Screen::Research => self
+                    .research
+                    .update(cx, |research, cx| research.reload_channels(window, cx)),
+                Screen::Themes => self
+                    .themes
+                    .update(cx, |themes, cx| themes.reload_channels(window, cx)),
+                Screen::Channels | Screen::Settings => {}
+            }
         }
         self.screen = screen;
         cx.notify();
@@ -195,6 +214,7 @@ impl Render for Shell {
                             .map(|main| match self.screen {
                                 Screen::Channels => main.child(self.channels.clone()),
                                 Screen::Research => main.child(self.research.clone()),
+                                Screen::Themes => main.child(self.themes.clone()),
                                 Screen::Settings => main.child(self.settings.clone()),
                             }),
                     )

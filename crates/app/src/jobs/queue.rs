@@ -84,6 +84,7 @@ impl StopSignal {
 /// What a handler gets: where to resume, and how to report back.
 pub struct JobContext {
     id: JobId,
+    kind: JobKind,
     attempt: u32,
     checkpoint: Option<String>,
     external_handle: Option<String>,
@@ -92,6 +93,16 @@ pub struct JobContext {
 }
 
 impl JobContext {
+    /// The running job.
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    /// The running job's kind, for handlers that serve several.
+    pub fn kind(&self) -> JobKind {
+        self.kind
+    }
+
     /// 1 for the first attempt, counting automatic retries.
     pub fn attempt(&self) -> u32 {
         self.attempt
@@ -444,6 +455,7 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
     let payload = job.payload().to_owned();
     let mut cx = JobContext {
         id: job.id(),
+        kind,
         attempt: job.attempts(),
         checkpoint: job.checkpoint().map(str::to_owned),
         external_handle: job.external_handle().map(str::to_owned),

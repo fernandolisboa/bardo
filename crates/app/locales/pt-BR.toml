@@ -95,6 +95,8 @@ retry = "Tentar de novo"
 [job.kind]
 countdown = "Contagem de teste"
 niche_research = "Pesquisa de nicho"
+theme_suggestion = "Sugestão de temas"
+theme_ranking = "Ranqueamento de temas"
 
 [job.state]
 queued = "Na fila"
@@ -112,6 +114,7 @@ not_allowed = "A chave não tem o acesso necessário, como uma API não ativada 
 limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube renovam todo dia à meia-noite do horário do Pacífico."
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
+declined = "O provedor se recusou a responder este pedido. Mude o canal ou o nicho e tente de novo."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -217,6 +220,62 @@ not_loaded = "Não foi possível carregar os resultados da pesquisa."
 seed_required = "Digite pelo menos um nicho ou palavra-chave."
 too_many_seeds = "Use no máximo 20 nichos por pesquisa."
 seed_too_long = "Use no máximo 100 caracteres por nicho."
+
+[themes]
+title = "Temas"
+no_channels = "Crie um canal primeiro. As ideias são escritas para o nicho, o público e o estilo dele."
+channel = "Canal"
+niche = "Nicho"
+no_niche = "Dê um nicho ao canal, ou pesquise nichos para ele primeiro."
+suggest_hint = "O Claude propõe {n} ideias de vídeo para o nicho; depois o motor de decisão as ranqueia por encaixe, tendência e concorrência."
+suggest = "Sugerir temas"
+rank = "Ranquear de novo"
+unranked = "{n} esperando ranqueamento"
+running = "Propondo e ranqueando ideias…"
+stopped = "A última execução parou:"
+list = "Ideias"
+ranking_hint = "A prioridade pesa encaixe (40%), tendência (35%) e o espaço que a concorrência deixa (25%). A confiança é o quanto o motor de decisão teve certeza da sua resposta menos segura."
+empty = "Ainda não há ideias para este nicho."
+discarded = "{n} descartadas"
+
+[themes.error]
+pick_niche = "Escolha um nicho primeiro."
+busy = "Ainda há ideias sendo propostas ou ranqueadas para este canal."
+nothing_to_rank = "Todas as ideias deste nicho já estão ranqueadas."
+not_loaded = "Não foi possível carregar as ideias."
+
+[themes.error.missing_key]
+claude = "Salve uma chave do Claude em Configurações para receber ideias."
+typesafe = "Salve uma chave da TypeSafe em Configurações para ranquear as ideias."
+
+[theme]
+priority = "Prioridade"
+confidence = "Confiança"
+fit = "Encaixe"
+trend = "Tendência"
+competition = "Concorrência"
+not_ranked = "Ainda sem ranqueamento. Use Ranquear de novo."
+ranked_by = "Ranqueada por {model}"
+title = "Título"
+angle = "Ângulo"
+edit = "Editar"
+save = "Salvar"
+cancel = "Cancelar"
+discard = "Descartar"
+approve = "Aprovar"
+approved = "Aprovada"
+
+[theme.error]
+not_saved = "Não foi possível salvar a ideia. Tente de novo."
+not_found = "Esta ideia não existe mais ou não pode mais mudar."
+title_required = "Dê um título à ideia."
+title_too_long = "Use no máximo 120 caracteres no título."
+angle_too_long = "Use no máximo 500 caracteres no ângulo."
+
+[projects]
+title = "Projetos de vídeo"
+empty = "Aprove uma ideia para começar um projeto de vídeo."
+started = "Projeto de vídeo iniciado: {title}"
 
 [age]
 just_now = "agora há pouco"

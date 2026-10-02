@@ -302,6 +302,9 @@ pub enum ProviderFailureKind {
     Unreachable,
     /// An answer the adapter does not understand.
     Unexpected,
+    /// The provider's safety rules declined the request. Not a key
+    /// problem; key checks never see it.
+    Declined,
 }
 
 /// A failed provider call.

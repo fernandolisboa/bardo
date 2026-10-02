@@ -17,23 +17,11 @@ use bardo_domain::{
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/market-data");
 const KEY: &str = "AIzaSyTestKey0001abcdefghijklmnopqrstu";
 
-/// A recorded response: `HTTP/x <status>`, headers, a blank line, the body.
+/// A recorded response.
 fn fixture(name: &str) -> HttpResponse {
     let path = Path::new(FIXTURES).join(format!("{name}.http"));
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    // Checkouts on Windows may turn line endings into CRLF.
-    let raw = raw.replace("\r\n", "\n");
-    let (head, body) = raw.split_once("\n\n").expect("blank line after headers");
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .expect("status line");
-    HttpResponse {
-        status,
-        body: body.to_owned(),
-    }
+    HttpResponse::from_recording(&raw).expect("a recorded response")
 }
 
 /// Answers each API resource (`search`, `videos`, `channels`) with a

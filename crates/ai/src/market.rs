@@ -10,13 +10,13 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, KeyCheckOutcome, Market, MarketData, MarketSample, Niche, Provider, ProviderFailure,
+    ApiKey, Market, MarketData, MarketSample, Niche, Provider, ProviderFailure,
     ProviderFailureKind, UploadSample,
 };
 use serde_json::Value;
 
-use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
-use crate::key_check::classify;
+use crate::http::{HttpRequest, Transport, UreqTransport};
+use crate::key_check::failure;
 
 const API: &str = "https://www.googleapis.com/youtube/v3";
 
@@ -176,27 +176,11 @@ impl<T: Transport> YouTubeMarketData<T> {
             .send(request)
             .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
         if !(200..=299).contains(&response.status) {
-            return Err(failure(&response));
+            return Err(failure(Provider::YouTubeData, &response));
         }
         serde_json::from_str(&response.body)
             .map_err(|error| unexpected(&format!("unreadable response: {error}")))
     }
-}
-
-fn failure(response: &HttpResponse) -> ProviderFailure {
-    let check = classify(Provider::YouTubeData, response);
-    let kind = match check.outcome {
-        KeyCheckOutcome::Rejected => ProviderFailureKind::Rejected,
-        KeyCheckOutcome::NotAllowed => ProviderFailureKind::NotAllowed,
-        KeyCheckOutcome::LimitReached => ProviderFailureKind::LimitReached,
-        KeyCheckOutcome::ProviderDown => ProviderFailureKind::ProviderDown,
-        KeyCheckOutcome::Unreachable => ProviderFailureKind::Unreachable,
-        KeyCheckOutcome::Valid | KeyCheckOutcome::Unexpected => ProviderFailureKind::Unexpected,
-    };
-    let detail = check
-        .detail
-        .unwrap_or_else(|| format!("HTTP {}", response.status));
-    ProviderFailure::new(kind, detail)
 }
 
 impl<T: Transport> MarketData for YouTubeMarketData<T> {

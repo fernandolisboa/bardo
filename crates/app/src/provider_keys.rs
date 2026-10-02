@@ -317,6 +317,7 @@ mod tests {
                 profiles: Box::new(Arc::clone(&self.db)),
                 channels: Box::new(Arc::clone(&self.db)),
                 jobs: Arc::clone(&self.db) as _,
+                themes: Arc::clone(&self.db) as _,
                 research: Arc::clone(&self.db) as _,
                 secrets,
             };

@@ -20,21 +20,9 @@ fn raw_fixture(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// A recorded response: `HTTP/x <status>`, headers, a blank line, the body.
+/// A recorded response.
 fn fixture(name: &str) -> HttpResponse {
-    // Checkouts on Windows may turn line endings into CRLF.
-    let raw = raw_fixture(name).replace("\r\n", "\n");
-    let (head, body) = raw.split_once("\n\n").expect("blank line after headers");
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .expect("status line");
-    HttpResponse {
-        status,
-        body: body.to_owned(),
-    }
+    HttpResponse::from_recording(&raw_fixture(name)).expect("a recorded response")
 }
 
 fn key(provider: Provider) -> ApiKey {
@@ -139,10 +127,7 @@ fn long_provider_messages_are_cut() {
     let long = "x".repeat(1000);
     let checked = classify(
         Provider::Claude,
-        &HttpResponse {
-            status: 401,
-            body: format!(r#"{{"error":{{"message":"{long}"}}}}"#),
-        },
+        &HttpResponse::new(401, format!(r#"{{"error":{{"message":"{long}"}}}}"#)),
     );
     let detail = checked.detail.unwrap();
     assert_eq!(detail.chars().count(), 301);
@@ -291,4 +276,57 @@ fn ureq_transport_reports_a_refused_connection_as_unreachable() {
             .send(&HttpRequest::get(format!("http://{address}/")))
             .is_err()
     );
+}
+
+#[test]
+fn ureq_transport_posts_json_and_reads_response_headers() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut head = Vec::new();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line.trim().is_empty() {
+                break;
+            }
+            head.push(line.trim().to_owned());
+        }
+        let length: usize = head
+            .iter()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().ok())?
+            })
+            .expect("a content-length");
+        let mut body = vec![0; length];
+        std::io::Read::read_exact(&mut reader, &mut body).unwrap();
+        let answer = r#"{"detail":{"message":"Rate limit exceeded."}}"#;
+        let mut stream = stream;
+        write!(
+            stream,
+            "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: 20\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
+            answer.len()
+        )
+        .unwrap();
+        (head, String::from_utf8(body).unwrap())
+    });
+
+    let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+    let request = HttpRequest::post_json(format!("http://{address}/v1/systemone"), r#"{"a":1}"#);
+    let response = transport.send(&request).unwrap();
+
+    let (head, body) = server.join().unwrap();
+    assert!(head[0].starts_with("POST /v1/systemone "), "{head:?}");
+    assert!(
+        head.iter()
+            .any(|line| line.eq_ignore_ascii_case("content-type: application/json")),
+        "{head:?}"
+    );
+    assert_eq!(body, r#"{"a":1}"#);
+    assert_eq!(response.status, 429);
+    assert_eq!(response.header("Retry-After"), Some("20"));
 }
