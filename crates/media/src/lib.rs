@@ -4,9 +4,15 @@
 //! bundled ffmpeg (ADR-0007).
 
 pub mod audio;
+mod engine;
 pub mod ffmpeg;
 pub mod mp3;
+mod pcm;
 mod playback;
 
 pub use audio::{AudioFormat, AudioInfo, ProbeError};
-pub use playback::{AudioOutput, DeviceAudio, Playback, PlaybackError};
+pub use engine::{BundledFfmpeg, MediaEngine};
+pub use pcm::{Chunk, PcmStream};
+pub use playback::{
+    AudioOutput, DeviceAudio, PcmClock, PcmSource, Playback, PlaybackError, StreamPlayback,
+};

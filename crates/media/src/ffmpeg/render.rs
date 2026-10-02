@@ -14,6 +14,7 @@ use serde::Deserialize;
 use super::frames::{FrameSize, FrameStream};
 use super::process::{self, Span};
 use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, seconds};
+use crate::PcmStream;
 
 /// Every audio stream is mixed at this rate and layout.
 const SAMPLE_RATE: u32 = 48_000;
@@ -29,11 +30,24 @@ pub struct RenderPlan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoClip {
-    pub source: PathBuf,
-    /// Where in the source the clip starts.
+    pub source: ClipSource,
+    /// Where in the source the clip starts (ignored for stills and black).
     pub start: Duration,
+    /// Rounded to whole frames of the output rate. A source shorter than
+    /// this holds its last frame to the end.
     pub duration: Duration,
     pub framing: Framing,
+}
+
+/// What a video clip shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClipSource {
+    /// A video file.
+    Video(PathBuf),
+    /// An image file, shown for the clip's whole length.
+    Still(PathBuf),
+    /// Black, where the timeline has nothing to show.
+    Black,
 }
 
 /// How a source picture fills an output frame of another shape.
@@ -173,9 +187,26 @@ impl RenderPlan {
 /// One `-ss … -t … -i …` input.
 #[derive(Debug, Clone, PartialEq)]
 struct Input<'a> {
-    source: &'a Path,
+    source: InputSource<'a>,
     start: Duration,
     duration: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum InputSource<'a> {
+    File(&'a Path),
+    /// An image repeated at the rate given.
+    Still(&'a Path, (u32, u32)),
+    /// A black picture at the rate given.
+    Black((u32, u32)),
+}
+
+/// Whole frames of `duration` at `fps`, rounded to the nearest.
+fn frame_count(duration: Duration, (numerator, denominator): (u32, u32)) -> u64 {
+    let numerator = u128::from(numerator);
+    let denominator = u128::from(denominator.max(1));
+    let nanos = duration.as_nanos();
+    ((nanos * numerator + denominator * 500_000_000) / (denominator * 1_000_000_000)) as u64
 }
 
 /// Inputs and the filter graph that turns them into `[vout]`: each clip
@@ -192,7 +223,11 @@ fn video_graph<'a>(
     let mut chains = Vec::new();
     for (index, clip) in plan.video.iter().enumerate() {
         inputs.push(Input {
-            source: &clip.source,
+            source: match &clip.source {
+                ClipSource::Video(path) => InputSource::File(path),
+                ClipSource::Still(path) => InputSource::Still(path, fps),
+                ClipSource::Black => InputSource::Black(fps),
+            },
             start: clip.start,
             duration: clip.duration,
         });
@@ -206,10 +241,13 @@ fn video_graph<'a>(
                  pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
             ),
         };
+        // A source that ends early holds its last frame (`tpad`), so every
+        // clip is exactly as many frames long as asked and the clips after
+        // it stay in time with the audio.
         chains.push(format!(
             "[{index}:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps={numerator}/{denominator},\
-             trim=duration={},{framing},setsar=1,format=yuv420p[v{index}]",
-            seconds(clip.duration)
+             tpad=stop=-1:stop_mode=clone,trim=end_frame={},{framing},setsar=1,format=yuv420p[v{index}]",
+            frame_count(clip.duration, fps).max(1)
         ));
     }
     let labels: String = (0..plan.video.len())
@@ -234,7 +272,7 @@ fn audio_graph(plan: &RenderPlan, first_input: usize) -> (Vec<Input<'_>>, String
     let mut chains = Vec::new();
     for (index, (clip, gain_db)) in plan.audio_clips().enumerate() {
         inputs.push(Input {
-            source: &clip.source,
+            source: InputSource::File(&clip.source),
             start: clip.start,
             duration: clip.duration,
         });
@@ -285,15 +323,26 @@ fn loudnorm_apply(target: LoudnessTarget, measured: Loudness) -> String {
 
 fn push_inputs(command: &mut std::process::Command, inputs: &[Input<'_>]) {
     for input in inputs {
-        command
-            .args([
-                "-ss",
-                &seconds(input.start),
-                "-t",
-                &seconds(input.duration),
-                "-i",
-            ])
-            .arg(path_arg(input.source));
+        let length = seconds(input.duration);
+        match input.source {
+            InputSource::File(path) => {
+                command
+                    .args(["-ss", &seconds(input.start), "-t", &length, "-i"])
+                    .arg(path_arg(path));
+            }
+            InputSource::Still(path, (numerator, denominator)) => {
+                command
+                    .args(["-loop", "1", "-framerate"])
+                    .arg(format!("{numerator}/{denominator}"))
+                    .args(["-t", &length, "-i"])
+                    .arg(path_arg(path));
+            }
+            InputSource::Black((numerator, denominator)) => {
+                command
+                    .args(["-f", "lavfi", "-t", &length, "-i"])
+                    .arg(format!("color=c=black:s=64x36:r={numerator}/{denominator}"));
+            }
+        }
     }
 }
 
@@ -434,6 +483,25 @@ impl Ffmpeg {
             .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"]);
         FrameStream::spawn(command, size, fps, from)
     }
+
+    /// The audio mix of `plan` from `from` on, as interleaved stereo f32
+    /// samples at 48 kHz: what the preview plays along with its frames.
+    pub fn preview_audio(
+        &self,
+        plan: &RenderPlan,
+        from: Duration,
+    ) -> Result<PcmStream, MediaError> {
+        let plan = plan.starting_at(from);
+        plan.check()?;
+        let (inputs, mix) = audio_graph(&plan, 0);
+        let mut command = self.ffmpeg();
+        push_inputs(&mut command, &inputs);
+        command
+            .args(["-filter_complex", &mix, "-map", "[amix]"])
+            .args(["-f", "f32le", "-ar", &SAMPLE_RATE.to_string(), "-ac", "2"])
+            .arg("pipe:1");
+        process::spawn_pcm(command, 2, SAMPLE_RATE)
+    }
 }
 
 #[derive(Deserialize)]
@@ -479,7 +547,7 @@ mod tests {
 
     fn video(name: &str, start: f64, duration: f64) -> VideoClip {
         VideoClip {
-            source: PathBuf::from(name),
+            source: ClipSource::Video(PathBuf::from(name)),
             start: secs(start),
             duration: secs(duration),
             framing: Framing::Crop { x: 0.5, y: 0.5 },
@@ -562,11 +630,54 @@ mod tests {
             (secs(1.0), secs(2.0))
         );
         assert!(graph.starts_with(
-            "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps=30/1,trim=duration=2.000000,\
+            "[0:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps=30/1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,\
              crop=w='min(iw,ih*1080/1920)':h='min(ih,iw*1920/1080)':x='(iw-ow)*0.5':y='(ih-oh)*0.5',\
              scale=1080:1920:flags=bicubic,setsar=1,format=yuv420p[v0];"
         ));
         assert!(graph.ends_with("[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[vout]"));
+    }
+
+    #[test]
+    fn stills_loop_and_black_comes_from_a_color_source() {
+        let mut plan = plan();
+        plan.video[0].source = ClipSource::Still(PathBuf::from("scene.png"));
+        plan.video[1].source = ClipSource::Black;
+        let (inputs, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra");
+        let mut command = std::process::Command::new("ffmpeg");
+        push_inputs(&mut command, &inputs);
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                "30/1",
+                "-t",
+                "2.000000",
+                "-i",
+                "scene.png",
+                "-f",
+                "lavfi",
+                "-t",
+                "3.000000",
+                "-i",
+                "color=c=black:s=64x36:r=30/1",
+            ]
+        );
+        assert!(graph.contains("trim=end_frame=90,"));
+    }
+
+    #[test]
+    fn frame_counts_round_to_the_nearest_frame() {
+        assert_eq!(frame_count(secs(2.0), (30, 1)), 60);
+        assert_eq!(frame_count(Duration::from_nanos(33_333_333), (30, 1)), 1);
+        assert_eq!(frame_count(secs(1.01), (30, 1)), 30);
+        assert_eq!(frame_count(secs(1.02), (30, 1)), 31);
+        assert_eq!(frame_count(secs(1.0), (30_000, 1_001)), 30);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 mod channels;
 mod clips;
 mod costs;
+mod editor;
 pub mod i18n;
 mod jobs;
 pub mod logging;
@@ -13,6 +14,7 @@ mod network_accounts;
 mod persona_package;
 mod personas;
 mod provider_keys;
+mod proxies;
 mod research;
 mod scenes;
 mod scripts;
@@ -31,7 +33,7 @@ use bardo_domain::{
     SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, UiLanguage, UserProfile,
     VoiceLibrary,
 };
-use bardo_media::AudioOutput;
+use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryProjectFiles};
 
 pub use bardo_domain;
@@ -40,6 +42,10 @@ pub use clips::{ClipsView, SceneClipView};
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
     SpendRow,
+};
+pub use editor::{
+    BinScene, ClipMedia, ClipProblem, ClipView, Editor, EditorError, EditorView, NarrationTrack,
+    PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, PreviewAspect, WordMark,
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
@@ -61,6 +67,7 @@ use crate::jobs::JobQueue;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
+use crate::proxies::ProxyHandler;
 use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
@@ -171,6 +178,8 @@ pub struct Providers {
     pub clips: Vec<Arc<dyn ClipGenerator>>,
     /// The local audio device, for playback.
     pub audio: Arc<dyn AudioOutput>,
+    /// The bundled ffmpeg: proxies, waveforms and the editor's preview.
+    pub media: Arc<dyn MediaEngine>,
 }
 
 impl Providers {
@@ -190,6 +199,7 @@ impl Providers {
                 Arc::new(bardo_ai::GoogleClips::new()),
             ],
             audio: Arc::new(bardo_media::DeviceAudio),
+            media: Arc::new(bardo_media::BundledFfmpeg::new()),
         }
     }
 }
@@ -209,6 +219,7 @@ pub struct Bardo {
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
+    media: Arc<dyn MediaEngine>,
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
@@ -334,20 +345,25 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let proxy_handler = ProxyHandler {
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
             jobs,
             profile.id,
-            crate::jobs::built_in_handlers(
-                research_handler,
-                theme_handler,
-                script_handler,
-                narration_handler,
-                import_handler,
-                scene_handler,
-                clip_handler,
-            ),
+            crate::jobs::built_in_handlers(crate::jobs::BuiltInHandlers {
+                research: research_handler,
+                themes: theme_handler,
+                scripts: script_handler,
+                narrations: narration_handler,
+                imports: import_handler,
+                scenes: scene_handler,
+                clips: clip_handler,
+                proxies: proxy_handler,
+            }),
             job_settings,
             redactor,
         )?;
@@ -365,6 +381,7 @@ impl Bardo {
             cost_book,
             files,
             audio: providers.audio,
+            media: providers.media,
             market_data: providers.market_data,
             voices: providers.voices,
             clips: providers.clips,
@@ -1072,6 +1089,7 @@ pub(crate) mod testing {
             images: Arc::new(FakeImages::default()),
             clips: vec![Arc::new(FakeClips::default())],
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
+            media: Arc::new(crate::editor::testing::FakeMedia::default()),
         }
     }
 }

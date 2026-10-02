@@ -82,4 +82,36 @@ impl Ffmpeg {
             }
         }
     }
+
+    /// Writes a copy of the image `source` scaled to `height` lines, as a
+    /// JPEG at `destination`: what the preview loops for a still.
+    pub fn build_still_proxy(
+        &self,
+        source: &Path,
+        destination: &Path,
+        height: u32,
+    ) -> Result<(), MediaError> {
+        let partial = partial_path(destination);
+        let mut command = self.ffmpeg();
+        command
+            .arg("-y")
+            .arg("-i")
+            .arg(path_arg(source))
+            .args(["-frames:v", "1", "-vf"])
+            .arg(format!("scale=-2:{height}:flags=bicubic"))
+            .args([
+                "-c:v", "mjpeg", "-q:v", "3", "-pix_fmt", "yuvj420p", "-f", "mjpeg",
+            ])
+            .arg(path_arg(&partial));
+        match process::output(command) {
+            Ok(_) => {
+                std::fs::rename(&partial, destination)?;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&partial);
+                Err(error)
+            }
+        }
+    }
 }

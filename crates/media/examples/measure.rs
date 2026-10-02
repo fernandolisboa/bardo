@@ -15,8 +15,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, Ffmpeg, FrameSize, Framing, LoudnessTarget, Output, ProxyCodec,
-    ProxySettings, RenderPlan, VideoClip, VideoEncoder,
+    AudioClip, AudioTrack, ClipSource, Ffmpeg, FrameSize, Framing, LoudnessTarget, Output,
+    ProxyCodec, ProxySettings, RenderPlan, VideoClip, VideoEncoder,
 };
 
 const CLIPS: usize = 12;
@@ -257,7 +257,7 @@ fn plan(clips: &[PathBuf], sources: &Sources) -> RenderPlan {
         video: clips
             .iter()
             .map(|clip| VideoClip {
-                source: clip.clone(),
+                source: ClipSource::Video(clip.clone()),
                 start: Duration::ZERO,
                 duration: Duration::from_secs(CLIP_SECONDS),
                 framing: Framing::Crop { x: 0.5, y: 0.5 },

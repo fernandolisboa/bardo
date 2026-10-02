@@ -194,6 +194,7 @@ narration_import = "Narration import"
 scene_plan = "Scene plan"
 scene_images = "Scene images"
 scene_clips = "Scene clips"
+proxies = "Preview proxies"
 
 [job.state]
 queued = "Queued"
@@ -212,6 +213,7 @@ limit_reached = "A quota or rate limit stopped the provider. YouTube quotas rese
 provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
 unexpected_answer = "The provider gave an answer Bardo does not understand."
 declined = "The provider declined this request under its safety rules. Change what was asked (the prompt, the channel or the niche) and try again."
+media = "ffmpeg could not read or write a media file. Check the file named, then retry."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -824,3 +826,89 @@ reached_line = "{provider}: {spent} of the {budget} budget spent this month, and
 question = "Generate anyway?"
 confirm = "Generate anyway"
 cancel = "Cancel"
+
+[editor]
+open = "Open editor"
+back = "Projects"
+duration = "{duration} · {fps} fps"
+undo = "Undo"
+redo = "Redo"
+review_render = "Review & render"
+jobs_proxies = "Proxies {ready}/{total}"
+jobs_idle = "Jobs"
+job_failed = "1 job failed"
+scene = "Scene {n}"
+proxy_badge = "Proxy"
+play = "Play"
+pause = "Pause"
+previous_frame = "Previous frame"
+next_frame = "Next frame"
+building = "Building preview proxies… {ready} of {total} files"
+keep_editing = "You can keep editing while this runs"
+stale = "The narration changed after the scenes were planned. Plan them again to match it."
+
+[editor.bin]
+scenes = "Scenes"
+media = "Media"
+caption_styles = "Caption styles"
+
+[editor.inspector]
+empty = "Select a clip to edit its properties"
+clip = "Clip"
+source_image = "{provider} image · {model}"
+source_clip = "Animated with {provider} · {model}"
+source_still = "Still image"
+source_none = "No image yet"
+in = "In"
+out = "Out"
+length = "Duration"
+file = "File"
+narration = "Narration"
+
+[editor.tool]
+select = "Select (V)"
+split = "Split (S)"
+snap_words = "Snap to words"
+ai_cuts = "AI cut suggestions"
+duck_music = "Duck music under narration"
+zoom_in = "Zoom in"
+zoom_out = "Zoom out"
+
+[editor.track]
+captions = "Captions"
+video = "Video"
+narration = "Narration"
+music = "Music"
+sfx = "SFX"
+
+[editor.empty]
+title = "Nothing to cut yet."
+no_narration = "The rough cut is built from your scenes and narration. Generate narration to start."
+no_scenes = "The rough cut is built from your scenes and narration. Plan the scenes to start."
+back = "Back to the project"
+
+[editor.clip]
+missing = "Media missing"
+proxy_failed = "Proxy failed"
+proxy_cancelled = "Proxy stopped"
+proxy_building = "Building proxy"
+
+[editor.problems]
+one = "1 clip needs attention"
+many = "{count} clips need attention"
+line = "Scene {n} · {file}: {reason}"
+no_image = "the scene has no image yet"
+file_gone = "the file is gone from the project folder"
+cancelled = "building its proxy was cancelled"
+retry = "Retry proxy"
+
+[editor.preview]
+offline = "Media offline"
+
+[editor.error]
+building = "The preview plays once the proxies are built."
+nothing_to_retry = "Every proxy is built or being built."
+ffmpeg_missing = "ffmpeg was not found, so there is no preview. Reinstall Bardo to get it back."
+preview_failed = "The preview could not start."
+not_loaded = "Could not load the editor."
+no_sound = "No sound device: the preview plays muted."

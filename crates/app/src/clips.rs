@@ -633,7 +633,7 @@ impl ClipJob<'_> {
             .save_scene(&plan, order.scene)
             .map_err(unexpected)?;
         if let Some(pushed) = pushed {
-            let _ = self.handler.files.remove(self.project, &pushed.file);
+            crate::proxies::remove_media(self.handler.files.as_ref(), self.project, &pushed.file);
         }
         Ok(())
     }
@@ -907,7 +907,7 @@ impl Bardo {
         let replaced = plan.scene_mut(index, SystemTime::now())?.accept_clip()?;
         self.scene_plans.save_scene(&plan, index)?;
         if let Some(replaced) = replaced {
-            let _ = self.files.remove(plan.project, &replaced.file);
+            crate::proxies::remove_media(self.files.as_ref(), plan.project, &replaced.file);
         }
         Ok(plan)
     }
@@ -922,7 +922,7 @@ impl Bardo {
         let mut plan = self.own_plan(project)?;
         let dropped = plan.scene_mut(index, SystemTime::now())?.reject_clip()?;
         self.scene_plans.save_scene(&plan, index)?;
-        let _ = self.files.remove(plan.project, &dropped.file);
+        crate::proxies::remove_media(self.files.as_ref(), plan.project, &dropped.file);
         Ok(plan)
     }
 
@@ -935,7 +935,7 @@ impl Bardo {
         let mut plan = self.own_plan(project)?;
         if let Some(removed) = plan.scene_mut(index, SystemTime::now())?.remove_clip() {
             self.scene_plans.save_scene(&plan, index)?;
-            let _ = self.files.remove(plan.project, &removed.file);
+            crate::proxies::remove_media(self.files.as_ref(), plan.project, &removed.file);
         }
         Ok(plan)
     }

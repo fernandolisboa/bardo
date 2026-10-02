@@ -1,4 +1,4 @@
-use bardo_app::bardo_domain::UiLanguage;
+use bardo_app::bardo_domain::{UiLanguage, VideoProjectId};
 use bardo_app::{Bardo, Text};
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -8,9 +8,10 @@ use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
+use crate::editor::{EditorEvent, EditorScreen};
 use crate::jobs::JobsPanel;
 use crate::personas::PersonasScreen;
-use crate::projects::ProjectsScreen;
+use crate::projects::{OpenEditor, ProjectsScreen};
 use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
 use crate::templates::TemplatesScreen;
@@ -78,6 +79,8 @@ pub struct Shell {
     /// Kept alive while closed, so the toggle's count stays current.
     jobs: Entity<JobsPanel>,
     jobs_open: bool,
+    /// The editor, open over the whole window in place of the screens.
+    editor: Option<(Entity<EditorScreen>, Subscription)>,
     error: Option<Text>,
     _subscriptions: Vec<Subscription>,
 }
@@ -94,7 +97,16 @@ impl Shell {
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
-        let subscriptions = vec![cx.observe(&jobs, |_, _, cx| cx.notify())];
+        let subscriptions = vec![
+            cx.observe(&jobs, |_, _, cx| cx.notify()),
+            cx.subscribe_in(
+                &projects,
+                window,
+                |this, _, event: &OpenEditor, window, cx| {
+                    this.open_editor(event.0, window, cx);
+                },
+            ),
+        ];
         Self {
             bardo,
             screen: Screen::Channels,
@@ -108,6 +120,7 @@ impl Shell {
             settings,
             jobs,
             jobs_open: false,
+            editor: None,
             error: None,
             _subscriptions: subscriptions,
         }
@@ -145,6 +158,37 @@ impl Shell {
         cx.notify();
     }
 
+    fn open_editor(
+        &mut self,
+        project: VideoProjectId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bardo = self.bardo.clone();
+        let editor = cx.new(|cx| EditorScreen::new(bardo, project, window, cx));
+        let subscription =
+            cx.subscribe_in(
+                &editor,
+                window,
+                |this, editor, event, window, cx| match event {
+                    EditorEvent::Close => {
+                        editor.update(cx, |editor, cx| editor.release(window, cx));
+                        this.editor = None;
+                        // The editor may have queued jobs or removed old proxies.
+                        this.projects
+                            .update(cx, |projects, cx| projects.reload(window, cx));
+                        cx.notify();
+                    }
+                    EditorEvent::ToggleJobs => {
+                        this.jobs_open = !this.jobs_open;
+                        cx.notify();
+                    }
+                },
+            );
+        self.editor = Some((editor, subscription));
+        cx.notify();
+    }
+
     fn select_language(
         &mut self,
         language: UiLanguage,
@@ -164,6 +208,14 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some((editor, _)) = &self.editor {
+            return h_flex()
+                .size_full()
+                .items_start()
+                .child(div().flex_1().h_full().min_w_0().child(editor.clone()))
+                .when(self.jobs_open, |row| row.child(self.jobs.clone()))
+                .into_any_element();
+        }
         let bardo = self.bardo.read(cx);
         let current = bardo.ui_language();
         let language_switch = ButtonGroup::new("ui-language")
@@ -266,5 +318,6 @@ impl Render for Shell {
                     )
                     .when(self.jobs_open, |row| row.child(self.jobs.clone())),
             )
+            .into_any_element()
     }
 }
