@@ -1136,3 +1136,44 @@ clips = "Depois dos clipes"
 edit = "Depois da edição"
 render = "Depois do render"
 publish = "Depois da publicação"
+
+[appearance.layout]
+title = "Layout"
+hint = "Onde cada tela coloca suas partes. As telas fazem as mesmas coisas em todo layout; trocar mantém a tela e a seleção em que você está."
+
+[ui_layout]
+workspace = "Workspace"
+studio = "Studio"
+not_saved = "Não foi possível salvar o layout. Tente de novo."
+
+[ui_layout.description]
+workspace = "Barra lateral por pilar, cartões com os detalhes ao lado."
+studio = "Mais denso: abas no topo, tabelas com os detalhes embaixo, barra de status."
+
+[status]
+jobs = "{n} tarefas em andamento"
+one_job = "1 tarefa em andamento"
+no_jobs = "Nenhuma tarefa em andamento"
+month_spend = "{amount} em {month}"
+
+[scenes.column]
+picture = "Imagem"
+time = "Tempo"
+narration = "Narração"
+prompt = "Prompt"
+image = "Imagem"
+clip = "Clipe"
+model = "Modelo"
+cost = "Custo do clipe"
+
+[scenes.state]
+done = "Pronta"
+
+[scenes.keys]
+hint = "↑ e ↓ percorrem as cenas e os detalhes acompanham. Enter usa a nova imagem ou o novo clipe de uma cena em revisão."
+
+[costs.brief]
+spent = "gasto"
+over = "{n} acima do orçamento"
+near = "{n} perto do orçamento"
+unpriced = "{n} sem preço"

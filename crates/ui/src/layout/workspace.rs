@@ -7,6 +7,7 @@
 use std::rc::Rc;
 
 use bardo_app::{Destination, Stage, StageState};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ElementId, Hsla, div, hsla, px, relative};
@@ -15,8 +16,8 @@ use crate::appearance::look;
 use crate::icons;
 use crate::kit;
 use crate::parts::{
-    Collection, CollectionKind, Header, Inspector, NavItem, Navigation, OnPick, ScreenParts,
-    StageItem, Stages, Tile,
+    Collection, CollectionKind, Figure, Header, Inspector, NavItem, Navigation, OnPick,
+    ScreenParts, Sections, StageItem, Stages, Tile,
 };
 
 const SIDEBAR_WIDTH: f32 = 216.;
@@ -237,11 +238,25 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
         notices,
         collection,
         inspector,
-        content,
+        mut content,
         aside,
+        summary,
+        sections,
     } = parts;
     let t = &look(cx).tokens;
     let staged = stages.is_some();
+    // The figures as cards, the toolbar, then the sections as tabs over
+    // the one shown.
+    let mut lead: Vec<AnyElement> = Vec::new();
+    if !summary.is_empty() {
+        lead.push(figures(summary, cx));
+    }
+    lead.extend(toolbar);
+    if let Some(sections) = sections {
+        let (tabs, shown) = section_tabs(sections);
+        lead.push(tabs);
+        content.extend(shown);
+    }
 
     let body = match collection {
         Some(collection) if collection.kind == CollectionKind::List => h_flex()
@@ -261,7 +276,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                             .max_w(px(PAGE_WIDTH))
                             .p_6()
                             .gap_4()
-                            .children(toolbar)
+                            .children(lead)
                             .children(notices)
                             .children(inspector.map(|inspector| inspector_body(inspector, cx)))
                             .children(content),
@@ -269,10 +284,10 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
             )
             .into_any_element(),
         collection @ Some(_) => {
-            main_with_inspector(toolbar, notices, collection, content, inspector, cx)
+            main_with_inspector(lead, notices, collection, content, inspector, cx)
         }
         None if inspector.is_some() => {
-            main_with_inspector(toolbar, notices, None, content, inspector, cx)
+            main_with_inspector(lead, notices, None, content, inspector, cx)
         }
         None => v_flex()
             .id("screen-page")
@@ -283,7 +298,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
             .pb_6()
             .when(staged, |page| page.pt_4())
             .gap_4()
-            .children(toolbar)
+            .children(lead)
             .children(notices)
             .child(
                 h_flex()
@@ -482,7 +497,7 @@ fn step(item: StageItem, current: Stage, on_pick: OnPick<Stage>, cx: &App) -> An
 
 /// The main column, with the inspector on the right when there is one.
 fn main_with_inspector(
-    toolbar: Option<AnyElement>,
+    lead: Vec<AnyElement>,
     notices: Vec<AnyElement>,
     collection: Option<Collection>,
     content: Vec<AnyElement>,
@@ -504,7 +519,7 @@ fn main_with_inspector(
                 .overflow_y_scroll()
                 .p_4()
                 .gap_3()
-                .children(toolbar)
+                .children(lead)
                 .children(notices)
                 .children(items)
                 .children(content),
@@ -577,8 +592,7 @@ fn collection_body(collection: Collection, cx: &App) -> AnyElement {
             .children(collection.cards)
             .into_any_element()
     };
-    v_flex()
-        .id(collection.id)
+    super::take_keys(v_flex().id(collection.id), collection.keys)
         .gap_3()
         .children(controls)
         .child(items)
@@ -607,8 +621,7 @@ fn list_column(collection: Collection, cx: &App) -> AnyElement {
             )
         })
         .child(
-            v_flex()
-                .id(collection.id)
+            super::take_keys(v_flex().id(collection.id), collection.keys)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -746,4 +759,64 @@ fn row(tile: Tile, cx: &App) -> AnyElement {
         )
         .on_click(move |event, window, cx| on_click(event, window, cx))
         .into_any_element()
+}
+
+/// The page's figures as a row of cards.
+fn figures(summary: Vec<Figure>, cx: &App) -> AnyElement {
+    let t = look(cx).tokens;
+    let mono = cx.theme().mono_font_family.clone();
+    h_flex()
+        .gap_3()
+        .flex_wrap()
+        .items_stretch()
+        .children(summary.into_iter().map(|figure| {
+            kit::card(cx)
+                .flex_1()
+                .min_w(px(220.))
+                .p_4()
+                .gap_1()
+                .when_some(figure.tone, |card, tone| card.border_color(tone.ink(cx)))
+                .child(div().text_sm().text_color(t.text2).child(figure.label))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_baseline()
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .font_family(mono.clone())
+                                .child(figure.value),
+                        )
+                        .children(figure.beside.map(|beside| {
+                            div()
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .child(beside)
+                        })),
+                )
+                .children(figure.line)
+        }))
+        .into_any_element()
+}
+
+/// The sections as tabs, and the one shown.
+fn section_tabs(sections: Sections) -> (AnyElement, Option<AnyElement>) {
+    let Sections {
+        id,
+        items,
+        selected,
+        on_pick,
+    } = sections;
+    let mut bar = TabBar::new(id).underline().selected_index(selected);
+    let mut shown = None;
+    for (ix, section) in items.into_iter().enumerate() {
+        bar = bar.child(Tab::new().label(section.title));
+        if ix == selected {
+            shown = Some(section.body);
+        }
+    }
+    let bar = bar
+        .on_click(move |ix: &usize, window, cx| on_pick(*ix, window, cx))
+        .into_any_element();
+    (bar, shown)
 }

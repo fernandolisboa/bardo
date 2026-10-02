@@ -75,7 +75,8 @@ mod timeline;
 mod voice;
 
 pub use appearance::{
-    ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownUiTheme, UnknownUiThemePreference,
+    LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,
+    UnknownUiThemePreference,
 };
 pub use budget::{Budget, BudgetLevel, Month};
 pub use caption::{

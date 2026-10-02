@@ -36,8 +36,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString,
-    Subscription, Task, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, FocusHandle, PathPromptOptions,
+    ScrollHandle, SharedString, Subscription, Task, Window, div, px,
 };
 
 use crate::appearance::look;
@@ -102,6 +102,10 @@ pub struct ProjectsScreen {
     stage: Stage,
     /// The scene open in the inspector at the Scenes and Clips stages.
     selected_scene: Option<usize>,
+    /// Takes ↑/↓ and Enter over the scenes.
+    scene_keys: FocusHandle,
+    /// Scrolls the scenes when a layout lists them in a scroll of their own.
+    scene_scroll: ScrollHandle,
     /// Whether the scene grid shows only the scenes with something left.
     pending_only: bool,
     view: Option<ScriptView>,
@@ -218,6 +222,8 @@ impl ProjectsScreen {
             project: None,
             stage: Stage::Script,
             selected_scene: None,
+            scene_keys: cx.focus_handle(),
+            scene_scroll: ScrollHandle::new(),
             pending_only: false,
             view: None,
             narration: None,

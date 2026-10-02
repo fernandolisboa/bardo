@@ -633,6 +633,7 @@ impl Render for ChannelsScreen {
         parts.inspector = Some(Inspector {
             title: Some(kit::section_heading(tr(bardo, title)).into_any_element()),
             body: vec![form],
+            media: None,
             footer: None,
         });
         layout::screen(parts, cx)
