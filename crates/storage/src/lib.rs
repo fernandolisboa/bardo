@@ -16,6 +16,7 @@ mod script;
 mod secrets;
 mod template;
 mod theme;
+mod timeline;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};

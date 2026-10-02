@@ -1,18 +1,26 @@
 //! The editor's timeline (`docs/design/editor.md`, section 3): toolbar,
 //! ruler, the five tracks with their 200 px headers, and the playhead.
-//! It draws `EditorView` only; editing tools come with #21 and later.
+//! It draws `EditorView` and the drag in progress; every edit goes through
+//! `Bardo::edit` when the mouse is released.
+//!
+//! Dragging an item's edge trims it; dragging a clip drops it between two
+//! others; dragging a narration piece moves it. While a drag runs, a ghost
+//! shows where the item will land (snapped, and clamped as the domain
+//! will), and a line marks the word it snapped to. Alt frees it from the
+//! words.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use bardo_app::bardo_domain::timecode;
-use bardo_app::{ClipMedia, ClipView, EditorView, NarrationTrack, Text};
+use bardo_app::bardo_domain::{AudioItem, Edge, ItemRef, Track as Lane, timecode};
+use bardo_app::{ClipMedia, ClipView, EditAction, Editor, EditorView, NarrationTrack, Text};
 use gpui_kit::component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, Bounds, ClickEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels,
-    ScrollWheelEvent, Window, canvas, div, fill, img, pattern_slash, point, px, size,
+    AnyElement, Bounds, ClickEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ObjectFit, Pixels, ScrollWheelEvent, Window, canvas, div, fill, img, pattern_slash, point, px,
+    size,
 };
 
 use super::tokens::*;
@@ -29,6 +37,48 @@ const WORDS_FROM: f32 = 60.;
 const ZOOM_STEP: f32 = 1.5;
 const MIN_ZOOM: f32 = 2.;
 const MAX_ZOOM: f32 = 600.;
+/// How close, on screen, a cut must come to a word to snap to it.
+const SNAP_PX: f32 = 8.;
+/// How far the mouse moves before a press becomes a drag.
+const DRAG_PX: f32 = 3.;
+/// The grab zone at each end of an item, for trimming.
+const EDGE_PX: f32 = 6.;
+
+/// What a drag holds of an item.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Grip {
+    Edge(Edge),
+    Body,
+}
+
+/// A drag on the timeline, from press to release.
+#[derive(Clone, Copy)]
+struct Drag {
+    item: ItemRef,
+    grip: Grip,
+    /// Where the mouse was pressed, on screen and in time.
+    from_x: f32,
+    from: Duration,
+    /// What the grip held when pressed: the edge's time, or the item's
+    /// start.
+    anchor: Duration,
+    /// The time under the mouse now.
+    time: Duration,
+    /// Alt is held: no snapping.
+    free: bool,
+    moved: bool,
+}
+
+impl Drag {
+    /// Where the grip is now: the anchor moved as far as the mouse.
+    fn target(&self) -> Duration {
+        if self.time >= self.from {
+            self.anchor + (self.time - self.from)
+        } else {
+            self.anchor.saturating_sub(self.from - self.time)
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Track {
@@ -99,6 +149,7 @@ pub(crate) struct TimelineState {
     scroll: f32,
     /// Where the lanes were last drawn, for mouse positions and fitting.
     lanes: Rc<Cell<Bounds<Pixels>>>,
+    drag: Option<Drag>,
 }
 
 impl Default for TimelineState {
@@ -108,11 +159,26 @@ impl Default for TimelineState {
             fit: true,
             scroll: 0.,
             lanes: Rc::default(),
+            drag: None,
         }
     }
 }
 
 impl TimelineState {
+    /// How far a cut may move to land on a word at this zoom.
+    pub(crate) fn snap_reach(&self) -> Duration {
+        Duration::from_secs_f32(SNAP_PX / self.zoom)
+    }
+
+    /// The reach for the drag in progress: none while Alt is held.
+    fn drag_reach(&self, drag: &Drag) -> Duration {
+        if drag.free {
+            Duration::ZERO
+        } else {
+            self.snap_reach()
+        }
+    }
+
     fn width(&self) -> f32 {
         self.lanes.get().size.width.into()
     }
@@ -237,14 +303,12 @@ impl EditorScreen {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, clip)| {
-                    self.render_clip(index, clip, selection == Some(index), cx)
+                    self.render_clip(index, clip, selection == Some(ItemRef::video(index)), cx)
                 })
                 .collect::<Vec<_>>(),
         );
-        let mut narration = view
-            .narration
-            .as_ref()
-            .and_then(|narration| self.render_narration(narration));
+        let mut narration = Some(self.render_narration(view, selection, cx));
+        let (mut video_ghost, mut narration_ghost, snap_line) = self.render_drag(view);
         let lanes = Track::ALL.map(|track| {
             let lane = div()
                 .relative()
@@ -253,8 +317,12 @@ impl EditorScreen {
                 .border_b_1()
                 .border_color(color(HAIRLINE));
             match track {
-                Track::Video => lane.children(video.take().into_iter().flatten()),
-                Track::Narration => lane.children(narration.take()),
+                Track::Video => lane
+                    .children(video.take().into_iter().flatten())
+                    .children(video_ghost.take().into_iter().flatten()),
+                Track::Narration => lane
+                    .children(narration.take().into_iter().flatten())
+                    .children(narration_ghost.take().into_iter().flatten()),
                 _ => lane,
             }
         });
@@ -293,6 +361,7 @@ impl EditorScreen {
                     .child(measure)
                     .child(self.render_ruler(cx))
                     .children(lanes)
+                    .children(snap_line)
                     .children(playhead_line)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -303,11 +372,21 @@ impl EditorScreen {
                         }),
                     )
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                        if event.pressed_button == Some(MouseButton::Left) {
+                        if this.timeline.drag.is_some() {
+                            this.drag_to(event, cx);
+                        } else if event.pressed_button == Some(MouseButton::Left) {
                             let time = this.timeline.time_at(event.position.x);
                             this.seek(time, cx);
                         }
                     }))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, cx| this.drop_drag(cx)),
+                    )
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, cx| this.drop_drag(cx)),
+                    )
                     .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                         let delta = event.delta.pixel_delta(px(16.));
                         let (dx, dy): (f32, f32) = (delta.x.into(), delta.y.into());
@@ -342,13 +421,31 @@ impl EditorScreen {
             .editor
             .as_ref()
             .map_or(Duration::ZERO, |editor| editor.playhead());
-        // Editing tools and toggles arrive with #21, #22, #25 and #30.
+        // The other toggles arrive with #22 and #30.
         let toggle = |id: &'static str, text: Text| {
             tool_button(id, false, false)
                 .border_1()
                 .border_color(color(HAIRLINE))
                 .child(tr(bardo, text))
         };
+        let editing = self
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.view().timeline.is_some());
+        let snapping = self.editor.as_ref().is_some_and(Editor::snapping);
+        let snap = tool_button("toggle-snap", editing, snapping)
+            .when(!snapping, |button| {
+                button.border_1().border_color(color(HAIRLINE))
+            })
+            .child(div().size(px(6.)).rounded_full().bg(color(if snapping {
+                TEXT
+            } else {
+                OUTLINE
+            })))
+            .child(tr(bardo, Text::EditorSnapWords))
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.with_editor(cx, |editor| editor.set_snapping(!editor.snapping()));
+            }));
         h_flex()
             .h(px(36.))
             .flex_none()
@@ -374,11 +471,15 @@ impl EditorScreen {
                             .child(tr(bardo, Text::EditorToolSelect)),
                     )
                     .child(
-                        tool_button("tool-split", false, false)
-                            .child(tr(bardo, Text::EditorToolSplit)),
+                        tool_button("tool-split", editing, false)
+                            .child(tr(bardo, Text::EditorToolSplit))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                let reach = this.timeline.snap_reach();
+                                this.edit(EditAction::SplitAtPlayhead { reach }, cx);
+                            })),
                     )
                     .child(div().w(px(1.)).h(px(18.)).mx_1().bg(color(HAIRLINE)))
-                    .child(toggle("toggle-snap", Text::EditorSnapWords))
+                    .child(snap)
                     .child(toggle("toggle-ai", Text::EditorAiCuts))
                     .child(toggle("toggle-duck", Text::EditorDuckMusic))
                     .child(div().flex_1())
@@ -526,20 +627,277 @@ impl EditorScreen {
                             .child(label(tr(bardo, text), tint).text_size(px(11.)))
                     })),
             )
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.select(Some(index), cx)));
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    let time = this.timeline.time_at(event.position.x);
+                    this.seek(time, cx);
+                    this.grab(ItemRef::video(index), Grip::Body, event, cx);
+                }),
+            )
+            .children(self.edge_handles(ItemRef::video(index), width, cx));
         Some(element.into_any_element())
     }
 
-    fn render_narration(&self, narration: &NarrationTrack) -> Option<AnyElement> {
+    /// The grab zones at an item's two ends, for trimming.
+    fn edge_handles(&self, item: ItemRef, width: f32, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if width < EDGE_PX * 3. {
+            return Vec::new();
+        }
+        [Edge::Start, Edge::End]
+            .into_iter()
+            .map(|edge| {
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(EDGE_PX))
+                    .when(edge == Edge::Start, |handle| handle.left_0())
+                    .when(edge == Edge::End, |handle| handle.right_0())
+                    .cursor_ew_resize()
+                    .hover(|style| style.bg(color(TEXT).opacity(0.25)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.grab(item, Grip::Edge(edge), event, cx);
+                        }),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    /// Starts a drag on `item` (selecting it); the lanes do not see the
+    /// press.
+    fn grab(&mut self, item: ItemRef, grip: Grip, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        self.select(Some(item), cx);
+        let Some((at, duration)) = self.editor.as_ref().and_then(|e| e.view().span(item)) else {
+            return;
+        };
+        let from = self.timeline.time_at(event.position.x);
+        self.timeline.drag = Some(Drag {
+            item,
+            grip,
+            from_x: event.position.x.into(),
+            from,
+            anchor: match grip {
+                Grip::Edge(Edge::End) => at + duration,
+                Grip::Edge(Edge::Start) | Grip::Body => at,
+            },
+            time: from,
+            free: event.modifiers.alt,
+            moved: false,
+        });
+    }
+
+    fn drag_to(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let time = self.timeline.time_at(event.position.x);
+        if let Some(drag) = self.timeline.drag.as_mut() {
+            let x: f32 = event.position.x.into();
+            drag.moved |= (x - drag.from_x).abs() > DRAG_PX;
+            drag.time = time;
+            drag.free = event.modifiers.alt;
+            cx.notify();
+        }
+    }
+
+    /// Ends the drag with the edit it shows.
+    fn drop_drag(&mut self, cx: &mut Context<Self>) {
+        let Some(drag) = self.timeline.drag.take() else {
+            return;
+        };
+        cx.notify();
+        let Some(editor) = self.editor.as_ref().filter(|_| drag.moved) else {
+            return;
+        };
+        let reach = self.timeline.drag_reach(&drag);
+        let item = drag.item;
+        let action = match (drag.grip, item.track) {
+            (Grip::Edge(edge), _) => EditAction::Trim {
+                item,
+                edge,
+                to: drag.target(),
+                reach,
+            },
+            (Grip::Body, Lane::Video) => match editor.reorder_target(item.index, drag.time) {
+                Some(to) if to != item.index => EditAction::Reorder {
+                    from: item.index,
+                    to,
+                },
+                _ => return,
+            },
+            (Grip::Body, Lane::Narration) => EditAction::Move {
+                item,
+                to: drag.target(),
+            },
+        };
+        self.edit(action, cx);
+    }
+
+    /// The drag in progress: a ghost of the item where it will land (on
+    /// the video lane or the narration lane) and the line of the word it
+    /// snaps to.
+    fn render_drag(
+        &self,
+        view: &EditorView,
+    ) -> (
+        Option<Vec<AnyElement>>,
+        Option<Vec<AnyElement>>,
+        Option<AnyElement>,
+    ) {
+        let (Some(drag), Some(editor)) = (self.timeline.drag, self.editor.as_ref()) else {
+            return (None, None, None);
+        };
+        if !drag.moved {
+            return (None, None, None);
+        }
         let timeline = &self.timeline;
-        let left = timeline.x(Duration::ZERO);
-        let width = narration.duration.as_secs_f32() * timeline.zoom;
-        if left + width < 0. {
+        let ghost = |at: Duration, duration: Duration| {
+            div()
+                .absolute()
+                .top(px(2.))
+                .bottom(px(2.))
+                .left(px(timeline.x(at)))
+                .w(px((duration.as_secs_f32() * timeline.zoom).max(2.)))
+                .rounded(px(3.))
+                .border_2()
+                .border_color(color(ACCENT))
+                .bg(color(ACCENT).opacity(0.12))
+                .into_any_element()
+        };
+        let reach = timeline.drag_reach(&drag);
+        let mut snapped = None;
+        let mut elements = Vec::new();
+        match (drag.grip, drag.item.track) {
+            (Grip::Edge(edge), _) => {
+                if let Some((at, duration)) =
+                    editor.trim_preview(drag.item, edge, drag.target(), reach)
+                {
+                    elements.push(ghost(at, duration));
+                    let (cut, on_word) = editor.snapped(drag.target(), reach);
+                    let edge_at = match edge {
+                        Edge::Start => at,
+                        Edge::End => at + duration,
+                    };
+                    snapped = (on_word && cut == edge_at).then_some(cut);
+                }
+            }
+            (Grip::Body, Lane::Video) => {
+                if let (Some((_, duration)), Some(to)) = (
+                    view.span(drag.item),
+                    editor.reorder_target(drag.item.index, drag.time),
+                ) {
+                    elements.push(ghost(drag.target(), duration));
+                    // The slot it drops into.
+                    let slot = if to > drag.item.index {
+                        view.clips[to].at + view.clips[to].duration
+                    } else {
+                        view.clips[to].at
+                    };
+                    elements.push(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(timeline.x(slot) - 1.))
+                            .w(px(3.))
+                            .bg(color(ACCENT))
+                            .into_any_element(),
+                    );
+                }
+            }
+            (Grip::Body, Lane::Narration) => {
+                if let (Some((_, duration)), Some(at)) = (
+                    view.span(drag.item),
+                    editor.move_preview(drag.item, drag.target()),
+                ) {
+                    elements.push(ghost(at, duration));
+                }
+            }
+        }
+        let line = snapped.map(|at| {
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(timeline.x(at)))
+                .w(px(1.))
+                .bg(color(TEXT))
+                .into_any_element()
+        });
+        match drag.item.track {
+            Lane::Video => (Some(elements), None, line),
+            Lane::Narration => (None, Some(elements), line),
+        }
+    }
+
+    /// The narration lane: each piece of the narration where the cut
+    /// plays it, with its stretch of the waveform, and the words on top.
+    fn render_narration(
+        &self,
+        view: &EditorView,
+        selection: Option<ItemRef>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let (Some(narration), Some(timeline)) = (&view.narration, &view.timeline) else {
+            return Vec::new();
+        };
+        let mut elements: Vec<AnyElement> = timeline
+            .narration()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, piece)| {
+                let item = ItemRef::narration(index);
+                self.render_piece(item, piece, narration, selection == Some(item), cx)
+            })
+            .collect();
+        let state = &self.timeline;
+        if state.zoom >= WORDS_FROM {
+            elements.extend(
+                narration
+                    .words
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, word)| {
+                        let x = state.x(word.start);
+                        let end = state.x(word.end);
+                        (end >= 0. && x <= state.width()).then(|| {
+                            div()
+                                .absolute()
+                                .left(px(x))
+                                .when(index % 2 == 0, |word| word.top(px(6.)))
+                                .when(index % 2 == 1, |word| word.top(px(20.)))
+                                .pl_0p5()
+                                .border_l_1()
+                                .border_color(color(NARRATION))
+                                .child(label(word.text.clone(), TEXT_2).text_size(px(10.)))
+                                .into_any_element()
+                        })
+                    }),
+            );
+        }
+        elements
+    }
+
+    fn render_piece(
+        &self,
+        item: ItemRef,
+        piece: &AudioItem,
+        narration: &NarrationTrack,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let timeline = &self.timeline;
+        let left = timeline.x(piece.at);
+        let width = (piece.duration.as_secs_f32() * timeline.zoom).max(2.);
+        if left + width < 0. || left > timeline.width() {
             return None;
         }
         let zoom = timeline.zoom;
-        let scroll = timeline.scroll;
         let peaks = narration.peaks.clone();
+        let source_start = piece.start.as_secs_f32();
+        // Drawn from the piece's own left edge, which may be off screen.
         let waveform = canvas(
             |_, _, _| {},
             move |bounds, (), window, _| {
@@ -548,15 +906,17 @@ impl EditorScreen {
                 };
                 let top: f32 = bounds.origin.y.into();
                 let height: f32 = bounds.size.height.into();
-                let origin: f32 = bounds.origin.x.into();
+                // On a whole pixel, so every piece's bars look alike.
+                let origin = f32::from(bounds.origin.x).round();
                 let visible: f32 = bounds.size.width.into();
                 let middle = top + height / 2.;
                 let per_pixel = per_second as f32 / zoom;
+                let first = source_start * per_second as f32;
                 // One bar every 2 px of what is on screen.
                 let mut x = 0.;
                 while x < visible {
-                    let from = ((x + scroll) * per_pixel) as usize;
-                    let to = (((x + 2. + scroll) * per_pixel) as usize).max(from + 1);
+                    let from = (first + x * per_pixel) as usize;
+                    let to = ((first + (x + 2.) * per_pixel) as usize).max(from + 1);
                     let peak = peaks
                         .get(from..to.min(peaks.len()))
                         .unwrap_or_default()
@@ -575,55 +935,33 @@ impl EditorScreen {
             },
         )
         .absolute()
-        .top_0()
-        .bottom_0();
-        let words = (zoom >= WORDS_FROM).then(|| {
-            narration
-                .words
-                .iter()
-                .enumerate()
-                .filter_map(|(index, word)| {
-                    let x = timeline.x(word.start);
-                    let end = timeline.x(word.end);
-                    (end >= 0. && x <= timeline.width()).then(|| {
-                        div()
-                            .absolute()
-                            .left(px(x))
-                            .when(index % 2 == 0, |word| word.top(px(2.)))
-                            .when(index % 2 == 1, |word| word.top(px(16.)))
-                            .pl_0p5()
-                            .border_l_1()
-                            .border_color(color(NARRATION))
-                            .child(label(word.text.clone(), TEXT_2).text_size(px(10.)))
-                    })
-                })
-                .collect::<Vec<_>>()
-        });
+        .inset_0();
         Some(
             div()
+                .id(("narration", item.index))
                 .absolute()
                 .top(px(4.))
                 .bottom(px(4.))
-                .left_0()
-                .right_0()
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left(px(left))
-                        .w(px(width))
-                        .rounded(px(3.))
-                        .bg(color(NARRATION_FILL))
-                        .border_1()
-                        .border_color(color(NARRATION).opacity(0.6)),
+                .left(px(left))
+                .w(px(width))
+                .overflow_hidden()
+                .rounded(px(3.))
+                .bg(color(NARRATION_FILL))
+                .border_1()
+                .border_color(color(NARRATION).opacity(0.6))
+                .when(selected, |piece| {
+                    piece.border_2().border_color(color(ACCENT))
+                })
+                .child(waveform)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        let time = this.timeline.time_at(event.position.x);
+                        this.seek(time, cx);
+                        this.grab(item, Grip::Body, event, cx);
+                    }),
                 )
-                .child(
-                    waveform
-                        .left(px(left.max(0.)))
-                        .w(px((left + width).min(timeline.width()) - left.max(0.))),
-                )
-                .children(words.into_iter().flatten())
+                .children(self.edge_handles(item, width, cx))
                 .into_any_element(),
         )
     }

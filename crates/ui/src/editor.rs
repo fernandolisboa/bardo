@@ -1,7 +1,7 @@
 //! The editor screen (#19's approved design, `docs/design/editor.md`): top
 //! bar, bin, preview and inspector, and the timeline below. It renders
-//! `bardo_app::Editor` state only: the rough cut, the proxies' progress, the
-//! playhead and the selection. Preview pictures come from `Editor::tick`,
+//! `bardo_app::Editor` state only: the cut, the proxies' progress, the
+//! playhead and the selection; edits go through `Bardo::edit`. Preview pictures come from `Editor::tick`,
 //! called every frame while the preview plays; each becomes a `RenderImage`
 //! and the previous one is dropped (ADR-0007).
 //!
@@ -14,8 +14,12 @@ mod timeline;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bardo_app::bardo_domain::{FPS, Generation, VideoProjectId, timecode};
-use bardo_app::{Bardo, ClipMedia, ClipProblem, ClipView, Editor, EditorView, PreviewAspect, Text};
+use bardo_app::bardo_domain::{
+    Edge, FPS, Generation, ItemRef, Track, VideoProjectId, frame_time, timecode,
+};
+use bardo_app::{
+    Bardo, ClipMedia, ClipProblem, ClipView, EditAction, Editor, EditorView, PreviewAspect, Text,
+};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -149,8 +153,21 @@ impl EditorScreen {
         self.with_editor(cx, |editor| editor.seek(time));
     }
 
-    pub(crate) fn select(&mut self, clip: Option<usize>, cx: &mut Context<Self>) {
-        self.with_editor(cx, |editor| editor.select(clip));
+    pub(crate) fn select(&mut self, item: Option<ItemRef>, cx: &mut Context<Self>) {
+        self.with_editor(cx, |editor| editor.select(item));
+    }
+
+    /// Makes an edit and shows why when it is not made.
+    pub(crate) fn edit(&mut self, action: EditAction, cx: &mut Context<Self>) {
+        let Self { bardo, editor, .. } = self;
+        if let Some(editor) = editor.as_mut() {
+            self.error = bardo
+                .read(cx)
+                .edit(editor, action)
+                .err()
+                .map(|error| error.message());
+            cx.notify();
+        }
     }
 
     fn retry_proxies(&mut self, cx: &mut Context<Self>) {
@@ -166,8 +183,33 @@ impl EditorScreen {
     }
 
     fn on_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        match event.keystroke.key.as_str() {
+        let modifiers = event.keystroke.modifiers;
+        let key = event.keystroke.key.as_str();
+        if modifiers.control || modifiers.platform {
+            match key {
+                "z" if modifiers.shift => self.edit(EditAction::Redo, cx),
+                "z" => self.edit(EditAction::Undo, cx),
+                "y" => self.edit(EditAction::Redo, cx),
+                _ => {}
+            }
+            return;
+        }
+        if modifiers.alt {
+            match key {
+                "left" => self.nudge_selection(-1, cx),
+                "right" => self.nudge_selection(1, cx),
+                _ => {}
+            }
+            return;
+        }
+        let reach = self.timeline.snap_reach();
+        match key {
             "space" => self.toggle_play(cx),
+            "s" => self.edit(EditAction::SplitAtPlayhead { reach }, cx),
+            "delete" | "backspace" => self.edit(EditAction::DeleteSelection, cx),
+            "[" => self.trim_to_playhead(Edge::Start, cx),
+            "]" => self.trim_to_playhead(Edge::End, cx),
+            "escape" => self.select(None, cx),
             "left" => self.with_editor(cx, |editor| editor.step(-1)),
             "right" => self.with_editor(cx, |editor| editor.step(1)),
             "home" => self.seek(Duration::ZERO, cx),
@@ -180,6 +222,66 @@ impl EditorScreen {
             }
             _ => {}
         }
+    }
+
+    /// Moves the selected edge to the playhead (`[` and `]`).
+    fn trim_to_playhead(&mut self, edge: Edge, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.as_ref() else {
+            return;
+        };
+        let Some(item) = editor.selection() else {
+            self.error = Some(Text::EditorNothingToCut);
+            cx.notify();
+            return;
+        };
+        let to = editor.playhead();
+        let reach = self.timeline.snap_reach();
+        self.edit(
+            EditAction::Trim {
+                item,
+                edge,
+                to,
+                reach,
+            },
+            cx,
+        );
+    }
+
+    /// Alt+← and Alt+→: a clip one place earlier or later, a narration
+    /// piece one frame.
+    fn nudge_selection(&mut self, by: i64, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.as_ref() else {
+            return;
+        };
+        let Some(item) = editor.selection() else {
+            return;
+        };
+        let action = match item.track {
+            Track::Video => {
+                let Some(to) = item.index.checked_add_signed(by as isize) else {
+                    return;
+                };
+                if to >= editor.view().clips.len() {
+                    return;
+                }
+                EditAction::Reorder {
+                    from: item.index,
+                    to,
+                }
+            }
+            Track::Narration => {
+                let Some((at, _)) = editor.view().span(item) else {
+                    return;
+                };
+                let to = if by < 0 {
+                    at.saturating_sub(frame_time(1))
+                } else {
+                    at + frame_time(1)
+                };
+                EditAction::Move { item, to }
+            }
+        };
+        self.edit(action, cx);
     }
 
     /// Frees the preview's picture from the window's atlas; the shell calls
@@ -336,9 +438,23 @@ impl EditorScreen {
                     .unwrap_or_else(|| tr(bardo, Text::EditorJobsIdle)),
             )
             .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::ToggleJobs)));
-        // Undo, redo (#21) and render (#27) come with their slices.
-        let undo = tool_button("editor-undo", false, false).child(icon(IconName::Undo, TEXT_3));
-        let redo = tool_button("editor-redo", false, false).child(icon(IconName::Redo, TEXT_3));
+        let can_undo = self.editor.as_ref().is_some_and(Editor::can_undo);
+        let can_redo = self.editor.as_ref().is_some_and(Editor::can_redo);
+        let undo = tool_button("editor-undo", can_undo, false)
+            .child(icon(IconName::Undo, if can_undo { TEXT_2 } else { TEXT_3 }))
+            .when(can_undo, |button| {
+                button.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::Undo, cx);
+                }))
+            });
+        let redo = tool_button("editor-redo", can_redo, false)
+            .child(icon(IconName::Redo, if can_redo { TEXT_2 } else { TEXT_3 }))
+            .when(can_redo, |button| {
+                button.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::Redo, cx);
+                }))
+            });
+        // Render (#27) comes with its slice.
         let render = div()
             .h(px(28.))
             .px_3()
@@ -383,7 +499,7 @@ impl EditorScreen {
         let mono = cx.theme().mono_font_family.clone();
         let selected_scene = self.editor.as_ref().and_then(|editor| {
             editor
-                .selection()
+                .selected_clip()
                 .map(|index| editor.view().clips[index].scene)
         });
         let tabs = h_flex()
@@ -465,7 +581,7 @@ impl EditorScreen {
                             if let Some(at) = at {
                                 this.seek(at, cx);
                             }
-                            this.select(clip, cx);
+                            this.select(clip.map(ItemRef::video), cx);
                         }))
                 })
                 .collect()
@@ -720,13 +836,83 @@ impl EditorScreen {
     fn render_inspector(&self, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let mono = cx.theme().mono_font_family.clone();
+        let selection = self.editor.as_ref().and_then(Editor::selection);
         let selected = self.editor.as_ref().and_then(|editor| {
             editor
-                .selection()
+                .selected_clip()
                 .map(|index| editor.view().clips[index].clone())
         });
-        let body = match selected {
-            None => div()
+        let field = |name: Text, value: String| {
+            h_flex()
+                .justify_between()
+                .gap_2()
+                .child(label(tr(bardo, name), TEXT_3))
+                .child(label(value, TEXT).font_family(mono.clone()))
+        };
+        let remove = || {
+            tool_button("inspector-remove", true, false)
+                .border_1()
+                .border_color(color(OUTLINE))
+                .child(icon(IconName::Delete, TEXT_2))
+                .child(tr(bardo, Text::EditorRemove))
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::DeleteSelection, cx);
+                }))
+        };
+        let shortcuts = || {
+            div()
+                .text_size(px(11.))
+                .text_color(color(TEXT_3))
+                .child(tr(bardo, Text::EditorShortcuts))
+        };
+        let audio = selection
+            .filter(|item| item.track == Track::Narration)
+            .and_then(|item| {
+                let editor = self.editor.as_ref()?;
+                let piece = editor
+                    .view()
+                    .timeline
+                    .as_ref()?
+                    .narration()
+                    .get(item.index)?
+                    .clone();
+                Some(piece)
+            });
+        let body = match (selected, audio) {
+            (None, Some(piece)) => v_flex()
+                .p_3()
+                .gap_3()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(color(TEXT))
+                        .child(tr(bardo, Text::EditorTrackNarration)),
+                )
+                .child(
+                    v_flex()
+                        .gap_1p5()
+                        .child(field(Text::EditorIn, timecode(piece.at)))
+                        .child(field(Text::EditorOut, timecode(piece.end())))
+                        .child(field(Text::EditorLength, short_duration(piece.duration)))
+                        .child(field(Text::EditorSourceIn, timecode(piece.start))),
+                )
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(label(tr(bardo, Text::EditorFile), TEXT_3))
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(color(TEXT_2))
+                                .font_family(mono.clone())
+                                .child(SharedString::from(piece.file)),
+                        ),
+                )
+                .child(remove())
+                .child(shortcuts())
+                .into_any_element(),
+            (None, None) => div()
                 .flex_1()
                 .flex()
                 .items_center()
@@ -740,14 +926,7 @@ impl EditorScreen {
                         .child(tr(bardo, Text::EditorInspectorEmpty)),
                 )
                 .into_any_element(),
-            Some(clip) => {
-                let field = |name: Text, value: String| {
-                    h_flex()
-                        .justify_between()
-                        .gap_2()
-                        .child(label(tr(bardo, name), TEXT_3))
-                        .child(label(value, TEXT).font_family(mono.clone()))
-                };
+            (Some(clip), _) => {
                 let provenance = provenance_lines(bardo, &clip);
                 v_flex()
                     .p_3()
@@ -785,7 +964,10 @@ impl EditorScreen {
                             .gap_1p5()
                             .child(field(Text::EditorIn, timecode(clip.at)))
                             .child(field(Text::EditorOut, timecode(clip.at + clip.duration)))
-                            .child(field(Text::EditorLength, short_duration(clip.duration))),
+                            .child(field(Text::EditorLength, short_duration(clip.duration)))
+                            .when(clip.is_clip, |fields| {
+                                fields.child(field(Text::EditorSourceIn, timecode(clip.start)))
+                            }),
                     )
                     .children(clip.file.clone().map(|file| {
                         v_flex()
@@ -810,6 +992,8 @@ impl EditorScreen {
                                     .child(SharedString::from(clip.text.clone())),
                             ),
                     )
+                    .child(remove())
+                    .child(shortcuts())
                     .into_any_element()
             }
         };
@@ -827,7 +1011,17 @@ impl EditorScreen {
                     .items_center()
                     .border_b_1()
                     .border_color(color(HAIRLINE))
-                    .child(label(tr(bardo, Text::EditorInspectorClip), TEXT_2)),
+                    .child(label(
+                        tr(
+                            bardo,
+                            if selection.is_some_and(|item| item.track == Track::Narration) {
+                                Text::EditorInspectorAudio
+                            } else {
+                                Text::EditorInspectorClip
+                            },
+                        ),
+                        TEXT_2,
+                    )),
             )
             .child(body)
             .into_any_element()
@@ -842,7 +1036,8 @@ impl EditorScreen {
         let error = self
             .error
             .or_else(|| self.editor.as_ref().and_then(Editor::error));
-        if problems.is_empty() && !view.stale && error.is_none() {
+        let cut_reset = self.editor.as_ref().is_some_and(Editor::cut_reset);
+        if problems.is_empty() && !view.stale && error.is_none() && !cut_reset {
             return None;
         }
         let can_retry = problems
@@ -892,6 +1087,7 @@ impl EditorScreen {
             .stale
             .then_some(Text::EditorStale)
             .into_iter()
+            .chain(cut_reset.then_some(Text::EditorCutReset))
             .chain(error)
             .map(|text| {
                 h_flex()
@@ -1032,7 +1228,7 @@ impl Render for EditorScreen {
             .child(self.render_preview(cx))
             .child(self.render_inspector(cx));
         let banners = self.render_banners(&view, cx);
-        let lower = if view.is_empty() {
+        let lower = if view.timeline.is_none() {
             self.render_empty(&view, cx)
         } else {
             self.render_timeline(&view, window, cx)

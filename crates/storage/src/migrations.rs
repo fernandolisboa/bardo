@@ -16,6 +16,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0012_clip.sql"),
     include_str!("../migrations/0013_persona_sharing.sql"),
     include_str!("../migrations/0014_imported_narration.sql"),
+    include_str!("../migrations/0015_timeline.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
