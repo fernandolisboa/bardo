@@ -54,7 +54,9 @@ impl Provider {
 
     /// The providers that cost money, in settings order.
     pub fn paid() -> impl Iterator<Item = Provider> {
-        Provider::ALL.into_iter().filter(|provider| provider.is_paid())
+        Provider::ALL
+            .into_iter()
+            .filter(|provider| provider.is_paid())
     }
 }
 

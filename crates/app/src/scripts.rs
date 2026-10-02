@@ -12,11 +12,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, CostPurpose, GeneratedScript, Generation, GenerationId, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, NoPendingScript, ProfileId, Provider, RepositoryError, Script,
-    ScriptFieldError, ScriptRepository, ScriptText, SecretStore, TemplateKind, TemplateUsed,
-    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat,
-    Money, TextGenerator, TextRequest, UiLanguage, VideoProject, VideoProjectId,
+    ApiKey, Channel, ChannelId, CostPurpose, GeneratedScript, Generation, GenerationId, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, Money, NoPendingScript, ProfileId, Provider,
+    RepositoryError, Script, ScriptFieldError, ScriptRepository, ScriptText, SecretStore,
+    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextFormat, TextGenerator, TextRequest, UiLanguage, VideoProject,
+    VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -835,7 +836,9 @@ mod tests {
         let h = Harness::new();
         let mut app = h.start();
         let project = project(&app);
-        let error = app.generate_script(project.id, BudgetConsent::Ask).unwrap_err();
+        let error = app
+            .generate_script(project.id, BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(error, ScriptError::MissingKey(Provider::Claude)));
         assert_eq!(error.message(), Text::ScriptMissingKey);
         assert!(app.jobs().is_empty());
@@ -843,7 +846,9 @@ mod tests {
         app.save_provider_key(Provider::Claude, CLAUDE_KEY).unwrap();
         *h.text.delay.lock().unwrap() = Duration::from_millis(100);
         let id = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
-        let again = app.generate_script(project.id, BudgetConsent::Ask).unwrap_err();
+        let again = app
+            .generate_script(project.id, BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(again, ScriptError::Busy));
         assert_eq!(again.message(), Text::ScriptBusy);
         wait_done(&app, id);
@@ -966,7 +971,10 @@ mod tests {
         assert_eq!(costs.channels[0].name.as_deref(), Some("Space Archives"));
         assert_eq!(costs.channels[0].amount, dollars("2"));
         assert_eq!(costs.videos.len(), 1);
-        assert_eq!(costs.videos[0].name.as_deref(), Some(project.title.as_str()));
+        assert_eq!(
+            costs.videos[0].name.as_deref(),
+            Some(project.title.as_str())
+        );
         assert_eq!(costs.videos[0].channel.as_deref(), Some("Space Archives"));
         assert_eq!(costs.videos[0].amount, dollars("2"));
         assert!(costs.unpriced.is_empty());
@@ -996,6 +1004,26 @@ mod tests {
             costs.unpriced,
             vec![(Provider::Claude, "claude-fake".to_owned())]
         );
+
+        // A rate added later prices the calls that had none.
+        app.save_rate(
+            Provider::Claude,
+            "claude",
+            bardo_domain::Meter::OutputTokens,
+            "10",
+        )
+        .unwrap();
+        app.save_rate(
+            Provider::Claude,
+            "claude",
+            bardo_domain::Meter::InputTokens,
+            "0",
+        )
+        .unwrap();
+        let costs = app.costs(app.current_month()).unwrap();
+        assert_eq!(costs.total, dollars("0.024"));
+        assert!(costs.unpriced.is_empty());
+        assert_eq!(app.script(project.id).unwrap().spent, dollars("0.024"));
     }
 
     #[test]
@@ -1115,7 +1143,10 @@ mod tests {
         app.save_rate(Provider::Claude, opus, Meter::InputTokens, "5")
             .unwrap();
         let changed = row(&app);
-        assert_eq!((changed.rate.price, changed.default), (dollars("5"), Some(dollars("4"))));
+        assert_eq!(
+            (changed.rate.price, changed.default),
+            (dollars("5"), Some(dollars("4")))
+        );
         assert!(changed.changed);
         app.reset_rate(Provider::Claude, opus, Meter::InputTokens)
             .unwrap();

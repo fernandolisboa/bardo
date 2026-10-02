@@ -70,8 +70,8 @@ pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
 };
 pub use cost::{
-    Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Metered, Meter, Money,
-    MoneyError, Rate, RateFieldError, RateTable, Spend, UnknownCostPurpose, UnknownMeter,
+    Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
+    Rate, RateFieldError, RateTable, Spend, UnknownCostPurpose, UnknownMeter,
 };
 pub use decision::{
     Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,

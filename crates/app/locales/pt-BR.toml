@@ -732,6 +732,7 @@ cost = "Custo estimado: cerca de {amount}"
 partial = "Custo estimado: cerca de {amount}, mais chamadas sem tarifa"
 unknown = "Custo estimado desconhecido: nenhuma tarifa cobre este modelo. Adicione uma na tela Custos."
 near = "{provider}: {spent} do orçamento de {budget} gastos este mês; isto passa de 80%."
+redraw = "Desenhar uma cena de novo custa cerca de {amount}."
 project_spent = "Este vídeo até agora: {amount}"
 
 [budget]

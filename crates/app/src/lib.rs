@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, CostRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker, MarketData,
-    NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
+    ChannelRepository, CostRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker,
+    MarketData, NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
     ScenePlanRepository, ScriptRepository, SecretStore, SpeechSynthesizer, TemplateRepository,
     TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
@@ -378,6 +378,21 @@ impl Bardo {
     /// A count in the interface language's short form (`48K`, `48 mil`).
     pub fn compact_count(&self, n: u64) -> String {
         self.catalog.compact(n)
+    }
+
+    /// An amount to the cent, e.g. `$1,234.56`, `US$ 0,05`.
+    pub fn money(&self, amount: bardo_domain::Money) -> String {
+        self.catalog.money(amount)
+    }
+
+    /// A price with the digits it needs, e.g. `$0.042`.
+    pub fn price(&self, amount: bardo_domain::Money) -> String {
+        self.catalog.price(amount)
+    }
+
+    /// A month and its year, e.g. `October 2026`.
+    pub fn month_name(&self, month: bardo_domain::Month) -> String {
+        self.catalog.month(month)
     }
 
     /// How long ago `at` was, e.g. `3 h ago`. A time in the future reads

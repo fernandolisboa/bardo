@@ -12,9 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::{
-    ChannelId, JobId, ProfileId, Provider, RepositoryError, TokenUsage, VideoProjectId,
-};
+use crate::{ChannelId, JobId, ProfileId, Provider, RepositoryError, TokenUsage, VideoProjectId};
 
 uuid_id!(
     /// Identifies one cost record.
@@ -120,6 +118,19 @@ impl Money {
             .filter(|micros| *micros <= Self::MAX.0)
             .ok_or(MoneyError::TooLarge)?;
         Ok(Money(micros))
+    }
+}
+
+/// The amount as typed back: dollars with two to six decimals, `12.50`,
+/// `0.042`; [`Money::parse`] reads it back.
+impl std::fmt::Display for Money {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (whole, fraction) = self.split();
+        let mut fraction = format!("{fraction:06}");
+        while fraction.len() > 2 && fraction.ends_with('0') {
+            fraction.pop();
+        }
+        write!(f, "{whole}.{fraction}")
     }
 }
 
@@ -355,9 +366,7 @@ impl RateTable {
             .cloned()
             .collect();
         rates.extend(changes.iter().cloned());
-        rates.sort_by(|a, b| {
-            (a.provider, &a.model, a.meter).cmp(&(b.provider, &b.model, b.meter))
-        });
+        rates.sort_by(|a, b| (a.provider, &a.model, a.meter).cmp(&(b.provider, &b.model, b.meter)));
         Self { rates }
     }
 
@@ -502,6 +511,17 @@ pub struct CostRecord {
     pub at: SystemTime,
 }
 
+impl CostRecord {
+    /// A call that had no rate, priced with `rates` once one covers it;
+    /// a priced call keeps its cost.
+    pub fn priced_with(mut self, rates: &RateTable) -> CostRecord {
+        if self.cost == Cost::Unpriced {
+            self.cost = Cost::of(None, rates, self.provider, &self.model, &self.usage);
+        }
+        self
+    }
+}
+
 /// Records added up.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Spend {
@@ -545,9 +565,9 @@ impl Spend {
             }
         }
         spend.channels = channels.into_values().collect();
-        spend.channels.sort_by(|a, b| b.1.cmp(&a.1));
+        spend.channels.sort_by_key(|row| std::cmp::Reverse(row.1));
         spend.projects = projects.into_values().collect();
-        spend.projects.sort_by(|a, b| b.1.cmp(&a.1));
+        spend.projects.sort_by_key(|row| std::cmp::Reverse(row.1));
         spend
     }
 
@@ -599,8 +619,7 @@ pub trait CostRepository: Send + Sync {
     fn budgets(&self, owner: ProfileId) -> Result<Vec<crate::Budget>, RepositoryError>;
 
     /// Sets the provider's budget, replacing the one it had.
-    fn save_budget(&self, owner: ProfileId, budget: &crate::Budget)
-    -> Result<(), RepositoryError>;
+    fn save_budget(&self, owner: ProfileId, budget: &crate::Budget) -> Result<(), RepositoryError>;
 
     fn remove_budget(&self, owner: ProfileId, provider: Provider) -> Result<(), RepositoryError>;
 }
@@ -654,11 +673,7 @@ impl<T: CostRepository + ?Sized> CostRepository for Arc<T> {
         (**self).budgets(owner)
     }
 
-    fn save_budget(
-        &self,
-        owner: ProfileId,
-        budget: &crate::Budget,
-    ) -> Result<(), RepositoryError> {
+    fn save_budget(&self, owner: ProfileId, budget: &crate::Budget) -> Result<(), RepositoryError> {
         (**self).save_budget(owner, budget)
     }
 
@@ -691,6 +706,20 @@ mod tests {
         assert_eq!(dollars("0.042"), Money::from_micros(42_000));
         assert_eq!(dollars("0.000001"), Money::from_micros(1));
         assert_eq!(dollars("0"), Money::ZERO);
+    }
+
+    #[test]
+    fn amounts_print_as_they_are_typed() {
+        for (amount, text) in [
+            ("12.5", "12.50"),
+            ("0.042", "0.042"),
+            ("0", "0.00"),
+            ("7", "7.00"),
+        ] {
+            let money = dollars(amount);
+            assert_eq!(money.to_string(), text);
+            assert_eq!(Money::parse(&money.to_string()), Ok(money));
+        }
     }
 
     #[test]
@@ -773,10 +802,30 @@ mod tests {
         RateTable::new(vec![
             rate(Provider::Claude, "", Meter::InputTokens, "10"),
             rate(Provider::Claude, "claude-opus-5-5", Meter::InputTokens, "4"),
-            rate(Provider::Claude, "claude-opus-5-5", Meter::OutputTokens, "20"),
-            rate(Provider::Gemini, "gemini-3.1-flash-image", Meter::InputTokens, "0.5"),
-            rate(Provider::Gemini, "gemini-3.1-flash-image", Meter::OutputTokens, "3"),
-            rate(Provider::Gemini, "gemini-3.1-flash-image", Meter::ImageTokens, "60"),
+            rate(
+                Provider::Claude,
+                "claude-opus-5-5",
+                Meter::OutputTokens,
+                "20",
+            ),
+            rate(
+                Provider::Gemini,
+                "gemini-3.1-flash-image",
+                Meter::InputTokens,
+                "0.5",
+            ),
+            rate(
+                Provider::Gemini,
+                "gemini-3.1-flash-image",
+                Meter::OutputTokens,
+                "3",
+            ),
+            rate(
+                Provider::Gemini,
+                "gemini-3.1-flash-image",
+                Meter::ImageTokens,
+                "60",
+            ),
         ])
     }
 
@@ -789,15 +838,27 @@ mod tests {
         assert_eq!(opus.price, dollars("4"));
         // A dated or later version of a model matches its prefix.
         let dated = table
-            .rate(Provider::Claude, "claude-opus-5-5-20261001", Meter::InputTokens)
+            .rate(
+                Provider::Claude,
+                "claude-opus-5-5-20261001",
+                Meter::InputTokens,
+            )
             .unwrap();
         assert_eq!(dated.price, dollars("4"));
         let other = table
             .rate(Provider::Claude, "claude-haiku-4-5", Meter::InputTokens)
             .unwrap();
         assert_eq!(other.price, dollars("10"), "the provider-wide rate");
-        assert!(table.rate(Provider::Claude, "claude-haiku-4-5", Meter::OutputTokens).is_none());
-        assert!(table.rate(Provider::ElevenLabs, "x", Meter::Characters).is_none());
+        assert!(
+            table
+                .rate(Provider::Claude, "claude-haiku-4-5", Meter::OutputTokens)
+                .is_none()
+        );
+        assert!(
+            table
+                .rate(Provider::ElevenLabs, "x", Meter::Characters)
+                .is_none()
+        );
     }
 
     #[test]
@@ -829,8 +890,15 @@ mod tests {
             input_tokens: 10,
             ..Metered::default()
         };
-        assert!(table.price(Provider::Claude, "claude-haiku-4-5", &input_only).is_some());
-        assert_eq!(table.price(Provider::Claude, "claude-haiku-4-5", &usage), None);
+        assert!(
+            table
+                .price(Provider::Claude, "claude-haiku-4-5", &input_only)
+                .is_some()
+        );
+        assert_eq!(
+            table.price(Provider::Claude, "claude-haiku-4-5", &usage),
+            None
+        );
         assert_eq!(
             table.price(Provider::Claude, "any", &Metered::default()),
             Some(Money::ZERO)
@@ -841,20 +909,46 @@ mod tests {
     fn changes_replace_or_add_to_the_defaults() {
         let defaults = vec![
             rate(Provider::Claude, "claude-opus-5-5", Meter::InputTokens, "4"),
-            rate(Provider::Claude, "claude-opus-5-5", Meter::OutputTokens, "20"),
+            rate(
+                Provider::Claude,
+                "claude-opus-5-5",
+                Meter::OutputTokens,
+                "20",
+            ),
         ];
         let changes = vec![
-            rate(Provider::Claude, "claude-opus-5-5", Meter::InputTokens, "3.5"),
-            rate(Provider::Claude, "claude-sonnet-5-5", Meter::InputTokens, "2"),
+            rate(
+                Provider::Claude,
+                "claude-opus-5-5",
+                Meter::InputTokens,
+                "3.5",
+            ),
+            rate(
+                Provider::Claude,
+                "claude-sonnet-5-5",
+                Meter::InputTokens,
+                "2",
+            ),
         ];
         let table = RateTable::with_changes(&defaults, &changes);
         assert_eq!(table.rates().len(), 3);
         let price = |model: &str, meter: Meter| {
-            table.rate(Provider::Claude, model, meter).map(|rate| rate.price)
+            table
+                .rate(Provider::Claude, model, meter)
+                .map(|rate| rate.price)
         };
-        assert_eq!(price("claude-opus-5-5", Meter::InputTokens), Some(dollars("3.5")));
-        assert_eq!(price("claude-opus-5-5", Meter::OutputTokens), Some(dollars("20")));
-        assert_eq!(price("claude-sonnet-5-5", Meter::InputTokens), Some(dollars("2")));
+        assert_eq!(
+            price("claude-opus-5-5", Meter::InputTokens),
+            Some(dollars("3.5"))
+        );
+        assert_eq!(
+            price("claude-opus-5-5", Meter::OutputTokens),
+            Some(dollars("20"))
+        );
+        assert_eq!(
+            price("claude-sonnet-5-5", Meter::InputTokens),
+            Some(dollars("2"))
+        );
     }
 
     #[test]
@@ -865,14 +959,26 @@ mod tests {
             output_tokens: 0,
         });
         assert_eq!(
-            Cost::of(Some(dollars("1")), &table, Provider::Claude, "claude-opus-5-5", &usage),
+            Cost::of(
+                Some(dollars("1")),
+                &table,
+                Provider::Claude,
+                "claude-opus-5-5",
+                &usage
+            ),
             Cost::Reported(dollars("1"))
         );
         assert_eq!(
             Cost::of(None, &table, Provider::Claude, "claude-opus-5-5", &usage),
             Cost::Estimated(dollars("4"))
         );
-        let cost = Cost::of(None, &table, Provider::ElevenLabs, "v2", &Metered::characters(5));
+        let cost = Cost::of(
+            None,
+            &table,
+            Provider::ElevenLabs,
+            "v2",
+            &Metered::characters(5),
+        );
         assert_eq!(cost, Cost::Unpriced);
         assert_eq!(cost.amount(), Money::ZERO);
     }
@@ -934,14 +1040,60 @@ mod tests {
     }
 
     #[test]
+    fn an_unpriced_call_is_priced_once_a_rate_covers_it() {
+        let rates = RateTable::new(vec![rate(
+            Provider::Claude,
+            "claude",
+            Meter::OutputTokens,
+            "10",
+        )]);
+        let mut unpriced = record(Provider::Claude, "claude-x", Cost::Unpriced, None, None);
+        unpriced.usage.output_tokens = 100_000;
+        assert_eq!(
+            unpriced.clone().priced_with(&rates).cost,
+            Cost::Estimated(dollars("1"))
+        );
+        let mut elsewhere = unpriced.clone();
+        elsewhere.model = "other".into();
+        assert_eq!(elsewhere.priced_with(&rates).cost, Cost::Unpriced);
+        let mut kept = unpriced;
+        kept.cost = Cost::Estimated(dollars("3"));
+        assert_eq!(kept.priced_with(&rates).cost, Cost::Estimated(dollars("3")));
+    }
+
+    #[test]
     fn spend_adds_up_per_provider_channel_and_project() {
         let (space, cooking) = (ChannelId::new(), ChannelId::new());
         let (probe, launch) = (VideoProjectId::new(), VideoProjectId::new());
         let records = [
-            record(Provider::Claude, "opus", Cost::Estimated(dollars("0.05")), Some(space), Some(probe)),
-            record(Provider::ElevenLabs, "v2", Cost::Estimated(dollars("0.30")), Some(space), Some(probe)),
-            record(Provider::Claude, "opus", Cost::Reported(dollars("0.10")), Some(space), Some(launch)),
-            record(Provider::Claude, "opus", Cost::Estimated(dollars("0.02")), Some(cooking), None),
+            record(
+                Provider::Claude,
+                "opus",
+                Cost::Estimated(dollars("0.05")),
+                Some(space),
+                Some(probe),
+            ),
+            record(
+                Provider::ElevenLabs,
+                "v2",
+                Cost::Estimated(dollars("0.30")),
+                Some(space),
+                Some(probe),
+            ),
+            record(
+                Provider::Claude,
+                "opus",
+                Cost::Reported(dollars("0.10")),
+                Some(space),
+                Some(launch),
+            ),
+            record(
+                Provider::Claude,
+                "opus",
+                Cost::Estimated(dollars("0.02")),
+                Some(cooking),
+                None,
+            ),
             record(Provider::Gemini, "img", Cost::Unpriced, None, None),
             record(Provider::Gemini, "img", Cost::Unpriced, None, None),
         ];

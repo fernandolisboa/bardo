@@ -9,7 +9,9 @@ use bardo_app::bardo_domain::{
     Channel, ChannelId, JobKind, JobState, NicheScores, Reason, Theme, ThemeFieldError, ThemeId,
     ThemeStatus,
 };
-use bardo_app::{Bardo, SUGGESTIONS_PER_RUN, Text, ThemesView};
+use bardo_app::{
+    Bardo, BudgetConsent, SUGGESTIONS_PER_RUN, SpendEstimate, Text, ThemeError, ThemesView,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::progress::Progress;
@@ -25,6 +27,7 @@ use gpui_kit::{
 };
 
 use crate::shell::tr;
+use crate::spend::{budget_question, estimate_note};
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
@@ -71,6 +74,9 @@ pub struct ThemesScreen {
     error: Option<Text>,
     /// The title of the project the last approval started.
     started: Option<String>,
+    /// A run held back at a budget: whether it only ranks, and what it
+    /// would cost.
+    budget_ask: Option<(bool, SpendEstimate)>,
     revision: u64,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -136,6 +142,7 @@ impl ThemesScreen {
             angle,
             error: None,
             started: None,
+            budget_ask: None,
             revision,
             _poll: poll,
             _subscriptions: subscriptions,
@@ -186,6 +193,7 @@ impl ThemesScreen {
     }
 
     fn select(&mut self, id: ChannelId, window: &mut Window, cx: &mut Context<Self>) {
+        self.budget_ask = None;
         self.selected = Some(id);
         self.niche = None;
         self.editing = None;
@@ -256,7 +264,8 @@ impl ThemesScreen {
             .is_some_and(|job| job.state().is_active())
     }
 
-    fn suggest(&mut self, rank_only: bool, cx: &mut Context<Self>) {
+    fn suggest(&mut self, rank_only: bool, consent: BudgetConsent, cx: &mut Context<Self>) {
+        self.budget_ask = None;
         let (Some(id), Some(niche)) = (self.selected, self.niche.clone()) else {
             self.error = Some(Text::ThemesPickNiche);
             cx.notify();
@@ -264,11 +273,18 @@ impl ThemesScreen {
         };
         let bardo = self.bardo.read(cx);
         let result = if rank_only {
-            bardo.rank_themes(id, &niche)
+            bardo.rank_themes(id, &niche, consent)
         } else {
-            bardo.suggest_themes(id, &niche)
+            bardo.suggest_themes(id, &niche, consent)
         };
-        self.error = result.err().map(|error| error.message());
+        self.error = match result {
+            Ok(_) => None,
+            Err(ThemeError::OverBudget(estimate)) => {
+                self.budget_ask = Some((rank_only, estimate));
+                None
+            }
+            Err(error) => Some(error.message()),
+        };
         self.started = None;
         self.load(cx);
         cx.notify();
@@ -396,9 +412,9 @@ impl ThemesScreen {
                             .primary()
                             .label(tr(bardo, Text::SuggestThemes))
                             .disabled(running || !has_niche)
-                            .on_click(
-                                cx.listener(|this, _: &ClickEvent, _, cx| this.suggest(false, cx)),
-                            ),
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.suggest(false, BudgetConsent::Ask, cx)
+                            })),
                     )
                     .when(unranked > 0, |row| {
                         row.child(
@@ -407,11 +423,14 @@ impl ThemesScreen {
                                 .label(tr(bardo, Text::RankThemes))
                                 .disabled(running)
                                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                    this.suggest(true, cx)
+                                    this.suggest(true, BudgetConsent::Ask, cx)
                                 })),
                         )
                     }),
             )
+            .children(view.and_then(|view| {
+                estimate_note(bardo, &view.suggest_estimate, Text::EstimateCost, cx)
+            }))
             .when(unranked > 0, |panel| {
                 panel.child(div().text_xs().text_color(theme.muted_foreground).child(
                     SharedString::from(
@@ -419,6 +438,27 @@ impl ThemesScreen {
                     ),
                 ))
             })
+            .children(
+                view.and_then(|view| view.rank_estimate.as_ref())
+                    .filter(|_| unranked > 0)
+                    .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
+            )
+            .children(self.budget_ask.as_ref().map(|(rank_only, estimate)| {
+                let rank_only = *rank_only;
+                budget_question(
+                    "themes-budget",
+                    bardo,
+                    estimate,
+                    cx,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.suggest(rank_only, BudgetConsent::Confirmed, cx)
+                    }),
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.budget_ask = None;
+                        cx.notify();
+                    }),
+                )
+            }))
             .children(self.error.map(|error| {
                 div()
                     .text_sm()

@@ -732,6 +732,7 @@ cost = "Estimated cost: about {amount}"
 partial = "Estimated cost: about {amount}, plus calls without a rate"
 unknown = "Estimated cost unknown: no rate covers this model. Add one on the Costs screen."
 near = "{provider}: {spent} of the {budget} budget spent this month; this takes it past 80%."
+redraw = "Drawing one scene again costs about {amount}."
 project_spent = "This video so far: {amount}"
 
 [budget]

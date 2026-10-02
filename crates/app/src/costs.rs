@@ -97,7 +97,9 @@ impl SpendEstimate {
 
     /// Whether some call has no rate, so the total is short.
     pub fn is_partial(&self) -> bool {
-        self.providers.iter().any(|provider| provider.amount.is_none())
+        self.providers
+            .iter()
+            .any(|provider| provider.amount.is_none())
     }
 
     /// The worst budget level among the providers it calls.
@@ -298,9 +300,13 @@ impl CostBook {
 
     /// Spend with each provider in `month`.
     fn month_spend(&self, month: Month) -> Result<Spend, RepositoryError> {
-        let records = self
+        let rates = self.rates()?;
+        let records: Vec<CostRecord> = self
             .costs
-            .costs_between(self.owner, month.start(), month.end())?;
+            .costs_between(self.owner, month.start(), month.end())?
+            .into_iter()
+            .map(|record| record.priced_with(&rates))
+            .collect();
         Ok(Spend::of(&records))
     }
 
@@ -315,7 +321,10 @@ impl CostBook {
             let amount = rates.price(call.provider, call.model, &self.typical(call)?);
             match providers.iter_mut().find(|p| p.provider == call.provider) {
                 Some(estimate) => {
-                    estimate.amount = estimate.amount.zip(amount).map(|(a, b)| a.saturating_add(b));
+                    estimate.amount = estimate
+                        .amount
+                        .zip(amount)
+                        .map(|(a, b)| a.saturating_add(b));
                 }
                 None => providers.push(ProviderEstimate {
                     provider: call.provider,
@@ -329,9 +338,8 @@ impl CostBook {
         for estimate in &mut providers {
             if let Some(budget) = budgets.iter().find(|b| b.provider == estimate.provider) {
                 estimate.budget = Some(budget.monthly);
-                estimate.level = Some(
-                    budget.level(estimate.spent, estimate.amount.unwrap_or_default()),
-                );
+                estimate.level =
+                    Some(budget.level(estimate.spent, estimate.amount.unwrap_or_default()));
             }
         }
         Ok(SpendEstimate { providers })
@@ -443,12 +451,13 @@ impl Bardo {
 
     /// What a video project cost so far.
     pub(crate) fn project_spend(&self, project: VideoProjectId) -> Result<Money, RepositoryError> {
+        let rates = self.cost_book.rates()?;
         Ok(self
             .cost_book
             .costs
             .project_costs(project)?
-            .iter()
-            .map(|record| record.cost.amount())
+            .into_iter()
+            .map(|record| record.priced_with(&rates).cost.amount())
             .sum())
     }
 
@@ -571,7 +580,12 @@ impl Bardo {
 
     /// Drops the user's price: a built-in rate comes back, an added one
     /// goes.
-    pub fn reset_rate(&self, provider: Provider, model: &str, meter: Meter) -> Result<(), CostError> {
+    pub fn reset_rate(
+        &self,
+        provider: Provider,
+        model: &str,
+        meter: Meter,
+    ) -> Result<(), CostError> {
         Ok(self
             .cost_book
             .costs
@@ -593,8 +607,14 @@ mod tests {
     fn the_built_in_rates_price_every_model_bardo_calls() {
         let dollars = |text| Some(Money::parse(text).unwrap());
         let claude = bardo_ai::claude::MODEL;
-        assert_eq!(price(Provider::Claude, claude, Meter::InputTokens), dollars("4"));
-        assert_eq!(price(Provider::Claude, claude, Meter::OutputTokens), dollars("20"));
+        assert_eq!(
+            price(Provider::Claude, claude, Meter::InputTokens),
+            dollars("4")
+        );
+        assert_eq!(
+            price(Provider::Claude, claude, Meter::OutputTokens),
+            dollars("20")
+        );
         let speech = bardo_ai::elevenlabs::SPEECH_MODEL;
         assert_eq!(
             price(Provider::ElevenLabs, speech, Meter::Characters),

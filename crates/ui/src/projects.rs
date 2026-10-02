@@ -13,7 +13,10 @@ use bardo_app::bardo_domain::{
     Channel, ChannelId, Generation, Job, JobState, Narration, SceneFieldError, ScenePlanId,
     ScriptFieldError, TemplateKind, VideoProject, VideoProjectId,
 };
-use bardo_app::{Bardo, NarrationPlayer, NarrationView, ScenesView, ScriptView, Text};
+use bardo_app::{
+    Bardo, BudgetConsent, NarrationError, NarrationPlayer, NarrationView, ScenesView, ScriptError,
+    ScriptView, SpendEstimate, Text,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -29,6 +32,7 @@ use gpui_kit::{
 };
 
 use crate::shell::tr;
+use crate::spend::{budget_question, estimate_note};
 
 mod scenes;
 
@@ -87,6 +91,12 @@ pub struct ProjectsScreen {
     /// "Plan again" was clicked on scenes that have images: the panel asks
     /// before discarding them.
     confirm_replan: bool,
+    /// A scene action held back at a budget, and what it would cost.
+    scenes_ask: Option<(scenes::SceneAction, SpendEstimate)>,
+    /// A script generation held back at a budget.
+    script_ask: Option<SpendEstimate>,
+    /// A narration held back at a budget.
+    narration_ask: Option<SpendEstimate>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -147,6 +157,9 @@ impl ProjectsScreen {
             scene_editor,
             scene_field_error: None,
             confirm_replan: false,
+            scenes_ask: None,
+            script_ask: None,
+            narration_ask: None,
             editor,
             loaded: None,
             field_error: None,
@@ -247,6 +260,9 @@ impl ProjectsScreen {
         self.editing_scene = None;
         self.scene_field_error = None;
         self.confirm_replan = false;
+        self.scenes_ask = None;
+        self.script_ask = None;
+        self.narration_ask = None;
         self.load(window, cx);
         cx.notify();
     }
@@ -326,19 +342,27 @@ impl ProjectsScreen {
             .is_some_and(|job| job.state().is_active())
     }
 
-    fn generate_narration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn generate_narration(
+        &mut self,
+        consent: BudgetConsent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.narration_ask = None;
         let Some(id) = self.project else {
             return;
         };
         if let Some(player) = self.player.as_mut() {
             player.pause();
         }
-        self.narration_error = self
-            .bardo
-            .read(cx)
-            .generate_narration(id)
-            .err()
-            .map(|error| error.message());
+        self.narration_error = match self.bardo.read(cx).generate_narration(id, consent) {
+            Ok(_) => None,
+            Err(NarrationError::OverBudget(estimate)) => {
+                self.narration_ask = Some(estimate);
+                None
+            }
+            Err(error) => Some(error.message()),
+        };
         self.load(window, cx);
         cx.notify();
     }
@@ -389,16 +413,19 @@ impl ProjectsScreen {
             .is_some_and(|job| job.state().is_active())
     }
 
-    fn generate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn generate(&mut self, consent: BudgetConsent, window: &mut Window, cx: &mut Context<Self>) {
+        self.script_ask = None;
         let Some(id) = self.project else {
             return;
         };
-        self.error = self
-            .bardo
-            .read(cx)
-            .generate_script(id)
-            .err()
-            .map(|error| error.message());
+        self.error = match self.bardo.read(cx).generate_script(id, consent) {
+            Ok(_) => None,
+            Err(ScriptError::OverBudget(estimate)) => {
+                self.script_ask = Some(estimate);
+                None
+            }
+            Err(error) => Some(error.message()),
+        };
         self.notice = None;
         self.load(window, cx);
         cx.notify();
@@ -557,7 +584,15 @@ impl ProjectsScreen {
                         project.niche.label(),
                         bardo.time_ago(project.created_at)
                     )),
-                ));
+                ))
+                .when(!view.spent.is_zero(), |header| {
+                    header.child(div().text_xs().text_color(theme.muted_foreground).child(
+                        SharedString::from(bardo.text_with(
+                            Text::ProjectSpent,
+                            &[("amount", &bardo.money(view.spent))],
+                        )),
+                    ))
+                });
 
         let title_row = h_flex()
             .gap_2()
@@ -590,6 +625,7 @@ impl ProjectsScreen {
                         &[("n", &view.template.number.to_string())],
                     )),
                 ))
+                .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
                 .child(
                     h_flex().child(
                         Button::new("generate-script")
@@ -597,7 +633,7 @@ impl ProjectsScreen {
                             .label(tr(bardo, Text::GenerateScript))
                             .disabled(running)
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.generate(window, cx)
+                                this.generate(BudgetConsent::Ask, window, cx)
                             })),
                     ),
                 )
@@ -645,7 +681,7 @@ impl ProjectsScreen {
                                 .label(tr(bardo, Text::RegenerateScript))
                                 .disabled(running)
                                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                    this.generate(window, cx)
+                                    this.generate(BudgetConsent::Ask, window, cx)
                                 })),
                         ),
                 )
@@ -655,6 +691,7 @@ impl ProjectsScreen {
                         .text_color(theme.muted_foreground)
                         .child(tr(bardo, Text::RegenerateScriptHint)),
                 )
+                .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
                 .into_any_element(),
         };
 
@@ -681,6 +718,21 @@ impl ProjectsScreen {
                     .child(tr(bardo, error))
             }))
             .children(self.render_job(cx))
+            .children(self.script_ask.as_ref().map(|estimate| {
+                budget_question(
+                    "script-budget",
+                    bardo,
+                    estimate,
+                    cx,
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.generate(BudgetConsent::Confirmed, window, cx)
+                    }),
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.script_ask = None;
+                        cx.notify();
+                    }),
+                )
+            }))
             .children(script.and_then(|s| s.pending()).map(|pending| {
                 self.render_pending(pending.text().as_str(), pending.generation(), cx)
             }))
@@ -997,9 +1049,9 @@ impl ProjectsScreen {
                 },
             ))
             .disabled(!can_generate)
-            .on_click(
-                cx.listener(|this, _: &ClickEvent, window, cx| this.generate_narration(window, cx)),
-            );
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.generate_narration(BudgetConsent::Ask, window, cx)
+            }));
         let generate = if narration.is_some() && !view.stale {
             generate.outline().small()
         } else {
@@ -1041,8 +1093,26 @@ impl ProjectsScreen {
                                 .text_color(theme.muted_foreground)
                                 .child(hint),
                         )
+                        .children(view.estimate.as_ref().and_then(|estimate| {
+                            estimate_note(bardo, estimate, Text::EstimateCost, cx)
+                        }))
                         .child(h_flex().child(generate)),
                 )
+                .children(self.narration_ask.as_ref().map(|estimate| {
+                    budget_question(
+                        "narration-budget",
+                        bardo,
+                        estimate,
+                        cx,
+                        cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.generate_narration(BudgetConsent::Confirmed, window, cx)
+                        }),
+                        cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.narration_ask = None;
+                            cx.notify();
+                        }),
+                    )
+                }))
                 .children(record)
                 .into_any_element(),
         )

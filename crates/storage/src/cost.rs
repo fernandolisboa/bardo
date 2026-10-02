@@ -370,7 +370,12 @@ mod tests {
                 at(1_790_916_202),
             )
         };
-        let unpriced = record(owner, CostPurpose::SceneImage, Cost::Unpriced, at(1_790_916_203));
+        let unpriced = record(
+            owner,
+            CostPurpose::SceneImage,
+            Cost::Unpriced,
+            at(1_790_916_203),
+        );
         for record in [&estimated, &reported, &unpriced] {
             db.record_cost(record).unwrap();
         }
@@ -390,9 +395,19 @@ mod tests {
         let (db, owner) = database();
         let october = Month::new(2026, 10).unwrap();
         let cost = Cost::Estimated(Money::from_cents(1));
-        let before = record(owner, CostPurpose::Script, cost, october.start() - Duration::from_millis(1));
+        let before = record(
+            owner,
+            CostPurpose::Script,
+            cost,
+            october.start() - Duration::from_millis(1),
+        );
         let first = record(owner, CostPurpose::Script, cost, october.start());
-        let last = record(owner, CostPurpose::Script, cost, october.end() - Duration::from_millis(1));
+        let last = record(
+            owner,
+            CostPurpose::Script,
+            cost,
+            october.end() - Duration::from_millis(1),
+        );
         let after = record(owner, CostPurpose::Script, cost, october.end());
         let other_profile = {
             let profile = UserProfile::new(UiLanguage::EnUs);
@@ -430,23 +445,41 @@ mod tests {
             .map(|record| record.id)
             .collect();
         assert_eq!(ids, [records[3].id, records[2].id, records[1].id]);
-        assert!(db.recent_costs(owner, CostPurpose::Narration, 5).unwrap().is_empty());
+        assert!(
+            db.recent_costs(owner, CostPurpose::Narration, 5)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
     fn rate_changes_are_saved_replaced_and_removed() {
         let (db, owner) = database();
         let rate = |price: &str| {
-            Rate::new(Provider::Claude, "claude-opus-5-5", Meter::InputTokens, price).unwrap()
+            Rate::new(
+                Provider::Claude,
+                "claude-opus-5-5",
+                Meter::InputTokens,
+                price,
+            )
+            .unwrap()
         };
         db.save_rate(owner, &rate("4")).unwrap();
         db.save_rate(owner, &rate("3.5")).unwrap();
         let other = Rate::new(Provider::Gemini, "", Meter::ImageTokens, "60").unwrap();
         db.save_rate(owner, &other).unwrap();
-        assert_eq!(db.rate_changes(owner).unwrap(), [rate("3.5"), other.clone()]);
+        assert_eq!(
+            db.rate_changes(owner).unwrap(),
+            [rate("3.5"), other.clone()]
+        );
 
-        db.remove_rate(owner, Provider::Claude, "claude-opus-5-5", Meter::InputTokens)
-            .unwrap();
+        db.remove_rate(
+            owner,
+            Provider::Claude,
+            "claude-opus-5-5",
+            Meter::InputTokens,
+        )
+        .unwrap();
         assert_eq!(db.rate_changes(owner).unwrap(), [other]);
     }
 
@@ -457,12 +490,18 @@ mod tests {
             provider,
             monthly: Money::from_cents(cents),
         };
-        db.save_budget(owner, &budget(Provider::Gemini, 500)).unwrap();
-        db.save_budget(owner, &budget(Provider::Claude, 1_000)).unwrap();
-        db.save_budget(owner, &budget(Provider::Claude, 2_000)).unwrap();
+        db.save_budget(owner, &budget(Provider::Gemini, 500))
+            .unwrap();
+        db.save_budget(owner, &budget(Provider::Claude, 1_000))
+            .unwrap();
+        db.save_budget(owner, &budget(Provider::Claude, 2_000))
+            .unwrap();
         assert_eq!(
             db.budgets(owner).unwrap(),
-            [budget(Provider::Claude, 2_000), budget(Provider::Gemini, 500)]
+            [
+                budget(Provider::Claude, 2_000),
+                budget(Provider::Gemini, 500)
+            ]
         );
         db.remove_budget(owner, Provider::Claude).unwrap();
         assert_eq!(db.budgets(owner).unwrap(), [budget(Provider::Gemini, 500)]);

@@ -11,11 +11,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngine, Decisions, Job, JobFailure, JobFailureKind, JobId,
-    JobKind, Niche, NicheScores, NicheSeedError, ProfileId, Progress, Provider, ProviderFailure,
-    Question, Questions, Reason, RepositoryError, SecretStore, TextFormat, TextGenerator,
-    TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
-    ThemeRepository, ThemeStatus, UiLanguage, VideoProject, rank_themes,
+    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngine, Decisions, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, Niche, NicheScores, NicheSeedError, ProfileId, Progress,
+    Provider, ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore,
+    TextFormat, TextGenerator, TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea,
+    ThemeNotSuggested, ThemeRanking, ThemeRepository, ThemeStatus, UiLanguage, VideoProject,
+    rank_themes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1083,23 +1084,30 @@ mod tests {
         assert_eq!(providers, [Provider::Claude, Provider::TypeSafe]);
 
         let job = suggest(&app, &channel);
-        let records = h
-            .db
-            .costs_between(app.profile().id, SystemTime::UNIX_EPOCH, SystemTime::now())
-            .unwrap();
+        let records =
+            h.db.costs_between(app.profile().id, SystemTime::UNIX_EPOCH, SystemTime::now())
+                .unwrap();
         let ranking_calls = SUGGESTIONS_PER_RUN.div_ceil(RANK_BATCH);
         assert_eq!(records.len(), 1 + ranking_calls);
         assert_eq!(
             (records[0].provider, records[0].purpose),
             (Provider::Claude, CostPurpose::ThemeIdeas)
         );
-        assert!(records[1..].iter().all(|record| record.provider == Provider::TypeSafe
-            && record.purpose == CostPurpose::ThemeRanking
-            && record.model == "jev-fake"
-            && record.usage.input_tokens > 0));
-        assert!(records.iter().all(|record| record.channel == Some(channel.id)
-            && record.project.is_none()
-            && record.job == Some(job.id())));
+        assert!(
+            records[1..]
+                .iter()
+                .all(|record| record.provider == Provider::TypeSafe
+                    && record.purpose == CostPurpose::ThemeRanking
+                    && record.model == "jev-fake"
+                    && record.usage.input_tokens > 0)
+        );
+        assert!(
+            records
+                .iter()
+                .all(|record| record.channel == Some(channel.id)
+                    && record.project.is_none()
+                    && record.job == Some(job.id()))
+        );
     }
 
     #[test]
@@ -1210,7 +1218,9 @@ mod tests {
         assert_eq!(view.unranked, SUGGESTIONS_PER_RUN);
 
         *h.decisions.failure.lock().unwrap() = None;
-        let id = app.rank_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
+        let id = app
+            .rank_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap();
         let job = wait_done(&app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
         assert_eq!(job.kind(), JobKind::ThemeRanking);
@@ -1243,7 +1253,9 @@ mod tests {
             "unranked ideas sort last"
         );
 
-        let id = app.rank_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
+        let id = app
+            .rank_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap();
         assert_eq!(wait_done(&app, id).state(), JobState::Done);
         let (_, questions) = h.decisions.calls().pop().unwrap();
         assert_eq!(questions.len(), 3, "only the edited idea is ranked");
@@ -1304,7 +1316,9 @@ mod tests {
         *h.decisions.delay.lock().unwrap() = Duration::from_millis(150);
         let app = h.start_with_keys();
         let channel = channel(&app, "space history");
-        let id = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
+        let id = app
+            .suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap();
         wait_until("the decision call", || !h.decisions.calls().is_empty());
 
         let theme = app
@@ -1384,12 +1398,16 @@ mod tests {
         let mut app = h.start();
         let channel = channel(&app, "space history");
 
-        let error = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap_err();
+        let error = app
+            .suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(error, ThemeError::MissingKey(Provider::Claude)));
         assert_eq!(error.message(), Text::ThemesMissingKey(Provider::Claude));
 
         app.save_provider_key(Provider::Claude, CLAUDE_KEY).unwrap();
-        let error = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap_err();
+        let error = app
+            .suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(error, ThemeError::MissingKey(Provider::TypeSafe)));
         assert!(app.jobs().is_empty(), "no job starts without its keys");
     }
@@ -1401,15 +1419,25 @@ mod tests {
         let app = h.start_with_keys();
         let channel = channel(&app, "space history");
 
-        let id = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
-        let again = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap_err();
+        let id = app
+            .suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap();
+        let again = app
+            .suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(again, ThemeError::Busy));
         assert_eq!(again.message(), Text::ThemesBusy);
 
         let other = channel_named(&app, "Ocean Files", "deep sea");
-        assert!(app.suggest_themes(other.id, "deep sea", BudgetConsent::Ask).is_ok());
+        assert!(
+            app.suggest_themes(other.id, "deep sea", BudgetConsent::Ask)
+                .is_ok()
+        );
         wait_done(&app, id);
-        assert!(app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).is_ok());
+        assert!(
+            app.suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+                .is_ok()
+        );
     }
 
     fn channel_named(app: &Bardo, name: &str, niche: &str) -> Channel {
@@ -1436,7 +1464,9 @@ mod tests {
         let view = app.themes(blank.id, None).unwrap();
         assert!(view.niches.is_empty());
         assert_eq!(view.niche, None);
-        let error = app.suggest_themes(blank.id, " ", BudgetConsent::Ask).unwrap_err();
+        let error = app
+            .suggest_themes(blank.id, " ", BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(error, ThemeError::InvalidNiche(_)));
         assert_eq!(error.message(), Text::ThemesPickNiche);
     }
@@ -1448,7 +1478,9 @@ mod tests {
         let channel = channel(&app, "space history");
         suggest(&app, &channel);
         h.text.answer_with(&["A deep sea idea"]);
-        let id = app.suggest_themes(channel.id, "deep sea", BudgetConsent::Ask).unwrap();
+        let id = app
+            .suggest_themes(channel.id, "deep sea", BudgetConsent::Ask)
+            .unwrap();
         assert_eq!(wait_done(&app, id).state(), JobState::Done);
 
         let deep = app.themes(channel.id, Some("Deep Sea")).unwrap();
@@ -1499,7 +1531,9 @@ mod tests {
         *first.decisions.delay.lock().unwrap() = Duration::from_millis(100);
         let app = first.start_with_keys();
         let channel = channel(&app, "space history");
-        let id = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
+        let id = app
+            .suggest_themes(channel.id, "space history", BudgetConsent::Ask)
+            .unwrap();
         wait_for(&app, id, |job| job.checkpoint() == Some(PROPOSED));
         drop(app);
 

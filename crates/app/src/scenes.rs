@@ -20,10 +20,11 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     ApiKey, CostPurpose, Generation, GenerationId, ImageGenerator, ImageRequest, Job, JobFailure,
     JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingImage,
-    NoSuchScene, ProfileId, RenderedPrompt, Progress, ProjectFiles, Provider, RepositoryError, SceneDraft,
-    SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt,
-    SecretStore, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion, TemplateVersionId,
-    TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId, sentences,
+    NoSuchScene, ProfileId, Progress, ProjectFiles, Provider, RenderedPrompt, RepositoryError,
+    SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository,
+    ScenePrompt, SecretStore, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
+    sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -881,8 +882,15 @@ mod tests {
         fn narrated_project(&self, app: &Bardo) -> VideoProject {
             self.answer(SCRIPT.to_owned());
             let project = project(app);
-            done(app, app.generate_script(project.id, BudgetConsent::Ask).unwrap());
-            done(app, app.generate_narration(project.id, BudgetConsent::Ask).unwrap());
+            done(
+                app,
+                app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+            );
+            done(
+                app,
+                app.generate_narration(project.id, BudgetConsent::Ask)
+                    .unwrap(),
+            );
             project
         }
 
@@ -890,7 +898,11 @@ mod tests {
         fn planned_project(&self, app: &Bardo) -> (VideoProject, ScenePlan) {
             let project = self.narrated_project(app);
             self.answer(plan_answer());
-            done(app, app.plan_scenes(project.id, false, BudgetConsent::Ask).unwrap());
+            done(
+                app,
+                app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                    .unwrap(),
+            );
             let plan = app.scenes(project.id).unwrap().plan.unwrap();
             (project, plan)
         }
@@ -898,7 +910,11 @@ mod tests {
         /// A planned project with every scene drawn.
         fn drawn_project(&self, app: &Bardo) -> (VideoProject, ScenePlan) {
             let (project, _) = self.planned_project(app);
-            done(app, app.generate_scene_images(project.id, BudgetConsent::Ask).unwrap());
+            done(
+                app,
+                app.generate_scene_images(project.id, BudgetConsent::Ask)
+                    .unwrap(),
+            );
             let plan = app.scenes(project.id).unwrap().plan.unwrap();
             (project, plan)
         }
@@ -977,7 +993,11 @@ mod tests {
         assert_eq!(before.narration, Some(narration.id));
 
         h.answer(plan_answer());
-        let job = done(&app, app.plan_scenes(project.id, false, BudgetConsent::Ask).unwrap());
+        let job = done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         let request = h.text.requests().pop().unwrap();
         assert!(matches!(request.format, TextFormat::Json { .. }));
@@ -1024,7 +1044,11 @@ mod tests {
         let app = h.start();
         let (project, planned) = h.planned_project(&app);
 
-        let job = done(&app, app.generate_scene_images(project.id, BudgetConsent::Ask).unwrap());
+        let job = done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         let prompts: Vec<_> = planned
             .scenes()
@@ -1067,7 +1091,11 @@ mod tests {
         assert!(count(CostPurpose::Narration) >= 1);
         assert_eq!(count(CostPurpose::ScenePlan), 1);
         assert_eq!(count(CostPurpose::SceneImage), plan.scenes().len());
-        assert!(records.iter().all(|r| r.channel == Some(project.channel) && r.job.is_some()));
+        assert!(
+            records
+                .iter()
+                .all(|r| r.channel == Some(project.channel) && r.job.is_some())
+        );
         let image = records
             .iter()
             .find(|r| r.purpose == CostPurpose::SceneImage)
@@ -1088,7 +1116,9 @@ mod tests {
         let (project, _) = h.planned_project(&app);
         h.images.decline("signal");
 
-        let id = app.generate_scene_images(project.id, BudgetConsent::Ask).unwrap();
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
         let job = wait_done(&app, id);
         assert_eq!(job.state(), JobState::Failed);
         let failure = job.failure().unwrap();
@@ -1134,7 +1164,11 @@ mod tests {
             "API key not valid",
         ));
 
-        let job = wait_done(&app, app.generate_scene_images(project.id, BudgetConsent::Ask).unwrap());
+        let job = wait_done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         assert_eq!(job.state(), JobState::Failed);
         assert_eq!(h.images.prompts().len(), 1, "a rejected key stops the job");
@@ -1149,7 +1183,11 @@ mod tests {
         let (project, drawn) = h.drawn_project(&app);
         let old = drawn.scenes()[1].image().unwrap().clone();
 
-        done(&app, app.regenerate_scene_image(project.id, 1, BudgetConsent::Ask).unwrap());
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 1, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
         assert_eq!(h.images.prompts().len(), 4, "only scene 2 was drawn again");
@@ -1180,7 +1218,11 @@ mod tests {
         let h = Harness::new();
         let app = h.start();
         let (project, drawn) = h.drawn_project(&app);
-        done(&app, app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask).unwrap());
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
         let new = app.scenes(project.id).unwrap().plan.unwrap().scenes()[0]
             .pending()
             .unwrap()
@@ -1239,7 +1281,9 @@ mod tests {
 
         let (project, _) = h.planned_project(&app);
         app.remove_provider_key(Provider::Gemini).unwrap();
-        let error = app.generate_scene_images(project.id, BudgetConsent::Ask).unwrap_err();
+        let error = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(error, SceneError::MissingKey(Provider::Gemini)));
         assert_eq!(error.message(), Text::ScenesMissingGeminiKey);
         app.remove_provider_key(Provider::Claude).unwrap();
@@ -1256,7 +1300,9 @@ mod tests {
         let (project, _) = h.planned_project(&app);
         *h.images.delay.lock().unwrap() = Duration::from_millis(100);
 
-        let id = app.generate_scene_images(project.id, BudgetConsent::Ask).unwrap();
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
         assert!(app.scenes(project.id).unwrap().is_busy());
         assert!(matches!(
             app.regenerate_scene_image(project.id, 0, BudgetConsent::Ask),
@@ -1282,7 +1328,11 @@ mod tests {
         ));
 
         h.answer(plan_answer());
-        done(&app, app.plan_scenes(project.id, true, BudgetConsent::Ask).unwrap());
+        done(
+            &app,
+            app.plan_scenes(project.id, true, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         let plan = app.scenes(project.id).unwrap().plan.unwrap();
         assert_ne!(plan.id, drawn.id);
@@ -1298,7 +1348,11 @@ mod tests {
         let app = h.start();
         let (project, _) = h.planned_project(&app);
 
-        done(&app, app.generate_narration(project.id, BudgetConsent::Ask).unwrap());
+        done(
+            &app,
+            app.generate_narration(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         let view = app.scenes(project.id).unwrap();
         assert!(view.stale);
@@ -1312,7 +1366,11 @@ mod tests {
         let (project, planned) = h.planned_project(&app);
 
         h.answer(r#"{"scenes": []}"#.to_owned());
-        let job = wait_done(&app, app.plan_scenes(project.id, false, BudgetConsent::Ask).unwrap());
+        let job = wait_done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
 
         assert_eq!(job.state(), JobState::Failed);
         assert_eq!(

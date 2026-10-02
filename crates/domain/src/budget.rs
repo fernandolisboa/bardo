@@ -183,7 +183,10 @@ mod tests {
     fn below_eighty_percent_jobs_just_run() {
         let ten = budget("10");
         assert_eq!(ten.level(Money::ZERO, Money::ZERO), BudgetLevel::Under);
-        assert_eq!(ten.level(money("7.999999"), Money::ZERO), BudgetLevel::Under);
+        assert_eq!(
+            ten.level(money("7.999999"), Money::ZERO),
+            BudgetLevel::Under
+        );
         assert_eq!(ten.level(money("7"), money("0.999999")), BudgetLevel::Under);
     }
 
@@ -192,7 +195,10 @@ mod tests {
         let ten = budget("10");
         assert_eq!(ten.level(money("8"), Money::ZERO), BudgetLevel::Warning);
         assert_eq!(ten.level(money("7.5"), money("0.5")), BudgetLevel::Warning);
-        assert_eq!(ten.level(money("9.999999"), Money::ZERO), BudgetLevel::Warning);
+        assert_eq!(
+            ten.level(money("9.999999"), Money::ZERO),
+            BudgetLevel::Warning
+        );
     }
 
     #[test]
@@ -201,23 +207,38 @@ mod tests {
         assert_eq!(ten.level(money("10"), Money::ZERO), BudgetLevel::Reached);
         assert_eq!(ten.level(money("12"), Money::ZERO), BudgetLevel::Reached);
         // A job that would cross the budget asks before it spends.
-        assert_eq!(ten.level(money("9.50"), money("0.50")), BudgetLevel::Reached);
+        assert_eq!(
+            ten.level(money("9.50"), money("0.50")),
+            BudgetLevel::Reached
+        );
         assert_eq!(ten.level(Money::ZERO, money("10.01")), BudgetLevel::Reached);
     }
 
     #[test]
     fn a_zero_budget_makes_every_job_ask() {
-        assert_eq!(budget("0").level(Money::ZERO, Money::ZERO), BudgetLevel::Reached);
+        assert_eq!(
+            budget("0").level(Money::ZERO, Money::ZERO),
+            BudgetLevel::Reached
+        );
     }
 
     #[test]
     fn the_warning_boundary_is_exact_for_odd_budgets() {
         // 80% of $0.000003 is $0.0000024: 2 millionths is under, 3 is over.
         let tiny = budget("0.000003");
-        assert_eq!(tiny.level(Money::from_micros(2), Money::ZERO), BudgetLevel::Under);
-        assert_eq!(tiny.level(Money::from_micros(3), Money::ZERO), BudgetLevel::Reached);
+        assert_eq!(
+            tiny.level(Money::from_micros(2), Money::ZERO),
+            BudgetLevel::Under
+        );
+        assert_eq!(
+            tiny.level(Money::from_micros(3), Money::ZERO),
+            BudgetLevel::Reached
+        );
         let odd = budget("12.34");
-        assert_eq!(odd.level(money("9.871999"), Money::ZERO), BudgetLevel::Under);
+        assert_eq!(
+            odd.level(money("9.871999"), Money::ZERO),
+            BudgetLevel::Under
+        );
         assert_eq!(odd.level(money("9.872"), Money::ZERO), BudgetLevel::Warning);
     }
 
@@ -273,7 +294,10 @@ mod tests {
         let first = Month::new(1970, 1).unwrap();
         assert_eq!(first.previous(), first);
         assert_eq!(first.start(), SystemTime::UNIX_EPOCH);
-        assert_eq!(Month::of(SystemTime::UNIX_EPOCH - Duration::from_secs(1)), first);
+        assert_eq!(
+            Month::of(SystemTime::UNIX_EPOCH - Duration::from_secs(1)),
+            first
+        );
     }
 
     #[test]

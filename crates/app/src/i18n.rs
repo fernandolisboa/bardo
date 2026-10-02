@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use bardo_domain::{
     ApiKeyError, AspectRatio, ChannelFieldError, ContentLanguage, Country, JobFailureKind, JobKind,
-    JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network, NetworkAccountFieldError, NicheSeedError,
-    PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFieldError, UiLanguage, Visibility, VoiceCategory,
+    JobState, KeyCheckOutcome, Meter, Money, MoneyError, Month, Network, NetworkAccountFieldError,
+    NicheSeedError, PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError,
+    TemplateKind, TemplateProblem, TemplateVariable, ThemeFieldError, UiLanguage, Visibility,
+    VoiceCategory,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -527,6 +528,8 @@ pub enum Text {
     EstimateUnknown,
     /// Placeholders: `{provider}`, `{spent}`, `{budget}`.
     EstimateNear,
+    /// Placeholder: `{amount}`.
+    EstimateRedraw,
     /// Placeholder: `{amount}`.
     ProjectSpent,
     BudgetReachedTitle,
@@ -1101,6 +1104,7 @@ impl Text {
             Text::EstimatePartial => "estimate.partial",
             Text::EstimateUnknown => "estimate.unknown",
             Text::EstimateNear => "estimate.near",
+            Text::EstimateRedraw => "estimate.redraw",
             Text::ProjectSpent => "estimate.project_spent",
             Text::BudgetReachedTitle => "budget.reached_title",
             Text::BudgetReachedLine => "budget.reached_line",
@@ -1703,6 +1707,7 @@ mod tests {
             Text::EstimatePartial,
             Text::EstimateUnknown,
             Text::EstimateNear,
+            Text::EstimateRedraw,
             Text::ProjectSpent,
             Text::BudgetReachedTitle,
             Text::BudgetReachedLine,
@@ -1886,7 +1891,10 @@ mod tests {
     #[test]
     fn months_read_in_each_language() {
         let october = Month::new(2026, 10).unwrap();
-        assert_eq!(Catalog::load(UiLanguage::EnUs).month(october), "October 2026");
+        assert_eq!(
+            Catalog::load(UiLanguage::EnUs).month(october),
+            "October 2026"
+        );
         assert_eq!(
             Catalog::load(UiLanguage::PtBr).month(october),
             "outubro de 2026"
@@ -1906,6 +1914,7 @@ mod tests {
                 (Text::EstimateCost, &[("amount", "$0.12")][..]),
                 (Text::EstimatePartial, &[("amount", "$0.12")][..]),
                 (Text::ProjectSpent, &[("amount", "$0.12")][..]),
+                (Text::EstimateRedraw, &[("amount", "$0.12")][..]),
                 (
                     Text::EstimateNear,
                     &[("provider", "Claude"), ("spent", "$8"), ("budget", "$9")][..],

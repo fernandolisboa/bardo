@@ -15,10 +15,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    Alignment, ApiKey, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind, JobId,
-    JobKind, Metered, Narration, NarrationId, NarrationRepository, Persona, ProfileId, Progress,
-    ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore, SpeechRequest,
-    SpeechSynthesizer, VideoProject, VideoProjectId, VoiceRef, WordTimings, split_for_speech,
+    Alignment, ApiKey, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind,
+    JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, Persona, ProfileId,
+    Progress, ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore,
+    SpeechRequest, SpeechSynthesizer, VideoProject, VideoProjectId, VoiceRef, WordTimings,
+    split_for_speech,
 };
 use bardo_media::{Playback, PlaybackError, mp3};
 use serde::{Deserialize, Serialize};
@@ -836,7 +837,9 @@ mod tests {
     }
 
     fn narrate(app: &Bardo, project: &VideoProject) -> Narration {
-        let id = app.generate_narration(project.id, BudgetConsent::Ask).unwrap();
+        let id = app
+            .generate_narration(project.id, BudgetConsent::Ask)
+            .unwrap();
         let job = wait_done(app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
         app.narration(project.id).unwrap().narration.unwrap()
@@ -1071,7 +1074,9 @@ mod tests {
 
         let project = project(&app);
         app.remove_provider_key(Provider::ElevenLabs).unwrap();
-        let error = app.generate_narration(project.id, BudgetConsent::Ask).unwrap_err();
+        let error = app
+            .generate_narration(project.id, BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(
             error,
             NarrationError::MissingKey(Provider::ElevenLabs)
@@ -1081,12 +1086,19 @@ mod tests {
             .unwrap();
 
         *h.speech.delay.lock().unwrap() = Duration::from_millis(100);
-        let id = app.generate_narration(project.id, BudgetConsent::Ask).unwrap();
-        let busy = app.generate_narration(project.id, BudgetConsent::Ask).unwrap_err();
+        let id = app
+            .generate_narration(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let busy = app
+            .generate_narration(project.id, BudgetConsent::Ask)
+            .unwrap_err();
         assert!(matches!(busy, NarrationError::Busy));
         assert_eq!(busy.message(), Text::NarrationBusy);
         wait_done(&app, id);
-        assert!(app.generate_narration(project.id, BudgetConsent::Ask).is_ok());
+        assert!(
+            app.generate_narration(project.id, BudgetConsent::Ask)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1134,7 +1146,9 @@ mod tests {
         ));
         let app = h.start();
         let project = project(&app);
-        let id = app.generate_narration(project.id, BudgetConsent::Ask).unwrap();
+        let id = app
+            .generate_narration(project.id, BudgetConsent::Ask)
+            .unwrap();
 
         let job = wait_done(&app, id);
         assert_eq!(job.state(), JobState::Failed);
