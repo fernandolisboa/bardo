@@ -23,6 +23,7 @@ bardo-app = { path = "crates/app" }
 gpui-kit = "=0.7.0"
 
 anyhow = "1"
+base64 = "0.22"
 dirs = "6"
 form_urlencoded = "1"
 humantime = "2"

@@ -331,6 +331,8 @@ mod tests {
                 templates: Arc::clone(&self.db) as _,
                 scripts: Arc::clone(&self.db) as _,
                 personas: Arc::clone(&self.db) as _,
+                narrations: Arc::clone(&self.db) as _,
+                files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 research: Arc::clone(&self.db) as _,
                 secrets,
             };

@@ -2,8 +2,10 @@
 //! keys (Windows Credential Manager).
 
 mod channel;
+mod files;
 mod job;
 mod migrations;
+mod narration;
 mod persona;
 mod profile;
 mod research;
@@ -19,6 +21,7 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::RepositoryError;
 use rusqlite::Connection;
 
+pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
 #[cfg(windows)]
 pub use secrets::CredentialManager;
 pub use secrets::{MemorySecretStore, credential_target, platform_secret_store};

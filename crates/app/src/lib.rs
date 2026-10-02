@@ -5,6 +5,7 @@ mod channels;
 pub mod i18n;
 mod jobs;
 pub mod logging;
+mod narrations;
 mod personas;
 mod provider_keys;
 mod research;
@@ -17,17 +18,19 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, DecisionEngine, JobRepository, KeyChecker, MarketData,
-    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, Redactor,
-    RepositoryError, ScriptRepository, SecretStore, TemplateRepository, TextGenerator,
-    ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
+    ChannelRepository, DecisionEngine, JobRepository, KeyChecker, MarketData, NarrationRepository,
+    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
+    RepositoryError, ScriptRepository, SecretStore, SpeechSynthesizer, TemplateRepository,
+    TextGenerator, ThemeRepository, UiLanguage, UserProfile, VoiceLibrary,
 };
-use bardo_storage::Database;
+use bardo_media::AudioOutput;
+use bardo_storage::{Database, MemoryProjectFiles};
 
 pub use bardo_domain;
 pub use channels::ChannelError;
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
@@ -36,6 +39,7 @@ pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
 use crate::jobs::JobQueue;
+use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
 use crate::research::NicheResearchHandler;
 use crate::scripts::ScriptHandler;
@@ -64,20 +68,38 @@ pub struct Repositories {
     pub scripts: Arc<dyn ScriptRepository>,
     /// The persona library.
     pub personas: Arc<dyn PersonaRepository>,
+    /// Narrations and their word timings. Shared with the job queue.
+    pub narrations: Arc<dyn NarrationRepository>,
+    /// Each video project's media folder. Shared with the job queue.
+    pub files: Arc<dyn ProjectFiles>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
 }
 
 impl Repositories {
-    /// Every data port served by one SQLite database, and keys by `secrets`.
-    pub fn local(db: Database, secrets: Box<dyn SecretStore>) -> Self {
-        Self::shared(Arc::new(db), Arc::from(secrets))
+    /// Every data port served by one SQLite database, keys by `secrets`
+    /// and media by `files`.
+    pub fn local(
+        db: Database,
+        secrets: Box<dyn SecretStore>,
+        files: Box<dyn ProjectFiles>,
+    ) -> Self {
+        Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
     }
 
     /// `local` over a database and secret store the caller keeps a handle
-    /// to (tests read them directly).
+    /// to (tests read them directly), with project files in memory.
     pub fn shared(db: Arc<Database>, secrets: Arc<dyn SecretStore>) -> Self {
+        Self::shared_with_files(db, secrets, Arc::new(MemoryProjectFiles::default()))
+    }
+
+    /// `shared` with the project files the caller chose.
+    pub fn shared_with_files(
+        db: Arc<Database>,
+        secrets: Arc<dyn SecretStore>,
+        files: Arc<dyn ProjectFiles>,
+    ) -> Self {
         Self {
             profiles: Box::new(Arc::clone(&db)),
             channels: Box::new(Arc::clone(&db)),
@@ -86,7 +108,9 @@ impl Repositories {
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
             personas: Arc::clone(&db) as _,
+            narrations: Arc::clone(&db) as _,
             research: db,
+            files,
             secrets,
         }
     }
@@ -104,6 +128,10 @@ pub struct Providers {
     pub decisions: Arc<dyn DecisionEngine>,
     /// The user's voices (ElevenLabs).
     pub voices: Arc<dyn VoiceLibrary>,
+    /// Narration (ElevenLabs).
+    pub speech: Arc<dyn SpeechSynthesizer>,
+    /// The local audio device, for playback.
+    pub audio: Arc<dyn AudioOutput>,
 }
 
 impl Providers {
@@ -115,6 +143,8 @@ impl Providers {
             text: Arc::new(bardo_ai::ClaudeTextGenerator::new()),
             decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
+            speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
+            audio: Arc::new(bardo_media::DeviceAudio),
         }
     }
 }
@@ -128,6 +158,9 @@ pub struct Bardo {
     templates: Arc<dyn TemplateRepository>,
     scripts: Arc<dyn ScriptRepository>,
     personas: Arc<dyn PersonaRepository>,
+    narrations: Arc<dyn NarrationRepository>,
+    files: Arc<dyn ProjectFiles>,
+    audio: Arc<dyn AudioOutput>,
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
     /// The last voice listing of this session, for the voice picker.
@@ -172,6 +205,8 @@ impl Bardo {
             templates,
             scripts,
             personas,
+            narrations,
+            files,
             secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
@@ -206,12 +241,24 @@ impl Bardo {
             text: Arc::clone(&providers.text),
             secrets: Arc::clone(&secrets),
         };
+        let narration_handler = NarrationHandler {
+            owner: profile.id,
+            narrations: Arc::clone(&narrations),
+            files: Arc::clone(&files),
+            speech: Arc::clone(&providers.speech),
+            secrets: Arc::clone(&secrets),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
             jobs,
             profile.id,
-            crate::jobs::built_in_handlers(research_handler, theme_handler, script_handler),
+            crate::jobs::built_in_handlers(
+                research_handler,
+                theme_handler,
+                script_handler,
+                narration_handler,
+            ),
             job_settings,
             redactor,
         )?;
@@ -223,6 +270,9 @@ impl Bardo {
             templates,
             scripts,
             personas,
+            narrations,
+            files,
+            audio: providers.audio,
             market_data: providers.market_data,
             voices: providers.voices,
             voice_list: None,
@@ -302,10 +352,11 @@ pub(crate) mod testing {
     use std::time::{Duration, SystemTime};
 
     use bardo_domain::{
-        Answer, ApiKey, Confidence, DecisionEngine, Decisions, GeneratedText, KeyCheck,
-        KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample, Niche, Provider,
-        ProviderFailure, Question, Questions, ScoreAnswer, TextGenerator, TextRequest, TokenUsage,
-        UploadSample, Voice, VoiceLibrary,
+        Alignment, Answer, ApiKey, CharTiming, Confidence, DecisionEngine, Decisions,
+        GeneratedText, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData, MarketSample,
+        Niche, Provider, ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
+        SpeechSynthesizer, TextGenerator, TextRequest, TokenUsage, UploadSample, Voice,
+        VoiceLibrary,
     };
 
     use crate::Providers;
@@ -573,6 +624,87 @@ pub(crate) mod testing {
         }
     }
 
+    /// One second of MP3 audio, the length of every fake part.
+    pub(crate) const PART_AUDIO: &[u8] =
+        include_bytes!("../../media/tests/fixtures/tone-1s-raw.mp3");
+
+    /// Reads every request as one second of tone, its characters timed
+    /// evenly across that second; `failure` wins when set. Keeps the
+    /// requests.
+    pub(crate) struct FakeSpeech {
+        pub(crate) requests: Mutex<Vec<SpeechRequest>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        pub(crate) max_chars: Mutex<usize>,
+        /// Fails this request (counting from 0) once, as a provider outage.
+        pub(crate) fail_at: Mutex<Option<usize>>,
+        /// How long each call takes, to catch a job mid-run.
+        pub(crate) delay: Mutex<Duration>,
+    }
+
+    impl Default for FakeSpeech {
+        fn default() -> Self {
+            Self {
+                requests: Mutex::default(),
+                failure: Mutex::default(),
+                max_chars: Mutex::new(5_000),
+                fail_at: Mutex::default(),
+                delay: Mutex::default(),
+            }
+        }
+    }
+
+    impl FakeSpeech {
+        pub(crate) fn requests(&self) -> Vec<SpeechRequest> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl SpeechSynthesizer for FakeSpeech {
+        fn max_chars(&self) -> usize {
+            *self.max_chars.lock().unwrap()
+        }
+
+        fn synthesize(
+            &self,
+            _key: &ApiKey,
+            request: &SpeechRequest,
+        ) -> Result<Speech, ProviderFailure> {
+            let delay = *self.delay.lock().unwrap();
+            std::thread::sleep(delay);
+            let mut requests = self.requests.lock().unwrap();
+            requests.push(request.clone());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let mut fail_at = self.fail_at.lock().unwrap();
+            if *fail_at == Some(requests.len() - 1) {
+                *fail_at = None;
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::ProviderDown,
+                    "busy",
+                ));
+            }
+            let chars: Vec<char> = request.text.chars().collect();
+            let step = Duration::from_secs(1) / chars.len().max(1) as u32;
+            Ok(Speech {
+                audio: PART_AUDIO.to_vec(),
+                alignment: Alignment {
+                    chars: chars
+                        .iter()
+                        .enumerate()
+                        .map(|(n, c)| CharTiming {
+                            text: c.to_string(),
+                            start: step * n as u32,
+                            end: step * (n as u32 + 1),
+                        })
+                        .collect(),
+                },
+                model: "eleven-fake".into(),
+                billed_characters: chars.len() as u64,
+            })
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -585,6 +717,8 @@ pub(crate) mod testing {
             text: Arc::new(FakeTextGenerator::default()),
             decisions: Arc::new(FakeDecisionEngine::default()),
             voices: Arc::new(FakeVoiceLibrary::default()),
+            speech: Arc::new(FakeSpeech::default()),
+            audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
         }
     }
 }
@@ -659,6 +793,8 @@ mod tests {
             templates: Arc::clone(&db) as _,
             scripts: Arc::clone(&db) as _,
             personas: Arc::new(FakePersonas::default()),
+            narrations: Arc::clone(&db) as _,
+            files: Arc::new(MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
         };
@@ -740,7 +876,11 @@ mod tests {
     #[test]
     fn works_against_real_sqlite() {
         let db = Database::open_in_memory().unwrap();
-        let repositories = Repositories::local(db, Box::new(MemorySecretStore::default()));
+        let repositories = Repositories::local(
+            db,
+            Box::new(MemorySecretStore::default()),
+            Box::new(MemoryProjectFiles::default()),
+        );
         let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();
         assert_eq!(app.ui_language(), UiLanguage::PtBr);

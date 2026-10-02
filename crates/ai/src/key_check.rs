@@ -57,6 +57,12 @@ pub fn classify(provider: Provider, response: &HttpResponse) -> KeyCheck {
         {
             KeyCheckOutcome::NotAllowed
         }
+        // ElevenLabs answers 401 when the account is out of credits too.
+        (Provider::ElevenLabs, 401)
+            if body["detail"]["status"].as_str() == Some("quota_exceeded") =>
+        {
+            KeyCheckOutcome::LimitReached
+        }
         (_, 401) => KeyCheckOutcome::Rejected,
         (Provider::Gemini | Provider::YouTubeData, 400)
             if google_reason(&body, "API_KEY_INVALID") =>

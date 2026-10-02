@@ -9,6 +9,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_theme.sql"),
     include_str!("../migrations/0006_script.sql"),
     include_str!("../migrations/0007_persona.sql"),
+    include_str!("../migrations/0008_narration.sql"),
 ];
 
 /// Applies every migration newer than the database's `user_version`, each in

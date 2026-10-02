@@ -1,15 +1,18 @@
 //! Video projects screen: pick a channel and one of its projects, then
-//! generate, edit and review the project's script. Generation runs as a job
+//! generate, edit and review the project's script, and generate and play
+//! its narration with the spoken word highlighted. Generation runs as jobs
 //! in `bardo_app`; this view polls the job revision and re-reads the script
-//! when it moves. The editor keeps the user's typing: it is refilled only
-//! when the stored text changes (first generation, accepting a new script).
+//! and narration when it moves, and re-renders while the narration plays.
+//! The editor keeps the user's typing: it is refilled only when the stored
+//! text changes (first generation, accepting a new script).
 
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, JobState, ScriptFieldError, VideoProject, VideoProjectId,
+    Channel, ChannelId, Generation, Job, JobState, Narration, ScriptFieldError, VideoProject,
+    VideoProjectId,
 };
-use bardo_app::{Bardo, ScriptView, Text};
+use bardo_app::{Bardo, NarrationPlayer, NarrationView, ScriptView, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -26,8 +29,9 @@ use gpui_kit::{
 
 use crate::shell::tr;
 
-/// How often the screen checks the job queue for changes.
-const POLL_EVERY: Duration = Duration::from_millis(100);
+/// How often the screen checks the job queue for changes, and moves the
+/// highlighted word while the narration plays.
+const POLL_EVERY: Duration = Duration::from_millis(50);
 
 /// One option of the channel select.
 #[derive(Clone)]
@@ -63,6 +67,13 @@ pub struct ProjectsScreen {
     projects: Vec<VideoProject>,
     project: Option<VideoProjectId>,
     view: Option<ScriptView>,
+    narration: Option<NarrationView>,
+    /// The narration loaded for playback, once the user plays it.
+    player: Option<NarrationPlayer>,
+    /// Whether the player was playing at the last poll, so the view also
+    /// redraws once when playback reaches the end on its own.
+    was_playing: bool,
+    narration_error: Option<Text>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -112,6 +123,10 @@ impl ProjectsScreen {
             projects: Vec::new(),
             project: None,
             view: None,
+            narration: None,
+            player: None,
+            was_playing: false,
+            narration_error: None,
             editor,
             loaded: None,
             field_error: None,
@@ -206,6 +221,8 @@ impl ProjectsScreen {
         self.error = None;
         self.notice = None;
         self.prompt_shown = None;
+        self.player = None;
+        self.narration_error = None;
         self.load(window, cx);
         cx.notify();
     }
@@ -213,8 +230,11 @@ impl ProjectsScreen {
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.project else {
             self.view = None;
+            self.narration = None;
+            self.player = None;
             return;
         };
+        self.load_narration(id, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -236,13 +256,104 @@ impl ProjectsScreen {
         }
     }
 
+    fn load_narration(&mut self, id: VideoProjectId, cx: &mut Context<Self>) {
+        match self.bardo.read(cx).narration(id) {
+            Ok(view) => {
+                // A new narration replaced the one loaded for playback.
+                let current = view.narration.as_ref().map(|n| n.id);
+                if self
+                    .player
+                    .as_ref()
+                    .is_some_and(|player| Some(player.narration().id) != current)
+                {
+                    self.player = None;
+                }
+                self.narration = Some(view);
+            }
+            Err(error) => {
+                self.narration = None;
+                self.player = None;
+                self.narration_error = Some(error.message());
+            }
+        }
+    }
+
     fn poll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let revision = self.bardo.read(cx).jobs_revision();
         if revision != self.revision {
             self.revision = revision;
             self.load(window, cx);
             cx.notify();
+        } else {
+            let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
+            if playing || playing != self.was_playing {
+                cx.notify();
+            }
+            self.was_playing = playing;
         }
+    }
+
+    fn narration_running(&self) -> bool {
+        self.narration
+            .as_ref()
+            .and_then(|view| view.job.as_ref())
+            .is_some_and(|job| job.state().is_active())
+    }
+
+    fn generate_narration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        if let Some(player) = self.player.as_mut() {
+            player.pause();
+        }
+        self.narration_error = self
+            .bardo
+            .read(cx)
+            .generate_narration(id)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// The player, loading the narration on first use.
+    fn player(&mut self, cx: &mut Context<Self>) -> Option<&mut NarrationPlayer> {
+        if self.player.is_none() {
+            let id = self.project?;
+            match self.bardo.read(cx).play_narration(id) {
+                Ok(player) => self.player = Some(player),
+                Err(error) => self.narration_error = Some(error.message()),
+            }
+        }
+        self.player.as_mut()
+    }
+
+    fn toggle_playback(&mut self, cx: &mut Context<Self>) {
+        let result = self.player(cx).map(|player| player.toggle());
+        if let Some(Err(error)) = result {
+            self.narration_error = Some(error.message());
+        } else if result.is_some() {
+            self.narration_error = None;
+        }
+        cx.notify();
+    }
+
+    /// Plays from word `index`.
+    fn play_from(&mut self, index: usize, cx: &mut Context<Self>) {
+        let result = self.player(cx).map(|player| {
+            player.seek_to_word(index)?;
+            if !player.is_playing() {
+                player.toggle()?;
+            }
+            Ok::<_, bardo_app::NarrationError>(())
+        });
+        if let Some(Err(error)) = result {
+            self.narration_error = Some(error.message());
+        } else if result.is_some() {
+            self.narration_error = None;
+        }
+        cx.notify();
     }
 
     fn running(&self) -> bool {
@@ -551,6 +662,7 @@ impl ProjectsScreen {
             .children(script.map(|script| {
                 self.render_provenance(script.source().generation(), PromptShown::Source, cx)
             }))
+            .children(self.render_narration(cx))
             .into_any_element()
     }
 
@@ -783,6 +895,304 @@ impl ProjectsScreen {
                     ))
                     .child(prompt_block(Text::PromptTask, &generation.prompt))
             })
+            .into_any_element()
+    }
+}
+
+/// `m:ss`, as players show time.
+fn clock(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+impl ProjectsScreen {
+    /// The narration: generate it, see whether it still matches the
+    /// script, play it with the spoken word highlighted, and its record.
+    fn render_narration(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let view = self.narration.as_ref()?;
+        let narration = view.narration.as_ref();
+        let player = narration.map(|narration| self.render_player(narration, cx));
+        let job = view
+            .job
+            .as_ref()
+            .and_then(|job| self.render_narration_job(job, cx));
+        let record = narration.map(|narration| self.render_narration_record(narration, cx));
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let running = self.narration_running();
+
+        let title_row = h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .child(tr(bardo, Text::NarrationTitle)),
+            )
+            .when(view.stale, |row| {
+                row.child(
+                    Tag::warning()
+                        .small()
+                        .child(tr(bardo, Text::NarrationStaleTag)),
+                )
+            });
+
+        let hint = match &view.persona {
+            Some(persona) => SharedString::from(bardo.text_with(
+                Text::NarrationGenerateHint,
+                &[
+                    ("persona", persona.details.name()),
+                    ("voice", persona.details.voice().name()),
+                    ("n", &view.characters().to_string()),
+                ],
+            )),
+            None => tr(bardo, Text::NarrationNoPersona),
+        };
+        let can_generate = !running && view.script.is_some() && view.persona.is_some();
+        let generate = Button::new("generate-narration")
+            .label(tr(
+                bardo,
+                if narration.is_some() {
+                    Text::RegenerateNarration
+                } else {
+                    Text::GenerateNarration
+                },
+            ))
+            .disabled(!can_generate)
+            .on_click(
+                cx.listener(|this, _: &ClickEvent, window, cx| this.generate_narration(window, cx)),
+            );
+        let generate = if narration.is_some() && !view.stale {
+            generate.outline().small()
+        } else {
+            generate.primary().small()
+        };
+
+        Some(
+            v_flex()
+                .pt_3()
+                .gap_2()
+                .border_t_1()
+                .border_color(theme.border)
+                .child(title_row)
+                .when(view.stale, |panel| {
+                    panel.child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.warning)
+                            .child(tr(bardo, Text::NarrationStale)),
+                    )
+                })
+                .children(self.narration_error.map(|error| {
+                    div()
+                        .text_sm()
+                        .text_color(theme.danger)
+                        .child(tr(bardo, error))
+                }))
+                .children(job)
+                .when(narration.is_none(), |panel| {
+                    panel.child(muted(cx, tr(bardo, Text::NarrationEmpty)))
+                })
+                .children(player)
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(hint),
+                        )
+                        .child(h_flex().child(generate)),
+                )
+                .children(record)
+                .into_any_element(),
+        )
+    }
+
+    /// A narration being recorded, or why the last one stopped.
+    fn render_narration_job(&self, job: &Job, cx: &App) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        match job.state() {
+            JobState::Queued | JobState::Running => Some(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(Spinner::new().small())
+                    .child(div().text_sm().child(tr(bardo, Text::NarrationRunning)))
+                    .child(div().text_xs().text_color(theme.muted_foreground).child(
+                        SharedString::from(format!("{}%", job.progress().permille() / 10)),
+                    ))
+                    .into_any_element(),
+            ),
+            JobState::Failed => {
+                let failure = job.failure()?;
+                Some(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.danger)
+                                .child(tr(bardo, Text::NarrationStopped)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(SharedString::from(failure.detail.clone())),
+                        )
+                        .into_any_element(),
+                )
+            }
+            JobState::Cancelled | JobState::Done => None,
+        }
+    }
+
+    /// Play/pause, the time, and the narrated words with the one being
+    /// spoken highlighted; clicking a word plays from it.
+    fn render_player(&self, narration: &Narration, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let player = self
+            .player
+            .as_ref()
+            .filter(|player| player.narration().id == narration.id);
+        let playing = player.is_some_and(|player| player.is_playing());
+        let position = player.map_or(Duration::ZERO, |player| player.position());
+        let current = player.and_then(|player| player.current_word());
+
+        let controls = h_flex()
+            .gap_3()
+            .items_center()
+            .child(
+                Button::new("toggle-narration")
+                    .primary()
+                    .small()
+                    .label(tr(
+                        bardo,
+                        if playing {
+                            Text::NarrationPause
+                        } else {
+                            Text::NarrationPlay
+                        },
+                    ))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_playback(cx))),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .child(SharedString::from(format!(
+                        "{} / {}",
+                        clock(position),
+                        clock(narration.duration)
+                    ))),
+            );
+
+        let text = narration.text.as_str();
+        let mut words: Vec<AnyElement> = Vec::with_capacity(narration.words.len());
+        let mut previous_end = 0;
+        for (index, timing) in narration.words.as_slice().iter().enumerate() {
+            // A line break in the script starts a new line here too.
+            if index > 0 && text[previous_end..timing.text.start].contains('\n') {
+                words.push(div().w_full().h(px(6.)).into_any_element());
+            }
+            previous_end = timing.text.end;
+            let spoken = current == Some(index);
+            words.push(
+                div()
+                    .id(("narration-word", index))
+                    .px_0p5()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .when(spoken, |word| {
+                        word.bg(theme.warning).text_color(theme.warning_foreground)
+                    })
+                    .when(!spoken, |word| word.hover(|word| word.bg(theme.list_hover)))
+                    .child(SharedString::from(text[timing.text.clone()].to_owned()))
+                    .on_click(
+                        cx.listener(move |this, _: &ClickEvent, _, cx| this.play_from(index, cx)),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        v_flex()
+            .gap_2()
+            .child(controls)
+            .child(
+                h_flex()
+                    .id("narration-words")
+                    .max_h(px(260.))
+                    .overflow_y_scroll()
+                    .flex_wrap()
+                    .gap_x_1()
+                    .gap_y_0p5()
+                    .p_2()
+                    .rounded_md()
+                    .bg(theme.muted)
+                    .text_sm()
+                    .children(words),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(tr(bardo, Text::NarrationWordsHint)),
+            )
+            .into_any_element()
+    }
+
+    /// What generated the narration and what it cost.
+    fn render_narration_record(&self, narration: &Narration, cx: &App) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let fact = |label: Text, value: String| {
+            v_flex()
+                .gap_0p5()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, label)),
+                )
+                .child(div().text_sm().child(SharedString::from(value)))
+        };
+        h_flex()
+            .flex_wrap()
+            .gap_x_6()
+            .gap_y_2()
+            .child(fact(
+                Text::ProvenanceProvider,
+                bardo
+                    .text(Text::ProviderName(narration.voice.provider()))
+                    .into_owned(),
+            ))
+            .child(fact(Text::ProvenanceModel, narration.model.clone()))
+            .child(fact(
+                Text::NarrationVoice,
+                narration.voice.name().to_owned(),
+            ))
+            .child(fact(
+                Text::NarrationCost,
+                bardo.text_with(
+                    Text::NarrationCostValue,
+                    &[("n", &narration.billed_characters.to_string())],
+                ),
+            ))
+            .child(fact(Text::NarrationDuration, clock(narration.duration)))
+            .child(fact(
+                Text::ProvenanceGenerated,
+                bardo.time_ago(narration.generated_at),
+            ))
             .into_any_element()
     }
 }

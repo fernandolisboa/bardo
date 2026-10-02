@@ -41,9 +41,11 @@ macro_rules! uuid_id {
 
 mod channel;
 mod decision;
+mod files;
 mod generation;
 mod job;
 mod market;
+mod narration;
 mod persona;
 mod profile;
 mod provider_key;
@@ -51,6 +53,7 @@ mod redaction;
 mod repository;
 mod research;
 mod script;
+mod speech;
 mod template;
 mod text;
 mod theme;
@@ -63,6 +66,7 @@ pub use decision::{
     Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,
     Questions, ScoreAnswer, YesNoAnswer,
 };
+pub use files::{ProjectFileError, ProjectFiles};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
@@ -71,6 +75,10 @@ pub use job::{
 };
 pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,
+};
+pub use narration::{
+    InvalidWordTimings, Narration, NarrationId, NarrationRepository, WordTiming, WordTimings,
+    spoken_words,
 };
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
@@ -90,6 +98,9 @@ pub use research::{
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,
     ScriptText,
+};
+pub use speech::{
+    Alignment, CharTiming, Speech, SpeechRequest, SpeechSynthesizer, split_for_speech,
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,

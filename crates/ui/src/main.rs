@@ -28,9 +28,10 @@ fn main() -> anyhow::Result<()> {
     let db = Database::open(&db_path)
         .with_context(|| format!("opening the database at {}", db_path.display()))?;
     let secrets = bardo_storage::platform_secret_store()?;
+    let files = bardo_storage::LocalProjectFiles::new(bardo_storage::default_projects_dir()?);
     let locale = sys_locale::get_locale();
     let bardo = Bardo::start(
-        Repositories::local(db, secrets),
+        Repositories::local(db, secrets, Box::new(files)),
         Providers::live(),
         locale.as_deref(),
     )?;

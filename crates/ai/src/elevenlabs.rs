@@ -1,15 +1,22 @@
-//! The user's ElevenLabs voices (`GET /v2/voices`): every voice the
-//! account can use, its own clones and designed voices included, page by
-//! page. Only what a persona needs to point at a voice is kept: id, name,
-//! category, description and labels; samples and settings are dropped.
+//! ElevenLabs: the user's voices and narration.
+//!
+//! Voices (`GET /v2/voices`): every voice the account can use, its own
+//! clones and designed voices included, page by page. Only what a persona
+//! needs to point at a voice is kept: id, name, category, description and
+//! labels; samples and settings are dropped.
+//!
+//! Narration (`POST /v1/text-to-speech/{voice_id}/with-timestamps`): the
+//! text read aloud as MP3, with the time each character is spoken, in one
+//! JSON answer. What the call billed comes in the `character-cost` header.
 
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKey, Provider, ProviderFailure, ProviderFailureKind, Voice, VoiceCategory, VoiceLibrary,
-    VoiceRef,
+    Alignment, ApiKey, CharTiming, Provider, ProviderFailure, ProviderFailureKind, Speech,
+    SpeechRequest, SpeechSynthesizer, Voice, VoiceCategory, VoiceLibrary, VoiceRef,
 };
-use serde_json::Value;
+use base64::Engine as _;
+use serde_json::{Value, json};
 
 use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
 use crate::key_check::failure;
@@ -170,5 +177,191 @@ impl<T: Transport> VoiceLibrary for ElevenLabsVoices<T> {
         }
         Voice::sort_for_picker(&mut voices);
         Ok(voices)
+    }
+}
+
+pub const SPEECH_URL: &str = "https://api.elevenlabs.io/v1/text-to-speech";
+/// The model for long-form narration: the most natural voice in every
+/// language Bardo targets, Portuguese included.
+pub const SPEECH_MODEL: &str = "eleven_multilingual_v2";
+/// MP3 at 44.1 kHz and 128 kbit/s: every plan may ask for it.
+pub const OUTPUT_FORMAT: &str = "mp3_44100_128";
+/// Characters read per request. The model takes 10,000; half keeps each
+/// call (and its answer, about 5 MB of audio) short enough to retry cheaply.
+pub const MAX_SPEECH_CHARS: usize = 5_000;
+/// Context sent around a part, so the voice keeps its intonation across
+/// joins. More adds nothing the model uses.
+pub const CONTEXT_CHARS: usize = 300;
+
+/// The request that reads `request.text` aloud.
+pub fn speech_request(key: &ApiKey, request: &SpeechRequest) -> HttpRequest {
+    let presets = request.presets;
+    let ratio = |percent: u8| f64::from(percent) / 100.0;
+    let mut body = json!({
+        "text": request.text,
+        "model_id": SPEECH_MODEL,
+        "voice_settings": {
+            "stability": ratio(presets.stability),
+            "similarity_boost": ratio(presets.similarity),
+            "style": ratio(presets.style),
+            "speed": ratio(presets.speed),
+            "use_speaker_boost": true,
+        },
+    });
+    // The end of the text before and the start of the text after.
+    if let Some(previous) = &request.previous_text {
+        let skip = previous.chars().count().saturating_sub(CONTEXT_CHARS);
+        body["previous_text"] = json!(previous.chars().skip(skip).collect::<String>());
+    }
+    if let Some(next) = &request.next_text {
+        body["next_text"] = json!(next.chars().take(CONTEXT_CHARS).collect::<String>());
+    }
+    HttpRequest::post_json(
+        format!(
+            "{SPEECH_URL}/{}/with-timestamps?output_format={OUTPUT_FORMAT}",
+            request.voice.id()
+        ),
+        body.to_string(),
+    )
+    .header("xi-api-key", key.expose())
+}
+
+fn unexpected(detail: impl Into<String>) -> ProviderFailure {
+    ProviderFailure::new(ProviderFailureKind::Unexpected, detail)
+}
+
+/// Reads a successful answer: the audio, the character timings (of the
+/// text as sent; of the normalized text when only those come back) and
+/// what was billed (the text's length when the header is missing).
+pub fn parse_speech(response: &HttpResponse, text: &str) -> Result<Speech, ProviderFailure> {
+    let body: Value = serde_json::from_str(&response.body)
+        .map_err(|error| unexpected(format!("unreadable speech: {error}")))?;
+    let audio = body["audio_base64"]
+        .as_str()
+        .ok_or_else(|| unexpected("the answer has no audio"))?;
+    let audio = base64::engine::general_purpose::STANDARD
+        .decode(audio)
+        .map_err(|error| unexpected(format!("unreadable audio: {error}")))?;
+    if audio.is_empty() {
+        return Err(unexpected("the answer has no audio"));
+    }
+    let alignment = [&body["alignment"], &body["normalized_alignment"]]
+        .into_iter()
+        .find(|alignment| alignment.is_object())
+        .ok_or_else(|| unexpected("the answer has no timings"))
+        .and_then(alignment)?;
+    let billed_characters = response
+        .header("character-cost")
+        .and_then(|cost| cost.trim().parse().ok())
+        .unwrap_or(text.chars().count() as u64);
+    Ok(Speech {
+        audio,
+        alignment,
+        model: SPEECH_MODEL.to_owned(),
+        billed_characters,
+    })
+}
+
+fn alignment(value: &Value) -> Result<Alignment, ProviderFailure> {
+    let list = |name: &str| {
+        value[name]
+            .as_array()
+            .ok_or_else(|| unexpected(format!("the timings have no {name}")))
+    };
+    let (chars, starts, ends) = (
+        list("characters")?,
+        list("character_start_times_seconds")?,
+        list("character_end_times_seconds")?,
+    );
+    if chars.len() != starts.len() || chars.len() != ends.len() {
+        return Err(unexpected("the timings do not line up"));
+    }
+    let seconds = |value: &Value| {
+        value
+            .as_f64()
+            .filter(|s| s.is_finite() && *s >= 0.0)
+            .map(Duration::from_secs_f64)
+            .ok_or_else(|| unexpected("a timing is not a time"))
+    };
+    let chars = chars
+        .iter()
+        .zip(starts.iter().zip(ends))
+        .map(|(text, (start, end))| {
+            let start = seconds(start)?;
+            Ok(CharTiming {
+                text: text.as_str().unwrap_or_default().to_owned(),
+                start,
+                end: seconds(end)?.max(start),
+            })
+        })
+        .collect::<Result<_, ProviderFailure>>()?;
+    Ok(Alignment { chars })
+}
+
+/// Reads text aloud with ElevenLabs over HTTPS.
+pub struct ElevenLabsSpeech<T = UreqTransport> {
+    transport: T,
+    backoff: Backoff,
+    sleep: Sleeper,
+}
+
+impl ElevenLabsSpeech {
+    /// A part of `MAX_SPEECH_CHARS` takes the provider a minute or two.
+    pub const TIMEOUT: Duration = Duration::from_secs(300);
+    /// Base64 audio of the longest part, its timings and headroom.
+    pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
+
+    pub fn new() -> Self {
+        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+    }
+}
+
+impl Default for ElevenLabsSpeech {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsSpeech<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self {
+            transport,
+            backoff: Backoff::default(),
+            sleep: thread_sleeper(),
+        }
+    }
+
+    /// Replaces how the adapter waits between retries (tests record the
+    /// waits instead).
+    pub fn with_sleeper(mut self, sleep: Sleeper) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> SpeechSynthesizer for ElevenLabsSpeech<T> {
+    fn max_chars(&self) -> usize {
+        MAX_SPEECH_CHARS
+    }
+
+    fn synthesize(&self, key: &ApiKey, request: &SpeechRequest) -> Result<Speech, ProviderFailure> {
+        if request.voice.provider() != Provider::ElevenLabs {
+            return Err(unexpected(format!(
+                "{} is not an ElevenLabs voice",
+                request.voice
+            )));
+        }
+        let response = self
+            .backoff
+            .send(&self.transport, &speech_request(key, request), &self.sleep)
+            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        if !(200..=299).contains(&response.status) {
+            return Err(failure(Provider::ElevenLabs, &response));
+        }
+        parse_speech(&response, &request.text)
     }
 }
