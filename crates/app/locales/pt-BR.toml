@@ -163,7 +163,7 @@ private = "Privado"
 
 [caption_style]
 clean = "Limpa"
-boxed = "Faixa"
+boxed = "Tarja"
 punch = "Impacto"
 
 [aspect_ratio]
@@ -878,9 +878,10 @@ audio = "Áudio"
 source_in = "Início na fonte"
 remove = "Remover do corte"
 shortcuts = "S divide · [ e ] aparam até o cursor · Alt+← e Alt+→ movem · Delete remove"
+
 [editor.captions]
 text = "Texto"
-text_hint = "Enter aplica o texto; o tempo continua o mesmo."
+text_hint = "Enter aplica o texto; o tempo de exibição não muda."
 style = "Estilo"
 style_hint = "O estilo vale para todas as legendas deste projeto."
 show = "Mostrar legendas"

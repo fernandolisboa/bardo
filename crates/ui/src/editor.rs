@@ -217,6 +217,11 @@ impl EditorScreen {
         }
         if !same_caption {
             self.apply_caption_text(window, cx);
+            // Clicks on the timeline keep the focus where it was; once
+            // another item is picked, the keys go back to the editor.
+            if typing {
+                window.focus(&self.focus, cx);
+            }
         }
         let selected = self.selected_caption();
         let text = selected

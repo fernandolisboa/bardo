@@ -268,6 +268,7 @@ impl Timeline {
     /// a trim of `edge` makes.
     pub fn trim_limits(&self, item: ItemRef, edge: Edge) -> Result<(Shift, Shift), EditError> {
         self.check(item.track, item.index)?;
+        // A caption's ends live in the narration file, cut away or not.
         if item.track == Track::Captions {
             return Ok(self.caption_trim_limits(item.index, edge));
         }
@@ -293,7 +294,7 @@ impl Timeline {
                 let room = audio.at - self.audio_floor(item.index);
                 (Shift::earlier(audio.start.min(room)), shrink)
             }
-            (Track::Captions, edge) => self.caption_trim_limits(item.index, edge),
+            (Track::Captions, _) => unreachable!("captions return above"),
             (Track::Narration, Edge::End) => {
                 let audio = &self.narration[item.index];
                 let in_file = audio.length.saturating_sub(audio.start + audio.duration);

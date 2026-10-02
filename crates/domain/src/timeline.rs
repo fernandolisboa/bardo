@@ -22,8 +22,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    CaptionStyle, Captions, DuckEnvelope, Mix, Narration, NarrationId, ProfileId, RepositoryError,
-    SavedCaptions, Scene, ScenePlan, ScenePlanId, VideoProjectId,
+    CaptionStyle, Captions, DuckEnvelope, Edge, Mix, Narration, NarrationId, ProfileId,
+    RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -459,6 +459,27 @@ impl Timeline {
         let first = shown.next()?;
         let end = shown.map(CaptionSpan::end).fold(first.end(), Duration::max);
         Some((first.at, end - first.at))
+    }
+
+    /// Where caption `index`'s `edge` shows: on the timeline, and in the
+    /// narration file at that point. A caption clipped by a cut shows its
+    /// edge where the clip falls, not where the caption ends in the file.
+    pub fn caption_edge(&self, index: usize, edge: Edge) -> Option<(Duration, Duration)> {
+        let caption = self.captions.lines.get(index)?;
+        let shown = self.narration.iter().filter_map(|item| {
+            let (start, end) = (
+                caption.start.max(item.start),
+                caption.end.min(item.start + item.duration),
+            );
+            (start < end).then(|| match edge {
+                Edge::Start => (item.at + (start - item.start), start),
+                Edge::End => (item.at + (end - item.start), end),
+            })
+        });
+        match edge {
+            Edge::Start => shown.min_by_key(|(at, _)| *at),
+            Edge::End => shown.max_by_key(|(at, _)| *at),
+        }
     }
 
     /// The end of the video track.
@@ -1167,6 +1188,34 @@ pub(crate) mod tests {
             .collect();
         narrated.words = WordTimings::restore(text, timings).unwrap();
         narrated
+    }
+
+    #[test]
+    fn captions_from_odd_word_timings_still_hold_together() {
+        let plan = plan(vec![scene(0, 2_000)]);
+        for words in [
+            // A word with no length.
+            [(500, 500), (600, 900), (900, 1_200), (1_200, 1_500)],
+            // A line shorter than a frame.
+            [(500, 520), (600, 900), (900, 1_200), (1_200, 1_500)],
+            // Lines that overlap.
+            [(0, 1_000), (500, 900), (900, 1_200), (1_200, 1_500)],
+            // The last word past the end of the file.
+            [(0, 500), (600, 900), (900, 1_200), (1_200, 2_100)],
+        ] {
+            let narration = narrated("Oh. Then the rest.", &words, 2_000);
+            let timeline = Timeline::rough_cut(&plan, &narration);
+            assert!(
+                timeline.captions().holds_together(min_length()),
+                "{words:?}"
+            );
+            let saved = saved(&timeline, &plan, &narration);
+            assert_eq!(
+                Timeline::restore(&saved, &plan, &narration),
+                Some(timeline),
+                "{words:?}"
+            );
+        }
     }
 
     #[test]

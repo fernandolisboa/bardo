@@ -486,6 +486,20 @@ impl Editor {
         };
         let (earliest, latest) = timeline.trim_limits(item, edge).ok()?;
         let (to, _) = self.snapped(to, reach);
+        if item.track == Track::Captions {
+            // A caption's ends live in the narration file: move the end
+            // from where it shows, which a cut may have clipped.
+            let caption = timeline.captions().lines().get(item.index)?;
+            let (shown_at, shown) = timeline.caption_edge(item.index, edge)?;
+            let end = match edge {
+                Edge::Start => caption.start,
+                Edge::End => caption.end,
+            };
+            let target = Shift::between(shown_at, to)
+                .move_time(shown)
+                .unwrap_or(Duration::ZERO);
+            return Some(Shift::between(end, target).clamp(earliest, latest));
+        }
         Some(Shift::between(from, to).clamp(earliest, latest))
     }
 
@@ -499,7 +513,19 @@ impl Editor {
         reach: Duration,
     ) -> Option<(Duration, Duration)> {
         let (at, duration) = self.view.span(item)?;
-        let shift = self.trim_shift(item, edge, to, reach)?;
+        let mut shift = self.trim_shift(item, edge, to, reach)?;
+        if item.track == Track::Captions {
+            // The shift moves the end in the file; on screen it moves from
+            // where the end shows.
+            let timeline = self.view.timeline.as_ref()?;
+            let caption = timeline.captions().lines().get(item.index)?;
+            let (_, shown) = timeline.caption_edge(item.index, edge)?;
+            let end = match edge {
+                Edge::Start => caption.start,
+                Edge::End => caption.end,
+            };
+            shift = Shift::between(shown, shift.move_time(end)?);
+        }
         let end = at + duration;
         Some(match edge {
             Edge::Start => {
@@ -3047,6 +3073,45 @@ mod tests {
 
         app.edit(&mut editor, EditAction::Undo).unwrap();
         assert!(!editor.view().captions.is_empty());
+    }
+
+    #[test]
+    fn trimming_a_caption_a_cut_clips_moves_the_end_that_shows() {
+        let h = Harness::new();
+        let app = h.start();
+        let (_, mut editor) = opened(&h, &app);
+        let caption = ItemRef::caption(0);
+        let (at, length) = editor.view().span(caption).unwrap();
+        assert!(length > frame_time(4), "a caption long enough to clip");
+        // The narration now stops halfway through the first caption.
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item: ItemRef::narration(0),
+                edge: Edge::End,
+                to: at + length / 2,
+                reach: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        let (at, clipped) = editor.view().span(caption).unwrap();
+        assert!(clipped < length);
+
+        let aim = frame_time(nearest_frame(at + clipped) - 1);
+        let trim = |editor: &Editor| editor.trim_preview(caption, Edge::End, aim, Duration::ZERO);
+        let preview = trim(&editor).unwrap();
+        assert_eq!(preview, (at, aim - at));
+        app.edit(
+            &mut editor,
+            EditAction::Trim {
+                item: caption,
+                edge: Edge::End,
+                to: aim,
+                reach: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        assert_eq!(editor.view().span(caption), Some(preview));
     }
 
     #[test]

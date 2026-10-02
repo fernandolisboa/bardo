@@ -9,8 +9,8 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use bardo_domain::CaptionStyle;
@@ -244,7 +244,12 @@ impl TempFile {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        std::fs::write(&path, contents)?;
+        // A new file only: never write through one already there.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        io::Write::write_all(&mut file, contents)?;
         Ok(TempFile(path))
     }
 
@@ -260,9 +265,15 @@ impl Drop for TempFile {
 }
 
 /// Writes the shipped fonts to a folder of their own, once per run (and
-/// again only when a file there is not the one shipped).
+/// again only when a file there is not byte for byte the one shipped).
 fn fonts_dir() -> Result<&'static Path, MediaError> {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
+    // The preview and a render may both start first.
+    static WRITING: Mutex<()> = Mutex::new(());
+    if let Some(dir) = DIR.get() {
+        return Ok(dir);
+    }
+    let _writing = WRITING.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(dir) = DIR.get() {
         return Ok(dir);
     }
@@ -270,8 +281,7 @@ fn fonts_dir() -> Result<&'static Path, MediaError> {
     std::fs::create_dir_all(&dir)?;
     for (name, bytes) in FONTS {
         let path = dir.join(name);
-        let current = std::fs::metadata(&path).map(|meta| meta.len()).ok();
-        if current != Some(bytes.len() as u64) {
+        if std::fs::read(&path).ok().as_deref() != Some(bytes) {
             // Written aside and renamed, so a reader never sees half a font.
             let partial = dir.join(format!("{name}.{}.partial", std::process::id()));
             std::fs::write(&partial, bytes)?;
@@ -444,12 +454,12 @@ mod tests {
     #[test]
     fn paths_are_escaped_for_the_option_and_the_graph() {
         let filter = subtitles_filter(
-            Path::new(r"C:\Users\Zoë\Temp\bardo-1-0-captions.ass"),
+            Path::new(r"C:\Users\Données\Temp\bardo-1-0-captions.ass"),
             Path::new("/tmp/it's [here], ok; yes"),
         );
         assert_eq!(
             filter,
-            r"subtitles=filename=C\\:/Users/Zoë/Temp/bardo-1-0-captions.ass:fontsdir=/tmp/it\\\'s \[here\]\, ok\; yes"
+            r"subtitles=filename=C\\:/Users/Données/Temp/bardo-1-0-captions.ass:fontsdir=/tmp/it\\\'s \[here\]\, ok\; yes"
         );
     }
 

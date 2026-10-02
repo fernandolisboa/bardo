@@ -13,6 +13,8 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
+use crate::min_length;
+
 /// How captions look when burned in. Each channel picks one for its new
 /// projects; a project can change its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -99,6 +101,36 @@ pub fn caption_text(text: &str) -> Option<String> {
     (!text.is_empty() && text.chars().count() <= MAX_CAPTION_CHARS).then_some(text)
 }
 
+/// `lines` made to hold together (`Captions::holds_together`) whatever
+/// the word timings were: each line starts after the one before, ends
+/// within the narration and lasts at least a frame. A line with no room
+/// left joins the one before it; text past the limit is cut short.
+fn settled(lines: Vec<Caption>, length: Duration) -> Vec<Caption> {
+    let mut settled: Vec<Caption> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let text = line.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let text: String = text.chars().take(MAX_CAPTION_CHARS).collect();
+        let text = text.trim_end().to_owned();
+        if text.is_empty() {
+            continue;
+        }
+        let start = line
+            .start
+            .max(settled.last().map_or(Duration::ZERO, |before| before.end));
+        let end = line.end.max(start + min_length()).min(length);
+        if start + min_length() > end {
+            if let Some(before) = settled.last_mut()
+                && let Some(joined) = caption_text(&format!("{} {text}", before.text))
+            {
+                before.text = joined;
+            }
+            continue;
+        }
+        settled.push(Caption { text, start, end });
+    }
+    settled
+}
+
 /// The mark a word ends on, past closing quotes and brackets.
 fn last_mark(word: &str) -> Option<char> {
     word.chars()
@@ -183,7 +215,7 @@ impl Captions {
         length: Duration,
     ) -> Self {
         Captions {
-            lines: caption_lines(words, LINE_RULES),
+            lines: settled(caption_lines(words, LINE_RULES), length),
             shown: true,
             style: CaptionStyle::default(),
             length,

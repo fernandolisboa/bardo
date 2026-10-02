@@ -878,6 +878,7 @@ audio = "Audio"
 source_in = "Source in"
 remove = "Remove from the cut"
 shortcuts = "S split · [ and ] trim to the playhead · Alt+← and Alt+→ move · Delete remove"
+
 [editor.captions]
 text = "Text"
 text_hint = "Enter applies the text; the timing stays."
