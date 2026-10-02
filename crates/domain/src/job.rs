@@ -83,10 +83,14 @@ pub enum JobKind {
     /// Has Claude write the prompt for a video project's music, for the
     /// user to take to a music tool.
     MusicPrompt,
+    /// Renders a video project's cut to one file per chosen network
+    /// account, in that account's preset, after the user reviewed it.
+    /// Outputs already finished are not rendered again on resume.
+    Render,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 12] = [
+    pub const ALL: [JobKind; 13] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -99,6 +103,7 @@ impl JobKind {
         JobKind::SceneClips,
         JobKind::Proxies,
         JobKind::MusicPrompt,
+        JobKind::Render,
     ];
 
     /// Stable name stored in the database.
@@ -116,6 +121,7 @@ impl JobKind {
             JobKind::SceneClips => "scene_clips",
             JobKind::Proxies => "proxies",
             JobKind::MusicPrompt => "music_prompt",
+            JobKind::Render => "render",
         }
     }
 }

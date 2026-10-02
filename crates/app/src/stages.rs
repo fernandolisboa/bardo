@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use bardo_domain::Scene;
 
-use crate::{Bardo, NarrationView, ScenesView, ScriptView, Text};
+use bardo_domain::JobState;
+
+use crate::{Bardo, NarrationView, RenderSummary, ScenesView, ScriptView, Text};
 
 /// A step of making a video, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,7 +39,7 @@ impl Stage {
     pub fn is_page(self) -> bool {
         matches!(
             self,
-            Stage::Script | Stage::Narration | Stage::Scenes | Stage::Clips
+            Stage::Script | Stage::Narration | Stage::Scenes | Stage::Clips | Stage::Render
         )
     }
 }
@@ -81,6 +83,16 @@ pub enum StageNote {
         total: usize,
     },
     EditorReady,
+    /// The cut can be reviewed and rendered; nothing rendered yet.
+    RenderReady,
+    /// Files rendered from the cut as it is now.
+    Rendered(usize),
+    /// Files rendered from an earlier cut or preset.
+    RenderOutdated(usize),
+    /// A render job is running.
+    Rendering,
+    /// The last render failed or was cancelled; it can resume.
+    RenderStopped,
     Working,
     /// Locked until that stage has something to give.
     After(Stage),
@@ -109,12 +121,13 @@ impl StageStatus {
     }
 }
 
-/// Every stage of a project, in order, from its script, narration and
-/// scenes as the projects screen loads them.
+/// Every stage of a project, in order, from its script, narration, scenes
+/// and renders as the projects screen loads them.
 pub fn project_stages(
     script: &ScriptView,
     narration: &NarrationView,
     scenes: &ScenesView,
+    renders: &RenderSummary,
 ) -> Vec<StageStatus> {
     let running = |job: Option<&bardo_domain::Job>| job.is_some_and(|job| job.state().is_active());
 
@@ -233,13 +246,40 @@ pub fn project_stages(
         StageStatus::new(Stage::Edit, StageState::Open, StageNote::EditorReady)
     };
 
+    let render_job = renders.job.as_ref().map(|job| job.state());
+    let render_stage = if !renders.has_cut {
+        StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit))
+    } else if render_job.is_some_and(JobState::is_active) {
+        StageStatus::new(Stage::Render, StageState::Working, StageNote::Rendering)
+    } else if matches!(render_job, Some(JobState::Failed | JobState::Cancelled)) {
+        StageStatus::new(
+            Stage::Render,
+            StageState::Attention,
+            StageNote::RenderStopped,
+        )
+    } else if renders.outdated > 0 {
+        StageStatus::new(
+            Stage::Render,
+            StageState::Attention,
+            StageNote::RenderOutdated(renders.outdated),
+        )
+    } else if renders.current > 0 {
+        StageStatus::new(
+            Stage::Render,
+            StageState::Done,
+            StageNote::Rendered(renders.current),
+        )
+    } else {
+        StageStatus::new(Stage::Render, StageState::Open, StageNote::RenderReady)
+    };
+
     vec![
         script_stage,
         narration_stage,
         scenes_stage,
         clips_stage,
         edit_stage,
-        StageStatus::locked(Stage::Render, StageNote::NotYet),
+        render_stage,
         StageStatus::locked(Stage::Publish, StageNote::NotYet),
     ]
 }
@@ -272,6 +312,11 @@ impl Bardo {
             StageNote::Images { done, total } => of(Text::StageImages, done, total),
             StageNote::Clips { done, total } => of(Text::StageClips, done, total),
             StageNote::EditorReady => self.text(Text::StageEditorReady).into_owned(),
+            StageNote::RenderReady => self.text(Text::StageRenderReady).into_owned(),
+            StageNote::Rendered(files) => n(Text::StageRendered, files),
+            StageNote::RenderOutdated(files) => n(Text::StageRenderOutdated, files),
+            StageNote::Rendering => self.text(Text::StageRendering).into_owned(),
+            StageNote::RenderStopped => self.text(Text::StageRenderStopped).into_owned(),
             StageNote::Working => self.text(Text::StageWorking).into_owned(),
             StageNote::After(stage) => self.text(Text::StageAfter(stage)).into_owned(),
             StageNote::NotYet => self.text(Text::StageNotYet).into_owned(),
@@ -361,7 +406,9 @@ pub fn scene_states(scenes: &ScenesView, stage: Stage) -> Vec<SceneState> {
 
 #[cfg(test)]
 mod tests {
-    use bardo_domain::VideoProject;
+    use std::time::SystemTime;
+
+    use bardo_domain::{Job, JobKind, ProfileId, VideoProject};
 
     use super::*;
     use crate::scenes::tests::{Harness, done, project};
@@ -372,6 +419,7 @@ mod tests {
             &app.script(project.id).unwrap(),
             &app.narration(project.id).unwrap(),
             &app.scenes(project.id).unwrap(),
+            &app.render_summary(project.id).unwrap(),
         )
     }
 
@@ -409,9 +457,14 @@ mod tests {
                 "{stage:?}"
             );
         }
-        for stage in [Stage::Render, Stage::Publish] {
-            assert_eq!(of(&stages, stage), (StageState::Locked, StageNote::NotYet));
-        }
+        assert_eq!(
+            of(&stages, Stage::Render),
+            (StageState::Locked, StageNote::After(Stage::Edit))
+        );
+        assert_eq!(
+            of(&stages, Stage::Publish),
+            (StageState::Locked, StageNote::NotYet)
+        );
         assert_eq!(opening_stage(&stages), Stage::Script);
     }
 
@@ -469,6 +522,10 @@ mod tests {
         assert_eq!(
             of(&stages, Stage::Edit),
             (StageState::Open, StageNote::EditorReady)
+        );
+        assert_eq!(
+            of(&stages, Stage::Render),
+            (StageState::Open, StageNote::RenderReady)
         );
         assert_eq!(opening_stage(&stages), Stage::Scenes);
     }
@@ -602,8 +659,73 @@ mod tests {
     fn with_every_page_done_the_project_opens_on_its_last_page() {
         let done = |stage| StageStatus::new(stage, StageState::Done, StageNote::Working);
         let mut stages: Vec<_> = Stage::ALL.into_iter().map(done).collect();
+        assert_eq!(opening_stage(&stages), Stage::Render);
+        stages[5] = StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit));
         assert_eq!(opening_stage(&stages), Stage::Clips);
-        stages[3] = StageStatus::locked(Stage::Clips, StageNote::After(Stage::Scenes));
-        assert_eq!(opening_stage(&stages), Stage::Scenes);
+    }
+
+    /// The Render stage of a project with a cut, from its summary.
+    fn render_stage(summary: RenderSummary) -> (StageState, StageNote) {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.planned_project(&app);
+        let stages = project_stages(
+            &app.script(project.id).unwrap(),
+            &app.narration(project.id).unwrap(),
+            &app.scenes(project.id).unwrap(),
+            &RenderSummary {
+                has_cut: true,
+                ..summary
+            },
+        );
+        of(&stages, Stage::Render)
+    }
+
+    #[test]
+    fn the_render_stage_follows_its_files_and_its_last_job() {
+        let job = |state: Option<JobState>| {
+            let mut job = Job::new(ProfileId::new(), JobKind::Render, "{}");
+            match state {
+                Some(JobState::Cancelled) => job.cancel().unwrap(),
+                Some(JobState::Done) => {
+                    job.start(SystemTime::now()).unwrap();
+                    job.complete().unwrap();
+                }
+                _ => {}
+            }
+            Some(job)
+        };
+        assert_eq!(
+            render_stage(RenderSummary {
+                current: 2,
+                ..RenderSummary::default()
+            }),
+            (StageState::Done, StageNote::Rendered(2))
+        );
+        assert_eq!(
+            render_stage(RenderSummary {
+                current: 1,
+                outdated: 1,
+                job: job(Some(JobState::Done)),
+                ..RenderSummary::default()
+            }),
+            (StageState::Attention, StageNote::RenderOutdated(1))
+        );
+        assert_eq!(
+            render_stage(RenderSummary {
+                current: 2,
+                job: job(None),
+                ..RenderSummary::default()
+            }),
+            (StageState::Working, StageNote::Rendering)
+        );
+        assert_eq!(
+            render_stage(RenderSummary {
+                current: 1,
+                job: job(Some(JobState::Cancelled)),
+                ..RenderSummary::default()
+            }),
+            (StageState::Attention, StageNote::RenderStopped)
+        );
     }
 }

@@ -122,6 +122,8 @@ pub enum EditorEvent {
     Close,
     /// Show or hide the jobs panel.
     ToggleJobs,
+    /// Back to the projects screen, at the project's render review.
+    Render,
 }
 
 pub struct EditorScreen {
@@ -714,8 +716,29 @@ impl EditorScreen {
                     this.edit(EditAction::Redo, cx);
                 }))
             });
-        // Render (#27) comes with its slice; until then its button is
-        // hidden, not shown disabled.
+        // Hidden, not disabled, while there is nothing to render.
+        let has_cut = view.is_some_and(|view| {
+            view.timeline
+                .as_ref()
+                .is_some_and(|timeline| !timeline.is_empty())
+        });
+        let render = has_cut.then(|| {
+            div()
+                .id("editor-render")
+                .h(px(28.))
+                .px_3()
+                .flex()
+                .items_center()
+                .rounded(px(4.))
+                .text_size(px(12.))
+                .bg(color(ACCENT))
+                .text_color(color(APP))
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .cursor_pointer()
+                .hover(|style| style.opacity(0.9))
+                .child(tr(bardo, Text::EditorReviewRender))
+                .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::Render)))
+        });
         h_flex()
             .h(px(44.))
             .flex_none()
@@ -739,6 +762,7 @@ impl EditorScreen {
             .child(jobs)
             .child(undo)
             .child(redo)
+            .children(render)
             .into_any_element()
     }
 

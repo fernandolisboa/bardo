@@ -195,6 +195,7 @@ cancel = "Cancelar"
 retry = "Tentar de novo"
 
 [job.kind]
+render = "Render final"
 countdown = "Contagem de teste"
 niche_research = "Pesquisa de nicho"
 theme_suggestion = "Sugestão de temas"
@@ -1063,6 +1064,11 @@ terminal_dark = "Terminal · escuro"
 budgets_used = "{percent}% dos orçamentos do mês"
 
 [stage.note]
+render_ready = "Pronto para revisar"
+rendered = "Arquivos: {n}"
+render_outdated = "Desatualizados: {n}"
+rendering = "Renderizando…"
+render_stopped = "Parado"
 script_missing = "Ainda não escrito"
 script_to_review = "Nova versão para revisar"
 script_words = "{n} palavras"
@@ -1177,3 +1183,81 @@ spent = "gasto"
 over = "{n} acima do orçamento"
 near = "{n} perto do orçamento"
 unpriced = "{n} sem preço"
+
+[render.error]
+no_cut = "Planeje as cenas e grave a narração primeiro: o render precisa de um corte."
+nothing_chosen = "Escolha pelo menos uma rede para renderizar."
+blocked = "Uma rede escolhida não pode ser renderizada. Veja as verificações dela."
+cut_changed = "O corte mudou depois desta revisão. Revise de novo antes de renderizar."
+already_running = "Este projeto já está renderizando."
+check_failed = "O Bardo não conseguiu verificar este corte com o ffmpeg. Verifique de novo ou veja os detalhes em Tarefas."
+not_loaded = "Não foi possível carregar a revisão do render. Tente de novo."
+
+[render]
+checking = "Verificando codificadores e loudness…"
+no_accounts = "Este canal não tem contas de rede. Adicione uma em Contas para renderizar para ela."
+info = "O render faz um arquivo por rede, no preset da conta: quadro, tamanho, codec, bitrate, duração máxima e loudness. Leva um tempo e substitui o último arquivo da rede, então só começa depois que você revisa as verificações e confirma. Uma verificação que bloqueia deixa a rede de fora; um aviso deixa você seguir."
+captions_on = "Ligadas"
+captions_off = "Desligadas"
+measuring = "Medindo…"
+lufs = "{value} LUFS"
+silent = "Sem som"
+targets = "Redes"
+chosen = "{n} de {total} escolhidas"
+include = "Renderizar para esta rede"
+loudness_on_target = "no alvo"
+loudness_off_target = "fora do alvo"
+show_file = "Mostrar na pasta"
+size = "{value} MB"
+encoder = "Codificador"
+encoder_hardware = "{name}, na placa de vídeo"
+encoder_software = "{name}, no processador"
+start = "Renderizar ({n})"
+check_again = "Verificar de novo"
+running = "Renderizando {done} de {total}…"
+stopped = "O render parou."
+cancelled = "Render cancelado. Retomar renderiza os arquivos que faltam; os prontos ficam."
+resume = "Retomar"
+
+[render.figure]
+length = "Duração"
+frame = "Quadro do corte"
+loudness = "Loudness da mixagem"
+captions = "Legendas"
+
+[render.gate]
+too_long = "Mais longo do que esta rede aceita ({limit}). Encurte o corte ou aumente o limite da conta."
+no_encoder = "Nenhum codificador {codec} funciona neste computador. Escolha outro codec no preset da conta."
+reframed = "O corte é {cut}; este arquivo é {output}, cada clipe pela sua janela de corte (centralizada, a menos que você a tenha movido)."
+captions_off = "As legendas estão desligadas no corte."
+missing_media = "{n} clipes estão sem mídia e saem pretos."
+silent = "A mixagem não tem som; ela sai como está."
+loudness_far = "A mixagem está a {gain} dB do alvo desta rede; o render muda isso tudo."
+peaks_limited = "Neste alvo os picos estourariam, então o render os limita."
+blocks = "Bloqueia"
+warning = "Aviso"
+
+[render.state]
+ready = "Pronta"
+blocked = "Bloqueada"
+warnings = "{n} para conferir"
+checking = "Verificando"
+
+[render.last]
+current = "Renderizado"
+outdated = "Desatualizado"
+none = "Não renderizado"
+file = "{size} · {loudness} · {encoder}"
+outdated_hint = "O corte ou o preset mudou depois que este arquivo foi renderizado."
+
+[render.column]
+preset = "Preset"
+checks = "Verificações"
+last = "Último render"
+
+[render.confirm]
+title = "Renderizar {n} arquivos agora?"
+body = "O render leva um tempo e substitui o último arquivo de cada rede. Ele roda em segundo plano; dá para cancelar e retomar."
+warnings = "{n} avisos ficam como estão."
+go = "Renderizar agora"
+back = "Voltar"

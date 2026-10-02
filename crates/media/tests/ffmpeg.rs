@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use bardo_domain::CaptionStyle;
+use bardo_domain::{CaptionStyle, VideoCodec};
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
     Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Output, ProxyCodec, ProxySettings,
@@ -119,7 +119,6 @@ fn vertical(encoder: VideoEncoder) -> Output {
 const TARGET: LoudnessTarget = LoudnessTarget {
     integrated: -14.0,
     true_peak: -1.5,
-    range: 11.0,
 };
 
 #[test]
@@ -251,7 +250,7 @@ fn software_encoding_always_works() {
         encoders.working.contains(&VideoEncoder::OpenH264),
         "{encoders:?}"
     );
-    assert!(!encoders.software().unwrap().is_hardware());
+    assert!(!encoders.software(VideoCodec::H264).unwrap().is_hardware());
 }
 
 #[test]
@@ -290,8 +289,9 @@ fn renders_a_vertical_short_at_the_loudness_target() {
         "integrated {} LUFS",
         loudness.integrated
     );
+    // Under the -1 dBTP networks ask for, after AAC.
     assert!(
-        loudness.true_peak <= TARGET.true_peak + 0.5,
+        loudness.true_peak <= -1.0,
         "true peak {}",
         loudness.true_peak
     );
@@ -308,9 +308,47 @@ fn renders_a_vertical_short_at_the_loudness_target() {
 }
 
 #[test]
+fn the_limiter_holds_the_peaks_a_gain_lifts_over_the_ceiling() {
+    // A -12 dBTP ceiling under a -9 LUFS target: the gain lifts the
+    // short's peaks well over it, and the limiter holds them under it
+    // through AAC.
+    let ffmpeg = ffmpeg();
+    let dir = scratch("limited");
+    let destination = dir.join("short.mp4");
+    let target = LoudnessTarget {
+        integrated: -9.0,
+        true_peak: -12.0,
+    };
+    let plan = short_plan();
+    let mix = ffmpeg.measure_mix_loudness(&plan, &()).unwrap();
+    let lifted = mix.true_peak + (target.integrated - mix.integrated);
+    assert!(lifted > target.true_peak + 3.0, "{mix:?}");
+    ffmpeg
+        .render(
+            &plan,
+            &vertical(VideoEncoder::OpenH264),
+            Some(target),
+            &destination,
+            &(),
+        )
+        .unwrap();
+    let loudness = ffmpeg.measure_loudness(&destination, &()).unwrap();
+    assert!(
+        loudness.true_peak <= target.true_peak + 0.5,
+        "true peak {}",
+        loudness.true_peak
+    );
+    assert!(
+        loudness.integrated <= target.integrated,
+        "integrated {} LUFS",
+        loudness.integrated
+    );
+}
+
+#[test]
 fn renders_with_every_working_encoder() {
     // NVENC, AMF, QSV and Media Foundation join on machines that have them;
-    // OpenH264 everywhere.
+    // OpenH264 and Kvazaar everywhere.
     let ffmpeg = ffmpeg();
     let dir = scratch("encoders");
     for encoder in ffmpeg.detect_encoders().working {
@@ -321,11 +359,89 @@ fn renders_with_every_working_encoder() {
         let video = ffmpeg.probe(&destination).unwrap().video.unwrap();
         assert_eq!(
             (video.codec.as_str(), video.height),
-            ("h264", 640),
+            (encoder.codec().code(), 640),
             "{}",
             encoder.name()
         );
     }
+}
+
+#[test]
+fn renders_hevc_in_software_at_a_quieter_target() {
+    // A preset may ask for HEVC and its own loudness target; Kvazaar is the
+    // software HEVC encoder every machine has.
+    let ffmpeg = ffmpeg();
+    let encoder = ffmpeg
+        .detect_encoders()
+        .software(VideoCodec::Hevc)
+        .expect("Kvazaar ships in the LGPL build");
+    let dir = scratch("hevc");
+    let destination = dir.join("short.mp4");
+    let target = LoudnessTarget {
+        integrated: -16.0,
+        true_peak: -1.0,
+    };
+    ffmpeg
+        .render(
+            &short_plan(),
+            &vertical(encoder),
+            Some(target),
+            &destination,
+            &(),
+        )
+        .unwrap();
+    let info = ffmpeg.probe(&destination).unwrap();
+    let video = info.video.unwrap();
+    assert_eq!(
+        (video.codec.as_str(), video.width, video.height),
+        ("hevc", 360, 640)
+    );
+    assert!(close(info.duration, 3.5, 0.1), "{:?}", info.duration);
+    let loudness = ffmpeg.measure_loudness(&destination, &()).unwrap();
+    assert!(
+        (loudness.integrated - target.integrated).abs() <= 1.0,
+        "integrated {} LUFS",
+        loudness.integrated
+    );
+}
+
+#[test]
+fn measures_the_mix_before_rendering() {
+    let ffmpeg = ffmpeg();
+    let mix = ffmpeg.measure_mix_loudness(&short_plan(), &()).unwrap();
+    assert!(!mix.is_silent());
+    assert!(mix.integrated > -40.0 && mix.integrated < -5.0, "{mix:?}");
+    let mut quieter = short_plan();
+    for track in &mut quieter.audio {
+        track.gain_db -= 6.0;
+    }
+    let lower = ffmpeg.measure_mix_loudness(&quieter, &()).unwrap();
+    assert!(
+        ((mix.integrated - lower.integrated) - 6.0).abs() < 0.5,
+        "{mix:?} {lower:?}"
+    );
+}
+
+#[test]
+fn a_silent_plan_renders_as_it_is_with_a_loudness_target() {
+    let ffmpeg = ffmpeg();
+    let mut plan = short_plan();
+    plan.audio.clear();
+    let mix = ffmpeg.measure_mix_loudness(&plan, &()).unwrap();
+    assert!(mix.is_silent(), "{mix:?}");
+    let dir = scratch("silent");
+    let destination = dir.join("silent.mp4");
+    ffmpeg
+        .render(
+            &plan,
+            &vertical(VideoEncoder::OpenH264),
+            Some(TARGET),
+            &destination,
+            &(),
+        )
+        .unwrap();
+    let loudness = ffmpeg.measure_loudness(&destination, &()).unwrap();
+    assert!(loudness.is_silent(), "{loudness:?}");
 }
 
 /// 4 s of music over black: what the mix tests render.

@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         names.join(", "),
         ms(started.elapsed())
     );
-    let best = encoders.best()?;
+    let best = encoders.best(bardo_domain::VideoCodec::H264)?;
 
     let started = Instant::now();
     let sources = make_sources(&ffmpeg, &work, best)?;
@@ -147,7 +147,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target = LoudnessTarget {
         integrated: -14.0,
         true_peak: -1.5,
-        range: 11.0,
     };
     for encoder in &encoders.working {
         let output = Output {

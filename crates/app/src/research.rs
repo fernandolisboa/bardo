@@ -432,6 +432,7 @@ mod tests {
                 media_assets: Arc::clone(&self.db) as _,
                 music_prompts: Arc::clone(&self.db) as _,
                 network_accounts: Arc::clone(&self.db) as _,
+                renders: Arc::clone(&self.db) as _,
                 costs: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 research: Arc::clone(&self.db) as _,

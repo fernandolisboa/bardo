@@ -14,13 +14,15 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use bardo_domain::CaptionStyle;
+use serde::{Deserialize, Serialize};
 
 use super::MediaError;
 use super::frames::FrameSize;
 
 /// The caption lines of a plan, in one style.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CaptionTrack {
+    #[serde(with = "style_code")]
     pub style: CaptionStyle,
     /// In order; lines may touch but not overlap.
     pub lines: Vec<CaptionLine>,
@@ -28,11 +30,31 @@ pub struct CaptionTrack {
 
 /// One caption as the plan shows it: its text and where on the plan's
 /// timeline.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CaptionLine {
     pub text: String,
     pub at: Duration,
     pub duration: Duration,
+}
+
+/// A caption style by its stored code, so a plan can be written down.
+mod style_code {
+    use bardo_domain::CaptionStyle;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        style: &CaptionStyle,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(style.code())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<CaptionStyle, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        code.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl CaptionTrack {
