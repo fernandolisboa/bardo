@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::{ApiKey, ProviderFailure, TokenUsage};
+use crate::{ApiKey, Metered, ProviderFailure};
 
 /// The file format of a generated image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,9 +53,10 @@ pub struct GeneratedImage {
     pub format: ImageFormat,
     /// The model that drew it, as the provider names it.
     pub model: String,
-    /// What the provider counted: the prompt in, the image (and any
-    /// reasoning) out. Cost tracking builds on it.
-    pub usage: TokenUsage,
+    /// What the provider counted: the prompt in, any reasoning out, and
+    /// the image apart, since it is priced apart. Cost tracking builds on
+    /// it.
+    pub usage: Metered,
 }
 
 /// Draws images. Every image is a wide 16:9 frame, the source every video

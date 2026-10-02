@@ -631,3 +631,112 @@ professional = "Professional clone"
 generated = "Designed"
 default = "ElevenLabs default"
 other = "Added from the library"
+
+[money]
+format = "${n}"
+thousands_separator = ","
+under = "under {amount}"
+
+[money.error]
+required = "Type an amount."
+invalid = "Type an amount in US dollars, like 12.50."
+too_precise = "Use at most six decimal places."
+too_large = "That amount is too large."
+
+[month]
+format = "{month} {year}"
+1 = "January"
+2 = "February"
+3 = "March"
+4 = "April"
+5 = "May"
+6 = "June"
+7 = "July"
+8 = "August"
+9 = "September"
+10 = "October"
+11 = "November"
+12 = "December"
+
+[meter]
+input_tokens = "Input tokens"
+output_tokens = "Output tokens"
+image_tokens = "Image tokens"
+characters = "Characters"
+
+[meter.unit]
+input_tokens = "per million tokens"
+output_tokens = "per million tokens"
+image_tokens = "per million tokens"
+characters = "per thousand characters"
+
+[costs]
+title = "Costs"
+hint = "What generations cost, per provider, channel and video. Months follow UTC, as providers bill."
+previous_month = "Previous month"
+next_month = "Next month"
+total = "Spent in {month}"
+empty = "Nothing was spent in {month}."
+unpriced = "No rate for {models}: those calls count as nothing until you add one under Rates."
+not_loaded = "Could not load costs. Restart Bardo to try again."
+not_saved = "Could not save. Try again."
+not_paid = "This provider is free within its quota, so it has no budget."
+providers_title = "By provider"
+providers_hint = "Set a monthly budget per provider. From 80% Bardo warns before a generation; once a job would reach the budget, Bardo asks before starting it."
+channels_title = "By channel"
+videos_title = "By video"
+unknown_channel = "Unknown channel"
+unknown_video = "Removed video"
+
+[costs.budget]
+none = "No budget"
+used = "of {budget} budget · {percent}%"
+near = "Near budget"
+reached = "Budget reached"
+set = "Set budget"
+change = "Change"
+remove = "Remove"
+save = "Save"
+cancel = "Cancel"
+placeholder = "Monthly budget, e.g. 20"
+saved = "Budget saved."
+removed = "Budget removed."
+
+[costs.rates]
+title = "Rates"
+hint = "Prices in US dollars, per million tokens or per thousand characters. A model covers every model whose name starts with it. A changed price applies to new calls; recorded costs keep theirs."
+all_models = "All models"
+changed = "Changed"
+added = "Added"
+edit = "Edit"
+save = "Save"
+cancel = "Cancel"
+reset = "Restore {price}"
+remove = "Remove"
+saved = "Rate saved."
+add_title = "Add a rate"
+provider = "Provider"
+model = "Model"
+model_placeholder = "Model name or its start, e.g. claude-sonnet-5-5"
+meter = "Meter"
+price = "Price (US$)"
+price_placeholder = "e.g. 3.00"
+add = "Add rate"
+
+[costs.rates.error]
+model_too_long = "Use at most 100 characters for the model."
+model_has_spaces = "Model names have no spaces."
+
+[estimate]
+cost = "Estimated cost: about {amount}"
+partial = "Estimated cost: about {amount}, plus calls without a rate"
+unknown = "Estimated cost unknown: no rate covers this model. Add one on the Costs screen."
+near = "{provider}: {spent} of the {budget} budget spent this month; this takes it past 80%."
+project_spent = "This video so far: {amount}"
+
+[budget]
+reached_title = "Over budget"
+reached_line = "{provider}: {spent} of the {budget} budget spent this month, and this costs about {amount}."
+question = "Generate anyway?"
+confirm = "Generate anyway"
+cancel = "Cancel"

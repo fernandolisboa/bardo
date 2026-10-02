@@ -2,6 +2,7 @@
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
 mod channels;
+mod costs;
 pub mod i18n;
 mod jobs;
 pub mod logging;
@@ -20,7 +21,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker, MarketData,
+    ChannelRepository, CostRepository, DecisionEngine, ImageGenerator, JobRepository, KeyChecker, MarketData,
     NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
     ScenePlanRepository, ScriptRepository, SecretStore, SpeechSynthesizer, TemplateRepository,
@@ -31,6 +32,10 @@ use bardo_storage::{Database, MemoryProjectFiles};
 
 pub use bardo_domain;
 pub use channels::ChannelError;
+pub use costs::{
+    BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
+    SpendRow,
+};
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
@@ -43,6 +48,7 @@ pub use scripts::{ScriptError, ScriptView};
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
+use crate::costs::CostBook;
 use crate::jobs::JobQueue;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
@@ -80,6 +86,9 @@ pub struct Repositories {
     pub scene_plans: Arc<dyn ScenePlanRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
+    /// What generations cost, the user's rates and budgets. Shared with
+    /// the job queue.
+    pub costs: Arc<dyn CostRepository>,
     /// Each video project's media folder. Shared with the job queue.
     pub files: Arc<dyn ProjectFiles>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
@@ -121,6 +130,7 @@ impl Repositories {
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            costs: Arc::clone(&db) as _,
             research: db,
             files,
             secrets,
@@ -176,6 +186,7 @@ pub struct Bardo {
     narrations: Arc<dyn NarrationRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
+    cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
     market_data: Arc<dyn MarketData>,
@@ -225,6 +236,7 @@ impl Bardo {
             narrations,
             scene_plans,
             network_accounts,
+            costs,
             files,
             secrets,
         } = repositories;
@@ -241,6 +253,11 @@ impl Bardo {
         }
         let catalog = Catalog::load(profile.ui_language);
         let redactor = Redactor::new();
+        let cost_book = CostBook {
+            owner: profile.id,
+            costs,
+            themes: Arc::clone(&themes),
+        };
         let research_handler = NicheResearchHandler {
             owner: profile.id,
             research: Arc::clone(&research),
@@ -253,12 +270,14 @@ impl Bardo {
             text: Arc::clone(&providers.text),
             decisions: Arc::clone(&providers.decisions),
             secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
         };
         let script_handler = ScriptHandler {
             owner: profile.id,
             scripts: Arc::clone(&scripts),
             text: Arc::clone(&providers.text),
             secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
         };
         let narration_handler = NarrationHandler {
             owner: profile.id,
@@ -266,6 +285,7 @@ impl Bardo {
             files: Arc::clone(&files),
             speech: Arc::clone(&providers.speech),
             secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
         };
         let scene_handler = SceneHandler {
             owner: profile.id,
@@ -275,6 +295,7 @@ impl Bardo {
             text: Arc::clone(&providers.text),
             images: Arc::clone(&providers.images),
             secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
         };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
@@ -302,6 +323,7 @@ impl Bardo {
             narrations,
             scene_plans,
             network_accounts,
+            cost_book,
             files,
             audio: providers.audio,
             market_data: providers.market_data,
@@ -633,6 +655,10 @@ pub(crate) mod testing {
             Ok(Decisions {
                 answers,
                 model: "jev-fake".into(),
+                usage: TokenUsage {
+                    input_tokens: 1_500,
+                    output_tokens: 30,
+                },
             })
         }
     }
@@ -802,9 +828,11 @@ pub(crate) mod testing {
                 bytes: SCENE_IMAGE.to_vec(),
                 format: ImageFormat::Png,
                 model: "nano-banana-fake".into(),
-                usage: TokenUsage {
+                usage: bardo_domain::Metered {
                     input_tokens: 12,
-                    output_tokens: 1_290,
+                    output_tokens: 210,
+                    image_tokens: 1_680,
+                    characters: 0,
                 },
             })
         }
@@ -902,6 +930,7 @@ mod tests {
             narrations: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),

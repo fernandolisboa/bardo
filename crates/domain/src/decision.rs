@@ -215,6 +215,8 @@ pub struct Decisions {
     pub answers: HashMap<String, Answer>,
     /// The engine's model and version, for the record.
     pub model: String,
+    /// What the engine counted; it charges for the input.
+    pub usage: crate::TokenUsage,
 }
 
 impl Decisions {
@@ -381,6 +383,7 @@ mod tests {
         let decisions = Decisions {
             answers: HashMap::from([("urgent".to_owned(), Answer::YesNo(YesNoAnswer::new(0.9)))]),
             model: "engine-1".into(),
+            usage: crate::TokenUsage::default(),
         };
         assert!(decisions.yes_no("urgent").is_some());
         assert!(decisions.score("urgent").is_none(), "wrong kind");

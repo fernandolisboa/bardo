@@ -116,6 +116,7 @@ fn reads_typed_answers_with_probabilities_and_confidence() {
         .decide(&key(), STATE, &questions())
         .unwrap();
     assert_eq!(decisions.model, "jev-1.13.0");
+    assert_eq!(decisions.usage.input_tokens, 512, "what the engine charges for");
 
     let fit = decisions.score("fit").unwrap();
     assert_eq!(fit.level, 3.2);

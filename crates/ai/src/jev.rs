@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use bardo_domain::{
     Answer, ApiKey, ChoiceAnswer, Confidence, DecisionEngine, Decisions, Provider, ProviderFailure,
-    ProviderFailureKind, Question, Questions, ScoreAnswer, YesNoAnswer,
+    ProviderFailureKind, Question, Questions, ScoreAnswer, TokenUsage, YesNoAnswer,
 };
 use serde_json::{Map, Value, json};
 
@@ -151,9 +151,14 @@ pub fn parse_decisions(
         }
         answers.insert(id.to_owned(), parse_answer(id, question, answer)?);
     }
+    let usage = &body["usage"];
     Ok(Decisions {
         answers,
         model: body["model"].as_str().unwrap_or(MODEL).to_owned(),
+        usage: TokenUsage {
+            input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
+            output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
+        },
     })
 }
 
@@ -221,6 +226,7 @@ impl<T: Transport> DecisionEngine for JevDecisionEngine<T> {
             return Ok(Decisions {
                 answers: HashMap::new(),
                 model: MODEL.to_owned(),
+                usage: TokenUsage::default(),
             });
         }
         let request = decision_request(key, state, questions);

@@ -45,6 +45,17 @@ impl Provider {
             Provider::YouTubeData => "youtube-data",
         }
     }
+
+    /// Whether calls cost money. The YouTube Data API is free within a
+    /// daily quota, so it has no rates or budget.
+    pub fn is_paid(self) -> bool {
+        self != Provider::YouTubeData
+    }
+
+    /// The providers that cost money, in settings order.
+    pub fn paid() -> impl Iterator<Item = Provider> {
+        Provider::ALL.into_iter().filter(|provider| provider.is_paid())
+    }
 }
 
 impl fmt::Display for Provider {

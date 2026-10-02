@@ -7,7 +7,7 @@ use bardo_ai::GeminiImages;
 use bardo_ai::gemini::{ASPECT_RATIO, IMAGE_MODEL, IMAGE_SIZE, MODELS_URL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ImageFormat, ImageGenerator, ImageRequest, Provider, ProviderFailureKind, TokenUsage,
+    ApiKey, ImageFormat, ImageGenerator, ImageRequest, Metered, Provider, ProviderFailureKind,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -64,12 +64,23 @@ fn returns_the_final_image_not_the_drafts_with_the_tokens_counted() {
     assert_eq!(image.model, "gemini-3.1-flash-image");
     assert_eq!(
         image.usage,
-        TokenUsage {
+        Metered {
             input_tokens: 14,
-            output_tokens: 1_680 + 218,
+            output_tokens: 218,
+            image_tokens: 1_680,
+            characters: 0,
         },
-        "thinking is billed as output"
+        "thinking is billed as text output, the image apart"
     );
+}
+
+#[test]
+fn without_a_breakdown_the_whole_answer_counts_as_image() {
+    let image = images(&["generate-image-no-breakdown"])
+        .generate(&key(), &request())
+        .unwrap();
+    assert_eq!(image.usage.image_tokens, 1_680);
+    assert_eq!(image.usage.output_tokens, 218);
 }
 
 #[test]

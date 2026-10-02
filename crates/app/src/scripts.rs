@@ -12,14 +12,15 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, GeneratedScript, Generation, GenerationId, Job, JobFailure,
+    ApiKey, Channel, ChannelId, CostPurpose, GeneratedScript, Generation, GenerationId, Job, JobFailure,
     JobFailureKind, JobId, JobKind, NoPendingScript, ProfileId, Provider, RepositoryError, Script,
     ScriptFieldError, ScriptRepository, ScriptText, SecretStore, TemplateKind, TemplateUsed,
     TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat,
-    TextGenerator, TextRequest, UiLanguage, VideoProject, VideoProjectId,
+    Money, TextGenerator, TextRequest, UiLanguage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
 use crate::{Bardo, Catalog, KeyState, TemplateError, Text};
 
@@ -49,6 +50,10 @@ pub enum ScriptError {
     /// A script of the project is being generated.
     #[error("a script is already being generated for this project")]
     Busy,
+    /// The generation would reach a provider's budget; the screen asks
+    /// before starting it with `BudgetConsent::Confirmed`.
+    #[error("over budget")]
+    OverBudget(SpendEstimate),
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -66,6 +71,7 @@ impl ScriptError {
             ScriptError::NothingToReview(_) => Text::ScriptNothingToReview,
             ScriptError::MissingKey(_) => Text::ScriptMissingKey,
             ScriptError::Busy => Text::ScriptBusy,
+            ScriptError::OverBudget(_) => Text::BudgetReachedTitle,
             ScriptError::Template(error) => error.message(),
             ScriptError::Repository(_) => Text::ScriptNotSaved,
         }
@@ -89,6 +95,10 @@ pub struct ScriptView {
     pub job: Option<Job>,
     /// The template version the next generation uses.
     pub template: TemplateVersion,
+    /// What generating the script would cost.
+    pub estimate: SpendEstimate,
+    /// What the video cost so far, every step included.
+    pub spent: Money,
 }
 
 /// The script job's payload: the rendered prompt and where it came from.
@@ -137,6 +147,7 @@ pub(crate) struct ScriptHandler {
     pub(crate) scripts: Arc<dyn ScriptRepository>,
     pub(crate) text: Arc<dyn TextGenerator>,
     pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) costs: CostBook,
 }
 
 impl ScriptHandler {
@@ -180,6 +191,16 @@ impl ScriptHandler {
         let generated = self.text.generate(&key, &request).map_err(|failure| {
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
+        self.costs.record_for_project(
+            PaidCall {
+                provider: Provider::Claude,
+                model: &generated.model,
+                purpose: CostPurpose::Script,
+                usage: generated.usage.into(),
+                job,
+            },
+            project,
+        );
         let now = SystemTime::now();
         let generation = Generation {
             id: GenerationId::new(),
@@ -213,6 +234,12 @@ impl ScriptHandler {
         };
         self.scripts.save_script(&script).map_err(unexpected)
     }
+}
+
+/// The Claude call that writes a script from `rendered`.
+fn script_call(rendered: &bardo_domain::RenderedPrompt) -> PlannedCall {
+    PlannedCall::new(Provider::Claude, CostPurpose::Script, 1)
+        .with_prompt(&rendered.instructions, &rendered.prompt)
 }
 
 /// `value`, or `NOT_SET` when blank.
@@ -313,18 +340,41 @@ impl Bardo {
     /// The project's script screen.
     pub fn script(&self, project: VideoProjectId) -> Result<ScriptView, ScriptError> {
         let project = self.own_project(project)?;
+        let template = self.current_template(TemplateKind::Script)?;
+        let rendered = self.render_script(&project, &template)?;
         Ok(ScriptView {
             script: self.scripts.script(project.id)?,
             job: self.latest_script_job(project.id),
-            template: self.current_template(TemplateKind::Script)?,
+            estimate: self.estimate(&[script_call(&rendered)])?,
+            spent: self.project_spend(project.id)?,
+            template,
             project,
         })
     }
 
+    /// The script template filled with the project's facts.
+    fn render_script(
+        &self,
+        project: &VideoProject,
+        template: &TemplateVersion,
+    ) -> Result<bardo_domain::RenderedPrompt, ScriptError> {
+        template
+            .body
+            .render(&self.script_values(project)?)
+            .map_err(|missing| {
+                // Every script variable has a value above.
+                ScriptError::Repository(RepositoryError(Box::new(missing)))
+            })
+    }
+
     /// Starts a job in which Claude writes the project's script from the
     /// current script template. With a script already there, the new one
-    /// waits for review.
-    pub fn generate_script(&self, project: VideoProjectId) -> Result<JobId, ScriptError> {
+    /// waits for review. Past Claude's budget it needs `consent`.
+    pub fn generate_script(
+        &self,
+        project: VideoProjectId,
+        consent: BudgetConsent,
+    ) -> Result<JobId, ScriptError> {
         let project = self.own_project(project)?;
         if self
             .latest_script_job(project.id)
@@ -336,13 +386,10 @@ impl Bardo {
             return Err(ScriptError::MissingKey(Provider::Claude));
         }
         let template = self.current_template(TemplateKind::Script)?;
-        let rendered = template
-            .body
-            .render(&self.script_values(&project)?)
-            .map_err(|missing| {
-                // Every script variable has a value above.
-                ScriptError::Repository(RepositoryError(Box::new(missing)))
-            })?;
+        let rendered = self.render_script(&project, &template)?;
+        if let Err(estimate) = self.check_budget(&[script_call(&rendered)], consent)? {
+            return Err(ScriptError::OverBudget(estimate));
+        }
         let payload = ScriptPayload {
             project: project.id.to_string(),
             template: template.id.to_string(),
@@ -518,7 +565,7 @@ mod tests {
     }
 
     fn generate(app: &Bardo, project: &VideoProject) -> Job {
-        let id = app.generate_script(project.id).unwrap();
+        let id = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
         wait_done(app, id)
     }
 
@@ -731,7 +778,7 @@ mod tests {
         generate(&app, &project);
 
         *h.text.delay.lock().unwrap() = Duration::from_millis(150);
-        let id = app.generate_script(project.id).unwrap();
+        let id = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
         let deadline = Instant::now() + PATIENCE;
         while h.text.requests().len() < 2 {
             assert!(Instant::now() < deadline, "Claude was never asked");
@@ -788,19 +835,19 @@ mod tests {
         let h = Harness::new();
         let mut app = h.start();
         let project = project(&app);
-        let error = app.generate_script(project.id).unwrap_err();
+        let error = app.generate_script(project.id, BudgetConsent::Ask).unwrap_err();
         assert!(matches!(error, ScriptError::MissingKey(Provider::Claude)));
         assert_eq!(error.message(), Text::ScriptMissingKey);
         assert!(app.jobs().is_empty());
 
         app.save_provider_key(Provider::Claude, CLAUDE_KEY).unwrap();
         *h.text.delay.lock().unwrap() = Duration::from_millis(100);
-        let id = app.generate_script(project.id).unwrap();
-        let again = app.generate_script(project.id).unwrap_err();
+        let id = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
+        let again = app.generate_script(project.id, BudgetConsent::Ask).unwrap_err();
         assert!(matches!(again, ScriptError::Busy));
         assert_eq!(again.message(), Text::ScriptBusy);
         wait_done(&app, id);
-        assert!(app.generate_script(project.id).is_ok());
+        assert!(app.generate_script(project.id, BudgetConsent::Ask).is_ok());
     }
 
     #[test]
@@ -849,7 +896,7 @@ mod tests {
         first.answer(&["Draft one."]);
         let app = first.start_with_key();
         let project = project(&app);
-        let id = app.generate_script(project.id).unwrap();
+        let id = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
         assert_eq!(wait_done(&app, id).state(), JobState::Done);
         let saved = script(&app, &project);
 
@@ -866,9 +913,213 @@ mod tests {
             scripts: Arc::clone(&first.db) as _,
             text: Arc::clone(&first.text) as _,
             secrets: Arc::clone(&first.secrets) as _,
+            costs: crate::costs::CostBook {
+                owner: app.profile().id,
+                costs: Arc::clone(&first.db) as _,
+                themes: Arc::clone(&first.db) as _,
+            },
         };
         handler.generate(&payload, id).unwrap();
         assert_eq!(first.text.requests().len(), 1, "Claude is asked once");
         assert_eq!(script(&app, &project), saved);
+    }
+
+    /// Prices the fake Claude model at $4 / $20 per million tokens and
+    /// makes each answer cost $1 + $1.
+    fn price_claude(h: &Harness, app: &Bardo) {
+        use bardo_domain::Meter;
+        app.save_rate(Provider::Claude, "claude-fake", Meter::InputTokens, "4")
+            .unwrap();
+        app.save_rate(Provider::Claude, "claude-fake", Meter::OutputTokens, "20")
+            .unwrap();
+        *h.text.usage.lock().unwrap() = TokenUsage {
+            input_tokens: 250_000,
+            output_tokens: 50_000,
+        };
+    }
+
+    fn dollars(text: &str) -> Money {
+        Money::parse(text).unwrap()
+    }
+
+    #[test]
+    fn generating_a_script_records_its_cost_per_video_channel_and_month() {
+        let h = Harness::new();
+        h.answer(&["Era uma vez uma sonda."]);
+        let app = h.start_with_key();
+        price_claude(&h, &app);
+        let project = project(&app);
+
+        assert_eq!(generate(&app, &project).state(), JobState::Done);
+
+        let month = app.current_month();
+        let costs = app.costs(month).unwrap();
+        assert_eq!(costs.total, dollars("2"));
+        let claude = costs
+            .providers
+            .iter()
+            .find(|p| p.provider == Provider::Claude)
+            .unwrap();
+        assert_eq!(claude.spent, dollars("2"));
+        assert_eq!(claude.budget, None);
+        assert_eq!(costs.channels.len(), 1);
+        assert_eq!(costs.channels[0].name.as_deref(), Some("Space Archives"));
+        assert_eq!(costs.channels[0].amount, dollars("2"));
+        assert_eq!(costs.videos.len(), 1);
+        assert_eq!(costs.videos[0].name.as_deref(), Some(project.title.as_str()));
+        assert_eq!(costs.videos[0].channel.as_deref(), Some("Space Archives"));
+        assert_eq!(costs.videos[0].amount, dollars("2"));
+        assert!(costs.unpriced.is_empty());
+        assert_eq!(app.script(project.id).unwrap().spent, dollars("2"));
+
+        let before = app.costs(month.previous()).unwrap();
+        assert_eq!(before.total, Money::ZERO);
+        assert!(before.videos.is_empty());
+    }
+
+    #[test]
+    fn a_model_without_a_rate_counts_as_nothing_and_is_named() {
+        let h = Harness::new();
+        h.answer(&["Era uma vez uma sonda."]);
+        *h.text.usage.lock().unwrap() = TokenUsage {
+            input_tokens: 800,
+            output_tokens: 2_400,
+        };
+        let app = h.start_with_key();
+        let project = project(&app);
+
+        assert_eq!(generate(&app, &project).state(), JobState::Done);
+
+        let costs = app.costs(app.current_month()).unwrap();
+        assert_eq!(costs.total, Money::ZERO);
+        assert_eq!(
+            costs.unpriced,
+            vec![(Provider::Claude, "claude-fake".to_owned())]
+        );
+    }
+
+    #[test]
+    fn the_estimate_shows_before_generating_and_learns_from_past_scripts() {
+        let h = Harness::new();
+        h.answer(&["Era uma vez uma sonda."]);
+        let app = h.start_with_key();
+        let project = project(&app);
+
+        let first = app.script(project.id).unwrap().estimate;
+        assert!(!first.is_partial());
+        assert_eq!(first.providers.len(), 1);
+        assert!(first.total() > Money::ZERO);
+
+        price_claude(&h, &app);
+        generate(&app, &project);
+        app.accept_script(project.id).ok();
+
+        // 50,000 output tokens at Opus's $20 per million is $1.
+        let learned = app.script(project.id).unwrap().estimate;
+        assert!(learned.total() >= dollars("1"), "{learned:?}");
+        assert!(learned.total() > first.total());
+    }
+
+    #[test]
+    fn a_budget_warns_from_80_percent_and_asks_from_100() {
+        let h = Harness::new();
+        h.answer(&["Draft one.", "Draft two."]);
+        let app = h.start_with_key();
+        price_claude(&h, &app);
+        let project = project(&app);
+        generate(&app, &project);
+
+        // $2 spent, and the next script estimated at about $1.
+        app.set_budget(Provider::Claude, "10").unwrap();
+        let estimate = app.script(project.id).unwrap().estimate;
+        assert_eq!(estimate.level(), bardo_domain::BudgetLevel::Under);
+
+        app.set_budget(Provider::Claude, "3.5").unwrap();
+        let estimate = app.script(project.id).unwrap().estimate;
+        assert_eq!(estimate.level(), bardo_domain::BudgetLevel::Warning);
+        assert_eq!(estimate.near_budget().count(), 1);
+
+        app.set_budget(Provider::Claude, "2").unwrap();
+        let claude = app.costs(app.current_month()).unwrap().providers[0].clone();
+        assert_eq!(claude.level, Some(bardo_domain::BudgetLevel::Reached));
+        assert_eq!(claude.percent, Some(100));
+        let asked = h.text.requests().len();
+        match app.generate_script(project.id, BudgetConsent::Ask) {
+            Err(ScriptError::OverBudget(estimate)) => {
+                let over: Vec<_> = estimate.over_budget().collect();
+                assert_eq!(over.len(), 1);
+                assert_eq!(over[0].provider, Provider::Claude);
+                assert_eq!(over[0].spent, dollars("2"));
+                assert_eq!(over[0].budget, Some(dollars("2")));
+            }
+            other => panic!("expected the budget question, got {other:?}"),
+        }
+        assert_eq!(h.text.requests().len(), asked, "nothing ran");
+
+        let id = app
+            .generate_script(project.id, BudgetConsent::Confirmed)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Done);
+        assert_eq!(app.costs(app.current_month()).unwrap().total, dollars("4"));
+
+        app.remove_budget(Provider::Claude).unwrap();
+        let estimate = app.script(project.id).unwrap().estimate;
+        assert_eq!(estimate.level(), bardo_domain::BudgetLevel::Under);
+    }
+
+    #[test]
+    fn budgets_and_rates_check_what_is_typed() {
+        use crate::CostError;
+        use bardo_domain::{Meter, MoneyError, RateFieldError};
+
+        let app = Harness::new().start();
+        assert!(matches!(
+            app.set_budget(Provider::Claude, "ten"),
+            Err(CostError::InvalidBudget(MoneyError::Invalid))
+        ));
+        assert!(matches!(
+            app.set_budget(Provider::YouTubeData, "1"),
+            Err(CostError::NotPaid(Provider::YouTubeData))
+        ));
+        app.set_budget(Provider::Gemini, "5").unwrap();
+        app.set_budget(Provider::Gemini, "7,50").unwrap();
+        let costs = app.costs(app.current_month()).unwrap();
+        let gemini = costs
+            .providers
+            .iter()
+            .find(|p| p.provider == Provider::Gemini)
+            .unwrap();
+        assert_eq!(gemini.budget, Some(dollars("7.50")));
+        assert!(costs.providers.iter().all(|p| p.provider.is_paid()));
+
+        assert!(matches!(
+            app.save_rate(Provider::Claude, "my model", Meter::InputTokens, "1"),
+            Err(CostError::InvalidRate(RateFieldError::ModelHasSpaces))
+        ));
+        assert!(matches!(
+            app.save_rate(Provider::YouTubeData, "", Meter::InputTokens, "1"),
+            Err(CostError::InvalidRate(RateFieldError::NotPaid))
+        ));
+
+        let opus = bardo_ai::claude::MODEL;
+        let row = |app: &Bardo| {
+            app.costs(app.current_month())
+                .unwrap()
+                .rates
+                .into_iter()
+                .find(|row| row.rate.model == opus && row.rate.meter == Meter::InputTokens)
+                .unwrap()
+        };
+        assert_eq!(row(&app).rate.price, dollars("4"));
+        assert!(!row(&app).changed);
+        app.save_rate(Provider::Claude, opus, Meter::InputTokens, "5")
+            .unwrap();
+        let changed = row(&app);
+        assert_eq!((changed.rate.price, changed.default), (dollars("5"), Some(dollars("4"))));
+        assert!(changed.changed);
+        app.reset_rate(Provider::Claude, opus, Meter::InputTokens)
+            .unwrap();
+        assert_eq!(row(&app).rate.price, dollars("4"));
+        assert!(!row(&app).changed);
     }
 }

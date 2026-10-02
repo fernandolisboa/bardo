@@ -15,14 +15,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    Alignment, ApiKey, CharTiming, GenerationPresets, Job, JobFailure, JobFailureKind, JobId,
-    JobKind, Narration, NarrationId, NarrationRepository, Persona, ProfileId, Progress,
+    Alignment, ApiKey, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind, JobId,
+    JobKind, Metered, Narration, NarrationId, NarrationRepository, Persona, ProfileId, Progress,
     ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore, SpeechRequest,
     SpeechSynthesizer, VideoProject, VideoProjectId, VoiceRef, WordTimings, split_for_speech,
 };
 use bardo_media::{Playback, PlaybackError, mp3};
 use serde::{Deserialize, Serialize};
 
+use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
 use crate::{Bardo, KeyState, Text};
 
@@ -42,6 +43,10 @@ pub enum NarrationError {
     /// A narration of the project is being generated.
     #[error("a narration is already being generated for this project")]
     Busy,
+    /// The narration would reach the provider's budget; the screen asks
+    /// before starting it with `BudgetConsent::Confirmed`.
+    #[error("over budget")]
+    OverBudget(SpendEstimate),
     /// Playback needs a narration.
     #[error("the project has no narration yet")]
     NoNarration,
@@ -63,6 +68,7 @@ impl NarrationError {
             NarrationError::NoPersona => Text::NarrationNoPersona,
             NarrationError::MissingKey(_) => Text::NarrationMissingKey,
             NarrationError::Busy => Text::NarrationBusy,
+            NarrationError::OverBudget(_) => Text::BudgetReachedTitle,
             NarrationError::NoNarration => Text::NarrationMissing,
             NarrationError::AudioMissing => Text::NarrationAudioMissing,
             NarrationError::Playback(_) => Text::NarrationCannotPlay,
@@ -85,6 +91,14 @@ pub struct NarrationView {
     pub job: Option<Job>,
     /// Who reads the next narration: the channel's default persona.
     pub persona: Option<Persona>,
+    /// What reading the current script would cost; `None` without one.
+    pub estimate: Option<SpendEstimate>,
+}
+
+/// The provider's calls that read `text` aloud: billed per character.
+fn narration_call(text: &ScriptText) -> PlannedCall {
+    PlannedCall::new(Provider::ElevenLabs, CostPurpose::Narration, 1)
+        .with_characters(text.as_str().chars().count())
 }
 
 impl NarrationView {
@@ -233,6 +247,7 @@ pub(crate) struct NarrationHandler {
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) speech: Arc<dyn SpeechSynthesizer>,
     pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) costs: CostBook,
 }
 
 impl NarrationHandler {
@@ -309,6 +324,16 @@ impl NarrationHandler {
                     format!("ElevenLabs: {}", failure.detail),
                 )
             })?;
+            self.costs.record_for_project(
+                PaidCall {
+                    provider: Provider::ElevenLabs,
+                    model: &speech.model,
+                    purpose: CostPurpose::Narration,
+                    usage: Metered::characters(speech.billed_characters),
+                    job,
+                },
+                project,
+            );
             let record = PartRecord::new(speech.model, speech.billed_characters, &speech.alignment);
             let record = serde_json::to_vec(&record).map_err(unexpected)?;
             self.files
@@ -500,7 +525,12 @@ impl Bardo {
             (Some(narration), Some(script)) => narration.is_stale(script),
             _ => false,
         };
+        let estimate = match &script {
+            Some(script) => Some(self.estimate(&[narration_call(script.text())])?),
+            None => None,
+        };
         Ok(NarrationView {
+            estimate,
             script: script.map(|script| script.text().clone()),
             narration,
             stale,
@@ -512,8 +542,13 @@ impl Bardo {
 
     /// Starts a job in which the channel's default persona reads the
     /// project's current script. The new narration replaces the current
-    /// one once it is complete.
-    pub fn generate_narration(&self, project: VideoProjectId) -> Result<JobId, NarrationError> {
+    /// one once it is complete. Past the voice provider's budget it needs
+    /// `consent`.
+    pub fn generate_narration(
+        &self,
+        project: VideoProjectId,
+        consent: BudgetConsent,
+    ) -> Result<JobId, NarrationError> {
         let project = self.narration_project(project)?;
         let script = self
             .scripts
@@ -529,6 +564,9 @@ impl Bardo {
         let provider = persona.details.voice().provider();
         if self.provider_key(provider).state == KeyState::NotSet {
             return Err(NarrationError::MissingKey(provider));
+        }
+        if let Err(estimate) = self.check_budget(&[narration_call(script.text())], consent)? {
+            return Err(NarrationError::OverBudget(estimate));
         }
         let voice = persona.details.voice();
         let presets = persona.details.presets();
@@ -792,13 +830,13 @@ mod tests {
             .unwrap();
         let project = theme.approve(SystemTime::now()).unwrap();
         app.themes.start_project(&theme, &project).unwrap();
-        let job = app.generate_script(project.id).unwrap();
+        let job = app.generate_script(project.id, BudgetConsent::Ask).unwrap();
         assert_eq!(wait_done(app, job).state(), JobState::Done);
         project
     }
 
     fn narrate(app: &Bardo, project: &VideoProject) -> Narration {
-        let id = app.generate_narration(project.id).unwrap();
+        let id = app.generate_narration(project.id, BudgetConsent::Ask).unwrap();
         let job = wait_done(app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
         app.narration(project.id).unwrap().narration.unwrap()
@@ -945,6 +983,11 @@ mod tests {
             files: Arc::clone(&h.files),
             speech: Arc::clone(&h.speech) as _,
             secrets: Arc::clone(&h.secrets) as _,
+            costs: crate::costs::CostBook {
+                owner: app.profile().id,
+                costs: Arc::clone(&h.db) as _,
+                themes: Arc::clone(&h.db) as _,
+            },
         };
         handler.narrate(job.payload(), job.id(), None).unwrap();
 
@@ -1014,7 +1057,7 @@ mod tests {
         let mut app = h.start();
         let bare = project_without_persona(&app, "No Narrator");
         assert!(matches!(
-            app.generate_narration(bare.id),
+            app.generate_narration(bare.id, BudgetConsent::Ask),
             Err(NarrationError::NoPersona)
         ));
         assert_eq!(
@@ -1022,13 +1065,13 @@ mod tests {
             Text::NarrationNoPersona
         );
         assert!(matches!(
-            app.generate_narration(VideoProjectId::new()),
+            app.generate_narration(VideoProjectId::new(), BudgetConsent::Ask),
             Err(NarrationError::ProjectNotFound)
         ));
 
         let project = project(&app);
         app.remove_provider_key(Provider::ElevenLabs).unwrap();
-        let error = app.generate_narration(project.id).unwrap_err();
+        let error = app.generate_narration(project.id, BudgetConsent::Ask).unwrap_err();
         assert!(matches!(
             error,
             NarrationError::MissingKey(Provider::ElevenLabs)
@@ -1038,12 +1081,12 @@ mod tests {
             .unwrap();
 
         *h.speech.delay.lock().unwrap() = Duration::from_millis(100);
-        let id = app.generate_narration(project.id).unwrap();
-        let busy = app.generate_narration(project.id).unwrap_err();
+        let id = app.generate_narration(project.id, BudgetConsent::Ask).unwrap();
+        let busy = app.generate_narration(project.id, BudgetConsent::Ask).unwrap_err();
         assert!(matches!(busy, NarrationError::Busy));
         assert_eq!(busy.message(), Text::NarrationBusy);
         wait_done(&app, id);
-        assert!(app.generate_narration(project.id).is_ok());
+        assert!(app.generate_narration(project.id, BudgetConsent::Ask).is_ok());
     }
 
     #[test]
@@ -1073,7 +1116,7 @@ mod tests {
 
         assert_eq!(app.narration(project.id).unwrap().script, None);
         assert!(matches!(
-            app.generate_narration(project.id),
+            app.generate_narration(project.id, BudgetConsent::Ask),
             Err(NarrationError::NoScript)
         ));
         assert!(matches!(
@@ -1091,7 +1134,7 @@ mod tests {
         ));
         let app = h.start();
         let project = project(&app);
-        let id = app.generate_narration(project.id).unwrap();
+        let id = app.generate_narration(project.id, BudgetConsent::Ask).unwrap();
 
         let job = wait_done(&app, id);
         assert_eq!(job.state(), JobState::Failed);

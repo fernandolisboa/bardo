@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, DecisionEngine, Decisions, Job, JobFailure, JobFailureKind, JobId,
+    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngine, Decisions, Job, JobFailure, JobFailureKind, JobId,
     JobKind, Niche, NicheScores, NicheSeedError, ProfileId, Progress, Provider, ProviderFailure,
     Question, Questions, Reason, RepositoryError, SecretStore, TextFormat, TextGenerator,
     TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
@@ -19,6 +19,7 @@ use bardo_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
 use crate::{Bardo, Catalog, KeyState, Text};
 
@@ -52,6 +53,10 @@ pub enum ThemeError {
     Busy,
     #[error("no theme is waiting for a ranking")]
     NothingToRank,
+    /// The work would reach a provider's budget; the screen asks before
+    /// starting it with `BudgetConsent::Confirmed`.
+    #[error("over budget")]
+    OverBudget(SpendEstimate),
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -69,6 +74,7 @@ impl ThemeError {
             ThemeError::MissingKey(provider) => Text::ThemesMissingKey(*provider),
             ThemeError::Busy => Text::ThemesBusy,
             ThemeError::NothingToRank => Text::ThemesNothingToRank,
+            ThemeError::OverBudget(_) => Text::BudgetReachedTitle,
             ThemeError::Repository(_) => Text::ThemeNotSaved,
         }
     }
@@ -102,6 +108,28 @@ pub struct ThemesView {
     pub job: Option<Job>,
     /// The channel's video projects, newest first.
     pub projects: Vec<VideoProject>,
+    /// What proposing and ranking new ideas would cost.
+    pub suggest_estimate: SpendEstimate,
+    /// What ranking the unranked themes would cost; `None` when none
+    /// waits.
+    pub rank_estimate: Option<SpendEstimate>,
+}
+
+/// The paid calls of a suggestion run: Claude proposes, the engine ranks.
+fn suggestion_calls() -> [PlannedCall; 2] {
+    [
+        PlannedCall::new(Provider::Claude, CostPurpose::ThemeIdeas, 1),
+        ranking_call(SUGGESTIONS_PER_RUN),
+    ]
+}
+
+/// The engine's calls to rank `themes` themes.
+fn ranking_call(themes: usize) -> PlannedCall {
+    PlannedCall::new(
+        Provider::TypeSafe,
+        CostPurpose::ThemeRanking,
+        themes.div_ceil(RANK_BATCH) as u64,
+    )
 }
 
 /// What providers learn about the channel, fixed when the job starts.
@@ -392,6 +420,7 @@ pub(crate) struct ThemeHandler {
     pub(crate) text: Arc<dyn TextGenerator>,
     pub(crate) decisions: Arc<dyn DecisionEngine>,
     pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) costs: CostBook,
 }
 
 impl ThemeHandler {
@@ -440,6 +469,17 @@ impl ThemeHandler {
             .text
             .generate(&key, &request)
             .map_err(|failure| provider_failure("Claude", failure))?;
+        self.costs.record(
+            PaidCall {
+                provider: Provider::Claude,
+                model: &generated.model,
+                purpose: CostPurpose::ThemeIdeas,
+                usage: generated.usage.into(),
+                job,
+            },
+            Some(channel),
+            None,
+        );
         let ideas = usable_ideas(&generated.text, &existing)?;
 
         let now = SystemTime::now();
@@ -507,6 +547,17 @@ impl ThemeHandler {
                 .decisions
                 .decide(&key, &state, &questions)
                 .map_err(|failure| provider_failure("decision engine", failure))?;
+            self.costs.record(
+                PaidCall {
+                    provider: Provider::TypeSafe,
+                    model: &decisions.model,
+                    purpose: CostPurpose::ThemeRanking,
+                    usage: decisions.usage.into(),
+                    job: cx.id(),
+                },
+                Some(channel),
+                None,
+            );
             let ranked_at = SystemTime::now();
 
             let mut ranked = Vec::new();
@@ -680,6 +731,7 @@ impl Bardo {
             .or_else(|| niches.first().cloned());
         let job = self.latest_theme_job(channel.id);
         let projects = self.themes.projects(channel.id)?;
+        let suggest_estimate = self.estimate(&suggestion_calls())?;
         let Some(niche) = niche else {
             return Ok(ThemesView {
                 niches,
@@ -690,6 +742,8 @@ impl Bardo {
                 unranked: 0,
                 job,
                 projects,
+                suggest_estimate,
+                rank_estimate: None,
             });
         };
 
@@ -722,35 +776,69 @@ impl Bardo {
             unranked,
             job,
             projects,
+            suggest_estimate,
+            rank_estimate: match unranked {
+                0 => None,
+                n => Some(self.estimate(&[ranking_call(n)])?),
+            },
         })
     }
 
+    /// Past a budget without `consent`, the estimate to ask about.
+    fn theme_budget(
+        &self,
+        calls: &[PlannedCall],
+        consent: BudgetConsent,
+    ) -> Result<(), ThemeError> {
+        self.check_budget(calls, consent)?
+            .map_err(ThemeError::OverBudget)
+    }
+
     /// Starts a job in which Claude proposes ideas for the niche and the
-    /// decision engine ranks them.
-    pub fn suggest_themes(&self, channel: ChannelId, niche: &str) -> Result<JobId, ThemeError> {
+    /// decision engine ranks them. Past Claude's or TypeSafe's budget it
+    /// needs `consent`.
+    pub fn suggest_themes(
+        &self,
+        channel: ChannelId,
+        niche: &str,
+        consent: BudgetConsent,
+    ) -> Result<JobId, ThemeError> {
         let channel = self.theme_channel(channel)?;
         let niche = Niche::new(niche).map_err(ThemeError::InvalidNiche)?;
         self.ensure_idle(channel.id)?;
         self.ensure_key(Provider::Claude)?;
         self.ensure_key(Provider::TypeSafe)?;
+        self.theme_budget(&suggestion_calls(), consent)?;
         self.enqueue_theme_job(JobKind::ThemeSuggestion, &channel, &niche)
     }
 
     /// Starts a job ranking the niche's suggested themes that have no
-    /// ranking (edited ones, or ones a failed job left behind).
-    pub fn rank_themes(&self, channel: ChannelId, niche: &str) -> Result<JobId, ThemeError> {
+    /// ranking (edited ones, or ones a failed job left behind). Past
+    /// TypeSafe's budget it needs `consent`.
+    pub fn rank_themes(
+        &self,
+        channel: ChannelId,
+        niche: &str,
+        consent: BudgetConsent,
+    ) -> Result<JobId, ThemeError> {
         let channel = self.theme_channel(channel)?;
         let niche = Niche::new(niche).map_err(ThemeError::InvalidNiche)?;
         self.ensure_idle(channel.id)?;
-        let waiting = self.themes.themes(channel.id)?.iter().any(|theme| {
-            theme.status() == ThemeStatus::Suggested
-                && theme.ranking().is_none()
-                && theme.niche.key() == niche.key()
-        });
-        if !waiting {
+        let waiting = self
+            .themes
+            .themes(channel.id)?
+            .iter()
+            .filter(|theme| {
+                theme.status() == ThemeStatus::Suggested
+                    && theme.ranking().is_none()
+                    && theme.niche.key() == niche.key()
+            })
+            .count();
+        if waiting == 0 {
             return Err(ThemeError::NothingToRank);
         }
         self.ensure_key(Provider::TypeSafe)?;
+        self.theme_budget(&[ranking_call(waiting)], consent)?;
         self.enqueue_theme_job(JobKind::ThemeRanking, &channel, &niche)
     }
 
@@ -842,6 +930,7 @@ mod tests {
                 narrations: Arc::clone(&self.db) as _,
                 scene_plans: Arc::clone(&self.db) as _,
                 network_accounts: Arc::clone(&self.db) as _,
+                costs: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
@@ -925,7 +1014,7 @@ mod tests {
     /// Suggests themes for the channel's niche and waits for the job.
     fn suggest(app: &Bardo, channel: &Channel) -> Job {
         let id = app
-            .suggest_themes(channel.id, channel.details.niche())
+            .suggest_themes(channel.id, channel.details.niche(), BudgetConsent::Ask)
             .unwrap();
         wait_done(app, id)
     }
@@ -980,6 +1069,37 @@ mod tests {
                     && theme.channel == channel.id
                     && theme.suggestion_job == Some(job.id()))
         );
+    }
+
+    #[test]
+    fn suggesting_records_what_claude_and_jev_cost() {
+        use bardo_domain::{CostPurpose, CostRepository};
+
+        let h = Harness::new();
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        let estimate = app.themes(channel.id, None).unwrap().suggest_estimate;
+        let providers: Vec<_> = estimate.providers.iter().map(|p| p.provider).collect();
+        assert_eq!(providers, [Provider::Claude, Provider::TypeSafe]);
+
+        let job = suggest(&app, &channel);
+        let records = h
+            .db
+            .costs_between(app.profile().id, SystemTime::UNIX_EPOCH, SystemTime::now())
+            .unwrap();
+        let ranking_calls = SUGGESTIONS_PER_RUN.div_ceil(RANK_BATCH);
+        assert_eq!(records.len(), 1 + ranking_calls);
+        assert_eq!(
+            (records[0].provider, records[0].purpose),
+            (Provider::Claude, CostPurpose::ThemeIdeas)
+        );
+        assert!(records[1..].iter().all(|record| record.provider == Provider::TypeSafe
+            && record.purpose == CostPurpose::ThemeRanking
+            && record.model == "jev-fake"
+            && record.usage.input_tokens > 0));
+        assert!(records.iter().all(|record| record.channel == Some(channel.id)
+            && record.project.is_none()
+            && record.job == Some(job.id())));
     }
 
     #[test]
@@ -1090,7 +1210,7 @@ mod tests {
         assert_eq!(view.unranked, SUGGESTIONS_PER_RUN);
 
         *h.decisions.failure.lock().unwrap() = None;
-        let id = app.rank_themes(channel.id, "space history").unwrap();
+        let id = app.rank_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
         let job = wait_done(&app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
         assert_eq!(job.kind(), JobKind::ThemeRanking);
@@ -1123,7 +1243,7 @@ mod tests {
             "unranked ideas sort last"
         );
 
-        let id = app.rank_themes(channel.id, "space history").unwrap();
+        let id = app.rank_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
         assert_eq!(wait_done(&app, id).state(), JobState::Done);
         let (_, questions) = h.decisions.calls().pop().unwrap();
         assert_eq!(questions.len(), 3, "only the edited idea is ranked");
@@ -1133,7 +1253,7 @@ mod tests {
         assert!(instructions.contains("The probe that never came home"));
         assert_eq!(app.themes(channel.id, None).unwrap().unranked, 0);
         assert!(matches!(
-            app.rank_themes(channel.id, "space history"),
+            app.rank_themes(channel.id, "space history", BudgetConsent::Ask),
             Err(ThemeError::NothingToRank)
         ));
     }
@@ -1184,7 +1304,7 @@ mod tests {
         *h.decisions.delay.lock().unwrap() = Duration::from_millis(150);
         let app = h.start_with_keys();
         let channel = channel(&app, "space history");
-        let id = app.suggest_themes(channel.id, "space history").unwrap();
+        let id = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
         wait_until("the decision call", || !h.decisions.calls().is_empty());
 
         let theme = app
@@ -1264,12 +1384,12 @@ mod tests {
         let mut app = h.start();
         let channel = channel(&app, "space history");
 
-        let error = app.suggest_themes(channel.id, "space history").unwrap_err();
+        let error = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap_err();
         assert!(matches!(error, ThemeError::MissingKey(Provider::Claude)));
         assert_eq!(error.message(), Text::ThemesMissingKey(Provider::Claude));
 
         app.save_provider_key(Provider::Claude, CLAUDE_KEY).unwrap();
-        let error = app.suggest_themes(channel.id, "space history").unwrap_err();
+        let error = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap_err();
         assert!(matches!(error, ThemeError::MissingKey(Provider::TypeSafe)));
         assert!(app.jobs().is_empty(), "no job starts without its keys");
     }
@@ -1281,15 +1401,15 @@ mod tests {
         let app = h.start_with_keys();
         let channel = channel(&app, "space history");
 
-        let id = app.suggest_themes(channel.id, "space history").unwrap();
-        let again = app.suggest_themes(channel.id, "space history").unwrap_err();
+        let id = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
+        let again = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap_err();
         assert!(matches!(again, ThemeError::Busy));
         assert_eq!(again.message(), Text::ThemesBusy);
 
         let other = channel_named(&app, "Ocean Files", "deep sea");
-        assert!(app.suggest_themes(other.id, "deep sea").is_ok());
+        assert!(app.suggest_themes(other.id, "deep sea", BudgetConsent::Ask).is_ok());
         wait_done(&app, id);
-        assert!(app.suggest_themes(channel.id, "space history").is_ok());
+        assert!(app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).is_ok());
     }
 
     fn channel_named(app: &Bardo, name: &str, niche: &str) -> Channel {
@@ -1316,7 +1436,7 @@ mod tests {
         let view = app.themes(blank.id, None).unwrap();
         assert!(view.niches.is_empty());
         assert_eq!(view.niche, None);
-        let error = app.suggest_themes(blank.id, " ").unwrap_err();
+        let error = app.suggest_themes(blank.id, " ", BudgetConsent::Ask).unwrap_err();
         assert!(matches!(error, ThemeError::InvalidNiche(_)));
         assert_eq!(error.message(), Text::ThemesPickNiche);
     }
@@ -1328,7 +1448,7 @@ mod tests {
         let channel = channel(&app, "space history");
         suggest(&app, &channel);
         h.text.answer_with(&["A deep sea idea"]);
-        let id = app.suggest_themes(channel.id, "deep sea").unwrap();
+        let id = app.suggest_themes(channel.id, "deep sea", BudgetConsent::Ask).unwrap();
         assert_eq!(wait_done(&app, id).state(), JobState::Done);
 
         let deep = app.themes(channel.id, Some("Deep Sea")).unwrap();
@@ -1379,7 +1499,7 @@ mod tests {
         *first.decisions.delay.lock().unwrap() = Duration::from_millis(100);
         let app = first.start_with_keys();
         let channel = channel(&app, "space history");
-        let id = app.suggest_themes(channel.id, "space history").unwrap();
+        let id = app.suggest_themes(channel.id, "space history", BudgetConsent::Ask).unwrap();
         wait_for(&app, id, |job| job.checkpoint() == Some(PROPOSED));
         drop(app);
 

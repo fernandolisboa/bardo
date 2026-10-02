@@ -1,0 +1,49 @@
+HTTP/2 200
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "**Composing the scene**\n\nA lighthouse on a cliff at dusk, wide frame.",
+            "thought": true
+          },
+          {
+            "inlineData": {
+              "mimeType": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAJCAIAAAC0SDtlAAAAEklEQVR4nGM4QSJgGNUwKDQAAMV3UZCpNc7sAAAAAElFTkSuQmCC"
+            },
+            "thought": true
+          },
+          {
+            "inlineData": {
+              "mimeType": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAJCAIAAAC0SDtlAAAAE0lEQVR4nGMQ0YgiCTGMahgUGgCLQVRhy5VnbgAAAABJRU5ErkJggg=="
+            },
+            "thoughtSignature": "EsoBCscBAXLI2nwQ"
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 14,
+    "candidatesTokenCount": 1680,
+    "totalTokenCount": 1912,
+    "thoughtsTokenCount": 218,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 14
+      }
+    ]
+  },
+  "modelVersion": "gemini-3.1-flash-image",
+  "responseId": "Xq7eaPK8Ndb3nsEPq9XcmAQ"
+}
