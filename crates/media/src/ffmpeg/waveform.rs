@@ -38,8 +38,10 @@ impl Ffmpeg {
 /// Max absolute value of each `slice` samples of little-endian f32.
 fn peaks(bytes: &[u8], slice: usize) -> Vec<f32> {
     let samples: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|sample| f32::from_le_bytes(*sample))
         .collect();
     samples
         .chunks(slice.max(1))
