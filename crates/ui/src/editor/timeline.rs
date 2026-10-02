@@ -38,6 +38,7 @@ use gpui_kit::{
 
 use super::tokens::*;
 use super::{EditorScreen, clip_name, color, icon, label, tool_button};
+use crate::appearance::EditorColor;
 use crate::shell::tr;
 
 /// The track header column, shared with the toolbar's timecode.
@@ -162,7 +163,7 @@ impl Track {
         }
     }
 
-    fn tint(self) -> u32 {
+    fn tint(self) -> EditorColor {
         match self {
             Track::Captions => CAPTIONS,
             Track::Video => VIDEO_EDGE,
@@ -178,9 +179,9 @@ impl Track {
 struct PieceLook {
     /// The element id's prefix.
     id: &'static str,
-    fill: u32,
+    fill: EditorColor,
     /// The waveform's and the outline's color.
-    wave: u32,
+    wave: EditorColor,
 }
 
 /// Zoom and scroll: view state the domain has no say in.
@@ -451,12 +452,6 @@ impl EditorScreen {
             .as_ref()
             .map_or(Duration::ZERO, |editor| editor.playhead());
         // The AI toggle arrives with #30.
-        let toggle = |id: &'static str, text: Text| {
-            tool_button(id, false, false)
-                .border_1()
-                .border_color(color(HAIRLINE))
-                .child(tr(bardo, text))
-        };
         let editing = self
             .editor
             .as_ref()
@@ -557,7 +552,8 @@ impl EditorScreen {
                     )
                     .child(div().w(px(1.)).h(px(18.)).mx_1().bg(color(HAIRLINE)))
                     .child(snap)
-                    .child(toggle("toggle-ai", Text::EditorAiCuts))
+                    // AI cut suggestions come with their slice; until then
+                    // the toggle is hidden, not shown disabled.
                     .child(duck)
                     .child(captions)
                     .child(div().flex_1())

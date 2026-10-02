@@ -9,10 +9,14 @@ use bardo_app::bardo_domain::{Job, JobId, JobState, Progress as JobProgress};
 use bardo_app::{Bardo, JobGroups, TestJob, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px};
 
+use crate::appearance::look;
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 /// How often the panel checks the queue for changes. Reading the revision
@@ -106,12 +110,16 @@ impl JobsPanel {
                     .font_medium()
                     .child(tr(bardo, Text::JobKindName(job.kind()))),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::JobStateName(state))),
-            );
+            .child({
+                let (tone, icon) = match state {
+                    JobState::Running => (Tone::Info, IconName::Loader),
+                    JobState::Queued => (Tone::Neutral, IconName::Inbox),
+                    JobState::Failed => (Tone::Danger, IconName::CircleX),
+                    JobState::Done => (Tone::Success, IconName::CircleCheck),
+                    JobState::Cancelled => (Tone::Neutral, IconName::Ban),
+                };
+                kit::status_with(tone, icon, tr(bardo, Text::JobStateName(state)), cx)
+            });
 
         // Done jobs need no bar; others show it once there is progress.
         let show_progress = state == JobState::Running
@@ -141,16 +149,18 @@ impl JobsPanel {
                 v_flex()
                     .gap_0p5()
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.warning)
-                            .child(SharedString::from(bardo.text_with(
+                        kit::notice(
+                            Tone::Warning,
+                            bardo.text_with(
                                 Text::JobRetryScheduled,
                                 &[
                                     ("attempt", &job.attempts().to_string()),
                                     ("max", &max_attempts.to_string()),
                                 ],
-                            ))),
+                            ),
+                            cx,
+                        )
+                        .text_xs(),
                     )
                     .child(
                         div()
@@ -161,26 +171,27 @@ impl JobsPanel {
                     .into_any_element(),
             ),
             (JobState::Failed, Some(failure)) => Some(
-                v_flex()
-                    .gap_0p5()
+                h_flex()
+                    .gap_1()
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.danger)
-                            .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                        kit::notice(
+                            Tone::Danger,
+                            tr(bardo, Text::JobFailureKindName(failure.kind)),
+                            cx,
+                        )
+                        .text_xs(),
                     )
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        SharedString::from(bardo.text_with(
-                            Text::JobFailedAfter,
-                            &[("attempts", &job.attempts().to_string())],
-                        )),
+                    .child(kit::details(
+                        SharedString::from(format!("job-details-{id}")),
+                        tr(bardo, Text::Details),
+                        vec![
+                            SharedString::from(bardo.text_with(
+                                Text::JobFailedAfter,
+                                &[("attempts", &job.attempts().to_string())],
+                            )),
+                            SharedString::from(failure.detail.clone()),
+                        ],
                     ))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(SharedString::from(failure.detail.clone())),
-                    )
                     .into_any_element(),
             ),
             _ => None,
@@ -206,12 +217,9 @@ impl JobsPanel {
             None
         };
 
-        v_flex()
+        kit::card(cx)
             .p_3()
             .gap_2()
-            .rounded_md()
-            .border_1()
-            .border_color(theme.border)
             .child(header)
             .children(progress)
             .children(status)
@@ -266,22 +274,25 @@ impl Render for JobsPanel {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
 
-        let test_jobs = v_flex()
+        let test_jobs = kit::well(cx)
+            .flex()
+            .flex_col()
             .gap_2()
             .p_3()
-            .rounded_md()
-            .bg(theme.muted)
             .child(
-                div()
-                    .text_sm()
-                    .font_medium()
-                    .child(tr(bardo, Text::TestJobsTitle)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::TestJobsHint)),
+                h_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .child(tr(bardo, Text::TestJobsTitle)),
+                    )
+                    .child(kit::info(
+                        "test-jobs-info",
+                        None,
+                        tr(bardo, Text::TestJobsHint),
+                    )),
             )
             .child(
                 h_flex()
@@ -307,12 +318,9 @@ impl Render for JobsPanel {
                     ),
             );
 
-        let error = self.error.map(|error| {
-            div()
-                .text_sm()
-                .text_color(theme.danger)
-                .child(tr(bardo, error))
-        });
+        let error = self
+            .error
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
         let empty = empty.then(|| {
             div()
                 .text_sm()
@@ -323,6 +331,7 @@ impl Render for JobsPanel {
         v_flex()
             .w(px(360.))
             .h_full()
+            .bg(look(cx).tokens.surface)
             .border_l_1()
             .border_color(theme.border)
             .child(

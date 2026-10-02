@@ -17,6 +17,7 @@ bardo-app.workspace = true
 bardo-storage.workspace = true
 anyhow.workspace = true
 gpui-kit.workspace = true
+tracing.workspace = true
 # Preview frames become RenderImages (ADR-0007).
 image = { version = "0.25", default-features = false }
 sys-locale = "0.3"

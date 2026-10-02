@@ -659,6 +659,7 @@ dependencies = [
  "gpui-kit",
  "image",
  "sys-locale",
+ "tracing",
 ]
 
 [[package]]

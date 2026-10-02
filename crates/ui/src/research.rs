@@ -13,14 +13,13 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
 };
 
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 /// How often the screen checks the job queue for changes.
@@ -301,16 +300,10 @@ impl ResearchScreen {
                     .filter(|_| self.seed_errors.is_empty())
                     .map(|error| tr(bardo, error)),
             )
-            .map(|text| {
-                div()
-                    .text_xs()
-                    .text_color(theme.danger)
-                    .child(text)
-                    .into_any_element()
-            })
+            .map(|text| kit::notice(Tone::Danger, text, cx).into_any_element())
             .collect();
 
-        v_flex()
+        kit::side_panel(cx)
             .id("research-editor")
             .w(px(340.))
             .h_full()
@@ -318,14 +311,7 @@ impl ResearchScreen {
             .overflow_y_scroll()
             .p_4()
             .gap_3()
-            .border_r_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .text_xl()
-                    .font_semibold()
-                    .child(tr(bardo, Text::ResearchTitle)),
-            )
+            .child(kit::title(tr(bardo, Text::ResearchTitle)))
             .child(
                 v_flex()
                     .gap_1()
@@ -347,49 +333,48 @@ impl ResearchScreen {
                 v_flex()
                     .gap_1()
                     .child(
-                        div()
-                            .text_sm()
-                            .font_medium()
-                            .child(tr(bardo, Text::ResearchSeeds)),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(tr(bardo, Text::ResearchSeeds)),
+                            )
+                            .child(kit::info(
+                                "research-seeds-info",
+                                None,
+                                tr(bardo, Text::ResearchSeedsHint),
+                            )),
                     )
                     .child(Textarea::new(&self.seeds))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::ResearchSeedsHint)),
-                    )
                     .children(messages),
             )
-            .children(cost.map(|cost| {
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(cost)
-            }))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .flex_wrap()
-                    .child(
-                        Button::new("run-research")
-                            .primary()
-                            .label(tr(bardo, Text::RunResearch))
-                            .disabled(running)
-                            .on_click(
-                                cx.listener(|this, _: &ClickEvent, _, cx| this.run(false, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("refresh-research")
-                            .outline()
-                            .label(refresh_label)
-                            .disabled(running)
-                            .on_click(
-                                cx.listener(|this, _: &ClickEvent, _, cx| this.run(true, cx)),
-                            ),
-                    ),
-            )
+            // A running job shows its progress instead of the buttons.
+            .when(!running, |editor| {
+                editor.child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .child(
+                            Button::new("run-research")
+                                .primary()
+                                .label(tr(bardo, Text::RunResearch))
+                                .on_click(
+                                    cx.listener(|this, _: &ClickEvent, _, cx| this.run(false, cx)),
+                                ),
+                        )
+                        .child(
+                            Button::new("refresh-research")
+                                .outline()
+                                .label(refresh_label)
+                                .on_click(
+                                    cx.listener(|this, _: &ClickEvent, _, cx| this.run(true, cx)),
+                                ),
+                        )
+                        .children(cost.map(|cost| kit::info("research-cost-info", None, cost))),
+                )
+            })
             .children(self.render_job(cx))
     }
 
@@ -430,22 +415,24 @@ impl ResearchScreen {
                 Some(
                     v_flex()
                         .gap_1()
+                        .child(kit::notice(
+                            Tone::Danger,
+                            tr(bardo, Text::ResearchStopped),
+                            cx,
+                        ))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.danger)
-                                .child(tr(bardo, Text::ResearchStopped)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(SharedString::from(failure.detail.clone())),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                                )
+                                .child(kit::details(
+                                    "research-failure-details",
+                                    tr(bardo, Text::Details),
+                                    vec![SharedString::from(failure.detail.clone())],
+                                )),
                         )
                         .into_any_element(),
                 )
@@ -456,7 +443,6 @@ impl ResearchScreen {
 
     fn render_results(&self, cx: &App) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         let rows: Vec<AnyElement> = self
             .view
             .iter()
@@ -474,20 +460,11 @@ impl ResearchScreen {
             .p_4()
             .gap_3()
             .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_semibold()
-                            .child(tr(bardo, Text::ResearchResultsTitle)),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::ResearchScoresHint)),
-                    ),
+                kit::section_heading(tr(bardo, Text::ResearchResultsTitle)).child(kit::info(
+                    "research-scores-info",
+                    None,
+                    tr(bardo, Text::ResearchScoresHint),
+                )),
             )
             .children(rows)
     }
@@ -524,13 +501,10 @@ impl ResearchScreen {
             Some(result) => self.render_result(result, cx),
         };
 
-        v_flex()
+        kit::card(cx)
             .id(("niche", ix))
             .p_3()
             .gap_2()
-            .rounded_md()
-            .border_1()
-            .border_color(theme.border)
             .child(header)
             .child(body)
             .into_any_element()
@@ -613,11 +587,11 @@ impl ResearchScreen {
                     .text_color(theme.muted_foreground)
                     .children(footer.into_iter().map(|text| div().child(text)))
                     .when(!result.fresh, |line| {
-                        line.child(
-                            div()
-                                .text_color(theme.warning)
-                                .child(tr(bardo, Text::ResearchStale)),
-                        )
+                        line.child(kit::status(
+                            Tone::Warning,
+                            tr(bardo, Text::ResearchStale),
+                            cx,
+                        ))
                     }),
             )
             .into_any_element()

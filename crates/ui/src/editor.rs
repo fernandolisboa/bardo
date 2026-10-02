@@ -43,6 +43,7 @@ use gpui_kit::{
     canvas, div, img, px, relative, rgb,
 };
 
+use crate::appearance::{self, EditorColor};
 use crate::shell::tr;
 
 /// How often the screen checks the job queue for changes.
@@ -76,32 +77,34 @@ struct FramedWindow {
     dragging: bool,
 }
 
-/// The design's tokens (`docs/design/editor.md`); the fills of tracks
-/// that have no content yet come with their slices.
+/// The design's palette (`docs/design/editor.md`) by role. The colors
+/// follow the interface theme (`appearance::EditorTokens`): Graphite under
+/// light and base dark themes, the theme's own under dark terminal and high
+/// contrast themes.
 pub(crate) mod tokens {
-    pub const APP: u32 = 0x0F1113;
-    pub const PANEL: u32 = 0x16191C;
-    pub const RAISED: u32 = 0x1E2226;
-    pub const RAISED_HOVER: u32 = 0x262B30;
-    pub const HAIRLINE: u32 = 0x2A2F35;
-    pub const OUTLINE: u32 = 0x3A4048;
-    pub const TEXT: u32 = 0xE7E9EC;
-    pub const TEXT_2: u32 = 0xA3AAB3;
-    pub const TEXT_3: u32 = 0x8A929C;
-    pub const ACCENT: u32 = 0xF2A33A;
-    pub const ACCENT_INK: u32 = 0x1A1206;
-    pub const ERROR: u32 = 0xE5534B;
-    pub const ERROR_FILL: u32 = 0x2A1416;
-    pub const VIDEO_FILL: u32 = 0x2B3D54;
-    pub const VIDEO_EDGE: u32 = 0x4F6E94;
-    pub const NARRATION: u32 = 0x2FA295;
-    pub const NARRATION_FILL: u32 = 0x14302D;
-    pub const MUSIC: u32 = 0xBBAEF7;
-    pub const MUSIC_FILL: u32 = 0x231F36;
-    pub const SFX_FILL: u32 = 0x7A4230;
-    pub const SFX_EDGE: u32 = 0xC8664A;
-    pub const CAPTIONS: u32 = 0xD2D6DC;
-    pub const CAPTIONS_INK: u32 = 0x121417;
+    pub use crate::appearance::EditorColor;
+    pub const APP: EditorColor = EditorColor::App;
+    pub const PANEL: EditorColor = EditorColor::Panel;
+    pub const RAISED: EditorColor = EditorColor::Raised;
+    pub const RAISED_HOVER: EditorColor = EditorColor::RaisedHover;
+    pub const HAIRLINE: EditorColor = EditorColor::Hairline;
+    pub const OUTLINE: EditorColor = EditorColor::Outline;
+    pub const TEXT: EditorColor = EditorColor::Text;
+    pub const TEXT_2: EditorColor = EditorColor::Text2;
+    pub const TEXT_3: EditorColor = EditorColor::Text3;
+    pub const ACCENT: EditorColor = EditorColor::Accent;
+    pub const ERROR: EditorColor = EditorColor::Error;
+    pub const ERROR_FILL: EditorColor = EditorColor::ErrorFill;
+    pub const VIDEO_FILL: EditorColor = EditorColor::VideoFill;
+    pub const VIDEO_EDGE: EditorColor = EditorColor::VideoEdge;
+    pub const NARRATION: EditorColor = EditorColor::Narration;
+    pub const NARRATION_FILL: EditorColor = EditorColor::NarrationFill;
+    pub const MUSIC: EditorColor = EditorColor::Music;
+    pub const MUSIC_FILL: EditorColor = EditorColor::MusicFill;
+    pub const SFX_FILL: EditorColor = EditorColor::SfxFill;
+    pub const SFX_EDGE: EditorColor = EditorColor::SfxEdge;
+    pub const CAPTIONS: EditorColor = EditorColor::Captions;
+    pub const CAPTIONS_INK: EditorColor = EditorColor::CaptionsInk;
 }
 
 use tokens::*;
@@ -572,15 +575,15 @@ impl EditorScreen {
     }
 }
 
-fn color(hex: u32) -> Hsla {
-    rgb(hex).into()
+fn color(ink: EditorColor) -> Hsla {
+    appearance::editor_color(ink)
 }
 
 /// A text label in the design's small UI size.
-pub(crate) fn label(text: impl Into<SharedString>, hex: u32) -> gpui_kit::Div {
+pub(crate) fn label(text: impl Into<SharedString>, ink: EditorColor) -> gpui_kit::Div {
     div()
         .text_size(px(12.))
-        .text_color(color(hex))
+        .text_color(color(ink))
         .whitespace_nowrap()
         .child(text.into())
 }
@@ -618,8 +621,8 @@ pub(crate) fn tool_button(
     }
 }
 
-fn icon(name: IconName, hex: u32) -> Icon {
-    Icon::new(name).size_4().text_color(color(hex))
+fn icon(name: IconName, ink: EditorColor) -> Icon {
+    Icon::new(name).size_4().text_color(color(ink))
 }
 
 /// `m:ss` for scene and clip lengths.
@@ -711,19 +714,8 @@ impl EditorScreen {
                     this.edit(EditAction::Redo, cx);
                 }))
             });
-        // Render (#27) comes with its slice.
-        let render = div()
-            .h(px(28.))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded(px(4.))
-            .bg(color(ACCENT))
-            .text_color(color(ACCENT_INK))
-            .text_size(px(12.))
-            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-            .opacity(0.5)
-            .child(tr(bardo, Text::EditorReviewRender));
+        // Render (#27) comes with its slice; until then its button is
+        // hidden, not shown disabled.
         h_flex()
             .h(px(44.))
             .flex_none()
@@ -747,7 +739,6 @@ impl EditorScreen {
             .child(jobs)
             .child(undo)
             .child(redo)
-            .child(render)
             .into_any_element()
     }
 
@@ -1131,7 +1122,7 @@ impl EditorScreen {
             .max_w_full()
             .aspect_ratio(ratio)
             .overflow_hidden()
-            .bg(color(0x000000))
+            .bg(gpui_kit::black())
             .border_1()
             .border_color(color(HAIRLINE));
         let frame = match framed {
@@ -1763,9 +1754,9 @@ impl EditorScreen {
                 } else {
                     gpui_kit::FontWeight::NORMAL
                 })
-                .text_color(color(look.fill))
+                .text_color(Hsla::from(rgb(look.fill)))
                 .when_some(look.band, |text, (band, opacity, _)| {
-                    text.bg(color(band).opacity(opacity))
+                    text.bg(Hsla::from(rgb(band)).opacity(opacity))
                 })
                 .child(sample);
             v_flex()

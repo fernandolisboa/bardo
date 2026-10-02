@@ -14,9 +14,8 @@ use bardo_app::{Bardo, PersonaError, Text, VoiceStatus, persona_package_folder};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -24,6 +23,7 @@ use gpui_kit::{
     Window, div, px,
 };
 
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 /// Field errors each control shows, and clears once the user edits it.
@@ -538,25 +538,17 @@ impl PersonasScreen {
             .map(|(ix, persona)| {
                 let id = persona.id;
                 let selected = self.editing == Some(id);
-                v_flex()
-                    .id(("persona", ix))
-                    .px_3()
-                    .py_2()
-                    .gap_0p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .when(selected, |row| row.bg(theme.list_active))
-                    .when(!selected, |row| row.hover(|row| row.bg(theme.list_hover)))
+                kit::list_row(("persona", ix), selected, cx)
                     .child(div().child(SharedString::from(persona.details.name().to_owned())))
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         SharedString::from(persona.details.voice().name().to_owned()),
                     ))
                     .children(persona.voice_flag.map(|flag| {
-                        h_flex().child(
-                            Tag::warning()
-                                .small()
-                                .child(tr(bardo, Text::VoiceFlagTag(flag))),
-                        )
+                        h_flex().child(kit::status(
+                            Tone::Warning,
+                            tr(bardo, Text::VoiceFlagTag(flag)),
+                            cx,
+                        ))
                     }))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.edit(id, window, cx)
@@ -568,9 +560,11 @@ impl PersonasScreen {
         let body: AnyElement = if self.load_failed {
             div()
                 .p_3()
-                .text_sm()
-                .text_color(theme.danger)
-                .child(tr(bardo, Text::PersonasNotLoaded))
+                .child(kit::notice(
+                    Tone::Danger,
+                    tr(bardo, Text::PersonasNotLoaded),
+                    cx,
+                ))
                 .into_any_element()
         } else if rows.is_empty() {
             div()
@@ -591,16 +585,23 @@ impl PersonasScreen {
                 .into_any_element()
         };
 
-        v_flex()
+        kit::side_panel(cx)
             .w(px(280.))
             .h_full()
-            .border_r_1()
-            .border_color(theme.border)
             .child(
                 h_flex()
                     .p_3()
                     .justify_between()
-                    .child(div().font_semibold().child(tr(bardo, Text::PersonasTitle)))
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(div().font_semibold().child(tr(bardo, Text::PersonasTitle)))
+                            .child(kit::info(
+                                "personas-info",
+                                None,
+                                tr(bardo, Text::PersonasHint),
+                            )),
+                    )
                     .child(
                         Button::new("new-persona")
                             .small()
@@ -609,14 +610,6 @@ impl PersonasScreen {
                                 this.start_new(window, cx)
                             })),
                     ),
-            )
-            .child(
-                div()
-                    .px_3()
-                    .pb_2()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::PersonasHint)),
             )
             .child(
                 h_flex().px_3().pb_2().child(
@@ -636,42 +629,43 @@ impl PersonasScreen {
         let theme = cx.theme();
         let loading = self.listing.is_some();
 
-        let current: AnyElement = match &self.voice {
-            Some(voice) => {
-                let status = match bardo.voice_status(voice) {
-                    VoiceStatus::Available => Some((Text::VoiceAvailable, theme.success)),
-                    VoiceStatus::Missing => Some((Text::VoiceMissing, theme.warning)),
-                    VoiceStatus::Unknown => None,
-                };
-                v_flex()
-                    .gap_0p5()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .font_medium()
-                                    .child(SharedString::from(voice.name().to_owned())),
-                            )
-                            .child(div().text_xs().text_color(theme.muted_foreground).child(
-                                SharedString::from(format!(
-                                    "{} · {}",
-                                    bardo.text(Text::ProviderName(voice.provider())),
-                                    voice.id()
+        let current: AnyElement =
+            match &self.voice {
+                Some(voice) => {
+                    let status = match bardo.voice_status(voice) {
+                        VoiceStatus::Available => Some((Text::VoiceAvailable, Tone::Success)),
+                        VoiceStatus::Missing => Some((Text::VoiceMissing, Tone::Warning)),
+                        VoiceStatus::Unknown => None,
+                    };
+                    v_flex()
+                        .gap_0p5()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .font_medium()
+                                        .child(SharedString::from(voice.name().to_owned())),
+                                )
+                                .child(div().text_xs().text_color(theme.muted_foreground).child(
+                                    SharedString::from(format!(
+                                        "{} · {}",
+                                        bardo.text(Text::ProviderName(voice.provider())),
+                                        voice.id()
+                                    )),
                                 )),
-                            )),
-                    )
-                    .children(status.map(|(text, color)| {
-                        div().text_xs().text_color(color).child(tr(bardo, text))
-                    }))
-                    .into_any_element()
-            }
-            None => div()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child(tr(bardo, Text::PersonaVoiceNone))
-                .into_any_element(),
-        };
+                        )
+                        .children(status.map(|(text, tone)| {
+                            h_flex().child(kit::status(tone, tr(bardo, text), cx))
+                        }))
+                        .into_any_element()
+                }
+                None => div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(tr(bardo, Text::PersonaVoiceNone))
+                    .into_any_element(),
+            };
 
         let toggle = if self.picker_open {
             Text::HideVoices
@@ -718,21 +712,24 @@ impl PersonasScreen {
         v_flex()
             .gap_2()
             .child(
-                div()
-                    .text_sm()
-                    .font_medium()
-                    .child(tr(bardo, Text::PersonaVoice)),
+                h_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .child(tr(bardo, Text::PersonaVoice)),
+                    )
+                    .child(kit::info(
+                        "persona-voice-info",
+                        None,
+                        tr(bardo, Text::PersonaVoiceHint),
+                    )),
             )
             .child(current)
             .child(buttons)
             .children(picker)
             .children(error)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::PersonaVoiceHint)),
-            )
             .into_any_element()
     }
 
@@ -794,15 +791,7 @@ impl PersonasScreen {
                 ];
                 traits.extend(voice.labels.iter().cloned());
                 let reference = voice.reference.clone();
-                v_flex()
-                    .id(("voice", ix))
-                    .px_3()
-                    .py_2()
-                    .gap_0p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .when(selected, |row| row.bg(theme.list_active))
-                    .when(!selected, |row| row.hover(|row| row.bg(theme.list_hover)))
+                kit::list_row(("voice", ix), selected, cx)
                     .child(
                         h_flex()
                             .justify_between()
@@ -813,12 +802,12 @@ impl PersonasScreen {
                                     .child(SharedString::from(voice.reference.name().to_owned())),
                             )
                             .when(selected, |row| {
-                                row.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(theme.success)
-                                        .child(tr(bardo, Text::VoiceSelected)),
-                                )
+                                row.child(kit::status_with(
+                                    Tone::Accent,
+                                    IconName::Check,
+                                    tr(bardo, Text::VoiceSelected),
+                                    cx,
+                                ))
                             }),
                     )
                     .child(
@@ -845,10 +834,8 @@ impl PersonasScreen {
             })
             .collect();
 
-        v_flex()
-            .border_1()
-            .border_color(theme.border)
-            .rounded_lg()
+        kit::well(cx)
+            .p_0()
             .child(
                 div()
                     .px_3()
@@ -889,18 +876,21 @@ impl PersonasScreen {
                     .child(
                         h_flex()
                             .justify_between()
-                            .child(div().text_sm().child(tr(bardo, preset.label())))
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(div().text_sm().child(tr(bardo, preset.label())))
+                                    .child(kit::info(
+                                        ("preset-info", *preset as usize),
+                                        None,
+                                        tr(bardo, preset.hint()),
+                                    )),
+                            )
                             .child(div().text_sm().font_medium().child(SharedString::from(
                                 bardo.text_with(Text::PresetPercent, &[("n", &value.to_string())]),
                             ))),
                     )
                     .child(Slider::new(slider).horizontal())
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, preset.hint())),
-                    )
                     .children(error)
                     .into_any_element()
             })
@@ -909,20 +899,19 @@ impl PersonasScreen {
         v_flex()
             .gap_3()
             .child(
-                v_flex()
-                    .gap_0p5()
+                h_flex()
+                    .gap_1()
                     .child(
                         div()
                             .text_sm()
                             .font_medium()
                             .child(tr(bardo, Text::PersonaPresets)),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::PersonaPresetsHint)),
-                    ),
+                    .child(kit::info(
+                        "persona-presets-info",
+                        None,
+                        tr(bardo, Text::PersonaPresetsHint),
+                    )),
             )
             .child(
                 div()
@@ -939,12 +928,10 @@ impl PersonasScreen {
     fn render_confirm(&self, channels: &[Channel], cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
-        v_flex()
+        kit::card(cx)
             .p_4()
             .gap_2()
-            .border_1()
             .border_color(theme.warning)
-            .rounded_lg()
             .child(
                 div()
                     .font_semibold()
@@ -994,19 +981,15 @@ impl PersonasScreen {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let loading = self.listing.is_some();
-        v_flex()
+        kit::card(cx)
             .p_3()
             .gap_2()
-            .border_1()
             .border_color(theme.warning)
-            .rounded_lg()
-            .child(
-                h_flex().child(
-                    Tag::warning()
-                        .small()
-                        .child(tr(bardo, Text::VoiceFlagTag(flag))),
-                ),
-            )
+            .child(h_flex().child(kit::status(
+                Tone::Warning,
+                tr(bardo, Text::VoiceFlagTag(flag)),
+                cx,
+            )))
             .child(
                 div()
                     .text_sm()
@@ -1062,11 +1045,7 @@ impl PersonasScreen {
             )
         };
         let field = |label: Text, control: AnyElement, below: Option<AnyElement>| {
-            v_flex()
-                .gap_1()
-                .child(div().text_sm().font_medium().child(tr(bardo, label)))
-                .child(control)
-                .children(below)
+            kit::field(tr(bardo, label), None, control, below)
         };
 
         let (title, action) = match self.editing {
@@ -1087,40 +1066,31 @@ impl PersonasScreen {
                 .text_color(theme.muted_foreground)
                 .child(text)
         });
-        let notice = self.notice.as_ref().map(|notice| match notice {
-            // Shrinks and wraps beside the buttons; a copy's name can be long.
-            Notice::Saved => div()
-                .text_sm()
-                .text_color(theme.success)
-                .child(tr(bardo, Text::PersonaSaved)),
-            Notice::Duplicated(name) => {
-                div()
-                    .text_sm()
-                    .text_color(theme.success)
-                    .child(SharedString::from(
-                        bardo.text_with(Text::PersonaDuplicated, &[("name", name)]),
-                    ))
-            }
-            Notice::Exported(path) => {
-                div()
-                    .text_sm()
-                    .text_color(theme.success)
-                    .child(SharedString::from(
-                        bardo.text_with(Text::PersonaExported, &[("path", path)]),
-                    ))
-            }
-            Notice::Imported(name) => {
-                div()
-                    .text_sm()
-                    .text_color(theme.success)
-                    .child(SharedString::from(
-                        bardo.text_with(Text::PersonaImported, &[("name", name)]),
-                    ))
-            }
-            Notice::Error(text) => div()
-                .text_sm()
-                .text_color(theme.danger)
-                .child(tr(bardo, *text)),
+        // Shrinks and wraps beside the buttons; a copy's name can be long.
+        let notice = self.notice.as_ref().map(|notice| {
+            let (tone, text): (Tone, SharedString) = match notice {
+                Notice::Saved => (Tone::Success, tr(bardo, Text::PersonaSaved)),
+                Notice::Duplicated(name) => (
+                    Tone::Success,
+                    bardo
+                        .text_with(Text::PersonaDuplicated, &[("name", name)])
+                        .into(),
+                ),
+                Notice::Exported(path) => (
+                    Tone::Success,
+                    bardo
+                        .text_with(Text::PersonaExported, &[("path", path)])
+                        .into(),
+                ),
+                Notice::Imported(name) => (
+                    Tone::Success,
+                    bardo
+                        .text_with(Text::PersonaImported, &[("name", name)])
+                        .into(),
+                ),
+                Notice::Error(text) => (Tone::Danger, tr(bardo, *text)),
+            };
+            kit::notice(tone, text, cx)
         });
 
         v_flex()
@@ -1136,27 +1106,32 @@ impl PersonasScreen {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(div().text_xl().font_semibold().child(tr(bardo, title)))
+                            .child(kit::title(tr(bardo, title)))
                             .children(usage),
                     )
                     .children(flag)
-                    .child(field(
-                        Text::PersonaName,
-                        Input::new(&self.name).into_any_element(),
-                        error_for(NAME_ERRORS),
-                    ))
-                    .child(voice)
-                    .child(field(
-                        Text::PersonaTone,
-                        Textarea::new(&self.tone).into_any_element(),
-                        error_for(TONE_ERRORS),
-                    ))
-                    .child(field(
-                        Text::PersonaScriptStyle,
-                        Textarea::new(&self.script_style).into_any_element(),
-                        error_for(SCRIPT_STYLE_ERRORS),
-                    ))
-                    .child(presets)
+                    .child(
+                        kit::card(cx)
+                            .p_4()
+                            .gap_4()
+                            .child(field(
+                                Text::PersonaName,
+                                Input::new(&self.name).into_any_element(),
+                                error_for(NAME_ERRORS),
+                            ))
+                            .child(voice)
+                            .child(field(
+                                Text::PersonaTone,
+                                Textarea::new(&self.tone).into_any_element(),
+                                error_for(TONE_ERRORS),
+                            ))
+                            .child(field(
+                                Text::PersonaScriptStyle,
+                                Textarea::new(&self.script_style).into_any_element(),
+                                error_for(SCRIPT_STYLE_ERRORS),
+                            ))
+                            .child(presets),
+                    )
                     .children(confirm)
                     .child(
                         h_flex()
@@ -1190,17 +1165,14 @@ impl PersonasScreen {
                                             this.export(cx)
                                         })),
                                 )
+                                .child(kit::info(
+                                    "persona-export-info",
+                                    None,
+                                    tr(bardo, Text::PersonaExportHint),
+                                ))
                             })
-                            .children(notice.map(|notice| notice.flex_1().min_w_0())),
-                    )
-                    .when(self.editing.is_some(), |form| {
-                        form.child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(tr(bardo, Text::PersonaExportHint)),
-                        )
-                    }),
+                            .children(notice.map(|notice| notice.flex_1())),
+                    ),
             )
     }
 }

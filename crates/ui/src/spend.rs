@@ -9,6 +9,7 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ElementId, SharedString, Window, div};
 
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 /// The estimate line, then one line per budget it takes past 80% or to
@@ -32,18 +33,12 @@ pub(crate) fn estimate_note(
     } else {
         SharedString::from(bardo.text_with(cost, &[("amount", &amount)]))
     };
-    let near = estimate.near_budget().map(|provider| {
-        div()
-            .text_xs()
-            .text_color(theme.warning)
-            .child(near_line(bardo, provider))
-    });
-    let over = estimate.over_budget().map(|provider| {
-        div()
-            .text_xs()
-            .text_color(theme.danger)
-            .child(over_line(bardo, provider))
-    });
+    let near = estimate
+        .near_budget()
+        .map(|provider| kit::notice(Tone::Warning, near_line(bardo, provider), cx).text_xs());
+    let over = estimate
+        .over_budget()
+        .map(|provider| kit::notice(Tone::Danger, over_line(bardo, provider), cx).text_xs());
     Some(
         v_flex()
             .gap_0p5()
@@ -105,18 +100,11 @@ pub(crate) fn budget_question(
         .iter()
         .filter(|provider| provider.level == Some(BudgetLevel::Reached))
         .map(|provider| div().text_sm().child(over_line(bardo, provider)));
-    v_flex()
+    kit::card(cx)
         .p_3()
         .gap_2()
-        .rounded_md()
-        .border_1()
         .border_color(theme.danger)
-        .child(
-            div()
-                .font_semibold()
-                .text_color(theme.danger)
-                .child(tr(bardo, Text::BudgetReachedTitle)),
-        )
+        .child(kit::notice(Tone::Danger, tr(bardo, Text::BudgetReachedTitle), cx).font_semibold())
         .children(lines)
         .child(div().text_sm().child(tr(bardo, Text::BudgetQuestion)))
         .child(

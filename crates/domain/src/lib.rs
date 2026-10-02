@@ -39,6 +39,7 @@ macro_rules! uuid_id {
     };
 }
 
+mod appearance;
 mod budget;
 mod caption;
 mod channel;
@@ -73,6 +74,9 @@ mod theme;
 mod timeline;
 mod voice;
 
+pub use appearance::{
+    ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownUiTheme, UnknownUiThemePreference,
+};
 pub use budget::{Budget, BudgetLevel, Month};
 pub use caption::{
     Caption, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS, SavedCaptions,

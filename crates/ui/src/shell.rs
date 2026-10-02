@@ -1,11 +1,12 @@
-use bardo_app::bardo_domain::{UiLanguage, VideoProjectId};
+use bardo_app::bardo_domain::VideoProjectId;
 use bardo_app::{Bardo, Text};
 use gpui_kit::component::badge::Badge;
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, Selectable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{ClickEvent, Entity, SharedString, Subscription, Window, div, px};
 
+use crate::appearance::{self, look};
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
 use crate::editor::{EditorEvent, EditorScreen};
@@ -61,10 +62,10 @@ impl Screen {
     }
 }
 
-/// The main window: top bar with the screen switch, the jobs toggle and the
-/// interface language switch, the current screen below and the jobs panel
-/// on the right when open. `Bardo` lives in an entity so screens re-render
-/// when it changes (e.g. the language).
+/// The main window: top bar with the screen switch and the jobs toggle,
+/// the current screen below and the jobs panel on the right when open.
+/// `Bardo` lives in an entity so screens re-render when it changes (e.g.
+/// the language, set in Settings).
 pub struct Shell {
     bardo: Entity<Bardo>,
     screen: Screen,
@@ -81,7 +82,6 @@ pub struct Shell {
     jobs_open: bool,
     /// The editor, open over the whole window in place of the screens.
     editor: Option<(Entity<EditorScreen>, Subscription)>,
-    error: Option<Text>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -97,8 +97,24 @@ impl Shell {
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
+        // The startup theme guessed the system's appearance before any
+        // window existed; this window knows it.
+        appearance::follow(
+            bardo.read(cx).ui_theme(),
+            appearance::system_mode(window),
+            cx,
+        );
         let subscriptions = vec![
             cx.observe(&jobs, |_, _, cx| cx.notify()),
+            // The title follows the interface language.
+            cx.observe_in(&bardo, window, |_, bardo, window, cx| {
+                window.set_window_title(&bardo.read(cx).text(Text::AppName));
+            }),
+            // "Follow Windows" switches with the system's light/dark setting.
+            cx.observe_window_appearance(window, |this, window, cx| {
+                let preference = this.bardo.read(cx).ui_theme();
+                appearance::follow(preference, appearance::system_mode(window), cx);
+            }),
             cx.subscribe_in(
                 &projects,
                 window,
@@ -121,7 +137,6 @@ impl Shell {
             jobs,
             jobs_open: false,
             editor: None,
-            error: None,
             _subscriptions: subscriptions,
         }
     }
@@ -188,22 +203,6 @@ impl Shell {
         self.editor = Some((editor, subscription));
         cx.notify();
     }
-
-    fn select_language(
-        &mut self,
-        language: UiLanguage,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let result = self.bardo.update(cx, |bardo, cx| {
-            let result = bardo.set_ui_language(language);
-            cx.notify();
-            result
-        });
-        self.error = result.err().map(|_| Text::LanguageNotSaved);
-        window.set_window_title(&self.bardo.read(cx).text(Text::AppName));
-        cx.notify();
-    }
 }
 
 impl Render for Shell {
@@ -217,58 +216,51 @@ impl Render for Shell {
                 .into_any_element();
         }
         let bardo = self.bardo.read(cx);
-        let current = bardo.ui_language();
-        let language_switch = ButtonGroup::new("ui-language")
-            .outline()
-            .children(UiLanguage::ALL.map(|language| {
-                Button::new(language.tag())
-                    .label(tr(bardo, Text::LanguageName(language)))
-                    .selected(language == current)
-            }))
-            .on_click(cx.listener(|this, clicked: &Vec<usize>, window, cx| {
-                if let Some(language) = clicked.first().and_then(|&i| UiLanguage::ALL.get(i)) {
-                    this.select_language(*language, window, cx);
-                }
-            }));
-
-        let screen_switch = ButtonGroup::new("screen")
-            .small()
-            .ghost()
-            .children(Screen::ALL.map(|screen| {
-                Button::new(("screen", screen as usize))
-                    .label(tr(bardo, screen.title()))
-                    .selected(screen == self.screen)
-            }))
-            .on_click(cx.listener(|this, clicked: &Vec<usize>, window, cx| {
-                if let Some(screen) = clicked.first().and_then(|&i| Screen::ALL.get(i)) {
-                    this.show(*screen, window, cx);
-                }
-            }));
+        let t = look(cx).tokens;
+        let nav = h_flex().gap_0p5().children(Screen::ALL.map(|screen| {
+            let on = screen == self.screen;
+            div()
+                .id(("screen", screen as usize))
+                .px_2p5()
+                .py_1()
+                .rounded(t.radius)
+                .text_sm()
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                .cursor_pointer()
+                .border_b_2()
+                .map(|item| {
+                    if on {
+                        item.bg(t.selected)
+                            .text_color(t.text)
+                            .border_color(t.accent)
+                    } else {
+                        item.text_color(t.text2)
+                            .border_color(gpui_kit::transparent_black())
+                            .hover(|item| item.bg(t.hover).text_color(t.text))
+                    }
+                })
+                .child(tr(bardo, screen.title()))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.show(screen, window, cx);
+                }))
+        }));
 
         let top_bar = h_flex()
             .h(px(48.))
             .px_4()
             .gap_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(div().text_lg().child(tr(bardo, Text::AppName)))
-            .child(screen_switch)
-            // The tagline yields its space first on narrow windows.
+            .bg(t.surface)
+            .border_b(t.border_width)
+            .border_color(t.border)
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(bardo, Text::AppTagline)),
+                    .text_lg()
+                    .font_weight(gpui_kit::FontWeight::BOLD)
+                    .mr_2()
+                    .child(tr(bardo, Text::AppName)),
             )
-            .children(
-                self.error
-                    .map(|error| div().text_color(cx.theme().danger).child(tr(bardo, error))),
-            )
+            .child(nav)
+            .child(div().flex_1())
             .child(
                 Badge::new().count(self.jobs.read(cx).active()).child(
                     Button::new("toggle-jobs")
@@ -281,19 +273,12 @@ impl Render for Shell {
                             cx.notify();
                         })),
                 ),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(bardo, Text::UiLanguageLabel)),
-            )
-            .child(language_switch);
+            );
 
         v_flex()
             .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+            .bg(t.app)
+            .text_color(t.text)
             .child(top_bar)
             .child(
                 h_flex()

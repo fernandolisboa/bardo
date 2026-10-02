@@ -1,6 +1,7 @@
 //! Application state and use cases. The UI talks to Bardo only through this
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
+mod appearance;
 mod channels;
 mod clips;
 mod costs;
@@ -34,11 +35,12 @@ use bardo_domain::{
     PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RepositoryError,
     ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
     TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository, UiLanguage,
-    UserProfile, VoiceLibrary,
+    UiThemePreference, UserProfile, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryProjectFiles};
 
+pub use appearance::{EditorPalette, Palette, Rgb, TrackColors, UiFont, palette};
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
@@ -455,6 +457,26 @@ impl Bardo {
         self.profiles.save(&updated)?;
         self.profile = updated;
         self.catalog = Catalog::load(language);
+        Ok(())
+    }
+
+    /// How the profile picks its interface theme.
+    pub fn ui_theme(&self) -> UiThemePreference {
+        self.profile.ui_theme
+    }
+
+    /// Changes how the interface theme is picked and remembers it. On
+    /// failure the current preference stays.
+    pub fn set_ui_theme(&mut self, preference: UiThemePreference) -> Result<(), AppError> {
+        if preference == self.profile.ui_theme {
+            return Ok(());
+        }
+        let updated = UserProfile {
+            ui_theme: preference,
+            ..self.profile.clone()
+        };
+        self.profiles.save(&updated)?;
+        self.profile = updated;
         Ok(())
     }
 
@@ -1291,6 +1313,31 @@ mod tests {
     }
 
     #[test]
+    fn a_new_profile_follows_the_system_with_paper_and_graphite() {
+        let app = start(&FakeProfiles::default(), None);
+        assert_eq!(app.ui_theme(), UiThemePreference::default());
+    }
+
+    #[test]
+    fn theme_choice_survives_a_restart() {
+        let profiles = FakeProfiles::default();
+        let fixed = UiThemePreference::Fixed(bardo_domain::UiTheme::BlackGold);
+        start(&profiles, None).set_ui_theme(fixed).unwrap();
+        assert_eq!(start(&profiles, None).ui_theme(), fixed);
+    }
+
+    #[test]
+    fn failed_save_keeps_the_current_theme() {
+        let profiles = FakeProfiles::default();
+        let mut app = start(&profiles, None);
+        profiles.fail_saves.set(true);
+
+        let fixed = UiThemePreference::Fixed(bardo_domain::UiTheme::Phosphor);
+        assert!(app.set_ui_theme(fixed).is_err());
+        assert_eq!(app.ui_theme(), UiThemePreference::default());
+    }
+
+    #[test]
     fn works_against_real_sqlite() {
         let db = Database::open_in_memory().unwrap();
         let repositories = Repositories::local(
@@ -1301,5 +1348,8 @@ mod tests {
         let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();
         assert_eq!(app.ui_language(), UiLanguage::PtBr);
+        let fixed = UiThemePreference::Fixed(bardo_domain::UiTheme::Brass);
+        app.set_ui_theme(fixed).unwrap();
+        assert_eq!(app.ui_theme(), fixed);
     }
 }

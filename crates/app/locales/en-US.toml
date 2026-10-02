@@ -3,10 +3,13 @@
 [app]
 name = "Bardo"
 tagline = "Create and run faceless channels, with AI assisting every step."
+details = "Details"
 
 [settings]
 ui_language = "Interface language"
 title = "Settings"
+keys_tab = "API keys"
+appearance_tab = "Appearance"
 
 [language]
 en-US = "English (US)"
@@ -14,6 +17,7 @@ pt-BR = "Português (Brasil)"
 
 [error]
 language_not_saved = "Could not save the interface language. Try again."
+ui_theme_not_saved = "Couldn't save the theme. Try again."
 
 [content_language]
 en = "English"
@@ -238,6 +242,7 @@ replace = "Replace key"
 test = "Test key"
 testing = "Testing…"
 remove = "Remove"
+info = "Where keys are kept"
 
 [provider_keys.error]
 not_set = "Save a key before testing it."
@@ -548,7 +553,6 @@ nothing_to_animate = "Every scene with an image already has a clip or one on the
 clip_model_not_offered = "That video model is no longer offered. Pick another one."
 
 [provenance]
-title = "Provenance"
 provider = "Provider"
 model = "Model"
 template = "Template"
@@ -1014,3 +1018,32 @@ busy = "The music prompt is already being written for this project."
 not_saved = "Could not save the music prompt. Try again."
 text_required = "The music prompt cannot be empty."
 text_too_long = "Keep the music prompt to at most 4000 characters."
+
+[appearance]
+theme = "Theme"
+follow_system = "Follow Windows"
+follow_system_hint = "Switches between your light and dark theme when Windows does."
+light = "Light"
+dark = "Dark"
+fixed = "Always the same theme"
+fixed_hint = "Pick it below."
+contrast = "Text contrast meets WCAG {level}"
+
+[ui_theme]
+paper = "Paper"
+sand = "Sand"
+graphite = "Graphite"
+slate = "Slate"
+hc-light = "High contrast light"
+hc-dark = "High contrast dark"
+black-gold = "Black Gold"
+brass = "Brass"
+phosphor = "Phosphor"
+phosphor-light = "Phosphor Light"
+
+[ui_theme_kind]
+light = "Light"
+dark = "Dark"
+high_contrast = "High contrast"
+terminal_light = "Terminal · light"
+terminal_dark = "Terminal · dark"

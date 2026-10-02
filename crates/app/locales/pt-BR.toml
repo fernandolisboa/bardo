@@ -3,10 +3,13 @@
 [app]
 name = "Bardo"
 tagline = "Crie e opere canais dark, com IA ajudando em cada etapa."
+details = "Detalhes"
 
 [settings]
 ui_language = "Idioma da interface"
 title = "Configurações"
+keys_tab = "Chaves de API"
+appearance_tab = "Aparência"
 
 [language]
 en-US = "English (US)"
@@ -14,6 +17,7 @@ pt-BR = "Português (Brasil)"
 
 [error]
 language_not_saved = "Não foi possível salvar o idioma da interface. Tente de novo."
+ui_theme_not_saved = "Não foi possível salvar o tema. Tente de novo."
 
 [content_language]
 en = "Inglês"
@@ -238,6 +242,7 @@ replace = "Trocar chave"
 test = "Testar chave"
 testing = "Testando…"
 remove = "Remover"
+info = "Onde as chaves ficam"
 
 [provider_keys.error]
 not_set = "Salve uma chave antes de testá-la."
@@ -548,7 +553,6 @@ nothing_to_animate = "Todas as cenas com imagem já têm clipe ou um a caminho."
 clip_model_not_offered = "Esse modelo de vídeo não é mais oferecido. Escolha outro."
 
 [provenance]
-title = "Procedência"
 provider = "Provedor"
 model = "Modelo"
 template = "Template"
@@ -1014,3 +1018,32 @@ busy = "Já há um prompt de música sendo escrito para este projeto."
 not_saved = "Não foi possível salvar o prompt de música. Tente de novo."
 text_required = "O prompt de música não pode ficar vazio."
 text_too_long = "Use no máximo 4000 caracteres no prompt de música."
+
+[appearance]
+theme = "Tema"
+follow_system = "Seguir o Windows"
+follow_system_hint = "Troca entre o seu tema claro e o escuro quando o Windows troca."
+light = "Claro"
+dark = "Escuro"
+fixed = "Sempre o mesmo tema"
+fixed_hint = "Escolha abaixo."
+contrast = "O contraste do texto atende ao WCAG {level}"
+
+[ui_theme]
+paper = "Papel"
+sand = "Areia"
+graphite = "Grafite"
+slate = "Ardósia"
+hc-light = "Alto contraste claro"
+hc-dark = "Alto contraste escuro"
+black-gold = "Ouro Negro"
+brass = "Latão"
+phosphor = "Fósforo"
+phosphor-light = "Fósforo Claro"
+
+[ui_theme_kind]
+light = "Claro"
+dark = "Escuro"
+high_contrast = "Alto contraste"
+terminal_light = "Terminal · claro"
+terminal_dark = "Terminal · escuro"

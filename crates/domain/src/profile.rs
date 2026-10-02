@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::RepositoryError;
+use crate::{RepositoryError, UiThemePreference};
 
 /// Identifies a user profile. Every entity carries the owning profile so more
 /// profiles can exist later without a migration (ADR-0005).
@@ -85,6 +85,7 @@ impl FromStr for UiLanguage {
 pub struct UserProfile {
     pub id: ProfileId,
     pub ui_language: UiLanguage,
+    pub ui_theme: UiThemePreference,
 }
 
 impl UserProfile {
@@ -92,6 +93,7 @@ impl UserProfile {
         Self {
             id: ProfileId::new(),
             ui_language,
+            ui_theme: UiThemePreference::default(),
         }
     }
 }

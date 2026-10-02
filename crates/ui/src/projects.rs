@@ -26,15 +26,15 @@ use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, EventEmitter, PathPromptOptions, SharedString,
     Subscription, Task, Window, div, px,
 };
 
+use crate::appearance::look;
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 
@@ -718,15 +718,7 @@ impl ProjectsScreen {
             .map(|(ix, project)| {
                 let id = project.id;
                 let selected = self.project == Some(id);
-                v_flex()
-                    .id(("project", ix))
-                    .px_3()
-                    .py_2()
-                    .gap_0p5()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .when(selected, |row| row.bg(theme.list_active))
-                    .when(!selected, |row| row.hover(|row| row.bg(theme.list_hover)))
+                kit::list_row(("project", ix), selected, cx)
                     .child(SharedString::from(project.title.clone()))
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         SharedString::from(format!(
@@ -745,7 +737,7 @@ impl ProjectsScreen {
             .collect();
         let empty = rows.is_empty();
 
-        v_flex()
+        kit::side_panel(cx)
             .id("projects-list")
             .w(px(300.))
             .h_full()
@@ -753,14 +745,7 @@ impl ProjectsScreen {
             .overflow_y_scroll()
             .p_4()
             .gap_3()
-            .border_r_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .text_xl()
-                    .font_semibold()
-                    .child(tr(bardo, Text::ProjectsTitle)),
-            )
+            .child(kit::title(tr(bardo, Text::ProjectsTitle)))
             .child(
                 v_flex()
                     .gap_1()
@@ -785,12 +770,10 @@ impl ProjectsScreen {
             return v_flex()
                 .flex_1()
                 .p_4()
-                .children(self.error.map(|error| {
-                    div()
-                        .text_sm()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, error))
-                }))
+                .children(
+                    self.error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+                )
                 .into_any_element();
         };
         let running = self.running();
@@ -837,44 +820,34 @@ impl ProjectsScreen {
                     ))
                 })
                 .child(
-                    v_flex()
+                    h_flex()
                         .pt_2()
-                        .gap_1()
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_medium()
-                                        .child(tr(bardo, Text::ProjectNarrator)),
-                                )
-                                .child(
-                                    div().w(px(440.)).child(
-                                        Select::new(&self.narrator_select)
-                                            .small()
-                                            .search_placeholder(tr(bardo, Text::PersonasTitle)),
-                                    ),
-                                ),
-                        )
+                        .gap_2()
+                        .items_center()
                         .child(
                             div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(tr(bardo, Text::ProjectNarratorHint)),
-                        ),
+                                .text_sm()
+                                .font_medium()
+                                .child(tr(bardo, Text::ProjectNarrator)),
+                        )
+                        .child(
+                            div().w(px(440.)).child(
+                                Select::new(&self.narrator_select)
+                                    .small()
+                                    .search_placeholder(tr(bardo, Text::PersonasTitle)),
+                            ),
+                        )
+                        .child(kit::info(
+                            "project-narrator-info",
+                            None,
+                            tr(bardo, Text::ProjectNarratorHint),
+                        )),
                 );
 
         let title_row = h_flex()
             .gap_2()
             .items_center()
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(tr(bardo, Text::ScriptTitle)),
-            )
+            .child(kit::section_heading(tr(bardo, Text::ScriptTitle)))
             .children(script.map(|script| {
                 Tag::secondary()
                     .small()
@@ -884,31 +857,36 @@ impl ProjectsScreen {
                     )))
             }))
             .when(script.is_some_and(|script| script.is_edited()), |row| {
-                row.child(Tag::warning().small().child(tr(bardo, Text::ScriptEdited)))
+                row.child(kit::status(Tone::Info, tr(bardo, Text::ScriptEdited), cx))
             });
 
         let body: AnyElement = match script {
             None => v_flex()
                 .gap_2()
                 .child(muted(cx, tr(bardo, Text::ScriptEmpty)))
-                .child(div().text_xs().text_color(theme.muted_foreground).child(
-                    SharedString::from(bardo.text_with(
-                        Text::GenerateScriptHint,
-                        &[("n", &view.template.number.to_string())],
-                    )),
-                ))
                 .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
-                .child(
-                    h_flex().child(
-                        Button::new("generate-script")
-                            .primary()
-                            .label(tr(bardo, Text::GenerateScript))
-                            .disabled(running)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.generate(BudgetConsent::Ask, window, cx)
-                            })),
-                    ),
-                )
+                .when(!running, |body| {
+                    body.child(
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Button::new("generate-script")
+                                    .primary()
+                                    .label(tr(bardo, Text::GenerateScript))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.generate(BudgetConsent::Ask, window, cx)
+                                    })),
+                            )
+                            .child(kit::info(
+                                "generate-script-info",
+                                None,
+                                SharedString::from(bardo.text_with(
+                                    Text::GenerateScriptHint,
+                                    &[("n", &view.template.number.to_string())],
+                                )),
+                            )),
+                    )
+                })
                 .into_any_element(),
             Some(script) => v_flex()
                 .gap_2()
@@ -917,10 +895,8 @@ impl ProjectsScreen {
                 })
                 .child(Textarea::new(&self.editor))
                 .children(self.field_error.map(|error| {
-                    div()
+                    kit::notice(Tone::Danger, tr(bardo, Text::ScriptFieldError(error)), cx)
                         .text_xs()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, Text::ScriptFieldError(error)))
                 }))
                 .child(
                     h_flex()
@@ -946,22 +922,22 @@ impl ProjectsScreen {
                                 })),
                         )
                         .child(div().flex_1())
-                        .child(
-                            Button::new("regenerate-script")
-                                .outline()
-                                .small()
-                                .label(tr(bardo, Text::RegenerateScript))
-                                .disabled(running)
-                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                    this.generate(BudgetConsent::Ask, window, cx)
-                                })),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, Text::RegenerateScriptHint)),
+                        .when(!running, |row| {
+                            row.child(
+                                Button::new("regenerate-script")
+                                    .outline()
+                                    .small()
+                                    .label(tr(bardo, Text::RegenerateScript))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.generate(BudgetConsent::Ask, window, cx)
+                                    })),
+                            )
+                            .child(kit::info(
+                                "regenerate-script-info",
+                                None,
+                                tr(bardo, Text::RegenerateScriptHint),
+                            ))
+                        }),
                 )
                 .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
                 .into_any_element(),
@@ -977,18 +953,14 @@ impl ProjectsScreen {
             .gap_3()
             .child(header)
             .child(title_row)
-            .children(self.notice.map(|notice| {
-                div()
-                    .text_sm()
-                    .text_color(theme.success)
-                    .child(tr(bardo, notice))
-            }))
-            .children(self.error.map(|error| {
-                div()
-                    .text_sm()
-                    .text_color(theme.danger)
-                    .child(tr(bardo, error))
-            }))
+            .children(
+                self.notice
+                    .map(|notice| kit::notice(Tone::Success, tr(bardo, notice), cx)),
+            )
+            .children(
+                self.error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+            )
             .children(self.render_job(cx))
             .children(self.script_ask.as_ref().map(|estimate| {
                 budget_question(
@@ -1027,7 +999,6 @@ impl ProjectsScreen {
     fn render_job(&self, cx: &App) -> Option<AnyElement> {
         let job = self.view.as_ref()?.job.as_ref()?;
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         match job.state() {
             JobState::Queued | JobState::Running => Some(
                 h_flex()
@@ -1042,22 +1013,24 @@ impl ProjectsScreen {
                 Some(
                     v_flex()
                         .gap_1()
+                        .child(kit::notice(
+                            Tone::Danger,
+                            tr(bardo, Text::ScriptStopped),
+                            cx,
+                        ))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.danger)
-                                .child(tr(bardo, Text::ScriptStopped)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(SharedString::from(failure.detail.clone())),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                                )
+                                .child(kit::details(
+                                    "script-failure-details",
+                                    tr(bardo, Text::Details),
+                                    vec![SharedString::from(failure.detail.clone())],
+                                )),
                         )
                         .into_any_element(),
                 )
@@ -1073,27 +1046,29 @@ impl ProjectsScreen {
         cx: &Context<Self>,
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
-        v_flex()
+        kit::card(cx)
             .p_3()
             .gap_2()
-            .rounded_md()
-            .border_1()
-            .border_color(theme.primary)
+            .border_color(look(cx).tokens.accent_edge)
             .child(
-                div()
-                    .font_medium()
-                    .child(tr(bardo, Text::ScriptPendingTitle)),
+                h_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .font_medium()
+                            .child(tr(bardo, Text::ScriptPendingTitle)),
+                    )
+                    .child(kit::info(
+                        "pending-script-info",
+                        None,
+                        tr(bardo, Text::ScriptPendingHint),
+                    )),
             )
             .child(
-                div()
+                kit::well(cx)
                     .id("pending-script")
                     .max_h(px(260.))
                     .overflow_y_scroll()
-                    .p_2()
-                    .rounded_md()
-                    .bg(theme.muted)
-                    .text_sm()
                     .child(SharedString::from(text.to_owned())),
             )
             .child(
@@ -1117,12 +1092,6 @@ impl ProjectsScreen {
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.review(false, window, cx)
                             })),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::ScriptPendingHint)),
                     ),
             )
             .child(self.render_provenance(
@@ -1134,7 +1103,8 @@ impl ProjectsScreen {
             .into_any_element()
     }
 
-    /// Who generated the text, from what, and what it used.
+    /// Who generated the text, from what, and what it used: behind
+    /// "Details", with the prompt one click away.
     fn render_provenance(
         &self,
         generation: &Generation,
@@ -1143,112 +1113,91 @@ impl ProjectsScreen {
         cx: &Context<Self>,
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
+        let tokens = &look(cx).tokens;
         let shown = self.prompt_shown == Some(which);
         let fact = |label: Text, value: String| {
-            v_flex()
-                .gap_0p5()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, label)),
-                )
-                .child(div().text_sm().child(SharedString::from(value)))
+            SharedString::from(format!("{}: {value}", bardo.text(label)))
         };
         let prompt_block = |label: Text, text: &str| {
             v_flex()
                 .gap_1()
                 .child(div().text_xs().font_medium().child(tr(bardo, label)))
                 .child(
-                    div()
-                        .p_2()
-                        .rounded_md()
-                        .bg(theme.muted)
+                    kit::well(cx)
                         .text_xs()
                         .child(SharedString::from(text.to_owned())),
                 )
         };
         let usage = generation.usage;
+        let facts = vec![
+            fact(
+                Text::ProvenanceProvider,
+                bardo
+                    .text(Text::ProviderName(generation.provider))
+                    .into_owned(),
+            ),
+            fact(Text::ProvenanceModel, generation.model.clone()),
+            fact(
+                Text::ProvenanceTemplate,
+                format!(
+                    "{} {}",
+                    bardo.text(Text::TemplateKindName(kind)),
+                    bardo.text_with(
+                        Text::ProvenanceTemplateVersion,
+                        &[("n", &generation.template.number.to_string())],
+                    )
+                ),
+            ),
+            fact(
+                Text::ProvenanceTokens,
+                bardo.text_with(
+                    Text::ProvenanceTokensValue,
+                    &[
+                        ("input", &usage.input_tokens.to_string()),
+                        ("output", &usage.output_tokens.to_string()),
+                    ],
+                ),
+            ),
+            fact(
+                Text::ProvenanceGenerated,
+                bardo.time_ago(generation.generated_at),
+            ),
+        ];
+        let (details_id, prompt_id) = match which {
+            PromptShown::Source => ("source-details", "toggle-source-prompt"),
+            PromptShown::Pending => ("pending-details", "toggle-pending-prompt"),
+            PromptShown::ScenePlan => ("scene-plan-details", "toggle-scene-plan-prompt"),
+            PromptShown::MusicPrompt => ("music-prompt-details", "toggle-music-prompt"),
+        };
 
         v_flex()
-            .pt_3()
             .gap_2()
-            .border_t_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .text_sm()
-                    .font_medium()
-                    .child(tr(bardo, Text::ProvenanceTitle)),
-            )
             .child(
                 h_flex()
-                    .flex_wrap()
-                    .gap_x_6()
-                    .gap_y_2()
-                    .child(fact(
-                        Text::ProvenanceProvider,
-                        bardo
-                            .text(Text::ProviderName(generation.provider))
-                            .into_owned(),
-                    ))
-                    .child(fact(Text::ProvenanceModel, generation.model.clone()))
-                    .child(fact(
-                        Text::ProvenanceTemplate,
-                        format!(
-                            "{} {}",
-                            bardo.text(Text::TemplateKindName(kind)),
-                            bardo.text_with(
-                                Text::ProvenanceTemplateVersion,
-                                &[("n", &generation.template.number.to_string())],
-                            )
-                        ),
-                    ))
-                    .child(fact(
-                        Text::ProvenanceTokens,
-                        bardo.text_with(
-                            Text::ProvenanceTokensValue,
-                            &[
-                                ("input", &usage.input_tokens.to_string()),
-                                ("output", &usage.output_tokens.to_string()),
-                            ],
-                        ),
-                    ))
-                    .child(fact(
-                        Text::ProvenanceGenerated,
-                        bardo.time_ago(generation.generated_at),
-                    )),
-            )
-            .child(
-                h_flex().child(
-                    Button::new(match which {
-                        PromptShown::Source => "toggle-source-prompt",
-                        PromptShown::Pending => "toggle-pending-prompt",
-                        PromptShown::ScenePlan => "toggle-scene-plan-prompt",
-                        PromptShown::MusicPrompt => "toggle-music-prompt",
-                    })
-                    .ghost()
-                    .xsmall()
-                    .label(tr(
-                        bardo,
-                        if shown {
-                            Text::HidePrompt
-                        } else {
-                            Text::ShowPrompt
-                        },
-                    ))
-                    .on_click(cx.listener(
-                        move |this, _: &ClickEvent, _, cx| {
-                            this.prompt_shown = if this.prompt_shown == Some(which) {
-                                None
-                            } else {
-                                Some(which)
-                            };
-                            cx.notify();
-                        },
-                    )),
-                ),
+                    .gap_1()
+                    .text_color(tokens.text2)
+                    .child(kit::details(details_id, tr(bardo, Text::Details), facts))
+                    .child(
+                        Button::new(prompt_id)
+                            .ghost()
+                            .xsmall()
+                            .label(tr(
+                                bardo,
+                                if shown {
+                                    Text::HidePrompt
+                                } else {
+                                    Text::ShowPrompt
+                                },
+                            ))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.prompt_shown = if this.prompt_shown == Some(which) {
+                                    None
+                                } else {
+                                    Some(which)
+                                };
+                                cx.notify();
+                            })),
+                    ),
             )
             .when(shown, |panel| {
                 panel
@@ -1287,32 +1236,42 @@ impl ProjectsScreen {
         let title_row = h_flex()
             .gap_2()
             .items_center()
-            .child(
-                div()
-                    .text_lg()
-                    .font_semibold()
-                    .child(tr(bardo, Text::NarrationTitle)),
-            )
+            .child(kit::section_heading(tr(bardo, Text::NarrationTitle)))
             .when(view.stale, |row| {
-                row.child(
-                    Tag::warning()
-                        .small()
-                        .child(tr(bardo, Text::NarrationStaleTag)),
-                )
-            });
+                row.child(kit::status(
+                    Tone::Warning,
+                    tr(bardo, Text::NarrationStaleTag),
+                    cx,
+                ))
+                .child(kit::info(
+                    "narration-stale-info",
+                    None,
+                    tr(bardo, Text::NarrationStale),
+                ))
+            })
+            .children(record);
 
         let flag = view.persona.as_ref().and_then(|persona| persona.voice_flag);
-        let hint = match (&view.persona, flag) {
-            (Some(_), Some(flag)) => tr(bardo, Text::NarrationVoiceFlagged(flag)),
-            (Some(persona), None) => SharedString::from(bardo.text_with(
-                Text::NarrationGenerateHint,
-                &[
-                    ("persona", persona.details.name()),
-                    ("voice", persona.details.voice().name()),
-                    ("n", &view.characters().to_string()),
-                ],
-            )),
-            (None, _) => tr(bardo, Text::NarrationNoPersona),
+        // Why narration can't be generated is a state; how it will be
+        // generated is an explanation behind the ⓘ.
+        let (blocked, hint) = match (&view.persona, flag) {
+            _ if view.script.is_none() => (Some(Tone::Info), tr(bardo, Text::NarrationNoScript)),
+            (Some(_), Some(flag)) => (
+                Some(Tone::Warning),
+                tr(bardo, Text::NarrationVoiceFlagged(flag)),
+            ),
+            (Some(persona), None) => (
+                None,
+                SharedString::from(bardo.text_with(
+                    Text::NarrationGenerateHint,
+                    &[
+                        ("persona", persona.details.name()),
+                        ("voice", persona.details.voice().name()),
+                        ("n", &view.characters().to_string()),
+                    ],
+                )),
+            ),
+            (None, _) => (Some(Tone::Info), tr(bardo, Text::NarrationNoPersona)),
         };
         let can_generate =
             !running && view.script.is_some() && view.persona.is_some() && flag.is_none();
@@ -1325,7 +1284,6 @@ impl ProjectsScreen {
                     Text::GenerateNarration
                 },
             ))
-            .disabled(!can_generate)
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 this.generate_narration(BudgetConsent::Ask, window, cx)
             }));
@@ -1335,11 +1293,11 @@ impl ProjectsScreen {
             generate.primary().small()
         };
         let choosing = self.choosing_recording.is_some() || self.recording.is_some();
+        let can_import = !running && !choosing && view.script.is_some();
         let import = Button::new("import-narration")
             .label(tr(bardo, Text::ImportNarration))
             .outline()
             .small()
-            .disabled(running || choosing || view.script.is_none())
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.choose_recording(cx)));
         let chosen = self
             .recording
@@ -1356,20 +1314,10 @@ impl ProjectsScreen {
                 .border_t_1()
                 .border_color(theme.border)
                 .child(title_row)
-                .when(view.stale, |panel| {
-                    panel.child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.warning)
-                            .child(tr(bardo, Text::NarrationStale)),
-                    )
-                })
-                .children(self.narration_error.map(|error| {
-                    div()
-                        .text_sm()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, error))
-                }))
+                .children(
+                    self.narration_error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+                )
                 .children(job)
                 .when(narration.is_none(), |panel| {
                     panel.child(muted(cx, tr(bardo, Text::NarrationEmpty)))
@@ -1378,26 +1326,31 @@ impl ProjectsScreen {
                 .child(
                     v_flex()
                         .gap_1()
+                        .children(blocked.map(|tone| kit::notice(tone, hint.clone(), cx)))
+                        .when(can_generate, |panel| {
+                            panel.children(view.estimate.as_ref().and_then(|estimate| {
+                                estimate_note(bardo, estimate, Text::EstimateCost, cx)
+                            }))
+                        })
                         .child(
-                            div()
-                                .text_xs()
-                                .text_color(if flag.is_some() {
-                                    theme.warning
-                                } else {
-                                    theme.muted_foreground
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .when(can_generate, |row| {
+                                    row.child(generate).child(kit::info(
+                                        "generate-narration-info",
+                                        None,
+                                        hint.clone(),
+                                    ))
                                 })
-                                .child(hint),
-                        )
-                        .children(view.estimate.as_ref().and_then(|estimate| {
-                            estimate_note(bardo, estimate, Text::EstimateCost, cx)
-                        }))
-                        .child(h_flex().gap_2().child(generate).child(import)),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, Text::ImportNarrationHint)),
+                                .when(can_import, |row| {
+                                    row.child(div().w(px(8.))).child(import).child(kit::info(
+                                        "import-narration-info",
+                                        None,
+                                        tr(bardo, Text::ImportNarrationHint),
+                                    ))
+                                }),
+                        ),
                 )
                 .when(self.reading_recording, |panel| {
                     panel.child(
@@ -1436,7 +1389,6 @@ impl ProjectsScreen {
                         cx.listener(|this, _: &ClickEvent, _, cx| this.cancel_recording(cx)),
                     )
                 }))
-                .children(record)
                 .into_any_element(),
         )
     }
@@ -1469,22 +1421,24 @@ impl ProjectsScreen {
                 Some(
                     v_flex()
                         .gap_1()
+                        .child(kit::notice(
+                            Tone::Danger,
+                            tr(bardo, Text::NarrationStopped),
+                            cx,
+                        ))
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.danger)
-                                .child(tr(bardo, Text::NarrationStopped)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(SharedString::from(failure.detail.clone())),
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .child(tr(bardo, Text::JobFailureKindName(failure.kind))),
+                                )
+                                .child(kit::details(
+                                    "narration-failure-details",
+                                    tr(bardo, Text::Details),
+                                    vec![SharedString::from(failure.detail.clone())],
+                                )),
                         )
                         .into_any_element(),
                 )
@@ -1498,6 +1452,7 @@ impl ProjectsScreen {
     fn render_player(&self, narration: &Narration, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
+        let tokens = look(cx).tokens;
         let player = self
             .player
             .as_ref()
@@ -1532,7 +1487,12 @@ impl ProjectsScreen {
                         clock(position),
                         clock(narration.duration)
                     ))),
-            );
+            )
+            .child(kit::info(
+                "narration-words-info",
+                None,
+                tr(bardo, Text::NarrationWordsHint),
+            ));
 
         let text = narration.text.as_str();
         let mut words: Vec<AnyElement> = Vec::with_capacity(narration.words.len());
@@ -1551,7 +1511,7 @@ impl ProjectsScreen {
                     .rounded_sm()
                     .cursor_pointer()
                     .when(spoken, |word| {
-                        word.bg(theme.warning).text_color(theme.warning_foreground)
+                        word.bg(tokens.accent).text_color(tokens.on_accent)
                     })
                     .when(!spoken, |word| word.hover(|word| word.bg(theme.list_hover)))
                     .child(SharedString::from(text[timing.text.clone()].to_owned()))
@@ -1566,87 +1526,69 @@ impl ProjectsScreen {
             .gap_2()
             .child(controls)
             .child(
-                h_flex()
+                kit::well(cx)
                     .id("narration-words")
                     .max_h(px(260.))
                     .overflow_y_scroll()
+                    .flex()
                     .flex_wrap()
                     .gap_x_1()
                     .gap_y_0p5()
                     .p_2()
-                    .rounded_md()
-                    .bg(theme.muted)
-                    .text_sm()
                     .children(words),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tr(bardo, Text::NarrationWordsHint)),
             )
             .into_any_element()
     }
 
-    /// What generated the narration and what it cost.
+    /// What generated the narration and what it cost, behind "Details".
     fn render_narration_record(&self, narration: &Narration, cx: &App) -> AnyElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         let fact = |label: Text, value: String| {
-            v_flex()
-                .gap_0p5()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, label)),
-                )
-                .child(div().text_sm().child(SharedString::from(value)))
+            SharedString::from(format!("{}: {value}", bardo.text(label)))
         };
         let source = &narration.source;
-        let record = h_flex()
-            .flex_wrap()
-            .gap_x_6()
-            .gap_y_2()
-            .child(fact(
+        let mut facts = vec![
+            fact(
                 Text::ProvenanceProvider,
                 bardo
                     .text(Text::ProviderName(source.provider()))
                     .into_owned(),
-            ))
-            .child(fact(Text::ProvenanceModel, source.model().to_owned()));
-        let record = match source {
+            ),
+            fact(Text::ProvenanceModel, source.model().to_owned()),
+        ];
+        match source {
             NarrationSource::Generated {
                 voice,
                 billed_characters,
                 ..
-            } => record
-                .child(fact(Text::NarrationVoice, voice.name().to_owned()))
-                .child(fact(
+            } => {
+                facts.push(fact(Text::NarrationVoice, voice.name().to_owned()));
+                facts.push(fact(
                     Text::NarrationCost,
                     bardo.text_with(
                         Text::NarrationCostValue,
                         &[("n", &billed_characters.to_string())],
                     ),
-                )),
-            NarrationSource::Imported { file_name, .. } => record
-                .child(fact(Text::NarrationRecording, file_name.clone()))
-                .child(fact(
+                ));
+            }
+            NarrationSource::Imported { file_name, .. } => {
+                facts.push(fact(Text::NarrationRecording, file_name.clone()));
+                facts.push(fact(
                     Text::NarrationCost,
                     bardo.text_with(
                         Text::NarrationAudioValue,
                         &[("length", &clock(narration.duration))],
                     ),
-                )),
-        };
+                ));
+            }
+        }
         let made = match source {
             NarrationSource::Generated { .. } => Text::ProvenanceGenerated,
             NarrationSource::Imported { .. } => Text::NarrationImported,
         };
-        record
-            .child(fact(Text::NarrationDuration, clock(narration.duration)))
-            .child(fact(made, bardo.time_ago(narration.generated_at)))
-            .into_any_element()
+        facts.push(fact(Text::NarrationDuration, clock(narration.duration)));
+        facts.push(fact(made, bardo.time_ago(narration.generated_at)));
+        kit::details("narration-details", tr(bardo, Text::Details), facts).into_any_element()
     }
 
     /// The recording the user chose: its name and length, what aligning it
@@ -1660,12 +1602,9 @@ impl ProjectsScreen {
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
-        v_flex()
+        kit::card(cx)
             .gap_2()
             .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(theme.border)
             .child(div().text_sm().child(SharedString::from(bardo.text_with(
                 Text::RecordingChosen,
                 &[

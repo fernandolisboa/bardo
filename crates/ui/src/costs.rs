@@ -10,16 +10,16 @@ use bardo_app::{Bardo, CostsView, ProviderSpend, RateRow, SpendRow, Text};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, StyledExt as _, h_flex,
-    v_flex,
+    ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
 };
 
+use crate::appearance::look;
+use crate::kit::{self, Tone};
 use crate::shell::tr;
 
 /// How often the screen checks the job queue for new costs.
@@ -341,24 +341,22 @@ impl CostsScreen {
                             .font_semibold()
                             .child(SharedString::from(name.clone())),
                     )
-                    .child(
-                        Button::new("next-month")
-                            .ghost()
-                            .small()
-                            .label(format!("{} ›", bardo.text(Text::CostsNextMonth)))
-                            .disabled(month >= current)
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.show_month(month.next(), cx)
-                            })),
-                    ),
+                    .when(month < current, |row| {
+                        row.child(
+                            Button::new("next-month")
+                                .ghost()
+                                .small()
+                                .label(format!("{} ›", bardo.text(Text::CostsNextMonth)))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.show_month(month.next(), cx)
+                                })),
+                        )
+                    }),
             )
             .child(
-                v_flex()
+                kit::card(cx)
                     .p_4()
                     .gap_1()
-                    .border_1()
-                    .border_color(theme.border)
-                    .rounded_lg()
                     .child(div().text_sm().text_color(theme.muted_foreground).child(
                         SharedString::from(bardo.text_with(Text::CostsTotal, &[("month", &name)])),
                     ))
@@ -386,14 +384,13 @@ impl CostsScreen {
             .collect::<Vec<_>>()
             .join(", ");
         Some(
-            div()
+            kit::card(cx)
                 .p_3()
-                .rounded_md()
-                .border_1()
                 .border_color(cx.theme().warning)
-                .text_sm()
-                .child(SharedString::from(
+                .child(kit::notice(
+                    Tone::Warning,
                     bardo.text_with(Text::CostsUnpriced, &[("models", &models)]),
+                    cx,
                 ))
                 .into_any_element(),
         )
@@ -409,8 +406,13 @@ impl CostsScreen {
         let bardo = self.bardo.read(cx);
         v_flex()
             .gap_2()
-            .child(section_title(cx, tr(bardo, Text::CostsProvidersTitle)))
-            .child(hint(cx, tr(bardo, Text::CostsProvidersHint)))
+            .child(
+                kit::section_heading(tr(bardo, Text::CostsProvidersTitle)).child(kit::info(
+                    "costs-providers-info",
+                    None,
+                    tr(bardo, Text::CostsProvidersHint),
+                )),
+            )
             .children(rows)
     }
 
@@ -422,7 +424,7 @@ impl CostsScreen {
         let level_color = match spend.level {
             Some(BudgetLevel::Reached) => theme.danger,
             Some(BudgetLevel::Warning) => theme.warning,
-            _ => theme.primary,
+            _ => look(cx).tokens.accent,
         };
 
         let budget: AnyElement = if editing {
@@ -457,12 +459,10 @@ impl CostsScreen {
                                 })),
                         ),
                 )
-                .children(self.budget_error.map(|error| {
-                    div()
-                        .text_xs()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, error))
-                }))
+                .children(
+                    self.budget_error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).text_xs()),
+                )
                 .into_any_element()
         } else {
             match (spend.budget, spend.percent) {
@@ -490,12 +490,16 @@ impl CostsScreen {
                                     )),
                                 ))
                                 .children(match spend.level {
-                                    Some(BudgetLevel::Reached) => Some(
-                                        Tag::danger().small().child(tr(bardo, Text::BudgetReached)),
-                                    ),
-                                    Some(BudgetLevel::Warning) => Some(
-                                        Tag::warning().small().child(tr(bardo, Text::BudgetNear)),
-                                    ),
+                                    Some(BudgetLevel::Reached) => Some(kit::status(
+                                        Tone::Danger,
+                                        tr(bardo, Text::BudgetReached),
+                                        cx,
+                                    )),
+                                    Some(BudgetLevel::Warning) => Some(kit::status(
+                                        Tone::Warning,
+                                        tr(bardo, Text::BudgetNear),
+                                        cx,
+                                    )),
                                     _ => None,
                                 })
                                 .child(div().flex_1())
@@ -550,12 +554,9 @@ impl CostsScreen {
             }
         };
 
-        v_flex()
+        kit::card(cx)
             .p_3()
             .gap_2()
-            .border_1()
-            .border_color(theme.border)
-            .rounded_lg()
             .child(
                 h_flex()
                     .justify_between()
@@ -613,17 +614,19 @@ impl CostsScreen {
                 .items_start()
                 .flex_wrap()
                 .child(
-                    v_flex()
+                    kit::card(cx)
                         .flex_1()
                         .min_w(px(260.))
+                        .p_3()
                         .gap_1()
                         .child(section_title(cx, tr(bardo, Text::CostsChannelsTitle)))
                         .children(channels),
                 )
                 .child(
-                    v_flex()
+                    kit::card(cx)
                         .flex_1()
                         .min_w(px(260.))
+                        .p_3()
                         .gap_1()
                         .child(section_title(cx, tr(bardo, Text::CostsVideosTitle)))
                         .children(videos),
@@ -643,15 +646,14 @@ impl CostsScreen {
         let bardo = self.bardo.read(cx);
         v_flex()
             .gap_2()
-            .child(section_title(cx, tr(bardo, Text::RatesTitle)))
-            .child(hint(cx, tr(bardo, Text::RatesHint)))
             .child(
-                v_flex()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded_lg()
-                    .children(rows),
+                kit::section_heading(tr(bardo, Text::RatesTitle)).child(kit::info(
+                    "rates-info",
+                    None,
+                    tr(bardo, Text::RatesHint),
+                )),
             )
+            .child(kit::card(cx).children(rows))
             .child(self.render_add_rate(cx))
     }
 
@@ -667,8 +669,8 @@ impl CostsScreen {
             SharedString::from(rate.model.clone())
         };
         let tag = match (row.changed, row.default) {
-            (true, Some(_)) => Some(Tag::warning().small().child(tr(bardo, Text::RateChanged))),
-            (true, None) => Some(Tag::secondary().small().child(tr(bardo, Text::RateAdded))),
+            (true, Some(_)) => Some(kit::status(Tone::Info, tr(bardo, Text::RateChanged), cx)),
+            (true, None) => Some(kit::status(Tone::Neutral, tr(bardo, Text::RateAdded), cx)),
             _ => None,
         };
 
@@ -704,12 +706,10 @@ impl CostsScreen {
                                 })),
                         ),
                 )
-                .children(self.rate_error.map(|error| {
-                    div()
-                        .text_xs()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, error))
-                }))
+                .children(
+                    self.rate_error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).text_xs()),
+                )
                 .into_any_element()
         } else {
             let edit_row = row.clone();
@@ -795,7 +795,6 @@ impl CostsScreen {
 
     fn render_add_rate(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
         let paid: Vec<Provider> = Provider::paid().collect();
         let providers = ButtonGroup::new("new-rate-provider")
             .small()
@@ -828,12 +827,9 @@ impl CostsScreen {
                 }
             }));
 
-        v_flex()
+        kit::card(cx)
             .p_3()
             .gap_2()
-            .border_1()
-            .border_color(theme.border)
-            .rounded_lg()
             .child(div().font_medium().child(tr(bardo, Text::AddRateTitle)))
             .child(labeled(
                 cx,
@@ -862,12 +858,10 @@ impl CostsScreen {
                     .child(Input::new(&self.new_price).small())
                     .into_any_element(),
             ))
-            .children(self.add_error.map(|error| {
-                div()
-                    .text_xs()
-                    .text_color(theme.danger)
-                    .child(tr(bardo, error))
-            }))
+            .children(
+                self.add_error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).text_xs()),
+            )
             .child(
                 h_flex().child(
                     Button::new("add-rate")
@@ -883,7 +877,7 @@ impl CostsScreen {
 }
 
 fn section_title(_cx: &App, text: SharedString) -> AnyElement {
-    div().text_lg().font_medium().child(text).into_any_element()
+    kit::section_heading(text).into_any_element()
 }
 
 fn hint(cx: &App, text: SharedString) -> AnyElement {
@@ -947,7 +941,6 @@ impl Render for CostsScreen {
         let breakdown = self.render_breakdown(cx);
         let rates = self.render_rates(cx).into_any_element();
         let bardo = self.bardo.read(cx);
-        let theme = cx.theme();
 
         v_flex().id("costs").size_full().overflow_y_scroll().child(
             v_flex()
@@ -955,28 +948,19 @@ impl Render for CostsScreen {
                 .p_6()
                 .gap_5()
                 .child(
-                    v_flex()
+                    h_flex()
                         .gap_1()
-                        .child(
-                            div()
-                                .text_xl()
-                                .font_semibold()
-                                .child(tr(bardo, Text::CostsTitle)),
-                        )
-                        .child(hint(cx, tr(bardo, Text::CostsHint))),
+                        .child(kit::title(tr(bardo, Text::CostsTitle)))
+                        .child(kit::info("costs-info", None, tr(bardo, Text::CostsHint))),
                 )
-                .children(self.notice.map(|notice| {
-                    div()
-                        .text_sm()
-                        .text_color(theme.success)
-                        .child(tr(bardo, notice))
-                }))
-                .children(self.error.map(|error| {
-                    div()
-                        .text_sm()
-                        .text_color(theme.danger)
-                        .child(tr(bardo, error))
-                }))
+                .children(
+                    self.notice
+                        .map(|notice| kit::notice(Tone::Success, tr(bardo, notice), cx)),
+                )
+                .children(
+                    self.error
+                        .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+                )
                 .child(month)
                 .children(unpriced)
                 .child(providers)
