@@ -3,7 +3,7 @@
 //! a `ChannelDraft` and errors back to fields.
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelDraft, ChannelFieldError, ChannelId, ContentLanguage, Country,
+    Channel, ChannelDraft, ChannelFieldError, ChannelId, ContentLanguage, Country, PersonaId,
 };
 use bardo_app::{Bardo, ChannelError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -53,6 +53,24 @@ fn country_choices(bardo: &Bardo) -> SearchableVec<Choice<Country>> {
     }))
 }
 
+/// "No default persona" first, then the profile's personas by name. A
+/// list that cannot be read offers only "none".
+fn persona_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<PersonaId>>> {
+    let none = Choice {
+        value: None,
+        title: tr(bardo, Text::ChannelPersonaNone),
+    };
+    let personas = bardo.personas().unwrap_or_default();
+    SearchableVec::new(
+        std::iter::once(none)
+            .chain(personas.into_iter().map(|persona| Choice {
+                value: Some(persona.id),
+                title: SharedString::from(persona.details.name().to_owned()),
+            }))
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn index_of<T: PartialEq>(all: &[T], value: &T) -> Option<IndexPath> {
     all.iter().position(|v| v == value).map(IndexPath::new)
 }
@@ -87,6 +105,7 @@ pub struct ChannelsScreen {
     aesthetic_notes: Entity<TextareaState>,
     language: ChoiceSelect<ContentLanguage>,
     country: ChoiceSelect<Country>,
+    persona: ChoiceSelect<Option<PersonaId>>,
     field_errors: Vec<ChannelFieldError>,
     notice: Option<Notice>,
     _subscriptions: Vec<Subscription>,
@@ -105,9 +124,13 @@ impl ChannelsScreen {
         let aesthetic_notes = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
 
         let defaults = ChannelDraft::default();
-        let (languages, countries) = {
+        let (languages, countries, personas) = {
             let bardo = bardo.read(cx);
-            (language_choices(bardo), country_choices(bardo))
+            (
+                language_choices(bardo),
+                country_choices(bardo),
+                persona_choices(bardo),
+            )
         };
         let language = cx.new(|cx| {
             let selected = index_of(&ContentLanguage::ALL, &defaults.language);
@@ -116,6 +139,9 @@ impl ChannelsScreen {
         let country = cx.new(|cx| {
             let selected = index_of(&Country::ALL, &defaults.country);
             SelectState::new(countries, selected, window, cx).searchable(true)
+        });
+        let persona = cx.new(|cx| {
+            SelectState::new(personas, Some(IndexPath::new(0)), window, cx).searchable(true)
         });
 
         let subscriptions = vec![
@@ -147,6 +173,7 @@ impl ChannelsScreen {
             aesthetic_notes,
             language,
             country,
+            persona,
             field_errors: Vec::new(),
             notice: None,
             _subscriptions: subscriptions,
@@ -178,6 +205,7 @@ impl ChannelsScreen {
         let aesthetic = tr(bardo, Text::ChannelAestheticNotesPlaceholder);
         let languages = language_choices(bardo);
         let countries = country_choices(bardo);
+        let personas = persona_choices(bardo);
 
         self.name
             .update(cx, |input, cx| input.set_placeholder(name, window, cx));
@@ -201,7 +229,34 @@ impl ChannelsScreen {
                 select.set_selected_value(&value, window, cx);
             }
         });
+        Self::set_persona_items(&self.persona, personas, window, cx);
         cx.notify();
+    }
+
+    /// Re-reads the persona choices; personas may have been created or
+    /// renamed on the personas screen.
+    pub fn reload_personas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let personas = persona_choices(self.bardo.read(cx));
+        Self::set_persona_items(&self.persona, personas, window, cx);
+        cx.notify();
+    }
+
+    /// Replaces the choices and keeps the selection, falling back to "none"
+    /// when the selected persona is gone.
+    fn set_persona_items(
+        select: &ChoiceSelect<Option<PersonaId>>,
+        personas: SearchableVec<Choice<Option<PersonaId>>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        select.update(cx, |select, cx| {
+            let selected = select.selected_value().copied().flatten();
+            select.set_items(personas, window, cx);
+            select.set_selected_value(&selected, window, cx);
+            if select.selected_value().is_none() {
+                select.set_selected_value(&None, window, cx);
+            }
+        });
     }
 
     fn fill(&mut self, draft: &ChannelDraft, window: &mut Window, cx: &mut Context<Self>) {
@@ -222,6 +277,9 @@ impl ChannelsScreen {
         });
         self.country.update(cx, |select, cx| {
             select.set_selected_value(&draft.country, window, cx)
+        });
+        self.persona.update(cx, |select, cx| {
+            select.set_selected_value(&draft.default_persona, window, cx)
         });
     }
 
@@ -249,6 +307,7 @@ impl ChannelsScreen {
                 .selected_value()
                 .copied()
                 .unwrap_or_default(),
+            default_persona: self.persona.read(cx).selected_value().copied().flatten(),
         }
     }
 
@@ -484,6 +543,13 @@ impl ChannelsScreen {
                                 )),
                             ),
                     )
+                    .child(field(
+                        Text::ChannelPersona,
+                        Select::new(&self.persona)
+                            .search_placeholder(tr(bardo, Text::PersonasTitle))
+                            .into_any_element(),
+                        Some(hint(Text::ChannelPersonaHint)),
+                    ))
                     .child(
                         h_flex()
                             .gap_3()

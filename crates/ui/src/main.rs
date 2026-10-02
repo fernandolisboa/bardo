@@ -5,6 +5,7 @@
 
 mod channels;
 mod jobs;
+mod personas;
 mod projects;
 mod research;
 mod settings;
