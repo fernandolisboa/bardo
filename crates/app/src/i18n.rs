@@ -9,11 +9,12 @@ use crate::{Destination, Pillar, Stage};
 
 use bardo_domain::{
     ApiKeyError, AspectRatio, CaptionStyle, ChannelFieldError, ContentLanguage, Country, Decibels,
-    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, MetadataProblem, Meter, Money,
-    MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
-    PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind,
-    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage,
-    UiTheme, Visibility, VoiceCategory, VoiceFlag,
+    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, MetadataProblem, Meter,
+    MetricsSyncOnStart, Money, MoneyError, Month, MusicPromptFieldError, Network,
+    NetworkAccountFieldError, NicheSeedError, PersonaFieldError, PostLinkError, Provider,
+    RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
+    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
+    VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -1018,6 +1019,64 @@ pub enum Text {
     DisclosureHow(Network),
     /// A metadata rule broken, with `{limit}` where it has one.
     MetadataProblem(MetadataProblem),
+    PublicationNoAccount,
+    PublicationNotExported,
+    PublicationAlreadyLinked,
+    PublicationNotFound,
+    PublicationNotSaved,
+    MetricsMissingKey,
+    MetricsNothingToSync,
+    MetricsAlreadySyncing,
+    MetricsNotLoaded,
+    PublicationTitle,
+    PublicationNeedsExport,
+    PublicationLinkPlaceholder,
+    PublicationMark,
+    PublicationMarkHint,
+    PublicationPosted,
+    PublicationMissing,
+    PublicationMissingHint,
+    PublicationOpen,
+    PublicationChange,
+    PublicationSave,
+    PublicationCancel,
+    PublicationRemove,
+    PublicationRemoveConfirm,
+    PublicationRemoveKeep,
+    PublicationSaved,
+    PublicationRemoved,
+    PublicationPostedAt,
+    PublicationNoMetrics,
+    PublicationFigure,
+    PublicationTileViews,
+    MetricViews,
+    MetricLikes,
+    MetricComments,
+    MetricHidden,
+    MetricHiddenHint,
+    MetricsSyncedAgo,
+    MetricsNotSynced,
+    MetricsSyncNow,
+    MetricsSyncing,
+    MetricsSyncStopped,
+    MetricsSyncHint,
+    MetricsHistory,
+    MetricsChange,
+    PerformanceInfo,
+    PerformanceChannel,
+    PerformanceEmpty,
+    PerformanceNoChannels,
+    PerformanceHistoryTitle,
+    PerformanceHistoryEmpty,
+    PerformancePosts,
+    PerformanceTracked,
+    PerformanceTile,
+    MetricsSettingsTab,
+    MetricsSettingLabel,
+    MetricsSettingHint,
+    MetricsSettingNotSaved,
+    PostLinkProblem(PostLinkError),
+    MetricsSyncOption(MetricsSyncOnStart),
 }
 
 impl Text {
@@ -1930,6 +1989,7 @@ impl Text {
             Text::DestinationName(place) => match place {
                 Destination::Research => "nav.place.research",
                 Destination::Themes => "nav.place.themes",
+                Destination::Performance => "nav.place.performance",
                 Destination::Projects => "nav.place.projects",
                 Destination::Personas => "nav.place.personas",
                 Destination::Templates => "nav.place.templates",
@@ -2091,6 +2151,73 @@ impl Text {
             Text::MetadataCostUnpriced => "metadata.cost_unpriced",
             Text::DisclosureHow(network) => {
                 return format!("disclosure.how.{}", network.code()).into();
+            }
+            Text::PublicationNoAccount => "publication.error.no_account",
+            Text::PublicationNotExported => "publication.error.not_exported",
+            Text::PublicationAlreadyLinked => "publication.error.already_linked",
+            Text::PublicationNotFound => "publication.error.not_found",
+            Text::PublicationNotSaved => "publication.error.not_saved",
+            Text::MetricsMissingKey => "metrics.error.missing_key",
+            Text::MetricsNothingToSync => "metrics.error.nothing_to_sync",
+            Text::MetricsAlreadySyncing => "metrics.error.already_syncing",
+            Text::MetricsNotLoaded => "metrics.error.not_loaded",
+            Text::PublicationTitle => "publication.title",
+            Text::PublicationNeedsExport => "publication.needs_export",
+            Text::PublicationLinkPlaceholder => "publication.link_placeholder",
+            Text::PublicationMark => "publication.mark",
+            Text::PublicationMarkHint => "publication.mark_hint",
+            Text::PublicationPosted => "publication.posted",
+            Text::PublicationMissing => "publication.missing",
+            Text::PublicationMissingHint => "publication.missing_hint",
+            Text::PublicationOpen => "publication.open",
+            Text::PublicationChange => "publication.change",
+            Text::PublicationSave => "publication.save",
+            Text::PublicationCancel => "publication.cancel",
+            Text::PublicationRemove => "publication.remove",
+            Text::PublicationRemoveConfirm => "publication.remove_confirm",
+            Text::PublicationRemoveKeep => "publication.remove_keep",
+            Text::PublicationSaved => "publication.saved",
+            Text::PublicationRemoved => "publication.removed",
+            Text::PublicationPostedAt => "publication.posted_at",
+            Text::PublicationNoMetrics => "publication.no_metrics",
+            Text::PublicationFigure => "publication.figure",
+            Text::PublicationTileViews => "publication.tile_views",
+            Text::MetricViews => "metrics.views",
+            Text::MetricLikes => "metrics.likes",
+            Text::MetricComments => "metrics.comments",
+            Text::MetricHidden => "metrics.hidden",
+            Text::MetricHiddenHint => "metrics.hidden_hint",
+            Text::MetricsSyncedAgo => "metrics.synced_ago",
+            Text::MetricsNotSynced => "metrics.not_synced",
+            Text::MetricsSyncNow => "metrics.sync_now",
+            Text::MetricsSyncing => "metrics.syncing",
+            Text::MetricsSyncStopped => "metrics.sync_stopped",
+            Text::MetricsSyncHint => "metrics.sync_hint",
+            Text::MetricsHistory => "metrics.history",
+            Text::MetricsChange => "metrics.change",
+            Text::PerformanceInfo => "performance.info",
+            Text::PerformanceChannel => "performance.channel",
+            Text::PerformanceEmpty => "performance.empty",
+            Text::PerformanceNoChannels => "performance.no_channels",
+            Text::PerformanceHistoryTitle => "performance.history_title",
+            Text::PerformanceHistoryEmpty => "performance.history_empty",
+            Text::PerformancePosts => "performance.posts",
+            Text::PerformanceTracked => "performance.tracked",
+            Text::PerformanceTile => "performance.tile",
+            Text::MetricsSettingsTab => "metrics.settings.tab",
+            Text::MetricsSettingLabel => "metrics.settings.label",
+            Text::MetricsSettingHint => "metrics.settings.hint",
+            Text::MetricsSettingNotSaved => "metrics.settings.not_saved",
+            Text::PostLinkProblem(error) => match error {
+                PostLinkError::Empty => "publication.link.empty",
+                PostLinkError::NotALink => "publication.link.not_a_link",
+                PostLinkError::OtherSite(Some(_)) => "publication.link.other_network",
+                PostLinkError::OtherSite(None) => "publication.link.other_site",
+                PostLinkError::ShortLink => "publication.link.short_link",
+                PostLinkError::NotAPost => "publication.link.not_a_post",
+            },
+            Text::MetricsSyncOption(setting) => {
+                return format!("metrics.sync_option.{}", setting.code()).into();
             }
             Text::MetadataProblem(problem) => match problem {
                 MetadataProblem::TitleRequired => "metadata.problem.title_required",
@@ -3240,6 +3367,74 @@ mod tests {
         texts.push(Text::MetadataCostUnpriced);
         texts.extend(Network::ALL.map(Text::DisclosureHow));
         texts.extend(MetadataProblem::ALL.map(Text::MetadataProblem));
+        texts.push(Text::PublicationNoAccount);
+        texts.push(Text::PublicationNotExported);
+        texts.push(Text::PublicationAlreadyLinked);
+        texts.push(Text::PublicationNotFound);
+        texts.push(Text::PublicationNotSaved);
+        texts.push(Text::MetricsMissingKey);
+        texts.push(Text::MetricsNothingToSync);
+        texts.push(Text::MetricsAlreadySyncing);
+        texts.push(Text::MetricsNotLoaded);
+        texts.push(Text::PublicationTitle);
+        texts.push(Text::PublicationNeedsExport);
+        texts.push(Text::PublicationLinkPlaceholder);
+        texts.push(Text::PublicationMark);
+        texts.push(Text::PublicationMarkHint);
+        texts.push(Text::PublicationPosted);
+        texts.push(Text::PublicationMissing);
+        texts.push(Text::PublicationMissingHint);
+        texts.push(Text::PublicationOpen);
+        texts.push(Text::PublicationChange);
+        texts.push(Text::PublicationSave);
+        texts.push(Text::PublicationCancel);
+        texts.push(Text::PublicationRemove);
+        texts.push(Text::PublicationRemoveConfirm);
+        texts.push(Text::PublicationRemoveKeep);
+        texts.push(Text::PublicationSaved);
+        texts.push(Text::PublicationRemoved);
+        texts.push(Text::PublicationPostedAt);
+        texts.push(Text::PublicationNoMetrics);
+        texts.push(Text::PublicationFigure);
+        texts.push(Text::PublicationTileViews);
+        texts.push(Text::MetricViews);
+        texts.push(Text::MetricLikes);
+        texts.push(Text::MetricComments);
+        texts.push(Text::MetricHidden);
+        texts.push(Text::MetricHiddenHint);
+        texts.push(Text::MetricsSyncedAgo);
+        texts.push(Text::MetricsNotSynced);
+        texts.push(Text::MetricsSyncNow);
+        texts.push(Text::MetricsSyncing);
+        texts.push(Text::MetricsSyncStopped);
+        texts.push(Text::MetricsSyncHint);
+        texts.push(Text::MetricsHistory);
+        texts.push(Text::MetricsChange);
+        texts.push(Text::PerformanceInfo);
+        texts.push(Text::PerformanceChannel);
+        texts.push(Text::PerformanceEmpty);
+        texts.push(Text::PerformanceNoChannels);
+        texts.push(Text::PerformanceHistoryTitle);
+        texts.push(Text::PerformanceHistoryEmpty);
+        texts.push(Text::PerformancePosts);
+        texts.push(Text::PerformanceTracked);
+        texts.push(Text::PerformanceTile);
+        texts.push(Text::MetricsSettingsTab);
+        texts.push(Text::MetricsSettingLabel);
+        texts.push(Text::MetricsSettingHint);
+        texts.push(Text::MetricsSettingNotSaved);
+        texts.extend(
+            [
+                PostLinkError::Empty,
+                PostLinkError::NotALink,
+                PostLinkError::OtherSite(Some(Network::TikTok)),
+                PostLinkError::OtherSite(None),
+                PostLinkError::ShortLink,
+                PostLinkError::NotAPost,
+            ]
+            .map(Text::PostLinkProblem),
+        );
+        texts.extend(MetricsSyncOnStart::ALL.map(Text::MetricsSyncOption));
         texts
     }
 

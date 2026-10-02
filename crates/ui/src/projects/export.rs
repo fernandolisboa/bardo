@@ -6,17 +6,18 @@
 //! queues one job that writes a folder per network with the rendered file
 //! and its metadata file; the stage follows it (progress, cancel, resume).
 //! Writing the metadata again replaces edits, so it asks first when there
-//! are any.
+//! are any. Once the file is up, the user pastes the post's link (#29);
+//! a YouTube post then shows its public numbers as syncs read them.
 
 use std::rc::Rc;
 
 use bardo_app::bardo_domain::{
-    Cost, Job, JobState, Network, TagPlacement, TemplateKind, VideoMetadataDraft, VideoProjectId,
-    compose, text_length,
+    Cost, Job, JobState, Network, PublicationId, TagPlacement, TemplateKind, VideoMetadataDraft,
+    VideoProjectId, compose, text_length,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, Text,
-    export_job_networks,
+    Bardo, BudgetConsent, ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView,
+    PublicationError, Text, export_job_networks,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -30,6 +31,7 @@ use gpui_kit::{AnyElement, App, ClickEvent, ClipboardItem, SharedString, Window,
 use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::appearance::look;
 use crate::kit::{self, Tone};
+use crate::metrics;
 use crate::parts::{Collection, CollectionKind, Figure, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
@@ -127,6 +129,10 @@ impl ProjectsScreen {
         self.metadata_tags.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx)
         });
+        let placeholder = tr(self.bardo.read(cx), Text::PublicationLinkPlaceholder);
+        self.post_link.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
         self.fill_metadata(window, cx);
     }
 
@@ -199,8 +205,81 @@ impl ProjectsScreen {
             self.selected_network = Some(network);
             self.metadata_loaded = None;
             self.export_notice = None;
+            self.reset_post(window, cx);
             self.fill_metadata(window, cx);
         }
+        cx.notify();
+    }
+
+    /// Leaves the link field empty and drops what the last post action
+    /// left open.
+    pub(super) fn reset_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.post_editing = false;
+        self.post_confirm_remove = false;
+        self.post_error = None;
+        self.post_link
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    }
+
+    /// Links the pasted post to the shown network's export.
+    fn mark_posted(&mut self, network: Network, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        let link = self.post_link.read(cx).value().to_string();
+        let bardo = self.bardo.read(cx);
+        match bardo.mark_posted(id, network, &link) {
+            Ok(_) => {
+                self.reset_post(window, cx);
+                self.export_error = None;
+                self.export_notice = Some(Text::PublicationSaved);
+            }
+            Err(PublicationError::Link(error)) => {
+                self.post_error = Some(bardo.post_link_problem(error, network).into());
+            }
+            Err(error) => self.post_error = Some(tr(bardo, error.message())),
+        }
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// Opens the link field over a linked post, filled with its link.
+    fn change_post(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.post_editing = true;
+        self.post_confirm_remove = false;
+        self.post_error = None;
+        self.post_link
+            .update(cx, |input, cx| input.set_value(url, window, cx));
+        cx.notify();
+    }
+
+    fn remove_post(
+        &mut self,
+        publication: PublicationId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.bardo.read(cx).remove_publication(publication) {
+            Ok(()) => {
+                self.reset_post(window, cx);
+                self.export_notice = Some(Text::PublicationRemoved);
+            }
+            Err(error) => {
+                self.post_confirm_remove = false;
+                self.post_error = Some(tr(self.bardo.read(cx), error.message()));
+            }
+        }
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn sync_metrics(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        self.post_error = bardo
+            .sync_metrics()
+            .err()
+            .map(|error| tr(bardo, error.message()));
+        self.load(window, cx);
         cx.notify();
     }
 
@@ -395,6 +474,20 @@ impl ProjectsScreen {
             Some(Cost::Unpriced) => bardo.text(Text::MetadataCostUnpriced).into_owned(),
             Some(cost) => bardo.money(cost.amount()),
         };
+        // Posts go up from exports: their count sits under the exports'.
+        let posted = view.targets.iter().filter(|t| t.posted.is_some()).count();
+        if posted > 0 {
+            exported.line = Some(
+                div()
+                    .text_xs()
+                    .text_color(look(cx).tokens.text2)
+                    .child(SharedString::from(bardo.text_with(
+                        Text::PublicationFigure,
+                        &[("n", &posted.to_string()), ("total", &total)],
+                    )))
+                    .into_any_element(),
+            );
+        }
         vec![
             Figure::new(tr(bardo, Text::ExportFigureRendered), of(summary.rendered)),
             Figure::new(tr(bardo, Text::ExportFigureMetadata), tr(bardo, metadata)),
@@ -716,7 +809,17 @@ impl ProjectsScreen {
                 Some(line) if !line.is_empty() => format!("@{} · {line}", target.handle),
                 _ => format!("@{}", target.handle),
             }));
-            tile.time = Some(tr(bardo, last_state(target)));
+            // Once posted, the post says more than the export.
+            tile.time = Some(match target.posted.as_ref() {
+                Some(post) => match post.latest() {
+                    Some(latest) => SharedString::from(bardo.text_with(
+                        Text::PublicationTileViews,
+                        &[("views", &bardo.compact_count(latest.views))],
+                    )),
+                    None => tr(bardo, Text::PublicationPosted),
+                },
+                None => tr(bardo, last_state(target)),
+            });
             tile.status = Some(state_chip(bardo, target, cx));
             tile.marks = include
                 .map(IntoElement::into_any_element)
@@ -1054,7 +1157,9 @@ impl ProjectsScreen {
                 .children(last)
                 .into_any_element(),
         );
+        body.push(self.post_section(view, target, cx));
 
+        let bardo = self.bardo.read(cx);
         let title = h_flex()
             .gap_2()
             .items_center()
@@ -1082,5 +1187,203 @@ impl ProjectsScreen {
         inspector.title = Some(title);
         inspector.footer = footer;
         inspector
+    }
+
+    /// The post made of the export: the field to paste its link, or the
+    /// linked post with its state, link and (on YouTube) public numbers.
+    fn post_section(
+        &self,
+        view: &ExportView,
+        target: &ExportTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let network = target.network;
+        let bardo = self.bardo.read(cx);
+        let heading = h_flex()
+            .gap_1()
+            .items_center()
+            .child(field_label(tr(bardo, Text::PublicationTitle)))
+            .child(kit::info(
+                "post-info",
+                None,
+                tr(bardo, Text::PublicationMarkHint),
+            ));
+        let error = self
+            .post_error
+            .clone()
+            .map(|error| kit::notice(Tone::Danger, error, cx).into_any_element());
+        let mut section = v_flex().gap_2().child(heading);
+
+        let posted = target.posted.as_ref();
+        if posted.is_none() && !target.can_mark_posted() {
+            return section
+                .child(muted(cx, tr(bardo, Text::PublicationNeedsExport)))
+                .into_any_element();
+        }
+        if posted.is_none() || self.post_editing {
+            let editing = self.post_editing;
+            let field = h_flex()
+                .gap_2()
+                .items_center()
+                .child(div().flex_1().min_w_0().child(Input::new(&self.post_link)))
+                .child(
+                    Button::new("post-mark")
+                        .small()
+                        .primary()
+                        .label(tr(
+                            bardo,
+                            if editing {
+                                Text::PublicationSave
+                            } else {
+                                Text::PublicationMark
+                            },
+                        ))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.mark_posted(network, window, cx);
+                        })),
+                )
+                .when(editing, |row| {
+                    row.child(
+                        Button::new("post-cancel")
+                            .small()
+                            .ghost()
+                            .label(tr(bardo, Text::PublicationCancel))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.reset_post(window, cx);
+                                cx.notify();
+                            })),
+                    )
+                });
+            section = section.child(field).children(error);
+            if let Some(post) = posted {
+                section = section.child(metrics::post_state(bardo, post, "post", cx));
+            }
+            return section.into_any_element();
+        }
+        let Some(post) = posted else {
+            return section.into_any_element();
+        };
+        let publication = &post.publication;
+        let url = publication.link.url().to_owned();
+        let open = url.clone();
+        let change = url.clone();
+        let id = publication.id;
+        section = section
+            .child(metrics::post_state(bardo, post, "post", cx))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        kit::well(cx)
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .truncate()
+                            .child(SharedString::from(url)),
+                    )
+                    .child(
+                        Button::new("post-open")
+                            .small()
+                            .outline()
+                            .label(tr(bardo, Text::PublicationOpen))
+                            .on_click(move |_, _, cx| cx.open_url(&open)),
+                    ),
+            );
+        if self.post_confirm_remove {
+            section = section.child(
+                kit::card(cx)
+                    .p_3()
+                    .gap_2()
+                    .border_color(look(cx).tokens.accent_edge)
+                    .child(div().text_sm().child(SharedString::from(bardo.text_with(
+                        Text::PublicationRemoveConfirm,
+                        &[("network", &bardo.text(Text::NetworkName(network)))],
+                    ))))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .justify_end()
+                            .child(
+                                Button::new("post-remove-keep")
+                                    .small()
+                                    .ghost()
+                                    .label(tr(bardo, Text::PublicationRemoveKeep))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                        this.post_confirm_remove = false;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("post-remove-confirm")
+                                    .small()
+                                    .danger()
+                                    .label(tr(bardo, Text::PublicationRemove))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.remove_post(id, window, cx);
+                                        },
+                                    )),
+                            ),
+                    ),
+            );
+        } else {
+            section = section.child(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Button::new("post-change")
+                            .xsmall()
+                            .ghost()
+                            .label(tr(bardo, Text::PublicationChange))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.change_post(change.clone(), window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("post-remove")
+                            .xsmall()
+                            .ghost()
+                            .label(tr(bardo, Text::PublicationRemove))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.post_confirm_remove = true;
+                                this.post_error = None;
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        section = section.children(error);
+        section = section.children(metrics::post_metrics(bardo, post, "post", cx));
+        if publication.has_public_metrics() {
+            let status = &view.metrics;
+            section = section
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .flex_wrap()
+                        .child(metrics::sync_state(bardo, status, "post-sync", cx))
+                        .when(status.can_sync(), |row| {
+                            row.child(
+                                Button::new("post-sync-now")
+                                    .xsmall()
+                                    .outline()
+                                    .label(tr(bardo, Text::MetricsSyncNow))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.sync_metrics(window, cx);
+                                    })),
+                            )
+                        })
+                        .child(kit::info(
+                            "post-sync-info",
+                            None,
+                            tr(bardo, Text::MetricsSyncHint),
+                        )),
+                )
+                .children(metrics::sync_notices(bardo, status, "post-sync", cx))
+                .children(metrics::history(bardo, post, cx));
+        }
+        section.into_any_element()
     }
 }

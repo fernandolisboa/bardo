@@ -434,6 +434,7 @@ mod tests {
                 network_accounts: Arc::clone(&self.db) as _,
                 renders: Arc::clone(&self.db) as _,
                 exports: Arc::clone(&self.db) as _,
+                publications: Arc::clone(&self.db) as _,
                 export_files: Arc::new(bardo_storage::MemoryExportFiles::default()),
                 costs: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),

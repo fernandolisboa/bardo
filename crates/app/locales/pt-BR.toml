@@ -210,6 +210,7 @@ proxies = "Proxies de pré-visualização"
 music_prompt = "Prompt de música"
 metadata = "Metadados"
 export = "Exportação"
+metrics_sync = "Sincronização de métricas"
 
 [job.state]
 queued = "Na fila"
@@ -1125,6 +1126,7 @@ production = "Produção"
 publishing = "Publicação"
 
 [nav.place]
+performance = "Desempenho"
 research = "Pesquisa"
 themes = "Temas"
 projects = "Projetos"
@@ -1382,3 +1384,86 @@ text_too_long = "O texto passa de {limit} caracteres, com o rodapé e as hashtag
 too_many_tags = "Mais de {limit} tags."
 tags_too_long = "As tags passam de {limit} caracteres no total."
 angle_brackets = "Esta rede não aceita < ou >. Remova-os."
+
+[publication.error]
+no_account = "Este canal não tem conta nesta rede."
+not_exported = "Exporte esta rede primeiro, publique o arquivo e depois cole o link da publicação."
+already_linked = "Esta publicação já está vinculada a outro projeto."
+not_found = "Essa publicação não está mais vinculada."
+not_saved = "Não foi possível salvar o link. Tente de novo."
+
+[metrics.error]
+missing_key = "Adicione sua chave da YouTube Data API em Configurações para sincronizar visualizações, curtidas e comentários."
+nothing_to_sync = "Nenhuma publicação do YouTube vinculada ainda."
+already_syncing = "As métricas já estão sincronizando."
+not_loaded = "Não foi possível carregar as métricas."
+
+[publication]
+title = "Publicação"
+needs_export = "Exporte esta rede, publique o arquivo manualmente e depois vincule a publicação aqui."
+link_placeholder = "Cole o link da publicação"
+mark = "Marcar como publicado"
+mark_hint = "Depois de publicar o arquivo exportado, cole o link da publicação. O Bardo o guarda com o projeto; publicações do YouTube também têm visualizações, curtidas e comentários públicos sincronizados."
+posted = "Publicado"
+missing = "Não encontrado"
+missing_hint = "A última sincronização não encontrou este vídeo no YouTube: ele foi removido ou ficou privado. Os números ficam como estavam."
+open = "Abrir"
+change = "Trocar link"
+save = "Salvar link"
+cancel = "Cancelar"
+remove = "Desvincular"
+remove_confirm = "Desvincular esta publicação? As métricas dela no Bardo também saem; a publicação continua no {network}."
+remove_keep = "Manter"
+saved = "Publicação vinculada."
+removed = "Publicação desvinculada."
+posted_at = "Publicado {when}"
+no_metrics = "O Bardo guarda o link. As métricas do {network} chegam com a publicação automática."
+figure = "{n} de {total} publicados"
+tile_views = "Publicado · {views} visualizações"
+
+[metrics]
+views = "Visualizações"
+likes = "Curtidas"
+comments = "Comentários"
+hidden = "Ocultos"
+hidden_hint = "O dono oculta as curtidas ou desativou os comentários, então o YouTube não informa esses números."
+synced_ago = "Sincronizado {when}"
+not_synced = "Ainda não sincronizado"
+sync_now = "Sincronizar agora"
+syncing = "Sincronizando métricas…"
+sync_stopped = "A última sincronização de métricas parou."
+sync_hint = "Lê visualizações, curtidas e comentários públicos de cada publicação do YouTube vinculada, com sua chave da YouTube Data API: uma unidade de cota a cada 50 publicações."
+history = "Histórico"
+change = "{change} desde a sincronização anterior"
+
+[performance]
+info = "Como as publicações do canal se saem. Vincule publicações na etapa Publicação de um projeto; as do YouTube sincronizam os números públicos, as das outras redes guardam o link até a publicação automática trazer as métricas."
+channel = "Canal"
+empty = "Nenhuma publicação vinculada neste canal ainda. Marque uma exportação como publicada na etapa Publicação de um projeto."
+no_channels = "Crie um canal para acompanhar as publicações dele aqui."
+history_title = "Visualizações do canal ao longo do tempo"
+history_empty = "O gráfico começa depois de duas sincronizações."
+posts = "Publicações"
+tracked = "{n} no YouTube"
+tile = "{network} · {views} visualizações"
+
+[metrics.settings]
+tab = "Métricas"
+label = "Sincronizar ao abrir"
+hint = "Quando o Bardo abre, ele sincroniza as métricas do YouTube se a verificação mais antiga passou deste tempo. Sincronizar agora sempre funciona."
+not_saved = "Não foi possível salvar a configuração. Tente de novo."
+
+[publication.link]
+empty = "Cole o link da publicação."
+not_a_link = "Isso não é um endereço da web. Copie o link da publicação no {network}."
+other_network = "Esse link é do {other}. Cole o link da publicação no {network}."
+other_site = "Esse link não é do {network}."
+short_link = "Links curtos escondem o vídeo. Abra-o no navegador e copie o endereço completo."
+not_a_post = "Esse link do {network} não aponta para uma publicação. Abra a publicação e copie o link dela."
+
+[metrics.sync_option]
+off = "Nunca"
+"1h" = "Se passou de 1 hora"
+"6h" = "Se passou de 6 horas"
+"12h" = "Se passou de 12 horas"
+"24h" = "Se passou de um dia"

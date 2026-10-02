@@ -1,6 +1,6 @@
 use bardo_domain::{
-    LayoutId, ProfileId, ProfileRepository, RepositoryError, UiLanguage, UiThemePreference,
-    UserProfile,
+    LayoutId, MetricsSyncOnStart, ProfileId, ProfileRepository, RepositoryError, UiLanguage,
+    UiThemePreference, UserProfile,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -12,7 +12,7 @@ impl ProfileRepository for Database {
         let row = self
             .conn()
             .query_row(
-                "SELECT id, ui_language, ui_theme, ui_layout FROM user_profile
+                "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
                 |row| {
@@ -21,13 +21,14 @@ impl ProfileRepository for Database {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
 
-        let Some((id, ui_language, ui_theme, ui_layout)) = row else {
+        let Some((id, ui_language, ui_theme, ui_layout, metrics_sync)) = row else {
             return Ok(None);
         };
         Ok(Some(UserProfile {
@@ -35,23 +36,26 @@ impl ProfileRepository for Database {
             ui_language: ui_language.parse::<UiLanguage>().map_err(boxed)?,
             ui_theme: UiThemePreference::from_code_or_default(&ui_theme),
             ui_layout: LayoutId::from_code_or_default(&ui_layout),
+            metrics_sync: MetricsSyncOnStart::from_code_or_default(&metrics_sync),
         }))
     }
 
     fn save(&self, profile: &UserProfile) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout)
-                 VALUES (?1, ?2, ?3, ?4)
+                "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
-                     ui_layout = excluded.ui_layout",
+                     ui_layout = excluded.ui_layout,
+                     metrics_sync = excluded.metrics_sync",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
                     profile.ui_theme.code(),
-                    profile.ui_layout.code()
+                    profile.ui_layout.code(),
+                    profile.metrics_sync.code()
                 ],
             )
             .map_err(boxed)?;
@@ -152,6 +156,29 @@ mod tests {
         assert_eq!(
             db.load_default().unwrap().unwrap().ui_layout,
             LayoutId::Workspace
+        );
+    }
+
+    #[test]
+    fn metrics_sync_setting_is_saved_and_unknown_values_read_as_the_default() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert_eq!(
+            db.load_default().unwrap().unwrap().metrics_sync,
+            MetricsSyncOnStart::Every6Hours
+        );
+
+        profile.metrics_sync = MetricsSyncOnStart::Off;
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
+
+        db.conn()
+            .execute("UPDATE user_profile SET metrics_sync = 'weekly'", [])
+            .unwrap();
+        assert_eq!(
+            db.load_default().unwrap().unwrap().metrics_sync,
+            MetricsSyncOnStart::Every6Hours
         );
     }
 

@@ -1,13 +1,14 @@
 //! Settings screen. The API keys tab has one card per provider to save,
 //! replace, test and remove its key; the Appearance tab picks the layout,
-//! the theme and the interface language. Rules, storage and the test call live in
+//! the theme and the interface language; the Metrics tab picks when a
+//! start syncs public post numbers. Rules, storage and the test call live in
 //! `bardo_app`; this file maps clicks to use cases and results to text.
 
 use std::collections::HashMap;
 
 use bardo_app::bardo_domain::{
-    KeyCheckOutcome, LayoutId, Provider, ThemeFamily, ThemeMode, UiLanguage, UiTheme,
-    UiThemePreference,
+    KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Provider, ThemeFamily, ThemeMode, UiLanguage,
+    UiTheme, UiThemePreference,
 };
 use bardo_app::{Bardo, Destination, KeyState, ProviderKeyStatus, Text};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -35,6 +36,15 @@ use crate::shell::tr;
 enum SettingsTab {
     Keys,
     Appearance,
+    Metrics,
+}
+
+impl SettingsTab {
+    const ALL: [SettingsTab; 3] = [
+        SettingsTab::Keys,
+        SettingsTab::Appearance,
+        SettingsTab::Metrics,
+    ];
 }
 
 /// One theme in a light or dark picker.
@@ -57,6 +67,38 @@ impl SearchableListItem for ThemeChoice {
 }
 
 type ThemeSelect = Entity<SelectState<SearchableVec<ThemeChoice>>>;
+
+/// One choice of when a start syncs metrics.
+#[derive(Clone)]
+struct SyncChoice {
+    value: MetricsSyncOnStart,
+    title: SharedString,
+}
+
+impl SearchableListItem for SyncChoice {
+    type Value = MetricsSyncOnStart;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &MetricsSyncOnStart {
+        &self.value
+    }
+}
+
+type SyncSelect = Entity<SelectState<SearchableVec<SyncChoice>>>;
+
+fn sync_choices(bardo: &Bardo) -> SearchableVec<SyncChoice> {
+    SearchableVec::new(
+        MetricsSyncOnStart::ALL
+            .map(|value| SyncChoice {
+                value,
+                title: tr(bardo, Text::MetricsSyncOption(value)),
+            })
+            .to_vec(),
+    )
+}
 
 fn theme_choices(bardo: &Bardo, mode: ThemeMode) -> SearchableVec<ThemeChoice> {
     SearchableVec::new(
@@ -85,6 +127,10 @@ pub struct SettingsScreen {
     /// The light and dark slots of "follow Windows".
     light_theme: ThemeSelect,
     dark_theme: ThemeSelect,
+    /// When a start syncs metrics.
+    metrics_sync: SyncSelect,
+    /// Why the last metrics setting was not saved.
+    metrics_error: Option<Text>,
     /// Why the last theme or language change was not saved.
     appearance_error: Option<Text>,
     /// What the labels and pickers were last set from; other changes to
@@ -151,12 +197,32 @@ impl SettingsScreen {
                 },
             ));
         }
+        let metrics_sync = {
+            let bardo = bardo.read(cx);
+            let choices = sync_choices(bardo);
+            let at = MetricsSyncOnStart::ALL
+                .iter()
+                .position(|setting| *setting == bardo.metrics_sync_on_start())
+                .unwrap_or(0);
+            cx.new(|cx| SelectState::new(choices, Some(IndexPath::new(at)), window, cx))
+        };
+        subscriptions.push(cx.subscribe_in(
+            &metrics_sync,
+            window,
+            |this, _, event: &SelectEvent<SearchableVec<SyncChoice>>, _, cx| {
+                if let SelectEvent::Confirm(Some(setting)) = event {
+                    this.set_metrics_sync(*setting, cx);
+                }
+            },
+        ));
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
             rows,
             light_theme,
             dark_theme,
+            metrics_sync,
+            metrics_error: None,
             appearance_error: None,
             labeled: None,
             _subscriptions: subscriptions,
@@ -194,6 +260,12 @@ impl SettingsScreen {
                 select.set_selected_value(&theme, window, cx);
             });
         }
+        let bardo = self.bardo.read(cx);
+        let (choices, setting) = (sync_choices(bardo), bardo.metrics_sync_on_start());
+        self.metrics_sync.update(cx, |select, cx| {
+            select.set_items(choices, window, cx);
+            select.set_selected_value(&setting, window, cx);
+        });
         cx.notify();
     }
 
@@ -233,6 +305,16 @@ impl SettingsScreen {
             }
             Err(_) => self.appearance_error = Some(Text::UiLayoutNotSaved),
         }
+        cx.notify();
+    }
+
+    fn set_metrics_sync(&mut self, setting: MetricsSyncOnStart, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.set_metrics_sync_on_start(setting);
+            cx.notify();
+            result
+        });
+        self.metrics_error = result.err().map(|_| Text::MetricsSettingNotSaved);
         cx.notify();
     }
 
@@ -610,6 +692,36 @@ impl SettingsScreen {
             .into_any_element()
     }
 
+    fn render_metrics(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        v_flex()
+            .gap_3()
+            .children(
+                self.metrics_error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+            )
+            .child(kit::field(
+                tr(bardo, Text::MetricsSettingLabel),
+                Some(kit::info(
+                    "metrics-sync-info",
+                    None,
+                    tr(bardo, Text::MetricsSettingHint),
+                )),
+                div()
+                    .w(px(280.))
+                    .child(Select::new(&self.metrics_sync).small())
+                    .into_any_element(),
+                Some(
+                    div()
+                        .text_xs()
+                        .text_color(look(cx).tokens.text2)
+                        .child(tr(bardo, Text::MetricsSyncHint))
+                        .into_any_element(),
+                ),
+            ))
+            .into_any_element()
+    }
+
     /// A layout as a sketch of where things go, its name and one line.
     fn layout_card(&self, layout: LayoutId, chosen: bool, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
@@ -895,23 +1007,25 @@ impl Render for SettingsScreen {
         let body = match self.tab {
             SettingsTab::Keys => self.render_keys(cx),
             SettingsTab::Appearance => self.render_appearance(cx),
+            SettingsTab::Metrics => self.render_metrics(cx),
         };
         let bardo = self.bardo.read(cx);
         let tabs = TabBar::new("settings-tabs")
             .underline()
-            .selected_index(match self.tab {
-                SettingsTab::Keys => 0,
-                SettingsTab::Appearance => 1,
-            })
+            .selected_index(
+                SettingsTab::ALL
+                    .iter()
+                    .position(|tab| *tab == self.tab)
+                    .unwrap_or(0),
+            )
             .child(Tab::new().label(tr(bardo, Text::SettingsKeysTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
+            .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {
-                this.tab = if *index == 0 {
-                    SettingsTab::Keys
-                } else {
-                    SettingsTab::Appearance
-                };
-                cx.notify();
+                if let Some(tab) = SettingsTab::ALL.get(*index) {
+                    this.tab = *tab;
+                    cx.notify();
+                }
             }));
 
         let mut parts = ScreenParts::new(Header::place(bardo, Destination::Settings));

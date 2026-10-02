@@ -20,6 +20,7 @@ mod persona_package;
 mod personas;
 mod provider_keys;
 mod proxies;
+mod publications;
 mod render;
 mod research;
 mod scenes;
@@ -37,10 +38,11 @@ use bardo_domain::{
     ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ExportFiles,
     ExportRepository, ImageGenerator, JobRepository, KeyChecker, LayoutId, MarketData,
     MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
-    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
-    RenderRepository, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
-    SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
-    TimelineRepository, UiLanguage, UiThemePreference, UserProfile, VoiceLibrary,
+    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles,
+    PublicationRepository, Redactor, RenderRepository, RepositoryError, ScenePlanRepository,
+    ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository,
+    TextGenerator, ThemeRepository, TimelineRepository, UiLanguage, UiThemePreference, UserProfile,
+    VideoStats, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles};
@@ -74,6 +76,9 @@ pub use network_accounts::NetworkAccountError;
 pub use persona_package::PackageError;
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus, persona_package_folder};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
+pub use publications::{
+    ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, PublicationError, PublishedPost,
+};
 pub use render::{
     CheckFound, RenderChecks, RenderError, RenderReview, RenderSummary, RenderTarget,
     render_job_files,
@@ -98,6 +103,7 @@ use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
 use crate::proxies::ProxyHandler;
+use crate::publications::MetricsSyncHandler;
 use crate::render::RenderHandler;
 use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
@@ -145,6 +151,8 @@ pub struct Repositories {
     pub exports: Arc<dyn ExportRepository>,
     /// Where export packages are written. Shared with the job queue.
     pub export_files: Arc<dyn ExportFiles>,
+    /// Posts made by hand and their metrics. Shared with the job queue.
+    pub publications: Arc<dyn PublicationRepository>,
     /// What generations cost, the user's rates and budgets. Shared with
     /// the job queue.
     pub costs: Arc<dyn CostRepository>,
@@ -200,6 +208,7 @@ impl Repositories {
             renders: Arc::clone(&db) as _,
             exports: Arc::clone(&db) as _,
             export_files: Arc::new(MemoryExportFiles::default()),
+            publications: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             research: db,
             files,
@@ -214,6 +223,8 @@ pub struct Providers {
     pub key_checker: Arc<dyn KeyChecker>,
     /// Niche research (YouTube Data API).
     pub market_data: Arc<dyn MarketData>,
+    /// Public statistics of the user's posts (YouTube Data API).
+    pub video_stats: Arc<dyn VideoStats>,
     /// Generative text (Claude).
     pub text: Arc<dyn TextGenerator>,
     /// Typed decisions (JEV).
@@ -242,6 +253,7 @@ impl Providers {
         Self {
             key_checker: Arc::new(bardo_ai::HttpKeyChecker::new()),
             market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
+            video_stats: Arc::new(bardo_ai::YouTubeStats::new()),
             text: Arc::new(bardo_ai::ClaudeTextGenerator::new()),
             decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
@@ -276,6 +288,7 @@ pub struct Bardo {
     renders: Arc<dyn RenderRepository>,
     exports: Arc<dyn ExportRepository>,
     export_files: Arc<dyn ExportFiles>,
+    publications: Arc<dyn PublicationRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
@@ -334,6 +347,7 @@ impl Bardo {
             renders,
             exports,
             export_files,
+            publications,
             costs,
             files,
             secrets,
@@ -442,6 +456,12 @@ impl Bardo {
             files: Arc::clone(&files),
             export_files: Arc::clone(&export_files),
         };
+        let metrics_handler = MetricsSyncHandler {
+            owner: profile.id,
+            publications: Arc::clone(&publications),
+            stats: Arc::clone(&providers.video_stats),
+            secrets: Arc::clone(&secrets),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
@@ -460,6 +480,7 @@ impl Bardo {
                 renders: render_handler,
                 metadata: metadata_handler,
                 exports: export_handler,
+                metrics: metrics_handler,
             }),
             job_settings,
             redactor,
@@ -481,6 +502,7 @@ impl Bardo {
             renders,
             exports,
             export_files,
+            publications,
             cost_book,
             files,
             audio: providers.audio,
@@ -1220,6 +1242,62 @@ pub(crate) mod testing {
         }
     }
 
+    /// Public statistics from a table the test fills; remembers each call.
+    #[derive(Default)]
+    pub(crate) struct FakeVideoStats {
+        pub(crate) found: Mutex<Vec<bardo_domain::VideoStatistics>>,
+        pub(crate) calls: Mutex<Vec<Vec<String>>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// While set, calls wait (a test can catch a sync running).
+        pub(crate) hold: std::sync::atomic::AtomicBool,
+    }
+
+    impl FakeVideoStats {
+        /// The post's statistics from now on, replacing earlier ones.
+        pub(crate) fn set(&self, post_id: &str, views: u64, likes: Option<u64>) {
+            let mut found = self.found.lock().unwrap();
+            found.retain(|stats| stats.post_id != post_id);
+            found.push(bardo_domain::VideoStatistics {
+                post_id: post_id.to_owned(),
+                published_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_000_000)),
+                views,
+                likes,
+                comments: Some(views / 100),
+            });
+        }
+
+        pub(crate) fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl bardo_domain::VideoStats for FakeVideoStats {
+        fn statistics(
+            &self,
+            _key: &ApiKey,
+            ids: &[&str],
+        ) -> Result<Vec<bardo_domain::VideoStatistics>, ProviderFailure> {
+            while self.hold.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            self.calls
+                .lock()
+                .unwrap()
+                .push(ids.iter().map(|id| (*id).to_owned()).collect());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            Ok(self
+                .found
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|stats| ids.contains(&stats.post_id.as_str()))
+                .cloned()
+                .collect())
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -1229,6 +1307,7 @@ pub(crate) mod testing {
         Providers {
             key_checker: Arc::new(FakeKeyChecker::default()),
             market_data,
+            video_stats: Arc::new(FakeVideoStats::default()),
             text: Arc::new(FakeTextGenerator::default()),
             decisions: Arc::new(FakeDecisionEngine::default()),
             voices: Arc::new(FakeVoiceLibrary::default()),
@@ -1320,6 +1399,7 @@ mod tests {
             network_accounts: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
             exports: Arc::clone(&db) as _,
+            publications: Arc::clone(&db) as _,
             export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),

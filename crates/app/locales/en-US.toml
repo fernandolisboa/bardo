@@ -210,6 +210,7 @@ proxies = "Preview proxies"
 music_prompt = "Music prompt"
 metadata = "Metadata"
 export = "Export"
+metrics_sync = "Metrics sync"
 
 [job.state]
 queued = "Queued"
@@ -1125,6 +1126,7 @@ production = "Production"
 publishing = "Publishing"
 
 [nav.place]
+performance = "Performance"
 research = "Research"
 themes = "Themes"
 projects = "Projects"
@@ -1382,3 +1384,86 @@ text_too_long = "The text is over {limit} characters, with the footer and hashta
 too_many_tags = "More than {limit} tags."
 tags_too_long = "The tags are over {limit} characters in all."
 angle_brackets = "This network doesn't accept < or >. Remove them."
+
+[publication.error]
+no_account = "This channel has no account on this network."
+not_exported = "Export this network first, post the file, then paste the post's link."
+already_linked = "This post is already linked to another project."
+not_found = "That post is no longer linked."
+not_saved = "Couldn't save the link. Try again."
+
+[metrics.error]
+missing_key = "Add your YouTube Data API key in Settings to sync views, likes and comments."
+nothing_to_sync = "No YouTube post is linked yet."
+already_syncing = "Metrics are already syncing."
+not_loaded = "Couldn't load the metrics."
+
+[publication]
+title = "Post"
+needs_export = "Export this network, post the file by hand, then link the post here."
+link_placeholder = "Paste the post's link"
+mark = "Mark as posted"
+mark_hint = "After posting the exported file, paste the post's link. Bardo keeps it with the project; YouTube posts also get their public views, likes and comments synced."
+posted = "Posted"
+missing = "Not found"
+missing_hint = "The last sync didn't find this video on YouTube: it was removed or made private. Its numbers stay as they were."
+open = "Open"
+change = "Change link"
+save = "Save link"
+cancel = "Cancel"
+remove = "Unlink"
+remove_confirm = "Unlink this post? Its metrics in Bardo go too; the post stays on {network}."
+remove_keep = "Keep"
+saved = "Post linked."
+removed = "Post unlinked."
+posted_at = "Posted {when}"
+no_metrics = "Bardo keeps the link. {network} metrics arrive with automatic publishing."
+figure = "{n} of {total} posted"
+tile_views = "Posted · {views} views"
+
+[metrics]
+views = "Views"
+likes = "Likes"
+comments = "Comments"
+hidden = "Hidden"
+hidden_hint = "The owner hides likes or turned comments off, so YouTube doesn't report them."
+synced_ago = "Synced {when}"
+not_synced = "Not synced yet"
+sync_now = "Sync now"
+syncing = "Syncing metrics…"
+sync_stopped = "The last metrics sync stopped."
+sync_hint = "Reads the public views, likes and comments of every linked YouTube post with your YouTube Data API key: one quota unit per 50 posts."
+history = "History"
+change = "{change} since the sync before"
+
+[performance]
+info = "How the channel's posts perform. Link posts at a project's Publish stage; YouTube posts sync their public numbers, the other networks keep their link until automatic publishing brings their metrics."
+channel = "Channel"
+empty = "No post linked on this channel yet. Mark an export as posted at a project's Publish stage."
+no_channels = "Create a channel to follow its posts here."
+history_title = "Channel views over time"
+history_empty = "The chart starts after two syncs."
+posts = "Posts"
+tracked = "{n} on YouTube"
+tile = "{network} · {views} views"
+
+[metrics.settings]
+tab = "Metrics"
+label = "Sync on start"
+hint = "When Bardo opens, it syncs YouTube metrics if the oldest check is older than this. Sync now always works."
+not_saved = "Couldn't save the setting. Try again."
+
+[publication.link]
+empty = "Paste the post's link."
+not_a_link = "That isn't a web address. Copy the post's link from {network}."
+other_network = "That's a {other} link. Paste the {network} post's link."
+other_site = "That link isn't from {network}."
+short_link = "Short links hide the video. Open it in the browser and copy the full address."
+not_a_post = "That {network} link doesn't point to one post. Open the post and copy its link."
+
+[metrics.sync_option]
+off = "Never"
+"1h" = "When older than 1 hour"
+"6h" = "When older than 6 hours"
+"12h" = "When older than 12 hours"
+"24h" = "When older than a day"

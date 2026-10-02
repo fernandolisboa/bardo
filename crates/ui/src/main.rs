@@ -12,8 +12,10 @@ mod icons;
 mod jobs;
 mod kit;
 mod layout;
+mod metrics;
 mod network_accounts;
 mod parts;
+mod performance;
 mod personas;
 mod projects;
 mod research;
@@ -51,6 +53,9 @@ fn main() -> anyhow::Result<()> {
     if let Some(log_path) = bardo_app::logging::default_log_path() {
         let _ = bardo_app::logging::init(&log_path, bardo.redactor());
     }
+    // Public post numbers catch up in the background when the profile's
+    // setting says they are due.
+    bardo.sync_metrics_on_start();
 
     // The bundled icons (gpui-kit's default set and Bardo's extra ones);
     // without them icons draw nothing.

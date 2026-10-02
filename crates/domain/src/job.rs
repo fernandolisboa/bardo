@@ -94,10 +94,13 @@ pub enum JobKind {
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
     Export,
+    /// Reads the public statistics of the user's YouTube publications and
+    /// keeps a snapshot of each, a batch of posts per checkpoint.
+    MetricsSync,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 15] = [
+    pub const ALL: [JobKind; 16] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -113,6 +116,7 @@ impl JobKind {
         JobKind::Render,
         JobKind::Metadata,
         JobKind::Export,
+        JobKind::MetricsSync,
     ];
 
     /// Stable name stored in the database.
@@ -133,6 +137,7 @@ impl JobKind {
             JobKind::Render => "render",
             JobKind::Metadata => "metadata",
             JobKind::Export => "export",
+            JobKind::MetricsSync => "metrics_sync",
         }
     }
 }

@@ -24,6 +24,7 @@ icon_assets!(
         Mic,
         MonitorPlay,
         Pencil,
+        TrendingUp,
         Scissors,
         Send,
         Trash,
@@ -53,6 +54,7 @@ pub fn destination(place: Destination) -> Lucide {
     match place {
         Destination::Research => Lucide::Compass,
         Destination::Themes => Lucide::Lightbulb,
+        Destination::Performance => Lucide::TrendingUp,
         Destination::Projects => Lucide::Clapperboard,
         Destination::Personas => Lucide::User,
         Destination::Templates => Lucide::LayoutTemplate,
