@@ -1,5 +1,5 @@
-//! The network accounts of the channel being edited, shown under the
-//! channel form: one row per account, buttons to add the networks still
+//! The network accounts of the channel picked on the accounts screen: one
+//! row per account, buttons to add the networks still
 //! free, and an inline form for the account being added or edited. Rules
 //! and persistence live in `bardo_app`; this file only maps the form to a
 //! `NetworkAccountDraft` and errors back to fields.
@@ -912,24 +912,7 @@ impl Render for NetworkAccountsPanel {
 
         v_flex()
             .gap_3()
-            .pt_4()
-            .border_t_1()
-            .border_color(theme.border)
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xl()
-                            .font_semibold()
-                            .child(tr(bardo, Text::ChannelAccountsTitle)),
-                    )
-                    .child(kit::info(
-                        "channel-accounts-info",
-                        None,
-                        tr(bardo, Text::ChannelAccountsHint),
-                    )),
-            )
+            .child(kit::section_heading(tr(bardo, Text::ChannelAccountsTitle)))
             .children(body)
             .children(form)
             .children(add)

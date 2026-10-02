@@ -3,13 +3,17 @@
 // No console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod accounts;
 mod appearance;
 mod channels;
 mod costs;
 mod editor;
+mod icons;
 mod jobs;
 mod kit;
+mod layout;
 mod network_accounts;
+mod parts;
 mod personas;
 mod projects;
 mod research;
@@ -47,10 +51,10 @@ fn main() -> anyhow::Result<()> {
         let _ = bardo_app::logging::init(&log_path, bardo.redactor());
     }
 
-    // The bundled icons (gpui-kit's default set); without them icons draw
-    // nothing.
+    // The bundled icons (gpui-kit's default set and Bardo's extra ones);
+    // without them icons draw nothing.
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(icons::BardoAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             appearance::init(bardo.ui_theme(), cx);

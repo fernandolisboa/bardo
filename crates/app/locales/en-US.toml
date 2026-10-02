@@ -385,6 +385,7 @@ title_too_long = "Keep the title to at most 120 characters."
 angle_too_long = "Keep the angle to at most 500 characters."
 
 [projects]
+switch = "Switch project"
 nav = "Projects"
 title = "Video projects"
 empty = "Approve an idea to start a video project."
@@ -770,6 +771,16 @@ video_seconds = "per second of video"
 audio_seconds = "per hour of audio"
 
 [costs]
+overview = "Overview"
+across_providers = "across {n} providers · months in UTC"
+budgets_tile = "Budgets"
+budgets_in_alert = "of {total} in alert"
+no_budgets = "No budget set"
+unpriced_title = "Calls without a price"
+unpriced_model = "model"
+unpriced_models = "models"
+unpriced_none = "Every call this month has a price."
+add_price = "Add price"
 title = "Costs"
 hint = "What generations cost, per provider, channel and video. Months follow UTC, as providers bill."
 previous_month = "Previous month"
@@ -783,7 +794,7 @@ not_paid = "This provider is free within its quota, so it has no budget."
 providers_title = "By provider"
 providers_hint = "Set a monthly budget per provider. From 80% Bardo warns before a generation; once a job would reach the budget, Bardo asks before starting it."
 channels_title = "By channel"
-videos_title = "By video"
+videos_title = "Most expensive videos"
 unknown_channel = "Unknown channel"
 unknown_video = "Removed video"
 
@@ -1047,3 +1058,81 @@ dark = "Dark"
 high_contrast = "High contrast"
 terminal_light = "Terminal · light"
 terminal_dark = "Terminal · dark"
+
+[nav]
+budgets_used = "{percent}% of this month's budgets"
+
+[stage.note]
+script_missing = "Not written yet"
+script_to_review = "New version to review"
+script_words = "{n} words"
+narration_missing = "Not recorded yet"
+narration_stale = "Out of date"
+scenes_missing = "Not planned yet"
+scenes_stale = "Out of date"
+to_review = "{n} to review"
+images = "{done} of {total} images"
+clips = "{done} of {total} clips"
+editor_ready = "Opens the editor"
+working = "Generating…"
+not_yet = "Not available yet"
+
+[scenes.filter]
+all = "All"
+pending = "Pending"
+pending_empty = "Nothing pending here."
+
+[scenes.card]
+review = "Review"
+failed = "Failed"
+to_draw = "To draw"
+to_animate = "To animate"
+animating = "Animating"
+
+[scenes.inspector]
+image_prompt = "Image prompt"
+current = "Current"
+new = "New"
+generation_details = "Generation details"
+
+[costs.column]
+provider = "Provider"
+usage = "Usage"
+spent = "Spent"
+budget = "Budget"
+state = "State"
+
+[nav.pillar]
+strategy = "Strategy"
+production = "Production"
+publishing = "Publishing"
+
+[nav.place]
+research = "Research"
+themes = "Themes"
+projects = "Projects"
+personas = "Personas"
+templates = "Templates"
+channels = "Channels"
+accounts = "Accounts"
+jobs = "Jobs"
+costs = "Costs"
+settings = "Settings"
+
+[stage.name]
+script = "Script"
+narration = "Narration"
+scenes = "Scenes"
+clips = "Clips"
+edit = "Edit"
+render = "Render"
+publish = "Publish"
+
+[stage.after]
+script = "After the script"
+narration = "After the narration"
+scenes = "After the scenes"
+clips = "After the clips"
+edit = "After the edit"
+render = "After the render"
+publish = "After publishing"

@@ -466,6 +466,68 @@ pub struct CostsView {
     pub rates: Vec<RateRow>,
 }
 
+/// A month at a glance: the spend, how the budgets stand together, and
+/// the budgets that call for attention.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpendSummary {
+    pub total: Money,
+    /// Paid providers that spent something.
+    pub providers_used: usize,
+    /// Providers with a budget.
+    pub budgets: usize,
+    /// What the providers with a budget spent, of their budgets together,
+    /// in whole percent; `None` without budgets.
+    pub budget_percent: Option<u64>,
+    /// The budgets from 80% on, the ones reached first.
+    pub alerts: Vec<(Provider, BudgetLevel)>,
+}
+
+impl SpendSummary {
+    /// The worst level among the budgets.
+    pub fn level(&self) -> BudgetLevel {
+        self.alerts
+            .iter()
+            .map(|(_, level)| *level)
+            .max()
+            .unwrap_or(BudgetLevel::Under)
+    }
+}
+
+impl CostsView {
+    pub fn summary(&self) -> SpendSummary {
+        let budgeted = || {
+            self.providers
+                .iter()
+                .filter_map(|spend| spend.budget.map(|budget| (spend, budget)))
+        };
+        let together = Budget {
+            // Which provider does not matter for the percentage.
+            provider: Provider::Claude,
+            monthly: budgeted().map(|(_, budget)| budget).sum(),
+        };
+        let spent: Money = budgeted().map(|(spend, _)| spend.spent).sum();
+        let mut alerts: Vec<(Provider, BudgetLevel)> = self
+            .providers
+            .iter()
+            .filter_map(|spend| Some((spend.provider, spend.level?)))
+            .filter(|(_, level)| *level != BudgetLevel::Under)
+            .collect();
+        // Stable, so providers keep their settings order within a level.
+        alerts.sort_by_key(|(_, level)| std::cmp::Reverse(*level));
+        SpendSummary {
+            total: self.total,
+            providers_used: self
+                .providers
+                .iter()
+                .filter(|spend| !spend.spent.is_zero())
+                .count(),
+            budgets: budgeted().count(),
+            budget_percent: (budgeted().count() > 0).then(|| together.percent_used(spent)),
+            alerts,
+        }
+    }
+}
+
 impl Bardo {
     /// The month now, in UTC as providers bill.
     pub fn current_month(&self) -> Month {
@@ -725,6 +787,70 @@ mod tests {
         ] {
             assert!(parse_rates(broken).is_err(), "{broken}");
         }
+    }
+
+    fn spend(provider: Provider, spent: u64, budget: Option<u64>) -> ProviderSpend {
+        let budget = budget.map(|cents| Budget {
+            provider,
+            monthly: Money::from_cents(cents),
+        });
+        let spent = Money::from_cents(spent);
+        ProviderSpend {
+            provider,
+            spent,
+            budget: budget.map(|b| b.monthly),
+            level: budget.map(|b| b.level(spent, Money::ZERO)),
+            percent: budget.map(|b| b.percent_used(spent)),
+        }
+    }
+
+    fn view(providers: Vec<ProviderSpend>) -> CostsView {
+        CostsView {
+            month: Month::new(2026, 10).unwrap(),
+            total: providers.iter().map(|p| p.spent).sum(),
+            providers,
+            channels: Vec::new(),
+            videos: Vec::new(),
+            unpriced: Vec::new(),
+            rates: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_summary_adds_the_budgets_up_and_lists_the_ones_to_watch() {
+        let summary = view(vec![
+            spend(Provider::Claude, 60, Some(2_000)),
+            spend(Provider::ElevenLabs, 168, Some(150)),
+            spend(Provider::Gemini, 731, Some(800)),
+            spend(Provider::Higgsfield, 0, None),
+            spend(Provider::TypeSafe, 0, None),
+        ])
+        .summary();
+        assert_eq!(summary.total, Money::from_cents(959));
+        assert_eq!(summary.providers_used, 3);
+        assert_eq!(summary.budgets, 3);
+        assert_eq!(
+            summary.budget_percent,
+            Some(32),
+            "959 of 2950, rounded down"
+        );
+        assert_eq!(
+            summary.alerts,
+            [
+                (Provider::ElevenLabs, BudgetLevel::Reached),
+                (Provider::Gemini, BudgetLevel::Warning),
+            ]
+        );
+        assert_eq!(summary.level(), BudgetLevel::Reached);
+    }
+
+    #[test]
+    fn a_summary_without_budgets_has_no_percentage_or_alerts() {
+        let summary = view(vec![spend(Provider::Claude, 120, None)]).summary();
+        assert_eq!(summary.budget_percent, None);
+        assert!(summary.alerts.is_empty());
+        assert_eq!(summary.level(), BudgetLevel::Under);
+        assert_eq!(summary.providers_used, 1);
     }
 
     #[test]

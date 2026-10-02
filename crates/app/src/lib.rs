@@ -13,6 +13,7 @@ mod media_import;
 mod music_prompts;
 mod narration_import;
 mod narrations;
+mod navigation;
 mod network_accounts;
 mod persona_package;
 mod personas;
@@ -21,6 +22,7 @@ mod proxies;
 mod research;
 mod scenes;
 mod scripts;
+mod stages;
 mod templates;
 mod themes;
 
@@ -48,7 +50,7 @@ pub use channels::ChannelError;
 pub use clips::{ClipsView, SceneClipView};
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
-    SpendRow,
+    SpendRow, SpendSummary,
 };
 pub use editor::{
     BinScene, ClipMedia, ClipProblem, ClipShows, ClipView, CutBasis, EditAction, Editor,
@@ -61,6 +63,7 @@ pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
+pub use navigation::{Destination, Pillar};
 pub use network_accounts::NetworkAccountError;
 pub use persona_package::PackageError;
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus, persona_package_folder};
@@ -68,6 +71,10 @@ pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, Prov
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use scenes::{SceneError, ScenesView};
 pub use scripts::{ScriptError, ScriptView};
+pub use stages::{
+    SceneState, Stage, StageNote, StageState, StageStatus, opening_stage, project_stages,
+    scene_states,
+};
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
