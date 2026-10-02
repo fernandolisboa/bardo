@@ -208,6 +208,8 @@ scene_images = "Scene images"
 scene_clips = "Scene clips"
 proxies = "Preview proxies"
 music_prompt = "Music prompt"
+metadata = "Metadata"
+export = "Export"
 
 [job.state]
 queued = "Queued"
@@ -590,6 +592,7 @@ unchanged = "Nothing changed, so no version was added."
 script = "Script"
 image_prompt = "Image prompts"
 music_prompt = "Music prompt"
+metadata = "Metadata"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -604,6 +607,8 @@ theme_title = "The video's working title."
 theme_angle = "The approved theme's angle."
 narration_sentences = "The narration, one numbered sentence per line with when it is spoken."
 video_length = "The video's length, from its narration (\"not known yet\" before there is one)."
+script = "The approved script."
+networks = "The channel's network accounts, one per line, with each network's fields and limits, the account's language, default tags and footer."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -662,6 +667,8 @@ export = "Export to file…"
 export_hint = "Exports a package with the persona and a reference to its voice, never audio or keys. Whoever imports it needs the same voice in their own ElevenLabs account."
 exported = "Exported to {path}."
 imported = "Imported {name}."
+realistic_voice = "Realistic synthetic voice or clone of a real person"
+realistic_voice_hint = "Tick it when the voice sounds like a real person: a clone, or a professional voice made from someone's recordings. Networks ask you to label such videos as altered or synthetic content; Bardo reminds you at export. Picking a cloned or professional voice ticks it."
 
 [persona.voice_flag]
 unchecked_tag = "Voice not checked"
@@ -1081,7 +1088,11 @@ images = "{done} of {total} images"
 clips = "{done} of {total} clips"
 editor_ready = "Opens the editor"
 working = "Generating…"
-not_yet = "Not available yet"
+export_ready = "Ready to export"
+exported = "Exported: {n}"
+export_outdated = "Out of date: {n}"
+exporting = "Exporting…"
+export_stopped = "Stopped"
 
 [scenes.filter]
 all = "All"
@@ -1261,3 +1272,110 @@ body = "Rendering takes a while and replaces each network's last file. It runs i
 warnings = "{n} warnings stay as they are."
 go = "Render now"
 back = "Go back"
+
+[export.error]
+no_accounts = "This channel has no network accounts. Add one under Accounts to export for it."
+nothing_chosen = "Choose at least one network to export."
+blocked = "A chosen network can't be exported yet. See what it still needs."
+already_running = "This project is already exporting."
+not_loaded = "Couldn't load the publishing stage. Try again."
+
+[metadata.error]
+missing_key = "Save your Claude key under Settings to write the metadata."
+busy = "The metadata is already being written."
+missing = "This network has no metadata yet. Write it first."
+not_saved = "Couldn't save the metadata. Try again."
+
+[export.file]
+video = "Video: {file} ({size}, {aspect}, {length})"
+title = "Title"
+description = "Description"
+caption = "Caption"
+tags = "Tags"
+visibility = "Visibility: {visibility}"
+
+[disclosure]
+reminder = "Synthetic voice: label this video as altered or synthetic content."
+notice = "The narrator's voice is flagged as a clone or a realistic synthetic voice. When you post, label each video as altered or synthetic content; each network's metadata file says where."
+
+[export]
+info = "Publishing prepares each network's post for you to upload by hand. Claude writes the title, description and tags from the script and the account's defaults; you edit them within each network's limits. Export writes one folder per network with the rendered file and a metadata.txt to copy from. Automatic upload and scheduling come later."
+chosen = "{n} of {total} chosen"
+targets = "Networks"
+include = "Export for this network"
+start = "Export ({n})"
+running = "Exporting {done} of {total}…"
+stopped = "The export stopped."
+cancelled = "Export cancelled. Resume exports the networks left; finished ones stay."
+show_folder = "Show in folder"
+column_render = "Render"
+column_last = "Last export"
+render_outdated_hint = "The cut or the preset changed after this file was rendered. It exports as it is; render again at the Render stage to include the changes."
+no_render_hint = "Render this network's file at the Render stage first."
+
+[export.figure]
+rendered = "Rendered"
+metadata = "Metadata"
+exported = "Exported"
+cost = "Metadata cost"
+networks = "{n} of {total}"
+
+[export.state]
+ready = "Ready"
+no_render = "Not rendered"
+no_metadata = "No metadata"
+problems = "{n} to fix"
+
+[export.last]
+current = "Exported"
+outdated = "Out of date"
+none = "Not exported"
+outdated_hint = "The render or the metadata changed after this export. Export again to update the folder."
+
+[metadata]
+generate = "Write metadata"
+regenerate = "Write again"
+generate_hint = "Claude writes every network's title, description and tags from the script and each account's defaults (language, default tags, footer), using version {n} of the metadata template."
+regenerate_hint = "Writing again replaces every network's metadata, edits included."
+running = "Claude is writing the metadata…"
+stopped = "Writing the metadata stopped."
+confirm_title = "Write the metadata again?"
+confirm_body = "Your edits on {n} networks will be replaced by what Claude writes."
+none = "Write the metadata to edit this network's post."
+empty = "No metadata yet. Claude writes it for every network at once."
+state_none = "Not written"
+state_generated = "By Claude"
+state_edited = "Edited"
+edited = "Edited"
+title = "Title"
+description = "Description"
+caption = "Caption"
+tags = "Tags"
+tags_placeholder = "Separated by commas"
+counter = "{n}/{limit}"
+tags_count = "{n} tags"
+tags_count_of = "{n}/{limit} tags"
+footer_note = "The account's footer is added after the description."
+hashtags_note = "The tags go at the end of the caption as hashtags; the count includes them."
+save = "Save"
+revert = "Revert"
+saved = "Metadata saved."
+copy = "Copy"
+copied = "Copied. Paste it in the network's upload form."
+preview = "As posted"
+
+[disclosure.how]
+youtube = "On YouTube, answer Yes to \"Altered or synthetic content\" in the upload's Details."
+tiktok = "On TikTok, turn on \"AI-generated content\" under More options before posting."
+instagram_reels = "On Instagram, turn on the AI label under Advanced settings before sharing."
+x = "X has no label setting: say in the post that the voice is synthetic."
+kick = "Kick has no label setting: say in the title or description that the voice is synthetic."
+
+[metadata.problem]
+title_required = "Write a title."
+title_too_long = "The title is over {limit} characters."
+text_required = "Write the caption."
+text_too_long = "The text is over {limit} characters, with the footer and hashtags."
+too_many_tags = "More than {limit} tags."
+tags_too_long = "The tags are over {limit} characters in all."
+angle_brackets = "This network doesn't accept < or >. Remove them."

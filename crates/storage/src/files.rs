@@ -88,6 +88,17 @@ impl ProjectFiles for LocalProjectFiles {
         std::fs::read(self.folder(project).join(name)).map_err(|e| error(name, e))
     }
 
+    fn open(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+    ) -> Result<Box<dyn std::io::Read + Send>, ProjectFileError> {
+        let name = checked(name)?;
+        let file =
+            std::fs::File::open(self.folder(project).join(name)).map_err(|e| error(name, e))?;
+        Ok(Box::new(file))
+    }
+
     fn copy_in(
         &self,
         project: VideoProjectId,
@@ -173,6 +184,14 @@ impl ProjectFiles for MemoryProjectFiles {
             .get(&(project, name.to_owned()))
             .cloned()
             .ok_or_else(|| error(name, std::io::ErrorKind::NotFound.into()))
+    }
+
+    fn open(
+        &self,
+        project: VideoProjectId,
+        name: &str,
+    ) -> Result<Box<dyn std::io::Read + Send>, ProjectFileError> {
+        Ok(Box::new(std::io::Cursor::new(self.read(project, name)?)))
     }
 
     /// Reads the source from disk.

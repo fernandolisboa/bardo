@@ -483,6 +483,8 @@ pub enum CostPurpose {
     NarrationAlignment,
     /// Claude writing the prompt for a video's music.
     MusicPrompt,
+    /// Claude writing each network's title, description and tags.
+    Metadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -490,7 +492,7 @@ pub enum CostPurpose {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 9] = [
+    pub const ALL: [CostPurpose; 10] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -500,6 +502,7 @@ impl CostPurpose {
         CostPurpose::SceneClip,
         CostPurpose::NarrationAlignment,
         CostPurpose::MusicPrompt,
+        CostPurpose::Metadata,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -514,6 +517,7 @@ impl CostPurpose {
             CostPurpose::SceneClip => "scene_clip",
             CostPurpose::NarrationAlignment => "narration_alignment",
             CostPurpose::MusicPrompt => "music_prompt",
+            CostPurpose::Metadata => "metadata",
         }
     }
 }

@@ -6,6 +6,7 @@ mod channels;
 mod clips;
 mod costs;
 mod editor;
+mod export;
 pub mod i18n;
 mod jobs;
 pub mod logging;
@@ -33,16 +34,16 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ImageGenerator,
-    JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository, MusicPromptRepository,
-    NarrationRepository, NetworkAccountRepository, NicheResearchRepository, Persona,
-    PersonaRepository, ProfileRepository, ProjectFiles, Redactor, RenderRepository,
-    RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
-    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
-    UiLanguage, UiThemePreference, UserProfile, VoiceLibrary,
+    ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ExportFiles,
+    ExportRepository, ImageGenerator, JobRepository, KeyChecker, LayoutId, MarketData,
+    MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
+    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles, Redactor,
+    RenderRepository, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
+    SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
+    TimelineRepository, UiLanguage, UiThemePreference, UserProfile, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
-use bardo_storage::{Database, MemoryProjectFiles};
+use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles};
 
 pub use appearance::{EditorPalette, Palette, Rgb, TrackColors, UiFont, palette};
 pub use bardo_domain;
@@ -58,6 +59,9 @@ pub use editor::{
     BinScene, ClipMedia, ClipProblem, ClipShows, ClipView, CutBasis, EditAction, Editor,
     EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
     media_framing, preview_size,
+};
+pub use export::{
+    ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
 };
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
@@ -87,6 +91,7 @@ pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
 use crate::clips::ClipHandler;
 use crate::costs::CostBook;
+use crate::export::{ExportHandler, MetadataHandler};
 use crate::jobs::JobQueue;
 use crate::music_prompts::MusicPromptHandler;
 use crate::narration_import::NarrationImportHandler;
@@ -136,6 +141,10 @@ pub struct Repositories {
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
     /// Each project's rendered files. Shared with the job queue.
     pub renders: Arc<dyn RenderRepository>,
+    /// Each project's metadata and exports. Shared with the job queue.
+    pub exports: Arc<dyn ExportRepository>,
+    /// Where export packages are written. Shared with the job queue.
+    pub export_files: Arc<dyn ExportFiles>,
     /// What generations cost, the user's rates and budgets. Shared with
     /// the job queue.
     pub costs: Arc<dyn CostRepository>,
@@ -147,14 +156,18 @@ pub struct Repositories {
 }
 
 impl Repositories {
-    /// Every data port served by one SQLite database, keys by `secrets`
-    /// and media by `files`.
+    /// Every data port served by one SQLite database, keys by `secrets`,
+    /// media by `files` and export packages by `export_files`.
     pub fn local(
         db: Database,
         secrets: Box<dyn SecretStore>,
         files: Box<dyn ProjectFiles>,
+        export_files: Box<dyn ExportFiles>,
     ) -> Self {
-        Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
+        Self {
+            export_files: Arc::from(export_files),
+            ..Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
+        }
     }
 
     /// `local` over a database and secret store the caller keeps a handle
@@ -163,7 +176,8 @@ impl Repositories {
         Self::shared_with_files(db, secrets, Arc::new(MemoryProjectFiles::default()))
     }
 
-    /// `shared` with the project files the caller chose.
+    /// `shared` with the project files the caller chose, and export
+    /// packages in memory.
     pub fn shared_with_files(
         db: Arc<Database>,
         secrets: Arc<dyn SecretStore>,
@@ -184,6 +198,8 @@ impl Repositories {
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
+            exports: Arc::clone(&db) as _,
+            export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             research: db,
             files,
@@ -258,6 +274,8 @@ pub struct Bardo {
     music_prompts: Arc<dyn MusicPromptRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
     renders: Arc<dyn RenderRepository>,
+    exports: Arc<dyn ExportRepository>,
+    export_files: Arc<dyn ExportFiles>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
@@ -314,6 +332,8 @@ impl Bardo {
             music_prompts,
             network_accounts,
             renders,
+            exports,
+            export_files,
             costs,
             files,
             secrets,
@@ -408,6 +428,19 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let metadata_handler = MetadataHandler {
+            owner: profile.id,
+            exports: Arc::clone(&exports),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
+        let export_handler = ExportHandler {
+            owner: profile.id,
+            exports: Arc::clone(&exports),
+            files: Arc::clone(&files),
+            export_files: Arc::clone(&export_files),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
@@ -424,6 +457,8 @@ impl Bardo {
                 proxies: proxy_handler,
                 music_prompts: music_prompt_handler,
                 renders: render_handler,
+                metadata: metadata_handler,
+                exports: export_handler,
             }),
             job_settings,
             redactor,
@@ -443,6 +478,8 @@ impl Bardo {
             music_prompts,
             network_accounts,
             renders,
+            exports,
+            export_files,
             cost_book,
             files,
             audio: providers.audio,
@@ -1281,6 +1318,8 @@ mod tests {
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
+            exports: Arc::clone(&db) as _,
+            export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
             research: db,
@@ -1418,6 +1457,7 @@ mod tests {
             db,
             Box::new(MemorySecretStore::default()),
             Box::new(MemoryProjectFiles::default()),
+            Box::new(MemoryExportFiles::default()),
         );
         let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();

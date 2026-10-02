@@ -76,6 +76,9 @@ struct PersonaV1 {
     tone: String,
     script_style: String,
     presets: PresetsV1,
+    /// Written only when set, so packages of other voices read as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    realistic_voice: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -116,6 +119,7 @@ pub fn encode(details: &PersonaDetails) -> String {
                 style: presets.style,
                 speed: presets.speed,
             },
+            realistic_voice: details.realistic_voice(),
         },
     };
     let mut json = serde_json::to_string_pretty(&envelope).expect("a persona package serializes");
@@ -153,6 +157,7 @@ pub fn decode(text: &str) -> Result<PersonaDetails, PackageError> {
             style: persona.presets.style,
             speed: persona.presets.speed,
         },
+        realistic_voice: persona.realistic_voice,
     })
     .map_err(|_| PackageError::InvalidPersona)
 }
@@ -206,6 +211,7 @@ mod tests {
                 style: 35,
                 speed: 70,
             },
+            realistic_voice: true,
         })
         .unwrap()
     }
@@ -240,13 +246,35 @@ mod tests {
         assert_eq!(keys(&json), ["format", "persona", "version"]);
         assert_eq!(
             keys(&json["persona"]),
-            ["name", "presets", "script_style", "tone", "voice"]
+            [
+                "name",
+                "presets",
+                "realistic_voice",
+                "script_style",
+                "tone",
+                "voice"
+            ]
         );
         assert_eq!(keys(&json["persona"]["voice"]), ["id", "name", "provider"]);
         assert_eq!(
             keys(&json["persona"]["presets"]),
             ["similarity", "speed", "stability", "style"]
         );
+    }
+
+    #[test]
+    fn the_realistic_voice_flag_is_written_only_when_set() {
+        let stock = &bardo_domain::Persona::defaults(bardo_domain::ProfileId::new())[0].details;
+        assert!(!encode(stock).contains("realistic_voice"));
+        // A package written before the flag existed reads as unflagged.
+        let mut older: serde_json::Value = serde_json::from_str(&encode(&details())).unwrap();
+        older["persona"]
+            .as_object_mut()
+            .unwrap()
+            .remove("realistic_voice");
+        let older = older.to_string();
+        assert!(!older.contains("realistic_voice"), "{older}");
+        assert_eq!(decode(&older).map(|d| d.realistic_voice()), Ok(false));
     }
 
     #[test]

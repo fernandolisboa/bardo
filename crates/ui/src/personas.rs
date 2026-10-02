@@ -8,12 +8,13 @@
 
 use bardo_app::bardo_domain::{
     Channel, ChannelId, GenerationPresets, Persona, PersonaDraft, PersonaFieldError, PersonaId,
-    Voice, VoiceFlag, VoiceRef,
+    Voice, VoiceCategory, VoiceFlag, VoiceRef,
 };
 use std::rc::Rc;
 
 use bardo_app::{Bardo, Destination, PersonaError, Text, VoiceStatus, persona_package_folder};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::{
@@ -130,6 +131,9 @@ pub struct PersonasScreen {
     tone: Entity<TextareaState>,
     script_style: Entity<TextareaState>,
     voice: Option<VoiceRef>,
+    /// Whether the voice is a clone or a realistic synthetic voice of a
+    /// real person: exports then remind the user to disclose it.
+    realistic_voice: bool,
     sliders: Vec<(Preset, Entity<SliderState>)>,
     picker_open: bool,
     /// The voice listing in flight; dropping it cancels the wait.
@@ -195,6 +199,7 @@ impl PersonasScreen {
             load_failed: false,
             editing: None,
             usage: Vec::new(),
+            realistic_voice: false,
             name,
             tone,
             script_style,
@@ -294,6 +299,7 @@ impl PersonasScreen {
             slider.update(cx, |slider, cx| slider.set_value(value, window, cx));
         }
         self.voice = draft.voice.clone();
+        self.realistic_voice = draft.realistic_voice;
     }
 
     fn presets(&self, cx: &App) -> GenerationPresets {
@@ -312,6 +318,7 @@ impl PersonasScreen {
             tone: self.tone.read(cx).value().to_string(),
             script_style: self.script_style.read(cx).value().to_string(),
             presets: self.presets(cx),
+            realistic_voice: self.realistic_voice,
         }
     }
 
@@ -524,7 +531,21 @@ impl PersonasScreen {
         cx.notify();
     }
 
-    fn pick(&mut self, voice: VoiceRef, cx: &mut Context<Self>) {
+    /// Picks a voice; one cloned from recordings is someone's real voice,
+    /// so the disclosure flag turns on with it (the user can turn it off).
+    fn pick(&mut self, voice: VoiceRef, category: VoiceCategory, cx: &mut Context<Self>) {
+        let changed = self
+            .voice
+            .as_ref()
+            .is_none_or(|current| !current.same_voice(&voice));
+        if changed
+            && matches!(
+                category,
+                VoiceCategory::Cloned | VoiceCategory::Professional
+            )
+        {
+            self.realistic_voice = true;
+        }
         self.voice = Some(voice);
         self.field_errors
             .retain(|error| !VOICE_ERRORS.contains(error));
@@ -662,6 +683,24 @@ impl PersonasScreen {
                     .child(tr(bardo, Text::PersonaFieldError(*error)))
             });
 
+        let realistic = h_flex()
+            .gap_1()
+            .items_center()
+            .child(
+                Checkbox::new("persona-realistic-voice")
+                    .checked(self.realistic_voice)
+                    .label(tr(bardo, Text::PersonaRealisticVoice))
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        this.realistic_voice = *checked;
+                        this.touched(cx);
+                    })),
+            )
+            .child(kit::info(
+                "persona-realistic-voice-info",
+                None,
+                tr(bardo, Text::PersonaRealisticVoiceHint),
+            ));
+
         v_flex()
             .gap_2()
             .child(
@@ -683,6 +722,7 @@ impl PersonasScreen {
             .child(buttons)
             .children(picker)
             .children(error)
+            .child(realistic)
             .into_any_element()
     }
 
@@ -744,6 +784,7 @@ impl PersonasScreen {
                 ];
                 traits.extend(voice.labels.iter().cloned());
                 let reference = voice.reference.clone();
+                let category = voice.category;
                 kit::list_row(("voice", ix), selected, cx)
                     .child(
                         h_flex()
@@ -781,7 +822,7 @@ impl PersonasScreen {
                         )
                     })
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.pick(reference.clone(), cx)
+                        this.pick(reference.clone(), category, cx)
                     }))
                     .into_any_element()
             })

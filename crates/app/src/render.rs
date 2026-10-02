@@ -819,7 +819,7 @@ impl JobHandler for RenderHandler {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Instant;
 
@@ -870,6 +870,13 @@ mod tests {
         let review = app.render_review(project).unwrap();
         let found = app.render_checks(&review).run().unwrap();
         review.checked(&found)
+    }
+
+    /// Checks the project's cut and renders every account it can.
+    pub(crate) fn render_all(app: &Bardo, project: VideoProjectId) {
+        let review = checked(app, project);
+        let chosen = review.renderable();
+        done(app, app.start_render(&review, &chosen).unwrap());
     }
 
     fn target(review: &RenderReview, account: NetworkAccountId) -> &RenderTarget {

@@ -99,12 +99,47 @@ Video length: {{video_length}}
 Write the music prompt for this video. The track should loop or run for the video's length \
 without a hard ending.";
 
+const METADATA_INSTRUCTIONS: &str = "\
+You write the post text for a faceless video that will be posted by hand on several social \
+networks. For each network you are given, write what its upload form asks for, within its \
+limits: a title where it has one, a description or caption where it takes one, and tags.
+
+Write each network's text in the language given for it. Lead with a hook that makes people want \
+to watch, and keep it true to the script: no claims the video does not make, no clickbait it \
+does not pay off. Keep it safe for advertisers.
+
+Tags are single topics without the # sign. Start from the account's default tags when it has \
+some, then add the most specific topics of this video, and stop within the network's tag limits. \
+Leave links, credits and calls to follow out of the text: the account adds its own footer.
+
+Stay well inside every limit: the footer and hashtags are added to the text after you write it.";
+
+const METADATA_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Channel language: {{language}}
+Audience country: {{country}}
+
+Video niche: {{niche}}
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+
+The networks, one per line, with what each one takes:
+{{networks}}
+
+The script:
+{{script}}
+
+Write the title, description and tags for each network listed. Leave a field empty where the \
+network does not take it.";
+
 /// Bardo's own text for `kind`: every profile's version 1.
 pub fn default_template(kind: TemplateKind) -> TemplateBody {
     let (instructions, prompt) = match kind {
         TemplateKind::Script => (SCRIPT_INSTRUCTIONS, SCRIPT_PROMPT),
         TemplateKind::ImagePrompt => (IMAGE_PROMPT_INSTRUCTIONS, IMAGE_PROMPT_PROMPT),
         TemplateKind::MusicPrompt => (MUSIC_PROMPT_INSTRUCTIONS, MUSIC_PROMPT_PROMPT),
+        TemplateKind::Metadata => (METADATA_INSTRUCTIONS, METADATA_PROMPT),
     };
     TemplateBody::new(kind, instructions, prompt).expect("the default templates are valid")
 }

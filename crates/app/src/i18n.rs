@@ -9,11 +9,11 @@ use crate::{Destination, Pillar, Stage};
 
 use bardo_domain::{
     ApiKeyError, AspectRatio, CaptionStyle, ChannelFieldError, ContentLanguage, Country, Decibels,
-    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, Meter, Money, MoneyError, Month,
-    MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError, PersonaFieldError,
-    Provider, RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
-    VoiceCategory, VoiceFlag,
+    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, MetadataProblem, Meter, Money,
+    MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
+    PersonaFieldError, Provider, RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind,
+    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage,
+    UiTheme, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -831,7 +831,6 @@ pub enum Text {
     StageClips,
     StageEditorReady,
     StageWorking,
-    StageNotYet,
     FilterAll,
     FilterPending,
     FilterPendingEmpty,
@@ -932,6 +931,90 @@ pub enum Text {
     StageRenderOutdated,
     StageRendering,
     StageRenderStopped,
+    ExportNoAccounts,
+    ExportNothingChosen,
+    ExportBlocked,
+    ExportAlreadyRunning,
+    ExportNotLoaded,
+    MetadataMissingKey,
+    MetadataBusy,
+    MetadataMissing,
+    MetadataNotSaved,
+    ExportFileVideo,
+    ExportFileTitle,
+    ExportFileDescription,
+    ExportFileCaption,
+    ExportFileTags,
+    ExportFileVisibility,
+    DisclosureReminder,
+    DisclosureNotice,
+    StageExportReady,
+    StageExported,
+    StageExportOutdated,
+    StageExporting,
+    StageExportStopped,
+    PersonaRealisticVoice,
+    PersonaRealisticVoiceHint,
+    ExportInfo,
+    ExportFigureRendered,
+    ExportFigureMetadata,
+    ExportFigureExported,
+    ExportFigureCost,
+    ExportFigureNetworks,
+    ExportChosen,
+    ExportTargets,
+    ExportInclude,
+    ExportStart,
+    ExportRunning,
+    ExportStopped,
+    ExportCancelled,
+    ExportShowFolder,
+    ExportColumnRender,
+    ExportColumnLast,
+    ExportRenderOutdatedHint,
+    ExportNoRenderHint,
+    ExportStateReady,
+    ExportStateNoRender,
+    ExportStateNoMetadata,
+    ExportStateProblems,
+    ExportLastCurrent,
+    ExportLastOutdated,
+    ExportLastNone,
+    ExportLastOutdatedHint,
+    MetadataGenerate,
+    MetadataRegenerate,
+    MetadataGenerateHint,
+    MetadataRegenerateHint,
+    MetadataRunning,
+    MetadataStopped,
+    MetadataConfirmTitle,
+    MetadataConfirmBody,
+    MetadataNone,
+    MetadataEmpty,
+    MetadataStateNone,
+    MetadataStateGenerated,
+    MetadataStateEdited,
+    MetadataEdited,
+    MetadataFieldTitle,
+    MetadataFieldDescription,
+    MetadataFieldCaption,
+    MetadataFieldTags,
+    MetadataTagsPlaceholder,
+    MetadataCounter,
+    MetadataTagsCount,
+    MetadataTagsCountOf,
+    MetadataFooterNote,
+    MetadataHashtagsNote,
+    MetadataSave,
+    MetadataRevert,
+    MetadataSaved,
+    MetadataCopy,
+    MetadataCopied,
+    MetadataPreview,
+    /// Where the network takes the synthetic-content label.
+    DisclosureHow(Network),
+    /// A metadata rule broken, with `{limit}` where it has one.
+    MetadataProblem(MetadataProblem),
 }
 
 impl Text {
@@ -1808,7 +1891,6 @@ impl Text {
             Text::StageClips => "stage.note.clips",
             Text::StageEditorReady => "stage.note.editor_ready",
             Text::StageWorking => "stage.note.working",
-            Text::StageNotYet => "stage.note.not_yet",
             Text::FilterAll => "scenes.filter.all",
             Text::FilterPending => "scenes.filter.pending",
             Text::FilterPendingEmpty => "scenes.filter.pending_empty",
@@ -1921,6 +2003,98 @@ impl Text {
             Text::StageRenderOutdated => "stage.note.render_outdated",
             Text::StageRendering => "stage.note.rendering",
             Text::StageRenderStopped => "stage.note.render_stopped",
+            Text::ExportNoAccounts => "export.error.no_accounts",
+            Text::ExportNothingChosen => "export.error.nothing_chosen",
+            Text::ExportBlocked => "export.error.blocked",
+            Text::ExportAlreadyRunning => "export.error.already_running",
+            Text::ExportNotLoaded => "export.error.not_loaded",
+            Text::MetadataMissingKey => "metadata.error.missing_key",
+            Text::MetadataBusy => "metadata.error.busy",
+            Text::MetadataMissing => "metadata.error.missing",
+            Text::MetadataNotSaved => "metadata.error.not_saved",
+            Text::ExportFileVideo => "export.file.video",
+            Text::ExportFileTitle => "export.file.title",
+            Text::ExportFileDescription => "export.file.description",
+            Text::ExportFileCaption => "export.file.caption",
+            Text::ExportFileTags => "export.file.tags",
+            Text::ExportFileVisibility => "export.file.visibility",
+            Text::DisclosureReminder => "disclosure.reminder",
+            Text::DisclosureNotice => "disclosure.notice",
+            Text::StageExportReady => "stage.note.export_ready",
+            Text::StageExported => "stage.note.exported",
+            Text::StageExportOutdated => "stage.note.export_outdated",
+            Text::StageExporting => "stage.note.exporting",
+            Text::StageExportStopped => "stage.note.export_stopped",
+            Text::PersonaRealisticVoice => "persona.realistic_voice",
+            Text::PersonaRealisticVoiceHint => "persona.realistic_voice_hint",
+            Text::ExportInfo => "export.info",
+            Text::ExportFigureRendered => "export.figure.rendered",
+            Text::ExportFigureMetadata => "export.figure.metadata",
+            Text::ExportFigureExported => "export.figure.exported",
+            Text::ExportFigureCost => "export.figure.cost",
+            Text::ExportFigureNetworks => "export.figure.networks",
+            Text::ExportChosen => "export.chosen",
+            Text::ExportTargets => "export.targets",
+            Text::ExportInclude => "export.include",
+            Text::ExportStart => "export.start",
+            Text::ExportRunning => "export.running",
+            Text::ExportStopped => "export.stopped",
+            Text::ExportCancelled => "export.cancelled",
+            Text::ExportShowFolder => "export.show_folder",
+            Text::ExportColumnRender => "export.column_render",
+            Text::ExportColumnLast => "export.column_last",
+            Text::ExportRenderOutdatedHint => "export.render_outdated_hint",
+            Text::ExportNoRenderHint => "export.no_render_hint",
+            Text::ExportStateReady => "export.state.ready",
+            Text::ExportStateNoRender => "export.state.no_render",
+            Text::ExportStateNoMetadata => "export.state.no_metadata",
+            Text::ExportStateProblems => "export.state.problems",
+            Text::ExportLastCurrent => "export.last.current",
+            Text::ExportLastOutdated => "export.last.outdated",
+            Text::ExportLastNone => "export.last.none",
+            Text::ExportLastOutdatedHint => "export.last.outdated_hint",
+            Text::MetadataGenerate => "metadata.generate",
+            Text::MetadataRegenerate => "metadata.regenerate",
+            Text::MetadataGenerateHint => "metadata.generate_hint",
+            Text::MetadataRegenerateHint => "metadata.regenerate_hint",
+            Text::MetadataRunning => "metadata.running",
+            Text::MetadataStopped => "metadata.stopped",
+            Text::MetadataConfirmTitle => "metadata.confirm_title",
+            Text::MetadataConfirmBody => "metadata.confirm_body",
+            Text::MetadataNone => "metadata.none",
+            Text::MetadataEmpty => "metadata.empty",
+            Text::MetadataStateNone => "metadata.state_none",
+            Text::MetadataStateGenerated => "metadata.state_generated",
+            Text::MetadataStateEdited => "metadata.state_edited",
+            Text::MetadataEdited => "metadata.edited",
+            Text::MetadataFieldTitle => "metadata.title",
+            Text::MetadataFieldDescription => "metadata.description",
+            Text::MetadataFieldCaption => "metadata.caption",
+            Text::MetadataFieldTags => "metadata.tags",
+            Text::MetadataTagsPlaceholder => "metadata.tags_placeholder",
+            Text::MetadataCounter => "metadata.counter",
+            Text::MetadataTagsCount => "metadata.tags_count",
+            Text::MetadataTagsCountOf => "metadata.tags_count_of",
+            Text::MetadataFooterNote => "metadata.footer_note",
+            Text::MetadataHashtagsNote => "metadata.hashtags_note",
+            Text::MetadataSave => "metadata.save",
+            Text::MetadataRevert => "metadata.revert",
+            Text::MetadataSaved => "metadata.saved",
+            Text::MetadataCopy => "metadata.copy",
+            Text::MetadataCopied => "metadata.copied",
+            Text::MetadataPreview => "metadata.preview",
+            Text::DisclosureHow(network) => {
+                return format!("disclosure.how.{}", network.code()).into();
+            }
+            Text::MetadataProblem(problem) => match problem {
+                MetadataProblem::TitleRequired => "metadata.problem.title_required",
+                MetadataProblem::TitleTooLong => "metadata.problem.title_too_long",
+                MetadataProblem::TextRequired => "metadata.problem.text_required",
+                MetadataProblem::TextTooLong => "metadata.problem.text_too_long",
+                MetadataProblem::TooManyTags => "metadata.problem.too_many_tags",
+                MetadataProblem::TagsTooLong => "metadata.problem.tags_too_long",
+                MetadataProblem::AngleBrackets => "metadata.problem.angle_brackets",
+            },
             Text::StageName(stage) => match stage {
                 Stage::Script => "stage.name.script",
                 Stage::Narration => "stage.name.narration",
@@ -2876,7 +3050,6 @@ mod tests {
         texts.push(Text::StageClips);
         texts.push(Text::StageEditorReady);
         texts.push(Text::StageWorking);
-        texts.push(Text::StageNotYet);
         texts.push(Text::FilterAll);
         texts.push(Text::FilterPending);
         texts.push(Text::FilterPendingEmpty);
@@ -2976,6 +3149,88 @@ mod tests {
         texts.push(Text::StageRenderOutdated);
         texts.push(Text::StageRendering);
         texts.push(Text::StageRenderStopped);
+        texts.push(Text::ExportNoAccounts);
+        texts.push(Text::ExportNothingChosen);
+        texts.push(Text::ExportBlocked);
+        texts.push(Text::ExportAlreadyRunning);
+        texts.push(Text::ExportNotLoaded);
+        texts.push(Text::MetadataMissingKey);
+        texts.push(Text::MetadataBusy);
+        texts.push(Text::MetadataMissing);
+        texts.push(Text::MetadataNotSaved);
+        texts.push(Text::ExportFileVideo);
+        texts.push(Text::ExportFileTitle);
+        texts.push(Text::ExportFileDescription);
+        texts.push(Text::ExportFileCaption);
+        texts.push(Text::ExportFileTags);
+        texts.push(Text::ExportFileVisibility);
+        texts.push(Text::DisclosureReminder);
+        texts.push(Text::DisclosureNotice);
+        texts.push(Text::StageExportReady);
+        texts.push(Text::StageExported);
+        texts.push(Text::StageExportOutdated);
+        texts.push(Text::StageExporting);
+        texts.push(Text::StageExportStopped);
+        texts.push(Text::PersonaRealisticVoice);
+        texts.push(Text::PersonaRealisticVoiceHint);
+        texts.push(Text::ExportInfo);
+        texts.push(Text::ExportFigureRendered);
+        texts.push(Text::ExportFigureMetadata);
+        texts.push(Text::ExportFigureExported);
+        texts.push(Text::ExportFigureCost);
+        texts.push(Text::ExportFigureNetworks);
+        texts.push(Text::ExportChosen);
+        texts.push(Text::ExportTargets);
+        texts.push(Text::ExportInclude);
+        texts.push(Text::ExportStart);
+        texts.push(Text::ExportRunning);
+        texts.push(Text::ExportStopped);
+        texts.push(Text::ExportCancelled);
+        texts.push(Text::ExportShowFolder);
+        texts.push(Text::ExportColumnRender);
+        texts.push(Text::ExportColumnLast);
+        texts.push(Text::ExportRenderOutdatedHint);
+        texts.push(Text::ExportNoRenderHint);
+        texts.push(Text::ExportStateReady);
+        texts.push(Text::ExportStateNoRender);
+        texts.push(Text::ExportStateNoMetadata);
+        texts.push(Text::ExportStateProblems);
+        texts.push(Text::ExportLastCurrent);
+        texts.push(Text::ExportLastOutdated);
+        texts.push(Text::ExportLastNone);
+        texts.push(Text::ExportLastOutdatedHint);
+        texts.push(Text::MetadataGenerate);
+        texts.push(Text::MetadataRegenerate);
+        texts.push(Text::MetadataGenerateHint);
+        texts.push(Text::MetadataRegenerateHint);
+        texts.push(Text::MetadataRunning);
+        texts.push(Text::MetadataStopped);
+        texts.push(Text::MetadataConfirmTitle);
+        texts.push(Text::MetadataConfirmBody);
+        texts.push(Text::MetadataNone);
+        texts.push(Text::MetadataEmpty);
+        texts.push(Text::MetadataStateNone);
+        texts.push(Text::MetadataStateGenerated);
+        texts.push(Text::MetadataStateEdited);
+        texts.push(Text::MetadataEdited);
+        texts.push(Text::MetadataFieldTitle);
+        texts.push(Text::MetadataFieldDescription);
+        texts.push(Text::MetadataFieldCaption);
+        texts.push(Text::MetadataFieldTags);
+        texts.push(Text::MetadataTagsPlaceholder);
+        texts.push(Text::MetadataCounter);
+        texts.push(Text::MetadataTagsCount);
+        texts.push(Text::MetadataTagsCountOf);
+        texts.push(Text::MetadataFooterNote);
+        texts.push(Text::MetadataHashtagsNote);
+        texts.push(Text::MetadataSave);
+        texts.push(Text::MetadataRevert);
+        texts.push(Text::MetadataSaved);
+        texts.push(Text::MetadataCopy);
+        texts.push(Text::MetadataCopied);
+        texts.push(Text::MetadataPreview);
+        texts.extend(Network::ALL.map(Text::DisclosureHow));
+        texts.extend(MetadataProblem::ALL.map(Text::MetadataProblem));
         texts
     }
 

@@ -232,6 +232,8 @@ fn first_guess(purpose: CostPurpose) -> Metered {
         CostPurpose::NarrationAlignment => Metered::audio_seconds(600),
         // A short paragraph.
         CostPurpose::MusicPrompt => tokens(500, 200),
+        // A post per network for a script of a few minutes.
+        CostPurpose::Metadata => tokens(2_500, 1_200),
     }
 }
 

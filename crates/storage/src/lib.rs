@@ -3,6 +3,8 @@
 
 mod channel;
 mod cost;
+mod export;
+mod export_files;
 mod files;
 mod job;
 mod media;
@@ -27,6 +29,7 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::RepositoryError;
 use rusqlite::Connection;
 
+pub use export_files::{LocalExportFiles, MemoryExportFiles, default_exports_dir};
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
 pub use migrations::{BrokenReferences, MigrationError};
 #[cfg(windows)]
