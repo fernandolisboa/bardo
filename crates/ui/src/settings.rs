@@ -19,8 +19,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, Hsla, SharedString, Subscription, Task, Window, div, px,
-    rgb,
+    AnyElement, App, ClickEvent, Entity, Hsla, MouseButton, SharedString, Subscription, Task,
+    Window, div, px, rgb,
 };
 
 use crate::appearance::{self, look};
@@ -84,6 +84,9 @@ pub struct SettingsScreen {
     dark_theme: ThemeSelect,
     /// Why the last theme or language change was not saved.
     appearance_error: Option<Text>,
+    /// What the labels and pickers were last set from; other changes to
+    /// Bardo leave them, and an open picker, alone.
+    labeled: Option<(UiLanguage, UiThemePreference)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -152,6 +155,7 @@ impl SettingsScreen {
             light_theme,
             dark_theme,
             appearance_error: None,
+            labeled: None,
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -164,6 +168,12 @@ impl SettingsScreen {
 
     /// Placeholders and theme names follow the interface language.
     fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        let now = (bardo.ui_language(), bardo.ui_theme());
+        if self.labeled == Some(now) {
+            return;
+        }
+        self.labeled = Some(now);
         for provider in Provider::ALL {
             let placeholder = tr(self.bardo.read(cx), Text::ProviderKeyPlaceholder(provider));
             self.rows[&provider].input.update(cx, |input, cx| {
@@ -486,6 +496,9 @@ impl SettingsScreen {
         .child(
             h_flex()
                 .gap_2()
+                // Opening a picker is not a click on the row: from a fixed
+                // theme it would switch to following Windows at once.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     div()
                         .text_sm()

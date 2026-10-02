@@ -553,7 +553,6 @@ nothing_to_animate = "Todas as cenas com imagem já têm clipe ou um a caminho."
 clip_model_not_offered = "Esse modelo de vídeo não é mais oferecido. Escolha outro."
 
 [provenance]
-title = "Procedência"
 provider = "Provedor"
 model = "Modelo"
 template = "Template"

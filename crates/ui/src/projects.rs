@@ -1255,6 +1255,7 @@ impl ProjectsScreen {
         // Why narration can't be generated is a state; how it will be
         // generated is an explanation behind the ⓘ.
         let (blocked, hint) = match (&view.persona, flag) {
+            _ if view.script.is_none() => (Some(Tone::Info), tr(bardo, Text::NarrationNoScript)),
             (Some(_), Some(flag)) => (
                 Some(Tone::Warning),
                 tr(bardo, Text::NarrationVoiceFlagged(flag)),

@@ -12,7 +12,7 @@ use gpui_kit::component::{
     ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Window, div, px};
+use gpui_kit::{AnyElement, ClickEvent, Entity, SharedString, Window, div, px};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
@@ -297,7 +297,6 @@ impl TemplatesScreen {
                     tr(bardo, Text::TemplateInstructions),
                     tr(bardo, Text::TemplateInstructionsHint),
                     Textarea::new(&self.instructions).into_any_element(),
-                    cx,
                 )
                 .children(errors(TemplateField::Instructions)),
             )
@@ -306,7 +305,6 @@ impl TemplatesScreen {
                     tr(bardo, Text::TemplatePrompt),
                     tr(bardo, Text::TemplatePromptHint),
                     Textarea::new(&self.prompt).into_any_element(),
-                    cx,
                 )
                 .children(errors(TemplateField::Prompt)),
             )
@@ -383,7 +381,7 @@ impl TemplatesScreen {
     }
 }
 
-fn field(label: SharedString, hint: SharedString, input: AnyElement, _cx: &App) -> gpui_kit::Div {
+fn field(label: SharedString, hint: SharedString, input: AnyElement) -> gpui_kit::Div {
     let id = SharedString::from(format!("template-field-{label}"));
     kit::field(label, Some(kit::info(id, None, hint)), input, None)
 }

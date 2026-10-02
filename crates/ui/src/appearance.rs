@@ -227,7 +227,6 @@ pub fn editor_color(role: EditorColor) -> Hsla {
 pub struct Look {
     pub theme: UiTheme,
     pub tokens: Tokens,
-    pub editor: EditorTokens,
     /// The platform's interface and monospace families, which base themes
     /// keep (a terminal theme replaces both while it is on).
     system_font: SharedString,
@@ -244,7 +243,11 @@ pub fn look(cx: &App) -> &Look {
 
 /// The system's light/dark setting as the window sees it.
 pub fn system_mode(window: &Window) -> ThemeMode {
-    match window.appearance() {
+    mode_of(window.appearance())
+}
+
+fn mode_of(appearance: WindowAppearance) -> ThemeMode {
+    match appearance {
         WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
         WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
     }
@@ -261,15 +264,12 @@ pub fn init(preference: UiThemePreference, cx: &mut App) {
     let theme = Theme::global(cx);
     let system_font = theme.font_family.clone();
     let system_mono = theme.mono_font_family.clone();
-    let mode = match cx.window_appearance() {
-        WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
-        WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
-    };
-    let chosen = preference.resolve(mode);
+    // A first guess before any window exists; the shell confirms it with
+    // its window's appearance once it opens.
+    let chosen = preference.resolve(mode_of(cx.window_appearance()));
     cx.set_global(Look {
         theme: chosen,
         tokens: Tokens::new(bardo_app::palette(chosen)),
-        editor: EditorTokens::new(&EditorPalette::for_theme(chosen)),
         system_font,
         system_mono,
     });
@@ -289,8 +289,7 @@ pub fn show(theme: UiTheme, cx: &mut App) {
     let look = cx.global_mut::<Look>();
     look.theme = theme;
     look.tokens = Tokens::new(bardo_app::palette(theme));
-    look.editor = EditorTokens::new(&EditorPalette::for_theme(theme));
-    EDITOR.set(Some(look.editor));
+    EDITOR.set(Some(EditorTokens::new(&EditorPalette::for_theme(theme))));
     let config = Rc::new(config(
         theme,
         look.system_font.clone(),

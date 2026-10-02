@@ -264,17 +264,22 @@ impl ProjectsScreen {
         };
         let can_plan = !busy && !view.is_animating() && view.narration.is_some();
         let plan_button = can_plan.then_some(plan_button);
-        let draw_button = (missing > 0 && !busy && !view.stale).then(|| {
-            Button::new("generate-scene-images")
-                .primary()
-                .small()
-                .label(SharedString::from(bardo.text_with(
-                    Text::GenerateSceneImages,
-                    &[("n", &missing.to_string())],
-                )))
-                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                    this.run_scene(SceneAction::DrawMissing, BudgetConsent::Ask, window, cx);
-                }))
+        let stale = view.stale;
+        let draw_button = (missing > 0 && !busy).then(|| {
+            let button = Button::new("generate-scene-images").small();
+            // A stale plan leads with planning again.
+            if stale {
+                button.outline()
+            } else {
+                button.primary()
+            }
+            .label(SharedString::from(bardo.text_with(
+                Text::GenerateSceneImages,
+                &[("n", &missing.to_string())],
+            )))
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                this.run_scene(SceneAction::DrawMissing, BudgetConsent::Ask, window, cx);
+            }))
         });
         let files = plan.map_or(0, |plan| plan.files().count());
         let confirm = self.confirm_replan.then(|| {
@@ -640,7 +645,6 @@ impl ProjectsScreen {
                         )
                     },
                 )
-                .children(record)
         });
 
         kit::card(cx)
@@ -662,7 +666,9 @@ impl ProjectsScreen {
                         )
                         .child(prompt)
                         .children(failure)
-                        .children(actions),
+                        // Provenance stays one click away, even while a
+                        // prompt is being edited.
+                        .child(h_flex().gap_2().children(actions).children(record)),
                 ),
             )
             .children(pending)
@@ -940,7 +946,7 @@ impl ProjectsScreen {
                                 .xsmall()
                                 .label(tr(
                                     bardo,
-                                    if scene.clip().is_some() || scene.pending_clip().is_some() {
+                                    if scene.clip().is_some() {
                                         Text::AnimateSceneAgain
                                     } else {
                                         Text::AnimateScene

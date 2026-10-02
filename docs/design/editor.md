@@ -43,7 +43,7 @@ Top to bottom, filling the window:
 
 ## Visual tokens
 
-These are the Graphite values. The editor follows the interface theme (#59): light and base dark themes keep Graphite; a dark terminal theme brings its own ground, text and accent with square corners; high contrast uses its own pairs and stronger track colors. The tokens live in `crates/app/src/appearance.rs` (`EditorPalette`), and a test checks text contrast and that tracks stay distinguishable under every theme.
+These are the Graphite values. The editor follows the interface theme (#59): light and base dark themes keep Graphite; a dark terminal theme brings its own ground, text and accent; high contrast uses its own pairs and stronger track colors. The tokens live in `crates/app/src/appearance.rs` (`EditorPalette`), and a test checks text contrast and that tracks stay distinguishable under every theme.
 
 | Token | Value | Use |
 | --- | --- | --- |

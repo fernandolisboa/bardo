@@ -553,7 +553,6 @@ nothing_to_animate = "Every scene with an image already has a clip or one on the
 clip_model_not_offered = "That video model is no longer offered. Pick another one."
 
 [provenance]
-title = "Provenance"
 provider = "Provider"
 model = "Model"
 template = "Template"

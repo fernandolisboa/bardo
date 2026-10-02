@@ -97,6 +97,13 @@ impl Shell {
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
+        // The startup theme guessed the system's appearance before any
+        // window existed; this window knows it.
+        appearance::follow(
+            bardo.read(cx).ui_theme(),
+            appearance::system_mode(window),
+            cx,
+        );
         let subscriptions = vec![
             cx.observe(&jobs, |_, _, cx| cx.notify()),
             // The title follows the interface language.
