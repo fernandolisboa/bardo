@@ -1,17 +1,19 @@
 //! Past performance (CONTEXT.md, PRD story 82): how the channel's own
 //! published videos did, as the theme ranking reads it.
 //!
-//! Videos are compared on their first week, so a video synced a month after
-//! going live and one synced on its third day weigh the same: each post's
-//! snapshots draw a line of views over its age, from zero when it went
-//! live, and the first-week figure is read off that line at seven days. A
-//! post younger than a week is projected from its pace so far; one younger
-//! than two days says too little and waits.
+//! Videos are compared on their first week: the views each publication had
+//! seven days after it went live, read off its metrics snapshots. Between
+//! two snapshots views are taken to grow in a straight line; where the
+//! snapshots do not reach across day seven, views are taken to grow like
+//! the square root of age (fast at first, then slower), which is how the
+//! figure is projected from a publication's first days or read back from a
+//! first sync in its second week. A publication first synced later than
+//! that says nothing about its first week and is left out; one synced only
+//! before its second day says too little yet.
 //!
-//! The decision engine judges words, not numbers: each video reaches it as
-//! where it stands against the channel's usual (its median first week), and
-//! the engine relates the idea it scores to the videos it resembles. The
-//! numbers stay in code, for the reason the user reads.
+//! The decision engine reads each video as where it stands against the
+//! channel's usual (its median first week), with the views beside it, and
+//! relates the idea it scores to the videos it resembles.
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -22,21 +24,25 @@ use crate::{
 
 /// The age at which videos are compared.
 pub const FIRST_WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
-/// The youngest a post may be for its pace to count.
-pub const MIN_AGE: Duration = Duration::from_secs(2 * 24 * 3600);
+/// The youngest a snapshot may be for a first week to be projected from it.
+pub const FIRST_WEEK_MIN_AGE: Duration = Duration::from_secs(2 * 24 * 3600);
+/// The oldest a publication's first snapshot past a week may be for its
+/// first week to be read back from it.
+pub const FIRST_WEEK_LATEST_SYNC: Duration = Duration::from_secs(14 * 24 * 3600);
 
 /// A video's views at seven days.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FirstWeek {
     pub views: u64,
-    /// Read from a post younger than a week, at its pace so far.
+    /// Projected from snapshots of its first days only.
     pub projected: bool,
 }
 
-/// One post's views at seven days, from its snapshots (any order): read off
-/// the line through zero at `posted_at` and each snapshot, or, when the
-/// newest snapshot is younger than a week, projected at its average pace.
-/// `None` until a snapshot at least [`MIN_AGE`] old exists.
+/// One publication's views at seven days, from its snapshots (any order).
+/// Read between the snapshots around day seven; from zero along a square
+/// root curve when the first snapshot comes in the second week; projected
+/// along that curve from the newest snapshot of the first week (at least
+/// [`FIRST_WEEK_MIN_AGE`] old) otherwise. `None` when no snapshot can say.
 pub fn first_week(posted_at: SystemTime, snapshots: &[MetricsSnapshot]) -> Option<FirstWeek> {
     let mut points: Vec<(f64, f64)> = snapshots
         .iter()
@@ -46,22 +52,28 @@ pub fn first_week(posted_at: SystemTime, snapshots: &[MetricsSnapshot]) -> Optio
         })
         .collect();
     points.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let &(newest_age, newest_views) = points.last()?;
-    if newest_age < MIN_AGE.as_secs_f64() {
-        return None;
-    }
     let week = FIRST_WEEK.as_secs_f64();
-    let (views, projected) = match points.iter().position(|&(age, _)| age >= week) {
-        Some(after) => {
-            let (age_after, views_after) = points[after];
-            let (age_before, views_before) = match after {
-                0 => (0.0, 0.0),
-                n => points[n - 1],
-            };
+    // Views at `week` on the curve through zero and (age, views).
+    let along_curve = |(age, views): (f64, f64)| views * (week / age).sqrt();
+    let after = points
+        .iter()
+        .position(|&(age, _)| age >= week)
+        .filter(|&ix| points[ix].0 <= FIRST_WEEK_LATEST_SYNC.as_secs_f64());
+    let (views, projected) = match after {
+        Some(0) => (along_curve(points[0]), false),
+        Some(ix) => {
+            let (age_after, views_after) = points[ix];
+            let (age_before, views_before) = points[ix - 1];
             let share = (week - age_before) / (age_after - age_before);
             (views_before + (views_after - views_before) * share, false)
         }
-        None => (newest_views * week / newest_age, true),
+        None => {
+            let &newest = points.iter().rev().find(|&&(age, _)| age < week)?;
+            if newest.0 < FIRST_WEEK_MIN_AGE.as_secs_f64() {
+                return None;
+            }
+            (along_curve(newest), true)
+        }
     };
     Some(FirstWeek {
         views: views.max(0.0).round() as u64,
@@ -69,20 +81,20 @@ pub fn first_week(posted_at: SystemTime, snapshots: &[MetricsSnapshot]) -> Optio
     })
 }
 
-/// One published video project of the channel and its first week, its
-/// posts added up (only YouTube posts have public numbers today).
+/// One published video project of the channel and its first week: its
+/// publications with one, added up (only YouTube has public numbers today).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedVideo {
     pub project: VideoProjectId,
     pub title: String,
     pub niche: Niche,
-    /// When its first post went live.
+    /// When the earliest of its publications with a first week went live.
     pub posted_at: SystemTime,
     pub first_week: FirstWeek,
 }
 
 /// Where a video stands against the channel's usual first week (its
-/// median), in the words the decision engine reads.
+/// median).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Standing {
     FarBelow,
@@ -110,17 +122,6 @@ impl Standing {
             r if r <= 1.25 => Standing::Usual,
             r if r <= 2.0 => Standing::Above,
             _ => Standing::FarAbove,
-        }
-    }
-
-    /// For the decision engine, which reads English best.
-    pub fn describe(self) -> &'static str {
-        match self {
-            Standing::FarBelow => "far below the channel's usual",
-            Standing::Below => "below the channel's usual",
-            Standing::Usual => "about the channel's usual",
-            Standing::Above => "above the channel's usual",
-            Standing::FarAbove => "far above the channel's usual",
         }
     }
 }
@@ -158,7 +159,7 @@ pub struct PerformanceEvidence {
     pub average_views: u64,
     /// Videos in scope.
     pub videos: u32,
-    /// Of those, projected from younger posts.
+    /// Of those, projected from their first days.
     pub projected: u32,
     /// Every video of the channel the engine read; how much the reason
     /// weighs grows with it.
@@ -247,10 +248,6 @@ impl PastPerformance {
         views.get(views.len().checked_sub(1)? / 2).copied()
     }
 
-    pub fn standing(&self, video: &PublishedVideo) -> Standing {
-        Standing::of(video.first_week.views, self.usual().unwrap_or(0))
-    }
-
     /// The numbers a reason for an idea in `niche` shows: the niche's
     /// videos, or every video when the niche has none. `None` without
     /// history.
@@ -317,19 +314,42 @@ mod tests {
     }
 
     #[test]
-    fn a_first_snapshot_after_a_week_draws_the_line_from_zero() {
+    fn a_first_snapshot_in_the_second_week_is_read_back_along_the_curve() {
         let p = PublicationId::new();
-        // Synced late: 28,000 at day 28 reads as 7,000 at day 7.
+        // 14,000 at day 14: 14,000 · √(7/14).
         assert_eq!(
-            week(at(0), &[snap(p, 28.0, 28_000), snap(p, 60.0, 90_000)]),
-            Some((7_000, false))
+            week(at(0), &[snap(p, 14.0, 14_000), snap(p, 60.0, 90_000)]),
+            Some((9_899, false))
         );
     }
 
     #[test]
-    fn a_young_post_is_projected_at_its_pace_and_a_very_young_one_waits() {
+    fn a_first_sync_after_two_weeks_says_nothing_about_the_first_week() {
         let p = PublicationId::new();
-        assert_eq!(week(at(0), &[snap(p, 3.5, 1_000)]), Some((2_000, true)));
+        // A back-catalog video linked a year after it went live.
+        assert_eq!(week(at(0), &[snap(p, 365.0, 100_000)]), None);
+        // Unless an early snapshot exists: then it is projected from that.
+        assert_eq!(
+            week(at(0), &[snap(p, 3.5, 1_000), snap(p, 30.0, 9_000)]),
+            Some((1_414, true))
+        );
+        // Snapshots on both sides of day seven still bracket it.
+        assert_eq!(
+            week(at(0), &[snap(p, 6.0, 600), snap(p, 8.0, 800)]),
+            Some((700, false))
+        );
+    }
+
+    #[test]
+    fn early_snapshots_project_the_week_and_very_early_ones_wait() {
+        let p = PublicationId::new();
+        // 1,000 at day 3.5: 1,000 · √2.
+        assert_eq!(week(at(0), &[snap(p, 3.5, 1_000)]), Some((1_414, true)));
+        assert_eq!(
+            week(at(0), &[snap(p, 2.0, 500), snap(p, 3.5, 1_000)]),
+            Some((1_414, true)),
+            "the newest of the first week"
+        );
         assert_eq!(
             week(at(0), &[snap(p, 1.0, 900), snap(p, 1.9, 1_000)]),
             None,
@@ -460,8 +480,7 @@ mod tests {
         c.post(new, Network::YouTube, 20, &[(3.5, 500)]);
         let fresh = c.project("Too fresh", "space history");
         c.post(fresh, Network::YouTube, 30, &[(1.0, 100)]);
-        let unposted = c.project("Not posted", "space history");
-        let _ = unposted;
+        c.project("Not posted", "space history");
         let tiktok_only = c.project("TikTok only", "space history");
         c.post(tiktok_only, Network::TikTok, 0, &[]);
 
@@ -471,7 +490,7 @@ mod tests {
         assert_eq!(
             past.videos()[0].first_week,
             FirstWeek {
-                views: 1_000,
+                views: 707,
                 projected: true
             }
         );
@@ -517,7 +536,7 @@ mod tests {
         let standings: Vec<_> = past
             .videos()
             .iter()
-            .map(|v| (v.title.as_str(), past.standing(v)))
+            .map(|v| (v.title.as_str(), Standing::of(v.first_week.views, 1_000)))
             .collect();
         assert!(standings.contains(&("a", Standing::FarBelow)));
         assert!(standings.contains(&("b", Standing::Usual)));
@@ -537,7 +556,7 @@ mod tests {
         );
         for (title, niche, views, age) in [
             ("a", "space history", 1_000, 7.0),
-            ("b", "Space  History", 2_001, 3.5),
+            ("b", "Space  History", 2_000, 3.5),
             ("c", "deep sea", 9_000, 7.0),
         ] {
             let p = c.project(title, niche);
@@ -548,8 +567,8 @@ mod tests {
             past.evidence(&Niche::new("space history").unwrap()),
             Some(PerformanceEvidence {
                 scope: EvidenceScope::Niche,
-                // (1,000 + 4,002) / 2
-                average_views: 2_501,
+                // (1,000 + 2,000 · √2) / 2
+                average_views: 1_914,
                 videos: 2,
                 projected: 1,
                 basis: 3,
@@ -559,7 +578,7 @@ mod tests {
             past.evidence(&Niche::new("volcanoes").unwrap()),
             Some(PerformanceEvidence {
                 scope: EvidenceScope::Channel,
-                average_views: 4_667,
+                average_views: 4_276,
                 videos: 3,
                 projected: 1,
                 basis: 3,

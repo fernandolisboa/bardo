@@ -149,8 +149,8 @@ pub use network_account::{
     NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository,
 };
 pub use performance::{
-    EvidenceScope, FIRST_WEEK, FirstWeek, MIN_AGE, PastPerformance, PerformanceEvidence,
-    PerformanceReason, PublishedVideo, Standing, first_week,
+    EvidenceScope, FIRST_WEEK, FIRST_WEEK_LATEST_SYNC, FIRST_WEEK_MIN_AGE, FirstWeek,
+    PastPerformance, PerformanceEvidence, PerformanceReason, PublishedVideo, Standing, first_week,
 };
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,

@@ -318,6 +318,7 @@ pub enum Text {
     ThemePerformanceChannelOne,
     ThemePerformanceProjected,
     ThemesNoHistory,
+    ThemesBeforeHistory,
     ThemeNotRanked,
     /// Placeholder: `{model}`.
     ThemeRankedBy,
@@ -1478,6 +1479,7 @@ impl Text {
             Text::ThemePerformanceChannelOne => "theme.performance_channel_one",
             Text::ThemePerformanceProjected => "theme.performance_projected",
             Text::ThemesNoHistory => "themes.no_history",
+            Text::ThemesBeforeHistory => "themes.before_history",
             Text::ThemeNotRanked => "theme.not_ranked",
             Text::ThemeRankedBy => "theme.ranked_by",
             Text::ThemeTitle => "theme.title",
@@ -2774,6 +2776,7 @@ mod tests {
             Text::ThemePerformanceChannelOne,
             Text::ThemePerformanceProjected,
             Text::ThemesNoHistory,
+            Text::ThemesBeforeHistory,
             Text::ThemeNotRanked,
             Text::ThemeRankedBy,
             Text::ThemeTitle,

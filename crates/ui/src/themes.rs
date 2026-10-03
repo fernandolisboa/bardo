@@ -361,6 +361,8 @@ impl ThemesScreen {
         let has_niche = view.is_some_and(|view| view.niche.is_some());
         let running = self.running();
         let unranked = view.map_or(0, |view| view.unranked);
+        let before_history = view.map_or(0, |view| view.before_history);
+        let waiting = unranked + before_history;
 
         v_flex()
             .gap_3()
@@ -403,7 +405,7 @@ impl ThemesScreen {
                                     this.suggest(false, BudgetConsent::Ask, cx)
                                 })),
                         )
-                        .when(unranked > 0, |row| {
+                        .when(waiting > 0, |row| {
                             row.child(
                                 Button::new("rank-themes")
                                     .outline()
@@ -433,9 +435,19 @@ impl ThemesScreen {
                     cx,
                 ))
             })
+            .when(before_history > 0, |panel| {
+                panel.child(kit::notice(
+                    Tone::Info,
+                    bardo.text_with(
+                        Text::ThemesBeforeHistory,
+                        &[("n", &before_history.to_string())],
+                    ),
+                    cx,
+                ))
+            })
             .children(
                 view.and_then(|view| view.rank_estimate.as_ref())
-                    .filter(|_| unranked > 0 && !running)
+                    .filter(|_| waiting > 0 && !running)
                     .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
             )
             .children(self.budget_ask.as_ref().map(|(rank_only, estimate)| {
