@@ -61,6 +61,7 @@ mod music_prompt;
 mod narration;
 mod network;
 mod network_account;
+mod performance;
 mod persona;
 mod profile;
 mod provider_key;
@@ -146,6 +147,10 @@ pub use network::{
 pub use network_account::{
     MetadataDefaults, NetworkAccount, NetworkAccountDetails, NetworkAccountDraft,
     NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository,
+};
+pub use performance::{
+    EvidenceScope, FIRST_WEEK, FIRST_WEEK_LATEST_SYNC, FIRST_WEEK_MIN_AGE, FirstWeek,
+    PastPerformance, PerformanceEvidence, PerformanceReason, PublishedVideo, Standing, first_week,
 };
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,

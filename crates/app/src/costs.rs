@@ -215,7 +215,8 @@ fn first_guess(purpose: CostPurpose) -> Metered {
     match purpose {
         // Ten ideas as JSON, with some reasoning.
         CostPurpose::ThemeIdeas => tokens(1_200, 3_000),
-        // Ten themes, three questions each.
+        // Ten themes, three questions each (four, with up to 40 past
+        // videos in the state, once the channel has history).
         CostPurpose::ThemeRanking => tokens(2_000, 0),
         CostPurpose::Script => tokens(1_000, 4_000),
         CostPurpose::Narration => Metered::characters(5_000),

@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, JobKind, JobState, NicheScores, Reason, Theme, ThemeFieldError, ThemeId,
-    ThemeStatus,
+    Channel, ChannelId, JobKind, JobState, NicheScores, PerformanceEvidence, Reason, Theme,
+    ThemeFieldError, ThemeId, ThemeStatus,
 };
 use bardo_app::{
     Bardo, BudgetConsent, Destination, SUGGESTIONS_PER_RUN, SpendEstimate, Text, ThemeError,
@@ -361,6 +361,8 @@ impl ThemesScreen {
         let has_niche = view.is_some_and(|view| view.niche.is_some());
         let running = self.running();
         let unranked = view.map_or(0, |view| view.unranked);
+        let before_history = view.map_or(0, |view| view.before_history);
+        let waiting = unranked + before_history;
 
         v_flex()
             .gap_3()
@@ -381,6 +383,13 @@ impl ThemesScreen {
                 view.and_then(|view| view.research)
                     .map(|scores| research_tags(bardo, scores)),
             )
+            .when(has_niche, |panel| {
+                panel.child(past_performance(
+                    bardo,
+                    cx,
+                    view.and_then(|view| view.past.as_ref()),
+                ))
+            })
             // Nothing to suggest for without a niche; a running job shows
             // its progress instead of the buttons.
             .when(has_niche && !running, |panel| {
@@ -396,7 +405,7 @@ impl ThemesScreen {
                                     this.suggest(false, BudgetConsent::Ask, cx)
                                 })),
                         )
-                        .when(unranked > 0, |row| {
+                        .when(waiting > 0, |row| {
                             row.child(
                                 Button::new("rank-themes")
                                     .outline()
@@ -426,9 +435,19 @@ impl ThemesScreen {
                     cx,
                 ))
             })
+            .when(before_history > 0, |panel| {
+                panel.child(kit::notice(
+                    Tone::Info,
+                    bardo.text_with(
+                        Text::ThemesBeforeHistory,
+                        &[("n", &before_history.to_string())],
+                    ),
+                    cx,
+                ))
+            })
             .children(
                 view.and_then(|view| view.rank_estimate.as_ref())
-                    .filter(|_| unranked > 0 && !running)
+                    .filter(|_| waiting > 0 && !running)
                     .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
             )
             .children(self.budget_ask.as_ref().map(|(rank_only, estimate)| {
@@ -643,15 +662,31 @@ impl ThemesScreen {
                     Text::ThemeCompetition,
                     ranking.competition,
                 ))
-                .child(div().self_end().child(kit::details(
-                    ("theme-ranking-details", ix),
-                    tr(bardo, Text::Details),
-                    vec![SharedString::from(format!(
-                        "{} · {}",
-                        bardo.text_with(Text::ThemeRankedBy, &[("model", &ranking.model)]),
-                        bardo.time_ago(ranking.ranked_at)
-                    ))],
-                )))
+                .children(ranking.performance.map(|performance| {
+                    reason(bardo, cx, Text::ThemePerformance, performance.reason)
+                }))
+                .child(
+                    div().self_end().child(kit::details(
+                        ("theme-ranking-details", ix),
+                        tr(bardo, Text::Details),
+                        // The numbers past performance was judged on, as they
+                        // were then, and who ranked it when.
+                        ranking
+                            .performance
+                            .map(|performance| {
+                                SharedString::from(
+                                    bardo.performance_evidence(&performance.evidence),
+                                )
+                            })
+                            .into_iter()
+                            .chain([SharedString::from(format!(
+                                "{} · {}",
+                                bardo.text_with(Text::ThemeRankedBy, &[("model", &ranking.model)]),
+                                bardo.time_ago(ranking.ranked_at)
+                            ))])
+                            .collect(),
+                    )),
+                )
                 .into_any_element(),
             None => h_flex()
                 .child(kit::status(
@@ -865,6 +900,34 @@ fn reason(bardo: &Bardo, cx: &App, label: Text, reason: Reason) -> impl IntoElem
                     )),
                 )),
         )
+}
+
+/// What the channel's published videos say about the niche, or when they
+/// will start to.
+fn past_performance(
+    bardo: &Bardo,
+    cx: &App,
+    evidence: Option<&PerformanceEvidence>,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    let line = match evidence {
+        Some(evidence) => div()
+            .text_sm()
+            .child(SharedString::from(bardo.performance_evidence(evidence))),
+        None => div()
+            .text_sm()
+            .text_color(theme.muted_foreground)
+            .child(tr(bardo, Text::ThemesNoHistory)),
+    };
+    v_flex()
+        .gap_0p5()
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(tr(bardo, Text::ThemePerformance)),
+        )
+        .child(line)
 }
 
 /// The niche's research scores, as on the research screen.

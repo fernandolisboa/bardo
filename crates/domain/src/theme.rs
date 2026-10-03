@@ -7,7 +7,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::{ChannelId, Confidence, JobId, Niche, PersonaId, ProfileId, RepositoryError, Score};
+use crate::{
+    ChannelId, Confidence, JobId, Niche, PerformanceReason, PersonaId, ProfileId, RepositoryError,
+    Score,
+};
 
 uuid_id!(
     /// Identifies a theme.
@@ -150,7 +153,8 @@ pub struct Reason {
 
 /// What the decision engine said about a theme. Competition and trend are
 /// judged for the theme's own angle, with the niche's research numbers as
-/// context; fit is judged against the channel.
+/// context; fit is judged against the channel, and past performance
+/// against the channel's own published videos, when it has some.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeRanking {
     /// How well the idea fits the channel. Higher is better.
@@ -159,6 +163,9 @@ pub struct ThemeRanking {
     pub trend: Reason,
     /// How crowded the angle is. Higher is harder.
     pub competition: Reason,
+    /// How the idea would do next to the channel's own videos. Higher is
+    /// better. `None` when the channel had no history when it was ranked.
+    pub performance: Option<PerformanceReason>,
     /// The engine's model, for the record.
     pub model: String,
     pub ranked_at: SystemTime,
@@ -171,13 +178,33 @@ impl ThemeRanking {
     pub const FIT_WEIGHT: f64 = 0.40;
     pub const TREND_WEIGHT: f64 = 0.35;
     pub const OPEN_WEIGHT: f64 = 0.25;
+    /// The most past performance weighs, reached at
+    /// [`Self::FULL_EVIDENCE`] videos; the other three share the rest in
+    /// their own proportions.
+    pub const PERFORMANCE_WEIGHT: f64 = 0.25;
+    /// Published videos at which past performance weighs fully. Fewer
+    /// weigh less, so one lucky video cannot reorder the list.
+    pub const FULL_EVIDENCE: u32 = 5;
+
+    /// How much past performance weighs in the priority: nothing without
+    /// history, up to [`Self::PERFORMANCE_WEIGHT`] as videos accumulate.
+    pub fn performance_weight(&self) -> f64 {
+        self.performance.map_or(0.0, |performance| {
+            let videos = performance.evidence.basis.min(Self::FULL_EVIDENCE);
+            Self::PERFORMANCE_WEIGHT * f64::from(videos) / f64::from(Self::FULL_EVIDENCE)
+        })
+    }
 
     /// The ranking key, 0–100.
     pub fn priority(&self) -> Score {
         let open = 100.0 - f64::from(self.competition.score.value());
-        let value = Self::FIT_WEIGHT * f64::from(self.fit.score.value())
+        let mut value = Self::FIT_WEIGHT * f64::from(self.fit.score.value())
             + Self::TREND_WEIGHT * f64::from(self.trend.score.value())
             + Self::OPEN_WEIGHT * open;
+        if let Some(performance) = self.performance {
+            let weight = self.performance_weight();
+            value = (1.0 - weight) * value + weight * f64::from(performance.reason.score.value());
+        }
         Score::new(value.round() as u8)
     }
 
@@ -185,6 +212,7 @@ impl ThemeRanking {
     pub fn confidence(&self) -> Confidence {
         [self.fit, self.trend, self.competition]
             .into_iter()
+            .chain(self.performance.map(|performance| performance.reason))
             .map(|reason| reason.confidence)
             .fold(
                 Confidence::new(1.0),
@@ -469,6 +497,7 @@ mod tests {
             fit: reason(fit, 0.9),
             trend: reason(trend, 0.8),
             competition: reason(competition, 0.7),
+            performance: None,
             model: "engine-1".into(),
             ranked_at: at(10),
         }
@@ -527,6 +556,45 @@ mod tests {
     #[test]
     fn ranking_confidence_is_the_least_sure_reason() {
         assert_eq!(ranking(1, 2, 3).confidence(), Confidence::new(0.7));
+        let mut with_history = ranking(1, 2, 3);
+        with_history.performance = Some(performance(50, 0.4, 5));
+        assert_eq!(with_history.confidence(), Confidence::new(0.4));
+    }
+
+    fn performance(score: u8, confidence: f64, basis: u32) -> PerformanceReason {
+        PerformanceReason {
+            reason: reason(score, confidence),
+            evidence: crate::PerformanceEvidence {
+                scope: crate::EvidenceScope::Niche,
+                average_views: 1_000,
+                videos: basis,
+                projected: 0,
+                basis,
+            },
+        }
+    }
+
+    #[test]
+    fn past_performance_weighs_more_as_videos_accumulate() {
+        let without = ranking(80, 60, 40);
+        assert_eq!(without.performance_weight(), 0.0);
+        assert_eq!(without.priority(), Score::new(68), "as before history");
+
+        let with = |basis| {
+            let mut ranking = ranking(80, 60, 40);
+            ranking.performance = Some(performance(100, 0.9, basis));
+            ranking
+        };
+        // One video: 5% of the priority. 0.95·68 + 0.05·100 = 69.6
+        assert!((with(1).performance_weight() - 0.05).abs() < 1e-9);
+        assert_eq!(with(1).priority(), Score::new(70));
+        // Five or more: the full 25%. 0.75·68 + 0.25·100 = 76
+        assert_eq!(with(5).priority(), Score::new(76));
+        assert_eq!(with(12).priority(), Score::new(76));
+
+        let mut flop = ranking(80, 60, 40);
+        flop.performance = Some(performance(0, 0.9, 5));
+        assert_eq!(flop.priority(), Score::new(51));
     }
 
     #[test]

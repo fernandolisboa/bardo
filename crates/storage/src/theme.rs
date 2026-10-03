@@ -1,7 +1,7 @@
 use bardo_domain::{
-    ChannelId, Confidence, JobId, Niche, PersonaId, ProfileId, Reason, RepositoryError, Score,
-    Theme, ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository, VideoProject,
-    VideoProjectId,
+    ChannelId, Confidence, EvidenceScope, JobId, Niche, PerformanceEvidence, PerformanceReason,
+    PersonaId, ProfileId, Reason, RepositoryError, Score, Theme, ThemeId, ThemeIdea, ThemeRanking,
+    ThemeRecord, ThemeRepository, VideoProject, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -11,7 +11,9 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, angle, status,
         suggested_at, position, suggestion_job,
         fit_score, fit_confidence, trend_score, trend_confidence,
-        competition_score, competition_confidence, ranked_by, ranked_at
+        competition_score, competition_confidence, ranked_by, ranked_at,
+        performance_score, performance_confidence, performance_scope, performance_views,
+        performance_videos, performance_projected, performance_basis
     FROM theme";
 
 const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id \
@@ -50,6 +52,45 @@ struct ThemeRow {
     competition: (Option<i64>, Option<f64>),
     ranked_by: Option<String>,
     ranked_at: Option<i64>,
+    performance: PerformanceRow,
+}
+
+/// The past performance columns, all NULL or all set.
+struct PerformanceRow {
+    score: Option<i64>,
+    confidence: Option<f64>,
+    scope: Option<String>,
+    views: Option<i64>,
+    videos: Option<i64>,
+    projected: Option<i64>,
+    basis: Option<i64>,
+}
+
+impl PerformanceRow {
+    fn into_reason(self) -> Result<Option<PerformanceReason>, RepositoryError> {
+        let Some(score) = self.score else {
+            return Ok(None);
+        };
+        let incomplete = || invalid("incomplete past performance");
+        let count = |n: Option<i64>| -> Result<u32, RepositoryError> {
+            u32::try_from(n.ok_or_else(incomplete)?).map_err(boxed)
+        };
+        let scope = self.scope.ok_or_else(incomplete)?;
+        Ok(Some(PerformanceReason {
+            reason: Reason {
+                score: Score::new(u8::try_from(score).map_err(boxed)?),
+                confidence: Confidence::new(self.confidence.ok_or_else(incomplete)?),
+            },
+            evidence: PerformanceEvidence {
+                scope: EvidenceScope::from_code(&scope)
+                    .ok_or_else(|| invalid(format!("unknown scope {scope}")))?,
+                average_views: u64::try_from(self.views.ok_or_else(incomplete)?).map_err(boxed)?,
+                videos: count(self.videos)?,
+                projected: count(self.projected)?,
+                basis: count(self.basis)?,
+            },
+        }))
+    }
 }
 
 impl ThemeRow {
@@ -70,6 +111,15 @@ impl ThemeRow {
             competition: (row.get(14)?, row.get(15)?),
             ranked_by: row.get(16)?,
             ranked_at: row.get(17)?,
+            performance: PerformanceRow {
+                score: row.get(18)?,
+                confidence: row.get(19)?,
+                scope: row.get(20)?,
+                views: row.get(21)?,
+                videos: row.get(22)?,
+                projected: row.get(23)?,
+                basis: row.get(24)?,
+            },
         })
     }
 
@@ -88,6 +138,7 @@ impl ThemeRow {
                 trend: reason(self.trend).ok_or_else(|| invalid("incomplete trend"))?,
                 competition: reason(self.competition)
                     .ok_or_else(|| invalid("incomplete competition"))?,
+                performance: self.performance.into_reason()?,
                 model,
                 ranked_at: from_unix_millis(ranked_at),
             }),
@@ -126,12 +177,17 @@ fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryErr
     let fit = reason(|r| r.fit);
     let trend = reason(|r| r.trend);
     let competition = reason(|r| r.competition);
+    let performance = ranking.and_then(|ranking| ranking.performance);
+    let evidence = performance.map(|performance| performance.evidence);
     tx.execute(
         "INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
              suggested_at, position, suggestion_job,
              fit_score, fit_confidence, trend_score, trend_confidence,
-             competition_score, competition_confidence, ranked_by, ranked_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+             competition_score, competition_confidence, ranked_by, ranked_at,
+             performance_score, performance_confidence, performance_scope, performance_views,
+             performance_videos, performance_projected, performance_basis)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+             ?19, ?20, ?21, ?22, ?23, ?24, ?25)
          ON CONFLICT (id) DO UPDATE SET
              niche = excluded.niche,
              title = excluded.title,
@@ -144,7 +200,14 @@ fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryErr
              competition_score = excluded.competition_score,
              competition_confidence = excluded.competition_confidence,
              ranked_by = excluded.ranked_by,
-             ranked_at = excluded.ranked_at",
+             ranked_at = excluded.ranked_at,
+             performance_score = excluded.performance_score,
+             performance_confidence = excluded.performance_confidence,
+             performance_scope = excluded.performance_scope,
+             performance_views = excluded.performance_views,
+             performance_videos = excluded.performance_videos,
+             performance_projected = excluded.performance_projected,
+             performance_basis = excluded.performance_basis",
         params![
             theme.id.to_string(),
             theme.owner.to_string(),
@@ -164,6 +227,13 @@ fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryErr
             competition.map(|(_, confidence)| confidence),
             ranking.map(|ranking| ranking.model.as_str()),
             ranking.map(|ranking| to_unix_millis(ranking.ranked_at)),
+            performance.map(|p| i64::from(p.reason.score.value())),
+            performance.map(|p| p.reason.confidence.value()),
+            evidence.map(|e| e.scope.code()),
+            evidence.map(|e| i64::try_from(e.average_views).unwrap_or(i64::MAX)),
+            evidence.map(|e| i64::from(e.videos)),
+            evidence.map(|e| i64::from(e.projected)),
+            evidence.map(|e| i64::from(e.basis)),
         ],
     )
     .map_err(boxed)?;
@@ -368,6 +438,7 @@ mod tests {
             fit: reason(80, 0.81),
             trend: reason(55, 0.6),
             competition: reason(30, 0.725),
+            performance: None,
             model: "jev-1.13.0".into(),
             ranked_at: time(1_800_000_100),
         }
@@ -385,6 +456,54 @@ mod tests {
         assert_eq!(db.themes(channel.id).unwrap(), [ranked.clone(), unranked]);
         assert_eq!(db.theme(ranked.id).unwrap(), Some(ranked));
         assert_eq!(db.theme(ThemeId::new()).unwrap(), None);
+    }
+
+    #[test]
+    fn a_ranking_keeps_its_past_performance() {
+        let (db, channel) = setup();
+        let mut ranked = theme(&channel, "With history", 0);
+        let mut with_history = ranking();
+        with_history.performance = Some(PerformanceReason {
+            reason: Reason {
+                score: Score::new(72),
+                confidence: Confidence::new(0.64),
+            },
+            evidence: PerformanceEvidence {
+                scope: EvidenceScope::Channel,
+                average_views: 12_345,
+                videos: 3,
+                projected: 1,
+                basis: 3,
+            },
+        });
+        ranked.rank(with_history).unwrap();
+        db.save_themes(std::slice::from_ref(&ranked)).unwrap();
+        assert_eq!(db.theme(ranked.id).unwrap(), Some(ranked.clone()));
+
+        // A ranking without history clears every column.
+        ranked.edit(ThemeIdea::new("Edited", "").unwrap()).unwrap();
+        ranked.rank(ranking()).unwrap();
+        db.save_themes(std::slice::from_ref(&ranked)).unwrap();
+        assert_eq!(db.theme(ranked.id).unwrap(), Some(ranked));
+    }
+
+    #[test]
+    fn half_a_past_performance_is_refused() {
+        let (db, channel) = setup();
+        let mut ranked = theme(&channel, "Ranked", 0);
+        ranked.rank(ranking()).unwrap();
+        db.save_themes(std::slice::from_ref(&ranked)).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let partial = conn.execute(
+            "UPDATE theme SET performance_score = 50 WHERE id = ?1",
+            [ranked.id.to_string()],
+        );
+        assert!(partial.is_err(), "a score needs its evidence");
+        let orphan = conn.execute(
+            "UPDATE theme SET performance_views = 50 WHERE id = ?1",
+            [ranked.id.to_string()],
+        );
+        assert!(orphan.is_err(), "evidence needs its score");
     }
 
     #[test]
