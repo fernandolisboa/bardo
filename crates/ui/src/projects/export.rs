@@ -133,6 +133,14 @@ impl ProjectsScreen {
         self.post_link.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx)
         });
+        let placeholder = tr(self.bardo.read(cx), Text::ScheduleDatePlaceholder);
+        self.schedule_date.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
+        let placeholder = tr(self.bardo.read(cx), Text::ScheduleTimePlaceholder);
+        self.schedule_time.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
         self.fill_metadata(window, cx);
         self.load_upload(cx);
     }

@@ -135,13 +135,38 @@ select **Check again** later.
 Pasting a post's link over an uploaded video asks first, and replaces the
 upload in Bardo only; the video stays on YouTube.
 
+## Scheduling
+
+In the review, **When** offers **Once processed** or **Schedule**. With
+**Schedule**, type the date and time YouTube makes the video public; the
+fields read them in the interface language's order (MM/DD/YYYY and 6:30 PM
+in English, DD/MM/AAAA and 18:30 in Portuguese) and in your computer's time
+zone, which the card names. Bardo sends the video as private with that
+publish time, and YouTube publishes it by itself: Bardo and the computer can
+be off. A time that has already passed is refused when you confirm, since
+YouTube would publish the video at once.
+
+The post then shows **Scheduled** with the time it goes public. Until then,
+**Change time** sends a new time and **Cancel schedule** leaves the video
+private on YouTube with no publish time; publishing it later is done in
+YouTube Studio. Both resend the made-for-kids answer and the
+synthetic-content disclosure YouTube already has, because YouTube clears
+whatever a change leaves out. A change made in YouTube Studio shows up the
+next time Bardo syncs metrics.
+
+Each metrics sync reads a scheduled video back through the connected
+account. Once YouTube made it public, the post becomes **Published** with
+YouTube's publish time and its metrics are read like any other post's. The
+sync needs no API key while only scheduled videos are tracked.
+
 ## Uploads stay private until the audit
 
 Google locks every video uploaded through an unaudited API project created
 after 2020-07-28 to **private**, and scheduled videos too; ADR-0008 records
 how Bardo reports such a publication: **Kept private**, with "Kept private
-by YouTube: your Google project has not passed the YouTube API audit". It
-is not a failure. To publish publicly from Bardo, request the
+by YouTube: your Google project has not passed the YouTube API audit". A
+scheduled video still private a quarter of an hour after its publish time is
+reported the same way. It is not a failure. To publish publicly from Bardo, request the
 [YouTube API Services audit](https://support.google.com/youtube/contact/yt_api_form)
 for your project; it changes the result, not anything in Bardo. Until
 then, you can make a video public yourself in YouTube Studio.
@@ -149,7 +174,9 @@ then, you can make a video public yourself in YouTube Studio.
 ## Quota
 
 Uploads draw on a separate bucket of 100 uploads per day per project; other
-calls share 10,000 units per day. Connecting and checking cost 1 unit each.
+calls share 10,000 units per day. Connecting, checking and reading a
+scheduled video back cost 1 unit each; changing or cancelling a schedule
+costs 51 (a read, then the update).
 When the quota runs out, Bardo says so and the counter resets at midnight
 Pacific time. An upload that hits the daily upload quota stops at once
 instead of retrying; select **Retry** after the reset.

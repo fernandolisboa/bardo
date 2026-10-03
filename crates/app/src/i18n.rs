@@ -9,12 +9,13 @@ use crate::{Destination, Pillar, Stage, UploadBlock};
 
 use bardo_domain::{
     ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionStyle, ChannelFieldError,
-    ContentLanguage, Country, Decibels, JobFailureKind, JobKind, JobState, KeyCheckOutcome,
-    LayoutId, MetadataProblem, Meter, MetricsSyncOnStart, Money, MoneyError, Month,
-    MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError, PersonaFieldError,
-    PostLinkError, Provider, RateFieldError, SceneFieldError, Score, ScriptFieldError,
-    SignInFailureKind, TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily,
-    ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility, VoiceCategory, VoiceFlag,
+    ContentLanguage, Country, DateOrder, Decibels, JobFailureKind, JobKind, JobState,
+    KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart, Money,
+    MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
+    PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError, ScheduleProblem,
+    Score, ScriptFieldError, SignInFailureKind, TemplateKind, TemplateProblem, TemplateVariable,
+    ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility, VoiceCategory,
+    VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -1223,6 +1224,42 @@ pub enum Text {
     UploadSentAt,
     PublicationReplaceUploadConfirm,
     PublicationReplaceUploadYes,
+    UploadFieldWhen,
+    UploadWhenNow,
+    UploadWhenSchedule,
+    UploadStartScheduled,
+    UploadStateScheduled,
+    UploadScheduledAt,
+    UploadScheduledHint,
+    UploadRestrictedScheduledHint,
+    UploadFailureScheduleMissed,
+    ScheduleDate,
+    ScheduleTime,
+    ScheduleDatePlaceholder,
+    ScheduleTimePlaceholder,
+    ScheduleZone,
+    ScheduleHint,
+    ScheduleChange,
+    ScheduleCancel,
+    ScheduleSave,
+    ScheduleCancelConfirm,
+    ScheduleCancelYes,
+    ScheduleKeep,
+    ScheduleWorking,
+    ScheduleChanged,
+    ScheduleCancelled,
+    ScheduleAlreadyLive,
+    ScheduleNotScheduled,
+    ScheduleFailed,
+    ScheduleNotAllowed,
+    DateTimeFormat,
+    TimeFormat,
+    TimeAm,
+    TimePm,
+    DateTimeWithZone,
+    ZoneWithOffset,
+    WeekdayName(u8),
+    ScheduleProblem(ScheduleProblem),
 }
 
 impl Text {
@@ -2539,6 +2576,44 @@ impl Text {
             Text::PublicationReplaceUploadConfirm => "publication.replace_upload_confirm",
             Text::PublicationReplaceUploadYes => "publication.replace_upload_yes",
             Text::UploadBlocked(block) => return format!("upload.block.{}", block.code()).into(),
+            Text::UploadFieldWhen => "upload.field.when",
+            Text::UploadWhenNow => "upload.when.now",
+            Text::UploadWhenSchedule => "upload.when.schedule",
+            Text::UploadStartScheduled => "upload.start_scheduled",
+            Text::UploadStateScheduled => "upload.state.scheduled",
+            Text::UploadScheduledAt => "upload.scheduled_at",
+            Text::UploadScheduledHint => "upload.scheduled_hint",
+            Text::UploadRestrictedScheduledHint => "upload.restricted_scheduled_hint",
+            Text::UploadFailureScheduleMissed => "upload.failure.schedule_missed",
+            Text::ScheduleDate => "schedule.date",
+            Text::ScheduleTime => "schedule.time",
+            Text::ScheduleDatePlaceholder => "schedule.date_placeholder",
+            Text::ScheduleTimePlaceholder => "schedule.time_placeholder",
+            Text::ScheduleZone => "schedule.zone",
+            Text::ScheduleHint => "schedule.hint",
+            Text::ScheduleChange => "schedule.change",
+            Text::ScheduleCancel => "schedule.cancel",
+            Text::ScheduleSave => "schedule.save",
+            Text::ScheduleCancelConfirm => "schedule.cancel_confirm",
+            Text::ScheduleCancelYes => "schedule.cancel_yes",
+            Text::ScheduleKeep => "schedule.keep",
+            Text::ScheduleWorking => "schedule.working",
+            Text::ScheduleChanged => "schedule.changed",
+            Text::ScheduleCancelled => "schedule.cancelled",
+            Text::ScheduleAlreadyLive => "schedule.already_live",
+            Text::ScheduleNotScheduled => "schedule.not_scheduled",
+            Text::ScheduleFailed => "schedule.failed",
+            Text::ScheduleNotAllowed => "schedule.not_allowed",
+            Text::DateTimeFormat => "date_time.format",
+            Text::TimeFormat => "date_time.time",
+            Text::TimeAm => "date_time.am",
+            Text::TimePm => "date_time.pm",
+            Text::DateTimeWithZone => "date_time.with_zone",
+            Text::ZoneWithOffset => "date_time.zone",
+            Text::WeekdayName(number) => return format!("weekday.{number}").into(),
+            Text::ScheduleProblem(problem) => {
+                return format!("schedule.problem.{}", problem.code()).into();
+            }
             Text::MetadataProblem(problem) => match problem {
                 MetadataProblem::TitleRequired => "metadata.problem.title_required",
                 MetadataProblem::TitleTooLong => "metadata.problem.title_too_long",
@@ -2731,6 +2806,66 @@ impl Catalog {
                 ("year", &month.year().to_string()),
             ],
         )
+    }
+
+    /// The order dates are typed and shown in.
+    pub fn date_order(&self) -> DateOrder {
+        match self.language {
+            UiLanguage::EnUs => DateOrder::MonthFirst,
+            UiLanguage::PtBr => DateOrder::DayFirst,
+        }
+    }
+
+    /// A moment on a wall clock with its zone, e.g. `Sun, October 4, 2026,
+    /// 6:00 PM (America/Sao_Paulo, UTC−03:00)`.
+    pub fn date_time(&self, local: &LocalTime) -> String {
+        let time = self.time(local);
+        let when = self.format(
+            Text::DateTimeFormat,
+            &[
+                ("weekday", &self.get(Text::WeekdayName(local.weekday))),
+                ("month", &self.get(Text::MonthName(local.month))),
+                ("day", &local.day.to_string()),
+                ("year", &local.year.to_string()),
+                ("time", &time),
+            ],
+        );
+        self.format(
+            Text::DateTimeWithZone,
+            &[("when", &when), ("zone", &self.zone(local))],
+        )
+    }
+
+    /// The time of day on a wall clock, e.g. `6:00 PM` or `18:00`.
+    pub fn time(&self, local: &LocalTime) -> String {
+        let (hour12, after_noon) = local.twelve_hour();
+        let period = self.get(if after_noon {
+            Text::TimePm
+        } else {
+            Text::TimeAm
+        });
+        self.format(
+            Text::TimeFormat,
+            &[
+                ("hour", &format!("{:02}", local.hour)),
+                ("hour12", &hour12.to_string()),
+                ("minute", &format!("{:02}", local.minute)),
+                ("period", &period),
+            ],
+        )
+    }
+
+    /// The zone of `local`: its name with its offset, or the offset alone
+    /// for a zone without a name.
+    pub fn zone(&self, local: &LocalTime) -> String {
+        if local.zone == local.offset {
+            local.offset.clone()
+        } else {
+            self.format(
+                Text::ZoneWithOffset,
+                &[("name", &local.zone), ("offset", &local.offset)],
+            )
+        }
     }
 
     /// How long ago something happened, e.g. `3 h ago`.
@@ -3925,6 +4060,42 @@ mod tests {
         texts.push(Text::PublicationReplaceUploadConfirm);
         texts.push(Text::PublicationReplaceUploadYes);
         texts.extend(UploadBlock::ALL.map(Text::UploadBlocked));
+        texts.push(Text::UploadFieldWhen);
+        texts.push(Text::UploadWhenNow);
+        texts.push(Text::UploadWhenSchedule);
+        texts.push(Text::UploadStartScheduled);
+        texts.push(Text::UploadStateScheduled);
+        texts.push(Text::UploadScheduledAt);
+        texts.push(Text::UploadScheduledHint);
+        texts.push(Text::UploadRestrictedScheduledHint);
+        texts.push(Text::UploadFailureScheduleMissed);
+        texts.push(Text::ScheduleDate);
+        texts.push(Text::ScheduleTime);
+        texts.push(Text::ScheduleDatePlaceholder);
+        texts.push(Text::ScheduleTimePlaceholder);
+        texts.push(Text::ScheduleZone);
+        texts.push(Text::ScheduleHint);
+        texts.push(Text::ScheduleChange);
+        texts.push(Text::ScheduleCancel);
+        texts.push(Text::ScheduleSave);
+        texts.push(Text::ScheduleCancelConfirm);
+        texts.push(Text::ScheduleCancelYes);
+        texts.push(Text::ScheduleKeep);
+        texts.push(Text::ScheduleWorking);
+        texts.push(Text::ScheduleChanged);
+        texts.push(Text::ScheduleCancelled);
+        texts.push(Text::ScheduleAlreadyLive);
+        texts.push(Text::ScheduleNotScheduled);
+        texts.push(Text::ScheduleFailed);
+        texts.push(Text::ScheduleNotAllowed);
+        texts.push(Text::DateTimeFormat);
+        texts.push(Text::TimeFormat);
+        texts.push(Text::TimeAm);
+        texts.push(Text::TimePm);
+        texts.push(Text::DateTimeWithZone);
+        texts.push(Text::ZoneWithOffset);
+        texts.extend((1..=7).map(Text::WeekdayName));
+        texts.extend(ScheduleProblem::ALL.map(Text::ScheduleProblem));
         texts
     }
 
@@ -4082,6 +4253,43 @@ mod tests {
             Catalog::load(UiLanguage::PtBr).month(october),
             "outubro de 2026"
         );
+    }
+
+    #[test]
+    fn publish_times_read_in_each_language_with_their_zone() {
+        let local = LocalTime {
+            year: 2026,
+            month: 10,
+            day: 4,
+            hour: 18,
+            minute: 5,
+            weekday: 7,
+            zone: "America/Sao_Paulo".into(),
+            offset: "UTC−03:00".into(),
+        };
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        assert_eq!(
+            en.date_time(&local),
+            "Sun, October 4, 2026, 6:05 PM (America/Sao_Paulo, UTC−03:00)"
+        );
+        assert_eq!(
+            pt.date_time(&local),
+            "dom., 4 de outubro de 2026, 18:05 (America/Sao_Paulo, UTC−03:00)"
+        );
+        let midnight = LocalTime {
+            hour: 0,
+            zone: "UTC+05:00".into(),
+            offset: "UTC+05:00".into(),
+            ..local
+        };
+        assert_eq!(
+            en.date_time(&midnight),
+            "Sun, October 4, 2026, 12:05 AM (UTC+05:00)",
+            "a zone without a name shows its offset once"
+        );
+        assert_eq!(en.date_order(), DateOrder::MonthFirst);
+        assert_eq!(pt.date_order(), DateOrder::DayFirst);
     }
 
     #[test]

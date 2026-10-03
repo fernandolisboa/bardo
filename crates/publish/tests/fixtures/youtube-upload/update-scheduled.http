@@ -1,0 +1,19 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "kind": "youtube#video",
+  "etag": "FIXTURE-etag",
+  "id": "Xb7kQ2mN9pA",
+  "status": {
+    "uploadStatus": "processed",
+    "privacyStatus": "private",
+    "publishAt": "2026-10-05T13:30:00.000Z",
+    "license": "creativeCommon",
+    "embeddable": false,
+    "publicStatsViewable": false,
+    "madeForKids": true,
+    "selfDeclaredMadeForKids": true,
+    "containsSyntheticMedia": true
+  }
+}
