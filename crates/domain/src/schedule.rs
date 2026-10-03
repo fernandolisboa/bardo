@@ -151,11 +151,6 @@ pub fn date_text(local: &LocalTime, order: DateOrder) -> String {
     format!("{first:02}/{second:02}/{}", local.year)
 }
 
-/// The time of `local` as the user types it: `18:30`.
-pub fn time_text(local: &LocalTime) -> String {
-    format!("{:02}:{:02}", local.hour, local.minute)
-}
-
 fn number(text: &str) -> Option<i64> {
     let text = text.trim();
     if text.is_empty() || text.len() > 4 || !text.bytes().all(|b| b.is_ascii_digit()) {
@@ -399,7 +394,6 @@ mod tests {
         );
         assert_eq!(date_text(&local, DateOrder::DayFirst), "04/10/2026");
         assert_eq!(date_text(&local, DateOrder::MonthFirst), "10/04/2026");
-        assert_eq!(time_text(&local), "18:30");
         assert_eq!(local.twelve_hour(), (6, true));
 
         let summer = local_time(utc("2026-07-01T16:00:00Z"), &zone("America/New_York"));
@@ -422,11 +416,22 @@ mod tests {
         let z = zone("Europe/Lisbon");
         let at = utc("2026-10-25T17:45:00Z");
         let local = local_time(at, &z);
+        let (hour12, after_noon) = local.twelve_hour();
+        let times = [
+            format!("{:02}:{:02}", local.hour, local.minute),
+            format!(
+                "{hour12}:{:02} {}",
+                local.minute,
+                if after_noon { "PM" } else { "AM" }
+            ),
+        ];
         for order in [DateOrder::DayFirst, DateOrder::MonthFirst] {
-            assert_eq!(
-                publish_time(&date_text(&local, order), &time_text(&local), order, &z),
-                Ok(at)
-            );
+            for time in &times {
+                assert_eq!(
+                    publish_time(&date_text(&local, order), time, order, &z),
+                    Ok(at)
+                );
+            }
         }
     }
 

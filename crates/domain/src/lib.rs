@@ -193,7 +193,7 @@ pub use scene::{
 };
 pub use schedule::{
     DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,
-    date_text, default_publish_time, local_time, parse_rfc3339, publish_time, time_text,
+    date_text, default_publish_time, local_time, parse_rfc3339, publish_time,
 };
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,

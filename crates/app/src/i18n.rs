@@ -2817,21 +2817,7 @@ impl Catalog {
     /// A moment on a wall clock with its zone, e.g. `Sun, October 4, 2026,
     /// 6:00 PM (America/Sao_Paulo, UTC−03:00)`.
     pub fn date_time(&self, local: &LocalTime) -> String {
-        let (hour12, after_noon) = local.twelve_hour();
-        let period = self.get(if after_noon {
-            Text::TimePm
-        } else {
-            Text::TimeAm
-        });
-        let time = self.format(
-            Text::TimeFormat,
-            &[
-                ("hour", &format!("{:02}", local.hour)),
-                ("hour12", &hour12.to_string()),
-                ("minute", &format!("{:02}", local.minute)),
-                ("period", &period),
-            ],
-        );
+        let time = self.time(local);
         let when = self.format(
             Text::DateTimeFormat,
             &[
@@ -2845,6 +2831,25 @@ impl Catalog {
         self.format(
             Text::DateTimeWithZone,
             &[("when", &when), ("zone", &self.zone(local))],
+        )
+    }
+
+    /// The time of day on a wall clock, e.g. `6:00 PM` or `18:00`.
+    pub fn time(&self, local: &LocalTime) -> String {
+        let (hour12, after_noon) = local.twelve_hour();
+        let period = self.get(if after_noon {
+            Text::TimePm
+        } else {
+            Text::TimeAm
+        });
+        self.format(
+            Text::TimeFormat,
+            &[
+                ("hour", &format!("{:02}", local.hour)),
+                ("hour12", &hour12.to_string()),
+                ("minute", &format!("{:02}", local.minute)),
+                ("period", &period),
+            ],
         )
     }
 

@@ -205,7 +205,7 @@ impl Bardo {
         let local = local_time(at, &self.zone);
         (
             bardo_domain::date_text(&local, self.catalog.date_order()),
-            bardo_domain::time_text(&local),
+            self.catalog.time(&local),
         )
     }
 
@@ -620,7 +620,7 @@ mod tests {
         );
         assert_eq!(
             s.app.publish_time_fields(at),
-            ("10/04/2026".to_owned(), "18:30".to_owned())
+            ("10/04/2026".to_owned(), "6:30 PM".to_owned())
         );
         assert_eq!(
             s.app.publish_time("31/12/2026", "18:30"),

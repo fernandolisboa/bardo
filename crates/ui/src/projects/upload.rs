@@ -402,8 +402,12 @@ impl ProjectsScreen {
             actions = actions.child(
                 Button::new("upload-review")
                     .small()
-                    .when(block.is_none(), |button| button.primary())
-                    .when(block.is_some(), |button| button.outline())
+                    .when(block.is_none() && scheduled.is_none(), |button| {
+                        button.primary()
+                    })
+                    .when(block.is_some() || scheduled.is_some(), |button| {
+                        button.outline()
+                    })
                     .label(tr(bardo, Text::UploadOpenReview))
                     .disabled(block.is_some())
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
