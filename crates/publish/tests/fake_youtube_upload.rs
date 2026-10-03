@@ -173,6 +173,7 @@ fn video() -> VideoUpload {
         visibility: Visibility::Private,
         made_for_kids: false,
         synthetic: false,
+        publish_at: None,
     }
 }
 

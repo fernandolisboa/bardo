@@ -1,0 +1,16 @@
+HTTP/2 404 
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 404,
+    "message": "The video that you are trying to update cannot be found.",
+    "errors": [
+      {
+        "message": "The video that you are trying to update cannot be found.",
+        "domain": "youtube.video",
+        "reason": "videoNotFound"
+      }
+    ]
+  }
+}

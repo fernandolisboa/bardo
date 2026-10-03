@@ -9,6 +9,12 @@
 //! the user asks, when a YouTube post is linked, and on start when the
 //! oldest check is older than the profile's setting. The other networks
 //! keep their link until publishing brings their metrics.
+//!
+//! A scheduled upload (#78) is private until its publish time, so public
+//! statistics cannot see it: the sync reads it through the owner's
+//! connection instead, records when it went live (or that the network kept
+//! it private), and from then on tracks it like any other post. A sync of
+//! scheduled uploads alone needs no Data API key.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,15 +22,17 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, ChannelId, ChannelPoint, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Network, PostLink, PostLinkError,
-    ProfileId, Progress, Provider, Publication, PublicationId, PublicationKind,
-    PublicationRepository, RepositoryError, STATS_BATCH, SecretStore, UserProfile, VideoProjectId,
-    VideoStats, channel_history,
+    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Network, NetworkAccountRepository,
+    PostLink, PostLinkError, ProfileId, Progress, Provider, Publication, PublicationId,
+    PublicationKind, PublicationRepository, RepositoryError, STATS_BATCH, SecretStore, UserProfile,
+    VideoProjectId, VideoStats, VideoUploader, channel_history,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::connections::Connections;
 use crate::jobs::{JobContext, JobHandler};
 use crate::scenes::{id, parse, to_json, unexpected};
+use crate::schedules::read_schedule;
 use crate::{AppError, Bardo, KeyState, Text};
 
 #[derive(Debug, thiserror::Error)]
@@ -139,8 +147,12 @@ pub struct MetricsStatus {
     pub job: Option<Job>,
     /// Whether a YouTube Data API key is saved.
     pub key_saved: bool,
+    /// Whether a sync needs the key to read anything: no tracked post is
+    /// scheduled (a scheduled one is read through its account's
+    /// connection; without a key a sync reads only those).
+    pub needs_key: bool,
     pub on_start: MetricsSyncOnStart,
-    /// YouTube publications a sync reads.
+    /// YouTube publications a sync reads, scheduled ones included.
     pub tracked: usize,
     /// The latest check of any of them.
     pub last_checked: Option<SystemTime>,
@@ -153,7 +165,7 @@ impl MetricsStatus {
 
     /// Whether "Sync now" may start a sync.
     pub fn can_sync(&self) -> bool {
-        self.key_saved && self.tracked > 0 && !self.is_syncing()
+        (self.key_saved || !self.needs_key) && self.tracked > 0 && !self.is_syncing()
     }
 }
 
@@ -210,19 +222,25 @@ pub(crate) struct MetricsSyncHandler {
     pub(crate) publications: Arc<dyn PublicationRepository>,
     pub(crate) stats: Arc<dyn VideoStats>,
     pub(crate) secrets: Arc<dyn SecretStore>,
+    pub(crate) accounts: Arc<dyn NetworkAccountRepository>,
+    pub(crate) connections: Connections,
+    pub(crate) uploaders: Vec<Arc<dyn VideoUploader>>,
 }
 
 impl MetricsSyncHandler {
-    fn key(&self) -> Result<ApiKey, JobFailure> {
+    fn saved_key(&self) -> Result<Option<ApiKey>, JobFailure> {
         self.secrets
             .get(self.owner, Provider::YouTubeData)
-            .map_err(|e| JobFailure::unexpected(format!("could not read the key: {e}")))?
-            .ok_or_else(|| {
-                JobFailure::new(
-                    JobFailureKind::MissingKey,
-                    "no YouTube Data API key is saved",
-                )
-            })
+            .map_err(|e| JobFailure::unexpected(format!("could not read the key: {e}")))
+    }
+
+    fn key(&self) -> Result<ApiKey, JobFailure> {
+        self.saved_key()?.ok_or_else(|| {
+            JobFailure::new(
+                JobFailureKind::MissingKey,
+                "no YouTube Data API key is saved",
+            )
+        })
     }
 }
 
@@ -238,7 +256,7 @@ impl JobHandler for MetricsSyncHandler {
         if checkpoint.batches >= batches.len() {
             return Ok(());
         }
-        let key = self.key()?;
+        let mut key = None;
         let taken_at = match checkpoint.taken_at {
             Some(millis) => SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis),
             None => whole_millis(SystemTime::now()),
@@ -262,18 +280,70 @@ impl JobHandler for MetricsSyncHandler {
                     .publications
                     .publication(publication)
                     .map_err(unexpected)?
-                    .filter(Publication::has_public_metrics)
+                    .filter(Publication::is_tracked)
                 {
                     posts.push(post);
                 }
             }
-            if !posts.is_empty() {
-                let ids: Vec<&str> = posts.iter().filter_map(Publication::post_id).collect();
-                let found = self.stats.statistics(&key, &ids).map_err(|failure| {
+            // Scheduled posts first: one that went live joins the
+            // statistics read below, when a key is saved.
+            let had_public = posts.iter().any(Publication::has_public_metrics);
+            let was_scheduled: Vec<PublicationId> = posts
+                .iter()
+                .filter(|post| post.is_scheduled())
+                .map(|post| post.id)
+                .collect();
+            let mut scheduled = Vec::new();
+            for post in posts.iter_mut().filter(|post| post.is_scheduled()) {
+                if cx.should_stop() {
+                    return Ok(());
+                }
+                let Some(from) = post.upload().and_then(|upload| upload.publish_at) else {
+                    continue;
+                };
+                match read_schedule(&self.connections, &*self.accounts, &self.uploaders, post) {
+                    Ok(Some(reading)) => {
+                        post.schedule_seen(reading, SystemTime::now());
+                        // A change the user made meanwhile wins over this
+                        // read; the next sync reads it again.
+                        if self
+                            .publications
+                            .save_schedule(post, from)
+                            .map_err(unexpected)?
+                        {
+                            scheduled.push(post.clone());
+                        }
+                    }
+                    Ok(None) => {}
+                    // The post stays scheduled; the next sync tries again.
+                    Err(detail) => tracing::warn!("could not read a scheduled upload: {detail}"),
+                }
+            }
+            // A read that a change made meanwhile overruled is dropped, so
+            // its post is not read as live.
+            let mut public: Vec<Publication> = posts
+                .into_iter()
+                .filter(|post| {
+                    !was_scheduled.contains(&post.id) || scheduled.iter().any(|p| p.id == post.id)
+                })
+                .filter(Publication::has_public_metrics)
+                .collect();
+            if !had_public && !public.is_empty() && key.is_none() && self.saved_key()?.is_none() {
+                // Only posts that just went live: their numbers wait for a
+                // key, rather than failing the sync of the schedules.
+                public.clear();
+            }
+            let mut snapshots = Vec::new();
+            if !public.is_empty() {
+                let key = match &key {
+                    Some(key) => key,
+                    None => key.insert(self.key()?),
+                };
+                let ids: Vec<&str> = public.iter().filter_map(Publication::post_id).collect();
+                let found = self.stats.statistics(key, &ids).map_err(|failure| {
                     JobFailure::new(failure.kind.into(), format!("YouTube: {}", failure.detail))
                 })?;
-                let mut snapshots = Vec::new();
-                for post in &mut posts {
+                for post in &mut public {
                     let statistics = found
                         .iter()
                         .find(|statistics| Some(statistics.post_id.as_str()) == post.post_id());
@@ -282,8 +352,14 @@ impl JobHandler for MetricsSyncHandler {
                         snapshots.push(MetricsSnapshot::of(post.id, statistics, taken_at));
                     }
                 }
+            }
+            // A post that went live is in both lists; its statistics read
+            // is the later word.
+            scheduled.retain(|post| public.iter().all(|p| p.id != post.id));
+            let checked: Vec<Publication> = scheduled.into_iter().chain(public).collect();
+            if !checked.is_empty() {
                 self.publications
-                    .save_sync(&posts, &snapshots)
+                    .save_sync(&checked, &snapshots)
                     .map_err(unexpected)?;
             }
             checkpoint.batches += 1;
@@ -317,11 +393,12 @@ impl Bardo {
     pub(crate) fn metrics_status(&self, publications: &[Publication]) -> MetricsStatus {
         let tracked: Vec<&Publication> = publications
             .iter()
-            .filter(|publication| publication.has_public_metrics())
+            .filter(|publication| publication.is_tracked())
             .collect();
         MetricsStatus {
             job: self.latest_sync_job(),
             key_saved: self.youtube_key_saved(),
+            needs_key: !tracked.iter().any(|p| p.is_scheduled()),
             on_start: self.profile.metrics_sync,
             tracked: tracked.len(),
             last_checked: tracked.iter().filter_map(|p| p.checked_at).max(),
@@ -495,13 +572,15 @@ impl Bardo {
             .publications
             .all_publications(self.profile.id)?
             .into_iter()
-            .filter(Publication::has_public_metrics)
+            .filter(Publication::is_tracked)
             .collect();
         tracked.sort_by_key(|publication| publication.checked_at);
         Ok(tracked)
     }
 
-    /// Starts a sync of every YouTube publication's public statistics.
+    /// Starts a sync of every YouTube publication's public statistics, and
+    /// of where scheduled uploads stand. Without a key it reads only the
+    /// scheduled uploads.
     pub fn sync_metrics(&self) -> Result<JobId, MetricsError> {
         if self
             .latest_sync_job()
@@ -509,12 +588,15 @@ impl Bardo {
         {
             return Err(MetricsError::AlreadySyncing);
         }
-        let tracked = self.tracked_publications()?;
+        let mut tracked = self.tracked_publications()?;
         if tracked.is_empty() {
             return Err(MetricsError::NothingToSync);
         }
         if !self.youtube_key_saved() {
-            return Err(MetricsError::MissingKey);
+            tracked.retain(Publication::is_scheduled);
+            if tracked.is_empty() {
+                return Err(MetricsError::MissingKey);
+            }
         }
         Ok(self.queue_sync(tracked.iter().map(|p| p.id).collect())?)
     }

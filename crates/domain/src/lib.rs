@@ -72,6 +72,7 @@ mod render;
 mod repository;
 mod research;
 mod scene;
+mod schedule;
 mod script;
 mod speech;
 mod template;
@@ -172,8 +173,8 @@ pub use provider_key::{
 pub use publication::{
     ChannelPoint, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, PostLink, PostLinkError,
     Publication, PublicationId, PublicationKind, PublicationRepository, STATS_BATCH,
-    UnknownMetricsSync, VideoStatistics, VideoStats, channel_history, latest_of_each,
-    sync_quota_units,
+    ScheduleReading, UnknownMetricsSync, VideoStatistics, VideoStats, channel_history,
+    latest_of_each, sync_quota_units,
 };
 pub use redaction::Redactor;
 pub use render::{
@@ -189,6 +190,10 @@ pub use scene::{
     MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneClip,
     SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
     ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, sentences,
+};
+pub use schedule::{
+    DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,
+    date_text, default_publish_time, local_time, parse_rfc3339, publish_time,
 };
 pub use script::{
     GeneratedScript, NoPendingScript, Script, ScriptFieldError, ScriptRecord, ScriptRepository,
@@ -215,8 +220,8 @@ pub use timeline::{
     snap, timecode,
 };
 pub use upload::{
-    InvalidUploadTransition, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind,
-    UploadFailure, UploadOutcome, UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload,
-    VideoUploader,
+    InvalidUploadTransition, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT,
+    Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
+    UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

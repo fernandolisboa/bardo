@@ -217,6 +217,20 @@ pub struct ProjectsScreen {
     upload_draft: Option<(UploadReview, UploadChoices)>,
     /// Why the upload did not start, or what its job action did not do.
     upload_error: Option<Text>,
+    /// "Schedule" is chosen in the open review.
+    upload_scheduled: bool,
+    /// The publish date and time as the user types them, in the review or
+    /// when changing a scheduled upload's time.
+    schedule_date: Entity<InputState>,
+    schedule_time: Entity<InputState>,
+    /// Why the typed publish time cannot be used.
+    schedule_problem: Option<Text>,
+    /// "Change time" or "Cancel schedule" was clicked on a scheduled upload.
+    schedule_edit: Option<upload::ScheduleEdit>,
+    /// The change being sent to the network.
+    schedule_task: Option<Task<()>>,
+    /// How the last change ended.
+    schedule_notice: Option<(Tone, Text)>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -243,6 +257,8 @@ impl ProjectsScreen {
         let metadata_description = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12));
         let metadata_tags = cx.new(|cx| InputState::new(window, cx));
         let post_link = cx.new(|cx| InputState::new(window, cx));
+        let schedule_date = cx.new(|cx| InputState::new(window, cx));
+        let schedule_time = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -278,6 +294,12 @@ impl ProjectsScreen {
                     this.post_error = None;
                     cx.notify();
                 }
+            }),
+            cx.subscribe(&schedule_date, |this, _, event: &InputEvent, cx| {
+                this.schedule_typed(event, cx)
+            }),
+            cx.subscribe(&schedule_time, |this, _, event: &InputEvent, cx| {
+                this.schedule_typed(event, cx)
             }),
             cx.subscribe_in(
                 &channel_select,
@@ -373,6 +395,13 @@ impl ProjectsScreen {
             upload_now: None,
             upload_draft: None,
             upload_error: None,
+            upload_scheduled: false,
+            schedule_date,
+            schedule_time,
+            schedule_problem: None,
+            schedule_edit: None,
+            schedule_task: None,
+            schedule_notice: None,
             editor,
             loaded: None,
             field_error: None,

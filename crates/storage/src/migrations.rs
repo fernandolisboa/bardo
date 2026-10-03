@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0026_theme_performance.sql"),
     include_str!("../migrations/0027_network_connection.sql"),
     include_str!("../migrations/0028_uploaded_publication.sql"),
+    include_str!("../migrations/0029_scheduled_upload.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
@@ -316,6 +317,87 @@ mod tests {
             })
             .unwrap();
         assert_eq!(snapshots, 0, "snapshots still go with their publication");
+    }
+
+    #[test]
+    fn rebuilding_publications_for_schedules_keeps_uploads_and_snapshots() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..28] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 28).unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language,
+                 country)
+             VALUES ('c', 'p', 'Space', '', '', 'en', 'US');
+             INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                 suggested_at, position)
+             VALUES ('t', 'p', 'c', 'space', 'Probe', '', 'approved', 0, 0);
+             INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                 created_at)
+             VALUES ('v', 'p', 'c', 't', 'space', 'Probe', 0);
+             INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                 render_id, kind, post_id, url, upload_status, upload_visibility,
+                 upload_job, posted_at, linked_at, checked_at)
+             VALUES ('up', 'v', 'youtube', 'p', 'a', 'r', 'uploaded', 'dQw4w9WgXcQ',
+                 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'restricted', 'public',
+                 'j', 1, 1, 3);
+             INSERT INTO metrics_snapshot (publication_id, taken_at, views)
+             VALUES ('up', 2, 40);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let row: (String, String, Option<i64>, String, Option<i64>) = conn
+            .query_row(
+                "SELECT upload_status, upload_visibility, upload_publish_at, upload_job,
+                        checked_at
+                 FROM publication",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "restricted".into(),
+                "public".into(),
+                None,
+                "j".into(),
+                Some(3)
+            )
+        );
+        let snapshots: i64 = conn
+            .query_row("SELECT COUNT(*) FROM metrics_snapshot", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(snapshots, 1, "the snapshots stay");
+        let scheduled = |publish_at: &str| {
+            conn.execute(
+                &format!(
+                    "INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                         render_id, kind, upload_status, upload_visibility, upload_publish_at,
+                         upload_job, posted_at, linked_at)
+                     VALUES ('s', 'v', 'tiktok', 'p', 'a', 'r', 'uploaded', 'scheduled',
+                         'public', {publish_at}, 'j2', 1, 1)"
+                ),
+                [],
+            )
+        };
+        assert!(scheduled("NULL").is_err(), "a schedule needs its time");
+        scheduled("5").unwrap();
     }
 
     #[test]

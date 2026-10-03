@@ -1621,11 +1621,16 @@ resume = "Retomar"
 retry = "Tentar de novo"
 check_again = "Verificar de novo"
 sent_at = "Enviado {when}"
+start_scheduled = "Enviar e agendar"
+scheduled_at = "Fica público {when}"
+scheduled_hint = "Privado no {network} até lá. O {network} publica sozinho, mesmo com o Bardo e o computador desligados."
+restricted_scheduled_hint = "O YouTube o manteve privado no horário de publicação: seu projeto do Google ainda não passou pela auditoria da API do YouTube."
 
 [upload.field]
 file = "Arquivo"
 channel = "Canal"
 visibility = "Visibilidade"
+when = "Quando"
 
 [upload.state]
 waiting = "Aguardando envio"
@@ -1637,6 +1642,7 @@ published = "Enviado"
 restricted = "Mantido privado"
 stopped = "Envio parado"
 failed = "Envio falhou"
+scheduled = "Agendado"
 
 [upload.failure]
 quota = "A cota diária de envios do seu projeto do Google no YouTube acabou. Ela renova à meia-noite do horário do Pacífico; tente de novo depois."
@@ -1646,6 +1652,7 @@ rejected = "O {network} rejeitou o vídeo ({reason}). Corrija e envie de novo."
 processing = "O {network} não conseguiu processar o vídeo ({reason}). Renderize e envie de novo."
 removed = "O vídeo não está mais no {network}."
 render_changed = "O render mudou depois da revisão, então o resto do arquivo não é o que você revisou. Revise o envio de novo."
+schedule_missed = "O horário de publicação passou antes de o envio começar, então nada foi enviado. Revise o envio de novo com um horário mais tarde."
 
 [upload.block]
 not_offered = "O Bardo ainda não envia para esta rede. Exporte o arquivo e publique manualmente."
@@ -1657,3 +1664,50 @@ no_render = "Renderize o preset desta conta primeiro."
 render_outdated = "O corte ou o preset mudou desde o render. Renderize de novo antes de enviar."
 no_metadata = "Escreva o título, a descrição e as tags primeiro."
 problems = "Corrija os problemas de metadados acima primeiro."
+
+[upload.when]
+now = "Assim que processar"
+schedule = "Agendar"
+
+[schedule]
+date = "Data"
+time = "Hora"
+date_placeholder = "DD/MM/AAAA"
+time_placeholder = "18:30"
+zone = "Seu fuso horário: {zone}"
+hint = "Ele sobe privado, e o {network} o torna público neste horário, mesmo com o Bardo e o computador desligados."
+change = "Mudar horário"
+cancel = "Cancelar agendamento"
+save = "Salvar horário"
+cancel_confirm = "Cancelar o agendamento? O vídeo continua privado no {network}. Para publicá-lo depois, faça isso no {network}."
+cancel_yes = "Cancelar agendamento"
+keep = "Manter agendamento"
+working = "Enviando a mudança ao {network}…"
+changed = "Novo horário salvo no {network}."
+cancelled = "Agendamento cancelado. O vídeo está privado no {network}."
+already_live = "Tarde demais para mudar: o {network} já o publicou."
+not_scheduled = "Este envio não tem mais um agendamento para mudar."
+failed = "O {network} não aceitou a mudança. Tente de novo."
+not_allowed = "O {network} não aceita horário de publicação para este vídeo: só um vídeo privado que nunca foi público pode ser agendado. Mude no {network}."
+
+[date_time]
+format = "{weekday}, {day} de {month} de {year}, {time}"
+time = "{hour}:{minute}"
+am = "AM"
+pm = "PM"
+with_zone = "{when} ({zone})"
+zone = "{name}, {offset}"
+
+[schedule.problem]
+date = "Digite a data como DD/MM/AAAA."
+time = "Digite a hora como 18:30."
+past = "Esse horário já passou. Escolha um mais tarde: o YouTube o publicaria na hora."
+
+[weekday]
+1 = "seg."
+2 = "ter."
+3 = "qua."
+4 = "qui."
+5 = "sex."
+6 = "sáb."
+7 = "dom."

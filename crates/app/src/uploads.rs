@@ -16,8 +16,14 @@
 //! external handle and the confirmed bytes its checkpoint, so a cancelled,
 //! failed or interrupted upload resumes without sending those bytes again.
 //! Then it waits for the network to process the video and records how it
-//! ended: published, restricted (kept private by the network although more
-//! was asked) or failed with the network's reason.
+//! ended: published, scheduled (private until its publish time),
+//! restricted (kept private by the network although more was asked) or
+//! failed with the network's reason.
+//!
+//! A scheduled upload (#78) is reviewed and confirmed the same way, with a
+//! publish time in the user's time zone that must still be ahead when they
+//! confirm. It goes up private with that time, and the network makes it
+//! public by itself, with Bardo and the PC off (ADR-0006).
 
 use std::io::Read;
 use std::sync::Arc;
@@ -27,9 +33,9 @@ use bardo_domain::{
     Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, MetadataProblem, Network,
     NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post, PostLink, Progress,
     ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository,
-    RenderRepository, RepositoryError, SecretText, SignInFailureKind, Upload, UploadError,
-    UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId,
-    VideoState, VideoUpload, VideoUploader, Visibility,
+    RenderRepository, RepositoryError, ScheduleProblem, SecretText, SignInFailureKind, Upload,
+    UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
+    VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time,
 };
 use serde::{Deserialize, Serialize};
 
@@ -168,6 +174,7 @@ impl UploadReview {
             made_for_kids: false,
             synthetic: self.synthetic,
             replace: false,
+            publish_at: None,
         }
     }
 }
@@ -181,6 +188,10 @@ pub struct UploadChoices {
     pub synthetic: bool,
     /// The user confirmed the upload replaces the network's publication.
     pub replace: bool,
+    /// When the network makes the video public: it goes up private until
+    /// then. A scheduled upload is public at that time, whatever
+    /// `visibility` says.
+    pub publish_at: Option<SystemTime>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -204,6 +215,9 @@ pub enum UploadReviewError {
     /// network (check again).
     #[error("the upload cannot do that now")]
     NotNow,
+    /// The publish time cannot be used (already past).
+    #[error("the publish time cannot be used: {0}")]
+    Schedule(ScheduleProblem),
     #[error(transparent)]
     Job(#[from] JobActionError),
     #[error(transparent)]
@@ -219,6 +233,7 @@ impl UploadReviewError {
             UploadReviewError::Blocked(block) => Text::UploadBlocked(*block),
             UploadReviewError::Changed => Text::UploadChanged,
             UploadReviewError::ReplaceNotConfirmed => Text::UploadReplaceNotConfirmed,
+            UploadReviewError::Schedule(problem) => Text::ScheduleProblem(*problem),
             UploadReviewError::NotNow
             | UploadReviewError::Job(_)
             | UploadReviewError::Repository(_) => Text::UploadNotStarted,
@@ -257,6 +272,9 @@ pub enum UploadState {
     Retrying,
     /// The network has the file and is processing it.
     Processing,
+    /// On the network, private until this time, when the network makes it
+    /// public.
+    Scheduled(SystemTime),
     /// The network was still processing the video when Bardo stopped
     /// waiting for it: check again later.
     StillProcessing,
@@ -292,6 +310,11 @@ pub fn upload_state(upload: &Upload, job: Option<&Job>) -> UploadState {
     match status {
         UploadStatus::Published => return UploadState::Published,
         UploadStatus::Restricted => return UploadState::Restricted,
+        UploadStatus::Scheduled => {
+            if let Some(at) = upload.publish_at {
+                return UploadState::Scheduled(at);
+            }
+        }
         _ => {}
     }
     let Some(job) = job else {
@@ -364,6 +387,9 @@ struct UploadPayload {
     /// The network's video, for a job that only checks on its processing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     video: Option<String>,
+    /// When the network makes the video public, in Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    publish_at: Option<u64>,
 }
 
 impl UploadPayload {
@@ -375,8 +401,19 @@ impl UploadPayload {
             visibility: self.visibility.parse().map_err(unexpected)?,
             made_for_kids: self.made_for_kids,
             synthetic: self.synthetic,
+            publish_at: self.publish_at.map(from_millis),
         })
     }
+}
+
+fn from_millis(millis: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis)
+}
+
+fn to_millis(at: SystemTime) -> u64 {
+    at.duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// How far an upload job got: the bytes the network confirmed, and the
@@ -424,13 +461,23 @@ fn failure_of(error: &UploadError, network: Network) -> (JobFailure, Option<Uplo
             JobFailureKind::Media,
             Some(UploadFailure::Job(JobFailureKind::Media)),
         ),
+        // YouTube may not schedule a time already past: the user reviews
+        // the upload again with a new time.
+        UploadErrorKind::Late | UploadErrorKind::ScheduleRefused => (
+            JobFailureKind::NotAllowed,
+            Some(UploadFailure::ScheduleMissed),
+        ),
+        UploadErrorKind::NotFound => (
+            JobFailureKind::UnexpectedAnswer,
+            Some(UploadFailure::Removed),
+        ),
     };
     let detail = format!("{}: {}", network.brand(), error.detail);
     (JobFailure::new(kind, detail), failure)
 }
 
 /// A token for the account, as an upload wants it.
-fn access_token(
+pub(crate) fn access_token(
     connections: &Connections,
     account: &NetworkAccount,
 ) -> Result<SecretText, UploadError> {
@@ -674,7 +721,7 @@ impl JobHandler for UploadHandler {
         let Some(upload) = publication.upload() else {
             return Ok(());
         };
-        if upload.job != job || upload.status.is_final() {
+        if upload.job != job || upload.status.is_on_network() {
             return Ok(());
         }
         let network: Network = payload.network.parse().map_err(unexpected)?;
@@ -711,6 +758,19 @@ impl JobHandler for UploadHandler {
                 // Stopped: the session and the bytes are saved.
                 Ok(None) => return Ok(()),
                 Err(_) if cx.should_stop() => return Ok(()),
+                // Not retryable: the publish time passed before the video
+                // went, and the user reviews the upload with a new one.
+                Err(error)
+                    if matches!(
+                        error.kind,
+                        UploadErrorKind::Late | UploadErrorKind::ScheduleRefused
+                    ) =>
+                {
+                    return self.update(publication_id, job, |p| {
+                        p.upload_mut()
+                            .map_or(Ok(()), |upload| upload.fail(UploadFailure::ScheduleMissed))
+                    });
+                }
                 Err(error) => return Err(self.failed(publication_id, job, &error, network)),
             }
         }
@@ -742,9 +802,18 @@ impl JobHandler for UploadHandler {
                     polls += 1;
                     continue;
                 }
-                Ok(VideoState::Ready { visibility }) => {
-                    let now = SystemTime::now();
-                    return self.update(publication_id, job, |p| p.processed(visibility, now));
+                Ok(VideoState::Ready {
+                    visibility,
+                    publish_at,
+                    published_at,
+                }) => {
+                    // A schedule YouTube already published has its own time.
+                    let at = published_at
+                        .filter(|_| visibility != Visibility::Private)
+                        .unwrap_or_else(SystemTime::now);
+                    return self.update(publication_id, job, |p| {
+                        p.processed(visibility, publish_at, at)
+                    });
                 }
                 Ok(VideoState::Failed(reason)) => UploadFailure::ProcessingFailed(reason),
                 Ok(VideoState::Rejected(reason)) => UploadFailure::Rejected(reason),
@@ -812,6 +881,9 @@ impl Bardo {
             UploadFailure::Removed => with(Text::UploadFailureRemoved, ""),
             UploadFailure::RenderChanged => {
                 self.text(Text::UploadFailureRenderChanged).into_owned()
+            }
+            UploadFailure::ScheduleMissed => {
+                self.text(Text::UploadFailureScheduleMissed).into_owned()
             }
             UploadFailure::Job(kind) => self.text(Text::JobFailureKindName(*kind)).into_owned(),
         }
@@ -927,6 +999,14 @@ impl Bardo {
         let (Some(render), Some(post), Some(size)) = (&now.render, &now.post, now.size) else {
             return Err(UploadReviewError::Changed);
         };
+        if let Some(at) = choices.publish_at {
+            check_publish_time(at, SystemTime::now()).map_err(UploadReviewError::Schedule)?;
+        }
+        // A scheduled upload is public at its time.
+        let visibility = match choices.publish_at {
+            Some(_) => Visibility::Public,
+            None => choices.visibility,
+        };
         let publication_id = PublicationId::new();
         let payload = UploadPayload {
             project: now.project.to_string(),
@@ -939,12 +1019,17 @@ impl Bardo {
             title: post.title.clone().unwrap_or_default(),
             description: post.text.clone().unwrap_or_default(),
             tags: post.tags.clone(),
-            visibility: choices.visibility.code().to_owned(),
+            visibility: visibility.code().to_owned(),
             made_for_kids: choices.made_for_kids,
             synthetic: choices.synthetic,
             video: None,
+            publish_at: choices.publish_at.map(to_millis),
         };
         let job = Job::new(self.profile.id, JobKind::Upload, to_json(&payload));
+        let upload = match choices.publish_at {
+            Some(at) => Upload::scheduled(from_millis(to_millis(at)), job.id()),
+            None => Upload::queued(visibility, job.id()),
+        };
         let reviewed_at = crate::publications::whole_millis(SystemTime::now());
         let publication = Publication {
             id: publication_id,
@@ -954,7 +1039,7 @@ impl Bardo {
             network: now.network,
             render: render.id,
             link: None,
-            kind: PublicationKind::Uploaded(Upload::queued(choices.visibility, job.id())),
+            kind: PublicationKind::Uploaded(upload),
             posted_at: reviewed_at,
             linked_at: reviewed_at,
             checked_at: None,
@@ -985,6 +1070,14 @@ impl Bardo {
         let payload = serde_json::from_str(job.payload())
             .map_err(|error| RepositoryError(Box::new(error)))?;
         Ok((job, payload))
+    }
+
+    /// What the upload of `job` declared: made for kids, and the
+    /// synthetic-content disclosure. Both off when the job is gone.
+    pub(crate) fn upload_declarations(&self, job: JobId) -> (bool, bool) {
+        self.upload_job(job)
+            .map(|(_, payload)| (payload.made_for_kids, payload.synthetic))
+            .unwrap_or_default()
     }
 
     /// Resumes a stopped upload, or retries a failed one, from what the
@@ -1049,8 +1142,8 @@ pub(crate) mod testing {
     use std::time::Duration;
 
     use bardo_domain::{
-        Network, SecretText, UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo,
-        VideoState, VideoUpload, VideoUploader,
+        Network, ScheduleChange, ScheduleOutcome, SecretText, UploadError, UploadErrorKind,
+        UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload, VideoUploader,
     };
 
     /// The bytes the fake sends per request.
@@ -1085,6 +1178,10 @@ pub(crate) mod testing {
         /// The tokens each request carried.
         pub(crate) tokens: Mutex<Vec<String>>,
         pub(crate) checks: Mutex<Vec<String>>,
+        /// Answers to schedule changes; when empty, the change is taken.
+        pub(crate) reschedules: Mutex<VecDeque<Result<ScheduleOutcome, UploadErrorKind>>>,
+        /// Every schedule change: the video and the change.
+        pub(crate) changes: Mutex<Vec<(String, ScheduleChange)>>,
         /// An attempt is holding.
         pub(crate) holding: AtomicBool,
     }
@@ -1125,6 +1222,9 @@ pub(crate) mod testing {
         ) -> Result<UploadOutcome, UploadError> {
             let token = run.access_token()?;
             self.tokens.lock().unwrap().push(token.expose().to_owned());
+            if run.session().is_none() && video.is_late(std::time::SystemTime::now()) {
+                return Err(UploadError::new(UploadErrorKind::Late, "the fake refused"));
+            }
             self.videos.lock().unwrap().push(video.clone());
             let attempt = self
                 .attempts
@@ -1194,14 +1294,40 @@ pub(crate) mod testing {
             match self.states.lock().unwrap().pop_front() {
                 Some(Ok(state)) => Ok(state),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
-                None => Ok(VideoState::Ready {
-                    visibility: self
-                        .videos
-                        .lock()
-                        .unwrap()
-                        .last()
-                        .map_or(bardo_domain::Visibility::Private, |video| video.visibility),
-                }),
+                // As asked: a scheduled video stays private with its time.
+                None => {
+                    let last = self.videos.lock().unwrap().last().cloned();
+                    let publish_at = last.as_ref().and_then(|video| video.publish_at);
+                    Ok(VideoState::Ready {
+                        visibility: match (&last, publish_at) {
+                            (_, Some(_)) | (None, _) => bardo_domain::Visibility::Private,
+                            (Some(video), None) => video.visibility,
+                        },
+                        publish_at,
+                        published_at: None,
+                    })
+                }
+            }
+        }
+
+        fn reschedule(
+            &self,
+            access_token: &SecretText,
+            id: &str,
+            change: &ScheduleChange,
+        ) -> Result<ScheduleOutcome, UploadError> {
+            self.tokens
+                .lock()
+                .unwrap()
+                .push(access_token.expose().to_owned());
+            self.changes
+                .lock()
+                .unwrap()
+                .push((id.to_owned(), change.clone()));
+            match self.reschedules.lock().unwrap().pop_front() {
+                Some(Ok(outcome)) => Ok(outcome),
+                Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
+                None => Ok(ScheduleOutcome::Changed),
             }
         }
 
@@ -1212,7 +1338,7 @@ pub(crate) mod testing {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{Duration, Instant, SystemTime};
 
     use bardo_domain::{
@@ -1241,7 +1367,7 @@ mod tests {
 
     /// The project rendered (its YouTube file is `FILE`) with metadata
     /// written, and its YouTube account connected.
-    fn ready() -> Setup {
+    pub(crate) fn ready() -> Setup {
         let s = rendered();
         generated(&s);
         s.h.files
@@ -1251,7 +1377,7 @@ mod tests {
         s
     }
 
-    fn connect(s: &Setup) {
+    pub(crate) fn connect(s: &Setup) {
         connect_to(s, "Space Archives");
     }
 
@@ -1289,16 +1415,16 @@ mod tests {
         .unwrap();
     }
 
-    fn review(s: &Setup) -> UploadReview {
+    pub(crate) fn review(s: &Setup) -> UploadReview {
         s.app.upload_review(s.project.id, Network::YouTube).unwrap()
     }
 
-    fn start(s: &Setup, choices: UploadChoices) -> JobId {
+    pub(crate) fn start(s: &Setup, choices: UploadChoices) -> JobId {
         let review = review(s);
         s.app.start_upload(&review, choices).unwrap()
     }
 
-    fn upload(s: &Setup) -> Publication {
+    pub(crate) fn upload(s: &Setup) -> Publication {
         s.app
             .publications
             .publications(s.project.id)
@@ -1308,7 +1434,7 @@ mod tests {
             .unwrap()
     }
 
-    fn state(s: &Setup) -> UploadState {
+    pub(crate) fn state(s: &Setup) -> UploadState {
         s.app.upload_state(&upload(s)).unwrap()
     }
 
@@ -1325,6 +1451,34 @@ mod tests {
             assert!(Instant::now() < deadline, "never {what}");
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    #[test]
+    fn a_publish_time_that_passed_before_the_upload_started_is_not_retried() {
+        let s = ready();
+        s.h.uploader
+            .will(Attempt::FailAfter(0, UploadErrorKind::Late));
+        let review = review(&s);
+        let at = SystemTime::now() + std::time::Duration::from_secs(3600);
+        let choices = UploadChoices {
+            publish_at: Some(at),
+            ..review.choices()
+        };
+        let job = done(&s.app, start(&s, choices));
+        assert_eq!(job.attempts(), 1, "not retried by the queue");
+        assert_eq!(
+            state(&s),
+            UploadState::Failed {
+                failure: UploadFailure::ScheduleMissed,
+                retryable: false,
+            },
+            "the user reviews it again with a new time"
+        );
+        let gone = UploadError::new(UploadErrorKind::NotFound, "gone");
+        assert_eq!(
+            failure_of(&gone, Network::YouTube).1,
+            Some(UploadFailure::Removed)
+        );
     }
 
     #[test]
@@ -1462,6 +1616,7 @@ mod tests {
             made_for_kids: true,
             synthetic: true,
             replace: false,
+            publish_at: None,
         };
         let job = s.app.start_upload(&review, choices).unwrap();
         done(&s.app, job);
@@ -1477,6 +1632,7 @@ mod tests {
                 visibility: Visibility::Unlisted,
                 made_for_kids: true,
                 synthetic: true,
+                publish_at: None,
             }]
         );
         assert!(
@@ -1530,6 +1686,8 @@ mod tests {
         s.h.uploader.answer(Ok(VideoState::Processing));
         s.h.uploader.answer(Ok(VideoState::Ready {
             visibility: Visibility::Private,
+            publish_at: None,
+            published_at: None,
         }));
         let review = review(&s);
         let job = start(
