@@ -6,7 +6,7 @@
 //! Publish stage and the Performance screen share them; what they show
 //! comes from `bardo_app`.
 
-use bardo_app::bardo_domain::{JobState, MetricsSnapshot, OwnerMetrics, PostRetention};
+use bardo_app::bardo_domain::{JobState, OwnerMetrics, PostRetention};
 use bardo_app::{Bardo, MetricsStatus, PublishedPost, Text, UploadState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -147,16 +147,18 @@ fn hidden(bardo: &Bardo, id: ElementId, cx: &App) -> AnyElement {
 /// found it.
 pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Option<Div> {
     let latest = post.latest()?;
-    let owned = post.latest_owner();
+    // The latest owner's numbers, and when they were read.
+    let owned = post
+        .latest_owner()
+        .and_then(|snapshot| Some((snapshot.owner?, snapshot.taken_at)));
     let optional = |value: Option<u64>, suffix: &str| match value {
         Some(n) => figure_value(count(bardo, n), cx),
         None => hidden(bardo, hint_id(id, suffix), cx),
     };
     let mut stats = Vec::new();
-    let owner = owned.and_then(|snapshot| snapshot.owner);
     // With engaged views first, the change line names the views it counts.
-    let engaged = owner.is_some();
-    if let Some(owner) = owner {
+    let engaged = owned.is_some();
+    if let Some((owner, _)) = &owned {
         stats.push(stat_with(
             tr(bardo, Text::MetricEngagedViews),
             Some((
@@ -210,18 +212,21 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
                     cx,
                 ))
             })
-            .children(owned.map(|snapshot| owner_numbers(bardo, snapshot, id, cx))),
+            .children(owned.map(|(owner, read_at)| owner_numbers(bardo, &owner, read_at, id, cx))),
     )
 }
 
-/// The owner's numbers of a snapshot: watch time, the average view, money
+/// The owner's numbers read at `read_at`: watch time, the average view, money
 /// or "not monetized", and when YouTube Analytics was read and how late
 /// it runs.
-fn owner_numbers(bardo: &Bardo, snapshot: &MetricsSnapshot, id: &str, cx: &App) -> Div {
+fn owner_numbers(
+    bardo: &Bardo,
+    owner: &OwnerMetrics,
+    read_at: std::time::SystemTime,
+    id: &str,
+    cx: &App,
+) -> Div {
     let t = look(cx).tokens;
-    let Some(owner) = snapshot.owner else {
-        return div();
-    };
     let watch = stat_row(vec![
         stat(
             tr(bardo, Text::MetricWatchTime),
@@ -245,14 +250,14 @@ fn owner_numbers(bardo: &Bardo, snapshot: &MetricsSnapshot, id: &str, cx: &App) 
         .border_t(t.border_width)
         .border_color(t.border)
         .child(watch)
-        .child(money(bardo, &owner, id, cx))
+        .child(money(bardo, owner, id, cx))
         .child(
             div()
                 .text_xs()
                 .text_color(t.text2)
                 .child(SharedString::from(bardo.text_with(
                     Text::MetricsOwnerLine,
-                    &[("when", &bardo.time_ago(snapshot.taken_at))],
+                    &[("when", &bardo.time_ago(read_at))],
                 ))),
         )
 }

@@ -13,9 +13,10 @@
 //!   giving `audienceWatchRatio` and `relativeRetentionPerformance`.
 //! - Columns are read by the names in `columnHeaders`, not by position. A
 //!   report without rows has no data for the video yet.
-//! - The method also takes the `youtube` scope Bardo asks at connection, so
-//!   no new scope is needed (its discovery document lists `youtube`,
-//!   `youtube.readonly`, `yt-analytics.readonly`, and the monetary one).
+//! - No new scope is needed: the method takes `youtube` or
+//!   `yt-analytics.readonly`, and money needs
+//!   `yt-analytics-monetary.readonly`; Bardo asks for all three at
+//!   connection and refuses a connection without them.
 //!
 //! Docs checked 2026-10-03: <https://developers.google.com/youtube/analytics/reference/reports/query>,
 //! <https://developers.google.com/youtube/analytics/channel_reports>,

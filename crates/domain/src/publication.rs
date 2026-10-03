@@ -583,12 +583,6 @@ pub struct MetricsSnapshot {
 }
 
 impl MetricsSnapshot {
-    /// The number a screen leads with: engaged views when the owner's
-    /// numbers are there, else the public views.
-    pub fn headline_views(&self) -> u64 {
-        self.owner.map_or(self.views, |owner| owner.engaged_views)
-    }
-
     /// Views gained (or lost, when YouTube recounts) from this snapshot
     /// to `later`.
     pub fn views_to(&self, later: &MetricsSnapshot) -> i64 {
@@ -778,6 +772,9 @@ impl MetricsTotals {
         self.likes = sum(self.likes, snapshot.likes);
         self.comments = sum(self.comments, snapshot.comments);
         self.posts += 1;
+    }
+
+    fn add_owner(&mut self, snapshot: &MetricsSnapshot) {
         if let Some(owner) = &snapshot.owner {
             let totals = self.owner.get_or_insert_with(OwnerTotals::default);
             totals.engaged_views = totals.engaged_views.saturating_add(owner.engaged_views);
@@ -795,11 +792,21 @@ impl MetricsTotals {
         }
     }
 
-    /// The latest snapshot of each post added up.
+    /// The latest snapshot of each post added up, and the owner's numbers
+    /// of each post's latest snapshot that has them: a sync that could not
+    /// read them keeps the ones read before.
     pub fn latest(snapshots: &[MetricsSnapshot]) -> Self {
         let mut totals = Self::default();
         for snapshot in latest_of_each(snapshots).values() {
             totals.add(snapshot);
+        }
+        let owned: Vec<MetricsSnapshot> = snapshots
+            .iter()
+            .filter(|snapshot| snapshot.owner.is_some())
+            .copied()
+            .collect();
+        for snapshot in latest_of_each(&owned).values() {
+            totals.add_owner(snapshot);
         }
         totals
     }
@@ -830,15 +837,20 @@ pub struct ChannelPoint {
 
 /// A channel's totals over time: at each moment a snapshot was taken, the
 /// latest snapshot of every post up to then, added up (a post not synced
-/// at that moment counts with its previous numbers). Oldest first.
+/// at that moment counts with its previous numbers, and its owner's
+/// numbers with the last ones read). Oldest first.
 pub fn channel_history(snapshots: &[MetricsSnapshot]) -> Vec<ChannelPoint> {
     let mut ordered: Vec<&MetricsSnapshot> = snapshots.iter().collect();
     ordered.sort_by_key(|snapshot| snapshot.taken_at);
     let mut latest: HashMap<PublicationId, MetricsSnapshot> = HashMap::new();
+    let mut latest_owned: HashMap<PublicationId, MetricsSnapshot> = HashMap::new();
     let mut points: Vec<ChannelPoint> = Vec::new();
     // A sync stamps every post with the same time: one point per sync.
     for (ix, snapshot) in ordered.iter().enumerate() {
         latest.insert(snapshot.publication, **snapshot);
+        if snapshot.owner.is_some() {
+            latest_owned.insert(snapshot.publication, **snapshot);
+        }
         let last_of_its_time = ordered
             .get(ix + 1)
             .is_none_or(|next| next.taken_at != snapshot.taken_at);
@@ -846,6 +858,9 @@ pub fn channel_history(snapshots: &[MetricsSnapshot]) -> Vec<ChannelPoint> {
             let mut totals = MetricsTotals::default();
             for kept in latest.values() {
                 totals.add(kept);
+            }
+            for kept in latest_owned.values() {
+                totals.add_owner(kept);
             }
             points.push(ChannelPoint {
                 at: snapshot.taken_at,
@@ -1613,13 +1628,25 @@ mod tests {
     }
 
     #[test]
-    fn the_headline_is_engaged_views_when_the_owner_numbers_are_there() {
-        let p = PublicationId::new();
-        assert_eq!(snap(p, 0, 1_000, None).headline_views(), 1_000);
-        assert_eq!(
-            owned(snap(p, 0, 1_000, None), 640, None).headline_views(),
-            640
-        );
+    fn owner_totals_keep_each_posts_last_owner_numbers() {
+        let (a, b) = (PublicationId::new(), PublicationId::new());
+        // The latest sync could not read the owner numbers (quota, or the
+        // data had not arrived): the earlier ones still count.
+        let snapshots = [
+            owned(snap(a, 0, 100, None), 80, Some(Money::from_cents(150))),
+            snap(a, 60, 150, None),
+            owned(snap(b, 0, 300, None), 200, None),
+            snap(b, 60, 320, None),
+        ];
+        let totals = MetricsTotals::latest(&snapshots);
+        assert_eq!(totals.views, 470, "the latest public views");
+        let owner = totals.owner.unwrap();
+        assert_eq!(owner.engaged_views, 280);
+        assert_eq!(owner.revenue, Some(Money::from_cents(150)));
+        assert_eq!(owner.posts, 2);
+        let history = channel_history(&snapshots);
+        assert_eq!(history[1].totals.views, 470);
+        assert_eq!(history[1].totals.owner.unwrap().engaged_views, 280);
     }
 
     #[test]

@@ -315,28 +315,25 @@ impl PerformanceScreen {
             tile.selected = shown == Some(id);
             tile.title = Some(SharedString::from(post.project_title.clone()));
             let network = bardo.text(Text::NetworkName(publication.network()));
-            let engaged = post
-                .post
-                .latest_owner()
-                .and_then(|snapshot| snapshot.owner)
-                .map(|owner| owner.engaged_views);
-            tile.text = Some(SharedString::from(match (engaged, post.post.latest()) {
-                (Some(engaged), _) => bardo.text_with(
-                    Text::PerformanceTileEngaged,
-                    &[
-                        ("network", &network),
-                        ("views", &bardo.compact_count(engaged)),
-                    ],
-                ),
-                (None, Some(latest)) => bardo.text_with(
-                    Text::PerformanceTile,
-                    &[
-                        ("network", &network),
-                        ("views", &bardo.compact_count(latest.views)),
-                    ],
-                ),
-                (None, None) => network.into_owned(),
-            }));
+            tile.text = Some(SharedString::from(
+                match (post.post.engaged_views(), post.post.latest()) {
+                    (Some(engaged), _) => bardo.text_with(
+                        Text::PerformanceTileEngaged,
+                        &[
+                            ("network", &network),
+                            ("views", &bardo.compact_count(engaged)),
+                        ],
+                    ),
+                    (None, Some(latest)) => bardo.text_with(
+                        Text::PerformanceTile,
+                        &[
+                            ("network", &network),
+                            ("views", &bardo.compact_count(latest.views)),
+                        ],
+                    ),
+                    (None, None) => network.into_owned(),
+                },
+            ));
             tile.time = Some(SharedString::from(bardo.time_ago(publication.posted_at)));
             if publication.missing_since.is_some() {
                 tile.status = Some(

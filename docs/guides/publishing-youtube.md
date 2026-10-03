@@ -211,8 +211,9 @@ scheduled video back cost 1 unit each; changing or cancelling a schedule
 costs 51 (a read, then the update).
 YouTube Analytics has its own quota, apart from the Data API's: each sync
 asks it for two reports per post of a connected channel (the numbers and
-the retention curve), one unit each, and a third the first time a channel
-turns out not to be monetized.
+the retention curve), one unit each, plus one more per sync for a channel
+that is not monetized (its first revenue report is refused, then read
+again without revenue).
 When the quota runs out, Bardo says so and the counter resets at midnight
 Pacific time. An upload that hits the daily upload quota stops at once
 instead of retrying; select **Retry** after the reset.

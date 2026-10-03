@@ -30,11 +30,11 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, ChannelId, ChannelPoint, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Monetization, Network, NetworkAccountId,
-    NetworkAccountRepository, OwnerAnalytics, PostLink, PostLinkError, PostRetention, ProfileId,
-    Progress, Provider, Publication, PublicationId, PublicationKind, PublicationRepository,
-    ReportPeriod, RepositoryError, STATS_BATCH, SecretStore, SecretText, UserProfile,
-    VideoProjectId, VideoStats, VideoUploader, channel_history, read_owner_metrics,
+    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Monetization, Network, NetworkAccount,
+    NetworkAccountId, NetworkAccountRepository, OwnerAnalytics, PostLink, PostLinkError,
+    PostRetention, ProfileId, Progress, Provider, Publication, PublicationId, PublicationKind,
+    PublicationRepository, ReportPeriod, RepositoryError, STATS_BATCH, SecretStore, SecretText,
+    UserProfile, VideoProjectId, VideoStats, VideoUploader, channel_history, read_owner_metrics,
 };
 use serde::{Deserialize, Serialize};
 
@@ -155,6 +155,14 @@ impl PublishedPost {
     pub fn latest_owner(&self) -> Option<&MetricsSnapshot> {
         self.history.iter().rev().find(|s| s.owner.is_some())
     }
+
+    /// The engaged views screens lead with, from the latest owner's
+    /// numbers; `None` leaves the public views in the lead.
+    pub fn engaged_views(&self) -> Option<u64> {
+        self.latest_owner()
+            .and_then(|snapshot| snapshot.owner)
+            .map(|owner| owner.engaged_views)
+    }
 }
 
 /// Whether a channel's owner numbers can be read: its YouTube account and
@@ -261,10 +269,9 @@ pub(crate) struct MetricsSyncHandler {
 
 /// How one sync reads an account's owner numbers.
 enum OwnerAccount {
-    /// Connected: the token for this sync, and what it learned of the
-    /// channel's money.
+    /// To read, and what this sync learned of the channel's money.
     Reading {
-        token: SecretText,
+        account: NetworkAccount,
         monetization: Monetization,
     },
     /// Not connected, or something stopped its reads for this sync.
@@ -287,8 +294,8 @@ impl MetricsSyncHandler {
         })
     }
 
-    /// The account's owner reads for this sync: its fresh token when it
-    /// is connected.
+    /// The account's owner reads for this sync, until its token is
+    /// refused or missing.
     fn owner_account(&self, account: NetworkAccountId) -> OwnerAccount {
         let account = match self.accounts.get(account) {
             Ok(Some(account)) => account,
@@ -298,15 +305,21 @@ impl MetricsSyncHandler {
                 return OwnerAccount::Off;
             }
         };
-        match self.connections.access_token(&account) {
-            Ok(tokens) => OwnerAccount::Reading {
-                token: SecretText::new(tokens.access_token()),
-                monetization: Monetization::Unknown,
-            },
-            Err(ConnectionError::NotConnected) => OwnerAccount::Off,
+        OwnerAccount::Reading {
+            account,
+            monetization: Monetization::Unknown,
+        }
+    }
+
+    /// The account's token, renewed when it is close to expiring: a long
+    /// sync can outlast the one it started with.
+    fn owner_token(&self, account: &NetworkAccount) -> Option<SecretText> {
+        match self.connections.access_token(account) {
+            Ok(tokens) => Some(SecretText::new(tokens.access_token())),
+            Err(ConnectionError::NotConnected) => None,
             Err(error) => {
                 tracing::warn!("owner metrics skipped, no sign-in: {error}");
-                OwnerAccount::Off
+                None
             }
         }
     }
@@ -341,14 +354,18 @@ impl MetricsSyncHandler {
                 .entry(post.account)
                 .or_insert_with(|| self.owner_account(post.account));
             let OwnerAccount::Reading {
-                token,
+                account: network_account,
                 monetization,
             } = account
             else {
                 continue;
             };
+            let Some(token) = self.owner_token(network_account) else {
+                *account = OwnerAccount::Off;
+                continue;
+            };
             let period = ReportPeriod::for_post(post.posted_at, snapshot.taken_at);
-            match read_owner_metrics(&**analytics, token, video, &period, monetization) {
+            match read_owner_metrics(&**analytics, &token, video, &period, monetization) {
                 Ok(reading) => {
                     snapshot.owner = reading.metrics;
                     if !reading.retention.is_empty() {
@@ -1312,7 +1329,7 @@ mod tests {
         let owner = latest.owner.expect("owner numbers on the snapshot");
         assert_eq!(owner.views, 48_000);
         assert_eq!(owner.engaged_views, 33_600);
-        assert_eq!(latest.headline_views(), 33_600);
+        assert_eq!(post.engaged_views(), Some(33_600));
         let money = owner.money().expect("monetized");
         assert_eq!(money.revenue, bardo_domain::Money::from_micros(96_000_000));
         assert_eq!(owner.rpm(), Some(bardo_domain::Money::from_cents(200)));
@@ -1395,7 +1412,7 @@ mod tests {
                 owner: None,
             }
         );
-        assert_eq!(latest.headline_views(), 1_200);
+        assert_eq!(post.engaged_views(), None, "the public views lead");
         assert_eq!(post.retention, None);
         let view = s.app.channel_metrics(s.project.channel).unwrap();
         assert_eq!(view.owner_access, OwnerAccess::NotConnected);

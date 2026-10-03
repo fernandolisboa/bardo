@@ -847,23 +847,17 @@ impl ProjectsScreen {
                 Some(_) if upload.is_some() => {
                     metrics::upload_label(bardo, upload.as_ref().expect("checked"))
                 }
-                Some(post) => {
-                    let engaged = post
-                        .latest_owner()
-                        .and_then(|snapshot| snapshot.owner)
-                        .map(|owner| owner.engaged_views);
-                    match (engaged, post.latest()) {
-                        (Some(engaged), _) => SharedString::from(bardo.text_with(
-                            Text::PublicationTileEngaged,
-                            &[("views", &bardo.compact_count(engaged))],
-                        )),
-                        (None, Some(latest)) => SharedString::from(bardo.text_with(
-                            Text::PublicationTileViews,
-                            &[("views", &bardo.compact_count(latest.views))],
-                        )),
-                        (None, None) => tr(bardo, Text::PublicationPosted),
-                    }
-                }
+                Some(post) => match (post.engaged_views(), post.latest()) {
+                    (Some(engaged), _) => SharedString::from(bardo.text_with(
+                        Text::PublicationTileEngaged,
+                        &[("views", &bardo.compact_count(engaged))],
+                    )),
+                    (None, Some(latest)) => SharedString::from(bardo.text_with(
+                        Text::PublicationTileViews,
+                        &[("views", &bardo.compact_count(latest.views))],
+                    )),
+                    (None, None) => tr(bardo, Text::PublicationPosted),
+                },
                 None => tr(bardo, last_state(target)),
             });
             tile.status = Some(state_chip(bardo, target, cx));
