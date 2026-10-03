@@ -153,7 +153,10 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
         None => hidden(bardo, hint_id(id, suffix), cx),
     };
     let mut stats = Vec::new();
-    if let Some(owner) = owned.and_then(|snapshot| snapshot.owner) {
+    let owner = owned.and_then(|snapshot| snapshot.owner);
+    // With engaged views first, the change line names the views it counts.
+    let engaged = owner.is_some();
+    if let Some(owner) = owner {
         stats.push(stat_with(
             tr(bardo, Text::MetricEngagedViews),
             Some((
@@ -184,7 +187,11 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
             .text_xs()
             .text_color(look(cx).tokens.text2)
             .child(SharedString::from(bardo.text_with(
-                Text::MetricsChange,
+                if engaged {
+                    Text::MetricsViewsChange
+                } else {
+                    Text::MetricsChange
+                },
                 &[("change", &change(bardo, n))],
             )))
     });

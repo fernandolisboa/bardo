@@ -1144,6 +1144,7 @@ pub enum Text {
     PublicationNoMetrics,
     PublicationFigure,
     PublicationTileViews,
+    PublicationTileEngaged,
     MetricViews,
     MetricLikes,
     MetricComments,
@@ -1157,6 +1158,7 @@ pub enum Text {
     MetricsSyncHint,
     MetricsHistory,
     MetricsChange,
+    MetricsViewsChange,
     MetricEngagedViews,
     MetricEngagedViewsHint,
     MetricWatchTime,
@@ -2513,6 +2515,7 @@ impl Text {
             Text::PublicationNoMetrics => "publication.no_metrics",
             Text::PublicationFigure => "publication.figure",
             Text::PublicationTileViews => "publication.tile_views",
+            Text::PublicationTileEngaged => "publication.tile_engaged",
             Text::MetricViews => "metrics.views",
             Text::MetricLikes => "metrics.likes",
             Text::MetricComments => "metrics.comments",
@@ -2526,6 +2529,7 @@ impl Text {
             Text::MetricsSyncHint => "metrics.sync_hint",
             Text::MetricsHistory => "metrics.history",
             Text::MetricsChange => "metrics.change",
+            Text::MetricsViewsChange => "metrics.views_change",
             Text::MetricEngagedViews => "metrics.engaged_views",
             Text::MetricEngagedViewsHint => "metrics.engaged_views_hint",
             Text::MetricWatchTime => "metrics.watch_time",
@@ -4056,6 +4060,7 @@ mod tests {
         texts.push(Text::PublicationNoMetrics);
         texts.push(Text::PublicationFigure);
         texts.push(Text::PublicationTileViews);
+        texts.push(Text::PublicationTileEngaged);
         texts.push(Text::MetricViews);
         texts.push(Text::MetricLikes);
         texts.push(Text::MetricComments);
@@ -4069,6 +4074,7 @@ mod tests {
         texts.push(Text::MetricsSyncHint);
         texts.push(Text::MetricsHistory);
         texts.push(Text::MetricsChange);
+        texts.push(Text::MetricsViewsChange);
         texts.push(Text::MetricEngagedViews);
         texts.push(Text::MetricEngagedViewsHint);
         texts.push(Text::MetricWatchTime);
