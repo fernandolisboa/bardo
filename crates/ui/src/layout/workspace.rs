@@ -402,11 +402,10 @@ fn stepper(stages: Stages, cx: &App) -> AnyElement {
         .into_iter()
         .map(|item| step(item, stages.current, Rc::clone(&stages.on_pick), cx));
     h_flex()
-        .id("stages")
         .flex_none()
+        .flex_wrap()
         .px_6()
         .gap_1()
-        .overflow_x_scroll()
         .border_b(t.border_width)
         .border_color(t.border)
         .children(steps)
@@ -436,7 +435,7 @@ fn step(item: StageItem, current: Stage, on_pick: OnPick<Stage>, cx: &App) -> An
     let round = if t.radius == px(0.) { px(0.) } else { px(999.) };
     // Seven stages share the width: each takes its part, and its line
     // wraps rather than pushing the last ones out of sight; below a
-    // readable width the row scrolls instead.
+    // readable width the steps go on to a second row (issue #73).
     h_flex()
         .id(("stage", stage as usize))
         .flex_1()
