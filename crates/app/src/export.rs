@@ -372,7 +372,7 @@ struct ProjectOf {
     project: String,
 }
 
-fn unix_millis(time: SystemTime) -> u64 {
+pub(crate) fn unix_millis(time: SystemTime) -> u64 {
     time.duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| {
             u64::try_from(since.as_millis()).unwrap_or(u64::MAX)

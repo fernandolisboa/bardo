@@ -5,6 +5,7 @@ mod appearance;
 mod channels;
 mod clips;
 mod costs;
+mod cut_suggestions;
 mod editor;
 mod export;
 pub mod i18n;
@@ -35,8 +36,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, ClipGenerator, CostRepository, DecisionEngine, ExportFiles,
-    ExportRepository, ImageGenerator, JobRepository, KeyChecker, LayoutId, MarketData,
+    ChannelRepository, ClipGenerator, CostRepository, CutSuggestionRepository, DecisionEngine,
+    ExportFiles, ExportRepository, ImageGenerator, JobRepository, KeyChecker, LayoutId, MarketData,
     MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
     NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles,
     PublicationRepository, Redactor, RenderRepository, RepositoryError, ScenePlanRepository,
@@ -56,6 +57,9 @@ pub use clips::{ClipsView, SceneClipView};
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
     SpendRow, SpendSummary,
+};
+pub use cut_suggestions::{
+    CHUNK_LIMITS, CutSuggestionError, SuggestionState, SuggestionView, SuggestionsView,
 };
 pub use editor::{
     BinScene, ClipMedia, ClipProblem, ClipShows, ClipView, CutBasis, EditAction, Editor,
@@ -96,6 +100,7 @@ pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
 use crate::clips::ClipHandler;
 use crate::costs::CostBook;
+use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
 use crate::jobs::JobQueue;
 use crate::music_prompts::MusicPromptHandler;
@@ -153,6 +158,8 @@ pub struct Repositories {
     pub export_files: Arc<dyn ExportFiles>,
     /// Posts made by hand and their metrics. Shared with the job queue.
     pub publications: Arc<dyn PublicationRepository>,
+    /// Each project's AI cut suggestions. Shared with the job queue.
+    pub cut_suggestions: Arc<dyn CutSuggestionRepository>,
     /// What generations cost, the user's rates and budgets. Shared with
     /// the job queue.
     pub costs: Arc<dyn CostRepository>,
@@ -209,6 +216,7 @@ impl Repositories {
             exports: Arc::clone(&db) as _,
             export_files: Arc::new(MemoryExportFiles::default()),
             publications: Arc::clone(&db) as _,
+            cut_suggestions: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             research: db,
             files,
@@ -289,6 +297,7 @@ pub struct Bardo {
     exports: Arc<dyn ExportRepository>,
     export_files: Arc<dyn ExportFiles>,
     publications: Arc<dyn PublicationRepository>,
+    cut_suggestions: Arc<dyn CutSuggestionRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     audio: Arc<dyn AudioOutput>,
@@ -348,6 +357,7 @@ impl Bardo {
             exports,
             export_files,
             publications,
+            cut_suggestions,
             costs,
             files,
             secrets,
@@ -462,6 +472,14 @@ impl Bardo {
             stats: Arc::clone(&providers.video_stats),
             secrets: Arc::clone(&secrets),
         };
+        let cut_handler = CutSuggestionHandler {
+            owner: profile.id,
+            suggestions: Arc::clone(&cut_suggestions),
+            narrations: Arc::clone(&narrations),
+            decisions: Arc::clone(&providers.decisions),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
         let jobs = JobQueue::start(
@@ -481,6 +499,7 @@ impl Bardo {
                 metadata: metadata_handler,
                 exports: export_handler,
                 metrics: metrics_handler,
+                cuts: cut_handler,
             }),
             job_settings,
             redactor,
@@ -503,6 +522,7 @@ impl Bardo {
             exports,
             export_files,
             publications,
+            cut_suggestions,
             cost_book,
             files,
             audio: providers.audio,
@@ -607,6 +627,11 @@ impl Bardo {
         self.catalog.decibels(level)
     }
 
+    /// A 0–100 score as a fraction, e.g. `0.82`, `0,82`.
+    pub fn score(&self, score: bardo_domain::Score) -> String {
+        self.catalog.score(score)
+    }
+
     /// An amount to the cent, e.g. `$1,234.56`, `US$ 0,05`.
     pub fn money(&self, amount: bardo_domain::Money) -> String {
         self.catalog.money(amount)
@@ -653,7 +678,7 @@ pub(crate) mod testing {
         ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData,
         MarketSample, Money, Niche, Provider, ProviderFailure, Question, Questions, ScoreAnswer,
         Speech, SpeechRequest, SpeechSynthesizer, StagedImage, TextGenerator, TextRequest,
-        TokenUsage, UploadSample, Voice, VoiceLibrary,
+        TokenUsage, UploadSample, Voice, VoiceLibrary, YesNoAnswer,
     };
 
     use crate::Providers;
@@ -826,6 +851,9 @@ pub(crate) mod testing {
     pub(crate) struct FakeDecisionEngine {
         pub(crate) calls: Mutex<Vec<(String, Questions)>>,
         pub(crate) levels: Mutex<Vec<(String, f64)>>,
+        /// Yes/no questions whose instructions contain the text get that
+        /// probability of yes; 0.2 otherwise.
+        pub(crate) yes: Mutex<Vec<(String, f64)>>,
         pub(crate) confidence: Mutex<f64>,
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
         /// How long each call takes, to catch a job mid-run.
@@ -837,6 +865,7 @@ pub(crate) mod testing {
             Self {
                 calls: Mutex::default(),
                 levels: Mutex::default(),
+                yes: Mutex::default(),
                 confidence: Mutex::new(0.8),
                 failure: Mutex::default(),
                 delay: Mutex::default(),
@@ -852,6 +881,15 @@ pub(crate) mod testing {
         /// Questions whose instructions contain `needle` get `level`.
         pub(crate) fn set_level(&self, needle: &str, level: f64) {
             self.levels.lock().unwrap().push((needle.to_owned(), level));
+        }
+
+        /// Yes/no questions whose instructions contain `needle` get
+        /// `probability` of yes.
+        pub(crate) fn set_yes(&self, needle: &str, probability: f64) {
+            self.yes
+                .lock()
+                .unwrap()
+                .push((needle.to_owned(), probability));
         }
     }
 
@@ -872,28 +910,33 @@ pub(crate) mod testing {
                 return Err(failure);
             }
             let levels = self.levels.lock().unwrap();
+            let yes = self.yes.lock().unwrap();
             let confidence = Confidence::new(*self.confidence.lock().unwrap());
             let mut answers = HashMap::new();
             for (id, question) in questions.iter() {
-                let Question::Score {
-                    instructions,
-                    levels: names,
-                } = question
-                else {
-                    panic!("the fake only answers score questions");
+                let answer = match question {
+                    Question::Score {
+                        instructions,
+                        levels: names,
+                    } => {
+                        let level = levels
+                            .iter()
+                            .find(|(needle, _)| instructions.contains(needle.as_str()))
+                            .map_or((names.len() - 1) as f64 / 2.0, |(_, level)| *level);
+                        Answer::Score(ScoreAnswer {
+                            level,
+                            probabilities: vec![0.0; names.len()],
+                            confidence,
+                        })
+                    }
+                    Question::YesNo { instructions, .. } => Answer::YesNo(YesNoAnswer::new(
+                        yes.iter()
+                            .find(|(needle, _)| instructions.contains(needle.as_str()))
+                            .map_or(0.2, |(_, probability)| *probability),
+                    )),
+                    Question::Choice { .. } => panic!("the fake answers no choice"),
                 };
-                let level = levels
-                    .iter()
-                    .find(|(needle, _)| instructions.contains(needle.as_str()))
-                    .map_or((names.len() - 1) as f64 / 2.0, |(_, level)| *level);
-                answers.insert(
-                    id.to_owned(),
-                    Answer::Score(ScoreAnswer {
-                        level,
-                        probabilities: vec![0.0; names.len()],
-                        confidence,
-                    }),
-                );
+                answers.insert(id.to_owned(), answer);
             }
             Ok(Decisions {
                 answers,
@@ -925,12 +968,12 @@ pub(crate) mod testing {
         }
     }
 
-    /// One second of MP3 audio, the length of every fake part.
+    /// One second of MP3 audio, the unit of every fake part.
     pub(crate) const PART_AUDIO: &[u8] =
         include_bytes!("../../media/tests/fixtures/tone-1s-raw.mp3");
 
-    /// Reads every request as one second of tone, its characters timed
-    /// evenly across that second; `failure` wins when set. Keeps the
+    /// Reads every request as `length` (one second by default) of tone, its
+    /// characters timed evenly across it; `failure` wins when set. Keeps the
     /// requests.
     pub(crate) struct FakeSpeech {
         pub(crate) requests: Mutex<Vec<SpeechRequest>>,
@@ -940,6 +983,8 @@ pub(crate) mod testing {
         pub(crate) fail_at: Mutex<Option<usize>>,
         /// How long each call takes, to catch a job mid-run.
         pub(crate) delay: Mutex<Duration>,
+        /// How long each request reads, its characters evenly spread.
+        pub(crate) length: Mutex<Duration>,
     }
 
     impl Default for FakeSpeech {
@@ -950,6 +995,7 @@ pub(crate) mod testing {
                 max_chars: Mutex::new(5_000),
                 fail_at: Mutex::default(),
                 delay: Mutex::default(),
+                length: Mutex::new(Duration::from_secs(1)),
             }
         }
     }
@@ -986,9 +1032,12 @@ pub(crate) mod testing {
                 ));
             }
             let chars: Vec<char> = request.text.chars().collect();
-            let step = Duration::from_secs(1) / chars.len().max(1) as u32;
+            let length = *self.length.lock().unwrap();
+            let step = length / chars.len().max(1) as u32;
+            // Whole seconds of tone, so the audio lasts as long as it reads.
+            let seconds = length.as_secs_f64().ceil().max(1.0) as usize;
             Ok(Speech {
-                audio: PART_AUDIO.to_vec(),
+                audio: PART_AUDIO.repeat(seconds),
                 alignment: Alignment {
                     chars: chars
                         .iter()
@@ -1400,6 +1449,7 @@ mod tests {
             renders: Arc::clone(&db) as _,
             exports: Arc::clone(&db) as _,
             publications: Arc::clone(&db) as _,
+            cut_suggestions: Arc::clone(&db) as _,
             export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),

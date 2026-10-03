@@ -83,10 +83,12 @@ Editing never waits on proxies or jobs (story 69).
 ## AI cut suggestions (#30)
 
 - Each candidate is a diamond pin on the ruler with its score, plus a dashed guide down the tracks.
-- The focused pin is accent-colored and opens a popover: "Cut here?", timecode, score, typed reasons from the decision engine (e.g. "Sentence end + 420 ms pause", "Scene boundary in script", "Topic shift (keyword: 'Ohio')"), **Accept (A)**, **Reject (R)**, **Next (Tab)**.
+- The focused pin is accent-colored and opens a popover: "Cut here?", timecode, score, typed reasons (e.g. "Sentence end + 420 ms pause", "Scene change", "Topic shift"; the decision engine judges the topic shift, the others come from the script and word timings), **Accept (A)**, **Reject (R)**, **Next (Tab)**.
 - Accepting splits the clip at that point (drawn as a solid cut with a check). Rejecting removes the pin.
-- Suggestions mode replaces the inspector with a list: timecode, score bar, reasons, accept/reject per row; accepted rows show a check, rejected rows are struck through with **Undo**; **Accept all above 0.80** at the top.
+- Suggestions mode replaces the inspector with a list: timecode, score bar, reasons, accept/reject per row; accepted rows show a check, rejected rows are struck through with **Undo**; **Accept all above 0.80** at the top (above the floor instead when the floor is higher; a point an earlier cut left under a second from it is skipped).
 - The toolbar toggle hides pins without discarding them; its badge counts pending suggestions.
+- Above the list: **Suggest cuts** with what it scores and what it costs (**Suggest again** once there is a set, which replaces it), the scoring job's progress with **Stop** (and **Resume** after a stop or failure), **Show from** (the profile's floor, 0.50 unless changed, in 0.10 steps) and a line counting the pending suggestions under it with **Show** / **Hide**.
+- While suggestions show, **A**, **R** and **Tab** accept, reject and move to the next pending pin; accepting or rejecting the focused pin moves on to the next one.
 
 ## Interactions
 

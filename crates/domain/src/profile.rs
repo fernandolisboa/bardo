@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::{LayoutId, MetricsSyncOnStart, RepositoryError, UiThemePreference};
+use crate::{
+    DEFAULT_CUT_FLOOR, LayoutId, MetricsSyncOnStart, RepositoryError, Score, UiThemePreference,
+};
 
 /// Identifies a user profile. Every entity carries the owning profile so more
 /// profiles can exist later without a migration (ADR-0005).
@@ -89,6 +91,9 @@ pub struct UserProfile {
     pub ui_layout: LayoutId,
     /// When a start syncs publication metrics by itself.
     pub metrics_sync: MetricsSyncOnStart,
+    /// The score a cut suggestion needs to show unless the user asks for
+    /// all of them.
+    pub cut_suggestion_floor: Score,
 }
 
 impl UserProfile {
@@ -99,6 +104,7 @@ impl UserProfile {
             ui_theme: UiThemePreference::default(),
             ui_layout: LayoutId::default(),
             metrics_sync: MetricsSyncOnStart::default(),
+            cut_suggestion_floor: DEFAULT_CUT_FLOOR,
         }
     }
 }

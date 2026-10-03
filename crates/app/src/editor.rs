@@ -58,6 +58,7 @@ use bardo_media::ffmpeg::{
 use bardo_media::{AudioOutput, MediaEngine, StreamPlayback};
 use serde::Deserialize;
 
+use crate::cut_suggestions::SuggestionsView;
 use crate::proxies::{Peaks, ProxiesCheckpoint, ProxiesPayload, ProxyKind, ProxyOrder, proxy_name};
 use crate::scenes::to_json;
 use crate::{Bardo, Text};
@@ -273,6 +274,8 @@ pub struct EditorView {
     pub proxies_total: usize,
     /// The project's latest proxies job.
     pub job: Option<Job>,
+    /// The AI cut suggestions on the cut, and asking for more.
+    pub suggestions: SuggestionsView,
 }
 
 impl EditorView {
@@ -386,6 +389,11 @@ pub enum EditAction {
     Place {
         asset: MediaAssetId,
         track: Track,
+    },
+    /// Splits the video clip under `at`, exactly there (a frame the caller
+    /// picked, as an accepted cut suggestion's).
+    CutPicture {
+        at: Duration,
     },
     Undo,
     Redo,
@@ -722,6 +730,17 @@ impl Editor {
                 let (at, _) = self.snapped(self.playhead, Duration::ZERO);
                 let (edit, placed) = timeline.place(asset, track, at)?;
                 (edit, Some(Some(placed)))
+            }
+            EditAction::CutPicture { at } => {
+                let index = timeline.video_at(at).ok_or(EditorError::NothingToCut)?;
+                (
+                    Edit::Split {
+                        track: Track::Video,
+                        index,
+                        at,
+                    },
+                    None,
+                )
             }
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
@@ -1384,7 +1403,14 @@ impl Bardo {
         let captions = timeline
             .as_ref()
             .map_or_else(Vec::new, Timeline::caption_spans);
+        let suggestions = self.suggestions_view(
+            project.id,
+            timeline.as_ref(),
+            narration.as_ref(),
+            plan.as_ref(),
+        )?;
         Ok(EditorView {
+            suggestions,
             channel_name,
             stale: plan
                 .as_ref()

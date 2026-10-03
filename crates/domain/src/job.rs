@@ -97,10 +97,13 @@ pub enum JobKind {
     /// Reads the public statistics of the user's YouTube publications and
     /// keeps a snapshot of each, a batch of posts per checkpoint.
     MetricsSync,
+    /// Has the decision engine score a video project's candidate cut
+    /// points, a stretch of the script per call and per checkpoint.
+    CutSuggestions,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 16] = [
+    pub const ALL: [JobKind; 17] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -117,6 +120,7 @@ impl JobKind {
         JobKind::Metadata,
         JobKind::Export,
         JobKind::MetricsSync,
+        JobKind::CutSuggestions,
     ];
 
     /// Stable name stored in the database.
@@ -138,6 +142,7 @@ impl JobKind {
             JobKind::Metadata => "metadata",
             JobKind::Export => "export",
             JobKind::MetricsSync => "metrics_sync",
+            JobKind::CutSuggestions => "cut_suggestions",
         }
     }
 }

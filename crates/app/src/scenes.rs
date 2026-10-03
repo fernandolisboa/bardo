@@ -863,6 +863,8 @@ pub(crate) mod tests {
         pub(crate) audio: Arc<crate::narrations::testing::FakeAudioOutput>,
         /// Public statistics of linked posts.
         pub(crate) stats: Arc<crate::testing::FakeVideoStats>,
+        pub(crate) decisions: Arc<FakeDecisionEngine>,
+        pub(crate) speech: Arc<FakeSpeech>,
     }
 
     impl Harness {
@@ -881,6 +883,8 @@ pub(crate) mod tests {
                 more_clips: Vec::new(),
                 secrets: Arc::default(),
                 stats: Arc::default(),
+                decisions: Arc::default(),
+                speech: Arc::default(),
             }
         }
 
@@ -928,9 +932,9 @@ pub(crate) mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::clone(&self.stats) as _,
                 text: Arc::clone(&self.text) as _,
-                decisions: Arc::new(FakeDecisionEngine::default()),
+                decisions: Arc::clone(&self.decisions) as _,
                 voices: Arc::new(FakeVoiceLibrary::default()),
-                speech: Arc::new(FakeSpeech::default()),
+                speech: Arc::clone(&self.speech) as _,
                 aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
                 images: Arc::clone(&self.images) as _,
                 clips: std::iter::once(Arc::clone(&self.clips) as _)

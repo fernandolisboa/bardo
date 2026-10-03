@@ -12,7 +12,7 @@ use bardo_domain::{
     JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, MetadataProblem, Meter,
     MetricsSyncOnStart, Money, MoneyError, Month, MusicPromptFieldError, Network,
     NetworkAccountFieldError, NicheSeedError, PersonaFieldError, PostLinkError, Provider,
-    RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
+    RateFieldError, SceneFieldError, Score, ScriptFieldError, TemplateKind, TemplateProblem,
     TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
     VoiceCategory, VoiceFlag,
 };
@@ -662,6 +662,38 @@ pub enum Text {
     EditorToolSplit,
     EditorSnapWords,
     EditorAiCuts,
+    CutsSuggest,
+    CutsSuggestAgain,
+    CutsHint,
+    CutsAgainHint,
+    CutsNoPoints,
+    CutsRunning,
+    CutsStop,
+    CutsStopped,
+    CutsRetry,
+    CutsEmpty,
+    CutsAcceptStrong,
+    CutsFloor,
+    CutsHidden,
+    CutsShown,
+    CutsShowHidden,
+    CutsHideLow,
+    CutsTitle,
+    CutsAccept,
+    CutsReject,
+    CutsNext,
+    CutsUndo,
+    CutsAccepted,
+    CutsConfidence,
+    CutsReasonSentence,
+    CutsReasonPause,
+    CutsReasonScene,
+    CutsReasonTopic,
+    CutsMissingKey,
+    CutsBusy,
+    CutsGone,
+    CutsNotSaved,
+    CutsFloorNotSaved,
     EditorDuckMusic,
     EditorZoomIn,
     EditorZoomOut,
@@ -1765,6 +1797,38 @@ impl Text {
             Text::EditorToolSplit => "editor.tool.split",
             Text::EditorSnapWords => "editor.tool.snap_words",
             Text::EditorAiCuts => "editor.tool.ai_cuts",
+            Text::CutsSuggest => "editor.cuts.suggest",
+            Text::CutsSuggestAgain => "editor.cuts.suggest_again",
+            Text::CutsHint => "editor.cuts.hint",
+            Text::CutsAgainHint => "editor.cuts.again_hint",
+            Text::CutsNoPoints => "editor.cuts.no_points",
+            Text::CutsRunning => "editor.cuts.running",
+            Text::CutsStop => "editor.cuts.stop",
+            Text::CutsStopped => "editor.cuts.stopped",
+            Text::CutsRetry => "editor.cuts.retry",
+            Text::CutsEmpty => "editor.cuts.empty",
+            Text::CutsAcceptStrong => "editor.cuts.accept_strong",
+            Text::CutsFloor => "editor.cuts.floor",
+            Text::CutsHidden => "editor.cuts.hidden",
+            Text::CutsShown => "editor.cuts.shown",
+            Text::CutsShowHidden => "editor.cuts.show_hidden",
+            Text::CutsHideLow => "editor.cuts.hide_low",
+            Text::CutsTitle => "editor.cuts.title",
+            Text::CutsAccept => "editor.cuts.accept",
+            Text::CutsReject => "editor.cuts.reject",
+            Text::CutsNext => "editor.cuts.next",
+            Text::CutsUndo => "editor.cuts.undo",
+            Text::CutsAccepted => "editor.cuts.accepted",
+            Text::CutsConfidence => "editor.cuts.confidence",
+            Text::CutsReasonSentence => "editor.cuts.reason.sentence_end",
+            Text::CutsReasonPause => "editor.cuts.reason.pause",
+            Text::CutsReasonScene => "editor.cuts.reason.scene_change",
+            Text::CutsReasonTopic => "editor.cuts.reason.topic_shift",
+            Text::CutsMissingKey => "editor.cuts.missing_key",
+            Text::CutsBusy => "editor.cuts.busy",
+            Text::CutsGone => "editor.cuts.gone",
+            Text::CutsNotSaved => "editor.cuts.not_saved",
+            Text::CutsFloorNotSaved => "editor.cuts.floor_not_saved",
             Text::EditorDuckMusic => "editor.tool.duck_music",
             Text::EditorZoomIn => "editor.tool.zoom_in",
             Text::EditorZoomOut => "editor.tool.zoom_out",
@@ -2373,6 +2437,18 @@ impl Catalog {
         self.format(Text::EditorDecibels, &[("n", &n)])
     }
 
+    /// A 0–100 score read as a fraction, as cut suggestions show it:
+    /// `0.82`, `0,82`, `1.00`.
+    pub fn score(&self, score: Score) -> String {
+        let value = score.value();
+        format!(
+            "{}{}{:02}",
+            value / 100,
+            self.get(Text::DecimalSeparator),
+            value % 100
+        )
+    }
+
     /// An amount spent or estimated, to the cent: `$1,234.56`, `US$ 0,05`.
     /// A non-zero amount that rounds to nothing reads `under $0.01`.
     pub fn money(&self, amount: Money) -> String {
@@ -2965,6 +3041,38 @@ mod tests {
             Text::EditorToolSplit,
             Text::EditorSnapWords,
             Text::EditorAiCuts,
+            Text::CutsSuggest,
+            Text::CutsSuggestAgain,
+            Text::CutsHint,
+            Text::CutsAgainHint,
+            Text::CutsNoPoints,
+            Text::CutsRunning,
+            Text::CutsStop,
+            Text::CutsStopped,
+            Text::CutsRetry,
+            Text::CutsEmpty,
+            Text::CutsAcceptStrong,
+            Text::CutsFloor,
+            Text::CutsHidden,
+            Text::CutsShown,
+            Text::CutsShowHidden,
+            Text::CutsHideLow,
+            Text::CutsTitle,
+            Text::CutsAccept,
+            Text::CutsReject,
+            Text::CutsNext,
+            Text::CutsUndo,
+            Text::CutsAccepted,
+            Text::CutsConfidence,
+            Text::CutsReasonSentence,
+            Text::CutsReasonPause,
+            Text::CutsReasonScene,
+            Text::CutsReasonTopic,
+            Text::CutsMissingKey,
+            Text::CutsBusy,
+            Text::CutsGone,
+            Text::CutsNotSaved,
+            Text::CutsFloorNotSaved,
             Text::EditorDuckMusic,
             Text::EditorZoomIn,
             Text::EditorZoomOut,
@@ -3538,6 +3646,15 @@ mod tests {
     }
 
     #[test]
+    fn scores_read_as_fractions_in_each_language() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        assert_eq!(en.score(Score::new(82)), "0.82");
+        assert_eq!(pt.score(Score::new(5)), "0,05");
+        assert_eq!(en.score(Score::new(100)), "1.00");
+    }
+
+    #[test]
     fn decibels_read_signed_in_each_language() {
         let en = Catalog::load(UiLanguage::EnUs);
         let pt = Catalog::load(UiLanguage::PtBr);
@@ -3687,6 +3804,14 @@ mod tests {
             let catalog = Catalog::load(language);
             for (text, args) in [
                 (Text::SuggestThemesHint, &[("n", "10")][..]),
+                (Text::CutsHint, &[("n", "12")][..]),
+                (Text::CutsAgainHint, &[("n", "12")][..]),
+                (Text::CutsRunning, &[("percent", "40")][..]),
+                (Text::CutsAcceptStrong, &[("score", "0.80")][..]),
+                (Text::CutsHidden, &[("n", "3"), ("score", "0.50")][..]),
+                (Text::CutsShown, &[("n", "3"), ("score", "0.50")][..]),
+                (Text::CutsConfidence, &[("n", "82")][..]),
+                (Text::CutsReasonPause, &[("ms", "420")][..]),
                 (Text::ThemesUnranked, &[("n", "3")][..]),
                 (Text::ThemesDiscarded, &[("n", "4")][..]),
                 (Text::ThemeRankedBy, &[("model", "jev-1.13.0")][..]),

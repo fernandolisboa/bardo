@@ -3,6 +3,7 @@
 
 mod channel;
 mod cost;
+mod cut_suggestion;
 mod export;
 mod export_files;
 mod files;

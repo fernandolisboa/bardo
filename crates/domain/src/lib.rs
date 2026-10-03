@@ -45,6 +45,7 @@ mod caption;
 mod channel;
 mod clip;
 mod cost;
+mod cut_suggestion;
 mod decision;
 mod edit;
 mod files;
@@ -96,6 +97,11 @@ pub use clip::{
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
     Rate, RateFieldError, RateTable, Spend, UnknownCostPurpose, UnknownMeter,
+};
+pub use cut_suggestion::{
+    ChunkLimits, CutCandidate, CutChunk, CutPlace, CutReasons, CutRules, CutSuggestion,
+    CutSuggestionRepository, CutSuggestions, DEFAULT_CUT_FLOOR, STRONG_CUT, SuggestionStatus,
+    cut_candidates, cut_chunks, cut_marker, open_candidates, place_cut,
 };
 pub use decision::{
     Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,
