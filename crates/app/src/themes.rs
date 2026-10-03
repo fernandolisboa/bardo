@@ -6,17 +6,22 @@
 //! Proposing and ranking call providers, so they run as jobs. A suggestion
 //! job proposes, saves the ideas and then ranks them; a ranking job only
 //! ranks the niche's themes that have no ranking (e.g. after an edit).
+//!
+//! Once the channel has published videos with a first week of metrics
+//! (PRD story 82), the engine also reads how they did and scores a fourth
+//! reason, past performance; without history the ranking is the same as
+//! before, question for question.
 
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngine, Decisions, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, Niche, NicheScores, NicheSeedError, ProfileId, Progress,
-    Provider, ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore,
-    TextFormat, TextGenerator, TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea,
-    ThemeNotSuggested, ThemeRanking, ThemeRepository, ThemeStatus, UiLanguage, VideoProject,
-    rank_themes,
+    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngine, Decisions, EvidenceScope, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, Niche, NicheScores, NicheSeedError,
+    PastPerformance, PerformanceEvidence, PerformanceReason, ProfileId, Progress, Provider,
+    ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore, TextFormat,
+    TextGenerator, TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested,
+    ThemeRanking, ThemeRepository, ThemeStatus, UiLanguage, VideoProject, rank_themes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +37,9 @@ const RANK_BATCH: usize = 10;
 const MAX_TITLES_TO_AVOID: usize = 60;
 /// The suggestion job's checkpoint once its ideas are saved.
 const PROPOSED: &str = "proposed";
+/// The channel's newest published videos the engine reads; older ones
+/// still count in the averages.
+const MAX_PAST_VIDEOS: usize = 40;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ThemeError {
@@ -114,6 +122,9 @@ pub struct ThemesView {
     /// What ranking the unranked themes would cost; `None` when none
     /// waits.
     pub rank_estimate: Option<SpendEstimate>,
+    /// How the channel's published videos did, as a ranking of the niche
+    /// would show it now; `None` until one has a first week of metrics.
+    pub past: Option<PerformanceEvidence>,
 }
 
 /// The paid calls of a suggestion run: Claude proposes, the engine ranks.
@@ -144,6 +155,120 @@ struct Brief {
     channel_themes: Vec<String>,
     aesthetic_notes: String,
     research: Option<ResearchFacts>,
+    /// The channel's history, when it has some. Absent from payloads
+    /// queued before past performance existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    past: Option<PastFacts>,
+}
+
+/// How the channel's published videos did, as the engine reads it and as
+/// the reason shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PastFacts {
+    /// Newest first, at most `MAX_PAST_VIDEOS`.
+    videos: Vec<PastVideo>,
+    /// Videos left out of the list for being older.
+    older: usize,
+    /// The channel's usual first week (the median).
+    usual: u64,
+    evidence: EvidenceFacts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct PastVideo {
+    title: String,
+    niche: String,
+    /// Where it stands against the usual, in the engine's words.
+    standing: String,
+    views: u64,
+    projected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct EvidenceFacts {
+    /// `EvidenceScope::code`.
+    scope: String,
+    average_views: u64,
+    videos: u32,
+    projected: u32,
+    basis: u32,
+}
+
+impl From<PerformanceEvidence> for EvidenceFacts {
+    fn from(evidence: PerformanceEvidence) -> Self {
+        Self {
+            scope: evidence.scope.code().to_owned(),
+            average_views: evidence.average_views,
+            videos: evidence.videos,
+            projected: evidence.projected,
+            basis: evidence.basis,
+        }
+    }
+}
+
+impl EvidenceFacts {
+    fn evidence(&self) -> Result<PerformanceEvidence, JobFailure> {
+        Ok(PerformanceEvidence {
+            scope: EvidenceScope::from_code(&self.scope)
+                .ok_or_else(|| JobFailure::unexpected(format!("unknown scope {:?}", self.scope)))?,
+            average_views: self.average_views,
+            videos: self.videos,
+            projected: self.projected,
+            basis: self.basis,
+        })
+    }
+}
+
+impl PastFacts {
+    /// What the engine reads of `past` when ranking ideas for `niche`;
+    /// `None` without history.
+    fn of(past: &PastPerformance, niche: &Niche) -> Option<Self> {
+        let evidence = past.evidence(niche)?;
+        let videos = past
+            .videos()
+            .iter()
+            .take(MAX_PAST_VIDEOS)
+            .map(|video| PastVideo {
+                title: video.title.clone(),
+                niche: video.niche.label().to_owned(),
+                standing: past.standing(video).describe().to_owned(),
+                views: video.first_week.views,
+                projected: video.first_week.projected,
+            })
+            .collect();
+        Some(Self {
+            videos,
+            older: past.videos().len().saturating_sub(MAX_PAST_VIDEOS),
+            usual: past.usual().unwrap_or(0),
+            evidence: evidence.into(),
+        })
+    }
+
+    fn describe(&self) -> String {
+        let mut lines = vec![format!(
+            "How this channel's own published videos did in their first 7 days, newest first. \
+             The channel's usual is its median: {} views.",
+            self.usual
+        )];
+        for video in &self.videos {
+            lines.push(format!(
+                "- \"{}\" (niche: {}): {}, {} views{}",
+                video.title,
+                video.niche,
+                video.standing,
+                video.views,
+                if video.projected {
+                    ", projected from its first days"
+                } else {
+                    ""
+                }
+            ));
+        }
+        if self.older > 0 {
+            lines.push(format!("- and {} older videos", self.older));
+        }
+        lines.join("\n")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +318,17 @@ impl Brief {
             None => "YouTube research on this niche: not run yet.".to_owned(),
         });
         lines.join("\n")
+    }
+
+    /// The decision engine's state: the channel and niche, then the
+    /// channel's history when it has some.
+    fn state(&self, niche: &str) -> String {
+        let mut state = self.describe(niche);
+        if let Some(past) = &self.past {
+            state.push_str("\n\n");
+            state.push_str(&past.describe());
+        }
+        state
     }
 }
 
@@ -332,22 +468,40 @@ fn usable_ideas(text: &str, existing: &[Theme]) -> Result<Vec<ThemeIdea>, JobFai
     Ok(ideas)
 }
 
-/// The three questions behind a ranking, asked about each theme.
+/// The questions behind a ranking, asked about each theme: three always,
+/// past performance when the channel has history.
 #[derive(Clone, Copy)]
 enum Aspect {
     Fit,
     Trend,
     Competition,
+    Performance,
 }
 
 impl Aspect {
     const ALL: [Aspect; 3] = [Aspect::Fit, Aspect::Trend, Aspect::Competition];
+
+    /// The questions asked about each theme.
+    fn asked(with_history: bool) -> &'static [Aspect] {
+        const WITH_HISTORY: [Aspect; 4] = [
+            Aspect::Fit,
+            Aspect::Trend,
+            Aspect::Competition,
+            Aspect::Performance,
+        ];
+        if with_history {
+            &WITH_HISTORY
+        } else {
+            &Self::ALL
+        }
+    }
 
     fn id(self, index: usize) -> String {
         let name = match self {
             Aspect::Fit => "fit",
             Aspect::Trend => "trend",
             Aspect::Competition => "competition",
+            Aspect::Performance => "performance",
         };
         format!("t{index}_{name}")
     }
@@ -386,6 +540,18 @@ impl Aspect {
                     "Several channels cover it",
                     "Many channels cover it",
                     "Saturated by big channels",
+                ],
+            ),
+            Aspect::Performance => (
+                "The state lists how this channel's own published videos did in their first 7 \
+                 days against the channel's usual. Judging by the videos most like this idea in \
+                 topic and angle, how would this idea do on this channel?",
+                [
+                    "Far below the channel's usual",
+                    "Below the channel's usual",
+                    "About the channel's usual",
+                    "Above the channel's usual",
+                    "Far above the channel's usual",
                 ],
             ),
         };
@@ -529,7 +695,14 @@ impl ThemeHandler {
             return Ok(());
         }
         let key = self.key(Provider::TypeSafe)?;
-        let state = payload.brief.describe(niche.label());
+        let state = payload.brief.state(niche.label());
+        let evidence = payload
+            .brief
+            .past
+            .as_ref()
+            .map(|past| past.evidence.evidence())
+            .transpose()?;
+        let aspects = Aspect::asked(evidence.is_some());
         let total = pending.len() as u64;
         let mut done = 0;
 
@@ -539,7 +712,7 @@ impl ThemeHandler {
             }
             let mut questions = Questions::new();
             for (index, theme) in batch.iter().enumerate() {
-                for aspect in Aspect::ALL {
+                for &aspect in aspects {
                     questions = questions
                         .ask(aspect.id(index), aspect.question(theme.idea()))
                         .map_err(unexpected)?;
@@ -569,6 +742,14 @@ impl ThemeHandler {
                     fit: reason(&decisions, &Aspect::Fit.id(index))?,
                     trend: reason(&decisions, &Aspect::Trend.id(index))?,
                     competition: reason(&decisions, &Aspect::Competition.id(index))?,
+                    performance: evidence
+                        .map(|evidence| -> Result<PerformanceReason, JobFailure> {
+                            Ok(PerformanceReason {
+                                reason: reason(&decisions, &Aspect::Performance.id(index))?,
+                                evidence,
+                            })
+                        })
+                        .transpose()?,
                     model: decisions.model.clone(),
                     ranked_at,
                 };
@@ -674,6 +855,15 @@ impl Bardo {
         }
     }
 
+    /// The first weeks of the channel's published videos.
+    fn past_performance(&self, channel: ChannelId) -> Result<PastPerformance, ThemeError> {
+        Ok(PastPerformance::of_channel(
+            &self.themes.projects(channel)?,
+            &self.publications.channel_publications(channel)?,
+            &self.publications.channel_snapshots(channel)?,
+        ))
+    }
+
     fn brief(&self, channel: &Channel, niche: &Niche) -> Result<Brief, ThemeError> {
         let research = self
             .research
@@ -702,6 +892,7 @@ impl Bardo {
             channel_themes: details.themes().to_vec(),
             aesthetic_notes: details.aesthetic_notes().to_owned(),
             research: facts,
+            past: PastFacts::of(&self.past_performance(channel.id)?, niche),
         })
     }
 
@@ -747,6 +938,7 @@ impl Bardo {
                 projects,
                 suggest_estimate,
                 rank_estimate: None,
+                past: None,
             });
         };
 
@@ -772,6 +964,7 @@ impl Bardo {
 
         Ok(ThemesView {
             research: self.niche_scores(&channel, &niche)?,
+            past: self.past_performance(channel.id)?.evidence(&niche),
             niches,
             niche: Some(niche),
             themes,
@@ -860,6 +1053,32 @@ impl Bardo {
         theme.discard()?;
         self.themes.save_themes(std::slice::from_ref(&theme))?;
         Ok(())
+    }
+
+    /// The numbers behind a past performance reason, as a sentence in the
+    /// interface language.
+    pub fn performance_evidence(&self, evidence: &PerformanceEvidence) -> String {
+        let text = match (evidence.scope, evidence.videos) {
+            (EvidenceScope::Niche, 1) => Text::ThemePerformanceNicheOne,
+            (EvidenceScope::Niche, _) => Text::ThemePerformanceNiche,
+            (EvidenceScope::Channel, 1) => Text::ThemePerformanceChannelOne,
+            (EvidenceScope::Channel, _) => Text::ThemePerformanceChannel,
+        };
+        let mut sentence = self.text_with(
+            text,
+            &[
+                ("views", &self.compact_count(evidence.average_views)),
+                ("n", &evidence.videos.to_string()),
+            ],
+        );
+        if evidence.projected > 0 {
+            sentence.push(' ');
+            sentence.push_str(&self.text_with(
+                Text::ThemePerformanceProjected,
+                &[("n", &evidence.projected.to_string())],
+            ));
+        }
+        sentence
     }
 
     /// Approves a suggested theme and starts its video project, linked to
@@ -1535,6 +1754,364 @@ mod tests {
             app.discard_theme(foreign.id),
             Err(ThemeError::ThemeNotFound)
         ));
+    }
+
+    const DAY: Duration = Duration::from_secs(24 * 3600);
+
+    /// A YouTube post of a new project of the channel: `title` in
+    /// `niche`, live `days_ago`, with one snapshot of `views` taken `age`
+    /// after it went live.
+    struct Post<'a> {
+        niche: &'a str,
+        title: &'a str,
+        days_ago: u32,
+        age: Duration,
+        views: u64,
+    }
+
+    fn published(h: &Harness, app: &Bardo, channel: &Channel, post: Post<'_>) -> VideoProject {
+        let Post {
+            niche,
+            title,
+            days_ago,
+            age,
+            views,
+        } = post;
+        use bardo_domain::{
+            MetricsSnapshot, Network, NetworkAccountId, PostLink, Publication, PublicationId,
+            PublicationRepository, RenderId,
+        };
+
+        let mut theme = Theme::suggested(
+            app.profile().id,
+            channel.id,
+            Niche::new(niche).unwrap(),
+            ThemeIdea::new(title, "").unwrap(),
+            SystemTime::now(),
+            0,
+            None,
+        );
+        h.db.save_themes(std::slice::from_ref(&theme)).unwrap();
+        let project = app.approve_theme(theme.id).unwrap();
+        theme.approve(SystemTime::now()).unwrap();
+        let posted_at = SystemTime::now() - DAY * days_ago;
+        let count = h.db.channel_publications(channel.id).unwrap().len();
+        let publication = Publication {
+            id: PublicationId::new(),
+            owner: app.profile().id,
+            project: project.id,
+            account: NetworkAccountId::new(),
+            render: RenderId::new(),
+            link: PostLink::parse(
+                Network::YouTube,
+                &format!("https://www.youtube.com/watch?v=video{count:06}"),
+            )
+            .unwrap(),
+            posted_at,
+            linked_at: posted_at,
+            checked_at: None,
+            missing_since: None,
+        };
+        h.db.save_publication(&publication).unwrap();
+        let snapshot = MetricsSnapshot {
+            publication: publication.id,
+            taken_at: posted_at + age,
+            views,
+            likes: None,
+            comments: None,
+        };
+        h.db.save_sync(&[], &[snapshot]).unwrap();
+        project
+    }
+
+    const PERFORMANCE_ASK: &str = "Judging by the videos most like this idea";
+
+    #[test]
+    fn rankings_read_the_channels_published_videos_and_give_a_fourth_reason() {
+        let h = Harness::new();
+        // Idea 4 looks like what did well; the rest sit at the usual.
+        h.decisions.set_level(
+            &format!("\"Idea 4\": Why Idea 4 matters.\n{}", "The state lists"),
+            4.0,
+        );
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        published(
+            &h,
+            &app,
+            &channel,
+            Post {
+                niche: "space history",
+                title: "Lost probes",
+                days_ago: 30,
+                age: 7 * DAY,
+                views: 1_000,
+            },
+        );
+        published(
+            &h,
+            &app,
+            &channel,
+            Post {
+                niche: "space history",
+                title: "Moon hoaxes",
+                days_ago: 20,
+                age: 14 * DAY,
+                views: 6_000,
+            },
+        );
+        published(
+            &h,
+            &app,
+            &channel,
+            Post {
+                niche: "deep sea",
+                title: "The abyss",
+                days_ago: 10,
+                age: 7 * DAY,
+                views: 9_000,
+            },
+        );
+        published(
+            &h,
+            &app,
+            &channel,
+            Post {
+                niche: "space history",
+                title: "Mars dust",
+                days_ago: 3,
+                age: 3 * DAY + DAY / 2,
+                views: 500,
+            },
+        );
+
+        let job = suggest(&app, &channel);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+
+        let (state, questions) = h.decisions.calls().pop().unwrap();
+        for line in [
+            "How this channel's own published videos did in their first 7 days, newest first. \
+             The channel's usual is its median: 1000 views.",
+            "- \"Mars dust\" (niche: space history): about the channel's usual, 1000 views, \
+             projected from its first days",
+            "- \"The abyss\" (niche: deep sea): far above the channel's usual, 9000 views",
+            "- \"Moon hoaxes\" (niche: space history): far above the channel's usual, 3000 views",
+            "- \"Lost probes\" (niche: space history): about the channel's usual, 1000 views",
+        ] {
+            assert!(state.contains(line), "{line}\n---\n{state}");
+        }
+        assert_eq!(questions.len(), 4 * SUGGESTIONS_PER_RUN);
+        let Some(Question::Score {
+            instructions,
+            levels,
+        }) = questions.get("t0_performance")
+        else {
+            panic!("past performance is a score question");
+        };
+        assert!(instructions.contains(PERFORMANCE_ASK), "{instructions}");
+        assert_eq!(levels.len(), 5);
+
+        let view = app.themes(channel.id, None).unwrap();
+        let evidence = PerformanceEvidence {
+            scope: EvidenceScope::Niche,
+            // (1,000 + 3,000 + 1,000) / 3
+            average_views: 1_667,
+            videos: 3,
+            projected: 1,
+            basis: 4,
+        };
+        assert_eq!(view.past, Some(evidence));
+        let suggested: Vec<&Theme> = view
+            .themes
+            .iter()
+            .filter(|theme| theme.status() == ThemeStatus::Suggested)
+            .collect();
+        assert_eq!(suggested.len(), SUGGESTIONS_PER_RUN);
+        assert!(suggested.iter().all(|theme| {
+            theme
+                .ranking()
+                .and_then(|ranking| ranking.performance)
+                .is_some_and(|performance| performance.evidence == evidence)
+        }));
+        assert_eq!(
+            suggested[0].idea().title(),
+            "Idea 4",
+            "what did well before leads"
+        );
+        let best = suggested[0].ranking().unwrap();
+        assert_eq!(
+            best.performance.unwrap().reason.score,
+            bardo_domain::Score::MAX
+        );
+        // Four videos weigh 20%: 0.8·50 + 0.2·100.
+        assert_eq!(best.priority(), bardo_domain::Score::new(60));
+    }
+
+    #[test]
+    fn a_channel_without_history_ranks_exactly_as_before() {
+        let fresh = Harness::new();
+        let app = fresh.start_with_keys();
+        let without = channel(&app, "space history");
+        suggest(&app, &without);
+        let (expected_state, expected_questions) = fresh.decisions.calls().pop().unwrap();
+        let expected: Vec<_> = app
+            .themes(without.id, None)
+            .unwrap()
+            .themes
+            .iter()
+            .map(|theme| {
+                (
+                    theme.idea().title().to_owned(),
+                    theme.ranking().unwrap().priority(),
+                )
+            })
+            .collect();
+
+        // Posts too young to say anything, or never synced, are no history.
+        let h = Harness::new();
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        published(
+            &h,
+            &app,
+            &channel,
+            Post {
+                niche: "space history",
+                title: "Just out",
+                days_ago: 1,
+                age: DAY,
+                views: 400,
+            },
+        );
+        suggest(&app, &channel);
+
+        let (state, questions) = h.decisions.calls().pop().unwrap();
+        assert_eq!(state, expected_state);
+        assert_eq!(questions, expected_questions);
+        assert!(!state.contains("published videos"));
+        let view = app.themes(channel.id, None).unwrap();
+        assert_eq!(view.past, None);
+        let ranked: Vec<_> = view
+            .themes
+            .iter()
+            .filter(|theme| theme.status() == ThemeStatus::Suggested)
+            .map(|theme| {
+                let ranking = theme.ranking().unwrap();
+                assert_eq!(ranking.performance, None);
+                (theme.idea().title().to_owned(), ranking.priority())
+            })
+            .collect();
+        assert_eq!(ranked, expected);
+    }
+
+    #[test]
+    fn a_niche_without_videos_reads_the_whole_channel() {
+        let h = Harness::new();
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        published(
+            &h,
+            &app,
+            &channel,
+            Post {
+                niche: "deep sea",
+                title: "The abyss",
+                days_ago: 10,
+                age: 7 * DAY,
+                views: 9_000,
+            },
+        );
+
+        let view = app.themes(channel.id, None).unwrap();
+        assert_eq!(
+            view.past,
+            Some(PerformanceEvidence {
+                scope: EvidenceScope::Channel,
+                average_views: 9_000,
+                videos: 1,
+                projected: 0,
+                basis: 1,
+            })
+        );
+        suggest(&app, &channel);
+        let ranking = app.themes(channel.id, None).unwrap().themes[0]
+            .ranking()
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            ranking.performance.map(|p| p.evidence.scope),
+            Some(EvidenceScope::Channel)
+        );
+    }
+
+    #[test]
+    fn the_engine_reads_only_the_newest_videos() {
+        let h = Harness::new();
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        for n in 0..(MAX_PAST_VIDEOS as u32 + 2) {
+            published(
+                &h,
+                &app,
+                &channel,
+                Post {
+                    niche: "space history",
+                    title: &format!("Video {n}"),
+                    days_ago: 100 - n,
+                    age: 7 * DAY,
+                    views: 100,
+                },
+            );
+        }
+        suggest(&app, &channel);
+        let (state, _) = h.decisions.calls().pop().unwrap();
+        assert!(state.contains("\"Video 41\""), "{state}");
+        assert!(!state.contains("\"Video 1\""), "{state}");
+        assert!(state.contains("- and 2 older videos"), "{state}");
+        let ranking = app.themes(channel.id, None).unwrap().themes[0]
+            .ranking()
+            .cloned()
+            .unwrap();
+        assert_eq!(ranking.performance.unwrap().evidence.basis, 42);
+    }
+
+    #[test]
+    fn the_evidence_reads_as_a_sentence() {
+        let h = Harness::new();
+        let app = h.start();
+        let evidence = |scope, videos, projected| PerformanceEvidence {
+            scope,
+            average_views: 12_400,
+            videos,
+            projected,
+            basis: 9,
+        };
+        assert_eq!(
+            app.performance_evidence(&evidence(EvidenceScope::Niche, 3, 0)),
+            "Videos in this niche averaged 12K views in their first 7 days on this channel \
+             (3 videos)."
+        );
+        assert_eq!(
+            app.performance_evidence(&evidence(EvidenceScope::Channel, 1, 1)),
+            "No video in this niche yet; the channel's one video had 12K views in its first 7 \
+             days. Projected from posts under a week old: 1."
+        );
+    }
+
+    #[test]
+    fn a_job_queued_before_past_performance_still_runs() {
+        let payload = ThemePayload::parse(
+            r#"{"channel":"0b0d7c7e-5b8e-4b8a-9d55-7e3b1c1d2e3f","niche":"space history",
+                "brief":{"channel_name":"A","country":"Brazil","language":"Portuguese",
+                "channel_niche":"","channel_themes":[],"aesthetic_notes":"","research":null}}"#,
+        )
+        .unwrap();
+        assert_eq!(payload.brief.past, None);
+        assert_eq!(
+            payload.brief.state("space history"),
+            payload.brief.describe("space history")
+        );
+        assert!(!payload.to_json().contains("past"), "no history, no field");
     }
 
     #[test]
