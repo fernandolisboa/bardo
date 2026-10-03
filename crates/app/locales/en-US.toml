@@ -1621,11 +1621,16 @@ resume = "Resume"
 retry = "Retry"
 check_again = "Check again"
 sent_at = "Uploaded {when}"
+start_scheduled = "Upload and schedule"
+scheduled_at = "Goes public {when}"
+scheduled_hint = "Private on {network} until then. {network} publishes it by itself, even with Bardo and your computer off."
+restricted_scheduled_hint = "YouTube kept it private at its publish time: your Google project has not passed the YouTube API audit."
 
 [upload.field]
 file = "File"
 channel = "Channel"
 visibility = "Visibility"
+when = "When"
 
 [upload.state]
 waiting = "Waiting to upload"
@@ -1637,6 +1642,7 @@ published = "Uploaded"
 restricted = "Kept private"
 stopped = "Upload stopped"
 failed = "Upload failed"
+scheduled = "Scheduled"
 
 [upload.failure]
 quota = "YouTube's daily upload quota for your Google project is used up. It resets at midnight Pacific time; retry then."
@@ -1646,6 +1652,7 @@ rejected = "{network} rejected the video ({reason}). Fix it and upload again."
 processing = "{network} could not process the video ({reason}). Render again and upload again."
 removed = "The video is no longer on {network}."
 render_changed = "The render changed after the review, so the rest of the file is not what you reviewed. Review the upload again."
+schedule_missed = "The publish time passed before the upload started, so nothing was sent. Review the upload again with a later time."
 
 [upload.block]
 not_offered = "Bardo doesn't upload to this network yet. Export the file and post it by hand."
@@ -1657,3 +1664,49 @@ no_render = "Render this account's preset first."
 render_outdated = "The cut or the preset changed since the render. Render again before uploading."
 no_metadata = "Write the title, description and tags first."
 problems = "Fix the metadata problems above first."
+
+[upload.when]
+now = "Once processed"
+schedule = "Schedule"
+
+[schedule]
+date = "Date"
+time = "Time"
+date_placeholder = "MM/DD/YYYY"
+time_placeholder = "6:30 PM"
+zone = "Your time zone: {zone}"
+hint = "It goes up private, and {network} makes it public at this time, even with Bardo and your computer off."
+change = "Change time"
+cancel = "Cancel schedule"
+save = "Save time"
+cancel_confirm = "Cancel the schedule? The video stays private on {network}. To publish it later, do it on {network}."
+cancel_yes = "Cancel schedule"
+keep = "Keep schedule"
+working = "Sending the change to {network}…"
+changed = "New time saved on {network}."
+cancelled = "Schedule cancelled. The video is private on {network}."
+already_live = "Too late to change: {network} already published it."
+not_scheduled = "This upload has no schedule to change any more."
+failed = "{network} didn't take the change. Try again."
+
+[date_time]
+format = "{weekday}, {month} {day}, {year}, {time}"
+time = "{hour12}:{minute} {period}"
+am = "AM"
+pm = "PM"
+with_zone = "{when} ({zone})"
+zone = "{name}, {offset}"
+
+[schedule.problem]
+date = "Type the date as MM/DD/YYYY."
+time = "Type the time as 18:30 or 6:30 PM."
+past = "That time has already passed. Pick a later one: YouTube would publish it right away."
+
+[weekday]
+1 = "Mon"
+2 = "Tue"
+3 = "Wed"
+4 = "Thu"
+5 = "Fri"
+6 = "Sat"
+7 = "Sun"

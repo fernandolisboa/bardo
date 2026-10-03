@@ -4,9 +4,12 @@
 mod common;
 
 use bardo_ai::http::Method;
+use std::time::{Duration, SystemTime};
+
 use bardo_domain::{
-    SecretText, UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo, VideoState,
-    VideoUpload, VideoUploader, Visibility,
+    Rfc3339, ScheduleChange, ScheduleOutcome, SecretText, UploadError, UploadErrorKind,
+    UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload, VideoUploader, Visibility,
+    parse_rfc3339,
 };
 use bardo_publish::YouTubeUploader;
 use common::{Scripted, fixture};
@@ -35,6 +38,7 @@ fn video() -> VideoUpload {
         visibility: Visibility::Public,
         made_for_kids: false,
         synthetic: true,
+        publish_at: None,
     }
 }
 
@@ -416,7 +420,7 @@ fn state(name: &str) -> Result<VideoState, UploadError> {
     let sent = uploader.transport().sent();
     assert_eq!(
         sent[0].url,
-        "https://www.googleapis.com/youtube/v3/videos?part=status&id=Xb7kQ2mN9pA"
+        "https://www.googleapis.com/youtube/v3/videos?part=snippet%2Cstatus&id=Xb7kQ2mN9pA"
     );
     assert_eq!(
         sent[0].header("authorization"),
@@ -431,13 +435,33 @@ fn the_videos_state_reads_processing_and_its_outcome() {
     assert_eq!(
         state("videos-processed-public"),
         Ok(VideoState::Ready {
-            visibility: Visibility::Public
+            visibility: Visibility::Public,
+            publish_at: None,
+            published_at: None,
         })
     );
     assert_eq!(
         state("videos-processed-private"),
         Ok(VideoState::Ready {
-            visibility: Visibility::Private
+            visibility: Visibility::Private,
+            publish_at: None,
+            published_at: None,
+        })
+    );
+    assert_eq!(
+        state("videos-scheduled"),
+        Ok(VideoState::Ready {
+            visibility: Visibility::Private,
+            publish_at: parse_rfc3339("2026-10-04T22:00:00Z"),
+            published_at: parse_rfc3339("2026-10-03T21:50:12Z"),
+        })
+    );
+    assert_eq!(
+        state("videos-live"),
+        Ok(VideoState::Ready {
+            visibility: Visibility::Public,
+            publish_at: None,
+            published_at: parse_rfc3339("2026-10-04T22:00:03Z"),
         })
     );
     assert_eq!(
@@ -453,4 +477,186 @@ fn the_videos_state_reads_processing_and_its_outcome() {
         state("videos-invalid-token").unwrap_err().kind,
         UploadErrorKind::Refused
     );
+}
+
+fn tomorrow() -> SystemTime {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    SystemTime::UNIX_EPOCH + Duration::from_secs(now - now % 60 + 24 * 3600)
+}
+
+#[test]
+fn a_scheduled_upload_goes_private_with_its_publish_time() {
+    let uploader = uploader(&[
+        "session-started",
+        "chunk-incomplete-1",
+        "chunk-incomplete-2",
+        "upload-complete",
+    ]);
+    let at = tomorrow();
+    let scheduled = VideoUpload {
+        publish_at: Some(at),
+        ..video()
+    };
+    uploader.upload(&scheduled, &mut FakeRun::new()).unwrap();
+    let body: serde_json::Value =
+        serde_json::from_str(&uploader.transport().sent()[0].body).unwrap();
+    assert_eq!(
+        body["status"],
+        serde_json::json!({
+            "privacyStatus": "private",
+            "publishAt": Rfc3339(at).to_string(),
+            "selfDeclaredMadeForKids": false,
+            "containsSyntheticMedia": true,
+        })
+    );
+    assert!(
+        Rfc3339(at).to_string().ends_with(":00Z"),
+        "UTC, to the second"
+    );
+}
+
+#[test]
+fn a_scheduled_upload_whose_time_passed_starts_no_session() {
+    let uploader = uploader(&[]);
+    let late = VideoUpload {
+        publish_at: Some(SystemTime::now() - Duration::from_secs(60)),
+        ..video()
+    };
+    let error = uploader.upload(&late, &mut FakeRun::new()).unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Late);
+    assert!(!error.kind.is_transient());
+    assert!(uploader.transport().sent().is_empty(), "nothing sent");
+}
+
+fn change(publish_at: Option<SystemTime>) -> ScheduleChange {
+    ScheduleChange {
+        publish_at,
+        made_for_kids: false,
+        synthetic: false,
+    }
+}
+
+fn reschedule(
+    names: &[&str],
+    change: &ScheduleChange,
+) -> (Result<ScheduleOutcome, UploadError>, Vec<common::Sent>) {
+    let uploader = uploader(names);
+    let outcome = uploader.reschedule(
+        &SecretText::new("ya29.fixture-access"),
+        "Xb7kQ2mN9pA",
+        change,
+    );
+    (outcome, uploader.transport().sent())
+}
+
+#[test]
+fn changing_the_time_sends_the_whole_status_back_with_the_new_time() {
+    let at = tomorrow();
+    let (outcome, sent) = reschedule(&["videos-scheduled", "update-scheduled"], &change(Some(at)));
+    assert_eq!(outcome, Ok(ScheduleOutcome::Changed));
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0].method, Method::Get, "reads the status first");
+    let update = &sent[1];
+    assert_eq!(update.method, Method::Put);
+    assert_eq!(
+        update.url,
+        "https://www.googleapis.com/youtube/v3/videos?part=status"
+    );
+    assert_eq!(
+        update.header("authorization"),
+        Some("Bearer ya29.fixture-access")
+    );
+    assert_eq!(update.header("content-type"), Some("application/json"));
+    let body: serde_json::Value = serde_json::from_str(&update.body).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "id": "Xb7kQ2mN9pA",
+            "status": {
+                "privacyStatus": "private",
+                "publishAt": Rfc3339(at).to_string(),
+                "license": "creativeCommon",
+                "embeddable": false,
+                "publicStatsViewable": false,
+                "selfDeclaredMadeForKids": true,
+                "containsSyntheticMedia": true,
+            },
+        }),
+        "every settable property, as the video has it; only the time changes"
+    );
+}
+
+#[test]
+fn cancelling_leaves_a_private_video_with_no_publish_time() {
+    let (outcome, sent) = reschedule(&["videos-scheduled", "update-scheduled"], &change(None));
+    assert_eq!(outcome, Ok(ScheduleOutcome::Changed));
+    let body: serde_json::Value = serde_json::from_str(&sent[1].body).unwrap();
+    assert_eq!(body["status"]["privacyStatus"], "private");
+    assert!(body["status"].get("publishAt").is_none());
+    assert_eq!(body["status"]["selfDeclaredMadeForKids"], true, "kept");
+    assert_eq!(body["status"]["containsSyntheticMedia"], true, "kept");
+}
+
+#[test]
+fn what_youtube_does_not_say_comes_from_the_upload() {
+    let declared = ScheduleChange {
+        publish_at: Some(tomorrow()),
+        made_for_kids: true,
+        synthetic: true,
+    };
+    let (outcome, sent) = reschedule(&["videos-scheduled-sparse", "update-scheduled"], &declared);
+    assert_eq!(outcome, Ok(ScheduleOutcome::Changed));
+    let body: serde_json::Value = serde_json::from_str(&sent[1].body).unwrap();
+    let status = body["status"].as_object().unwrap();
+    assert_eq!(status["selfDeclaredMadeForKids"], true);
+    assert_eq!(status["containsSyntheticMedia"], true);
+    assert!(
+        !status.contains_key("license") && !status.contains_key("embeddable"),
+        "nothing made up"
+    );
+}
+
+#[test]
+fn a_video_already_live_is_not_changed() {
+    let (outcome, sent) = reschedule(&["videos-live"], &change(Some(tomorrow())));
+    assert_eq!(
+        outcome,
+        Ok(ScheduleOutcome::Live {
+            visibility: Visibility::Public,
+            published_at: parse_rfc3339("2026-10-04T22:00:03Z"),
+        })
+    );
+    assert_eq!(sent.len(), 1, "no update sent");
+}
+
+#[test]
+fn a_new_time_that_is_not_ahead_is_not_sent() {
+    let past = SystemTime::now() - Duration::from_secs(60);
+    let (outcome, sent) = reschedule(&["videos-scheduled"], &change(Some(past)));
+    assert_eq!(outcome.unwrap_err().kind, UploadErrorKind::Late);
+    assert_eq!(sent.len(), 1, "no update sent");
+}
+
+#[test]
+fn schedule_changes_name_what_youtube_refused() {
+    let (outcome, _) = reschedule(&["videos-none"], &change(None));
+    assert_eq!(outcome.unwrap_err().kind, UploadErrorKind::NotFound);
+    let (outcome, _) = reschedule(&["videos-scheduled", "update-not-found"], &change(None));
+    assert_eq!(outcome.unwrap_err().kind, UploadErrorKind::NotFound);
+    let (outcome, _) = reschedule(
+        &["videos-scheduled", "update-invalid-publish-at"],
+        &change(Some(tomorrow())),
+    );
+    let error = outcome.unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Invalid);
+    assert!(
+        error.detail.contains("invalidPublishAt"),
+        "{}",
+        error.detail
+    );
+    let (outcome, _) = reschedule(&["videos-invalid-token"], &change(None));
+    assert_eq!(outcome.unwrap_err().kind, UploadErrorKind::Refused);
 }

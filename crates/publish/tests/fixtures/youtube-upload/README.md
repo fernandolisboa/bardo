@@ -38,3 +38,13 @@ during the publishing regression pass if an upload misbehaves):
   `videos-failed.http`: `videos.list part=status` while processing, when
   processed (as asked, and kept private), rejected and failed.
 - `videos-none.http`: the video is gone.
+- `videos-scheduled.http`: `videos.list part=snippet,status` of a private
+  video with a publish time, with status values that are not YouTube's
+  defaults (to show a schedule change keeps them);
+  `videos-scheduled-sparse.http`: the same with no snippet and only some
+  status properties; `videos-live.http`: the video after YouTube made it
+  public at its time, with `publishedAt`.
+- `update-scheduled.http`: `videos.update part=status` taking a new
+  publish time; `update-invalid-publish-at.http`: a publish time it does
+  not take (`invalidPublishAt`); `update-not-found.http`: the video is gone
+  (`videoNotFound`).

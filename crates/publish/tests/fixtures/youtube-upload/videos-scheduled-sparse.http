@@ -1,0 +1,23 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "FIXTURE-etag",
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "FIXTURE-etag",
+      "id": "Xb7kQ2mN9pA",
+      "status": {
+        "uploadStatus": "processed",
+        "privacyStatus": "private",
+        "publishAt": "2026-10-04T22:00:00Z"
+      }
+    }
+  ],
+  "pageInfo": {
+    "totalResults": 1,
+    "resultsPerPage": 1
+  }
+}

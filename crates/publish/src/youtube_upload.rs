@@ -1,5 +1,6 @@
-//! YouTube upload: `videos.insert` over the resumable upload protocol, and
-//! the uploaded video's status from `videos.list`.
+//! YouTube upload: `videos.insert` over the resumable upload protocol, the
+//! uploaded video's status from `videos.list`, and its schedule changed
+//! with `videos.update`.
 //!
 //! - A session starts with the video's details and the file's size
 //!   (`X-Upload-Content-Length`); YouTube answers with the session's address
@@ -14,16 +15,27 @@
 //! - 500, 502, 503 and 504 are worth resuming after a wait; the job queue
 //!   waits and resumes. `quotaExceeded` (the project's 100 uploads a day)
 //!   is not.
+//! - A scheduled upload goes `private` with `status.publishAt` (ISO 8601);
+//!   YouTube makes it public at that time, and publishes a past time at
+//!   once, so a session never starts once the time passed.
+//! - `videos.update` with `part=status` replaces the whole status: every
+//!   settable property left out is cleared. A schedule change reads the
+//!   status first and sends all of it back, changing only the privacy and
+//!   the publish time. It only applies while the video is private and was
+//!   never published.
 //!
 //! Docs checked 2026-10-03: <https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol>,
-//! <https://developers.google.com/youtube/v3/docs/videos/insert>.
+//! <https://developers.google.com/youtube/v3/docs/videos/insert>,
+//! <https://developers.google.com/youtube/v3/docs/videos>,
+//! <https://developers.google.com/youtube/v3/docs/videos/update>.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use bardo_ai::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
+use bardo_ai::http::{HttpRequest, HttpResponse, Method, Transport, UreqTransport};
 use bardo_domain::{
-    Network, SecretText, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT, UploadError, UploadErrorKind,
-    UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload, VideoUploader, Visibility,
+    Network, Rfc3339, ScheduleChange, ScheduleOutcome, SecretText, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT,
+    UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload,
+    VideoUploader, Visibility, parse_rfc3339,
 };
 use serde_json::{Value, json};
 
@@ -102,13 +114,21 @@ impl<T: Transport> YouTubeUploader<T> {
             .map_err(|error| UploadError::new(UploadErrorKind::Unreachable, error.0))
     }
 
-    /// Starts a session for a file of `size` bytes; its address.
+    /// Starts a session for a file of `size` bytes; its address. Never
+    /// once a scheduled video's publish time passed: YouTube would publish
+    /// it at once.
     fn start(
         &self,
         video: &VideoUpload,
         size: u64,
         token: &SecretText,
     ) -> Result<String, UploadError> {
+        if video.is_late(SystemTime::now()) {
+            return Err(UploadError::new(
+                UploadErrorKind::Late,
+                "the publish time passed before the upload started",
+            ));
+        }
         let url = format!(
             "{}/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
             self.endpoints.api
@@ -260,36 +280,17 @@ impl<T: Transport> VideoUploader for YouTubeUploader<T> {
     }
 
     fn state(&self, access_token: &SecretText, id: &str) -> Result<VideoState, UploadError> {
-        let query = form_urlencoded::Serializer::new(String::new())
-            .extend_pairs([("part", "status"), ("id", id)])
-            .finish();
-        let request = HttpRequest::get(format!("{}/youtube/v3/videos?{query}", self.endpoints.api))
-            .header("authorization", format!("Bearer {}", access_token.expose()));
-        let response = self.send(&request)?;
-        if !(200..=299).contains(&response.status) {
-            return Err(failure(&response));
-        }
-        let body: Value = serde_json::from_str(&response.body)
-            .map_err(|error| unexpected(&format!("unreadable videos answer: {error}")))?;
-        let Some(status) = body["items"]
-            .as_array()
-            .and_then(|items| items.first())
-            .map(|item| &item["status"])
-        else {
+        let Some(item) = self.video(access_token, id)? else {
             return Ok(VideoState::Removed);
         };
+        let status = &item["status"];
         let reason = |name: &str| status[name].as_str().unwrap_or("unknown").to_owned();
         Ok(match status["uploadStatus"].as_str() {
             Some("uploaded") => VideoState::Processing,
             Some("processed") => VideoState::Ready {
-                visibility: match status["privacyStatus"].as_str() {
-                    Some("public") => Visibility::Public,
-                    Some("unlisted") => Visibility::Unlisted,
-                    Some("private") => Visibility::Private,
-                    other => {
-                        return Err(unexpected(&format!("unknown privacy status {other:?}")));
-                    }
-                },
+                visibility: privacy(status)?,
+                publish_at: time(status, "publishAt")?,
+                published_at: time(&item["snippet"], "publishedAt")?,
             },
             Some("failed") => VideoState::Failed(reason("failureReason")),
             Some("rejected") => VideoState::Rejected(reason("rejectionReason")),
@@ -297,21 +298,144 @@ impl<T: Transport> VideoUploader for YouTubeUploader<T> {
             other => return Err(unexpected(&format!("unknown upload status {other:?}"))),
         })
     }
+
+    fn reschedule(
+        &self,
+        access_token: &SecretText,
+        id: &str,
+        change: &ScheduleChange,
+    ) -> Result<ScheduleOutcome, UploadError> {
+        let Some(item) = self.video(access_token, id)? else {
+            return Err(UploadError::new(
+                UploadErrorKind::NotFound,
+                "the video is no longer on YouTube",
+            ));
+        };
+        let current = &item["status"];
+        let visibility = privacy(current)?;
+        if visibility != Visibility::Private {
+            return Ok(ScheduleOutcome::Live {
+                visibility,
+                published_at: time(&item["snippet"], "publishedAt")?,
+            });
+        }
+        if change.publish_at.is_some_and(|at| at <= SystemTime::now()) {
+            return Err(UploadError::new(
+                UploadErrorKind::Late,
+                "the new publish time is not ahead",
+            ));
+        }
+        let body = json!({
+            "id": id,
+            "status": updated_status(current, change),
+        });
+        let url = format!("{}/youtube/v3/videos?part=status", self.endpoints.api);
+        let request = HttpRequest {
+            method: Method::Put,
+            ..HttpRequest::post_json(url, body.to_string())
+        }
+        .header("authorization", format!("Bearer {}", access_token.expose()));
+        let response = self.send(&request)?;
+        match response.status {
+            200..=299 => Ok(ScheduleOutcome::Changed),
+            404 => Err(UploadError::new(
+                UploadErrorKind::NotFound,
+                "the video is no longer on YouTube",
+            )),
+            _ => Err(failure(&response)),
+        }
+    }
 }
 
-/// The video resource `videos.insert` takes.
+impl<T: Transport> YouTubeUploader<T> {
+    /// The video `id` with its snippet and status, as its owner sees it;
+    /// `None` when YouTube no longer has it.
+    fn video(&self, access_token: &SecretText, id: &str) -> Result<Option<Value>, UploadError> {
+        let query = form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([("part", "snippet,status"), ("id", id)])
+            .finish();
+        let request = HttpRequest::get(format!("{}/youtube/v3/videos?{query}", self.endpoints.api))
+            .header("authorization", format!("Bearer {}", access_token.expose()));
+        let response = self.send(&request)?;
+        if !(200..=299).contains(&response.status) {
+            return Err(failure(&response));
+        }
+        let mut body: Value = serde_json::from_str(&response.body)
+            .map_err(|error| unexpected(&format!("unreadable videos answer: {error}")))?;
+        Ok(body["items"]
+            .as_array_mut()
+            .and_then(|items| items.first_mut())
+            .map(Value::take))
+    }
+}
+
+/// The video's privacy status.
+fn privacy(status: &Value) -> Result<Visibility, UploadError> {
+    match status["privacyStatus"].as_str() {
+        Some("public") => Ok(Visibility::Public),
+        Some("unlisted") => Ok(Visibility::Unlisted),
+        Some("private") => Ok(Visibility::Private),
+        other => Err(unexpected(&format!("unknown privacy status {other:?}"))),
+    }
+}
+
+/// An optional ISO 8601 time of `part`.
+fn time(part: &Value, name: &str) -> Result<Option<SystemTime>, UploadError> {
+    match &part[name] {
+        Value::Null => Ok(None),
+        Value::String(text) => parse_rfc3339(text)
+            .map(Some)
+            .ok_or_else(|| unexpected(&format!("unreadable {name} {text:?}"))),
+        other => Err(unexpected(&format!("unreadable {name} {other}"))),
+    }
+}
+
+/// The whole status `videos.update` takes: the video's current settable
+/// properties as they are, private, with the new publish time (or none).
+/// The made-for-kids answer and the synthetic-content disclosure are the
+/// video's own; the upload's when YouTube does not say.
+fn updated_status(current: &Value, change: &ScheduleChange) -> Value {
+    let mut status = serde_json::Map::new();
+    status.insert("privacyStatus".into(), json!("private"));
+    if let Some(at) = change.publish_at {
+        status.insert("publishAt".into(), json!(Rfc3339(at).to_string()));
+    }
+    for kept in ["embeddable", "license", "publicStatsViewable"] {
+        if !current[kept].is_null() {
+            status.insert(kept.into(), current[kept].clone());
+        }
+    }
+    let made_for_kids = current["selfDeclaredMadeForKids"]
+        .as_bool()
+        .or_else(|| current["madeForKids"].as_bool())
+        .unwrap_or(change.made_for_kids);
+    status.insert("selfDeclaredMadeForKids".into(), json!(made_for_kids));
+    let synthetic = current["containsSyntheticMedia"]
+        .as_bool()
+        .unwrap_or(change.synthetic);
+    status.insert("containsSyntheticMedia".into(), json!(synthetic));
+    Value::Object(status)
+}
+
+/// The video resource `videos.insert` takes. A scheduled video goes
+/// private with its publish time.
 fn resource(video: &VideoUpload) -> Value {
+    let mut status = json!({
+        "privacyStatus": video.visibility.code(),
+        "selfDeclaredMadeForKids": video.made_for_kids,
+        "containsSyntheticMedia": video.synthetic,
+    });
+    if let Some(at) = video.publish_at {
+        status["privacyStatus"] = json!(Visibility::Private.code());
+        status["publishAt"] = json!(Rfc3339(at).to_string());
+    }
     json!({
         "snippet": {
             "title": video.title,
             "description": video.description,
             "tags": video.tags,
         },
-        "status": {
-            "privacyStatus": video.visibility.code(),
-            "selfDeclaredMadeForKids": video.made_for_kids,
-            "containsSyntheticMedia": video.synthetic,
-        },
+        "status": status,
     })
 }
 

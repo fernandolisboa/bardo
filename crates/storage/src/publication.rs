@@ -17,7 +17,7 @@ const PUBLICATION_COLUMNS: &str = "publication.id, publication.project_id, publi
      publication.post_id, publication.url, publication.posted_at, publication.linked_at,
      publication.checked_at, publication.missing_since, publication.kind,
      publication.upload_status, publication.upload_failure, publication.upload_visibility,
-     publication.upload_job";
+     publication.upload_job, publication.upload_publish_at";
 
 /// A publication row as SQLite returns it.
 struct PublicationRow {
@@ -38,6 +38,7 @@ struct PublicationRow {
     upload_failure: Option<String>,
     upload_visibility: Option<String>,
     upload_job: Option<String>,
+    upload_publish_at: Option<i64>,
 }
 
 impl PublicationRow {
@@ -60,6 +61,7 @@ impl PublicationRow {
             upload_failure: row.get(14)?,
             upload_visibility: row.get(15)?,
             upload_job: row.get(16)?,
+            upload_publish_at: row.get(17)?,
         })
     }
 
@@ -83,6 +85,7 @@ impl PublicationRow {
                     .ok_or_else(|| broken("no upload visibility"))?
                     .parse::<Visibility>()
                     .map_err(boxed)?,
+                publish_at: self.upload_publish_at.map(from_unix_millis),
                 job: JobId::from(uuid(
                     self.upload_job
                         .as_deref()
@@ -168,9 +171,16 @@ fn stored(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
+/// The statuses whose upload sets `posted_at`: it went live, or waits
+/// for its publish time.
+const SETS_POSTED_AT: &str = "('published', 'restricted', 'scheduled')";
+
+/// The statuses after which a later save keeps `posted_at`: it went live.
+const LIVE: &str = "('published', 'restricted')";
+
 /// Saves a publication. One saved before keeps its dates and what syncs
 /// found (they belong to `save_sync`); its account, render, post and
-/// upload change. An upload that went live sets when it did.
+/// upload change. An upload that went live, or was scheduled, sets when.
 fn upsert(conn: &Connection, publication: &Publication) -> Result<(), RepositoryError> {
     // Another post linked for the same project and network goes, with its
     // snapshots.
@@ -185,25 +195,28 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
     .map_err(boxed)?;
     let upload = publication.upload();
     conn.execute(
-        "INSERT INTO publication (id, project_id, network, profile_id, account_id, render_id,
-                                  post_id, url, posted_at, linked_at, checked_at, missing_since,
-                                  kind, upload_status, upload_failure, upload_visibility,
-                                  upload_job)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
-         ON CONFLICT (id) DO UPDATE SET
-             account_id = excluded.account_id,
-             render_id = excluded.render_id,
-             post_id = excluded.post_id,
-             url = excluded.url,
-             kind = excluded.kind,
-             upload_status = excluded.upload_status,
-             upload_failure = excluded.upload_failure,
-             upload_visibility = excluded.upload_visibility,
-             upload_job = excluded.upload_job,
-             posted_at = CASE WHEN excluded.upload_status IN ('published', 'restricted')
-                                   AND publication.upload_status
-                                       NOT IN ('published', 'restricted')
-                              THEN excluded.posted_at ELSE publication.posted_at END",
+        &format!(
+            "INSERT INTO publication (id, project_id, network, profile_id, account_id, render_id,
+                                      post_id, url, posted_at, linked_at, checked_at,
+                                      missing_since, kind, upload_status, upload_failure,
+                                      upload_visibility, upload_job, upload_publish_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18)
+             ON CONFLICT (id) DO UPDATE SET
+                 account_id = excluded.account_id,
+                 render_id = excluded.render_id,
+                 post_id = excluded.post_id,
+                 url = excluded.url,
+                 kind = excluded.kind,
+                 upload_status = excluded.upload_status,
+                 upload_failure = excluded.upload_failure,
+                 upload_visibility = excluded.upload_visibility,
+                 upload_job = excluded.upload_job,
+                 upload_publish_at = excluded.upload_publish_at,
+                 posted_at = CASE WHEN excluded.upload_status IN {SETS_POSTED_AT}
+                                       AND publication.upload_status NOT IN {LIVE}
+                                  THEN excluded.posted_at ELSE publication.posted_at END"
+        ),
         params![
             publication.id.to_string(),
             publication.project.to_string(),
@@ -222,6 +235,7 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             upload.and_then(|upload| upload.status.failure().map(|failure| failure.code())),
             upload.map(|upload| upload.visibility.code()),
             upload.map(|upload| upload.job.to_string()),
+            upload.and_then(|upload| upload.publish_at.map(to_unix_millis)),
         ],
     )
     .map_err(boxed)?;
@@ -289,15 +303,19 @@ impl PublicationRepository for Database {
         let changed = self
             .conn()
             .execute(
-                "UPDATE publication SET
-                     post_id = ?3,
-                     url = ?4,
-                     upload_status = ?5,
-                     upload_failure = ?6,
-                     posted_at = CASE WHEN ?5 IN ('published', 'restricted')
-                                           AND upload_status NOT IN ('published', 'restricted')
-                                      THEN ?7 ELSE posted_at END
-                 WHERE id = ?1 AND upload_job = ?2",
+                &format!(
+                    "UPDATE publication SET
+                         post_id = ?3,
+                         url = ?4,
+                         upload_status = ?5,
+                         upload_failure = ?6,
+                         upload_visibility = ?8,
+                         upload_publish_at = ?9,
+                         posted_at = CASE WHEN ?5 IN {SETS_POSTED_AT}
+                                               AND upload_status NOT IN {LIVE}
+                                          THEN ?7 ELSE posted_at END
+                     WHERE id = ?1 AND upload_job = ?2"
+                ),
                 params![
                     publication.id.to_string(),
                     upload.job.to_string(),
@@ -306,6 +324,8 @@ impl PublicationRepository for Database {
                     upload.status.code(),
                     upload.status.failure().map(|failure| failure.code()),
                     to_unix_millis(publication.posted_at),
+                    upload.visibility.code(),
+                    upload.publish_at.map(to_unix_millis),
                 ],
             )
             .map_err(boxed)?;
@@ -518,7 +538,9 @@ mod tests {
         db.save_publication(&upload).unwrap();
         assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
 
-        upload.processed(Visibility::Private, time(400)).unwrap();
+        upload
+            .processed(Visibility::Private, None, time(400))
+            .unwrap();
         db.save_publication(&upload).unwrap();
         let read = db.publication(upload.id).unwrap().unwrap();
         assert_eq!(read.upload().unwrap().status, UploadStatus::Restricted);
@@ -547,7 +569,9 @@ mod tests {
             .unwrap();
         assert!(db.save_upload(&upload).unwrap());
         assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
-        upload.processed(Visibility::Unlisted, time(400)).unwrap();
+        upload
+            .processed(Visibility::Unlisted, None, time(400))
+            .unwrap();
         assert!(db.save_upload(&upload).unwrap());
         let read = db.publication(upload.id).unwrap().unwrap();
         assert_eq!(read.posted_at, time(400), "went live when processed");
@@ -571,6 +595,64 @@ mod tests {
         other.upload_mut().unwrap().start().unwrap();
         assert!(db.save_upload(&other).unwrap());
         assert_eq!(db.publications(project.id).unwrap(), [other]);
+    }
+
+    #[test]
+    fn a_scheduled_upload_keeps_its_publish_time_until_it_goes_live() {
+        let (db, _, project) = setup();
+        let mut upload = Publication {
+            kind: PublicationKind::Uploaded(Upload::scheduled(time(5_000), JobId::new())),
+            ..uploading(&project)
+        };
+        db.save_publication(&upload).unwrap();
+        assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
+        upload.upload_mut().unwrap().start().unwrap();
+        upload
+            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .unwrap();
+        upload
+            .processed(Visibility::Private, Some(time(5_000)), time(400))
+            .unwrap();
+        assert!(db.save_upload(&upload).unwrap());
+        let read = db.publication(upload.id).unwrap().unwrap();
+        assert_eq!(read.upload().unwrap().status, UploadStatus::Scheduled);
+        assert_eq!(read.posted_at, time(5_000), "goes live at its time");
+        assert_eq!(read, upload);
+
+        upload.rescheduled(time(6_000)).unwrap();
+        assert!(db.save_upload(&upload).unwrap());
+        assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
+
+        upload.schedule_seen(
+            bardo_domain::ScheduleReading::Live {
+                published_at: Some(time(6_002)),
+            },
+            time(7_000),
+        );
+        assert!(db.save_upload(&upload).unwrap());
+        db.save_sync(std::slice::from_ref(&upload), &[]).unwrap();
+        let read = db.publication(upload.id).unwrap().unwrap();
+        assert_eq!(read.posted_at, time(6_002), "YouTube's publish time");
+        assert_eq!(read.checked_at, Some(time(7_000)));
+        assert_eq!(read, upload);
+
+        let mut cancelled = Publication {
+            kind: PublicationKind::Uploaded(Upload::scheduled(time(5_000), JobId::new())),
+            ..uploading(&project)
+        };
+        cancelled.upload_mut().unwrap().start().unwrap();
+        cancelled
+            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pB").unwrap())
+            .unwrap();
+        cancelled
+            .processed(Visibility::Private, Some(time(5_000)), time(400))
+            .unwrap();
+        db.save_publication(&cancelled).unwrap();
+        cancelled.unscheduled().unwrap();
+        assert!(db.save_upload(&cancelled).unwrap());
+        let read = db.publication(cancelled.id).unwrap().unwrap();
+        assert_eq!(read.upload().unwrap().visibility, Visibility::Private);
+        assert_eq!(read.upload().unwrap().publish_at, None);
     }
 
     #[test]

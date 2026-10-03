@@ -5,7 +5,10 @@
 //! with a status, and gets its link once the network made the video. On
 //! YouTube a metrics sync reads the public statistics (views, likes,
 //! comments) with the Data API key and keeps a snapshot per sync; the other
-//! networks keep the link until publishing brings their metrics.
+//! networks keep the link until publishing brings their metrics. A
+//! scheduled upload (YouTube's `publishAt`) waits private on the network;
+//! the sync reads it back through the owner's connection until it goes
+//! live, and then tracks it like any other post.
 //!
 //! Links are read here, without a network call: the post's id must be in
 //! the link itself. Short links (`vm.tiktok.com/…`) hide it, so they are
@@ -19,7 +22,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     ApiKey, ChannelId, InvalidUploadTransition, Network, NetworkAccountId, ProfileId,
-    ProviderFailure, RenderId, RepositoryError, Upload, UploadStatus, VideoProjectId, Visibility,
+    ProviderFailure, RenderId, RepositoryError, SCHEDULE_GRACE, Upload, UploadStatus,
+    VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -397,6 +401,95 @@ impl Publication {
         }
     }
 
+    /// Whether the post waits on the network for its publish time.
+    pub fn is_scheduled(&self) -> bool {
+        self.upload()
+            .is_some_and(|upload| upload.status == UploadStatus::Scheduled)
+    }
+
+    /// Whether a metrics sync reads this post: for its public statistics,
+    /// or, while scheduled, to learn whether it went live.
+    pub fn is_tracked(&self) -> bool {
+        self.has_public_metrics() || (self.is_scheduled() && self.link.is_some())
+    }
+
+    /// What a sync read of a scheduled post, at `now`:
+    ///
+    /// - Live: it went public; it went live when the network says.
+    /// - Private with a publish time: still waiting, at that time (changed
+    ///   on the network or not), unless the time is more than
+    ///   `SCHEDULE_GRACE` past: then the network kept it private.
+    /// - Private without one: the schedule was cancelled on the network
+    ///   before its time (a private video now), or the network kept it
+    ///   private once its time passed.
+    /// - Missing: not found, like a post a sync no longer finds.
+    ///
+    /// A post that is not scheduled is left as it is.
+    pub fn schedule_seen(&mut self, reading: ScheduleReading, now: SystemTime) {
+        let Some(upload) = self
+            .upload_mut()
+            .filter(|u| u.status == UploadStatus::Scheduled)
+        else {
+            return;
+        };
+        let due = |at: SystemTime| at + SCHEDULE_GRACE <= now;
+        let step = match reading {
+            ScheduleReading::Live { published_at } => {
+                let fallback = upload.publish_at.unwrap_or(now);
+                upload
+                    .went_live()
+                    .map(|()| Some(published_at.unwrap_or(fallback)))
+            }
+            ScheduleReading::Private {
+                publish_at: Some(at),
+            } if due(at) => upload.kept_private().map(|()| None),
+            ScheduleReading::Private {
+                publish_at: Some(at),
+            } => upload.reschedule(at).map(|()| Some(at)),
+            ScheduleReading::Private { publish_at: None } => {
+                if upload.publish_at.is_some_and(due) {
+                    upload.kept_private().map(|()| None)
+                } else {
+                    upload.unschedule().map(|()| None)
+                }
+            }
+            ScheduleReading::Missing => {
+                self.checked(None, now);
+                return;
+            }
+        };
+        if let Ok(Some(posted_at)) = step {
+            self.posted_at = posted_at;
+        }
+        self.checked_at = Some(now);
+        self.missing_since = None;
+    }
+
+    /// The user changed the scheduled post's publish time on the network.
+    pub fn rescheduled(&mut self, publish_at: SystemTime) -> Result<(), InvalidUploadTransition> {
+        self.scheduled_upload("reschedule")?
+            .reschedule(publish_at)?;
+        self.posted_at = publish_at;
+        Ok(())
+    }
+
+    /// The user cancelled the scheduled post's publish time on the network:
+    /// it stays private.
+    pub fn unscheduled(&mut self) -> Result<(), InvalidUploadTransition> {
+        self.scheduled_upload("cancel the schedule of")?
+            .unschedule()
+    }
+
+    fn scheduled_upload(
+        &mut self,
+        action: &'static str,
+    ) -> Result<&mut Upload, InvalidUploadTransition> {
+        self.upload_mut().ok_or(InvalidUploadTransition {
+            from: "manual",
+            action,
+        })
+    }
+
     /// What a sync learned: the post with its statistics, or that it was
     /// not found.
     pub fn checked(&mut self, found: Option<&VideoStatistics>, at: SystemTime) {
@@ -425,20 +518,34 @@ impl Publication {
         Ok(())
     }
 
-    /// The network processed the uploaded video: it went live now.
+    /// The network processed the uploaded video: it went live `at`, or,
+    /// scheduled, goes live at its publish time.
     pub fn processed(
         &mut self,
         visibility: Visibility,
+        publish_at: Option<SystemTime>,
         at: SystemTime,
     ) -> Result<(), InvalidUploadTransition> {
-        let upload = self.upload_mut().ok_or(InvalidUploadTransition {
-            from: "manual",
-            action: "finish processing",
-        })?;
-        upload.processed(visibility)?;
-        self.posted_at = at;
+        let upload = self.scheduled_upload("finish processing")?;
+        upload.processed(visibility, publish_at)?;
+        self.posted_at = match (&upload.status, upload.publish_at) {
+            (UploadStatus::Scheduled, Some(publish_at)) => publish_at,
+            _ => at,
+        };
         Ok(())
     }
+}
+
+/// What a sync read of a scheduled post (`Publication::schedule_seen`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleReading {
+    /// The video is no longer private, public since `published_at` (the
+    /// network's time) when it says.
+    Live { published_at: Option<SystemTime> },
+    /// Still private, with the publish time the network holds.
+    Private { publish_at: Option<SystemTime> },
+    /// The network no longer has the video.
+    Missing,
 }
 
 /// A post's public statistics as the network reports them now. Likes and
@@ -551,16 +658,32 @@ impl MetricsSyncOnStart {
         }
     }
 
-    /// Whether a start at `now` syncs `publications`: some has public
-    /// metrics and was never checked, or the oldest check is older than
-    /// the interval. Off never syncs.
+    /// Whether a start at `now` syncs `publications`: some tracked post
+    /// was never checked, the oldest check is older than the interval, or
+    /// a scheduled post's publish time passed since its last check. Off
+    /// never syncs.
     pub fn is_due(self, publications: &[Publication], now: SystemTime) -> bool {
         let Some(interval) = self.interval() else {
             return false;
         };
+        // A scheduled post past its publish time, not checked since: did it
+        // go live?
+        let went_live = publications.iter().any(|publication| {
+            let passed = publication
+                .upload()
+                .and_then(|upload| upload.publish_at)
+                .map(|at| at + SCHEDULE_GRACE)
+                .filter(|passed| *passed <= now);
+            publication.is_tracked()
+                && publication.is_scheduled()
+                && passed.is_some_and(|passed| publication.checked_at.is_none_or(|c| c < passed))
+        });
+        if went_live {
+            return true;
+        }
         let mut checks = publications
             .iter()
-            .filter(|publication| publication.has_public_metrics())
+            .filter(|publication| publication.is_tracked())
             .map(|publication| publication.checked_at)
             .peekable();
         if checks.peek().is_none() {
@@ -697,11 +820,11 @@ pub trait PublicationRepository: Send + Sync {
     /// same network (and its snapshots, when it is another post).
     fn save_publication(&self, publication: &Publication) -> Result<(), RepositoryError>;
 
-    /// Saves an upload's progress: its status, and the post once the
-    /// network has it. Only the row of the same publication and upload job
-    /// changes, and nothing else goes, so a run that ends after the upload
-    /// was replaced leaves the replacement alone. Returns whether the row
-    /// was still there.
+    /// Saves an upload's progress: its status, visibility and publish time,
+    /// and the post once the network has it. Only the row of the same
+    /// publication and upload job changes, and nothing else goes, so a run
+    /// that ends after the upload was replaced leaves the replacement
+    /// alone. Returns whether the row was still there.
     fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError>;
 
     /// Removes a publication and its snapshots.
@@ -1099,7 +1222,7 @@ mod tests {
         assert!(!p.has_public_metrics(), "still processing");
         assert!(!p.is_posted(), "still processing");
 
-        p.processed(Visibility::Public, at(50)).unwrap();
+        p.processed(Visibility::Public, None, at(50)).unwrap();
         assert_eq!(p.upload().unwrap().status, UploadStatus::Published);
         assert_eq!(p.posted_at, at(50));
         assert!(p.has_public_metrics(), "joins the metrics sync");
@@ -1119,7 +1242,9 @@ mod tests {
     fn private_and_restricted_uploads_have_no_public_metrics() {
         let mut restricted = uploading(Visibility::Unlisted);
         restricted.sent(video()).unwrap();
-        restricted.processed(Visibility::Private, at(5)).unwrap();
+        restricted
+            .processed(Visibility::Private, None, at(5))
+            .unwrap();
         assert_eq!(
             restricted.upload().unwrap().status,
             UploadStatus::Restricted
@@ -1129,16 +1254,163 @@ mod tests {
 
         let mut private = uploading(Visibility::Private);
         private.sent(video()).unwrap();
-        private.processed(Visibility::Private, at(5)).unwrap();
+        private.processed(Visibility::Private, None, at(5)).unwrap();
         assert_eq!(private.upload().unwrap().status, UploadStatus::Published);
         assert!(!private.has_public_metrics());
+    }
+
+    /// A YouTube upload scheduled for `at(1000)`, processed and waiting.
+    fn scheduled() -> Publication {
+        let mut p = publication(Network::YouTube, None);
+        p.link = None;
+        p.kind = PublicationKind::Uploaded(Upload::scheduled(at(1000), crate::JobId::new()));
+        p.upload_mut().unwrap().start().unwrap();
+        p.sent(video()).unwrap();
+        p.processed(Visibility::Private, Some(at(1000)), at(5))
+            .unwrap();
+        p
+    }
+
+    const GRACE: u64 = SCHEDULE_GRACE.as_secs();
+
+    #[test]
+    fn a_scheduled_upload_waits_for_its_time_and_is_read_by_the_sync() {
+        let p = scheduled();
+        assert!(p.is_scheduled());
+        assert_eq!(p.posted_at, at(1000), "goes live at its publish time");
+        assert!(!p.is_posted(), "not live yet");
+        assert!(!p.has_public_metrics(), "private until then");
+        assert!(p.is_tracked(), "the sync reads it back");
+    }
+
+    #[test]
+    fn a_sync_that_finds_it_public_makes_it_published_at_the_networks_time() {
+        let mut p = scheduled();
+        p.schedule_seen(
+            ScheduleReading::Live {
+                published_at: Some(at(1003)),
+            },
+            at(2000),
+        );
+        assert_eq!(p.upload().unwrap().status, UploadStatus::Published);
+        assert_eq!(p.posted_at, at(1003), "YouTube's own publish time");
+        assert_eq!(p.checked_at, Some(at(2000)));
+        assert!(p.has_public_metrics(), "now tracked for its statistics");
+        assert!(p.is_posted());
+
+        let mut no_time = scheduled();
+        no_time.schedule_seen(ScheduleReading::Live { published_at: None }, at(2000));
+        assert_eq!(no_time.posted_at, at(1000), "the publish time asked");
+    }
+
+    #[test]
+    fn a_sync_reads_back_a_time_changed_on_the_network() {
+        let mut p = scheduled();
+        p.schedule_seen(
+            ScheduleReading::Private {
+                publish_at: Some(at(5000)),
+            },
+            at(900),
+        );
+        assert!(p.is_scheduled());
+        assert_eq!(p.upload().unwrap().publish_at, Some(at(5000)));
+        assert_eq!(p.posted_at, at(5000));
+        assert_eq!(p.checked_at, Some(at(900)));
+    }
+
+    #[test]
+    fn a_video_still_private_past_its_time_was_kept_private_by_the_network() {
+        // Shortly after the time, YouTube may not have flipped it yet.
+        let mut soon = scheduled();
+        let reading = ScheduleReading::Private {
+            publish_at: Some(at(1000)),
+        };
+        soon.schedule_seen(reading, at(1000 + GRACE - 1));
+        assert!(soon.is_scheduled());
+
+        let mut kept = scheduled();
+        kept.schedule_seen(reading, at(1000 + GRACE));
+        assert_eq!(kept.upload().unwrap().status, UploadStatus::Restricted);
+        assert!(!kept.has_public_metrics());
+
+        let mut dropped = scheduled();
+        dropped.schedule_seen(
+            ScheduleReading::Private { publish_at: None },
+            at(1000 + GRACE),
+        );
+        assert_eq!(
+            dropped.upload().unwrap().status,
+            UploadStatus::Restricted,
+            "no publish time any more, past it"
+        );
+    }
+
+    #[test]
+    fn a_schedule_cancelled_on_the_network_before_its_time_leaves_a_private_video() {
+        let mut p = scheduled();
+        p.schedule_seen(ScheduleReading::Private { publish_at: None }, at(500));
+        let upload = p.upload().unwrap();
+        assert_eq!(upload.status, UploadStatus::Published);
+        assert_eq!(upload.visibility, Visibility::Private);
+        assert_eq!(upload.publish_at, None);
+        assert!(!p.is_tracked(), "a private video has no public metrics");
+    }
+
+    #[test]
+    fn a_scheduled_video_no_longer_found_is_missing() {
+        let mut p = scheduled();
+        p.schedule_seen(ScheduleReading::Missing, at(600));
+        assert!(p.is_scheduled());
+        assert_eq!(p.missing_since, Some(at(600)));
+        p.schedule_seen(
+            ScheduleReading::Private {
+                publish_at: Some(at(1000)),
+            },
+            at(700),
+        );
+        assert_eq!(p.missing_since, None, "found again");
+    }
+
+    #[test]
+    fn only_a_scheduled_post_takes_schedule_readings() {
+        let mut manual = publication(Network::YouTube, None);
+        let before = manual.clone();
+        manual.schedule_seen(ScheduleReading::Live { published_at: None }, at(9));
+        assert_eq!(manual, before);
+        assert!(manual.rescheduled(at(9)).is_err());
+        assert!(manual.unscheduled().is_err());
+
+        let mut p = scheduled();
+        p.rescheduled(at(3000)).unwrap();
+        assert_eq!(
+            (p.upload().unwrap().publish_at, p.posted_at),
+            (Some(at(3000)), at(3000))
+        );
+        p.unscheduled().unwrap();
+        assert_eq!(p.upload().unwrap().visibility, Visibility::Private);
+        assert!(p.rescheduled(at(4000)).is_err(), "not scheduled any more");
+    }
+
+    #[test]
+    fn a_start_syncs_when_a_scheduled_post_passed_its_time() {
+        let six = MetricsSyncOnStart::Every6Hours;
+        let mut p = scheduled();
+        p.checked_at = Some(at(900));
+        assert!(!six.is_due(std::slice::from_ref(&p), at(1000)), "not yet");
+        assert!(six.is_due(std::slice::from_ref(&p), at(1000 + GRACE)));
+        p.checked_at = Some(at(1000 + GRACE));
+        assert!(
+            !six.is_due(std::slice::from_ref(&p), at(1000 + GRACE + 60)),
+            "checked since"
+        );
+        assert!(!MetricsSyncOnStart::Off.is_due(&[scheduled()], at(9999)));
     }
 
     #[test]
     fn a_manual_publication_takes_no_upload_steps() {
         let mut p = publication(Network::YouTube, None);
         assert!(p.sent(video()).is_err());
-        assert!(p.processed(Visibility::Public, at(1)).is_err());
+        assert!(p.processed(Visibility::Public, None, at(1)).is_err());
         assert_eq!(p.kind.code(), "manual");
     }
 

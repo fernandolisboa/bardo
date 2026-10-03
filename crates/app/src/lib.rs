@@ -26,6 +26,7 @@ mod publications;
 mod render;
 mod research;
 mod scenes;
+mod schedules;
 mod scripts;
 mod selection;
 mod stages;
@@ -46,7 +47,7 @@ use bardo_domain::{
     PublicationRepository, Redactor, RenderRepository, RepositoryError, ScenePlanRepository,
     ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository,
     TextGenerator, ThemeRepository, TimelineRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VideoUploader, VoiceLibrary,
+    VideoStats, VideoUploader, VoiceLibrary, Zone,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore};
@@ -96,6 +97,7 @@ pub use render::{
 };
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use scenes::{SceneError, ScenesView};
+pub use schedules::{ScheduleError, ScheduleResult, ScheduleUpdate};
 pub use scripts::{ScriptError, ScriptView};
 pub use selection::{Step, step_selection};
 pub use stages::{
@@ -343,6 +345,8 @@ pub struct Bardo {
     connection_book: ConnectionBook,
     profile: UserProfile,
     catalog: Catalog,
+    /// The system's time zone, which publish times are typed and shown in.
+    zone: Zone,
 }
 
 impl Bardo {
@@ -500,11 +504,22 @@ impl Bardo {
             files: Arc::clone(&files),
             export_files: Arc::clone(&export_files),
         };
+        let connection_book = ConnectionBook::load(
+            profile.id,
+            connection_secrets,
+            connections,
+            providers.sign_ins,
+            providers.consent,
+            redactor.clone(),
+        );
         let metrics_handler = MetricsSyncHandler {
             owner: profile.id,
             publications: Arc::clone(&publications),
             stats: Arc::clone(&providers.video_stats),
             secrets: Arc::clone(&secrets),
+            accounts: Arc::clone(&network_accounts),
+            connections: connection_book.connections().clone(),
+            uploaders: providers.uploaders.clone(),
         };
         let cut_handler = CutSuggestionHandler {
             owner: profile.id,
@@ -516,14 +531,6 @@ impl Bardo {
         };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
-        let connection_book = ConnectionBook::load(
-            profile.id,
-            connection_secrets,
-            connections,
-            providers.sign_ins,
-            providers.consent,
-            redactor.clone(),
-        );
         let upload_handler = crate::uploads::UploadHandler {
             publications: Arc::clone(&publications),
             accounts: Arc::clone(&network_accounts),
@@ -588,6 +595,7 @@ impl Bardo {
             connection_book,
             profile,
             catalog,
+            zone: Zone::new(jiff::tz::TimeZone::system()),
         })
     }
 

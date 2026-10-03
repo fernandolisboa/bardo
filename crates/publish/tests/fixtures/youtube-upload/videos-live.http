@@ -1,0 +1,35 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "FIXTURE-etag",
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "FIXTURE-etag",
+      "id": "Xb7kQ2mN9pA",
+      "snippet": {
+        "publishedAt": "2026-10-04T22:00:03Z",
+        "channelId": "UCFIXTUREchannel000000000",
+        "title": "Why the Voyager probes are still talking",
+        "description": "Fifty years out and still sending data home.",
+        "categoryId": "28"
+      },
+      "status": {
+        "uploadStatus": "processed",
+        "privacyStatus": "public",
+        "license": "youtube",
+        "embeddable": true,
+        "publicStatsViewable": true,
+        "madeForKids": false,
+        "selfDeclaredMadeForKids": false,
+        "containsSyntheticMedia": true
+      }
+    }
+  ],
+  "pageInfo": {
+    "totalResults": 1,
+    "resultsPerPage": 1
+  }
+}

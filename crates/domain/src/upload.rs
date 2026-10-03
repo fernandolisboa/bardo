@@ -10,7 +10,7 @@
 //! restart from what it saved.
 
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::{JobFailureKind, JobId, Network, SecretText, Visibility};
 
@@ -44,6 +44,9 @@ pub enum UploadFailure {
     /// The rendered file changed after the review (rendered again while
     /// the upload was stopped): the rest of it is not what was reviewed.
     RenderChanged,
+    /// The publish time passed before the upload could start: the network
+    /// would publish the video at once. The user reviews it again.
+    ScheduleMissed,
     /// The upload job failed for another reason.
     Job(JobFailureKind),
 }
@@ -59,6 +62,7 @@ impl UploadFailure {
             UploadFailure::ProcessingFailed(reason) => format!("processing:{reason}"),
             UploadFailure::Removed => "removed".to_owned(),
             UploadFailure::RenderChanged => "render_changed".to_owned(),
+            UploadFailure::ScheduleMissed => "schedule_missed".to_owned(),
             UploadFailure::Job(kind) => format!("job:{}", kind.code()),
         }
     }
@@ -78,6 +82,7 @@ impl UploadFailure {
                 "reconnect" => UploadFailure::ReconnectNeeded,
                 "removed" => UploadFailure::Removed,
                 "render_changed" => UploadFailure::RenderChanged,
+                "schedule_missed" => UploadFailure::ScheduleMissed,
                 _ => UploadFailure::Job(JobFailureKind::Unexpected),
             },
         }
@@ -93,6 +98,9 @@ pub enum UploadStatus {
     Uploading,
     /// The network has the file and is processing it.
     Processing,
+    /// On the network, private until its publish time (`Upload::publish_at`),
+    /// when the network makes it public by itself.
+    Scheduled,
     /// On the network with the visibility the upload asked for.
     Published,
     /// On the network, but kept private by it although the upload asked
@@ -110,6 +118,7 @@ impl UploadStatus {
             UploadStatus::Queued => "queued",
             UploadStatus::Uploading => "uploading",
             UploadStatus::Processing => "processing",
+            UploadStatus::Scheduled => "scheduled",
             UploadStatus::Published => "published",
             UploadStatus::Restricted => "restricted",
             UploadStatus::Failed(_) => "failed",
@@ -122,6 +131,7 @@ impl UploadStatus {
             "queued" => UploadStatus::Queued,
             "uploading" => UploadStatus::Uploading,
             "processing" => UploadStatus::Processing,
+            "scheduled" => UploadStatus::Scheduled,
             "published" => UploadStatus::Published,
             "restricted" => UploadStatus::Restricted,
             "failed" => UploadStatus::Failed(UploadFailure::from_code(failure.unwrap_or(""))),
@@ -133,6 +143,12 @@ impl UploadStatus {
     /// the upload.
     pub fn is_final(&self) -> bool {
         matches!(self, UploadStatus::Published | UploadStatus::Restricted)
+    }
+
+    /// Whether the network has the video, live or waiting for its publish
+    /// time: the upload job has nothing left to do.
+    pub fn is_on_network(&self) -> bool {
+        self.is_final() || *self == UploadStatus::Scheduled
     }
 
     pub fn failure(&self) -> Option<&UploadFailure> {
@@ -152,13 +168,18 @@ pub struct InvalidUploadTransition {
 }
 
 /// The upload side of an uploaded publication: its status, the
-/// visibility it asked for and the job that sends it.
+/// visibility it asked for, its publish time when scheduled, and the job
+/// that sends it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Upload {
     pub status: UploadStatus,
-    /// What the user chose in the review. The network may keep the video
-    /// private anyway (`UploadStatus::Restricted`).
+    /// What the user chose in the review: public for a scheduled upload
+    /// (what it becomes at its publish time). The network may keep the
+    /// video private anyway (`UploadStatus::Restricted`).
     pub visibility: Visibility,
+    /// When the network makes the video public: it goes up private until
+    /// then. `None` for an upload that goes live once processed.
+    pub publish_at: Option<SystemTime>,
     /// The job that uploads it; retrying that job resumes the upload.
     pub job: JobId,
 }
@@ -169,7 +190,17 @@ impl Upload {
         Self {
             status: UploadStatus::Queued,
             visibility,
+            publish_at: None,
             job,
+        }
+    }
+
+    /// A reviewed upload that goes up private and turns public at
+    /// `publish_at`, waiting for its job.
+    pub fn scheduled(publish_at: SystemTime, job: JobId) -> Self {
+        Self {
+            publish_at: Some(publish_at),
+            ..Self::queued(Visibility::Public, job)
         }
     }
 
@@ -204,21 +235,67 @@ impl Upload {
         }
     }
 
-    /// The network processed the video and shows it as `visibility`: a
-    /// private video where unlisted or public was asked is restricted.
-    pub fn processed(&mut self, visibility: Visibility) -> Result<(), InvalidUploadTransition> {
-        match self.status {
-            UploadStatus::Processing => {
-                self.status = if visibility == Visibility::Private
-                    && self.visibility != Visibility::Private
-                {
-                    UploadStatus::Restricted
-                } else {
-                    UploadStatus::Published
-                };
-                Ok(())
+    /// The network processed the video and shows it as `visibility`, with
+    /// the publish time it holds. A scheduled upload still private with a
+    /// publish time is scheduled (at the network's time); one the network
+    /// keeps private without it, like a private video where unlisted or
+    /// public was asked, is restricted.
+    pub fn processed(
+        &mut self,
+        visibility: Visibility,
+        publish_at: Option<SystemTime>,
+    ) -> Result<(), InvalidUploadTransition> {
+        if self.status != UploadStatus::Processing {
+            return Err(self.invalid("finish processing"));
+        }
+        self.status = match (self.publish_at, visibility, publish_at) {
+            (Some(_), Visibility::Private, Some(at)) => {
+                self.publish_at = Some(at);
+                UploadStatus::Scheduled
             }
-            _ => Err(self.invalid("finish processing")),
+            (_, Visibility::Private, _) if self.visibility != Visibility::Private => {
+                UploadStatus::Restricted
+            }
+            _ => UploadStatus::Published,
+        };
+        Ok(())
+    }
+
+    /// The network made the scheduled video public at its publish time.
+    pub fn went_live(&mut self) -> Result<(), InvalidUploadTransition> {
+        self.from_scheduled("go live")?;
+        self.status = UploadStatus::Published;
+        Ok(())
+    }
+
+    /// The publish time passed and the network kept the scheduled video
+    /// private: the user's API project has not passed the network's audit.
+    pub fn kept_private(&mut self) -> Result<(), InvalidUploadTransition> {
+        self.from_scheduled("keep private")?;
+        self.status = UploadStatus::Restricted;
+        Ok(())
+    }
+
+    /// The scheduled video now goes live at `publish_at`.
+    pub fn reschedule(&mut self, publish_at: SystemTime) -> Result<(), InvalidUploadTransition> {
+        self.from_scheduled("reschedule")?;
+        self.publish_at = Some(publish_at);
+        Ok(())
+    }
+
+    /// The schedule is gone: the video stays private, with no publish time.
+    pub fn unschedule(&mut self) -> Result<(), InvalidUploadTransition> {
+        self.from_scheduled("cancel the schedule of")?;
+        self.status = UploadStatus::Published;
+        self.visibility = Visibility::Private;
+        self.publish_at = None;
+        Ok(())
+    }
+
+    fn from_scheduled(&self, action: &'static str) -> Result<(), InvalidUploadTransition> {
+        match self.status {
+            UploadStatus::Scheduled => Ok(()),
+            _ => Err(self.invalid(action)),
         }
     }
 
@@ -235,9 +312,9 @@ impl Upload {
     }
 
     /// The upload failed for `failure`. A video already on the network
-    /// (published or restricted) cannot fail any more.
+    /// (published, restricted or scheduled) cannot fail any more.
     pub fn fail(&mut self, failure: UploadFailure) -> Result<(), InvalidUploadTransition> {
-        if self.status.is_final() {
+        if self.status.is_on_network() {
             return Err(self.invalid("fail"));
         }
         self.status = UploadStatus::Failed(failure);
@@ -258,6 +335,17 @@ pub struct VideoUpload {
     /// The video holds realistic altered or synthetic content (YouTube's
     /// `containsSyntheticMedia`).
     pub synthetic: bool,
+    /// When the network makes the video public: it goes up private until
+    /// then (YouTube's `publishAt`). `visibility` is public.
+    pub publish_at: Option<SystemTime>,
+}
+
+impl VideoUpload {
+    /// Whether the publish time is no longer ahead of `now`: a new upload
+    /// session would make the video public at once.
+    pub fn is_late(&self, now: SystemTime) -> bool {
+        self.publish_at.is_some_and(|at| at <= now)
+    }
 }
 
 /// The video the network made of a finished upload.
@@ -283,6 +371,11 @@ pub enum VideoState {
     /// Processed, showing as `visibility`.
     Ready {
         visibility: Visibility,
+        /// When the network makes the private video public, if scheduled.
+        publish_at: Option<SystemTime>,
+        /// When it went public, as the network says (YouTube's
+        /// `publishedAt`); only meaningful once it is not private.
+        published_at: Option<SystemTime>,
     },
     /// Processing failed, with the network's reason.
     Failed(String),
@@ -318,6 +411,11 @@ pub enum UploadErrorKind {
     Unexpected,
     /// The file could not be read, or the run could not save its state.
     Local,
+    /// The publish time passed before the upload could start: the network
+    /// would publish it at once.
+    Late,
+    /// The video is no longer on the network.
+    NotFound,
 }
 
 impl UploadErrorKind {
@@ -349,6 +447,29 @@ impl UploadError {
             detail: detail.into(),
         }
     }
+}
+
+/// A new publish time for a scheduled video, or none to cancel it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleChange {
+    pub publish_at: Option<SystemTime>,
+    /// What the upload declared, kept when the network does not say: a
+    /// change replaces the network's whole status.
+    pub made_for_kids: bool,
+    pub synthetic: bool,
+}
+
+/// How a schedule change ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleOutcome {
+    /// The network took the new publish time, or the cancel.
+    Changed,
+    /// Too late: the video is no longer private (it went live), so its
+    /// publish time cannot change. Nothing was sent.
+    Live {
+        visibility: Visibility,
+        published_at: Option<SystemTime>,
+    },
 }
 
 /// What an upload needs from whoever runs it: a token, the file, and where
@@ -394,6 +515,22 @@ pub trait VideoUploader: Send + Sync {
     /// Where the uploaded video `id` stands.
     fn state(&self, access_token: &SecretText, id: &str) -> Result<VideoState, UploadError>;
 
+    /// Changes the publish time of the scheduled video `id`, or cancels it
+    /// (`change.publish_at` is `None`: the video stays private). Only while
+    /// the video is private and was never published.
+    fn reschedule(
+        &self,
+        access_token: &SecretText,
+        id: &str,
+        change: &ScheduleChange,
+    ) -> Result<ScheduleOutcome, UploadError> {
+        let _ = (access_token, id, change);
+        Err(UploadError::new(
+            UploadErrorKind::NotAllowed,
+            "the network does not schedule videos",
+        ))
+    }
+
     /// How long to wait before processing check number `polls` (from 0).
     fn poll_delay(&self, polls: u32) -> Duration {
         // Fifteen seconds, doubling each time up to five minutes.
@@ -428,7 +565,7 @@ mod tests {
         );
         u.sent().unwrap();
         assert_eq!(u.status, UploadStatus::Processing);
-        u.processed(Visibility::Public).unwrap();
+        u.processed(Visibility::Public, None).unwrap();
         assert_eq!(u.status, UploadStatus::Published);
         assert!(u.status.is_final());
     }
@@ -439,14 +576,14 @@ mod tests {
             let mut u = upload(asked);
             u.start().unwrap();
             u.sent().unwrap();
-            u.processed(Visibility::Private).unwrap();
+            u.processed(Visibility::Private, None).unwrap();
             assert_eq!(u.status, UploadStatus::Restricted, "{asked:?}");
             assert!(u.status.is_final());
         }
         let mut private = upload(Visibility::Private);
         private.start().unwrap();
         private.sent().unwrap();
-        private.processed(Visibility::Private).unwrap();
+        private.processed(Visibility::Private, None).unwrap();
         assert_eq!(private.status, UploadStatus::Published, "private was asked");
     }
 
@@ -471,7 +608,7 @@ mod tests {
         let mut done = upload(Visibility::Public);
         done.start().unwrap();
         done.sent().unwrap();
-        done.processed(Visibility::Public).unwrap();
+        done.processed(Visibility::Public, None).unwrap();
         assert!(done.fail(UploadFailure::Removed).is_err());
         assert!(done.start().is_err(), "nothing left to send");
         assert_eq!(done.status, UploadStatus::Published);
@@ -482,9 +619,12 @@ mod tests {
         let mut u = upload(Visibility::Public);
         let error = u.sent().unwrap_err();
         assert_eq!(error.from, "queued");
-        assert!(u.processed(Visibility::Public).is_err());
+        assert!(u.processed(Visibility::Public, None).is_err());
         u.start().unwrap();
-        assert!(u.processed(Visibility::Public).is_err(), "not sent yet");
+        assert!(
+            u.processed(Visibility::Public, None).is_err(),
+            "not sent yet"
+        );
         u.sent().unwrap();
         u.sent().unwrap();
         assert_eq!(
@@ -504,7 +644,7 @@ mod tests {
             .unwrap();
         u.sent().unwrap();
         assert_eq!(u.status, UploadStatus::Processing);
-        u.processed(Visibility::Public).unwrap();
+        u.processed(Visibility::Public, None).unwrap();
         assert!(u.sent().is_err(), "published");
     }
 
@@ -520,9 +660,107 @@ mod tests {
         u.check_again(next).unwrap();
         assert_eq!(u.job, next);
         assert_eq!(u.status, UploadStatus::Processing);
-        u.processed(Visibility::Public).unwrap();
+        u.processed(Visibility::Public, None).unwrap();
         assert!(u.check_again(first).is_err(), "published");
         assert_eq!(u.job, next);
+    }
+
+    fn at(secs: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    fn scheduled(publish_at: SystemTime) -> Upload {
+        let mut u = Upload::scheduled(publish_at, JobId::new());
+        u.start().unwrap();
+        u.sent().unwrap();
+        u
+    }
+
+    #[test]
+    fn a_scheduled_upload_asks_for_public_at_its_time() {
+        let u = Upload::scheduled(at(100), JobId::new());
+        assert_eq!(u.visibility, Visibility::Public);
+        assert_eq!(u.publish_at, Some(at(100)));
+        assert_eq!(u.status, UploadStatus::Queued);
+        assert_eq!(upload(Visibility::Public).publish_at, None);
+    }
+
+    #[test]
+    fn a_processed_private_video_with_its_time_is_scheduled_at_the_networks_time() {
+        let mut u = scheduled(at(100));
+        u.processed(Visibility::Private, Some(at(160))).unwrap();
+        assert_eq!(u.status, UploadStatus::Scheduled);
+        assert_eq!(u.publish_at, Some(at(160)), "the network's time");
+        assert!(!u.status.is_final(), "it still goes live");
+        assert!(u.status.is_on_network());
+        assert!(u.start().is_err(), "nothing left to send");
+        assert!(
+            u.fail(UploadFailure::Removed).is_err(),
+            "on the network already"
+        );
+    }
+
+    #[test]
+    fn a_scheduled_upload_the_network_kept_private_without_a_time_is_restricted() {
+        let mut u = scheduled(at(100));
+        u.processed(Visibility::Private, None).unwrap();
+        assert_eq!(u.status, UploadStatus::Restricted);
+    }
+
+    #[test]
+    fn a_scheduled_upload_processed_after_its_time_may_be_public_already() {
+        let mut u = scheduled(at(100));
+        u.processed(Visibility::Public, None).unwrap();
+        assert_eq!(u.status, UploadStatus::Published);
+    }
+
+    #[test]
+    fn a_schedule_goes_live_or_is_kept_private() {
+        let mut live = scheduled(at(100));
+        live.processed(Visibility::Private, Some(at(100))).unwrap();
+        live.went_live().unwrap();
+        assert_eq!(live.status, UploadStatus::Published);
+        assert!(live.went_live().is_err(), "once");
+
+        let mut kept = scheduled(at(100));
+        kept.processed(Visibility::Private, Some(at(100))).unwrap();
+        kept.kept_private().unwrap();
+        assert_eq!(kept.status, UploadStatus::Restricted);
+        assert!(kept.reschedule(at(200)).is_err(), "no schedule any more");
+    }
+
+    #[test]
+    fn a_schedule_changes_or_is_cancelled_only_while_scheduled() {
+        let mut u = scheduled(at(100));
+        assert!(u.reschedule(at(200)).is_err(), "still processing");
+        u.processed(Visibility::Private, Some(at(100))).unwrap();
+        u.reschedule(at(200)).unwrap();
+        assert_eq!(u.publish_at, Some(at(200)));
+        assert_eq!(u.status, UploadStatus::Scheduled);
+
+        u.unschedule().unwrap();
+        assert_eq!(u.status, UploadStatus::Published);
+        assert_eq!(u.visibility, Visibility::Private, "a private video");
+        assert_eq!(u.publish_at, None);
+        assert!(u.unschedule().is_err());
+        assert!(u.reschedule(at(300)).is_err());
+    }
+
+    #[test]
+    fn a_video_is_late_once_its_publish_time_is_not_ahead() {
+        let mut video = VideoUpload {
+            title: "t".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            visibility: Visibility::Public,
+            made_for_kids: false,
+            synthetic: false,
+            publish_at: None,
+        };
+        assert!(!video.is_late(at(100)), "not scheduled");
+        video.publish_at = Some(at(100));
+        assert!(video.is_late(at(100)));
+        assert!(!video.is_late(at(99)));
     }
 
     #[test]
@@ -531,9 +769,11 @@ mod tests {
             UploadStatus::Queued,
             UploadStatus::Uploading,
             UploadStatus::Processing,
+            UploadStatus::Scheduled,
             UploadStatus::Published,
             UploadStatus::Restricted,
             UploadStatus::Failed(UploadFailure::QuotaExceeded),
+            UploadStatus::Failed(UploadFailure::ScheduleMissed),
             UploadStatus::Failed(UploadFailure::UploadLimit),
             UploadStatus::Failed(UploadFailure::ReconnectNeeded),
             UploadStatus::Failed(UploadFailure::Rejected("copyright".into())),
@@ -570,6 +810,8 @@ mod tests {
             UploadErrorKind::Unreachable,
             UploadErrorKind::Unexpected,
             UploadErrorKind::Local,
+            UploadErrorKind::Late,
+            UploadErrorKind::NotFound,
         ]
         .into_iter()
         .filter(|kind| kind.is_transient())
