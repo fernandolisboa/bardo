@@ -451,10 +451,13 @@ fn upload_state(
         );
     }
     if matches!(state, UploadState::Restricted) {
-        // A scheduled one was kept private at its publish time.
+        // A scheduled one was kept private at its publish time; before it,
+        // YouTube kept it private while processing it.
+        let now = std::time::SystemTime::now();
         let scheduled = publication
             .upload()
-            .is_some_and(|upload| upload.publish_at.is_some());
+            .and_then(|upload| upload.publish_at)
+            .is_some_and(|at| at <= now);
         let hint = if scheduled {
             Text::UploadRestrictedScheduledHint
         } else {

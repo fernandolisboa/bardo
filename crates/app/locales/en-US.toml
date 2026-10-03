@@ -1688,6 +1688,7 @@ cancelled = "Schedule cancelled. The video is private on {network}."
 already_live = "Too late to change: {network} already published it."
 not_scheduled = "This upload has no schedule to change any more."
 failed = "{network} didn't take the change. Try again."
+not_allowed = "{network} takes no publish time for this video: only a private video that was never public can be scheduled. Change it on {network}."
 
 [date_time]
 format = "{weekday}, {month} {day}, {year}, {time}"

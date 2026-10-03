@@ -426,6 +426,8 @@ impl Publication {
     ///
     /// A post that is not scheduled is left as it is.
     pub fn schedule_seen(&mut self, reading: ScheduleReading, now: SystemTime) {
+        // A video that stays private counts as posted from its upload.
+        let arrived = self.linked_at;
         let Some(upload) = self
             .upload_mut()
             .filter(|u| u.status == UploadStatus::Scheduled)
@@ -442,16 +444,17 @@ impl Publication {
             }
             ScheduleReading::Private {
                 publish_at: Some(at),
-            } if due(at) => upload.kept_private().map(|()| None),
+            } if due(at) => upload.kept_private().map(|()| Some(arrived)),
             ScheduleReading::Private {
                 publish_at: Some(at),
             } => upload.reschedule(at).map(|()| Some(at)),
             ScheduleReading::Private { publish_at: None } => {
                 if upload.publish_at.is_some_and(due) {
-                    upload.kept_private().map(|()| None)
+                    upload.kept_private()
                 } else {
-                    upload.unschedule().map(|()| None)
+                    upload.unschedule()
                 }
+                .map(|()| Some(arrived))
             }
             ScheduleReading::Missing => {
                 self.checked(None, now);
@@ -477,7 +480,9 @@ impl Publication {
     /// it stays private.
     pub fn unscheduled(&mut self) -> Result<(), InvalidUploadTransition> {
         self.scheduled_upload("cancel the schedule of")?
-            .unschedule()
+            .unschedule()?;
+        self.posted_at = self.linked_at;
+        Ok(())
     }
 
     fn scheduled_upload(
@@ -827,6 +832,16 @@ pub trait PublicationRepository: Send + Sync {
     /// alone. Returns whether the row was still there.
     fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError>;
 
+    /// Saves what was learned about a scheduled upload (a sync's read-back
+    /// or the user's change) as `save_upload` does, but only while the row
+    /// still holds the schedule it started from: scheduled to go public at
+    /// `from`. A change saved meanwhile wins. Returns whether it was saved.
+    fn save_schedule(
+        &self,
+        publication: &Publication,
+        from: SystemTime,
+    ) -> Result<bool, RepositoryError>;
+
     /// Removes a publication and its snapshots.
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError>;
 
@@ -877,6 +892,14 @@ impl<T: PublicationRepository + ?Sized> PublicationRepository for Arc<T> {
 
     fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError> {
         (**self).save_upload(publication)
+    }
+
+    fn save_schedule(
+        &self,
+        publication: &Publication,
+        from: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        (**self).save_schedule(publication, from)
     }
 
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
@@ -1332,6 +1355,7 @@ mod tests {
         kept.schedule_seen(reading, at(1000 + GRACE));
         assert_eq!(kept.upload().unwrap().status, UploadStatus::Restricted);
         assert!(!kept.has_public_metrics());
+        assert_eq!(kept.posted_at, kept.linked_at, "posted from its upload");
 
         let mut dropped = scheduled();
         dropped.schedule_seen(
@@ -1353,6 +1377,7 @@ mod tests {
         assert_eq!(upload.status, UploadStatus::Published);
         assert_eq!(upload.visibility, Visibility::Private);
         assert_eq!(upload.publish_at, None);
+        assert_eq!(p.posted_at, p.linked_at, "not the cancelled time");
         assert!(!p.is_tracked(), "a private video has no public metrics");
     }
 
@@ -1388,6 +1413,7 @@ mod tests {
         );
         p.unscheduled().unwrap();
         assert_eq!(p.upload().unwrap().visibility, Visibility::Private);
+        assert_eq!(p.posted_at, p.linked_at, "posted from its upload");
         assert!(p.rescheduled(at(4000)).is_err(), "not scheduled any more");
     }
 

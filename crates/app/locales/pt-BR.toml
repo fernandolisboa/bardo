@@ -1688,6 +1688,7 @@ cancelled = "Agendamento cancelado. O vídeo está privado no {network}."
 already_live = "Tarde demais para mudar: o {network} já o publicou."
 not_scheduled = "Este envio não tem mais um agendamento para mudar."
 failed = "O {network} não aceitou a mudança. Tente de novo."
+not_allowed = "O {network} não aceita horário de publicação para este vídeo: só um vídeo privado que nunca foi público pode ser agendado. Mude no {network}."
 
 [date_time]
 format = "{weekday}, {day} de {month} de {year}, {time}"

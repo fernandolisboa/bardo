@@ -651,7 +651,7 @@ fn schedule_changes_name_what_youtube_refused() {
         &change(Some(tomorrow())),
     );
     let error = outcome.unwrap_err();
-    assert_eq!(error.kind, UploadErrorKind::Invalid);
+    assert_eq!(error.kind, UploadErrorKind::ScheduleRefused);
     assert!(
         error.detail.contains("invalidPublishAt"),
         "{}",

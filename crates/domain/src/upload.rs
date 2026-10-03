@@ -414,6 +414,9 @@ pub enum UploadErrorKind {
     /// The publish time passed before the upload could start: the network
     /// would publish it at once.
     Late,
+    /// The network takes no publish time for the video: it was public
+    /// once, or the time is out of its range.
+    ScheduleRefused,
     /// The video is no longer on the network.
     NotFound,
 }

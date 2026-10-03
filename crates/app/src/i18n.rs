@@ -1251,6 +1251,7 @@ pub enum Text {
     ScheduleAlreadyLive,
     ScheduleNotScheduled,
     ScheduleFailed,
+    ScheduleNotAllowed,
     DateTimeFormat,
     TimeFormat,
     TimeAm,
@@ -2602,6 +2603,7 @@ impl Text {
             Text::ScheduleAlreadyLive => "schedule.already_live",
             Text::ScheduleNotScheduled => "schedule.not_scheduled",
             Text::ScheduleFailed => "schedule.failed",
+            Text::ScheduleNotAllowed => "schedule.not_allowed",
             Text::DateTimeFormat => "date_time.format",
             Text::TimeFormat => "date_time.time",
             Text::TimeAm => "date_time.am",
@@ -4085,6 +4087,7 @@ mod tests {
         texts.push(Text::ScheduleAlreadyLive);
         texts.push(Text::ScheduleNotScheduled);
         texts.push(Text::ScheduleFailed);
+        texts.push(Text::ScheduleNotAllowed);
         texts.push(Text::DateTimeFormat);
         texts.push(Text::TimeFormat);
         texts.push(Text::TimeAm);

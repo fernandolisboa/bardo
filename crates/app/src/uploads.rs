@@ -463,7 +463,7 @@ fn failure_of(error: &UploadError, network: Network) -> (JobFailure, Option<Uplo
         ),
         // YouTube may not schedule a time already past: the user reviews
         // the upload again with a new time.
-        UploadErrorKind::Late => (
+        UploadErrorKind::Late | UploadErrorKind::ScheduleRefused => (
             JobFailureKind::NotAllowed,
             Some(UploadFailure::ScheduleMissed),
         ),
@@ -758,6 +758,19 @@ impl JobHandler for UploadHandler {
                 // Stopped: the session and the bytes are saved.
                 Ok(None) => return Ok(()),
                 Err(_) if cx.should_stop() => return Ok(()),
+                // Not retryable: the publish time passed before the video
+                // went, and the user reviews the upload with a new one.
+                Err(error)
+                    if matches!(
+                        error.kind,
+                        UploadErrorKind::Late | UploadErrorKind::ScheduleRefused
+                    ) =>
+                {
+                    return self.update(publication_id, job, |p| {
+                        p.upload_mut()
+                            .map_or(Ok(()), |upload| upload.fail(UploadFailure::ScheduleMissed))
+                    });
+                }
                 Err(error) => return Err(self.failed(publication_id, job, &error, network)),
             }
         }
@@ -792,11 +805,14 @@ impl JobHandler for UploadHandler {
                 Ok(VideoState::Ready {
                     visibility,
                     publish_at,
-                    ..
+                    published_at,
                 }) => {
-                    let now = SystemTime::now();
+                    // A schedule YouTube already published has its own time.
+                    let at = published_at
+                        .filter(|_| visibility != Visibility::Private)
+                        .unwrap_or_else(SystemTime::now);
                     return self.update(publication_id, job, |p| {
-                        p.processed(visibility, publish_at, now)
+                        p.processed(visibility, publish_at, at)
                     });
                 }
                 Ok(VideoState::Failed(reason)) => UploadFailure::ProcessingFailed(reason),
@@ -1439,10 +1455,25 @@ pub(crate) mod tests {
 
     #[test]
     fn a_publish_time_that_passed_before_the_upload_started_is_not_retried() {
-        let error = UploadError::new(UploadErrorKind::Late, "late");
-        let (job, failure) = failure_of(&error, Network::YouTube);
-        assert_eq!(failure, Some(UploadFailure::ScheduleMissed));
-        assert!(!job.kind.is_transient(), "the user reviews it again");
+        let s = ready();
+        s.h.uploader
+            .will(Attempt::FailAfter(0, UploadErrorKind::Late));
+        let review = review(&s);
+        let at = SystemTime::now() + std::time::Duration::from_secs(3600);
+        let choices = UploadChoices {
+            publish_at: Some(at),
+            ..review.choices()
+        };
+        let job = done(&s.app, start(&s, choices));
+        assert_eq!(job.attempts(), 1, "not retried by the queue");
+        assert_eq!(
+            state(&s),
+            UploadState::Failed {
+                failure: UploadFailure::ScheduleMissed,
+                retryable: false,
+            },
+            "the user reviews it again with a new time"
+        );
         let gone = UploadError::new(UploadErrorKind::NotFound, "gone");
         assert_eq!(
             failure_of(&gone, Network::YouTube).1,

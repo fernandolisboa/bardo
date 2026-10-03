@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use bardo_domain::{
     ChannelId, JobId, MetricsSnapshot, Network, NetworkAccountId, PostLink, ProfileId, Publication,
     PublicationId, PublicationKind, PublicationRepository, RenderId, RepositoryError, Upload,
@@ -297,39 +299,15 @@ impl PublicationRepository for Database {
     }
 
     fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError> {
-        let Some(upload) = publication.upload() else {
-            return Ok(false);
-        };
-        let changed = self
-            .conn()
-            .execute(
-                &format!(
-                    "UPDATE publication SET
-                         post_id = ?3,
-                         url = ?4,
-                         upload_status = ?5,
-                         upload_failure = ?6,
-                         upload_visibility = ?8,
-                         upload_publish_at = ?9,
-                         posted_at = CASE WHEN ?5 IN {SETS_POSTED_AT}
-                                               AND upload_status NOT IN {LIVE}
-                                          THEN ?7 ELSE posted_at END
-                     WHERE id = ?1 AND upload_job = ?2"
-                ),
-                params![
-                    publication.id.to_string(),
-                    upload.job.to_string(),
-                    publication.link.as_ref().map(PostLink::post_id),
-                    publication.link.as_ref().map(PostLink::url),
-                    upload.status.code(),
-                    upload.status.failure().map(|failure| failure.code()),
-                    to_unix_millis(publication.posted_at),
-                    upload.visibility.code(),
-                    upload.publish_at.map(to_unix_millis),
-                ],
-            )
-            .map_err(boxed)?;
-        Ok(changed > 0)
+        update_upload(&self.conn(), publication, None)
+    }
+
+    fn save_schedule(
+        &self,
+        publication: &Publication,
+        from: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        update_upload(&self.conn(), publication, Some(from))
     }
 
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
@@ -409,6 +387,51 @@ impl PublicationRepository for Database {
             channel.to_string(),
         )
     }
+}
+
+/// Saves an upload's progress on the row of the same publication and
+/// upload job; with `scheduled_at`, only while the row is still scheduled
+/// to go public then. Returns whether the row changed.
+fn update_upload(
+    conn: &Connection,
+    publication: &Publication,
+    scheduled_at: Option<SystemTime>,
+) -> Result<bool, RepositoryError> {
+    let Some(upload) = publication.upload() else {
+        return Ok(false);
+    };
+    let changed = conn
+        .execute(
+            &format!(
+                "UPDATE publication SET
+                     post_id = ?3,
+                     url = ?4,
+                     upload_status = ?5,
+                     upload_failure = ?6,
+                     upload_visibility = ?8,
+                     upload_publish_at = ?9,
+                     posted_at = CASE WHEN ?5 IN {SETS_POSTED_AT}
+                                           AND upload_status NOT IN {LIVE}
+                                      THEN ?7 ELSE posted_at END
+                 WHERE id = ?1 AND upload_job = ?2
+                   AND (?10 IS NULL
+                        OR (upload_status = 'scheduled' AND upload_publish_at = ?10))"
+            ),
+            params![
+                publication.id.to_string(),
+                upload.job.to_string(),
+                publication.link.as_ref().map(PostLink::post_id),
+                publication.link.as_ref().map(PostLink::url),
+                upload.status.code(),
+                upload.status.failure().map(|failure| failure.code()),
+                to_unix_millis(publication.posted_at),
+                upload.visibility.code(),
+                upload.publish_at.map(to_unix_millis),
+                scheduled_at.map(to_unix_millis),
+            ],
+        )
+        .map_err(boxed)?;
+    Ok(changed > 0)
 }
 
 #[cfg(test)]
@@ -595,6 +618,53 @@ mod tests {
         other.upload_mut().unwrap().start().unwrap();
         assert!(db.save_upload(&other).unwrap());
         assert_eq!(db.publications(project.id).unwrap(), [other]);
+    }
+
+    #[test]
+    fn a_schedule_read_saves_only_over_the_schedule_it_started_from() {
+        let (db, _, project) = setup();
+        let mut upload = Publication {
+            kind: PublicationKind::Uploaded(Upload::scheduled(time(5_000), JobId::new())),
+            ..uploading(&project)
+        };
+        upload.upload_mut().unwrap().start().unwrap();
+        upload
+            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .unwrap();
+        upload
+            .processed(Visibility::Private, Some(time(5_000)), time(400))
+            .unwrap();
+        db.save_publication(&upload).unwrap();
+
+        // The user moved it to 6,000 while a sync read 5,000 and found it
+        // live: the sync's word does not overwrite the change.
+        let mut changed = upload.clone();
+        changed.rescheduled(time(6_000)).unwrap();
+        assert!(db.save_schedule(&changed, time(5_000)).unwrap());
+        let mut stale = upload.clone();
+        stale.schedule_seen(
+            bardo_domain::ScheduleReading::Live { published_at: None },
+            time(5_100),
+        );
+        assert!(!db.save_schedule(&stale, time(5_000)).unwrap());
+        assert_eq!(db.publication(upload.id).unwrap(), Some(changed.clone()));
+
+        // A read from the schedule as it stands is saved.
+        let mut live = changed.clone();
+        live.schedule_seen(
+            bardo_domain::ScheduleReading::Live {
+                published_at: Some(time(6_001)),
+            },
+            time(6_100),
+        );
+        assert!(db.save_schedule(&live, time(6_000)).unwrap());
+        let read = db.publication(upload.id).unwrap().unwrap();
+        assert_eq!(read.upload().unwrap().status, UploadStatus::Published);
+        assert_eq!(read.posted_at, time(6_001));
+        assert!(
+            !db.save_schedule(&live, time(6_000)).unwrap(),
+            "not scheduled any more"
+        );
     }
 
     #[test]

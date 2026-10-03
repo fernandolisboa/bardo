@@ -346,6 +346,8 @@ pub struct Bardo {
     profile: UserProfile,
     catalog: Catalog,
     /// The system's time zone, which publish times are typed and shown in.
+    /// Read once at start: a zone changed while Bardo runs applies after a
+    /// restart.
     zone: Zone,
 }
 

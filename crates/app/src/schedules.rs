@@ -40,6 +40,10 @@ pub enum ScheduleError {
     /// The network no longer has the video.
     #[error("the video is gone")]
     Removed,
+    /// The network takes no publish time for the video any more: it was
+    /// public once.
+    #[error("the network takes no publish time for the video")]
+    NotAllowed,
     /// The network did not take the change: offline, refused or down.
     #[error("the network did not take the change: {0}")]
     Failed(String),
@@ -55,6 +59,7 @@ impl ScheduleError {
             ScheduleError::Problem(problem) => Text::ScheduleProblem(*problem),
             ScheduleError::ReconnectNeeded => Text::UploadFailureReconnect,
             ScheduleError::Removed => Text::UploadFailureRemoved,
+            ScheduleError::NotAllowed => Text::ScheduleNotAllowed,
             ScheduleError::Failed(_) | ScheduleError::Repository(_) => Text::ScheduleFailed,
         }
     }
@@ -99,6 +104,10 @@ impl ScheduleUpdate {
                 Err(error) => Err(failed(error)),
             };
         };
+        let from = publication
+            .upload()
+            .and_then(|upload| upload.publish_at)
+            .ok_or(ScheduleError::NotScheduled)?;
         let now = SystemTime::now();
         let result = match outcome {
             Ok(ScheduleOutcome::Changed) => match self.change.publish_at {
@@ -113,8 +122,6 @@ impl ScheduleUpdate {
             },
             Ok(ScheduleOutcome::Live { published_at, .. }) => {
                 publication.schedule_seen(ScheduleReading::Live { published_at }, now);
-                self.publications
-                    .save_sync(std::slice::from_ref(&publication), &[])?;
                 ScheduleResult::AlreadyLive
             }
             Err(error) if error.kind == UploadErrorKind::NotFound => {
@@ -125,7 +132,15 @@ impl ScheduleUpdate {
             }
             Err(error) => return Err(failed(error)),
         };
-        self.publications.save_upload(&publication)?;
+        // A sync that recorded something else meanwhile (the video went
+        // live, or was kept private) has the later word.
+        if !self.publications.save_schedule(&publication, from)? {
+            return Err(ScheduleError::NotScheduled);
+        }
+        if result == ScheduleResult::AlreadyLive {
+            self.publications
+                .save_sync(std::slice::from_ref(&publication), &[])?;
+        }
         tracing::info!(network = self.account.network.code(), "changed a schedule");
         Ok(result)
     }
@@ -140,6 +155,7 @@ fn failed(error: bardo_domain::UploadError) -> ScheduleError {
         UploadErrorKind::SignedOut | UploadErrorKind::Refused => ScheduleError::ReconnectNeeded,
         UploadErrorKind::Late => ScheduleError::Problem(ScheduleProblem::Past),
         UploadErrorKind::NotFound => ScheduleError::Removed,
+        UploadErrorKind::ScheduleRefused => ScheduleError::NotAllowed,
         _ => ScheduleError::Failed(error.detail),
     }
 }
@@ -427,6 +443,38 @@ mod tests {
     }
 
     #[test]
+    fn without_a_key_a_sync_still_reads_the_schedules_next_to_public_posts() {
+        let s = scheduled(tomorrow());
+        // A post linked by hand on another project: its numbers need a key.
+        let (second, _) = s.h.drawn_project(&s.app);
+        let manual = Publication {
+            id: bardo_domain::PublicationId::new(),
+            project: second.id,
+            kind: bardo_domain::PublicationKind::Manual,
+            link: Some(
+                bardo_domain::PostLink::parse(Network::YouTube, "https://youtu.be/dQw4w9WgXcQ")
+                    .unwrap(),
+            ),
+            ..upload(&s)
+        };
+        s.app.publications.save_publication(&manual).unwrap();
+        let status = s.app.metrics_sync_status().unwrap();
+        assert!(status.can_sync());
+        s.h.uploader.answer(Ok(VideoState::Ready {
+            visibility: Visibility::Public,
+            publish_at: None,
+            published_at: Some(tomorrow()),
+        }));
+
+        sync(&s);
+
+        assert_eq!(upload(&s).upload().unwrap().status, UploadStatus::Published);
+        assert!(s.h.stats.calls().is_empty(), "no key: no statistics read");
+        let manual = s.app.publications.publication(manual.id).unwrap().unwrap();
+        assert_eq!(manual.checked_at, None, "left for a sync with a key");
+    }
+
+    #[test]
     fn a_post_that_went_live_gets_its_numbers_in_the_same_sync_with_a_key() {
         let mut s = scheduled(tomorrow());
         s.app
@@ -589,6 +637,11 @@ mod tests {
             change(&s, None),
             Err(ScheduleError::ReconnectNeeded)
         ));
+
+        push(UploadErrorKind::ScheduleRefused);
+        let error = change(&s, Some(tomorrow())).unwrap_err();
+        assert!(matches!(error, ScheduleError::NotAllowed));
+        assert_eq!(error.message(), Text::ScheduleNotAllowed);
 
         push(UploadErrorKind::NotFound);
         assert!(matches!(change(&s, None), Err(ScheduleError::Removed)));

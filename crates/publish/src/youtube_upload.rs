@@ -501,6 +501,8 @@ fn failure(response: &HttpResponse) -> UploadError {
         }
         403 => UploadErrorKind::NotAllowed,
         429 => UploadErrorKind::RateLimited,
+        // A publish time on a video that was public once.
+        400 if has("invalidPublishAt") => UploadErrorKind::ScheduleRefused,
         400 => UploadErrorKind::Invalid,
         500 | 502 | 503 | 504 => UploadErrorKind::NetworkDown,
         _ => UploadErrorKind::Unexpected,
