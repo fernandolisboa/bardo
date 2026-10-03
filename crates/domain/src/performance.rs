@@ -296,6 +296,7 @@ mod tests {
             views,
             likes: None,
             comments: None,
+            owner: None,
         }
     }
 
@@ -311,6 +312,28 @@ mod tests {
         assert_eq!(week(at(0), &snaps), Some((2_000, false)));
         // Exactly at seven days.
         assert_eq!(week(at(0), &[snap(p, 7.0, 4_200)]), Some((4_200, false)));
+    }
+
+    #[test]
+    fn the_first_week_reads_public_views_even_with_owner_numbers() {
+        let p = PublicationId::new();
+        let owned = |snapshot: MetricsSnapshot| MetricsSnapshot {
+            owner: Some(crate::OwnerMetrics {
+                views: 1,
+                engaged_views: 1,
+                minutes_watched: 1,
+                average_view_seconds: 1,
+                average_view_share: crate::Share::default(),
+                earnings: crate::Earnings::NotMonetized,
+            }),
+            ..snapshot
+        };
+        let week = first_week(
+            at(0),
+            &[owned(snap(p, 5.0, 1_000)), owned(snap(p, 9.0, 3_000))],
+        )
+        .unwrap();
+        assert_eq!(week.views, 2_000, "engaged views arrive days late");
     }
 
     #[test]

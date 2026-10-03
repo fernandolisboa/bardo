@@ -8,7 +8,10 @@
 //! networks keep the link until publishing brings their metrics. A
 //! scheduled upload (YouTube's `publishAt`) waits private on the network;
 //! the sync reads it back through the owner's connection until it goes
-//! live, and then tracks it like any other post.
+//! live, and then tracks it like any other post. When the channel's account
+//! is connected, a sync also reads the owner's numbers of each YouTube post
+//! it found (#79, `owner_metrics`): they ride on the same snapshot, and the
+//! retention curve is kept as last read.
 //!
 //! Links are read here, without a network call: the post's id must be in
 //! the link itself. Short links (`vm.tiktok.com/…`) hide it, so they are
@@ -21,9 +24,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ChannelId, InvalidUploadTransition, Network, NetworkAccountId, ProfileId,
-    ProviderFailure, RenderId, RepositoryError, SCHEDULE_GRACE, Upload, UploadStatus,
-    VideoProjectId, Visibility,
+    ApiKey, ChannelId, InvalidUploadTransition, Money, Network, NetworkAccountId, OwnerMetrics,
+    ProfileId, ProviderFailure, RenderId, RepositoryError, RetentionCurve, SCHEDULE_GRACE, Upload,
+    UploadStatus, VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -570,12 +573,22 @@ pub struct VideoStatistics {
 pub struct MetricsSnapshot {
     pub publication: PublicationId,
     pub taken_at: SystemTime,
+    /// The public view count.
     pub views: u64,
     pub likes: Option<u64>,
     pub comments: Option<u64>,
+    /// The owner's numbers, when the channel's account is connected and
+    /// the network had data for the post (48 to 72 hours late).
+    pub owner: Option<OwnerMetrics>,
 }
 
 impl MetricsSnapshot {
+    /// The number a screen leads with: engaged views when the owner's
+    /// numbers are there, else the public views.
+    pub fn headline_views(&self) -> u64 {
+        self.owner.map_or(self.views, |owner| owner.engaged_views)
+    }
+
     /// Views gained (or lost, when YouTube recounts) from this snapshot
     /// to `later`.
     pub fn views_to(&self, later: &MetricsSnapshot) -> i64 {
@@ -590,8 +603,17 @@ impl MetricsSnapshot {
             views: statistics.views,
             likes: statistics.likes,
             comments: statistics.comments,
+            owner: None,
         }
     }
+}
+
+/// A post's retention curve as a sync last read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostRetention {
+    pub publication: PublicationId,
+    pub read_at: SystemTime,
+    pub curve: RetentionCurve,
 }
 
 /// Reads public statistics of posts (YouTube Data API, key only).
@@ -731,6 +753,19 @@ pub struct MetricsTotals {
     pub comments: Option<u64>,
     /// How many posts the totals add up.
     pub posts: usize,
+    /// The owner's numbers of the posts that have them; `None` when none
+    /// has.
+    pub owner: Option<OwnerTotals>,
+}
+
+/// The owner's numbers added up, over the posts that have them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OwnerTotals {
+    pub engaged_views: u64,
+    pub minutes_watched: u64,
+    /// The revenue of the monetized posts; `None` when none is.
+    pub revenue: Option<Money>,
+    pub posts: usize,
 }
 
 impl MetricsTotals {
@@ -743,6 +778,21 @@ impl MetricsTotals {
         self.likes = sum(self.likes, snapshot.likes);
         self.comments = sum(self.comments, snapshot.comments);
         self.posts += 1;
+        if let Some(owner) = &snapshot.owner {
+            let totals = self.owner.get_or_insert_with(OwnerTotals::default);
+            totals.engaged_views = totals.engaged_views.saturating_add(owner.engaged_views);
+            totals.minutes_watched = totals.minutes_watched.saturating_add(owner.minutes_watched);
+            if let Some(money) = owner.money() {
+                totals.revenue = Some(
+                    totals
+                        .revenue
+                        .unwrap_or(Money::ZERO)
+                        .saturating_add(money.revenue)
+                        .min(Money::MAX),
+                );
+            }
+            totals.posts += 1;
+        }
     }
 
     /// The latest snapshot of each post added up.
@@ -864,6 +914,19 @@ pub trait PublicationRepository: Send + Sync {
         &self,
         channel: ChannelId,
     ) -> Result<Vec<MetricsSnapshot>, RepositoryError>;
+
+    /// Replaces each post's retention curve with the one given; a post
+    /// removed meanwhile is skipped.
+    fn save_retention(&self, curves: &[PostRetention]) -> Result<(), RepositoryError>;
+
+    /// The post's retention curve as last read.
+    fn retention(
+        &self,
+        publication: PublicationId,
+    ) -> Result<Option<PostRetention>, RepositoryError>;
+
+    /// The retention curves of every publication of the channel.
+    fn channel_retention(&self, channel: ChannelId) -> Result<Vec<PostRetention>, RepositoryError>;
 }
 
 impl<T: PublicationRepository + ?Sized> PublicationRepository for Arc<T> {
@@ -926,6 +989,21 @@ impl<T: PublicationRepository + ?Sized> PublicationRepository for Arc<T> {
         channel: ChannelId,
     ) -> Result<Vec<MetricsSnapshot>, RepositoryError> {
         (**self).channel_snapshots(channel)
+    }
+
+    fn save_retention(&self, curves: &[PostRetention]) -> Result<(), RepositoryError> {
+        (**self).save_retention(curves)
+    }
+
+    fn retention(
+        &self,
+        publication: PublicationId,
+    ) -> Result<Option<PostRetention>, RepositoryError> {
+        (**self).retention(publication)
+    }
+
+    fn channel_retention(&self, channel: ChannelId) -> Result<Vec<PostRetention>, RepositoryError> {
+        (**self).channel_retention(channel)
     }
 }
 
@@ -1493,6 +1571,7 @@ mod tests {
             views,
             likes,
             comments: Some(1),
+            owner: None,
         }
     }
 
@@ -1511,6 +1590,64 @@ mod tests {
         assert_eq!(totals.posts, 2);
         assert_eq!(MetricsTotals::latest(&[]), MetricsTotals::default());
         assert_eq!(MetricsTotals::latest(&[snap(b, 0, 1, None)]).likes, None);
+    }
+
+    fn owned(snapshot: MetricsSnapshot, engaged: u64, revenue: Option<Money>) -> MetricsSnapshot {
+        MetricsSnapshot {
+            owner: Some(OwnerMetrics {
+                views: snapshot.views,
+                engaged_views: engaged,
+                minutes_watched: engaged / 2,
+                average_view_seconds: 20,
+                average_view_share: crate::Share::of_percent(50.0),
+                earnings: match revenue {
+                    Some(revenue) => crate::Earnings::Monetized(crate::MoneyReport {
+                        revenue,
+                        ..crate::MoneyReport::default()
+                    }),
+                    None => crate::Earnings::NotMonetized,
+                },
+            }),
+            ..snapshot
+        }
+    }
+
+    #[test]
+    fn the_headline_is_engaged_views_when_the_owner_numbers_are_there() {
+        let p = PublicationId::new();
+        assert_eq!(snap(p, 0, 1_000, None).headline_views(), 1_000);
+        assert_eq!(
+            owned(snap(p, 0, 1_000, None), 640, None).headline_views(),
+            640
+        );
+    }
+
+    #[test]
+    fn owner_totals_add_the_posts_that_have_them() {
+        let (a, b, c) = (
+            PublicationId::new(),
+            PublicationId::new(),
+            PublicationId::new(),
+        );
+        let snapshots = [
+            owned(snap(a, 0, 100, None), 80, Some(Money::from_cents(150))),
+            owned(snap(b, 0, 300, None), 200, None),
+            snap(c, 0, 50, None),
+        ];
+        let totals = MetricsTotals::latest(&snapshots);
+        assert_eq!(totals.views, 450, "public views of every post");
+        let owner = totals.owner.unwrap();
+        assert_eq!(owner.engaged_views, 280);
+        assert_eq!(owner.minutes_watched, 140);
+        assert_eq!(
+            owner.revenue,
+            Some(Money::from_cents(150)),
+            "monetized only"
+        );
+        assert_eq!(owner.posts, 2);
+        assert_eq!(MetricsTotals::latest(&[snap(c, 0, 5, None)]).owner, None);
+        let unpaid = MetricsTotals::latest(&[owned(snap(b, 0, 9, None), 9, None)]);
+        assert_eq!(unpaid.owner.unwrap().revenue, None);
     }
 
     #[test]

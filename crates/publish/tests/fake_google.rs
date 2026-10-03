@@ -178,6 +178,7 @@ fn sign_in(address: &str) -> YouTubeSignIn {
             token: format!("{address}/token"),
             revoke: format!("{address}/revoke"),
             api: address.to_owned(),
+            analytics: address.to_owned(),
         })
 }
 

@@ -7,8 +7,10 @@
 pub mod loopback;
 pub mod oauth;
 pub mod youtube;
+pub mod youtube_analytics;
 pub mod youtube_upload;
 
 pub use loopback::LoopbackReceiver;
 pub use youtube::{GoogleEndpoints, YouTubeSignIn};
+pub use youtube_analytics::YouTubeAnalytics;
 pub use youtube_upload::YouTubeUploader;

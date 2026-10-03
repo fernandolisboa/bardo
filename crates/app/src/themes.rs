@@ -1234,6 +1234,7 @@ mod tests {
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
+                analytics: Vec::new(),
             };
             Bardo::start_with(
                 repositories,
@@ -1880,6 +1881,7 @@ mod tests {
                 views,
                 likes: None,
                 comments: None,
+                owner: None,
             };
             h.db.save_sync(&[], &[snapshot]).unwrap();
         }

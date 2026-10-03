@@ -1355,7 +1355,7 @@ pub(crate) mod tests {
     use crate::{EditAction, PublicationError, RenderError};
 
     const FILE: &[u8] = b"0123456789";
-    const ACCESS: &str = "ya29.upload-access";
+    pub(crate) const ACCESS: &str = "ya29.upload-access";
 
     fn youtube(s: &Setup) -> NetworkAccount {
         NetworkAccountRepository::list(&*s.h.db, s.project.channel)

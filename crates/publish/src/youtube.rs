@@ -35,6 +35,8 @@ pub struct GoogleEndpoints {
     pub revoke: String,
     /// The YouTube Data API's base address.
     pub api: String,
+    /// The YouTube Analytics API's base address.
+    pub analytics: String,
 }
 
 impl Default for GoogleEndpoints {
@@ -44,6 +46,7 @@ impl Default for GoogleEndpoints {
             token: "https://oauth2.googleapis.com/token".into(),
             revoke: "https://oauth2.googleapis.com/revoke".into(),
             api: "https://www.googleapis.com".into(),
+            analytics: "https://youtubeanalytics.googleapis.com".into(),
         }
     }
 }
