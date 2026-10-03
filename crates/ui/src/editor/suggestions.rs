@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use bardo_app::bardo_domain::{CutReasons, JobState, STRONG_CUT, Score, timecode};
+use bardo_app::bardo_domain::{CutReasons, JobState, Score, timecode};
 use bardo_app::{
     Bardo, BudgetConsent, CutSuggestionError, SpendEstimate, SuggestionState, SuggestionView,
     SuggestionsView, Text,
@@ -783,7 +783,7 @@ impl EditorScreen {
         let strong = view
             .items
             .iter()
-            .any(|item| item.state == SuggestionState::Pending && item.reaches(STRONG_CUT));
+            .any(|item| item.state == SuggestionState::Pending && item.reaches(view.strong()));
         let accept_strong = asked_before.then(|| {
             tool_button("cuts-accept-strong", strong, false)
                 .border_1()
@@ -791,7 +791,7 @@ impl EditorScreen {
                 .child(icon(IconName::Check, if strong { TEXT_2 } else { TEXT_3 }))
                 .child(bardo.text_with(
                     Text::CutsAcceptStrong,
-                    &[("score", &bardo.score(STRONG_CUT))],
+                    &[("score", &bardo.score(view.strong()))],
                 ))
                 .when(strong, |button| {
                     button.on_click(

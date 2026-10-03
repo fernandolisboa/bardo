@@ -66,7 +66,9 @@ pub fn sentences(narration: &Narration) -> Vec<Sentence> {
     sentences
 }
 
-fn ends_sentence(word: &str) -> bool {
+/// A word that ends a sentence: `.`, `!`, `?` or `…`, past closing quotes
+/// and brackets.
+pub(crate) fn ends_sentence(word: &str) -> bool {
     word.trim_end_matches(['"', '\'', '”', '’', '»', ')', ']', '*'])
         .ends_with(['.', '!', '?', '…'])
 }

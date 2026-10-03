@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::editor::{EditAction, Editor, EditorError};
+use crate::export::unix_millis;
 use crate::jobs::{JobContext, JobHandler};
 use crate::{AppError, Bardo, KeyState, Text};
 
@@ -123,8 +124,11 @@ impl SuggestionView {
 /// The suggestions part of the editor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuggestionsView {
-    /// Those the cut plays, in timeline order.
+    /// Those the cut plays with room for a shot each side, in timeline
+    /// order.
     pub items: Vec<SuggestionView>,
+    /// The job that made them.
+    pub set: Option<JobId>,
     /// The project's latest scoring job.
     pub job: Option<Job>,
     /// The score a suggestion needs to show unless the user asks for all.
@@ -139,6 +143,7 @@ impl Default for SuggestionsView {
     fn default() -> Self {
         Self {
             items: Vec::new(),
+            set: None,
             job: None,
             floor: DEFAULT_CUT_FLOOR,
             open_points: 0,
@@ -157,6 +162,12 @@ impl SuggestionsView {
         self.items
             .iter()
             .filter(move |item| item.state == SuggestionState::Pending && item.reaches(floor))
+    }
+
+    /// The score "accept all" takes: [`STRONG_CUT`], or the floor when
+    /// that is higher, so it never accepts what does not show.
+    pub fn strong(&self) -> Score {
+        self.floor.max(STRONG_CUT)
     }
 
     /// Pending suggestions below the floor, hidden unless asked for.
@@ -213,6 +224,9 @@ fn nanos(duration: Duration) -> u64 {
 struct CutPayload {
     project: String,
     narration: String,
+    /// When the job was queued, in Unix milliseconds: suggestions saved
+    /// after it (by a newer job) are not replaced when this one is retried.
+    queued_at: u64,
     points: Vec<Point>,
 }
 
@@ -373,17 +387,32 @@ impl CutSuggestionHandler {
     }
 }
 
+impl CutSuggestionHandler {
+    /// Whether the project's saved suggestions are this job's, or newer
+    /// than it: then it has nothing left to save.
+    fn superseded(
+        &self,
+        project: VideoProjectId,
+        payload: &CutPayload,
+        cx: &JobContext,
+    ) -> Result<bool, JobFailure> {
+        let saved = self
+            .suggestions
+            .cut_suggestions(project)
+            .map_err(unexpected)?;
+        Ok(saved.is_some_and(|saved| {
+            saved.job == cx.id() || unix_millis(saved.made_at) > payload.queued_at
+        }))
+    }
+}
+
 impl JobHandler for CutSuggestionHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let payload = CutPayload::parse(payload)?;
         let (project, narration_id) = payload.ids()?;
         // An earlier attempt may have saved them and stopped before the
-        // queue recorded it as done.
-        let saved = self
-            .suggestions
-            .cut_suggestions(project)
-            .map_err(unexpected)?;
-        if saved.is_some_and(|saved| saved.job == cx.id()) {
+        // queue recorded it as done, or a newer job replaced them.
+        if self.superseded(project, &payload, cx)? {
             return Ok(());
         }
         let narration = self
@@ -400,10 +429,11 @@ impl JobHandler for CutSuggestionHandler {
             .map(|point| point.candidate())
             .collect();
         let chunks = cut_chunks(&narration, &candidates, &CHUNK_LIMITS);
-        let mut checkpoint: CutCheckpoint = cx
-            .checkpoint()
-            .and_then(|text| serde_json::from_str(text).ok())
-            .unwrap_or_default();
+        let mut checkpoint: CutCheckpoint = match cx.checkpoint() {
+            Some(text) => serde_json::from_str(text)
+                .map_err(|e| JobFailure::unexpected(format!("invalid checkpoint: {e}")))?,
+            None => CutCheckpoint::default(),
+        };
         let total = chunks.len().max(1) as u64;
 
         if checkpoint.chunks < chunks.len() {
@@ -449,7 +479,7 @@ impl JobHandler for CutSuggestionHandler {
                 .map_err(unexpected)?;
             }
         }
-        if cx.should_stop() {
+        if cx.should_stop() || self.superseded(project, &payload, cx)? {
             return Ok(());
         }
 
@@ -510,13 +540,24 @@ struct ProjectOf {
 }
 
 impl Bardo {
-    fn latest_cut_job(&self, project: VideoProjectId) -> Option<Job> {
+    /// The project's scoring jobs, oldest first.
+    fn cut_jobs(&self, project: VideoProjectId) -> impl DoubleEndedIterator<Item = Job> {
         let project = project.to_string();
-        self.jobs().into_iter().rev().find(|job| {
+        self.jobs().into_iter().filter(move |job| {
             job.kind() == JobKind::CutSuggestions
                 && serde_json::from_str::<ProjectOf>(job.payload())
                     .is_ok_and(|of| of.project == project)
         })
+    }
+
+    /// The project's running scoring job, else its latest.
+    fn latest_cut_job(&self, project: VideoProjectId) -> Option<Job> {
+        let mut jobs: Vec<Job> = self.cut_jobs(project).collect();
+        let running = jobs.iter().rposition(|job| job.state().is_active());
+        match running {
+            Some(index) => Some(jobs.swap_remove(index)),
+            None => jobs.pop(),
+        }
     }
 
     /// The suggestions part of the editor of `project`, on `timeline` as
@@ -541,12 +582,19 @@ impl Bardo {
             .cut_suggestions(project)?
             .filter(|saved| saved.narration == narration.id);
         if let Some(saved) = saved {
+            view.set = Some(saved.job);
             view.items = saved
                 .suggestions
                 .iter()
                 .enumerate()
                 .filter_map(|(index, suggestion)| {
                     let place = place_cut(timeline, suggestion.source)?;
+                    // A point a cut made since leaves too short a shot.
+                    if matches!(place, CutPlace::Open { .. })
+                        && !place.has_room(timeline, &CutRules::default())
+                    {
+                        return None;
+                    }
                     let state = match (place, suggestion.status) {
                         (CutPlace::Made { .. }, _) => SuggestionState::Accepted,
                         (CutPlace::Open { .. }, SuggestionStatus::Pending) => {
@@ -596,10 +644,7 @@ impl Bardo {
             .narrations
             .narration(project)?
             .ok_or(CutSuggestionError::NothingToCut)?;
-        if self
-            .latest_cut_job(project)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.cut_jobs(project).any(|job| job.state().is_active()) {
             return Err(CutSuggestionError::Busy);
         }
         if self.provider_key(Provider::TypeSafe).state == KeyState::NotSet {
@@ -617,6 +662,7 @@ impl Bardo {
         let payload = CutPayload {
             project: project.to_string(),
             narration: narration.id.to_string(),
+            queued_at: unix_millis(SystemTime::now()),
             points: points.iter().map(Point::of).collect(),
         };
         let job = self.jobs.enqueue(Job::new(
@@ -647,24 +693,29 @@ impl Bardo {
         Ok(())
     }
 
-    /// Accepts every pending suggestion that scores [`STRONG_CUT`] or
-    /// more, each as its own cut; the number accepted.
+    /// Accepts every pending suggestion that scores
+    /// [`SuggestionsView::strong`] or more, each as its own cut, earliest
+    /// first; one a cut before it left without room is skipped. The number
+    /// accepted.
     pub fn accept_strong_suggestions(
         &self,
         editor: &mut Editor,
     ) -> Result<usize, CutSuggestionError> {
-        let strong: Vec<usize> = editor
-            .view()
-            .suggestions
-            .items
-            .iter()
-            .filter(|item| item.state == SuggestionState::Pending && item.reaches(STRONG_CUT))
-            .map(|item| item.index)
-            .collect();
-        for &index in &strong {
+        let mut accepted = 0;
+        loop {
+            let suggestions = &editor.view().suggestions;
+            let strong = suggestions.strong();
+            let Some(index) = suggestions
+                .items
+                .iter()
+                .find(|item| item.state == SuggestionState::Pending && item.reaches(strong))
+                .map(|item| item.index)
+            else {
+                return Ok(accepted);
+            };
             self.accept_suggestion(editor, index)?;
+            accepted += 1;
         }
-        Ok(strong.len())
     }
 
     /// Turns suggestion `index` down: it leaves the timeline and stays in
@@ -697,13 +748,9 @@ impl Bardo {
             .cut_suggestions
             .cut_suggestions(project)?
             .ok_or(CutSuggestionError::NoSuchSuggestion)?;
-        if !editor
-            .view()
-            .suggestions
-            .items
-            .iter()
-            .any(|item| item.index == index)
-        {
+        // The editor may show an earlier set than the one saved now.
+        let shown = &editor.view().suggestions;
+        if shown.set != Some(saved.job) || !shown.items.iter().any(|item| item.index == index) {
             return Err(CutSuggestionError::NoSuchSuggestion);
         }
         if saved.set_status(index, status) {
@@ -938,9 +985,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_long_script_is_scored_a_stretch_at_a_time() {
-        let h = Harness::new();
+    /// A project narrated for 5 minutes, 120 sentences in scenes of a
+    /// few: over a hundred points, several stretches.
+    fn long(h: &Harness) -> (Bardo, VideoProject, Editor) {
         let sentences: Vec<String> = (0..120)
             .map(|n| format!("The probe sent its report number {n} home."))
             .collect();
@@ -965,7 +1012,14 @@ mod tests {
             app.plan_scenes(project.id, false, BudgetConsent::Ask)
                 .unwrap(),
         );
-        let mut editor = app.open_editor(project.id).unwrap();
+        let editor = app.open_editor(project.id).unwrap();
+        (app, project, editor)
+    }
+
+    #[test]
+    fn a_long_script_is_scored_a_stretch_at_a_time() {
+        let h = Harness::new();
+        let (app, _, mut editor) = long(&h);
         let points = editor.view().suggestions.open_points;
         assert!(points > 100, "{points}");
 
@@ -994,23 +1048,103 @@ mod tests {
     #[test]
     fn scoring_is_a_job_that_resumes_where_it_stopped() {
         let h = Harness::new();
-        let (app, project, mut editor) = suggested(&h);
-        let earlier = editor.view().suggestions.job.as_ref().map(Job::id);
+        let (app, project, mut editor) = long(&h);
+        let narration = app.narrations.narration(project.id).unwrap().unwrap();
+        let plan = app.scene_plans.scene_plan(project.id).unwrap();
+        let timeline = editor.view().timeline.clone().unwrap();
+        let points = open_points(&timeline, &narration, plan.as_ref());
+        let chunks = cut_chunks(&narration, &points, &CHUNK_LIMITS).len();
+        assert!(chunks > 2, "{chunks}");
 
-        *h.decisions.delay.lock().unwrap() = Duration::from_millis(300);
+        *h.decisions.delay.lock().unwrap() = Duration::from_millis(100);
         let job = app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while app
+            .jobs()
+            .iter()
+            .any(|j| j.id() == job && j.progress().permille() == 0)
+        {
+            assert!(std::time::Instant::now() < deadline, "no stretch scored");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        app.cancel_job(job).unwrap();
+        let cancelled = wait_done(&app, job);
+        assert_eq!(cancelled.state(), JobState::Cancelled);
+        let kept: CutCheckpoint = serde_json::from_str(cancelled.checkpoint().unwrap()).unwrap();
+        assert!(kept.chunks > 0 && kept.chunks < chunks, "{}", kept.chunks);
+        // The call in flight when it stopped still ends.
+        std::thread::sleep(Duration::from_millis(150));
+        let before = h.decisions.calls().len();
+        assert_eq!(
+            app.cut_suggestions.cut_suggestions(project.id).unwrap(),
+            None
+        );
+
+        *h.decisions.delay.lock().unwrap() = Duration::ZERO;
+        app.retry_job(job).unwrap();
+        assert_eq!(wait_done(&app, job).state(), JobState::Done);
+
+        assert_eq!(
+            h.decisions.calls().len() - before,
+            chunks - kept.chunks,
+            "only the stretches not scored yet"
+        );
+        app.refresh_editor(&mut editor).unwrap();
+        assert_eq!(editor.view().suggestions.set, Some(job));
+        assert_eq!(editor.view().suggestions.items.len(), points.len());
+    }
+
+    #[test]
+    fn an_older_job_never_replaces_newer_suggestions() {
+        let h = Harness::new();
+        let (app, project) = drawn(&h);
+        let mut editor = app.open_editor(project.id).unwrap();
+        *h.decisions.delay.lock().unwrap() = Duration::from_millis(300);
+        let older = app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap();
         assert!(matches!(
             app.suggest_cuts(&mut editor, BudgetConsent::Ask),
             Err(CutSuggestionError::Busy)
         ));
-        app.cancel_job(job).unwrap();
-        assert_eq!(wait_done(&app, job).state(), JobState::Cancelled);
+        app.cancel_job(older).unwrap();
+        assert_eq!(wait_done(&app, older).state(), JobState::Cancelled);
+        std::thread::sleep(Duration::from_millis(350));
 
-        // A cancelled job leaves the earlier suggestions.
-        let editor = app.open_editor(project.id).unwrap();
-        let saved = app.cut_suggestions.cut_suggestions(project.id).unwrap();
-        assert_eq!(saved.map(|saved| Some(saved.job)), Some(earlier));
-        assert_eq!(editor.view().suggestions.items.len(), 3);
+        *h.decisions.delay.lock().unwrap() = Duration::ZERO;
+        let newer = app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap();
+        done(&app, newer);
+        app.refresh_editor(&mut editor).unwrap();
+        let first = editor.view().suggestions.items[0].index;
+        app.reject_suggestion(&mut editor, first).unwrap();
+        let calls = h.decisions.calls().len();
+
+        app.retry_job(older).unwrap();
+        assert_eq!(wait_done(&app, older).state(), JobState::Done);
+        assert_eq!(h.decisions.calls().len(), calls, "nothing asked again");
+        app.refresh_editor(&mut editor).unwrap();
+        assert_eq!(editor.view().suggestions.set, Some(newer));
+        assert_eq!(states(&editor)[0], SuggestionState::Rejected);
+    }
+
+    #[test]
+    fn a_suggestion_of_an_earlier_set_is_not_changed() {
+        let h = Harness::new();
+        let (app, _, mut editor) = suggested(&h);
+        let mut stale = app.open_editor(editor.project()).unwrap();
+        done(
+            &app,
+            app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap(),
+        );
+        let index = stale.view().suggestions.items[0].index;
+        assert!(matches!(
+            app.reject_suggestion(&mut stale, index),
+            Err(CutSuggestionError::NoSuchSuggestion)
+        ));
+        app.refresh_editor(&mut editor).unwrap();
+        assert!(
+            states(&editor)
+                .iter()
+                .all(|state| *state == SuggestionState::Pending)
+        );
     }
 
     #[test]

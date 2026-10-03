@@ -22,6 +22,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::scene::ends_sentence;
 use crate::{
     Confidence, JobId, Narration, NarrationId, ProfileId, RepositoryError, ScenePlan, Score,
     Timeline, VideoProjectId, frame_time, min_length, nearest_frame, sentences,
@@ -98,11 +99,6 @@ pub fn cut_candidates(
                 .collect()
         })
         .unwrap_or_default();
-    let sentence_ends: Vec<usize> = sentences(narration)
-        .into_iter()
-        .filter(|sentence| ends_sentence(&text[words[sentence.words.end - 1].text.clone()]))
-        .map(|sentence| sentence.words.end - 1)
-        .collect();
     words
         .windows(2)
         .enumerate()
@@ -110,7 +106,7 @@ pub fn cut_candidates(
             let (word, next) = (&pair[0], &pair[1]);
             let silence = next.start.saturating_sub(word.end);
             let reasons = CutReasons {
-                sentence_end: sentence_ends.contains(&index),
+                sentence_end: ends_sentence(&text[word.text.clone()]),
                 pause: (silence >= rules.min_pause).then_some(silence),
                 scene_change: scene_starts
                     .iter()
@@ -128,14 +124,6 @@ pub fn cut_candidates(
         .collect()
 }
 
-/// A word that ends a sentence: `.`, `!`, `?` or `…`, past closing quotes
-/// and brackets. A sentence the scene planner closed for its length or at
-/// a line break did not end in the text.
-fn ends_sentence(word: &str) -> bool {
-    word.trim_end_matches(['"', '\'', '”', '’', '»', ')', ']', '*'])
-        .ends_with(['.', '!', '?', '…'])
-}
-
 /// Where a point of the narration stands on a timeline's picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CutPlace {
@@ -149,6 +137,17 @@ impl CutPlace {
     pub fn at(self) -> Duration {
         match self {
             CutPlace::Open { at, .. } | CutPlace::Made { at } => at,
+        }
+    }
+
+    /// Whether a cut here leaves both new shots at least `rules.min_shot`
+    /// long. A cut already made has no room for another.
+    pub fn has_room(self, timeline: &Timeline, rules: &CutRules) -> bool {
+        match self {
+            CutPlace::Open { clip, at } => timeline.video().get(clip).is_some_and(|clip| {
+                at >= clip.at + rules.min_shot && at + rules.min_shot <= clip.end()
+            }),
+            CutPlace::Made { .. } => false,
         }
     }
 }
@@ -175,15 +174,11 @@ pub fn open_candidates(
     candidates: Vec<CutCandidate>,
     rules: &CutRules,
 ) -> Vec<CutCandidate> {
-    let video = timeline.video();
     candidates
         .into_iter()
-        .filter(|candidate| match place_cut(timeline, candidate.source) {
-            Some(CutPlace::Open { clip, at }) => {
-                let clip = &video[clip];
-                at >= clip.at + rules.min_shot && at + rules.min_shot <= clip.end()
-            }
-            _ => false,
+        .filter(|candidate| {
+            place_cut(timeline, candidate.source)
+                .is_some_and(|place| place.has_room(timeline, rules))
         })
         .collect()
 }
@@ -633,7 +628,7 @@ mod tests {
                     cuts: vec![1, 2],
                 },
             ],
-            "sentences of 8, 17 and 10 characters go alone is its own chunk; the last has no point"
+            "sentences of 8, 17 and 10 characters each fill a chunk; the last has no point, so it goes"
         );
         let by_cuts = ChunkLimits {
             max_chars: 1_000,
