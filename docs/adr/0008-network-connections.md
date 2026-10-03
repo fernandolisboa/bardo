@@ -1,0 +1,34 @@
+# ADR-0008: Network connections and upload paths
+
+- Status: Accepted
+- Date: 2026-10-03
+- Amends: ADR-0003 (upload per network), ADR-0006 (which networks use the in-app scheduler)
+
+## Context
+
+The publishing phase (PRD stories 83-90) uploads to YouTube, TikTok and Instagram Reels from a desktop app that runs no server. The platforms' official docs, checked on 2026-10-03, set these constraints:
+
+- **YouTube.** Uploads from unverified API projects created after 2020-07-28 are locked to private until the project passes the YouTube API Services audit; the audit has no own-channel exemption. `videos.insert` costs 1 unit of a separate Video Uploads bucket of 100 per day per project; other calls share 10,000 units per day. Desktop OAuth uses PKCE over a loopback redirect, its client secret is not treated as a secret, and installed apps cannot add scopes later. An OAuth client in "Testing" status gets refresh tokens that expire seven days after consent; a client whose only user is its developer may be put "In production" without Google verification.
+- **TikTok.** The Content Sharing and App Review guidelines exclude personal tools ("Not acceptable: A utility tool to help upload contents to the account(s) you or your team manages"; "Apps must not be for private or personal use"). Unaudited clients post only as `SELF_ONLY`, and the posting account must itself be private. The Content Posting API has no scheduling field. Upload to inbox (`video.upload`) sends a draft that the creator finishes in the TikTok app, at most 5 pending per 24 h. Login Kit for Desktop requires PKCE with a hex-encoded SHA-256 challenge and a `localhost`/`127.0.0.1` redirect with a port; the token exchange needs the client secret.
+- **Instagram.** Uploading a local file (`upload_type=resumable` to `rupload.facebook.com`) is documented only for apps with Facebook Login for Business, which needs the Instagram professional account linked to a Facebook Page. Instagram Login without a Page needs the video at a public URL. Standard Access serves accounts with a role on the app, with no App Review or Business Verification. The publishing limit reads 100 posts per 24 h in the guide and 50 in the `content_publishing_limit` reference. No scheduling parameter.
+
+## Decision
+
+1. **App credentials are the user's own.** Each network connection uses an OAuth app the user registers: a Google Cloud OAuth client of type Desktop, a TikTok app (or sandbox), a Meta app with Facebook Login for Business. The user enters its client id and secret once in Settings; they are kept in Windows Credential Manager per user profile, like provider keys, and masked by the redactor. Bardo's binary ships no client secret. Any audit or review belongs to the user's app and is done on the user's schedule. A setup guide per network lives in `docs/guides/`.
+2. **Tokens per network account.** OAuth tokens live in Credential Manager keyed by (user profile, network account), never in SQLite or files. SQLite keeps only the connection's state (connected identity, scopes, expiry, last refresh). A refresh the network refuses puts the account in **reconnect needed** instead of failing jobs one by one. Disconnecting revokes the token at the network where it offers revocation. All of a network's scopes are asked at the first connection.
+3. **One OAuth core.** Authorization code with PKCE, a one-shot loopback listener on `127.0.0.1` with a random port and a `state` check, the system browser for consent. The PKCE challenge encoding is per network (base64url for Google and Meta, hex for TikTok). Where a network does not accept a loopback redirect, the connection falls back to a token the user pastes from the network's developer dashboard, then refreshed by Bardo.
+4. **Upload path per network.**
+   - **YouTube**: resumable `videos.insert`; scheduling through `status.publishAt` (ADR-0006).
+   - **TikTok**: upload to the creator's inbox as a **draft** (`video.upload`). The creator writes the caption details, chooses visibility and schedules in the TikTok app; Bardo puts the title and description where the creator can copy them. Direct Post is not built: an unaudited client could only post privately from a private account.
+   - **Instagram Reels**: Facebook Login for Business with a linked Facebook Page, resumable local upload, then `media_publish`; scheduling through the in-app scheduler (ADR-0006).
+   - **X and Kick**: export only (unchanged).
+5. **Publications gain a kind and a status.** Kinds: manual (posted by hand from an export) and uploaded. An uploaded publication moves through queued, uploading, processing, then scheduled, published, draft sent (TikTok) or **restricted** (the network kept it private because the app is not audited); failed keeps its reason. Still one publication per project and network.
+6. **Limits are checked before queuing and read from the network where it reports them**: the YouTube uploads bucket, the TikTok pending-drafts cap, the Instagram publishing limit from `content_publishing_limit` (never a hard-coded number).
+
+## Consequences
+
+- Setting up publishing means registering three apps, one per network. The guides walk through it; nothing in Bardo waits on an audit, and every adapter is built and tested against recorded fixtures.
+- Until the user's Google project passes the YouTube audit, uploads and scheduled videos stay private; the publication shows **restricted** with the reason. The audit only changes the result, not the code.
+- TikTok posting is one step short of automatic: the draft lands in the inbox and the creator posts it. If the guidelines ever admit own-account tools, Direct Post becomes another adapter behind the same interface.
+- Instagram needs a Facebook Page linked to the professional account.
+- A generic Credential Manager entry holds at most 2,560 bytes; a token set larger than that is refused, not truncated.

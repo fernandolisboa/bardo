@@ -1,6 +1,6 @@
 # ADR-0003: Publishing networks in the MVP
 
-- Status: Accepted
+- Status: Accepted; upload paths amended by [ADR-0008](0008-network-connections.md)
 - Date: 2026-09-30
 
 ## Context
@@ -27,3 +27,11 @@ Automatic publishing depends on each platform's API access rules, which are outs
   3. Instagram Professional account and a Meta app with Instagram publishing; add the owner's account as an app role (no App Review needed for own use).
 - Until audits clear, YouTube and TikTok uploads land as private. The app must surface this clearly instead of failing silently.
 - The Instagram 50/24h limit is enforced client-side before queuing.
+
+## Update (2026-10-03)
+
+The docs checked again for the publishing phase correct three findings above; [ADR-0008](0008-network-connections.md) holds the decisions that follow from them.
+
+- **YouTube**: `videos.insert` now draws on a separate Video Uploads bucket of 100 uploads per day per project. The private lock for unaudited projects is unchanged.
+- **TikTok**: the audit excludes personal tools, so a client used only for the owner's own account stays unaudited, posts only as `SELF_ONLY` and needs the account itself private. Bardo uploads TikTok videos to the creator's inbox as drafts instead of posting directly.
+- **Instagram**: local-file upload needs Facebook Login for Business and a Facebook Page linked to the professional account. The publishing limit reads 100 per 24 h in the guide and 50 in the API reference, so it is read from `content_publishing_limit` rather than fixed at 50.
