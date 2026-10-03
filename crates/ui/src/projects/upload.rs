@@ -7,7 +7,7 @@
 //! runs as a job the stage follows: stop, resume and retry, with the state
 //! the post section shows.
 
-use bardo_app::bardo_domain::{JobId, Visibility};
+use bardo_app::bardo_domain::{JobId, PublicationId, Visibility};
 use bardo_app::{Text, UploadChoices, UploadReview, UploadReviewError, UploadState};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -101,12 +101,26 @@ impl ProjectsScreen {
         cx: &mut Context<Self>,
     ) {
         let bardo = self.bardo.read(cx);
-        let result = if resume {
-            bardo.retry_job(job)
+        self.upload_error = if resume {
+            bardo.resume_upload(job).err().map(|error| error.message())
         } else {
-            bardo.cancel_job(job)
+            bardo.cancel_job(job).err().map(|_| Text::UploadNotStarted)
         };
-        self.upload_error = result.err().map(|_| Text::UploadNotStarted);
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn check_upload_again(
+        &mut self,
+        publication: PublicationId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bardo = self.bardo.read(cx);
+        self.upload_error = bardo
+            .check_upload(publication)
+            .err()
+            .map(|error| error.message());
         self.load(window, cx);
         cx.notify();
     }
@@ -135,6 +149,7 @@ impl ProjectsScreen {
         let upload = now.replaces.as_ref().and_then(|publication| {
             Some((publication.upload()?.job, bardo.upload_state(publication)?))
         });
+        let shown = now.replaces.as_ref().map(|publication| publication.id);
         let active = upload.as_ref().is_some_and(|(_, state)| state.is_active());
         let mut actions = h_flex().gap_2().items_center().flex_wrap();
         match upload {
@@ -173,6 +188,19 @@ impl ProjectsScreen {
                         .label(tr(bardo, Text::UploadRetry))
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             this.upload_job_action(job, true, window, cx);
+                        })),
+                );
+            }
+            Some((_, UploadState::StillProcessing)) => {
+                actions = actions.child(
+                    Button::new("upload-check")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::UploadCheckAgain))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            if let Some(publication) = shown {
+                                this.check_upload_again(publication, window, cx);
+                            }
                         })),
                 );
             }

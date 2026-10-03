@@ -527,6 +527,7 @@ impl Bardo {
         let upload_handler = crate::uploads::UploadHandler {
             publications: Arc::clone(&publications),
             accounts: Arc::clone(&network_accounts),
+            renders: Arc::clone(&renders),
             files: Arc::clone(&files),
             connections: connection_book.connections().clone(),
             uploaders: providers.uploaders.clone(),

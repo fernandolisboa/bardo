@@ -370,6 +370,17 @@ impl Publication {
         }
     }
 
+    /// Whether the post is on the network: a linked post, or an upload
+    /// the network finished processing (published or restricted). An
+    /// upload still on its way, or failed, is not a post yet.
+    pub fn is_posted(&self) -> bool {
+        self.link.is_some()
+            && match &self.kind {
+                PublicationKind::Manual => true,
+                PublicationKind::Uploaded(upload) => upload.status.is_final(),
+            }
+    }
+
     /// Whether a metrics sync reads this post: public statistics exist
     /// for YouTube only until publishing brings the others' (ADR-0004),
     /// and only for a post anyone can open by its id (an upload published
@@ -686,6 +697,13 @@ pub trait PublicationRepository: Send + Sync {
     /// same network (and its snapshots, when it is another post).
     fn save_publication(&self, publication: &Publication) -> Result<(), RepositoryError>;
 
+    /// Saves an upload's progress: its status, and the post once the
+    /// network has it. Only the row of the same publication and upload job
+    /// changes, and nothing else goes, so a run that ends after the upload
+    /// was replaced leaves the replacement alone. Returns whether the row
+    /// was still there.
+    fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError>;
+
     /// Removes a publication and its snapshots.
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError>;
 
@@ -732,6 +750,10 @@ impl<T: PublicationRepository + ?Sized> PublicationRepository for Arc<T> {
 
     fn save_publication(&self, publication: &Publication) -> Result<(), RepositoryError> {
         (**self).save_publication(publication)
+    }
+
+    fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError> {
+        (**self).save_upload(publication)
     }
 
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
@@ -1043,6 +1065,7 @@ mod tests {
 
     #[test]
     fn only_youtube_posts_have_public_metrics() {
+        assert!(publication(Network::TikTok, None).is_posted());
         assert!(publication(Network::YouTube, None).has_public_metrics());
         assert!(!publication(Network::TikTok, None).has_public_metrics());
     }
@@ -1068,16 +1091,28 @@ mod tests {
         let mut p = uploading(Visibility::Public);
         assert_eq!(p.post_id(), None);
         assert!(!p.has_public_metrics(), "no video yet");
+        assert!(!p.is_posted());
 
         p.sent(video()).unwrap();
         assert_eq!(p.post_id(), Some("dQw4w9WgXcQ"));
         assert_eq!(p.upload().unwrap().status, UploadStatus::Processing);
         assert!(!p.has_public_metrics(), "still processing");
+        assert!(!p.is_posted(), "still processing");
 
         p.processed(Visibility::Public, at(50)).unwrap();
         assert_eq!(p.upload().unwrap().status, UploadStatus::Published);
         assert_eq!(p.posted_at, at(50));
         assert!(p.has_public_metrics(), "joins the metrics sync");
+        assert!(p.is_posted());
+
+        let mut failed = uploading(Visibility::Public);
+        failed.sent(video()).unwrap();
+        failed
+            .upload_mut()
+            .unwrap()
+            .fail(crate::UploadFailure::Rejected("duplicate".into()))
+            .unwrap();
+        assert!(!failed.is_posted(), "rejected by the network");
     }
 
     #[test]
@@ -1090,6 +1125,7 @@ mod tests {
             UploadStatus::Restricted
         );
         assert!(!restricted.has_public_metrics());
+        assert!(restricted.is_posted(), "on the channel, private");
 
         let mut private = uploading(Visibility::Private);
         private.sent(video()).unwrap();

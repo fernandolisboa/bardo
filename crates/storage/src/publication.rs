@@ -282,6 +282,36 @@ impl PublicationRepository for Database {
         tx.commit().map_err(boxed)
     }
 
+    fn save_upload(&self, publication: &Publication) -> Result<bool, RepositoryError> {
+        let Some(upload) = publication.upload() else {
+            return Ok(false);
+        };
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE publication SET
+                     post_id = ?3,
+                     url = ?4,
+                     upload_status = ?5,
+                     upload_failure = ?6,
+                     posted_at = CASE WHEN ?5 IN ('published', 'restricted')
+                                           AND upload_status NOT IN ('published', 'restricted')
+                                      THEN ?7 ELSE posted_at END
+                 WHERE id = ?1 AND upload_job = ?2",
+                params![
+                    publication.id.to_string(),
+                    upload.job.to_string(),
+                    publication.link.as_ref().map(PostLink::post_id),
+                    publication.link.as_ref().map(PostLink::url),
+                    upload.status.code(),
+                    upload.status.failure().map(|failure| failure.code()),
+                    to_unix_millis(publication.posted_at),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(changed > 0)
+    }
+
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
         self.conn()
             .execute("DELETE FROM publication WHERE id = ?1", [id.to_string()])
@@ -504,6 +534,43 @@ mod tests {
             .unwrap();
         db.save_publication(&failed).unwrap();
         assert_eq!(db.publications(project.id).unwrap(), [failed], "replaced");
+    }
+
+    #[test]
+    fn an_upload_saves_its_progress_only_while_it_is_the_publication() {
+        let (db, _, project) = setup();
+        let mut upload = uploading(&project);
+        db.save_publication(&upload).unwrap();
+        upload.upload_mut().unwrap().start().unwrap();
+        upload
+            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .unwrap();
+        assert!(db.save_upload(&upload).unwrap());
+        assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
+        upload.processed(Visibility::Unlisted, time(400)).unwrap();
+        assert!(db.save_upload(&upload).unwrap());
+        let read = db.publication(upload.id).unwrap().unwrap();
+        assert_eq!(read.posted_at, time(400), "went live when processed");
+        assert_eq!(read, upload);
+
+        // The user linked a post meanwhile: the upload's run no longer
+        // touches it.
+        let manual = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&manual).unwrap();
+        assert!(!db.save_upload(&upload).unwrap());
+        assert_eq!(db.publications(project.id).unwrap(), [manual]);
+
+        // Neither does a run of another upload job on the same row.
+        let mut other = uploading(&project);
+        db.save_publication(&other).unwrap();
+        let stale = Publication {
+            kind: PublicationKind::Uploaded(Upload::queued(Visibility::Public, JobId::new())),
+            ..other.clone()
+        };
+        assert!(!db.save_upload(&stale).unwrap());
+        other.upload_mut().unwrap().start().unwrap();
+        assert!(db.save_upload(&other).unwrap());
+        assert_eq!(db.publications(project.id).unwrap(), [other]);
     }
 
     #[test]

@@ -119,8 +119,18 @@ The upload runs as a job: the Post section shows its progress, then
 **Processing** while YouTube works on the file, and **Uploaded** with the
 video's link. **Stop** keeps what YouTube already received; **Resume**
 sends only the rest. A dropped connection retries by itself from the same
-point. A render of the project waits until the upload is done, since it
-would rewrite the file being sent.
+point.
+
+While the upload runs, Bardo refuses to render the project, since the
+render would rewrite the file being sent; **Resume** waits for a running
+render the same way. If the project was rendered again while the upload was
+stopped, resuming ends that upload with "The render changed after the
+review": the rest of the file is not what you reviewed, so review the
+upload again.
+
+Bardo checks on YouTube's processing for about an hour. If YouTube is still
+processing the video after that, the post shows **Still processing**;
+select **Check again** later.
 
 Pasting a post's link over an uploaded video asks first, and replaces the
 upload in Bardo only; the video stays on YouTube.

@@ -494,11 +494,7 @@ impl ProjectsScreen {
         let posted = view
             .targets
             .iter()
-            .filter(|t| {
-                t.posted
-                    .as_ref()
-                    .is_some_and(|p| p.publication.link.is_some())
-            })
+            .filter(|t| t.posted.as_ref().is_some_and(|p| p.publication.is_posted()))
             .count();
         if posted > 0 {
             exported.line = Some(

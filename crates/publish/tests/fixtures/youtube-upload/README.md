@@ -25,7 +25,11 @@ during the publishing regression pass if an upload misbehaves):
 - `status-first-chunk.http`: a status query after the first chunk arrived.
 - `upload-complete.http`: `201 Created` with the video after the last chunk.
 - `session-gone.http`: a session YouTube no longer knows (404).
+- `session-elsewhere.http`: a session address on another host, which the
+  uploader refuses (the token would go with every chunk).
 - `server-unavailable.http`: a 503, which the protocol says to resume after.
+- `not-implemented.http`: a 501, which the protocol does not list as
+  worth resuming.
 - `quota-exceeded.http`: the project's daily uploads bucket is spent.
 - `upload-limit.http`: the channel's own upload limit (`uploadLimitExceeded`).
 - `invalid-title.http`: a title YouTube does not take (`invalidTitle`).

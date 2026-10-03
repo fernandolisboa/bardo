@@ -294,6 +294,33 @@ fn a_session_forgotten_again_and_again_gives_up() {
 }
 
 #[test]
+fn a_session_on_another_host_gets_no_token() {
+    let elsewhere = uploader(&["session-elsewhere"]);
+    let mut run = FakeRun::new();
+    let error = elsewhere.upload(&video(), &mut run).unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::Unexpected);
+    assert_eq!(run.session, None, "not kept");
+    assert_eq!(elsewhere.transport().sent().len(), 1, "no chunk sent there");
+
+    // Nor does a saved one: a new session starts on the API's host.
+    let fresh = uploader(&[
+        "session-started",
+        "chunk-incomplete-1",
+        "chunk-incomplete-2",
+        "upload-complete",
+    ]);
+    let mut run =
+        FakeRun::resuming("http://www.googleapis.com/upload/youtube/v3/videos?upload_id=x");
+    assert_eq!(fresh.upload(&video(), &mut run).unwrap(), uploaded());
+    let sent = fresh.transport().sent();
+    assert!(
+        sent.iter()
+            .all(|request| request.url.starts_with("https://www.googleapis.com/"))
+    );
+    assert_eq!(run.session.as_deref(), Some(SESSION));
+}
+
+#[test]
 fn a_stop_keeps_the_session_for_the_next_run() {
     let uploader = uploader(&["session-started", "chunk-incomplete-1"]);
     let mut run = FakeRun::new();
@@ -310,6 +337,7 @@ fn a_stop_keeps_the_session_for_the_next_run() {
 fn server_errors_are_transient_and_quota_is_not() {
     let cases = [
         ("server-unavailable", UploadErrorKind::NetworkDown, true),
+        ("not-implemented", UploadErrorKind::Unexpected, false),
         ("quota-exceeded", UploadErrorKind::QuotaExceeded, false),
         ("upload-limit", UploadErrorKind::UploadLimit, false),
         ("invalid-title", UploadErrorKind::Invalid, false),

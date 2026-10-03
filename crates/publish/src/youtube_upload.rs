@@ -138,9 +138,18 @@ impl<T: Transport> YouTubeUploader<T> {
         }
         response
             .header("location")
-            .filter(|location| location.starts_with("https://") || location.starts_with("http://"))
+            .filter(|location| self.is_session(location))
             .map(str::to_owned)
-            .ok_or_else(|| unexpected("the session answer has no address"))
+            .ok_or_else(|| unexpected("the session answer has no address on the API's host"))
+    }
+
+    /// Whether `address` is on the API's own scheme and host: every chunk
+    /// carries the token, so it never goes in clear text or elsewhere.
+    fn is_session(&self, address: &str) -> bool {
+        let api = self.endpoints.api.trim_end_matches('/');
+        address
+            .strip_prefix(api)
+            .is_some_and(|rest| rest.starts_with('/'))
     }
 
     /// Asks what YouTube has of the session.
@@ -186,7 +195,8 @@ impl<T: Transport> VideoUploader for YouTubeUploader<T> {
                 "the file is empty",
             ));
         }
-        let mut session = run.session();
+        // A saved session is the one started here; check it anyway.
+        let mut session = run.session().filter(|address| self.is_session(address));
         let mut confirmed = 0;
         if let Some(address) = &session {
             match self.query(address, size, &run.access_token()?)? {
@@ -368,7 +378,7 @@ fn failure(response: &HttpResponse) -> UploadError {
         403 => UploadErrorKind::NotAllowed,
         429 => UploadErrorKind::RateLimited,
         400 => UploadErrorKind::Invalid,
-        500..=599 => UploadErrorKind::NetworkDown,
+        500 | 502 | 503 | 504 => UploadErrorKind::NetworkDown,
         _ => UploadErrorKind::Unexpected,
     };
     let reason = reasons.first().copied().unwrap_or_default();

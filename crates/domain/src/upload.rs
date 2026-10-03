@@ -41,6 +41,9 @@ pub enum UploadFailure {
     ProcessingFailed(String),
     /// The video was removed on the network before it was ready.
     Removed,
+    /// The rendered file changed after the review (rendered again while
+    /// the upload was stopped): the rest of it is not what was reviewed.
+    RenderChanged,
     /// The upload job failed for another reason.
     Job(JobFailureKind),
 }
@@ -55,6 +58,7 @@ impl UploadFailure {
             UploadFailure::Rejected(reason) => format!("rejected:{reason}"),
             UploadFailure::ProcessingFailed(reason) => format!("processing:{reason}"),
             UploadFailure::Removed => "removed".to_owned(),
+            UploadFailure::RenderChanged => "render_changed".to_owned(),
             UploadFailure::Job(kind) => format!("job:{}", kind.code()),
         }
     }
@@ -73,6 +77,7 @@ impl UploadFailure {
                 "upload_limit" => UploadFailure::UploadLimit,
                 "reconnect" => UploadFailure::ReconnectNeeded,
                 "removed" => UploadFailure::Removed,
+                "render_changed" => UploadFailure::RenderChanged,
                 _ => UploadFailure::Job(JobFailureKind::Unexpected),
             },
         }
@@ -214,6 +219,18 @@ impl Upload {
                 Ok(())
             }
             _ => Err(self.invalid("finish processing")),
+        }
+    }
+
+    /// Another job checks on a video the network was still processing
+    /// when the first job stopped waiting.
+    pub fn check_again(&mut self, job: JobId) -> Result<(), InvalidUploadTransition> {
+        match self.status {
+            UploadStatus::Processing => {
+                self.job = job;
+                Ok(())
+            }
+            _ => Err(self.invalid("check again")),
         }
     }
 
@@ -492,6 +509,23 @@ mod tests {
     }
 
     #[test]
+    fn only_a_video_being_processed_is_checked_again() {
+        let first = JobId::new();
+        let mut u = Upload::queued(Visibility::Public, first);
+        let next = JobId::new();
+        assert!(u.check_again(next).is_err(), "queued");
+        u.start().unwrap();
+        assert!(u.check_again(next).is_err(), "uploading");
+        u.sent().unwrap();
+        u.check_again(next).unwrap();
+        assert_eq!(u.job, next);
+        assert_eq!(u.status, UploadStatus::Processing);
+        u.processed(Visibility::Public).unwrap();
+        assert!(u.check_again(first).is_err(), "published");
+        assert_eq!(u.job, next);
+    }
+
+    #[test]
     fn statuses_and_failures_round_trip_through_their_codes() {
         let statuses = [
             UploadStatus::Queued,
@@ -505,6 +539,7 @@ mod tests {
             UploadStatus::Failed(UploadFailure::Rejected("copyright".into())),
             UploadStatus::Failed(UploadFailure::ProcessingFailed("codec".into())),
             UploadStatus::Failed(UploadFailure::Removed),
+            UploadStatus::Failed(UploadFailure::RenderChanged),
             UploadStatus::Failed(UploadFailure::Job(JobFailureKind::ProviderUnavailable)),
         ];
         for status in statuses {

@@ -1199,12 +1199,14 @@ pub enum Text {
     UploadStateUploading,
     UploadStateRetrying,
     UploadStateProcessing,
+    UploadStateStillProcessing,
     UploadStatePublished,
     UploadStateRestricted,
     UploadStateStopped,
     UploadStateFailed,
     UploadRetryingHint,
     UploadProcessingHint,
+    UploadStillProcessingHint,
     UploadStoppedHint,
     UploadRestrictedHint,
     UploadFailureQuota,
@@ -1213,9 +1215,11 @@ pub enum Text {
     UploadFailureRejected,
     UploadFailureProcessing,
     UploadFailureRemoved,
+    UploadFailureRenderChanged,
     UploadStop,
     UploadResume,
     UploadRetry,
+    UploadCheckAgain,
     UploadSentAt,
     PublicationReplaceUploadConfirm,
     PublicationReplaceUploadYes,
@@ -2510,12 +2514,14 @@ impl Text {
             Text::UploadStateUploading => "upload.state.uploading",
             Text::UploadStateRetrying => "upload.state.retrying",
             Text::UploadStateProcessing => "upload.state.processing",
+            Text::UploadStateStillProcessing => "upload.state.still_processing",
             Text::UploadStatePublished => "upload.state.published",
             Text::UploadStateRestricted => "upload.state.restricted",
             Text::UploadStateStopped => "upload.state.stopped",
             Text::UploadStateFailed => "upload.state.failed",
             Text::UploadRetryingHint => "upload.retrying_hint",
             Text::UploadProcessingHint => "upload.processing_hint",
+            Text::UploadStillProcessingHint => "upload.still_processing_hint",
             Text::UploadStoppedHint => "upload.stopped_hint",
             Text::UploadRestrictedHint => "upload.restricted_hint",
             Text::UploadFailureQuota => "upload.failure.quota",
@@ -2524,9 +2530,11 @@ impl Text {
             Text::UploadFailureRejected => "upload.failure.rejected",
             Text::UploadFailureProcessing => "upload.failure.processing",
             Text::UploadFailureRemoved => "upload.failure.removed",
+            Text::UploadFailureRenderChanged => "upload.failure.render_changed",
             Text::UploadStop => "upload.stop",
             Text::UploadResume => "upload.resume",
             Text::UploadRetry => "upload.retry",
+            Text::UploadCheckAgain => "upload.check_again",
             Text::UploadSentAt => "upload.sent_at",
             Text::PublicationReplaceUploadConfirm => "publication.replace_upload_confirm",
             Text::PublicationReplaceUploadYes => "publication.replace_upload_yes",
@@ -3892,12 +3900,14 @@ mod tests {
         texts.push(Text::UploadStateUploading);
         texts.push(Text::UploadStateRetrying);
         texts.push(Text::UploadStateProcessing);
+        texts.push(Text::UploadStateStillProcessing);
         texts.push(Text::UploadStatePublished);
         texts.push(Text::UploadStateRestricted);
         texts.push(Text::UploadStateStopped);
         texts.push(Text::UploadStateFailed);
         texts.push(Text::UploadRetryingHint);
         texts.push(Text::UploadProcessingHint);
+        texts.push(Text::UploadStillProcessingHint);
         texts.push(Text::UploadStoppedHint);
         texts.push(Text::UploadRestrictedHint);
         texts.push(Text::UploadFailureQuota);
@@ -3906,9 +3916,11 @@ mod tests {
         texts.push(Text::UploadFailureRejected);
         texts.push(Text::UploadFailureProcessing);
         texts.push(Text::UploadFailureRemoved);
+        texts.push(Text::UploadFailureRenderChanged);
         texts.push(Text::UploadStop);
         texts.push(Text::UploadResume);
         texts.push(Text::UploadRetry);
+        texts.push(Text::UploadCheckAgain);
         texts.push(Text::UploadSentAt);
         texts.push(Text::PublicationReplaceUploadConfirm);
         texts.push(Text::PublicationReplaceUploadYes);

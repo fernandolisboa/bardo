@@ -307,39 +307,30 @@ impl UreqTransport {
     pub const MAX_BODY_BYTES: u64 = 1024 * 1024;
 
     pub fn new(timeout: Duration) -> Self {
-        let tls = ureq::tls::TlsConfig::builder()
-            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-            .build();
-        let agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_global(Some(timeout))
-            .tls_config(tls)
-            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .new_agent();
-        Self {
-            agent,
-            max_body_bytes: Self::MAX_BODY_BYTES,
-        }
+        Self::with_redirects(timeout, true)
     }
 
     /// For resumable uploads: a 308 answer is "resume incomplete", not a
     /// redirect to follow, so redirects come back as they are. `timeout`
     /// bounds each request, a chunk of the file included.
     pub fn for_uploads(timeout: Duration) -> Self {
+        Self::with_redirects(timeout, false)
+    }
+
+    fn with_redirects(timeout: Duration, follow: bool) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
             .root_certs(ureq::tls::RootCerts::PlatformVerifier)
             .build();
-        let agent = ureq::Agent::config_builder()
+        let mut config = ureq::Agent::config_builder()
             .http_status_as_error(false)
-            .max_redirects(0)
             .timeout_global(Some(timeout))
             .tls_config(tls)
-            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .new_agent();
+            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")));
+        if !follow {
+            config = config.max_redirects(0);
+        }
         Self {
-            agent,
+            agent: config.build().new_agent(),
             max_body_bytes: Self::MAX_BODY_BYTES,
         }
     }

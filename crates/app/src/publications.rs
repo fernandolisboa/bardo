@@ -576,10 +576,10 @@ impl Bardo {
                 .or_default()
                 .push(*snapshot);
         }
-        // An upload is a post once the network has the video.
+        // An upload is a post once the network processed the video.
         let posts = publications
             .into_iter()
-            .filter(|publication| publication.link.is_some())
+            .filter(Publication::is_posted)
             .map(|publication| {
                 let history = histories.remove(&publication.id).unwrap_or_default();
                 ChannelPost {

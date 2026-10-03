@@ -354,6 +354,7 @@ pub fn upload_label(bardo: &Bardo, state: &UploadState) -> SharedString {
             .into(),
         UploadState::Retrying => tr(bardo, Text::UploadStateRetrying),
         UploadState::Processing => tr(bardo, Text::UploadStateProcessing),
+        UploadState::StillProcessing => tr(bardo, Text::UploadStateStillProcessing),
         UploadState::Published => tr(bardo, Text::UploadStatePublished),
         UploadState::Restricted => tr(bardo, Text::UploadStateRestricted),
         UploadState::Stopped => tr(bardo, Text::UploadStateStopped),
@@ -385,6 +386,10 @@ fn upload_state(
         UploadState::Processing => (
             Tone::Info,
             Some(with_network(Text::UploadProcessingHint).into()),
+        ),
+        UploadState::StillProcessing => (
+            Tone::Warning,
+            Some(with_network(Text::UploadStillProcessingHint).into()),
         ),
         UploadState::Published if missing => {
             (Tone::Warning, Some(tr(bardo, Text::PublicationMissingHint)))

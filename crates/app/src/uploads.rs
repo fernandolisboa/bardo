@@ -27,15 +27,15 @@ use bardo_domain::{
     Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, MetadataProblem, Network,
     NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post, PostLink, Progress,
     ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository,
-    RepositoryError, SecretText, SignInFailureKind, Upload, UploadError, UploadErrorKind,
-    UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload,
-    VideoUploader, Visibility,
+    RenderRepository, RepositoryError, SecretText, SignInFailureKind, Upload, UploadError,
+    UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId,
+    VideoState, VideoUpload, VideoUploader, Visibility,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::connections::Connections;
 use crate::export::{ExportError, ExportTarget};
-use crate::jobs::{JobContext, JobHandler};
+use crate::jobs::{JobActionError, JobContext, JobHandler};
 use crate::scenes::{id, parse, to_json, unexpected};
 use crate::{Bardo, ConnectionError, ConnectionState, Text};
 
@@ -200,6 +200,12 @@ pub enum UploadReviewError {
     /// upload replaces it.
     #[error("the upload would replace the network's publication")]
     ReplaceNotConfirmed,
+    /// The upload is not stopped or failed (resume), or not waiting on the
+    /// network (check again).
+    #[error("the upload cannot do that now")]
+    NotNow,
+    #[error(transparent)]
+    Job(#[from] JobActionError),
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -213,7 +219,9 @@ impl UploadReviewError {
             UploadReviewError::Blocked(block) => Text::UploadBlocked(*block),
             UploadReviewError::Changed => Text::UploadChanged,
             UploadReviewError::ReplaceNotConfirmed => Text::UploadReplaceNotConfirmed,
-            UploadReviewError::Repository(_) => Text::UploadNotStarted,
+            UploadReviewError::NotNow
+            | UploadReviewError::Job(_)
+            | UploadReviewError::Repository(_) => Text::UploadNotStarted,
         }
     }
 }
@@ -222,6 +230,7 @@ impl From<ExportError> for UploadReviewError {
     fn from(error: ExportError) -> Self {
         match error {
             ExportError::Repository(error) => UploadReviewError::Repository(error),
+            ExportError::NoAccounts => UploadReviewError::NoAccount,
             _ => UploadReviewError::ProjectNotFound,
         }
     }
@@ -248,6 +257,9 @@ pub enum UploadState {
     Retrying,
     /// The network has the file and is processing it.
     Processing,
+    /// The network was still processing the video when Bardo stopped
+    /// waiting for it: check again later.
+    StillProcessing,
     Published,
     /// Kept private by the network although more was asked.
     Restricted,
@@ -322,7 +334,7 @@ pub fn upload_state(upload: &Upload, job: Option<&Job>) -> UploadState {
                 failure: failure.clone(),
                 retryable: false,
             },
-            UploadStatus::Processing => UploadState::Processing,
+            UploadStatus::Processing => UploadState::StillProcessing,
             _ => UploadState::Failed {
                 failure: UploadFailure::Job(JobFailureKind::Unexpected),
                 retryable: false,
@@ -339,6 +351,8 @@ struct UploadPayload {
     publication: String,
     account: String,
     network: String,
+    /// The render reviewed, and its file: a run refuses to send another.
+    render: String,
     file: String,
     size: u64,
     title: String,
@@ -347,6 +361,9 @@ struct UploadPayload {
     visibility: String,
     made_for_kids: bool,
     synthetic: bool,
+    /// The network's video, for a job that only checks on its processing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    video: Option<String>,
 }
 
 impl UploadPayload {
@@ -443,10 +460,16 @@ fn access_token(
     }
 }
 
+/// How many times an upload job checks on a video the network is
+/// processing before it stops waiting: about an hour with YouTube's
+/// `poll_delay`.
+const PROCESSING_POLLS: u32 = 16;
+
 /// Runs uploads.
 pub(crate) struct UploadHandler {
     pub(crate) publications: Arc<dyn PublicationRepository>,
     pub(crate) accounts: Arc<dyn NetworkAccountRepository>,
+    pub(crate) renders: Arc<dyn RenderRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) connections: Connections,
     pub(crate) uploaders: Vec<Arc<dyn VideoUploader>>,
@@ -528,8 +551,8 @@ impl UploadRun for JobRun<'_> {
 }
 
 impl UploadHandler {
-    /// Applies `step` to the stored publication and saves it, unless it was
-    /// replaced since.
+    /// Applies `step` to the stored publication and saves its upload,
+    /// unless it was replaced since (also while this saves).
     fn update(
         &self,
         id: PublicationId,
@@ -544,8 +567,29 @@ impl UploadHandler {
         }
         step(&mut publication).map_err(unexpected)?;
         self.publications
-            .save_publication(&publication)
+            .save_upload(&publication)
+            .map(drop)
             .map_err(unexpected)
+    }
+
+    /// Whether the project's render is still the one reviewed, with the
+    /// same file: a render made while the upload was stopped rewrote it.
+    fn render_unchanged(
+        &self,
+        project: VideoProjectId,
+        payload: &UploadPayload,
+    ) -> Result<bool, JobFailure> {
+        let render = self
+            .renders
+            .renders(project)
+            .map_err(unexpected)?
+            .into_iter()
+            .find(|render| render.id.to_string() == payload.render);
+        Ok(render.is_some_and(|render| render.file == payload.file)
+            && self
+                .files
+                .size(project, &payload.file)
+                .is_ok_and(|size| size == payload.size))
     }
 
     /// Records why the upload failed and hands the failure to the queue.
@@ -648,8 +692,17 @@ impl JobHandler for UploadHandler {
             Some(text) => parse(text)?,
             None => UploadCheckpoint::default(),
         };
+        checkpoint.video = checkpoint.video.or_else(|| payload.video.clone());
 
         if checkpoint.video.is_none() {
+            let project: VideoProjectId = id(&payload.project)?;
+            if !self.render_unchanged(project, &payload)? {
+                // Not retryable: the user reviews the new render.
+                return self.update(publication_id, job, |p| {
+                    p.upload_mut()
+                        .map_or(Ok(()), |upload| upload.fail(UploadFailure::RenderChanged))
+                });
+            }
             self.update(publication_id, job, |p| {
                 p.upload_mut().map_or(Ok(()), Upload::start)
             })?;
@@ -671,7 +724,9 @@ impl JobHandler for UploadHandler {
         })?;
         self.update(publication_id, job, |p| p.sent(link))?;
 
-        // Wait for the network to process it.
+        // Wait for the network to process it, for a while: the job holds a
+        // place in the queue meanwhile. Past that the video shows as still
+        // processing, and the user checks again later.
         let mut polls = 0;
         loop {
             if cx.should_stop() {
@@ -681,7 +736,7 @@ impl JobHandler for UploadHandler {
                 .and_then(|token| uploader.state(&token, &video));
             let outcome = match state {
                 Ok(VideoState::Processing) => {
-                    if !cx.sleep(uploader.poll_delay(polls)) {
+                    if polls >= PROCESSING_POLLS || !cx.sleep(uploader.poll_delay(polls)) {
                         return Ok(());
                     }
                     polls += 1;
@@ -755,6 +810,9 @@ impl Bardo {
             UploadFailure::Rejected(reason) => with(Text::UploadFailureRejected, reason),
             UploadFailure::ProcessingFailed(reason) => with(Text::UploadFailureProcessing, reason),
             UploadFailure::Removed => with(Text::UploadFailureRemoved, ""),
+            UploadFailure::RenderChanged => {
+                self.text(Text::UploadFailureRenderChanged).into_owned()
+            }
             UploadFailure::Job(kind) => self.text(Text::JobFailureKindName(*kind)).into_owned(),
         }
     }
@@ -805,8 +863,15 @@ impl Bardo {
             .render
             .as_ref()
             .and_then(|render| self.files.size(project, &render.file).ok());
+        // The channel too: reconnecting the account to another channel
+        // sends the video elsewhere.
+        let channel = match &connection {
+            ConnectionState::Connected { channel }
+            | ConnectionState::ReconnectNeeded { channel } => channel.as_str(),
+            _ => "",
+        };
         let stamp = format!(
-            "{}|{}|{}|{}|{synthetic}",
+            "{}|{}|{}|{}|{synthetic}|{channel}",
             target
                 .render
                 .as_ref()
@@ -862,11 +927,13 @@ impl Bardo {
         let (Some(render), Some(post), Some(size)) = (&now.render, &now.post, now.size) else {
             return Err(UploadReviewError::Changed);
         };
+        let publication_id = PublicationId::new();
         let payload = UploadPayload {
             project: now.project.to_string(),
-            publication: PublicationId::new().to_string(),
+            publication: publication_id.to_string(),
             account: now.account.to_string(),
             network: now.network.code().to_owned(),
+            render: render.id.to_string(),
             file: render.file.clone(),
             size,
             title: post.title.clone().unwrap_or_default(),
@@ -875,13 +942,12 @@ impl Bardo {
             visibility: choices.visibility.code().to_owned(),
             made_for_kids: choices.made_for_kids,
             synthetic: choices.synthetic,
+            video: None,
         };
         let job = Job::new(self.profile.id, JobKind::Upload, to_json(&payload));
         let reviewed_at = crate::publications::whole_millis(SystemTime::now());
         let publication = Publication {
-            id: id(&payload.publication).map_err(|failure| {
-                UploadReviewError::Repository(RepositoryError(failure.detail.into()))
-            })?,
+            id: publication_id,
             owner: self.profile.id,
             project: now.project,
             account: now.account,
@@ -903,6 +969,71 @@ impl Bardo {
             Err(error) => {
                 if let Err(error) = self.publications.remove_publication(publication.id) {
                     tracing::warn!("could not remove the unqueued upload: {error}");
+                }
+                Err(error.into())
+            }
+        }
+    }
+
+    /// The upload job of the publication shown on the Publish stage, with
+    /// its payload.
+    fn upload_job(&self, job: JobId) -> Result<(Job, UploadPayload), UploadReviewError> {
+        let job = self
+            .job(job)
+            .filter(|job| job.kind() == JobKind::Upload)
+            .ok_or(UploadReviewError::NotNow)?;
+        let payload = serde_json::from_str(job.payload())
+            .map_err(|error| RepositoryError(Box::new(error)))?;
+        Ok((job, payload))
+    }
+
+    /// Resumes a stopped upload, or retries a failed one, from what the
+    /// network has. Not while the project renders: the render rewrites the
+    /// file being sent (and the job then refuses the new file).
+    pub fn resume_upload(&self, job: JobId) -> Result<(), UploadReviewError> {
+        let (_, payload) = self.upload_job(job)?;
+        let project: VideoProjectId =
+            id(&payload.project).map_err(|failure| RepositoryError(failure.detail.into()))?;
+        if self
+            .latest_job_of(JobKind::Render, project)
+            .is_some_and(|job| job.state().is_active())
+        {
+            return Err(UploadReviewError::Blocked(UploadBlock::Rendering));
+        }
+        Ok(self.retry_job(job)?)
+    }
+
+    /// Checks again on a video the network was still processing when its
+    /// upload job stopped waiting: a new job reads where it stands.
+    pub fn check_upload(&self, publication: PublicationId) -> Result<JobId, UploadReviewError> {
+        let mut publication = self
+            .publications
+            .publication(publication)?
+            .filter(|publication| publication.owner == self.profile.id)
+            .ok_or(UploadReviewError::NotNow)?;
+        let video = publication.post_id().map(str::to_owned);
+        let Some(upload) = publication.upload_mut() else {
+            return Err(UploadReviewError::NotNow);
+        };
+        let (old, mut payload) = self.upload_job(upload.job)?;
+        if old.state().is_active() || video.is_none() {
+            return Err(UploadReviewError::NotNow);
+        }
+        payload.video = video;
+        let job = Job::new(self.profile.id, JobKind::Upload, to_json(&payload));
+        upload
+            .check_again(job.id())
+            .map_err(|_| UploadReviewError::NotNow)?;
+        self.publications.save_publication(&publication)?;
+        match self.jobs.enqueue(job) {
+            Ok(id) => Ok(id),
+            Err(error) => {
+                // Back to the job that stopped waiting.
+                if let Some(upload) = publication.upload_mut() {
+                    upload.job = old.id();
+                }
+                if let Err(error) = self.publications.save_publication(&publication) {
+                    tracing::warn!("could not restore the upload's job: {error}");
                 }
                 Err(error.into())
             }
@@ -1121,6 +1252,10 @@ mod tests {
     }
 
     fn connect(s: &Setup) {
+        connect_to(s, "Space Archives");
+    }
+
+    fn connect_to(s: &Setup, channel: &str) {
         let account = youtube(s);
         let now = SystemTime::now();
         let tokens = TokenSet::granted(
@@ -1143,7 +1278,7 @@ mod tests {
                 status: ConnectionStatus::Connected,
                 identity: ConnectedIdentity {
                     id: "UCarchives".into(),
-                    name: "Space Archives".into(),
+                    name: channel.into(),
                 },
                 scopes: Vec::new(),
                 expires_at: tokens.expires_at(),
@@ -1290,6 +1425,14 @@ mod tests {
             Err(UploadReviewError::Changed)
         ));
         assert!(review(&s).synthetic, "a realistic voice turns it on");
+
+        // The channel: the account was connected to another one.
+        let seen = review(&s);
+        connect_to(&s, "Other Channel");
+        assert!(matches!(
+            s.app.start_upload(&seen, seen.choices()),
+            Err(UploadReviewError::Changed)
+        ));
 
         // The cut: the render no longer matches it.
         let seen = review(&s);
@@ -1445,7 +1588,7 @@ mod tests {
             Some("https://upload.test/session-1")
         );
 
-        s.app.retry_job(job).unwrap();
+        s.app.resume_upload(job).unwrap();
         done(&s.app, job);
         assert_eq!(s.h.uploader.chunk_starts(), [0, 4, 8], "no byte twice");
         assert!(
@@ -1458,6 +1601,107 @@ mod tests {
         );
         assert_eq!(*s.h.uploader.files.lock().unwrap(), [FILE.to_vec()]);
         assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_render_made_while_stopped_ends_the_upload_for_a_new_review() {
+        let s = ready();
+        s.h.uploader.will(Attempt::HoldAfter(1));
+        let review = review(&s);
+        let job = start(&s, review.choices());
+        wait_until("held", || {
+            s.h.uploader
+                .holding
+                .load(std::sync::atomic::Ordering::SeqCst)
+        });
+        s.app.cancel_job(job).unwrap();
+        wait_done(&s.app, job);
+        assert_eq!(state(&s), UploadState::Stopped);
+
+        // Stopped, the project renders again: the file is another one.
+        let render = checked(&s.app, s.project.id);
+        done(
+            &s.app,
+            s.app.start_render(&render, &render.renderable()).unwrap(),
+        );
+        s.h.files
+            .write(s.project.id, "render-youtube.mp4", b"9876543210")
+            .unwrap();
+
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+        assert_eq!(s.h.uploader.chunk_starts(), [0], "nothing of the new file");
+        assert_eq!(
+            state(&s),
+            UploadState::Failed {
+                failure: UploadFailure::RenderChanged,
+                retryable: false,
+            }
+        );
+        assert_eq!(
+            s.app
+                .upload_failure_text(&UploadFailure::RenderChanged, Network::YouTube),
+            "The render changed after the review, so the rest of the file is not what you reviewed. Review the upload again."
+        );
+
+        // A new review sends the new file whole.
+        let again = self::review(&s);
+        assert_eq!(again.block(), None);
+        let next = s
+            .app
+            .start_upload(
+                &again,
+                UploadChoices {
+                    replace: true,
+                    ..again.choices()
+                },
+            )
+            .unwrap();
+        done(&s.app, next);
+        assert_eq!(
+            *s.h.uploader.files.lock().unwrap(),
+            [b"9876543210".to_vec()]
+        );
+        assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_video_still_processing_frees_the_queue_and_is_checked_again() {
+        let s = ready();
+        for _ in 0..=PROCESSING_POLLS {
+            s.h.uploader.answer(Ok(VideoState::Processing));
+        }
+        let review = review(&s);
+        let first = start(&s, review.choices());
+        done(&s.app, first);
+        assert_eq!(
+            s.h.uploader.checks.lock().unwrap().len(),
+            PROCESSING_POLLS as usize + 1
+        );
+        assert_eq!(state(&s), UploadState::StillProcessing);
+        let publication = upload(&s);
+        assert_eq!(
+            publication.upload().unwrap().status,
+            UploadStatus::Processing
+        );
+        assert!(!publication.is_posted());
+        assert!(matches!(
+            s.app.resume_upload(first),
+            Err(UploadReviewError::Job(_))
+        ));
+
+        let check = s.app.check_upload(publication.id).unwrap();
+        assert_ne!(check, first);
+        done(&s.app, check);
+        assert_eq!(state(&s), UploadState::Published);
+        let publication = upload(&s);
+        assert_eq!(publication.upload().unwrap().job, check);
+        assert_eq!(s.h.uploader.chunk_starts(), [0, 4, 8], "not sent again");
+        assert_eq!(s.h.uploader.videos.lock().unwrap().len(), 1);
+        assert!(matches!(
+            s.app.check_upload(publication.id),
+            Err(UploadReviewError::NotNow)
+        ));
     }
 
     #[test]
