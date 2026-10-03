@@ -17,9 +17,9 @@ use std::time::SystemTime;
 use bardo_domain::{
     ApiKey, ChannelId, ChannelPoint, Job, JobFailure, JobFailureKind, JobId, JobKind,
     MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Network, PostLink, PostLinkError,
-    ProfileId, Progress, Provider, Publication, PublicationId, PublicationRepository,
-    RepositoryError, STATS_BATCH, SecretStore, UserProfile, VideoProjectId, VideoStats,
-    channel_history,
+    ProfileId, Progress, Provider, Publication, PublicationId, PublicationKind,
+    PublicationRepository, RepositoryError, STATS_BATCH, SecretStore, UserProfile, VideoProjectId,
+    VideoStats, channel_history,
 };
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +44,13 @@ pub enum PublicationError {
     AlreadyLinked,
     #[error("publication not found")]
     NotFound,
+    /// The network's publication is an upload; linking a post replaces it
+    /// only once the user confirms.
+    #[error("linking a post replaces the upload")]
+    ReplacesUpload,
+    /// The network's upload is running or waiting: stop it first.
+    #[error("the network's upload is running")]
+    Uploading,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -59,6 +66,8 @@ impl PublicationError {
             PublicationError::Link(error) => Text::PostLinkProblem(*error),
             PublicationError::AlreadyLinked => Text::PublicationAlreadyLinked,
             PublicationError::NotFound => Text::PublicationNotFound,
+            PublicationError::ReplacesUpload => Text::PublicationReplacesUpload,
+            PublicationError::Uploading => Text::PublicationUploading,
             PublicationError::Repository(_) => Text::PublicationNotSaved,
         }
     }
@@ -171,7 +180,7 @@ pub struct ChannelMetricsView {
 
 /// `time` as storage keeps it, so what `mark_posted` returns equals what
 /// is read back.
-fn whole_millis(time: SystemTime) -> SystemTime {
+pub(crate) fn whole_millis(time: SystemTime) -> SystemTime {
     let since = time
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
@@ -259,7 +268,7 @@ impl JobHandler for MetricsSyncHandler {
                 }
             }
             if !posts.is_empty() {
-                let ids: Vec<&str> = posts.iter().map(|p| p.link.post_id()).collect();
+                let ids: Vec<&str> = posts.iter().filter_map(Publication::post_id).collect();
                 let found = self.stats.statistics(&key, &ids).map_err(|failure| {
                     JobFailure::new(failure.kind.into(), format!("YouTube: {}", failure.detail))
                 })?;
@@ -267,7 +276,7 @@ impl JobHandler for MetricsSyncHandler {
                 for post in &mut posts {
                     let statistics = found
                         .iter()
-                        .find(|statistics| statistics.post_id == post.link.post_id());
+                        .find(|statistics| Some(statistics.post_id.as_str()) == post.post_id());
                     post.checked(statistics, taken_at);
                     if let Some(statistics) = statistics {
                         snapshots.push(MetricsSnapshot::of(post.id, statistics, taken_at));
@@ -345,13 +354,16 @@ impl Bardo {
 
     /// Links the post the user made of the project's export on `network`,
     /// from its address. Linking the same post again keeps its metrics;
-    /// another post replaces the publication and its metrics. A YouTube
-    /// post is synced right away when the key is saved.
+    /// another post replaces the publication and its metrics. Replacing an
+    /// upload needs `replace` (the user confirmed it), and waits until the
+    /// upload stops. A YouTube post is synced right away when the key is
+    /// saved.
     pub fn mark_posted(
         &self,
         project: VideoProjectId,
         network: Network,
         link: &str,
+        replace: bool,
     ) -> Result<Publication, PublicationError> {
         let project = self
             .themes
@@ -378,7 +390,7 @@ impl Bardo {
             .any(|other| {
                 other.project != project.id
                     && other.network() == network
-                    && other.link.post_id() == link.post_id()
+                    && other.post_id() == Some(link.post_id())
             });
         if elsewhere {
             return Err(PublicationError::AlreadyLinked);
@@ -389,10 +401,19 @@ impl Bardo {
             .publications(project.id)?
             .into_iter()
             .find(|publication| publication.network() == network);
+        if let Some(upload) = current.as_ref().and_then(Publication::upload) {
+            if self.job_active(upload.job) {
+                return Err(PublicationError::Uploading);
+            }
+            if !replace {
+                return Err(PublicationError::ReplacesUpload);
+            }
+        }
         let publication = match current {
-            Some(current) if current.link.post_id() == link.post_id() => Publication {
-                link,
+            Some(current) if current.post_id() == Some(link.post_id()) => Publication {
+                link: Some(link),
                 account: account.id,
+                kind: PublicationKind::Manual,
                 ..current
             },
             _ => Publication {
@@ -400,8 +421,10 @@ impl Bardo {
                 owner: self.profile.id,
                 project: project.id,
                 account: account.id,
+                network,
                 render: export.render,
-                link,
+                link: Some(link),
+                kind: PublicationKind::Manual,
                 posted_at: now,
                 linked_at: now,
                 checked_at: None,
@@ -426,13 +449,19 @@ impl Bardo {
     }
 
     /// Unlinks a post: its publication and metrics go; the post stays on
-    /// the network.
+    /// the network. An upload is unlinked only once it stopped.
     pub fn remove_publication(&self, id: PublicationId) -> Result<(), PublicationError> {
         let publication = self
             .publications
             .publication(id)?
             .filter(|publication| publication.owner == self.profile.id)
             .ok_or(PublicationError::NotFound)?;
+        if publication
+            .upload()
+            .is_some_and(|upload| self.job_active(upload.job))
+        {
+            return Err(PublicationError::Uploading);
+        }
         Ok(self.publications.remove_publication(publication.id)?)
     }
 
@@ -547,8 +576,10 @@ impl Bardo {
                 .or_default()
                 .push(*snapshot);
         }
+        // An upload is a post once the network has the video.
         let posts = publications
             .into_iter()
+            .filter(|publication| publication.link.is_some())
             .map(|publication| {
                 let history = histories.remove(&publication.id).unwrap_or_default();
                 ChannelPost {
@@ -630,11 +661,11 @@ mod tests {
 
         let publication = s
             .app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
-        assert_eq!(publication.link.post_id(), "dQw4w9WgXcQ");
+        assert_eq!(publication.post_id().unwrap(), "dQw4w9WgXcQ");
         assert_eq!(
-            publication.link.url(),
+            publication.link.as_ref().unwrap().url(),
             "https://www.youtube.com/shorts/dQw4w9WgXcQ"
         );
         let view = s.app.export_view(s.project.id).unwrap();
@@ -654,7 +685,11 @@ mod tests {
     #[test]
     fn a_bad_link_is_refused_with_why() {
         let s = exported();
-        let refuse = |network, link| s.app.mark_posted(s.project.id, network, link).unwrap_err();
+        let refuse = |network, link| {
+            s.app
+                .mark_posted(s.project.id, network, link, false)
+                .unwrap_err()
+        };
         assert!(matches!(
             refuse(Network::YouTube, TIKTOK),
             PublicationError::Link(PostLinkError::OtherSite(Some(Network::TikTok)))
@@ -682,20 +717,22 @@ mod tests {
         let s = rendered();
         generated(&s);
         assert!(matches!(
-            s.app.mark_posted(s.project.id, Network::YouTube, SHORT),
+            s.app
+                .mark_posted(s.project.id, Network::YouTube, SHORT, false),
             Err(PublicationError::NotExported)
         ));
         assert!(matches!(
             s.app.mark_posted(
                 s.project.id,
                 Network::X,
-                "https://x.com/a/status/1840000000000000001"
+                "https://x.com/a/status/1840000000000000001",
+                false
             ),
             Err(PublicationError::NoAccount)
         ));
         assert!(matches!(
             s.app
-                .mark_posted(VideoProjectId::new(), Network::YouTube, SHORT),
+                .mark_posted(VideoProjectId::new(), Network::YouTube, SHORT, false),
             Err(PublicationError::ProjectNotFound)
         ));
     }
@@ -706,7 +743,7 @@ mod tests {
         with_key(&mut s);
         s.h.stats.set("dQw4w9WgXcQ", 1_200, Some(80));
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         let job = sync_jobs(&s.app).pop().expect("a sync was queued");
         done(&s.app, job.id());
@@ -726,7 +763,7 @@ mod tests {
 
         // A TikTok post keeps its link and syncs nothing.
         s.app
-            .mark_posted(s.project.id, Network::TikTok, TIKTOK)
+            .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
             .unwrap();
         assert_eq!(sync_jobs(&s.app).len(), 1);
         assert!(posted(&s, Network::TikTok).unwrap().history.is_empty());
@@ -736,10 +773,10 @@ mod tests {
     fn each_sync_keeps_a_snapshot_and_the_history_grows() {
         let mut s = exported();
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         s.app
-            .mark_posted(s.project.id, Network::TikTok, TIKTOK)
+            .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
             .unwrap();
         assert!(matches!(
             s.app.sync_metrics(),
@@ -780,7 +817,7 @@ mod tests {
         with_key(&mut s);
         s.h.stats.set("dQw4w9WgXcQ", 900, Some(9));
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
 
@@ -799,7 +836,7 @@ mod tests {
         s.h.stats.set("dQw4w9WgXcQ", 500, None);
         let first = s
             .app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
 
@@ -809,11 +846,12 @@ mod tests {
                 s.project.id,
                 Network::YouTube,
                 "https://youtu.be/dQw4w9WgXcQ",
+                false,
             )
             .unwrap();
         assert_eq!(again.id, first.id);
         assert_eq!(
-            again.link.url(),
+            again.link.as_ref().unwrap().url(),
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         );
         assert_eq!(posted(&s, Network::YouTube).unwrap().history.len(), 1);
@@ -824,6 +862,7 @@ mod tests {
                 s.project.id,
                 Network::YouTube,
                 "https://www.youtube.com/shorts/aaaaaaaaaaa",
+                false,
             )
             .unwrap();
         assert_ne!(other.id, first.id);
@@ -845,7 +884,7 @@ mod tests {
     fn a_post_links_to_one_project() {
         let s = exported();
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         // A second project of the same channel, exported too.
         let (second, _) = s.h.drawn_project(&s.app);
@@ -869,7 +908,7 @@ mod tests {
             s.app.start_export(&view, &[Network::YouTube]).unwrap(),
         );
         assert!(matches!(
-            s.app.mark_posted(second.id, Network::YouTube, SHORT),
+            s.app.mark_posted(second.id, Network::YouTube, SHORT, false),
             Err(PublicationError::AlreadyLinked)
         ));
     }
@@ -881,7 +920,7 @@ mod tests {
         s.h.stats.set("dQw4w9WgXcQ", 10, None);
         let publication = s
             .app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
         s.app.remove_publication(publication.id).unwrap();
@@ -901,7 +940,7 @@ mod tests {
         let mut s = exported();
         with_key(&mut s);
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         let first = sync_jobs(&s.app).pop().unwrap();
         wait_done(&s.app, first.id());
@@ -922,7 +961,7 @@ mod tests {
         let mut s = exported();
         with_key(&mut s);
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         wait_done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
         *s.h.stats.failure.lock().unwrap() = Some(ProviderFailure::new(
@@ -939,7 +978,7 @@ mod tests {
         let mut s = exported();
         assert_eq!(s.app.sync_metrics_on_start(), None, "nothing linked");
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         assert_eq!(s.app.sync_metrics_on_start(), None, "no key");
         with_key(&mut s);
@@ -963,14 +1002,14 @@ mod tests {
         with_key(&mut s);
         s.h.stats.set("dQw4w9WgXcQ", 300, Some(30));
         s.app
-            .mark_posted(s.project.id, Network::YouTube, SHORT)
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
             .unwrap();
         done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
         std::thread::sleep(std::time::Duration::from_millis(3));
         s.h.stats.set("dQw4w9WgXcQ", 700, Some(50));
         done(&s.app, s.app.sync_metrics().unwrap());
         s.app
-            .mark_posted(s.project.id, Network::TikTok, TIKTOK)
+            .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
             .unwrap();
 
         let view = s.app.channel_metrics(s.project.channel).unwrap();

@@ -7,6 +7,8 @@
 pub mod loopback;
 pub mod oauth;
 pub mod youtube;
+pub mod youtube_upload;
 
 pub use loopback::LoopbackReceiver;
 pub use youtube::{GoogleEndpoints, YouTubeSignIn};
+pub use youtube_upload::YouTubeUploader;

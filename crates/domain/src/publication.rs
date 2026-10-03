@@ -1,9 +1,11 @@
-//! Manual publications and their metrics (PRD stories 79-81): after
+//! Publications and their metrics (PRD stories 79-81, 84, 85): after
 //! posting an export by hand, the user pastes the post's link; Bardo checks
 //! it belongs to the network, keeps the post's id, and from then on tracks
-//! the post. On YouTube a metrics sync reads the public statistics (views,
-//! likes, comments) with the Data API key and keeps a snapshot per sync;
-//! the other networks keep the link until publishing brings their metrics.
+//! the post. An upload (ADR-0008) becomes a publication of its own kind,
+//! with a status, and gets its link once the network made the video. On
+//! YouTube a metrics sync reads the public statistics (views, likes,
+//! comments) with the Data API key and keeps a snapshot per sync; the other
+//! networks keep the link until publishing brings their metrics.
 //!
 //! Links are read here, without a network call: the post's id must be in
 //! the link itself. Short links (`vm.tiktok.com/…`) hide it, so they are
@@ -16,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ChannelId, Network, NetworkAccountId, ProfileId, ProviderFailure, RenderId,
-    RepositoryError, VideoProjectId,
+    ApiKey, ChannelId, InvalidUploadTransition, Network, NetworkAccountId, ProfileId,
+    ProviderFailure, RenderId, RepositoryError, Upload, UploadStatus, VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -296,22 +298,47 @@ impl PostLink {
     }
 }
 
-/// A post the user made of a video project's export on one network
-/// account, linked to Bardo by its address. One per project and network:
-/// linking again replaces the link.
+/// How a publication got to the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublicationKind {
+    /// The user posted an export by hand and linked the post.
+    Manual,
+    /// Bardo uploaded it after the upload review (ADR-0008).
+    Uploaded(Upload),
+}
+
+impl PublicationKind {
+    /// Stable name for storage.
+    pub fn code(&self) -> &'static str {
+        match self {
+            PublicationKind::Manual => "manual",
+            PublicationKind::Uploaded(_) => "uploaded",
+        }
+    }
+}
+
+/// A video project's post on one network account: posted by hand from an
+/// export and linked by its address, or uploaded by Bardo. One per project
+/// and network: a new one replaces the earlier one, whatever its kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Publication {
     pub id: PublicationId,
     pub owner: ProfileId,
     pub project: VideoProjectId,
     pub account: NetworkAccountId,
-    /// The render the export it was posted from copied.
+    pub network: Network,
+    /// The render it was posted from: the one the export copied, or the
+    /// one uploaded.
     pub render: RenderId,
-    pub link: PostLink,
-    /// When it went live: when the user linked it, until the network says
-    /// (YouTube's publish time, after a sync).
+    /// The post on the network. Always there for a manual publication; an
+    /// upload has it once the network made the video.
+    pub link: Option<PostLink>,
+    pub kind: PublicationKind,
+    /// When it went live: when the user linked it or the upload was
+    /// reviewed, until the network says (YouTube's publish time, after a
+    /// sync).
     pub posted_at: SystemTime,
-    /// When the user linked it.
+    /// When the user linked it, or reviewed the upload.
     pub linked_at: SystemTime,
     /// The last sync that looked for the post, found or not.
     pub checked_at: Option<SystemTime>,
@@ -321,13 +348,42 @@ pub struct Publication {
 
 impl Publication {
     pub fn network(&self) -> Network {
-        self.link.network()
+        self.network
+    }
+
+    /// The post's id on the network, once there is a post.
+    pub fn post_id(&self) -> Option<&str> {
+        self.link.as_ref().map(PostLink::post_id)
+    }
+
+    pub fn upload(&self) -> Option<&Upload> {
+        match &self.kind {
+            PublicationKind::Manual => None,
+            PublicationKind::Uploaded(upload) => Some(upload),
+        }
+    }
+
+    pub fn upload_mut(&mut self) -> Option<&mut Upload> {
+        match &mut self.kind {
+            PublicationKind::Manual => None,
+            PublicationKind::Uploaded(upload) => Some(upload),
+        }
     }
 
     /// Whether a metrics sync reads this post: public statistics exist
-    /// for YouTube only until publishing brings the others' (ADR-0004).
+    /// for YouTube only until publishing brings the others' (ADR-0004),
+    /// and only for a post anyone can open by its id (an upload published
+    /// as public or unlisted; a private or restricted one is hidden).
     pub fn has_public_metrics(&self) -> bool {
-        self.network() == Network::YouTube
+        if self.network != Network::YouTube || self.link.is_none() {
+            return false;
+        }
+        match &self.kind {
+            PublicationKind::Manual => true,
+            PublicationKind::Uploaded(upload) => {
+                upload.status == UploadStatus::Published && upload.visibility != Visibility::Private
+            }
+        }
     }
 
     /// What a sync learned: the post with its statistics, or that it was
@@ -345,6 +401,32 @@ impl Publication {
                 self.missing_since.get_or_insert(at);
             }
         }
+    }
+
+    /// The upload sent the whole file and the network made `video` of it.
+    pub fn sent(&mut self, video: PostLink) -> Result<(), InvalidUploadTransition> {
+        let upload = self.upload_mut().ok_or(InvalidUploadTransition {
+            from: "manual",
+            action: "finish sending",
+        })?;
+        upload.sent()?;
+        self.link = Some(video);
+        Ok(())
+    }
+
+    /// The network processed the uploaded video: it went live now.
+    pub fn processed(
+        &mut self,
+        visibility: Visibility,
+        at: SystemTime,
+    ) -> Result<(), InvalidUploadTransition> {
+        let upload = self.upload_mut().ok_or(InvalidUploadTransition {
+            from: "manual",
+            action: "finish processing",
+        })?;
+        upload.processed(visibility)?;
+        self.posted_at = at;
+        Ok(())
     }
 }
 
@@ -924,8 +1006,10 @@ mod tests {
             owner: ProfileId::new(),
             project: VideoProjectId::new(),
             account: NetworkAccountId::new(),
+            network,
             render: RenderId::new(),
-            link: PostLink::parse(network, link).unwrap(),
+            link: Some(PostLink::parse(network, link).unwrap()),
+            kind: PublicationKind::Manual,
             posted_at: at(0),
             linked_at: at(0),
             checked_at,
@@ -961,6 +1045,65 @@ mod tests {
     fn only_youtube_posts_have_public_metrics() {
         assert!(publication(Network::YouTube, None).has_public_metrics());
         assert!(!publication(Network::TikTok, None).has_public_metrics());
+    }
+
+    fn uploading(visibility: Visibility) -> Publication {
+        let mut p = publication(Network::YouTube, None);
+        p.link = None;
+        p.kind = PublicationKind::Uploaded(Upload::queued(visibility, crate::JobId::new()));
+        p.upload_mut().unwrap().start().unwrap();
+        p
+    }
+
+    fn video() -> PostLink {
+        PostLink::parse(
+            Network::YouTube,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_upload_gets_its_link_when_sent_and_goes_live_when_processed() {
+        let mut p = uploading(Visibility::Public);
+        assert_eq!(p.post_id(), None);
+        assert!(!p.has_public_metrics(), "no video yet");
+
+        p.sent(video()).unwrap();
+        assert_eq!(p.post_id(), Some("dQw4w9WgXcQ"));
+        assert_eq!(p.upload().unwrap().status, UploadStatus::Processing);
+        assert!(!p.has_public_metrics(), "still processing");
+
+        p.processed(Visibility::Public, at(50)).unwrap();
+        assert_eq!(p.upload().unwrap().status, UploadStatus::Published);
+        assert_eq!(p.posted_at, at(50));
+        assert!(p.has_public_metrics(), "joins the metrics sync");
+    }
+
+    #[test]
+    fn private_and_restricted_uploads_have_no_public_metrics() {
+        let mut restricted = uploading(Visibility::Unlisted);
+        restricted.sent(video()).unwrap();
+        restricted.processed(Visibility::Private, at(5)).unwrap();
+        assert_eq!(
+            restricted.upload().unwrap().status,
+            UploadStatus::Restricted
+        );
+        assert!(!restricted.has_public_metrics());
+
+        let mut private = uploading(Visibility::Private);
+        private.sent(video()).unwrap();
+        private.processed(Visibility::Private, at(5)).unwrap();
+        assert_eq!(private.upload().unwrap().status, UploadStatus::Published);
+        assert!(!private.has_public_metrics());
+    }
+
+    #[test]
+    fn a_manual_publication_takes_no_upload_steps() {
+        let mut p = publication(Network::YouTube, None);
+        assert!(p.sent(video()).is_err());
+        assert!(p.processed(Visibility::Public, at(1)).is_err());
+        assert_eq!(p.kind.code(), "manual");
     }
 
     #[test]

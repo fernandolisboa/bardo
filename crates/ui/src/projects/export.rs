@@ -17,7 +17,7 @@ use bardo_app::bardo_domain::{
 };
 use bardo_app::{
     Bardo, BudgetConsent, ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView,
-    PublicationError, Text, export_job_networks,
+    PublicationError, Text, UploadState, export_job_networks,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -134,10 +134,11 @@ impl ProjectsScreen {
             input.set_placeholder(placeholder, window, cx)
         });
         self.fill_metadata(window, cx);
+        self.load_upload(cx);
     }
 
     /// The network in the inspector: the picked one, else the first.
-    fn shown_network<'a>(&self, view: &'a ExportView) -> Option<&'a ExportTarget> {
+    pub(super) fn shown_network<'a>(&self, view: &'a ExportView) -> Option<&'a ExportTarget> {
         view.targets
             .iter()
             .find(|target| Some(target.network) == self.selected_network)
@@ -205,8 +206,11 @@ impl ProjectsScreen {
             self.selected_network = Some(network);
             self.metadata_loaded = None;
             self.export_notice = None;
+            self.upload_draft = None;
+            self.upload_error = None;
             self.reset_post(window, cx);
             self.fill_metadata(window, cx);
+            self.load_upload(cx);
         }
         cx.notify();
     }
@@ -216,23 +220,35 @@ impl ProjectsScreen {
     pub(super) fn reset_post(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.post_editing = false;
         self.post_confirm_remove = false;
+        self.post_confirm_replace = false;
         self.post_error = None;
         self.post_link
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
-    /// Links the pasted post to the shown network's export.
-    fn mark_posted(&mut self, network: Network, window: &mut Window, cx: &mut Context<Self>) {
+    /// Links the pasted post to the shown network's export. Over an
+    /// upload, it asks first (`replace` once the user confirmed).
+    fn mark_posted(
+        &mut self,
+        network: Network,
+        replace: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(id) = self.project else {
             return;
         };
         let link = self.post_link.read(cx).value().to_string();
         let bardo = self.bardo.read(cx);
-        match bardo.mark_posted(id, network, &link) {
+        match bardo.mark_posted(id, network, &link, replace) {
             Ok(_) => {
                 self.reset_post(window, cx);
                 self.export_error = None;
                 self.export_notice = Some(Text::PublicationSaved);
+            }
+            Err(PublicationError::ReplacesUpload) => {
+                self.post_confirm_replace = true;
+                self.post_error = None;
             }
             Err(PublicationError::Link(error)) => {
                 self.post_error = Some(bardo.post_link_problem(error, network).into());
@@ -475,7 +491,15 @@ impl ProjectsScreen {
             Some(cost) => bardo.money(cost.amount()),
         };
         // Posts go up from exports: their count sits under the exports'.
-        let posted = view.targets.iter().filter(|t| t.posted.is_some()).count();
+        let posted = view
+            .targets
+            .iter()
+            .filter(|t| {
+                t.posted
+                    .as_ref()
+                    .is_some_and(|p| p.publication.link.is_some())
+            })
+            .count();
         if posted > 0 {
             exported.line = Some(
                 div()
@@ -810,7 +834,15 @@ impl ProjectsScreen {
                 _ => format!("@{}", target.handle),
             }));
             // Once posted, the post says more than the export.
+            let upload = target
+                .posted
+                .as_ref()
+                .and_then(|post| bardo.upload_state(&post.publication))
+                .filter(|state| !matches!(state, UploadState::Published));
             tile.time = Some(match target.posted.as_ref() {
+                Some(_) if upload.is_some() => {
+                    metrics::upload_label(bardo, upload.as_ref().expect("checked"))
+                }
                 Some(post) => match post.latest() {
                     Some(latest) => SharedString::from(bardo.text_with(
                         Text::PublicationTileViews,
@@ -1157,6 +1189,7 @@ impl ProjectsScreen {
                 .children(last)
                 .into_any_element(),
         );
+        body.extend(self.upload_section(cx));
         body.push(self.post_section(view, target, cx));
 
         let bardo = self.bardo.read(cx);
@@ -1187,6 +1220,45 @@ impl ProjectsScreen {
         inspector.title = Some(title);
         inspector.footer = footer;
         inspector
+    }
+
+    /// Linking the pasted post replaces the network's upload: the user
+    /// confirms first.
+    fn replace_upload_card(&self, network: Network, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        kit::card(cx)
+            .p_3()
+            .gap_2()
+            .border_color(look(cx).tokens.accent_edge)
+            .child(div().text_sm().child(SharedString::from(bardo.text_with(
+                Text::PublicationReplaceUploadConfirm,
+                &[("network", &bardo.text(Text::NetworkName(network)))],
+            ))))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        Button::new("post-replace-keep")
+                            .small()
+                            .ghost()
+                            .label(tr(bardo, Text::PublicationRemoveKeep))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.post_confirm_replace = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("post-replace-confirm")
+                            .small()
+                            .primary()
+                            .label(tr(bardo, Text::PublicationReplaceUploadYes))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.mark_posted(network, true, window, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// The post made of the export: the field to paste its link, or the
@@ -1239,7 +1311,7 @@ impl ProjectsScreen {
                             },
                         ))
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            this.mark_posted(network, window, cx);
+                            this.mark_posted(network, false, window, cx);
                         })),
                 )
                 .when(editing, |row| {
@@ -1258,19 +1330,25 @@ impl ProjectsScreen {
             if let Some(post) = posted {
                 section = section.child(metrics::post_state(bardo, post, "post", cx));
             }
+            if self.post_confirm_replace {
+                section = section.child(self.replace_upload_card(network, cx));
+            }
             return section.into_any_element();
         }
         let Some(post) = posted else {
             return section.into_any_element();
         };
         let publication = &post.publication;
-        let url = publication.link.url().to_owned();
-        let open = url.clone();
-        let change = url.clone();
+        let uploading = bardo
+            .upload_state(publication)
+            .is_some_and(|state| state.is_active());
+        let url = publication.link.as_ref().map(|link| link.url().to_owned());
+        let change = url.clone().unwrap_or_default();
         let id = publication.id;
         section = section
             .child(metrics::post_state(bardo, post, "post", cx))
-            .child(
+            .children(url.map(|url| {
+                let open = url.clone();
                 h_flex()
                     .gap_2()
                     .items_center()
@@ -1288,8 +1366,8 @@ impl ProjectsScreen {
                             .outline()
                             .label(tr(bardo, Text::PublicationOpen))
                             .on_click(move |_, _, cx| cx.open_url(&open)),
-                    ),
-            );
+                    )
+            }));
         if self.post_confirm_remove {
             section = section.child(
                 kit::card(cx)
@@ -1327,7 +1405,7 @@ impl ProjectsScreen {
                             ),
                     ),
             );
-        } else {
+        } else if !uploading {
             section = section.child(
                 h_flex()
                     .gap_1()

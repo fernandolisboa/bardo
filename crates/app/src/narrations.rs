@@ -865,6 +865,7 @@ pub(crate) mod tests {
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
+                uploaders: Vec::new(),
             };
             let mut app = Bardo::start_with(
                 Repositories::shared_with_files(

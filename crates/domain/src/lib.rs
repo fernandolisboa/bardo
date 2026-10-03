@@ -78,6 +78,7 @@ mod template;
 mod text;
 mod theme;
 mod timeline;
+mod upload;
 mod voice;
 
 pub use appearance::{
@@ -170,8 +171,9 @@ pub use provider_key::{
 };
 pub use publication::{
     ChannelPoint, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, PostLink, PostLinkError,
-    Publication, PublicationId, PublicationRepository, STATS_BATCH, UnknownMetricsSync,
-    VideoStatistics, VideoStats, channel_history, latest_of_each, sync_quota_units,
+    Publication, PublicationId, PublicationKind, PublicationRepository, STATS_BATCH,
+    UnknownMetricsSync, VideoStatistics, VideoStats, channel_history, latest_of_each,
+    sync_quota_units,
 };
 pub use redaction::Redactor;
 pub use render::{
@@ -211,5 +213,10 @@ pub use timeline::{
     AudioItem, CaptionSpan, FPS, Picture, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,
     TimelineRepository, VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame,
     snap, timecode,
+};
+pub use upload::{
+    InvalidUploadTransition, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind,
+    UploadFailure, UploadOutcome, UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload,
+    VideoUploader,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

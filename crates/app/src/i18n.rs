@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use std::time::Duration;
 
-use crate::{Destination, Pillar, Stage};
+use crate::{Destination, Pillar, Stage, UploadBlock};
 
 use bardo_domain::{
     ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionStyle, ChannelFieldError,
@@ -965,6 +965,7 @@ pub enum Text {
     RenderCutChanged,
     RenderAlreadyRunning,
     RenderWhileExporting,
+    RenderWhileUploading,
     RenderCheckFailed,
     RenderNotLoaded,
     RenderNoAccounts,
@@ -1169,6 +1170,55 @@ pub enum Text {
     MetricsSettingNotSaved,
     PostLinkProblem(PostLinkError),
     MetricsSyncOption(MetricsSyncOnStart),
+    /// Why an upload cannot start now.
+    UploadBlocked(UploadBlock),
+    UploadChanged,
+    UploadReplaceNotConfirmed,
+    UploadNotStarted,
+    PublicationReplacesUpload,
+    PublicationUploading,
+    UploadTitle,
+    UploadHint,
+    UploadOpenReview,
+    UploadReviewTitle,
+    UploadFieldFile,
+    UploadFieldChannel,
+    UploadFieldVisibility,
+    UploadMadeForKids,
+    UploadMadeForKidsHint,
+    UploadSynthetic,
+    UploadSyntheticHint,
+    UploadSyntheticOn,
+    UploadReplacePost,
+    UploadReplaceUpload,
+    UploadIrreversible,
+    UploadStart,
+    UploadBack,
+    UploadQueued,
+    UploadStateWaiting,
+    UploadStateUploading,
+    UploadStateRetrying,
+    UploadStateProcessing,
+    UploadStatePublished,
+    UploadStateRestricted,
+    UploadStateStopped,
+    UploadStateFailed,
+    UploadRetryingHint,
+    UploadProcessingHint,
+    UploadStoppedHint,
+    UploadRestrictedHint,
+    UploadFailureQuota,
+    UploadFailureUploadLimit,
+    UploadFailureReconnect,
+    UploadFailureRejected,
+    UploadFailureProcessing,
+    UploadFailureRemoved,
+    UploadStop,
+    UploadResume,
+    UploadRetry,
+    UploadSentAt,
+    PublicationReplaceUploadConfirm,
+    PublicationReplaceUploadYes,
 }
 
 impl Text {
@@ -2220,6 +2270,7 @@ impl Text {
             Text::RenderCutChanged => "render.error.cut_changed",
             Text::RenderAlreadyRunning => "render.error.already_running",
             Text::RenderWhileExporting => "render.error.while_exporting",
+            Text::RenderWhileUploading => "render.error.while_uploading",
             Text::RenderCheckFailed => "render.error.check_failed",
             Text::RenderNotLoaded => "render.error.not_loaded",
             Text::RenderNoAccounts => "render.no_accounts",
@@ -2432,6 +2483,54 @@ impl Text {
             Text::MetricsSyncOption(setting) => {
                 return format!("metrics.sync_option.{}", setting.code()).into();
             }
+            Text::UploadChanged => "upload.error.changed",
+            Text::UploadReplaceNotConfirmed => "upload.error.replace_not_confirmed",
+            Text::UploadNotStarted => "upload.error.not_started",
+            Text::PublicationReplacesUpload => "publication.error.replaces_upload",
+            Text::PublicationUploading => "publication.error.uploading",
+            Text::UploadTitle => "upload.title",
+            Text::UploadHint => "upload.hint",
+            Text::UploadOpenReview => "upload.open_review",
+            Text::UploadReviewTitle => "upload.review_title",
+            Text::UploadFieldFile => "upload.field.file",
+            Text::UploadFieldChannel => "upload.field.channel",
+            Text::UploadFieldVisibility => "upload.field.visibility",
+            Text::UploadMadeForKids => "upload.made_for_kids",
+            Text::UploadMadeForKidsHint => "upload.made_for_kids_hint",
+            Text::UploadSynthetic => "upload.synthetic",
+            Text::UploadSyntheticHint => "upload.synthetic_hint",
+            Text::UploadSyntheticOn => "upload.synthetic_on",
+            Text::UploadReplacePost => "upload.replace_post",
+            Text::UploadReplaceUpload => "upload.replace_upload",
+            Text::UploadIrreversible => "upload.irreversible",
+            Text::UploadStart => "upload.start",
+            Text::UploadBack => "upload.back",
+            Text::UploadQueued => "upload.queued",
+            Text::UploadStateWaiting => "upload.state.waiting",
+            Text::UploadStateUploading => "upload.state.uploading",
+            Text::UploadStateRetrying => "upload.state.retrying",
+            Text::UploadStateProcessing => "upload.state.processing",
+            Text::UploadStatePublished => "upload.state.published",
+            Text::UploadStateRestricted => "upload.state.restricted",
+            Text::UploadStateStopped => "upload.state.stopped",
+            Text::UploadStateFailed => "upload.state.failed",
+            Text::UploadRetryingHint => "upload.retrying_hint",
+            Text::UploadProcessingHint => "upload.processing_hint",
+            Text::UploadStoppedHint => "upload.stopped_hint",
+            Text::UploadRestrictedHint => "upload.restricted_hint",
+            Text::UploadFailureQuota => "upload.failure.quota",
+            Text::UploadFailureUploadLimit => "upload.failure.upload_limit",
+            Text::UploadFailureReconnect => "upload.failure.reconnect",
+            Text::UploadFailureRejected => "upload.failure.rejected",
+            Text::UploadFailureProcessing => "upload.failure.processing",
+            Text::UploadFailureRemoved => "upload.failure.removed",
+            Text::UploadStop => "upload.stop",
+            Text::UploadResume => "upload.resume",
+            Text::UploadRetry => "upload.retry",
+            Text::UploadSentAt => "upload.sent_at",
+            Text::PublicationReplaceUploadConfirm => "publication.replace_upload_confirm",
+            Text::PublicationReplaceUploadYes => "publication.replace_upload_yes",
+            Text::UploadBlocked(block) => return format!("upload.block.{}", block.code()).into(),
             Text::MetadataProblem(problem) => match problem {
                 MetadataProblem::TitleRequired => "metadata.problem.title_required",
                 MetadataProblem::TitleTooLong => "metadata.problem.title_too_long",
@@ -3553,6 +3652,7 @@ mod tests {
         texts.push(Text::RenderCutChanged);
         texts.push(Text::RenderAlreadyRunning);
         texts.push(Text::RenderWhileExporting);
+        texts.push(Text::RenderWhileUploading);
         texts.push(Text::RenderCheckFailed);
         texts.push(Text::RenderNotLoaded);
         texts.push(Text::RenderNoAccounts);
@@ -3765,6 +3865,54 @@ mod tests {
             .map(Text::PostLinkProblem),
         );
         texts.extend(MetricsSyncOnStart::ALL.map(Text::MetricsSyncOption));
+        texts.push(Text::UploadChanged);
+        texts.push(Text::UploadReplaceNotConfirmed);
+        texts.push(Text::UploadNotStarted);
+        texts.push(Text::PublicationReplacesUpload);
+        texts.push(Text::PublicationUploading);
+        texts.push(Text::UploadTitle);
+        texts.push(Text::UploadHint);
+        texts.push(Text::UploadOpenReview);
+        texts.push(Text::UploadReviewTitle);
+        texts.push(Text::UploadFieldFile);
+        texts.push(Text::UploadFieldChannel);
+        texts.push(Text::UploadFieldVisibility);
+        texts.push(Text::UploadMadeForKids);
+        texts.push(Text::UploadMadeForKidsHint);
+        texts.push(Text::UploadSynthetic);
+        texts.push(Text::UploadSyntheticHint);
+        texts.push(Text::UploadSyntheticOn);
+        texts.push(Text::UploadReplacePost);
+        texts.push(Text::UploadReplaceUpload);
+        texts.push(Text::UploadIrreversible);
+        texts.push(Text::UploadStart);
+        texts.push(Text::UploadBack);
+        texts.push(Text::UploadQueued);
+        texts.push(Text::UploadStateWaiting);
+        texts.push(Text::UploadStateUploading);
+        texts.push(Text::UploadStateRetrying);
+        texts.push(Text::UploadStateProcessing);
+        texts.push(Text::UploadStatePublished);
+        texts.push(Text::UploadStateRestricted);
+        texts.push(Text::UploadStateStopped);
+        texts.push(Text::UploadStateFailed);
+        texts.push(Text::UploadRetryingHint);
+        texts.push(Text::UploadProcessingHint);
+        texts.push(Text::UploadStoppedHint);
+        texts.push(Text::UploadRestrictedHint);
+        texts.push(Text::UploadFailureQuota);
+        texts.push(Text::UploadFailureUploadLimit);
+        texts.push(Text::UploadFailureReconnect);
+        texts.push(Text::UploadFailureRejected);
+        texts.push(Text::UploadFailureProcessing);
+        texts.push(Text::UploadFailureRemoved);
+        texts.push(Text::UploadStop);
+        texts.push(Text::UploadResume);
+        texts.push(Text::UploadRetry);
+        texts.push(Text::UploadSentAt);
+        texts.push(Text::PublicationReplaceUploadConfirm);
+        texts.push(Text::PublicationReplaceUploadYes);
+        texts.extend(UploadBlock::ALL.map(Text::UploadBlocked));
         texts
     }
 

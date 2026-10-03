@@ -129,6 +129,13 @@ impl ProjectFiles for LocalProjectFiles {
         checked(name).is_ok_and(|name| self.folder(project).join(name).is_file())
     }
 
+    fn size(&self, project: VideoProjectId, name: &str) -> Result<u64, ProjectFileError> {
+        let name = checked(name)?;
+        std::fs::metadata(self.folder(project).join(name))
+            .map(|metadata| metadata.len())
+            .map_err(|e| error(name, e))
+    }
+
     fn remove(&self, project: VideoProjectId, name: &str) -> Result<(), ProjectFileError> {
         let name = checked(name)?;
         match std::fs::remove_file(self.folder(project).join(name)) {
@@ -205,6 +212,10 @@ impl ProjectFiles for MemoryProjectFiles {
         self.write(project, name, &bytes)
     }
 
+    fn size(&self, project: VideoProjectId, name: &str) -> Result<u64, ProjectFileError> {
+        self.read(project, name).map(|bytes| bytes.len() as u64)
+    }
+
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {
         self.files
             .lock()
@@ -251,6 +262,8 @@ mod tests {
         assert_eq!(files.read(project, "narration.mp3").unwrap(), b"second");
         assert!(files.exists(project, "narration.mp3"));
         assert!(!files.exists(other, "narration.mp3"));
+        assert_eq!(files.size(project, "narration.mp3").unwrap(), 6);
+        assert!(files.size(other, "narration.mp3").is_err());
         let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
@@ -272,6 +285,7 @@ mod tests {
             assert!(files.write(project, name, b"x").is_err(), "{name}");
             assert!(files.read(project, name).is_err(), "{name}");
             assert!(!files.exists(project, name), "{name}");
+            assert!(files.size(project, name).is_err(), "{name}");
         }
     }
 
@@ -283,6 +297,7 @@ mod tests {
         files.write(project, "a.mp3", b"a").unwrap();
         assert_eq!(files.names(project), ["a.mp3", "b.mp3"]);
         assert_eq!(files.read(project, "a.mp3").unwrap(), b"a");
+        assert_eq!(files.size(project, "a.mp3").unwrap(), 1);
         files.remove(project, "a.mp3").unwrap();
         assert!(!files.exists(project, "a.mp3"));
         assert!(files.write(project, "../a.mp3", b"a").is_err());

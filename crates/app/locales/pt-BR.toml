@@ -214,6 +214,7 @@ metadata = "Metadados"
 export = "Exportação"
 metrics_sync = "Sincronização de métricas"
 cut_suggestions = "Sugestões de corte"
+upload = "Envio"
 
 [job.state]
 queued = "Na fila"
@@ -1251,6 +1252,7 @@ blocked = "Uma rede escolhida não pode ser renderizada. Veja as verificações 
 cut_changed = "O corte mudou depois desta revisão. Revise de novo antes de renderizar."
 already_running = "Este projeto já está renderizando."
 while_exporting = "Espere a exportação terminar antes de renderizar de novo."
+while_uploading = "Espere o envio terminar antes de renderizar de novo."
 check_failed = "O Bardo não conseguiu verificar este corte com o ffmpeg. Verifique de novo ou veja os detalhes em Tarefas."
 not_loaded = "Não foi possível carregar a revisão do render. Tente de novo."
 
@@ -1438,6 +1440,8 @@ not_exported = "Exporte esta rede primeiro, publique o arquivo e depois cole o l
 already_linked = "Esta publicação já está vinculada a outro projeto."
 not_found = "Essa publicação não está mais vinculada."
 not_saved = "Não foi possível salvar o link. Tente de novo."
+replaces_upload = "Esta rede tem um vídeo enviado. Confirme que o link o substitui no Bardo."
+uploading = "Um envio para esta rede está em andamento. Pare-o antes de vincular ou desvincular uma publicação."
 
 [metrics.error]
 missing_key = "Adicione sua chave da YouTube Data API em Configurações para sincronizar visualizações, curtidas e comentários."
@@ -1467,6 +1471,8 @@ posted_at = "Publicado {when}"
 no_metrics = "O Bardo guarda o link. As métricas do {network} chegam com a publicação automática."
 figure = "{n} de {total} publicados"
 tile_views = "Publicado · {views} visualizações"
+replace_upload_confirm = "Vincular esta publicação no lugar do vídeo enviado? O vídeo continua no {network}."
+replace_upload_yes = "Vincular no lugar"
 
 [metrics]
 views = "Visualizações"
@@ -1583,3 +1589,67 @@ unexpected = "A rede respondeu de um jeito que o Bardo não entende. Tente de no
 [consent_page]
 done = "O Bardo está conectado. Pode fechar esta aba."
 failed = "O Bardo não conectou. Volte ao Bardo para ver o motivo."
+
+[upload.error]
+changed = "O render, o corte ou a publicação mudou desde a revisão. Revise o envio de novo."
+replace_not_confirmed = "Confirme que o envio substitui a publicação desta rede no Bardo."
+not_started = "Não foi possível iniciar o envio. Tente de novo."
+
+[upload]
+title = "Envio"
+hint = "O Bardo envia o arquivo renderizado ao canal conectado com este título, descrição e tags. Nada é enviado antes de você confirmar a revisão."
+open_review = "Revisar envio"
+review_title = "Revise o envio para o {network}"
+made_for_kids = "Conteúdo para crianças"
+made_for_kids_hint = "O YouTube exige esta resposta em todo vídeo. Vídeos para crianças perdem comentários, notificações e anúncios personalizados."
+synthetic = "Conteúdo alterado ou sintético"
+synthetic_hint = "Informa ao YouTube que o vídeo tem conteúdo realista criado ou alterado com IA, como uma voz realista. O YouTube mostra um rótulo nele."
+synthetic_on = "Marcado porque a narração usa uma voz realista."
+replace_post = "Substituir a publicação vinculada no Bardo. Ela continua no {network}."
+replace_upload = "Substituir o envio anterior no Bardo. Um vídeo que ele já enviou continua no {network}."
+irreversible = "Depois de enviado, o vídeo fica no seu canal. Removê-lo é feito no {network}."
+start = "Enviar"
+back = "Voltar"
+queued = "Envio na fila."
+retrying_hint = "A conexão ou o {network} falhou no caminho. O Bardo tenta de novo em instantes e continua do que já chegou."
+processing_hint = "O {network} recebeu o arquivo e está processando. O Bardo acompanha até terminar."
+stopped_hint = "Retome para enviar o resto. O que o {network} já recebeu não é enviado de novo."
+restricted_hint = "Mantido privado pelo YouTube: seu projeto do Google ainda não passou pela auditoria da API do YouTube."
+stop = "Parar"
+resume = "Retomar"
+retry = "Tentar de novo"
+sent_at = "Enviado {when}"
+
+[upload.field]
+file = "Arquivo"
+channel = "Canal"
+visibility = "Visibilidade"
+
+[upload.state]
+waiting = "Aguardando envio"
+uploading = "Enviando {percent}"
+retrying = "Tentando de novo"
+processing = "Processando"
+published = "Enviado"
+restricted = "Mantido privado"
+stopped = "Envio parado"
+failed = "Envio falhou"
+
+[upload.failure]
+quota = "A cota diária de envios do seu projeto do Google no YouTube acabou. Ela renova à meia-noite do horário do Pacífico; tente de novo depois."
+upload_limit = "O canal atingiu o limite de envios do YouTube por enquanto. Tente de novo mais tarde."
+reconnect = "A rede recusou o login. Reconecte a conta em Configurações › Redes e tente de novo."
+rejected = "O {network} rejeitou o vídeo ({reason}). Corrija e envie de novo."
+processing = "O {network} não conseguiu processar o vídeo ({reason}). Renderize e envie de novo."
+removed = "O vídeo não está mais no {network}."
+
+[upload.block]
+not_offered = "O Bardo ainda não envia para esta rede. Exporte o arquivo e publique manualmente."
+not_connected = "Conecte esta conta em Configurações › Redes para enviar daqui."
+reconnect_needed = "A rede recusou o login desta conta. Reconecte-a em Configurações › Redes."
+uploading = "Um envio para esta rede está em andamento."
+rendering = "Um render está em andamento. Envie quando ele terminar."
+no_render = "Renderize o preset desta conta primeiro."
+render_outdated = "O corte ou o preset mudou desde o render. Renderize de novo antes de enviar."
+no_metadata = "Escreva o título, a descrição e as tags primeiro."
+problems = "Corrija os problemas de metadados acima primeiro."

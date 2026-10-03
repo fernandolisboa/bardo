@@ -1,0 +1,12 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "FIXTURE-etag",
+  "items": [],
+  "pageInfo": {
+    "totalResults": 0,
+    "resultsPerPage": 0
+  }
+}

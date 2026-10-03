@@ -1,0 +1,5 @@
+HTTP/2 200 
+content-type: text/plain; charset=utf-8
+location: https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status&upload_id=FIXTURE-upload-id-2
+x-guploader-uploadid: FIXTURE-upload-id-2
+

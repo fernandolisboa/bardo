@@ -29,6 +29,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0025_cut_suggestion.sql"),
     include_str!("../migrations/0026_theme_performance.sql"),
     include_str!("../migrations/0027_network_connection.sql"),
+    include_str!("../migrations/0028_uploaded_publication.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
@@ -246,6 +247,75 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn rebuilding_publications_keeps_linked_posts_and_their_snapshots() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..27] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 27).unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language,
+                 country)
+             VALUES ('c', 'p', 'Space', '', '', 'en', 'US');
+             INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                 suggested_at, position)
+             VALUES ('t', 'p', 'c', 'space', 'Probe', '', 'approved', 0, 0);
+             INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                 created_at)
+             VALUES ('v', 'p', 'c', 't', 'space', 'Probe', 0);
+             INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                 render_id, post_id, url, posted_at, linked_at)
+             VALUES ('pub', 'v', 'youtube', 'p', 'a', 'r', 'dQw4w9WgXcQ',
+                 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 1, 1);
+             INSERT INTO metrics_snapshot (publication_id, taken_at, views)
+             VALUES ('pub', 2, 40);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let (kind, post): (String, String) = conn
+            .query_row("SELECT kind, post_id FROM publication", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((kind.as_str(), post.as_str()), ("manual", "dQw4w9WgXcQ"));
+        let views: i64 = conn
+            .query_row("SELECT views FROM metrics_snapshot", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(views, 40, "the snapshots stay");
+        assert!(
+            conn.execute(
+                "INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                     render_id, kind, posted_at, linked_at)
+                 VALUES ('m', 'v', 'tiktok', 'p', 'a', 'r', 'manual', 1, 1)",
+                [],
+            )
+            .is_err(),
+            "a manual publication needs its post"
+        );
+        conn.execute(
+            "INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                 render_id, kind, upload_status, upload_visibility, upload_job, posted_at,
+                 linked_at)
+             VALUES ('u', 'v', 'tiktok', 'p', 'a', 'r', 'uploaded', 'queued', 'public', 'j',
+                 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM publication WHERE id = 'pub'", [])
+            .unwrap();
+        let snapshots: i64 = conn
+            .query_row("SELECT COUNT(*) FROM metrics_snapshot", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(snapshots, 0, "snapshots still go with their publication");
     }
 
     #[test]

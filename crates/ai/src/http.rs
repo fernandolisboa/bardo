@@ -323,6 +323,43 @@ impl UreqTransport {
         }
     }
 
+    /// For resumable uploads: a 308 answer is "resume incomplete", not a
+    /// redirect to follow, so redirects come back as they are. `timeout`
+    /// bounds each request, a chunk of the file included.
+    pub fn for_uploads(timeout: Duration) -> Self {
+        let tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .timeout_global(Some(timeout))
+            .tls_config(tls)
+            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .new_agent();
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
+    }
+
+    /// `for_uploads` against a local server: plain HTTP, no proxy.
+    #[doc(hidden)]
+    pub fn for_uploads_without_proxy(timeout: Duration) -> Self {
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .timeout_global(Some(timeout))
+            .proxy(None)
+            .build()
+            .new_agent();
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
+    }
+
     /// Accepts bodies up to `bytes` (audio comes back inside JSON).
     pub fn with_max_body(mut self, bytes: u64) -> Self {
         self.max_body_bytes = bytes;

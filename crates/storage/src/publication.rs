@@ -1,6 +1,7 @@
 use bardo_domain::{
-    ChannelId, MetricsSnapshot, Network, NetworkAccountId, PostLink, ProfileId, Publication,
-    PublicationId, PublicationRepository, RenderId, RepositoryError, VideoProjectId,
+    ChannelId, JobId, MetricsSnapshot, Network, NetworkAccountId, PostLink, ProfileId, Publication,
+    PublicationId, PublicationKind, PublicationRepository, RenderId, RepositoryError, Upload,
+    UploadStatus, VideoProjectId, Visibility,
 };
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
@@ -14,7 +15,9 @@ fn uuid(text: &str) -> Result<Uuid, RepositoryError> {
 const PUBLICATION_COLUMNS: &str = "publication.id, publication.project_id, publication.network,
      publication.profile_id, publication.account_id, publication.render_id,
      publication.post_id, publication.url, publication.posted_at, publication.linked_at,
-     publication.checked_at, publication.missing_since";
+     publication.checked_at, publication.missing_since, publication.kind,
+     publication.upload_status, publication.upload_failure, publication.upload_visibility,
+     publication.upload_job";
 
 /// A publication row as SQLite returns it.
 struct PublicationRow {
@@ -24,12 +27,17 @@ struct PublicationRow {
     owner: String,
     account: String,
     render: String,
-    post_id: String,
-    url: String,
+    post_id: Option<String>,
+    url: Option<String>,
     posted_at: i64,
     linked_at: i64,
     checked_at: Option<i64>,
     missing_since: Option<i64>,
+    kind: String,
+    upload_status: Option<String>,
+    upload_failure: Option<String>,
+    upload_visibility: Option<String>,
+    upload_job: Option<String>,
 }
 
 impl PublicationRow {
@@ -47,18 +55,55 @@ impl PublicationRow {
             linked_at: row.get(9)?,
             checked_at: row.get(10)?,
             missing_since: row.get(11)?,
+            kind: row.get(12)?,
+            upload_status: row.get(13)?,
+            upload_failure: row.get(14)?,
+            upload_visibility: row.get(15)?,
+            upload_job: row.get(16)?,
         })
     }
 
     fn publication(self) -> Result<Publication, RepositoryError> {
         let network: Network = self.network.parse().map_err(boxed)?;
+        let broken =
+            |what: &str| RepositoryError(format!("publication {}: {what}", self.id).into());
+        let kind = match self.kind.as_str() {
+            "manual" => PublicationKind::Manual,
+            "uploaded" => PublicationKind::Uploaded(Upload {
+                status: self
+                    .upload_status
+                    .as_deref()
+                    .and_then(|status| {
+                        UploadStatus::from_code(status, self.upload_failure.as_deref())
+                    })
+                    .ok_or_else(|| broken("unknown upload status"))?,
+                visibility: self
+                    .upload_visibility
+                    .as_deref()
+                    .ok_or_else(|| broken("no upload visibility"))?
+                    .parse::<Visibility>()
+                    .map_err(boxed)?,
+                job: JobId::from(uuid(
+                    self.upload_job
+                        .as_deref()
+                        .ok_or_else(|| broken("no upload job"))?,
+                )?),
+            }),
+            other => return Err(broken(&format!("unknown kind {other}"))),
+        };
+        let link = match (self.post_id, self.url) {
+            (Some(post_id), Some(url)) => Some(PostLink::restore(network, post_id, url)),
+            _ => None,
+        };
         Ok(Publication {
             id: PublicationId::from(uuid(&self.id)?),
             owner: ProfileId::from(uuid(&self.owner)?),
             project: VideoProjectId::from(uuid(&self.project)?),
             account: NetworkAccountId::from(uuid(&self.account)?),
+            network,
             render: RenderId::from(uuid(&self.render)?),
-            link: PostLink::restore(network, self.post_id, self.url),
+            link,
+            kind,
             posted_at: from_unix_millis(self.posted_at),
             linked_at: from_unix_millis(self.linked_at),
             checked_at: self.checked_at.map(from_unix_millis),
@@ -123,9 +168,9 @@ fn stored(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-/// Saves a link. A publication saved before keeps its post, its dates and
-/// what syncs found (they belong to `save_sync`); only its account,
-/// render and address change.
+/// Saves a publication. One saved before keeps its dates and what syncs
+/// found (they belong to `save_sync`); its account, render, post and
+/// upload change. An upload that went live sets when it did.
 fn upsert(conn: &Connection, publication: &Publication) -> Result<(), RepositoryError> {
     // Another post linked for the same project and network goes, with its
     // snapshots.
@@ -138,14 +183,27 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
         ],
     )
     .map_err(boxed)?;
+    let upload = publication.upload();
     conn.execute(
         "INSERT INTO publication (id, project_id, network, profile_id, account_id, render_id,
-                                  post_id, url, posted_at, linked_at, checked_at, missing_since)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                                  post_id, url, posted_at, linked_at, checked_at, missing_since,
+                                  kind, upload_status, upload_failure, upload_visibility,
+                                  upload_job)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
          ON CONFLICT (id) DO UPDATE SET
              account_id = excluded.account_id,
              render_id = excluded.render_id,
-             url = excluded.url",
+             post_id = excluded.post_id,
+             url = excluded.url,
+             kind = excluded.kind,
+             upload_status = excluded.upload_status,
+             upload_failure = excluded.upload_failure,
+             upload_visibility = excluded.upload_visibility,
+             upload_job = excluded.upload_job,
+             posted_at = CASE WHEN excluded.upload_status IN ('published', 'restricted')
+                                   AND publication.upload_status
+                                       NOT IN ('published', 'restricted')
+                              THEN excluded.posted_at ELSE publication.posted_at END",
         params![
             publication.id.to_string(),
             publication.project.to_string(),
@@ -153,12 +211,17 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             publication.owner.to_string(),
             publication.account.to_string(),
             publication.render.to_string(),
-            publication.link.post_id(),
-            publication.link.url(),
+            publication.link.as_ref().map(PostLink::post_id),
+            publication.link.as_ref().map(PostLink::url),
             to_unix_millis(publication.posted_at),
             to_unix_millis(publication.linked_at),
             publication.checked_at.map(to_unix_millis),
             publication.missing_since.map(to_unix_millis),
+            publication.kind.code(),
+            upload.map(|upload| upload.status.code()),
+            upload.and_then(|upload| upload.status.failure().map(|failure| failure.code())),
+            upload.map(|upload| upload.visibility.code()),
+            upload.map(|upload| upload.job.to_string()),
         ],
     )
     .map_err(boxed)?;
@@ -355,8 +418,10 @@ mod tests {
             owner: project.owner,
             project: project.id,
             account: NetworkAccountId::new(),
+            network,
             render: RenderId::new(),
-            link: PostLink::parse(network, link).unwrap(),
+            link: Some(PostLink::parse(network, link).unwrap()),
+            kind: PublicationKind::Manual,
             posted_at: time(100),
             linked_at: time(100),
             checked_at: None,
@@ -398,6 +463,60 @@ mod tests {
         );
         assert_eq!(db.publication(yt.id).unwrap(), Some(yt));
         assert_eq!(db.publication(PublicationId::new()).unwrap(), None);
+    }
+
+    fn uploading(project: &VideoProject) -> Publication {
+        Publication {
+            link: None,
+            kind: PublicationKind::Uploaded(Upload::queued(Visibility::Unlisted, JobId::new())),
+            ..youtube(project, "dQw4w9WgXcQ")
+        }
+    }
+
+    #[test]
+    fn uploads_round_trip_through_every_status() {
+        let (db, _, project) = setup();
+        let mut upload = uploading(&project);
+        db.save_publication(&upload).unwrap();
+        assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
+
+        upload.upload_mut().unwrap().start().unwrap();
+        db.save_publication(&upload).unwrap();
+        upload
+            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .unwrap();
+        db.save_publication(&upload).unwrap();
+        assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
+
+        upload.processed(Visibility::Private, time(400)).unwrap();
+        db.save_publication(&upload).unwrap();
+        let read = db.publication(upload.id).unwrap().unwrap();
+        assert_eq!(read.upload().unwrap().status, UploadStatus::Restricted);
+        assert_eq!(read.posted_at, time(400), "went live when processed");
+        assert_eq!(read, upload);
+
+        let mut failed = uploading(&project);
+        failed.upload_mut().unwrap().start().unwrap();
+        failed
+            .upload_mut()
+            .unwrap()
+            .fail(bardo_domain::UploadFailure::Rejected("duplicate".into()))
+            .unwrap();
+        db.save_publication(&failed).unwrap();
+        assert_eq!(db.publications(project.id).unwrap(), [failed], "replaced");
+    }
+
+    #[test]
+    fn an_upload_replaces_a_linked_post_and_its_snapshots() {
+        let (db, _, project) = setup();
+        let manual = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&manual).unwrap();
+        db.save_sync(&[], &[snapshot(&manual, 200, 50)]).unwrap();
+
+        let upload = uploading(&project);
+        db.save_publication(&upload).unwrap();
+        assert_eq!(db.publications(project.id).unwrap(), [upload]);
+        assert_eq!(db.snapshots(manual.id).unwrap(), []);
     }
 
     #[test]

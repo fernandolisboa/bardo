@@ -342,6 +342,11 @@ pub(crate) struct ConnectionBook {
 }
 
 impl ConnectionBook {
+    /// The token side, for background work.
+    pub(crate) fn connections(&self) -> &Connections {
+        &self.connections
+    }
+
     /// Reads which app credentials are saved and teaches the redactor each
     /// of them. A store that cannot be read shows the network as
     /// unreadable.
