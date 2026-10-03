@@ -3,12 +3,19 @@
 //! free, and an inline form for the account being added or edited. Rules
 //! and persistence live in `bardo_app`; this file only maps the form to a
 //! `NetworkAccountDraft` and errors back to fields.
+//!
+//! An account on a network Bardo signs in to also shows its connection:
+//! connect (consent in the system browser), check, reconnect and
+//! disconnect, each run off the UI thread.
+
+use std::collections::HashMap;
 
 use bardo_app::bardo_domain::{
     AspectRatio, ChannelId, ContentLanguage, Network, NetworkAccount, NetworkAccountDraft,
-    NetworkAccountFieldError, NetworkAccountId, Resolution, VideoCodec, Visibility,
+    NetworkAccountFieldError, NetworkAccountId, Resolution, SignInFailureKind, VideoCodec,
+    Visibility,
 };
-use bardo_app::{Bardo, NetworkAccountError, Text};
+use bardo_app::{Bardo, ConnectionError, ConnectionState, NetworkAccountError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -18,7 +25,10 @@ use gpui_kit::component::{
     ActiveTheme as _, IconName, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Window, div};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, Entity, EventEmitter, SharedString, Subscription, Task, Window,
+    div,
+};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
@@ -140,6 +150,27 @@ enum Notice {
     Error(Text),
 }
 
+/// Asks the shell to open Settings › Networks, where a connection's app
+/// credentials are saved.
+pub struct OpenNetworkSettings;
+
+/// Connection work running off the UI thread for one account.
+#[derive(Clone, Copy, PartialEq)]
+enum Work {
+    Connecting,
+    Checking,
+    Disconnecting,
+}
+
+/// What an account's connection line says after the last action.
+struct ConnectionNotice {
+    tone: Tone,
+    text: SharedString,
+    /// Offer to open Settings › Networks: the app credentials are missing
+    /// or the network rejected them.
+    settings: bool,
+}
+
 /// The channel whose accounts are shown.
 #[derive(Clone, Copy)]
 struct ChannelRef {
@@ -169,8 +200,13 @@ pub struct NetworkAccountsPanel {
     loudness: Entity<InputState>,
     field_errors: Vec<NetworkAccountFieldError>,
     notice: Option<Notice>,
+    /// Connection work in flight; dropping its task stops waiting for it.
+    work: HashMap<NetworkAccountId, (Work, Task<()>)>,
+    connection_notices: HashMap<NetworkAccountId, ConnectionNotice>,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<OpenNetworkSettings> for NetworkAccountsPanel {}
 
 impl NetworkAccountsPanel {
     pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -256,6 +292,8 @@ impl NetworkAccountsPanel {
             loudness,
             field_errors: Vec::new(),
             notice: None,
+            work: HashMap::new(),
+            connection_notices: HashMap::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -277,6 +315,7 @@ impl NetworkAccountsPanel {
             self.confirm_remove = None;
             self.field_errors.clear();
             self.notice = None;
+            self.connection_notices.clear();
         }
         self.relabel(window, cx);
     }
@@ -532,12 +571,350 @@ impl NetworkAccountsPanel {
         cx.notify();
     }
 
+    /// Starts a sign-in: opens the consent page in the system browser and
+    /// waits off the UI thread for the browser to come back.
+    fn connect(&mut self, id: NetworkAccountId, cx: &mut Context<Self>) {
+        let attempt = self.bardo.update(cx, |bardo, cx| {
+            let attempt = bardo.connect(id);
+            cx.notify();
+            attempt
+        });
+        let attempt = match attempt {
+            Ok(attempt) => attempt,
+            Err(error) => return self.connection_failed(id, &error, cx),
+        };
+        cx.open_url(attempt.consent_url());
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { attempt.run() })
+                .await;
+            let outcome = bardo.update(cx, |bardo, cx| {
+                let outcome = bardo.record_connect(result);
+                cx.notify();
+                outcome
+            });
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .work
+                    .get(&id)
+                    .is_some_and(|(work, _)| *work == Work::Connecting)
+                {
+                    this.work.remove(&id);
+                }
+                match outcome {
+                    // Cancelled or replaced while it ran.
+                    None => {}
+                    Some(Ok(_)) => {
+                        this.connection_notices.remove(&id);
+                    }
+                    Some(Err(error)) => this.connection_failed(id, &error, cx),
+                }
+                cx.notify();
+            });
+        });
+        self.connection_notices.remove(&id);
+        self.work.insert(id, (Work::Connecting, task));
+        cx.notify();
+    }
+
+    fn cancel_connect(&mut self, id: NetworkAccountId, cx: &mut Context<Self>) {
+        self.bardo.update(cx, |bardo, cx| {
+            bardo.cancel_connect(id);
+            cx.notify();
+        });
+        self.work.remove(&id);
+        self.connection_notices.remove(&id);
+        cx.notify();
+    }
+
+    /// Renews the access if due and reads the channel again.
+    fn check_connection(&mut self, id: NetworkAccountId, cx: &mut Context<Self>) {
+        let check = match self.bardo.read(cx).connection_check(id) {
+            Ok(check) => check,
+            Err(error) => return self.connection_failed(id, &error, cx),
+        };
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { check.run() })
+                .await;
+            // The channel name or the status may have changed.
+            bardo.update(cx, |_, cx| cx.notify());
+            let _ = this.update(cx, |this, cx| {
+                this.work.remove(&id);
+                match result {
+                    Ok(identity) => {
+                        let bardo = this.bardo.read(cx);
+                        let text = bardo
+                            .text_with(Text::ConnectionChecked, &[("channel", &identity.name)]);
+                        this.connection_notices.insert(
+                            id,
+                            ConnectionNotice {
+                                tone: Tone::Success,
+                                text: SharedString::from(text),
+                                settings: false,
+                            },
+                        );
+                    }
+                    Err(error) => this.connection_failed(id, &error, cx),
+                }
+                cx.notify();
+            });
+        });
+        self.connection_notices.remove(&id);
+        self.work.insert(id, (Work::Checking, task));
+        cx.notify();
+    }
+
+    /// Revokes the access and forgets the tokens.
+    fn disconnect(&mut self, id: NetworkAccountId, network: Network, cx: &mut Context<Self>) {
+        let disconnection = self.bardo.update(cx, |bardo, cx| {
+            let disconnection = bardo.disconnection(id);
+            cx.notify();
+            disconnection
+        });
+        let disconnection = match disconnection {
+            Ok(disconnection) => disconnection,
+            Err(error) => return self.connection_failed(id, &error, cx),
+        };
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { disconnection.run() })
+                .await;
+            bardo.update(cx, |_, cx| cx.notify());
+            let _ = this.update(cx, |this, cx| {
+                this.work.remove(&id);
+                match result {
+                    Ok(done) => {
+                        let bardo = this.bardo.read(cx);
+                        let (tone, text) = if done.revoked {
+                            (Tone::Success, bardo.text(Text::ConnectionDisconnected))
+                        } else {
+                            (
+                                Tone::Warning,
+                                bardo
+                                    .text_with(
+                                        Text::ConnectionDisconnectedNotRevoked,
+                                        &[("network", &bardo.text(Text::NetworkName(network)))],
+                                    )
+                                    .into(),
+                            )
+                        };
+                        let text = SharedString::from(text.into_owned());
+                        this.connection_notices.insert(
+                            id,
+                            ConnectionNotice {
+                                tone,
+                                text,
+                                settings: false,
+                            },
+                        );
+                    }
+                    Err(error) => this.connection_failed(id, &error, cx),
+                }
+                cx.notify();
+            });
+        });
+        self.connection_notices.remove(&id);
+        self.work.insert(id, (Work::Disconnecting, task));
+        cx.notify();
+    }
+
+    fn connection_failed(&mut self, id: NetworkAccountId, error: &ConnectionError, cx: &App) {
+        let Some(text) = error.message() else {
+            return;
+        };
+        let tone = match error {
+            ConnectionError::Consent(bardo_app::bardo_domain::ConsentError::Cancelled) => {
+                self.connection_notices.remove(&id);
+                return;
+            }
+            ConnectionError::ReconnectNeeded => Tone::Warning,
+            ConnectionError::SignIn(failure)
+                if matches!(
+                    failure.kind,
+                    SignInFailureKind::LimitReached
+                        | SignInFailureKind::NetworkDown
+                        | SignInFailureKind::Unreachable
+                ) =>
+            {
+                Tone::Warning
+            }
+            _ => Tone::Danger,
+        };
+        let settings = matches!(error, ConnectionError::NoAppCredentials(_))
+            || matches!(
+                error,
+                ConnectionError::SignIn(failure) if failure.kind == SignInFailureKind::ClientRejected
+            );
+        self.connection_notices.insert(
+            id,
+            ConnectionNotice {
+                tone,
+                text: tr(self.bardo.read(cx), text),
+                settings,
+            },
+        );
+    }
+
+    /// The connection line of an account on a network Bardo signs in to.
+    fn render_connection(
+        &self,
+        account: &NetworkAccount,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let id = account.id;
+        let network = account.network;
+        let state = match bardo.connection_state(account) {
+            Ok(ConnectionState::Unavailable) => return None,
+            Ok(state) => state,
+            Err(error) => {
+                let text = error.message().unwrap_or(Text::ConnectionNotSaved);
+                return Some(kit::notice(Tone::Danger, tr(bardo, text), cx).into_any_element());
+            }
+        };
+        let work = self.work.get(&id).map(|(work, _)| *work);
+        let ix = network as usize;
+        let small =
+            |id: &'static str, text: Text| Button::new((id, ix)).small().label(tr(bardo, text));
+        let pill = match &state {
+            ConnectionState::Unavailable | ConnectionState::NotConnected => kit::status_with(
+                Tone::Neutral,
+                IconName::Minus,
+                tr(bardo, Text::ConnectionNotConnectedLabel),
+                cx,
+            ),
+            ConnectionState::Connecting => kit::status_with(
+                Tone::Info,
+                IconName::LoaderCircle,
+                tr(bardo, Text::ConnectionConnecting),
+                cx,
+            ),
+            ConnectionState::Connected { channel } => kit::status(
+                Tone::Success,
+                bardo.text_with(Text::ConnectionConnected, &[("channel", channel)]),
+                cx,
+            ),
+            ConnectionState::ReconnectNeeded { channel } => kit::status(
+                Tone::Warning,
+                bardo.text_with(Text::ConnectionReconnectNeeded, &[("channel", channel)]),
+                cx,
+            ),
+        };
+        let disconnect = || {
+            small("disconnect-account", Text::Disconnect)
+                .ghost()
+                .loading(work == Some(Work::Disconnecting))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if !this.work.contains_key(&id) {
+                        this.disconnect(id, network, cx)
+                    }
+                }))
+        };
+        let actions: Vec<AnyElement> = match &state {
+            ConnectionState::Unavailable => Vec::new(),
+            ConnectionState::NotConnected => vec![
+                small("connect-account", Text::Connect)
+                    .primary()
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.connect(id, cx)))
+                    .into_any_element(),
+            ],
+            ConnectionState::Connecting => vec![
+                small("cancel-connect", Text::CancelConnect)
+                    .ghost()
+                    .on_click(
+                        cx.listener(move |this, _: &ClickEvent, _, cx| this.cancel_connect(id, cx)),
+                    )
+                    .into_any_element(),
+            ],
+            ConnectionState::Connected { .. } => vec![
+                small(
+                    "check-connection",
+                    if work == Some(Work::Checking) {
+                        Text::CheckingConnection
+                    } else {
+                        Text::CheckConnection
+                    },
+                )
+                .outline()
+                .loading(work == Some(Work::Checking))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if !this.work.contains_key(&id) {
+                        this.check_connection(id, cx)
+                    }
+                }))
+                .into_any_element(),
+                disconnect().into_any_element(),
+            ],
+            ConnectionState::ReconnectNeeded { .. } => vec![
+                small("reconnect-account", Text::Reconnect)
+                    .primary()
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.connect(id, cx)))
+                    .into_any_element(),
+                disconnect().into_any_element(),
+            ],
+        };
+        let hint = matches!(state, ConnectionState::ReconnectNeeded { .. }).then(|| {
+            div()
+                .text_xs()
+                .text_color(look(cx).tokens.text2)
+                .child(tr(bardo, Text::ConnectionReconnectHint))
+        });
+        let notice =
+            self.connection_notices.get(&id).map(|notice| {
+                h_flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(kit::notice(notice.tone, notice.text.clone(), cx))
+                    .when(notice.settings, |row| {
+                        row.child(
+                            Button::new(("open-network-settings", ix))
+                                .small()
+                                .outline()
+                                .icon(IconName::Settings2)
+                                .label(tr(bardo, Text::OpenNetworkSettings))
+                                .on_click(cx.listener(|_, _: &ClickEvent, _, cx| {
+                                    cx.emit(OpenNetworkSettings)
+                                })),
+                        )
+                    })
+            });
+        Some(
+            v_flex()
+                .gap_1p5()
+                .pt_1()
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .child(pill)
+                        .child(div().flex_1())
+                        .children(actions),
+                )
+                .children(hint)
+                .children(notice)
+                .into_any_element(),
+        )
+    }
+
     fn show_error(&mut self, error: &NetworkAccountError) {
         self.field_errors = error.field_errors().to_vec();
         self.notice = error.form_message().map(Notice::Error);
     }
 
     fn render_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut connections: HashMap<NetworkAccountId, AnyElement> = self
+            .accounts
+            .iter()
+            .filter_map(|account| Some((account.id, self.render_connection(account, cx)?)))
+            .collect();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         self.accounts
@@ -547,6 +924,7 @@ impl NetworkAccountsPanel {
                 let network = account.network;
                 let open = self.editing == Some(Editing::Existing(id, network));
                 let custom = !account.details.overrides().is_empty();
+                let connection = connections.remove(&id);
                 let preset = if custom {
                     kit::status_with(
                         Tone::Accent,
@@ -647,6 +1025,7 @@ impl NetworkAccountsPanel {
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
                         SharedString::from(bardo.preset_summary(&account.render_preset())),
                     ))
+                    .children(connection)
                     .children(confirm)
                     .into_any_element()
             })

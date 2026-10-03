@@ -395,6 +395,8 @@ mod tests {
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
+                sign_ins: Vec::new(),
+                consent: Arc::new(crate::connections::testing::NoConsent),
             };
             Bardo::start_with(
                 Repositories::shared(Arc::clone(&self.db), Arc::clone(&self.secrets) as _),

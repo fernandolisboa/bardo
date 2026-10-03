@@ -13,6 +13,7 @@ dirs.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 keyring-core = "1"

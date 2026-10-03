@@ -12,6 +12,7 @@ use crate::editor::{EditorEvent, EditorScreen};
 use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
+use crate::network_accounts::OpenNetworkSettings;
 use crate::parts::{BudgetMeter, Navigation};
 use crate::performance::PerformanceScreen;
 use crate::personas::PersonasScreen;
@@ -98,6 +99,15 @@ impl Shell {
                 let preference = this.bardo.read(cx).ui_theme();
                 appearance::follow(preference, appearance::system_mode(window), cx);
             }),
+            cx.subscribe_in(
+                &accounts,
+                window,
+                |this, _, _: &OpenNetworkSettings, window, cx| {
+                    this.settings
+                        .update(cx, |settings, cx| settings.show_networks(cx));
+                    this.pick(Destination::Settings, window, cx);
+                },
+            ),
             cx.subscribe_in(
                 &projects,
                 window,

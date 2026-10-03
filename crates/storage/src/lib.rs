@@ -1,7 +1,9 @@
 //! SQLite persistence and migrations, and the secret store for provider
-//! keys (Windows Credential Manager).
+//! keys, network app credentials and OAuth tokens (Windows Credential
+//! Manager).
 
 mod channel;
+mod connection;
 mod cost;
 mod cut_suggestion;
 mod export;
@@ -36,7 +38,10 @@ pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
 pub use migrations::{BrokenReferences, MigrationError};
 #[cfg(windows)]
 pub use secrets::CredentialManager;
-pub use secrets::{MemorySecretStore, credential_target, platform_secret_store};
+pub use secrets::{
+    MemorySecretStore, app_credentials_target, credential_target, platform_connection_secrets,
+    platform_secret_store, tokens_target,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {

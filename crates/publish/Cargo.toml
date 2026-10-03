@@ -1,6 +1,6 @@
 [package]
 name = "bardo-publish"
-description = "Adapters per network: upload, schedule, metrics and export."
+description = "Adapters per network: sign-in, upload, schedule, metrics and export."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,14 @@ publish.workspace = true
 
 [dependencies]
 bardo-domain.workspace = true
+# The HTTP seam every adapter goes through, so publishing adapters are
+# tested against recorded responses like the provider adapters.
+bardo-ai.workspace = true
+base64.workspace = true
+form_urlencoded.workspace = true
+getrandom = "0.3"
+serde_json.workspace = true
+sha2 = "0.10"
 
 [lints]
 workspace = true

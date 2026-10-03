@@ -23,13 +23,20 @@ impl Redactor {
     /// Starts masking `key`. Keys stay known after they are removed or
     /// replaced, because older text may still carry them.
     pub fn add(&self, key: &ApiKey) {
+        self.add_parts(&key.sensitive_parts());
+    }
+
+    /// Starts masking each of `parts`: the pieces of app credentials or
+    /// OAuth tokens. Parts shorter than `ApiKey::MIN_CHARS` are skipped,
+    /// since masking very short strings would mangle ordinary text.
+    pub fn add_parts(&self, parts: &[&str]) {
         let mut secrets = self
             .secrets
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        for part in key.sensitive_parts() {
-            if !secrets.iter().any(|known| known == part) {
-                secrets.push(part.to_owned());
+        for part in parts {
+            if part.len() >= ApiKey::MIN_CHARS && !secrets.iter().any(|known| known == part) {
+                secrets.push((*part).to_owned());
             }
         }
         secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
@@ -129,6 +136,16 @@ mod tests {
         redactor.add(&key(Provider::Claude, "abcdefgh"));
         redactor.add(&key(Provider::Gemini, "abcdefgh-longer"));
         assert_eq!(redactor.redact("abcdefgh-longer"), "[redacted]");
+    }
+
+    #[test]
+    fn credential_and_token_parts_are_masked_but_short_ones_skipped() {
+        let redactor = Redactor::new();
+        redactor.add_parts(&["ya29.access-token-0001", "1//refresh-0001", "abc"]);
+        assert_eq!(
+            redactor.redact("Bearer ya29.access-token-0001 refresh=1//refresh-0001 abc"),
+            "Bearer [redacted] refresh=[redacted] abc"
+        );
     }
 
     #[test]

@@ -1,0 +1,26 @@
+HTTP/2 403 
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "error": {
+    "code": 403,
+    "message": "YouTube Data API v3 has not been used in project 1234567890 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/youtube.googleapis.com/overview?project=1234567890 then retry.",
+    "errors": [
+      {
+        "message": "YouTube Data API v3 has not been used in project 1234567890 before or it is disabled.",
+        "domain": "usageLimits",
+        "reason": "accessNotConfigured",
+        "extendedHelp": "https://console.developers.google.com"
+      }
+    ],
+    "status": "PERMISSION_DENIED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "SERVICE_DISABLED",
+        "domain": "googleapis.com"
+      }
+    ]
+  }
+}

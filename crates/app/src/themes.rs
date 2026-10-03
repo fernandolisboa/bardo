@@ -1206,6 +1206,7 @@ mod tests {
                 media_assets: Arc::clone(&self.db) as _,
                 music_prompts: Arc::clone(&self.db) as _,
                 network_accounts: Arc::clone(&self.db) as _,
+                connections: Arc::clone(&self.db) as _,
                 renders: Arc::clone(&self.db) as _,
                 exports: Arc::clone(&self.db) as _,
                 publications: Arc::clone(&self.db) as _,
@@ -1215,6 +1216,7 @@ mod tests {
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
+                connection_secrets: Arc::new(MemorySecretStore::default()),
             };
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
@@ -1229,6 +1231,8 @@ mod tests {
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
+                sign_ins: Vec::new(),
+                consent: Arc::new(crate::connections::testing::NoConsent),
             };
             Bardo::start_with(
                 repositories,

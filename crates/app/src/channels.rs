@@ -145,6 +145,7 @@ mod tests {
             media_assets: Arc::clone(db) as _,
             music_prompts: Arc::clone(db) as _,
             network_accounts: Arc::clone(db) as _,
+            connections: Arc::clone(db) as _,
             renders: Arc::clone(db) as _,
             exports: Arc::clone(db) as _,
             publications: Arc::clone(db) as _,
@@ -154,6 +155,7 @@ mod tests {
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             research: Arc::clone(db) as _,
             secrets: Arc::new(MemorySecretStore::default()),
+            connection_secrets: Arc::new(MemorySecretStore::default()),
         };
         Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap()
     }
@@ -356,6 +358,7 @@ mod tests {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
             exports: Arc::clone(&db) as _,
             publications: Arc::clone(&db) as _,
@@ -365,6 +368,7 @@ mod tests {
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
+            connection_secrets: Arc::new(MemorySecretStore::default()),
         };
         let app = Bardo::start(repositories, testing::providers(), None).unwrap();
         let error = app.create_channel(draft("Space Archives")).unwrap_err();
