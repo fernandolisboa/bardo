@@ -263,7 +263,7 @@ impl Upload {
 
     /// The network made the scheduled video public at its publish time.
     pub fn went_live(&mut self) -> Result<(), InvalidUploadTransition> {
-        self.from_scheduled("go live")?;
+        self.require_scheduled("go live")?;
         self.status = UploadStatus::Published;
         Ok(())
     }
@@ -271,28 +271,28 @@ impl Upload {
     /// The publish time passed and the network kept the scheduled video
     /// private: the user's API project has not passed the network's audit.
     pub fn kept_private(&mut self) -> Result<(), InvalidUploadTransition> {
-        self.from_scheduled("keep private")?;
+        self.require_scheduled("keep private")?;
         self.status = UploadStatus::Restricted;
         Ok(())
     }
 
     /// The scheduled video now goes live at `publish_at`.
     pub fn reschedule(&mut self, publish_at: SystemTime) -> Result<(), InvalidUploadTransition> {
-        self.from_scheduled("reschedule")?;
+        self.require_scheduled("reschedule")?;
         self.publish_at = Some(publish_at);
         Ok(())
     }
 
     /// The schedule is gone: the video stays private, with no publish time.
     pub fn unschedule(&mut self) -> Result<(), InvalidUploadTransition> {
-        self.from_scheduled("cancel the schedule of")?;
+        self.require_scheduled("cancel the schedule of")?;
         self.status = UploadStatus::Published;
         self.visibility = Visibility::Private;
         self.publish_at = None;
         Ok(())
     }
 
-    fn from_scheduled(&self, action: &'static str) -> Result<(), InvalidUploadTransition> {
+    fn require_scheduled(&self, action: &'static str) -> Result<(), InvalidUploadTransition> {
         match self.status {
             UploadStatus::Scheduled => Ok(()),
             _ => Err(self.invalid(action)),

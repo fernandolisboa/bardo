@@ -355,6 +355,7 @@ pub fn upload_label(bardo: &Bardo, state: &UploadState) -> SharedString {
         UploadState::Retrying => tr(bardo, Text::UploadStateRetrying),
         UploadState::Processing => tr(bardo, Text::UploadStateProcessing),
         UploadState::StillProcessing => tr(bardo, Text::UploadStateStillProcessing),
+        UploadState::Scheduled(_) => tr(bardo, Text::UploadStateScheduled),
         UploadState::Published => tr(bardo, Text::UploadStatePublished),
         UploadState::Restricted => tr(bardo, Text::UploadStateRestricted),
         UploadState::Stopped => tr(bardo, Text::UploadStateStopped),
@@ -391,6 +392,10 @@ fn upload_state(
             Tone::Warning,
             Some(with_network(Text::UploadStillProcessingHint).into()),
         ),
+        UploadState::Scheduled(_) => (
+            Tone::Info,
+            Some(with_network(Text::UploadScheduledHint).into()),
+        ),
         UploadState::Published if missing => {
             (Tone::Warning, Some(tr(bardo, Text::PublicationMissingHint)))
         }
@@ -425,6 +430,18 @@ fn upload_state(
                 cx,
             ))
         });
+    let row = match state {
+        UploadState::Scheduled(at) => row.child(
+            div()
+                .text_sm()
+                .text_color(look(cx).tokens.text2)
+                .child(SharedString::from(bardo.text_with(
+                    Text::UploadScheduledAt,
+                    &[("when", &bardo.publish_time_text(*at))],
+                ))),
+        ),
+        _ => row,
+    };
     let mut column = v_flex().gap_2().child(row);
     if let UploadState::Uploading(progress) = state {
         column = column.child(
@@ -434,11 +451,16 @@ fn upload_state(
         );
     }
     if matches!(state, UploadState::Restricted) {
-        column = column.child(kit::notice(
-            Tone::Warning,
-            tr(bardo, Text::UploadRestrictedHint),
-            cx,
-        ));
+        // A scheduled one was kept private at its publish time.
+        let scheduled = publication
+            .upload()
+            .is_some_and(|upload| upload.publish_at.is_some());
+        let hint = if scheduled {
+            Text::UploadRestrictedScheduledHint
+        } else {
+            Text::UploadRestrictedHint
+        };
+        column = column.child(kit::notice(Tone::Warning, tr(bardo, hint), cx));
     }
     if let UploadState::Failed { failure, .. } = state {
         column = column.child(kit::notice(
