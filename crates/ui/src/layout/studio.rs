@@ -503,7 +503,8 @@ fn stage_tabs(stages: Stages, toolbar: Option<AnyElement>, cx: &App) -> AnyEleme
         .items
         .into_iter()
         .map(|item| stage_tab(item, stages.current, Rc::clone(&stages.on_pick), cx));
-    // The actions go under the tabs when both do not fit on one line.
+    // The actions go under the tabs when both do not fit on one line, and
+    // the tabs themselves wrap rather than run past the edge (issue #73).
     h_flex()
         .flex_none()
         .w_full()
@@ -515,7 +516,7 @@ fn stage_tabs(stages: Stages, toolbar: Option<AnyElement>, cx: &App) -> AnyEleme
         .items_center()
         .border_b(t.border_width)
         .border_color(t.border)
-        .child(h_flex().flex_none().gap_0p5().items_center().children(tabs))
+        .child(h_flex().flex_wrap().gap_0p5().items_center().children(tabs))
         .children(toolbar.map(|toolbar| {
             div()
                 .ml_auto()
