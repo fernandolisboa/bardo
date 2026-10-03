@@ -2,7 +2,7 @@
 
 - Status: Ready for implementation
 - Date: 2026-10-01
-- Source of truth for scope and acceptance: [`docs/spec/mvp.md`](../spec/mvp.md) (Accepted). Decisions: ADR-0001 to ADR-0006. Vocabulary: [`docs/CONTEXT.md`](../CONTEXT.md).
+- Source of truth for scope and acceptance: [`docs/spec/mvp.md`](../spec/mvp.md) (Accepted). Decisions: ADR-0001 to ADR-0008. Vocabulary: [`docs/CONTEXT.md`](../CONTEXT.md).
 
 ## Problem Statement
 
@@ -130,13 +130,13 @@ Build order: creation (Strategy and Production) and Editing first, with export a
 
 ### Publishing (after creation and editing are usable)
 
-83. As a creator, I want to connect YouTube, TikTok and Instagram accounts with OAuth, so that Bardo can upload for me.
+83. As a creator, I want to connect YouTube, TikTok and Instagram accounts with OAuth through apps I register myself, entering each app's credentials once in Settings, so that Bardo can upload for me without shipping anyone's secrets (ADR-0008).
 84. As a creator, I want a review screen before any upload with file, metadata, account, visibility, schedule and disclosure, so that nothing goes out by accident.
 85. As a creator, I want uploads to resume without re-sending finished chunks, so that a dropped connection does not restart a large upload.
 86. As a creator, I want YouTube scheduled publications to use native scheduling, so that they go live with my PC off.
-87. As a creator, I want TikTok and Instagram scheduled posts to go out while the app is open and missed ones to run after I confirm on next launch, so that I stay in control.
+87. As a creator, I want Instagram scheduled posts to go out while the app is open and missed ones to run after I confirm on next launch, and TikTok videos sent to my TikTok inbox as drafts that I finish and schedule in the TikTok app, so that I stay in control (ADR-0008).
 88. As a creator, I want a clear status when a network restricts my posts to private because my app is unaudited, so that I am not confused by invisible videos.
-89. As a creator, I want the Instagram 50 posts per 24 hours limit enforced before queuing, so that I do not hit API errors.
+89. As a creator, I want each network's posting limits (Instagram's publishing limit as the API reports it, TikTok's pending drafts, YouTube's daily uploads) enforced before queuing, so that I do not hit API errors.
 90. As a creator, I want owner metrics (YouTube revenue, CPM, RPM, retention; TikTok and Instagram metrics) once accounts are connected, so that I can measure money, not just views.
 
 ## Implementation Decisions
@@ -152,11 +152,11 @@ Build order: creation (Strategy and Production) and Editing first, with export a
   - Decision engine: three typed question kinds (choice, score, yes/no) evaluated against a state; answers carry probabilities and confidence. JEV adapter (TypeSafe HTTP API) in the MVP; Laya (local ONNX) evaluated right after.
   - Market data: search recent uploads for a niche in a country and language; returns raw statistics. Scoring (competition, trend) is pure domain logic over those statistics.
   - Network metrics: fetch statistics for a publication. Public YouTube stats need only the API key.
-  - Network publishing (later): upload, schedule, status.
+  - Network publishing: connect (OAuth with PKCE over loopback, ADR-0008), upload with resume, schedule where the network supports it, status.
 - **Cost.** Every adapter call that costs money returns a cost record (reported or estimated from a per-model rate table). Budget checks happen in `app` before a job is enqueued: under 80% runs, 80–100% warns, at or over 100% requires confirmation.
 - **Job queue in `app`, persisted in `storage`.** Jobs have type, payload, state (queued, running, paused, failed, cancelled, done), progress, attempt count and checkpoint. Retry with exponential backoff; resume from checkpoint after restart. Long provider jobs persist the provider's job handle so a restart polls instead of resubmitting (no double charge).
 - **Storage.** SQLite with versioned migrations. Project media in the user-chosen folder; the database stores paths and metadata, never secrets. Same database will later be shared with the background agent (ADR-0006), so writes go through transactions with locking in mind.
-- **Secrets.** Windows Credential Manager only, behind a secrets interface; a redaction layer scrubs known secrets from logs and errors.
+- **Secrets.** Windows Credential Manager only, behind a secrets interface; a redaction layer scrubs known secrets from logs and errors. Network app credentials are kept per user profile; OAuth tokens per network account (ADR-0008).
 - **Media.** ffmpeg bundled and pinned. `media` exposes probe, proxy generation, preview frames/playback source and render from a timeline description. NVENC (H.264/HEVC) when present, software fallback. Loudness measured and normalized to the preset target.
 - **Timeline model in `domain`.** Pure data and operations (split, trim, move, delete, gain, fades, ducking, captions, crop), with snapping to word timings and undo/redo as a command history. `media` turns a timeline into ffmpeg work; `ui` only renders `app` state.
 - **Captions** derive from word timings plus user edits; styles are channel settings.
