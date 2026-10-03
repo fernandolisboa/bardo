@@ -70,7 +70,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Captions from the word timings: editable text and timing, a few burned-in styles per channel.
 - Framing: 9:16 and 16:9 with per-clip crop/reframe position.
 - Preview playback from low-resolution proxies.
-- AI suggestions: the decision engine scores candidate cut points from the script and word timings; the user accepts or rejects each.
+- AI suggestions: the decision engine scores candidate cut points (sentence ends, pauses, scene changes) from the script and word timings, in stretches that fit its context; the user accepts or rejects each. Accepting is a manual cut, undoable like any other; suggestions under the profile's floor are hidden until asked for.
 - Render presets per network; final render as a job after a review screen (duration, resolution, loudness, captions on/off, target networks).
 
 **Not in the MVP**

@@ -234,6 +234,8 @@ fn first_guess(purpose: CostPurpose) -> Metered {
         CostPurpose::MusicPrompt => tokens(500, 200),
         // A post per network for a script of a few minutes.
         CostPurpose::Metadata => tokens(2_500, 1_200),
+        // A stretch of script and two questions per point in it.
+        CostPurpose::CutSuggestions => tokens(4_000, 0),
     }
 }
 

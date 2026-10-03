@@ -43,7 +43,7 @@ use crate::shell::tr;
 
 /// The track header column, shared with the toolbar's timecode.
 const HEADER: f32 = 200.;
-const RULER: f32 = 24.;
+pub(super) const RULER: f32 = 24.;
 /// Space kept after the last clip when the timeline fits the window.
 const END_GAP: f32 = 24.;
 /// Below this zoom the narration's words would overlap; they hide.
@@ -224,7 +224,7 @@ impl TimelineState {
         }
     }
 
-    fn width(&self) -> f32 {
+    pub(super) fn width(&self) -> f32 {
         self.lanes.get().size.width.into()
     }
 
@@ -248,7 +248,7 @@ impl TimelineState {
         }
     }
 
-    fn x(&self, time: Duration) -> f32 {
+    pub(super) fn x(&self, time: Duration) -> f32 {
         time.as_secs_f32() * self.zoom - self.scroll
     }
 
@@ -337,6 +337,7 @@ impl EditorScreen {
         let mut sfx = Some(self.render_sfx(view, selection, cx));
         let mut captions = Some(self.render_captions(view, selection, cx));
         let (mut ghost, snap_line) = self.render_drag(view);
+        let cut_marks = self.render_cut_marks(cx);
         let lanes = Track::ALL.map(|track| {
             let lane = div()
                 .relative()
@@ -393,6 +394,7 @@ impl EditorScreen {
                     .children(lanes)
                     .children(snap_line)
                     .children(playhead_line)
+                    .children(cut_marks)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -445,17 +447,17 @@ impl EditorScreen {
     }
 
     fn render_timeline_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let editing = self
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.view().timeline.is_some());
+        let cuts = self.render_cuts_toggle(editing, cx);
         let bardo = self.bardo.read(cx);
         let mono = cx.theme().mono_font_family.clone();
         let playhead = self
             .editor
             .as_ref()
             .map_or(Duration::ZERO, |editor| editor.playhead());
-        // The AI toggle arrives with #30.
-        let editing = self
-            .editor
-            .as_ref()
-            .is_some_and(|e| e.view().timeline.is_some());
         let snapping = self.editor.as_ref().is_some_and(Editor::snapping);
         let snap = tool_button("toggle-snap", editing, snapping)
             .when(!snapping, |button| {
@@ -552,8 +554,7 @@ impl EditorScreen {
                     )
                     .child(div().w(px(1.)).h(px(18.)).mx_1().bg(color(HAIRLINE)))
                     .child(snap)
-                    // AI cut suggestions come with their slice; until then
-                    // the toggle is hidden, not shown disabled.
+                    .child(cuts)
                     .child(duck)
                     .child(captions)
                     .child(div().flex_1())

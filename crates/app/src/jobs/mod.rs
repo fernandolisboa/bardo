@@ -14,6 +14,7 @@ pub(crate) use queue::JobQueue;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::clips::ClipHandler;
+use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
 use crate::music_prompts::MusicPromptHandler;
 use crate::narration_import::NarrationImportHandler;
@@ -42,6 +43,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) metadata: MetadataHandler,
     pub(crate) exports: ExportHandler,
     pub(crate) metrics: MetricsSyncHandler,
+    pub(crate) cuts: CutSuggestionHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -62,6 +64,7 @@ pub(crate) fn built_in_handlers(
         metadata,
         exports,
         metrics,
+        cuts,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -82,6 +85,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
     handlers.insert(JobKind::Export, Arc::new(exports));
     handlers.insert(JobKind::MetricsSync, Arc::new(metrics));
+    handlers.insert(JobKind::CutSuggestions, Arc::new(cuts));
     handlers
 }
 
@@ -701,6 +705,7 @@ mod tests {
             renders: Arc::clone(db) as _,
             exports: Arc::clone(db) as _,
             publications: Arc::clone(db) as _,
+            cut_suggestions: Arc::clone(db) as _,
             export_files: Arc::new(bardo_storage::MemoryExportFiles::default()),
             costs: Arc::clone(db) as _,
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),

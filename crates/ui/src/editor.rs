@@ -17,6 +17,7 @@
 //! the design's tokens are below, and amber marks only the playhead, the
 //! selection and the primary button.
 
+mod suggestions;
 mod timeline;
 
 use std::cell::Cell;
@@ -149,6 +150,7 @@ pub struct EditorScreen {
     import_task: Option<Task<()>>,
     /// Files the last import refused, by name, and why.
     import_errors: Vec<(String, Text)>,
+    cuts: suggestions::CutsState,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -206,6 +208,7 @@ impl EditorScreen {
             importing: 0,
             import_task: None,
             import_errors: Vec::new(),
+            cuts: suggestions::CutsState::default(),
             _poll: poll,
             _subscriptions: subscriptions,
         }
@@ -460,6 +463,9 @@ impl EditorScreen {
                 "right" => self.nudge_selection(1, cx),
                 _ => {}
             }
+            return;
+        }
+        if self.cut_key(key, modifiers.shift, cx) {
             return;
         }
         let reach = self.timeline.snap_reach();
@@ -2389,7 +2395,11 @@ impl Render for EditorScreen {
             .min_h_0()
             .child(self.render_bin(Some(&view), cx))
             .child(self.render_preview(cx))
-            .child(self.render_inspector(cx));
+            .child(if self.cuts.on && view.timeline.is_some() {
+                self.render_cuts_panel(cx)
+            } else {
+                self.render_inspector(cx)
+            });
         let banners = self.render_banners(&view, cx);
         let lower = if view.timeline.is_none() {
             self.render_empty(&view, cx)

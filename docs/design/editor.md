@@ -87,6 +87,8 @@ Editing never waits on proxies or jobs (story 69).
 - Accepting splits the clip at that point (drawn as a solid cut with a check). Rejecting removes the pin.
 - Suggestions mode replaces the inspector with a list: timecode, score bar, reasons, accept/reject per row; accepted rows show a check, rejected rows are struck through with **Undo**; **Accept all above 0.80** at the top.
 - The toolbar toggle hides pins without discarding them; its badge counts pending suggestions.
+- Above the list: **Suggest cuts** with what it scores and what it costs (**Suggest again** once there is a set, which replaces it), the scoring job's progress with **Stop** (and **Resume** after a stop or failure), **Show from** (the profile's floor, 0.50 unless changed, in 0.10 steps) and a line counting the pending suggestions under it with **Show** / **Hide**.
+- While suggestions show, **A**, **R** and **Tab** accept, reject and move to the next pending pin; accepting or rejecting the focused pin moves on to the next one.
 
 ## Interactions
 

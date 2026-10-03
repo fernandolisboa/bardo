@@ -225,8 +225,8 @@ impl Score {
     pub const MAX: Score = Score(100);
 
     /// Values above 100 are clamped.
-    pub fn new(value: u8) -> Self {
-        Self(value.min(100))
+    pub const fn new(value: u8) -> Self {
+        Self(if value > 100 { 100 } else { value })
     }
 
     pub fn value(self) -> u8 {

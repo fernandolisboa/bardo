@@ -1,5 +1,5 @@
 use bardo_domain::{
-    LayoutId, MetricsSyncOnStart, ProfileId, ProfileRepository, RepositoryError, UiLanguage,
+    LayoutId, MetricsSyncOnStart, ProfileId, ProfileRepository, RepositoryError, Score, UiLanguage,
     UiThemePreference, UserProfile,
 };
 use rusqlite::{OptionalExtension, params};
@@ -12,7 +12,8 @@ impl ProfileRepository for Database {
         let row = self
             .conn()
             .query_row(
-                "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync FROM user_profile
+                "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor
+                 FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
                 |row| {
@@ -22,13 +23,14 @@ impl ProfileRepository for Database {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
 
-        let Some((id, ui_language, ui_theme, ui_layout, metrics_sync)) = row else {
+        let Some((id, ui_language, ui_theme, ui_layout, metrics_sync, cut_floor)) = row else {
             return Ok(None);
         };
         Ok(Some(UserProfile {
@@ -37,25 +39,29 @@ impl ProfileRepository for Database {
             ui_theme: UiThemePreference::from_code_or_default(&ui_theme),
             ui_layout: LayoutId::from_code_or_default(&ui_layout),
             metrics_sync: MetricsSyncOnStart::from_code_or_default(&metrics_sync),
+            cut_suggestion_floor: Score::new(u8::try_from(cut_floor).map_err(boxed)?),
         }))
     }
 
     fn save(&self, profile: &UserProfile) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
+                                           cut_suggestion_floor)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
                      ui_layout = excluded.ui_layout,
-                     metrics_sync = excluded.metrics_sync",
+                     metrics_sync = excluded.metrics_sync,
+                     cut_suggestion_floor = excluded.cut_suggestion_floor",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
                     profile.ui_theme.code(),
                     profile.ui_layout.code(),
-                    profile.metrics_sync.code()
+                    profile.metrics_sync.code(),
+                    profile.cut_suggestion_floor.value(),
                 ],
             )
             .map_err(boxed)?;
@@ -180,6 +186,21 @@ mod tests {
             db.load_default().unwrap().unwrap().metrics_sync,
             MetricsSyncOnStart::Every6Hours
         );
+    }
+
+    #[test]
+    fn cut_suggestion_floor_is_saved() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert_eq!(
+            db.load_default().unwrap().unwrap().cut_suggestion_floor,
+            bardo_domain::DEFAULT_CUT_FLOOR
+        );
+
+        profile.cut_suggestion_floor = Score::new(65);
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
     }
 
     #[test]
