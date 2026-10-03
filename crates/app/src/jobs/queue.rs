@@ -401,7 +401,13 @@ fn schedule(shared: &Arc<Shared>) {
         }
         let now = SystemTime::now();
         while state.workers.len() < shared.settings.max_running {
-            let Some(job) = state.jobs.iter_mut().find(|job| job.is_due(now)) else {
+            // A job whose cancelled run is still stopping waits for it: a
+            // job never has two workers.
+            let State { jobs, workers, .. } = &mut *state;
+            let Some(job) = jobs
+                .iter_mut()
+                .find(|job| job.is_due(now) && !workers.contains_key(&job.id()))
+            else {
                 break;
             };
             job.start(now).expect("a due job starts");

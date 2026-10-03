@@ -630,6 +630,103 @@ mod tests {
     }
 
     #[test]
+    fn a_job_retried_while_its_cancelled_run_stops_waits_for_that_run() {
+        let (db, owner) = memory_db();
+        let runs = Arc::new(AtomicU32::new(0));
+        let running = Arc::new(AtomicU32::new(0));
+        let overlapped = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let q = {
+            let (runs, running, overlapped, release) = (
+                Arc::clone(&runs),
+                Arc::clone(&running),
+                Arc::clone(&overlapped),
+                Arc::clone(&release),
+            );
+            queue(
+                &db,
+                owner,
+                handlers(move |_, cx| {
+                    let run = runs.fetch_add(1, Ordering::SeqCst) + 1;
+                    if running.fetch_add(1, Ordering::SeqCst) > 0 {
+                        overlapped.store(true, Ordering::SeqCst);
+                    }
+                    if run == 1 {
+                        until_stopped(cx);
+                        // Slow to notice the stop, as a provider call is.
+                        while !release.load(Ordering::SeqCst) {
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                    }
+                    running.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
+                }),
+                settings(),
+            )
+        };
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+        q.cancel(id).unwrap();
+        q.retry(id).unwrap();
+
+        // The retry waits while the cancelled run is still stopping.
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            q.jobs().into_iter().find(|j| j.id() == id).unwrap().state(),
+            JobState::Queued
+        );
+
+        // Then it runs once, and the stopped run's result is not its own.
+        release.store(true, Ordering::SeqCst);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+        assert!(!overlapped.load(Ordering::SeqCst), "two runs at once");
+    }
+
+    #[test]
+    fn a_retried_run_can_be_cancelled_after_the_stopped_run_returned() {
+        let (db, owner) = memory_db();
+        let runs = Arc::new(AtomicU32::new(0));
+        let release = Arc::new(AtomicBool::new(false));
+        let q = {
+            let (runs, release) = (Arc::clone(&runs), Arc::clone(&release));
+            queue(
+                &db,
+                owner,
+                handlers(move |_, cx| {
+                    let run = runs.fetch_add(1, Ordering::SeqCst) + 1;
+                    until_stopped(cx);
+                    if run == 1 {
+                        while !release.load(Ordering::SeqCst) {
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                    }
+                    Ok(())
+                }),
+                settings(),
+            )
+        };
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+        q.cancel(id).unwrap();
+        q.retry(id).unwrap();
+        release.store(true, Ordering::SeqCst);
+        wait_for(|| q.jobs(), id, |_| runs.load(Ordering::SeqCst) == 2);
+
+        // The second run still hears a cancel.
+        q.cancel(id).unwrap();
+        let cancelled = wait_for(|| q.jobs(), id, |j| j.state() == JobState::Cancelled);
+        assert_eq!(cancelled.state(), JobState::Cancelled);
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(
+            q.jobs().into_iter().find(|j| j.id() == id).unwrap().state(),
+            JobState::Cancelled,
+            "the stopped second run does not complete it"
+        );
+    }
+
+    #[test]
     fn cancel_and_retry_check_the_job() {
         let (db, owner) = memory_db();
         let q = queue(
