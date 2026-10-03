@@ -403,7 +403,10 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
 }
 
 /// The header in one line: the way here and the title, the meta, the
-/// figures in brief, and the actions on the right.
+/// figures in brief, and the actions on the right. When the window is too
+/// narrow for all of it, what does not fit goes to the next line (issue
+/// #68): the figures never get narrower than their widest brief, so they
+/// never run under the actions.
 fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
     let t = &look(cx).tokens;
     let mut trail = Vec::new();
@@ -415,10 +418,12 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
     h_flex()
         .flex_none()
         .w_full()
+        .flex_wrap()
         .min_h(px(44.))
         .px_4()
         .py_1p5()
-        .gap_3()
+        .gap_x_3()
+        .gap_y_1p5()
         .items_center()
         .border_b(t.border_width)
         .border_color(t.border)
@@ -450,10 +455,10 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
                 .text_color(t.text2)
                 .child(meta)
         }))
+        // No `min_w_0`: the automatic minimum keeps the widest brief whole.
         .child(
             h_flex()
                 .flex_1()
-                .min_w_0()
                 .gap_2()
                 .items_center()
                 .flex_wrap()
@@ -461,6 +466,7 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
         )
         .child(
             h_flex()
+                .ml_auto()
                 .flex_none()
                 .gap_2()
                 .items_center()
