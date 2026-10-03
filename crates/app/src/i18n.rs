@@ -13,9 +13,9 @@ use bardo_domain::{
     KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart, Money,
     MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
     PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError, ScheduleProblem,
-    Score, ScriptFieldError, SignInFailureKind, TemplateKind, TemplateProblem, TemplateVariable,
-    ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility, VoiceCategory,
-    VoiceFlag,
+    Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind, TemplateProblem,
+    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
+    VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -1157,6 +1157,28 @@ pub enum Text {
     MetricsSyncHint,
     MetricsHistory,
     MetricsChange,
+    MetricEngagedViews,
+    MetricEngagedViewsHint,
+    MetricWatchTime,
+    MetricAverageView,
+    MetricAverageViewed,
+    MetricRevenue,
+    MetricRpm,
+    MetricRpmHint,
+    MetricCpm,
+    MetricCpmHint,
+    MetricPlaybackCpm,
+    MetricPlaybackCpmHint,
+    MetricNotMonetized,
+    MetricNotMonetizedHint,
+    MetricsOwnerLine,
+    MetricsRetention,
+    MetricsRetentionHint,
+    MetricsRetentionStart,
+    MetricsRetentionEnd,
+    MetricsHours,
+    MetricsMinutes,
+    MetricsPercent,
     PerformanceInfo,
     PerformanceEmpty,
     PerformanceNoChannels,
@@ -1165,6 +1187,9 @@ pub enum Text {
     PerformancePosts,
     PerformanceTracked,
     PerformanceTile,
+    PerformanceOwnerNotConnected,
+    PerformanceOwnerReconnect,
+    PerformanceTileEngaged,
     MetricsSettingsTab,
     MetricsSettingLabel,
     MetricsSettingHint,
@@ -2501,6 +2526,31 @@ impl Text {
             Text::MetricsSyncHint => "metrics.sync_hint",
             Text::MetricsHistory => "metrics.history",
             Text::MetricsChange => "metrics.change",
+            Text::MetricEngagedViews => "metrics.engaged_views",
+            Text::MetricEngagedViewsHint => "metrics.engaged_views_hint",
+            Text::MetricWatchTime => "metrics.watch_time",
+            Text::MetricAverageView => "metrics.average_view",
+            Text::MetricAverageViewed => "metrics.average_viewed",
+            Text::MetricRevenue => "metrics.revenue",
+            Text::MetricRpm => "metrics.rpm",
+            Text::MetricRpmHint => "metrics.rpm_hint",
+            Text::MetricCpm => "metrics.cpm",
+            Text::MetricCpmHint => "metrics.cpm_hint",
+            Text::MetricPlaybackCpm => "metrics.playback_cpm",
+            Text::MetricPlaybackCpmHint => "metrics.playback_cpm_hint",
+            Text::MetricNotMonetized => "metrics.not_monetized",
+            Text::MetricNotMonetizedHint => "metrics.not_monetized_hint",
+            Text::MetricsOwnerLine => "metrics.owner_line",
+            Text::MetricsRetention => "metrics.retention",
+            Text::MetricsRetentionHint => "metrics.retention_hint",
+            Text::MetricsRetentionStart => "metrics.retention_start",
+            Text::MetricsRetentionEnd => "metrics.retention_end",
+            Text::MetricsHours => "metrics.hours",
+            Text::MetricsMinutes => "metrics.minutes",
+            Text::MetricsPercent => "metrics.percent",
+            Text::PerformanceOwnerNotConnected => "performance.owner_not_connected",
+            Text::PerformanceOwnerReconnect => "performance.owner_reconnect",
+            Text::PerformanceTileEngaged => "performance.tile_engaged",
             Text::PerformanceInfo => "performance.info",
             Text::PerformanceEmpty => "performance.empty",
             Text::PerformanceNoChannels => "performance.no_channels",
@@ -2768,6 +2818,41 @@ impl Catalog {
             magnitude % 10
         );
         self.format(Text::EditorDecibels, &[("n", &n)])
+    }
+
+    /// A share as a percentage to the tenth: `71.6%`, `71,6%`, `100%`.
+    pub fn percent(&self, share: Share) -> String {
+        let tenths = (u64::from(share.ten_thousandths()) + 5) / 10;
+        let n = if tenths.is_multiple_of(10) {
+            self.grouped(tenths / 10)
+        } else {
+            format!(
+                "{}{}{}",
+                self.grouped(tenths / 10),
+                self.get(Text::DecimalSeparator),
+                tenths % 10
+            )
+        };
+        self.format(Text::MetricsPercent, &[("n", &n)])
+    }
+
+    /// Minutes watched, in minutes under an hour and in short hours from
+    /// there: `45 min`, `12 h`, `1.2K h`.
+    pub fn watch_time(&self, minutes: u64) -> String {
+        if minutes < 60 {
+            return self.format(Text::MetricsMinutes, &[("n", &minutes.to_string())]);
+        }
+        self.format(Text::MetricsHours, &[("n", &self.compact(minutes / 60))])
+    }
+
+    /// A length on a clock: `0:34`, `12:05`, `1:02:09`.
+    pub fn clock(&self, seconds: u64) -> String {
+        let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+        if hours > 0 {
+            format!("{hours}:{minutes:02}:{seconds:02}")
+        } else {
+            format!("{minutes}:{seconds:02}")
+        }
     }
 
     /// A 0–100 score read as a fraction, as cut suggestions show it:
@@ -3984,6 +4069,31 @@ mod tests {
         texts.push(Text::MetricsSyncHint);
         texts.push(Text::MetricsHistory);
         texts.push(Text::MetricsChange);
+        texts.push(Text::MetricEngagedViews);
+        texts.push(Text::MetricEngagedViewsHint);
+        texts.push(Text::MetricWatchTime);
+        texts.push(Text::MetricAverageView);
+        texts.push(Text::MetricAverageViewed);
+        texts.push(Text::MetricRevenue);
+        texts.push(Text::MetricRpm);
+        texts.push(Text::MetricRpmHint);
+        texts.push(Text::MetricCpm);
+        texts.push(Text::MetricCpmHint);
+        texts.push(Text::MetricPlaybackCpm);
+        texts.push(Text::MetricPlaybackCpmHint);
+        texts.push(Text::MetricNotMonetized);
+        texts.push(Text::MetricNotMonetizedHint);
+        texts.push(Text::MetricsOwnerLine);
+        texts.push(Text::MetricsRetention);
+        texts.push(Text::MetricsRetentionHint);
+        texts.push(Text::MetricsRetentionStart);
+        texts.push(Text::MetricsRetentionEnd);
+        texts.push(Text::MetricsHours);
+        texts.push(Text::MetricsMinutes);
+        texts.push(Text::MetricsPercent);
+        texts.push(Text::PerformanceOwnerNotConnected);
+        texts.push(Text::PerformanceOwnerReconnect);
+        texts.push(Text::PerformanceTileEngaged);
         texts.push(Text::PerformanceInfo);
         texts.push(Text::PerformanceEmpty);
         texts.push(Text::PerformanceNoChannels);
@@ -4231,6 +4341,23 @@ mod tests {
         assert_eq!(en.money(Money::from_micros(5_000)), "$0.01");
         assert_eq!(en.money(Money::from_micros(4_999)), "under $0.01");
         assert_eq!(pt.money(Money::from_micros(1)), "menos de US$ 0,01");
+    }
+
+    #[test]
+    fn owner_numbers_read_in_each_language() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        let share = Share::from_ten_thousandths;
+        assert_eq!(en.percent(share(7_162)), "71.6%");
+        assert_eq!(pt.percent(share(7_162)), "71,6%");
+        assert_eq!(en.percent(share(10_000)), "100%");
+        assert_eq!(en.percent(share(11_805)), "118.1%", "rewatched");
+        assert_eq!(en.watch_time(45), "45 min");
+        assert_eq!(en.watch_time(18_021), "300 h");
+        assert_eq!(pt.watch_time(120_000), "2 mil h");
+        assert_eq!(en.clock(34), "0:34");
+        assert_eq!(en.clock(725), "12:05");
+        assert_eq!(en.clock(3_729), "1:02:09");
     }
 
     #[test]

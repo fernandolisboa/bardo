@@ -701,6 +701,21 @@ impl Bardo {
         self.catalog.score(score)
     }
 
+    /// A share as a percentage to the tenth, e.g. `71.6%`, `71,6%`.
+    pub fn percent(&self, share: bardo_domain::Share) -> String {
+        self.catalog.percent(share)
+    }
+
+    /// Minutes watched, e.g. `45 min`, `1.2K h`.
+    pub fn watch_time(&self, minutes: u64) -> String {
+        self.catalog.watch_time(minutes)
+    }
+
+    /// A length on a clock, e.g. `0:34`, `1:02:09`.
+    pub fn clock(&self, seconds: u64) -> String {
+        self.catalog.clock(seconds)
+    }
+
     /// An amount to the cent, e.g. `$1,234.56`, `US$ 0,05`.
     pub fn money(&self, amount: bardo_domain::Money) -> String {
         self.catalog.money(amount)
