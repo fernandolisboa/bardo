@@ -1,5 +1,6 @@
 //! Settings screen. The API keys tab has one card per provider to save,
-//! replace, test and remove its key; the Appearance tab picks the layout,
+//! replace, test and remove its key; the Networks tab keeps the OAuth app
+//! credentials Bardo signs in to networks with; the Appearance tab picks the layout,
 //! the theme and the interface language; the Metrics tab picks when a
 //! start syncs public post numbers. Rules, storage and the test call live in
 //! `bardo_app`; this file maps clicks to use cases and results to text.
@@ -7,10 +8,10 @@
 use std::collections::HashMap;
 
 use bardo_app::bardo_domain::{
-    KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Provider, ThemeFamily, ThemeMode, UiLanguage,
-    UiTheme, UiThemePreference,
+    AppCredentialsFieldError, KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Network, Provider,
+    ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
-use bardo_app::{Bardo, Destination, KeyState, ProviderKeyStatus, Text};
+use bardo_app::{AppCredentialsStatus, Bardo, Destination, KeyState, ProviderKeyStatus, Text};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -35,13 +36,15 @@ use crate::shell::tr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SettingsTab {
     Keys,
+    Networks,
     Appearance,
     Metrics,
 }
 
 impl SettingsTab {
-    const ALL: [SettingsTab; 3] = [
+    const ALL: [SettingsTab; 4] = [
         SettingsTab::Keys,
+        SettingsTab::Networks,
         SettingsTab::Appearance,
         SettingsTab::Metrics,
     ];
@@ -120,10 +123,30 @@ struct KeyRow {
     testing: Option<Task<()>>,
 }
 
+/// Field errors each credentials input shows, and clears once edited.
+const CLIENT_ID_ERRORS: &[AppCredentialsFieldError] = &[
+    AppCredentialsFieldError::ClientIdRequired,
+    AppCredentialsFieldError::ClientIdInvalid,
+];
+const CLIENT_SECRET_ERRORS: &[AppCredentialsFieldError] = &[
+    AppCredentialsFieldError::ClientSecretRequired,
+    AppCredentialsFieldError::ClientSecretInvalid,
+];
+
+/// What the screen holds for one network's app credentials.
+struct CredentialsRow {
+    client_id: Entity<InputState>,
+    client_secret: Entity<InputState>,
+    field_errors: Vec<AppCredentialsFieldError>,
+    /// Why the last save or removal did not happen.
+    error: Option<Text>,
+}
+
 pub struct SettingsScreen {
     bardo: Entity<Bardo>,
     tab: SettingsTab,
     rows: HashMap<Provider, KeyRow>,
+    credentials: HashMap<Network, CredentialsRow>,
     /// The light and dark slots of "follow Windows".
     light_theme: ThemeSelect,
     dark_theme: ThemeSelect,
@@ -161,6 +184,33 @@ impl SettingsScreen {
                     testing: None,
                 };
                 (provider, row)
+            })
+            .collect();
+        let credentials = Network::sign_in_networks()
+            .map(|network| {
+                let client_id = cx.new(|cx| InputState::new(window, cx));
+                // Masked like an API key: the secret never shows on screen.
+                let client_secret = cx.new(|cx| InputState::new(window, cx).masked(true));
+                for (input, fields) in [
+                    (&client_id, CLIENT_ID_ERRORS),
+                    (&client_secret, CLIENT_SECRET_ERRORS),
+                ] {
+                    subscriptions.push(cx.subscribe(input, move |this, _, event, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            let row = this.credentials_mut(network);
+                            row.field_errors.retain(|error| !fields.contains(error));
+                            row.error = None;
+                            cx.notify();
+                        }
+                    }));
+                }
+                let row = CredentialsRow {
+                    client_id,
+                    client_secret,
+                    field_errors: Vec::new(),
+                    error: None,
+                };
+                (network, row)
             })
             .collect();
         let (light, dark) = follow_pair(bardo.read(cx).ui_theme());
@@ -219,6 +269,7 @@ impl SettingsScreen {
             bardo,
             tab: SettingsTab::Keys,
             rows,
+            credentials,
             light_theme,
             dark_theme,
             metrics_sync,
@@ -235,6 +286,18 @@ impl SettingsScreen {
         self.rows.get_mut(&provider).expect("a row per provider")
     }
 
+    fn credentials_mut(&mut self, network: Network) -> &mut CredentialsRow {
+        self.credentials
+            .get_mut(&network)
+            .expect("a row per sign-in network")
+    }
+
+    /// Opens the Networks tab, where a connection's app credentials live.
+    pub fn show_networks(&mut self, cx: &mut Context<Self>) {
+        self.tab = SettingsTab::Networks;
+        cx.notify();
+    }
+
     /// Placeholders and theme names follow the interface language.
     fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let bardo = self.bardo.read(cx);
@@ -248,6 +311,16 @@ impl SettingsScreen {
             self.rows[&provider].input.update(cx, |input, cx| {
                 input.set_placeholder(placeholder, window, cx)
             });
+        }
+        for network in Network::sign_in_networks() {
+            let bardo = self.bardo.read(cx);
+            let id = tr(bardo, Text::ClientIdPlaceholder(network));
+            let secret = tr(bardo, Text::ClientSecretPlaceholder(network));
+            let row = &self.credentials[&network];
+            row.client_id
+                .update(cx, |input, cx| input.set_placeholder(id, window, cx));
+            row.client_secret
+                .update(cx, |input, cx| input.set_placeholder(secret, window, cx));
         }
         let (light, dark) = follow_pair(self.bardo.read(cx).ui_theme());
         for (select, mode, theme) in [
@@ -390,6 +463,187 @@ impl SettingsScreen {
         row.error = None;
         row.testing = Some(task);
         cx.notify();
+    }
+
+    fn save_credentials(&mut self, network: Network, window: &mut Window, cx: &mut Context<Self>) {
+        let row = &self.credentials[&network];
+        let (id_input, secret_input) = (row.client_id.clone(), row.client_secret.clone());
+        let id = id_input.read(cx).value();
+        let secret = secret_input.read(cx).value();
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.save_app_credentials(network, &id, &secret);
+            cx.notify();
+            result
+        });
+        let row = self.credentials_mut(network);
+        match result {
+            Ok(()) => {
+                row.field_errors.clear();
+                row.error = None;
+                id_input.update(cx, |input, cx| input.set_value("", window, cx));
+                secret_input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            Err(error) => {
+                row.field_errors = error.field_errors().to_vec();
+                row.error = error.message();
+            }
+        }
+        cx.notify();
+    }
+
+    fn remove_credentials(&mut self, network: Network, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.remove_app_credentials(network);
+            cx.notify();
+            result
+        });
+        let row = self.credentials_mut(network);
+        row.field_errors.clear();
+        row.error = result.err().and_then(|error| error.message());
+        cx.notify();
+    }
+
+    fn render_credentials_card(
+        &self,
+        status: AppCredentialsStatus,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let bardo = self.bardo.read(cx);
+        let tokens = look(cx).tokens;
+        let network = status.network;
+        let row = &self.credentials[&network];
+        let saved = matches!(status.state, KeyState::Saved { .. });
+
+        let state = match &status.state {
+            KeyState::NotSet => kit::status_with(
+                Tone::Neutral,
+                IconName::Minus,
+                tr(bardo, Text::AppCredentialsNotSet),
+                cx,
+            ),
+            KeyState::Saved { hint } => kit::status(
+                Tone::Success,
+                bardo.text_with(Text::AppCredentialsSaved, &[("hint", hint)]),
+                cx,
+            ),
+            KeyState::Unreadable => {
+                kit::status(Tone::Danger, tr(bardo, Text::AppCredentialsUnreadable), cx)
+            }
+        };
+        let field_error = |fields: &[AppCredentialsFieldError]| {
+            let error = row.field_errors.iter().find(|e| fields.contains(e))?;
+            Some(
+                div()
+                    .text_xs()
+                    .text_color(tokens.danger)
+                    .child(tr(bardo, Text::AppCredentialsFieldError(*error))),
+            )
+        };
+        let field = |label: Text, input: &Entity<InputState>, fields| {
+            v_flex()
+                .flex_1()
+                .min_w(px(240.))
+                .gap_1()
+                .child(div().text_sm().font_medium().child(tr(bardo, label)))
+                .child(Input::new(input))
+                .children(field_error(fields))
+        };
+        let save = Button::new(("save-credentials", network as usize))
+            .label(tr(
+                bardo,
+                if saved {
+                    Text::ReplaceAppCredentials
+                } else {
+                    Text::SaveAppCredentials
+                },
+            ))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.save_credentials(network, window, cx)
+            }));
+        let save = if saved {
+            save.outline()
+        } else {
+            save.primary()
+        };
+        let error = row
+            .error
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
+
+        kit::card(cx)
+            .p_4()
+            .gap_3()
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(240.))
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .child(tr(bardo, Text::AppCredentialsName(network))),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(tokens.text2)
+                                    .child(tr(bardo, Text::AppCredentialsPurpose(network))),
+                            ),
+                    )
+                    .child(state),
+            )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap_3()
+                    .child(field(Text::ClientId, &row.client_id, CLIENT_ID_ERRORS))
+                    .child(field(
+                        Text::ClientSecret,
+                        &row.client_secret,
+                        CLIENT_SECRET_ERRORS,
+                    )),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(save)
+                    .when(status.state != KeyState::NotSet, |actions| {
+                        actions.child(
+                            Button::new(("remove-credentials", network as usize))
+                                .ghost()
+                                .label(tr(bardo, Text::RemoveAppCredentials))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.remove_credentials(network, cx)
+                                })),
+                        )
+                    }),
+            )
+            .children(error)
+    }
+
+    fn render_networks(&self, cx: &mut Context<Self>) -> AnyElement {
+        let statuses = self.bardo.read(cx).app_credentials();
+        let cards: Vec<_> = statuses
+            .into_iter()
+            .map(|status| self.render_credentials_card(status, cx).into_any_element())
+            .collect();
+        let bardo = self.bardo.read(cx);
+        v_flex()
+            .gap_3()
+            .child(
+                kit::section_heading(tr(bardo, Text::AppCredentialsTitle)).child(kit::info(
+                    "app-credentials-info",
+                    Some(tr(bardo, Text::AppCredentialsInfo)),
+                    tr(bardo, Text::AppCredentialsHint),
+                )),
+            )
+            .children(cards)
+            .into_any_element()
     }
 
     fn render_card(&self, status: ProviderKeyStatus, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1006,6 +1260,7 @@ impl Render for SettingsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match self.tab {
             SettingsTab::Keys => self.render_keys(cx),
+            SettingsTab::Networks => self.render_networks(cx),
             SettingsTab::Appearance => self.render_appearance(cx),
             SettingsTab::Metrics => self.render_metrics(cx),
         };
@@ -1019,6 +1274,7 @@ impl Render for SettingsScreen {
                     .unwrap_or(0),
             )
             .child(Tab::new().label(tr(bardo, Text::SettingsKeysTab)))
+            .child(Tab::new().label(tr(bardo, Text::SettingsNetworksTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {

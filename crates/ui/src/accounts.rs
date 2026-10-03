@@ -8,11 +8,11 @@ use bardo_app::bardo_domain::{Channel, ChannelId};
 use bardo_app::{Bardo, Destination, Text};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::*;
-use gpui_kit::{ClickEvent, Entity, SharedString, Window, div};
+use gpui_kit::{ClickEvent, Entity, EventEmitter, SharedString, Subscription, Window, div};
 
 use crate::kit::{self, Tone};
 use crate::layout;
-use crate::network_accounts::NetworkAccountsPanel;
+use crate::network_accounts::{NetworkAccountsPanel, OpenNetworkSettings};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 
@@ -22,17 +22,25 @@ pub struct AccountsScreen {
     load_failed: bool,
     channel: Option<ChannelId>,
     panel: Entity<NetworkAccountsPanel>,
+    _subscription: Subscription,
 }
+
+/// The panel's request to open Settings › Networks goes on to the shell.
+impl EventEmitter<OpenNetworkSettings> for AccountsScreen {}
 
 impl AccountsScreen {
     pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let panel = cx.new(|cx| NetworkAccountsPanel::new(bardo.clone(), window, cx));
+        let subscription = cx.subscribe(&panel, |_, _, _: &OpenNetworkSettings, cx| {
+            cx.emit(OpenNetworkSettings)
+        });
         let mut screen = Self {
             bardo,
             channels: Vec::new(),
             load_failed: false,
             channel: None,
             panel,
+            _subscription: subscription,
         };
         screen.reload(window, cx);
         screen

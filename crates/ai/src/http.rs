@@ -43,6 +43,23 @@ impl HttpRequest {
         }
     }
 
+    /// A POST of an HTML form without files
+    /// (`application/x-www-form-urlencoded`), e.g. an OAuth token request.
+    pub fn post_form(url: impl Into<String>, fields: &[(&str, &str)]) -> Self {
+        let body = form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(fields)
+            .finish();
+        Self {
+            method: Method::Post,
+            url: url.into(),
+            headers: vec![(
+                "content-type".into(),
+                "application/x-www-form-urlencoded".to_owned(),
+            )],
+            body: Some(body.into_bytes()),
+        }
+    }
+
     /// A POST of an HTML form with files (`multipart/form-data`), e.g. an
     /// audio file and its text.
     pub fn post_multipart(url: impl Into<String>, parts: &[FormPart<'_>]) -> Self {
@@ -403,6 +420,25 @@ impl Transport for UreqTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plain_form_is_url_encoded() {
+        let request = HttpRequest::post_form(
+            "https://example.test/token",
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", "1//a b+c"),
+            ],
+        );
+        assert_eq!(
+            request.header_value("content-type"),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(
+            request.body.as_deref(),
+            Some(&b"grant_type=refresh_token&refresh_token=1%2F%2Fa+b%2Bc"[..])
+        );
+    }
 
     #[test]
     fn a_multipart_form_holds_each_part_between_boundaries() {

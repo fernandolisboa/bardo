@@ -863,6 +863,8 @@ pub(crate) mod tests {
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
+                sign_ins: Vec::new(),
+                consent: Arc::new(crate::connections::testing::NoConsent),
             };
             let mut app = Bardo::start_with(
                 Repositories::shared_with_files(

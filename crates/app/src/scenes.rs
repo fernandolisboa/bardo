@@ -942,6 +942,8 @@ pub(crate) mod tests {
                     .collect(),
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
+                sign_ins: Vec::new(),
+                consent: Arc::new(crate::connections::testing::NoConsent),
             };
             let mut app = Bardo::start_with(
                 repositories,

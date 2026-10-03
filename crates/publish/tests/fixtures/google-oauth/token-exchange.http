@@ -1,0 +1,11 @@
+HTTP/2 200 
+content-type: application/json; charset=utf-8
+cache-control: no-cache, no-store, max-age=0, must-revalidate
+
+{
+  "access_token": "ya29.a0AfB_byC-fixture-access-token-0001",
+  "expires_in": 3599,
+  "refresh_token": "1//0gFixture-refresh-token-0001",
+  "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/yt-analytics-monetary.readonly",
+  "token_type": "Bearer"
+}

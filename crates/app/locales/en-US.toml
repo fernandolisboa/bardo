@@ -6,6 +6,7 @@ tagline = "Create and run faceless channels, with AI assisting every step."
 details = "Details"
 
 [settings]
+networks_tab = "Networks"
 ui_language = "Interface language"
 title = "Settings"
 keys_tab = "API keys"
@@ -123,6 +124,7 @@ saved = "Account saved."
 removed = "Account removed."
 
 [network_account.error]
+still_connected = "Disconnect this account before removing it, so its access is revoked."
 handle_required = "Type the account's handle."
 handle_too_long = "Use at most 30 characters."
 handle_invalid = "Type only the handle, without spaces or links."
@@ -1511,3 +1513,73 @@ off = "Never"
 "6h" = "When older than 6 hours"
 "12h" = "When older than 12 hours"
 "24h" = "When older than a day"
+
+[app_credentials]
+title = "App credentials"
+hint = "Bardo signs in to each network with an OAuth app you register on it, and ships none of its own. The client ID and secret are kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
+info = "Where credentials are kept"
+client_id = "Client ID"
+client_secret = "Client secret"
+not_set = "Not saved"
+saved = "Saved, secret ending in {hint}"
+unreadable = "Could not read these credentials from Windows Credential Manager."
+save = "Save"
+replace = "Replace"
+remove = "Remove"
+
+[app_credentials.youtube]
+name = "YouTube · Google OAuth client"
+purpose = "A Desktop app client in your Google Cloud project, with YouTube Data API v3 and YouTube Analytics API enabled and the consent screen In production. In Testing, Google ends the connection after seven days."
+client_id_placeholder = "…apps.googleusercontent.com"
+client_secret_placeholder = "GOCSPX-…"
+
+[app_credentials.error]
+client_id_required = "Enter the client ID."
+client_id_invalid = "Paste the client ID of a Google OAuth client. It ends in .apps.googleusercontent.com."
+client_secret_required = "Enter the client secret."
+client_secret_invalid = "That doesn't look like a client secret. Copy it again from Google Cloud."
+
+[connection]
+not_connected = "Not connected"
+connecting = "Waiting for you to allow access in the browser…"
+connected = "Connected as {channel}"
+reconnect_needed = "Reconnect needed · {channel}"
+connect = "Connect"
+reconnect = "Reconnect"
+cancel = "Cancel"
+disconnect = "Disconnect"
+disconnecting = "Disconnecting…"
+check = "Check"
+checking = "Checking…"
+open_settings = "Open Settings › Networks"
+checked = "The connection works. Channel: {channel}."
+disconnected = "Disconnected. Bardo's access was revoked."
+disconnected_not_revoked = "Disconnected here, but {network} couldn't be reached to revoke Bardo's access. You can remove it from your account's security settings on {network}."
+reconnect_hint = "The network refused to renew access: it was revoked or expired (a Google client in Testing status expires after seven days). Reconnect to sign in again."
+
+[connection.error]
+not_offered = "Bardo doesn't sign in to this network yet."
+needs_app_credentials = "Save your OAuth client in Settings › Networks before connecting."
+not_connected = "This account isn't connected."
+denied = "Access wasn't allowed in the browser. Connect again and choose Allow."
+timed_out = "No answer came back from the browser within five minutes. Connect again."
+cancelled = "Connection cancelled."
+listen_failed = "Bardo couldn't wait for the browser's answer on this computer. Try again; if it keeps failing, check that a firewall allows Bardo on 127.0.0.1."
+missing_scopes = "Not every permission was allowed. Connect again and leave every box ticked: Bardo needs them to upload, schedule and read analytics."
+tokens_too_large = "The network's tokens are too large for Windows Credential Manager, so they weren't kept."
+store_failed = "Could not reach Windows Credential Manager. Try again."
+not_saved = "Couldn't save the connection. Try again."
+
+[connection.failure]
+refused = "The network refused the sign-in. Connect again."
+client_rejected = "Google doesn't recognize the client ID or secret. Check them in Settings › Networks."
+not_allowed = "Access was refused. Enable YouTube Data API v3 and YouTube Analytics API in your Google Cloud project."
+no_channel = "This Google account has no YouTube channel. Sign in with the account that owns the channel."
+limit_reached = "The project's YouTube quota is used up for today. Try again after midnight Pacific time."
+network_down = "YouTube is failing on its side. Try again later."
+unreachable = "Couldn't reach the network. Check your internet connection."
+unexpected = "The network answered in a way Bardo doesn't understand. Try again."
+
+[consent_page]
+done = "Bardo is connected. You can close this tab."
+failed = "Bardo didn't connect. Go back to Bardo to see why."

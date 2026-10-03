@@ -1,7 +1,7 @@
 //! Network account use cases (PRD story 10): a channel's accounts, at most
 //! one per network, each with its handle, metadata defaults and render
-//! preset overrides. Exports and uploads read them later; nothing here
-//! signs in to a network.
+//! preset overrides. Exports and uploads read them later; signing in to a
+//! network lives in `connections`.
 
 use bardo_domain::{
     Channel, ChannelId, Network, NetworkAccount, NetworkAccountDetails, NetworkAccountDraft,
@@ -22,6 +22,9 @@ pub enum NetworkAccountError {
     ChannelNotFound,
     #[error("network account not found")]
     NotFound,
+    /// The account is signed in: disconnecting first revokes its tokens.
+    #[error("the network account is still connected")]
+    StillConnected,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -35,6 +38,7 @@ impl NetworkAccountError {
             NetworkAccountError::NetworkTaken(_) => Some(Text::NetworkAccountTaken),
             NetworkAccountError::ChannelNotFound => Some(Text::ChannelNotFound),
             NetworkAccountError::NotFound => Some(Text::NetworkAccountNotFound),
+            NetworkAccountError::StillConnected => Some(Text::NetworkAccountStillConnected),
             NetworkAccountError::Repository(_) => Some(Text::NetworkAccountNotSaved),
         }
     }
@@ -105,8 +109,13 @@ impl Bardo {
         Ok(account)
     }
 
+    /// Removes the account. A connected one must be disconnected first, so
+    /// its tokens are revoked rather than left behind.
     pub fn remove_network_account(&self, id: NetworkAccountId) -> Result<(), NetworkAccountError> {
         let account = self.own_network_account(id)?;
+        if self.connection_book.is_connected(account.id)? {
+            return Err(NetworkAccountError::StillConnected);
+        }
         Ok(self.network_accounts.delete(account.id)?)
     }
 

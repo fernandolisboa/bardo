@@ -4,6 +4,7 @@
 mod appearance;
 mod channels;
 mod clips;
+mod connections;
 mod costs;
 mod cut_suggestions;
 mod editor;
@@ -36,9 +37,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, ClipGenerator, CostRepository, CutSuggestionRepository, DecisionEngine,
-    ExportFiles, ExportRepository, ImageGenerator, JobRepository, KeyChecker, LayoutId, MarketData,
-    MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
+    ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver, CostRepository,
+    CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository, ImageGenerator,
+    JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository, MusicPromptRepository,
+    NarrationRepository, NetworkAccountRepository, NetworkConnectionRepository, NetworkSignIn,
     NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles,
     PublicationRepository, Redactor, RenderRepository, RepositoryError, ScenePlanRepository,
     ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository,
@@ -46,7 +48,7 @@ use bardo_domain::{
     VideoStats, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
-use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles};
+use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore};
 
 pub use appearance::{EditorPalette, Palette, Rgb, TrackColors, UiFont, palette};
 pub use bardo_domain;
@@ -54,6 +56,10 @@ pub use bardo_domain;
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
 pub use channels::ChannelError;
 pub use clips::{ClipsView, SceneClipView};
+pub use connections::{
+    AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult, ConnectionCheck,
+    ConnectionError, ConnectionState, Disconnected, Disconnection,
+};
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
     SpendRow, SpendSummary,
@@ -99,6 +105,7 @@ pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 
 use crate::clips::ClipHandler;
+use crate::connections::ConnectionBook;
 use crate::costs::CostBook;
 use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
@@ -150,6 +157,8 @@ pub struct Repositories {
     pub music_prompts: Arc<dyn MusicPromptRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
+    /// Each network account's connection state. Never its tokens.
+    pub connections: Arc<dyn NetworkConnectionRepository>,
     /// Each project's rendered files. Shared with the job queue.
     pub renders: Arc<dyn RenderRepository>,
     /// Each project's metadata and exports. Shared with the job queue.
@@ -168,19 +177,25 @@ pub struct Repositories {
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
+    /// Network app credentials and OAuth tokens. Never the database
+    /// (ADR-0008).
+    pub connection_secrets: Arc<dyn ConnectionSecrets>,
 }
 
 impl Repositories {
     /// Every data port served by one SQLite database, keys by `secrets`,
-    /// media by `files` and export packages by `export_files`.
+    /// app credentials and tokens by `connection_secrets`, media by `files`
+    /// and export packages by `export_files`.
     pub fn local(
         db: Database,
         secrets: Box<dyn SecretStore>,
+        connection_secrets: Box<dyn ConnectionSecrets>,
         files: Box<dyn ProjectFiles>,
         export_files: Box<dyn ExportFiles>,
     ) -> Self {
         Self {
             export_files: Arc::from(export_files),
+            connection_secrets: Arc::from(connection_secrets),
             ..Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
         }
     }
@@ -192,7 +207,7 @@ impl Repositories {
     }
 
     /// `shared` with the project files the caller chose, and export
-    /// packages in memory.
+    /// packages, app credentials and tokens in memory.
     pub fn shared_with_files(
         db: Arc<Database>,
         secrets: Arc<dyn SecretStore>,
@@ -212,6 +227,7 @@ impl Repositories {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
             exports: Arc::clone(&db) as _,
             export_files: Arc::new(MemoryExportFiles::default()),
@@ -221,6 +237,7 @@ impl Repositories {
             research: db,
             files,
             secrets,
+            connection_secrets: Arc::new(MemorySecretStore::default()),
         }
     }
 }
@@ -253,6 +270,10 @@ pub struct Providers {
     pub audio: Arc<dyn AudioOutput>,
     /// The bundled ffmpeg: proxies, waveforms and the editor's preview.
     pub media: Arc<dyn MediaEngine>,
+    /// Sign-in per network that has one (ADR-0008): YouTube for now.
+    pub sign_ins: Vec<Arc<dyn NetworkSignIn>>,
+    /// Where the browser comes back after consent: a loopback listener.
+    pub consent: Arc<dyn ConsentReceiver>,
 }
 
 impl Providers {
@@ -274,6 +295,8 @@ impl Providers {
             ],
             audio: Arc::new(bardo_media::DeviceAudio),
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
+            sign_ins: vec![Arc::new(bardo_publish::YouTubeSignIn::new())],
+            consent: Arc::new(bardo_publish::LoopbackReceiver),
         }
     }
 }
@@ -309,6 +332,7 @@ pub struct Bardo {
     voice_list: Option<VoiceList>,
     jobs: JobQueue,
     provider_keys: ProviderKeys,
+    connection_book: ConnectionBook,
     profile: UserProfile,
     catalog: Catalog,
 }
@@ -353,6 +377,7 @@ impl Bardo {
             media_assets,
             music_prompts,
             network_accounts,
+            connections,
             renders,
             exports,
             export_files,
@@ -361,6 +386,7 @@ impl Bardo {
             costs,
             files,
             secrets,
+            connection_secrets,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -482,6 +508,14 @@ impl Bardo {
         };
         let provider_keys =
             ProviderKeys::load(secrets, providers.key_checker, redactor.clone(), profile.id);
+        let connection_book = ConnectionBook::load(
+            profile.id,
+            connection_secrets,
+            connections,
+            providers.sign_ins,
+            providers.consent,
+            redactor.clone(),
+        );
         let jobs = JobQueue::start(
             jobs,
             profile.id,
@@ -533,6 +567,7 @@ impl Bardo {
             voice_list: None,
             jobs,
             provider_keys,
+            connection_book,
             profile,
             catalog,
         })
@@ -1366,6 +1401,8 @@ pub(crate) mod testing {
             clips: vec![Arc::new(FakeClips::default())],
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             media: Arc::new(crate::editor::testing::FakeMedia::default()),
+            sign_ins: Vec::new(),
+            consent: Arc::new(crate::connections::testing::NoConsent),
         }
     }
 }
@@ -1446,6 +1483,7 @@ mod tests {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
+            connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
             exports: Arc::clone(&db) as _,
             publications: Arc::clone(&db) as _,
@@ -1455,6 +1493,7 @@ mod tests {
             files: Arc::new(MemoryProjectFiles::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
+            connection_secrets: Arc::new(MemorySecretStore::default()),
         };
         Bardo::start(repositories, testing::providers(), locale).unwrap()
     }
@@ -1586,6 +1625,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let repositories = Repositories::local(
             db,
+            Box::new(MemorySecretStore::default()),
             Box::new(MemorySecretStore::default()),
             Box::new(MemoryProjectFiles::default()),
             Box::new(MemoryExportFiles::default()),

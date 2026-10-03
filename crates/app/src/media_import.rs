@@ -222,6 +222,8 @@ mod tests {
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::clone(&self.media) as _,
+                sign_ins: Vec::new(),
+                consent: Arc::new(crate::connections::testing::NoConsent),
             };
             Bardo::start_with(
                 Repositories::shared_with_files(

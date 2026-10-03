@@ -1,0 +1,14 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+server: scaffolding on HTTPServer2
+
+{
+  "items": [
+    {
+      "id": "UCx9Fixture-Channel-Id01",
+      "snippet": {
+        "title": "Arquivos do Espaço"
+      }
+    }
+  ]
+}

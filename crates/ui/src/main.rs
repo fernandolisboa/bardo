@@ -40,11 +40,18 @@ fn main() -> anyhow::Result<()> {
     let db = Database::open(&db_path)
         .with_context(|| format!("opening the database at {}", db_path.display()))?;
     let secrets = bardo_storage::platform_secret_store()?;
+    let connection_secrets = bardo_storage::platform_connection_secrets()?;
     let files = bardo_storage::LocalProjectFiles::new(bardo_storage::default_projects_dir()?);
     let exports = bardo_storage::LocalExportFiles::new(bardo_storage::default_exports_dir());
     let locale = sys_locale::get_locale();
     let bardo = Bardo::start(
-        Repositories::local(db, secrets, Box::new(files), Box::new(exports)),
+        Repositories::local(
+            db,
+            secrets,
+            connection_secrets,
+            Box::new(files),
+            Box::new(exports),
+        ),
         Providers::live(),
         locale.as_deref(),
     )?;

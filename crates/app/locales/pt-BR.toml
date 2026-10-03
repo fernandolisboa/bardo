@@ -6,6 +6,7 @@ tagline = "Crie e opere canais dark, com IA ajudando em cada etapa."
 details = "Detalhes"
 
 [settings]
+networks_tab = "Redes"
 ui_language = "Idioma da interface"
 title = "Configurações"
 keys_tab = "Chaves de API"
@@ -123,6 +124,7 @@ saved = "Conta salva."
 removed = "Conta removida."
 
 [network_account.error]
+still_connected = "Desconecte esta conta antes de removê-la, para que o acesso seja revogado."
 handle_required = "Digite o @ da conta."
 handle_too_long = "Use no máximo 30 caracteres."
 handle_invalid = "Digite só o @, sem espaços nem links."
@@ -1511,3 +1513,73 @@ off = "Nunca"
 "6h" = "Se passou de 6 horas"
 "12h" = "Se passou de 12 horas"
 "24h" = "Se passou de um dia"
+
+[app_credentials]
+title = "Credenciais de app"
+hint = "O Bardo entra em cada rede com um app OAuth que você registra nela, e não traz nenhum próprio. O ID e a chave secreta do cliente ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
+info = "Onde as credenciais ficam"
+client_id = "ID do cliente"
+client_secret = "Chave secreta do cliente"
+not_set = "Não salvas"
+saved = "Salvas, chave secreta terminada em {hint}"
+unreadable = "Não foi possível ler estas credenciais do Gerenciador de Credenciais do Windows."
+save = "Salvar"
+replace = "Trocar"
+remove = "Remover"
+
+[app_credentials.youtube]
+name = "YouTube · cliente OAuth do Google"
+purpose = "Um cliente do tipo App para computador no seu projeto do Google Cloud, com a YouTube Data API v3 e a YouTube Analytics API ativadas e a tela de consentimento Em produção. Em Teste, o Google encerra a conexão depois de sete dias."
+client_id_placeholder = "…apps.googleusercontent.com"
+client_secret_placeholder = "GOCSPX-…"
+
+[app_credentials.error]
+client_id_required = "Informe o ID do cliente."
+client_id_invalid = "Cole o ID de um cliente OAuth do Google. Ele termina em .apps.googleusercontent.com."
+client_secret_required = "Informe a chave secreta do cliente."
+client_secret_invalid = "Isso não parece uma chave secreta de cliente. Copie de novo do Google Cloud."
+
+[connection]
+not_connected = "Não conectada"
+connecting = "Aguardando você permitir o acesso no navegador…"
+connected = "Conectada como {channel}"
+reconnect_needed = "Reconexão necessária · {channel}"
+connect = "Conectar"
+reconnect = "Reconectar"
+cancel = "Cancelar"
+disconnect = "Desconectar"
+disconnecting = "Desconectando…"
+check = "Verificar"
+checking = "Verificando…"
+open_settings = "Abrir Configurações › Redes"
+checked = "A conexão funciona. Canal: {channel}."
+disconnected = "Desconectada. O acesso do Bardo foi revogado."
+disconnected_not_revoked = "Desconectada aqui, mas não foi possível falar com o {network} para revogar o acesso do Bardo. Você pode removê-lo nas configurações de segurança da sua conta no {network}."
+reconnect_hint = "A rede recusou renovar o acesso: ele foi revogado ou expirou (um cliente do Google em status Teste expira depois de sete dias). Reconecte para entrar de novo."
+
+[connection.error]
+not_offered = "O Bardo ainda não entra nesta rede."
+needs_app_credentials = "Salve o seu cliente OAuth em Configurações › Redes antes de conectar."
+not_connected = "Esta conta não está conectada."
+denied = "O acesso não foi permitido no navegador. Conecte de novo e escolha Permitir."
+timed_out = "Nenhuma resposta voltou do navegador em cinco minutos. Conecte de novo."
+cancelled = "Conexão cancelada."
+listen_failed = "O Bardo não conseguiu esperar a resposta do navegador neste computador. Tente de novo; se continuar falhando, confira se algum firewall bloqueia o Bardo em 127.0.0.1."
+missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e deixe todas as caixas marcadas: o Bardo precisa delas para enviar, agendar e ler as análises."
+tokens_too_large = "Os tokens da rede são grandes demais para o Gerenciador de Credenciais do Windows, então não foram guardados."
+store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
+not_saved = "Não foi possível salvar a conexão. Tente de novo."
+
+[connection.failure]
+refused = "A rede recusou a entrada. Conecte de novo."
+client_rejected = "O Google não reconhece o ID ou a chave secreta do cliente. Confira em Configurações › Redes."
+not_allowed = "O acesso foi recusado. Ative a YouTube Data API v3 e a YouTube Analytics API no seu projeto do Google Cloud."
+no_channel = "Esta conta do Google não tem canal no YouTube. Entre com a conta dona do canal."
+limit_reached = "A cota do YouTube do projeto acabou por hoje. Tente de novo depois da meia-noite no horário do Pacífico."
+network_down = "O YouTube está com falha do lado dele. Tente mais tarde."
+unreachable = "Não foi possível falar com a rede. Confira sua conexão com a internet."
+unexpected = "A rede respondeu de um jeito que o Bardo não entende. Tente de novo."
+
+[consent_page]
+done = "O Bardo está conectado. Pode fechar esta aba."
+failed = "O Bardo não conectou. Volte ao Bardo para ver o motivo."

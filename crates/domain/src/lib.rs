@@ -44,6 +44,7 @@ mod budget;
 mod caption;
 mod channel;
 mod clip;
+mod connection;
 mod cost;
 mod cut_suggestion;
 mod decision;
@@ -94,6 +95,12 @@ pub use channel::{
 pub use clip::{
     ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelError, ClipModelRef,
     ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, StagedImage,
+};
+pub use connection::{
+    AppCredentials, AppCredentialsFieldError, ConnectedIdentity, ConnectionSecrets,
+    ConnectionStatus, ConsentCallback, ConsentError, ConsentPages, ConsentReceiver, ConsentRequest,
+    NetworkConnection, NetworkConnectionRepository, NetworkSignIn, SecretText, SignInFailure,
+    SignInFailureKind, TokenGrant, TokenSet, TokenSetTooLarge,
 };
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
