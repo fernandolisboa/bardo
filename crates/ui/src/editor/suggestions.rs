@@ -21,20 +21,30 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, ClickEvent, MouseButton, PathBuilder, SharedString, canvas, div, fill, point, px,
-    size,
+    AnyElement, App, ClickEvent, KeyBinding, MouseButton, PathBuilder, SharedString, actions,
+    canvas, div, fill, point, px, size,
 };
 
-use super::timeline::RULER;
+use super::timeline::PIN_ROW;
 use super::tokens::*;
 use super::{EditorScreen, color, icon, label, tool_button};
 use crate::appearance::EditorColor;
 use crate::shell::tr;
-use crate::spend::{budget_question, estimate_note};
+use crate::spend::{budget_question, estimate_line, near_line};
+
+actions!(cut_suggestions, [NextCut]);
+
+/// The key context the editor takes while suggestions show, so Tab moves
+/// between them instead of between focusable elements.
+pub(super) const CONTEXT: &str = "CutSuggestions";
+
+pub(super) fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("tab", NextCut, Some(CONTEXT))]);
+}
 
 /// What one click of the floor's − or + changes: 0.10.
 const FLOOR_STEP: u8 = 10;
-const POPOVER_WIDTH: f32 = 288.;
+const POPOVER_WIDTH: f32 = 320.;
 /// Pins closer than this share the ruler without their scores.
 const SCORE_ROOM: f32 = 44.;
 
@@ -76,12 +86,6 @@ impl CutsState {
             item.state == SuggestionState::Pending && self.pinned(item, view.floor)
         })
     }
-}
-
-/// A score as the design shows it: `0.82`.
-fn score_text(score: Score) -> String {
-    let value = score.value();
-    format!("{}.{:02}", value / 100, value % 100)
 }
 
 /// A suggestion's reasons, joined: "Sentence end + 420 ms pause".
@@ -279,19 +283,18 @@ impl EditorScreen {
     }
 
     /// Tab: the next pending suggestion.
-    fn next_cut(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn next_cut(&mut self, cx: &mut Context<Self>) {
         if let Some(next) = self.next_pending(self.cuts.focused) {
             self.focus_cut(next, cx);
         }
     }
 
-    /// A, R and Tab while the suggestions show; whether the key was theirs.
-    pub(super) fn cut_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) -> bool {
+    /// A and R while the suggestions show; whether the key was theirs.
+    pub(super) fn cut_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         if !self.cuts.on {
             return false;
         }
         match (key, self.cuts.focused) {
-            ("tab", _) if !shift => self.next_cut(cx),
             ("a", Some(index)) => self.accept_cut(index, cx),
             ("r", Some(index)) => self.reject_cut(index, cx),
             _ => return false,
@@ -394,6 +397,7 @@ impl EditorScreen {
             .map(|item| (self.timeline.x(item.at), *item))
             .filter(|(x, _)| *x >= -SCORE_ROOM && *x <= width + 8.)
             .collect();
+        let ruler = self.ruler_height();
         let focused = self.cuts.focused;
         let guides: Vec<(f32, EditorColor)> = placed
             .iter()
@@ -411,7 +415,7 @@ impl EditorScreen {
             |_, _, _| {},
             move |bounds, (), window, _| {
                 let left = f32::from(bounds.origin.x);
-                let top = f32::from(bounds.origin.y) + RULER;
+                let top = f32::from(bounds.origin.y) + ruler;
                 let bottom = f32::from(bounds.origin.y + bounds.size.height);
                 for (x, ink) in &guides {
                     let mut y = top;
@@ -448,7 +452,7 @@ impl EditorScreen {
                 && (is_focused || room >= SCORE_ROOM))
                 .then(|| {
                     label(
-                        score_text(item.score),
+                        bardo.score(item.score),
                         if is_focused { ACCENT } else { TEXT_2 },
                     )
                     .text_size(px(10.))
@@ -458,8 +462,8 @@ impl EditorScreen {
                 h_flex()
                     .id(("cut-pin", index))
                     .absolute()
-                    .top_0()
-                    .h(px(RULER))
+                    .top(px(ruler - PIN_ROW - 1.))
+                    .h(px(PIN_ROW))
                     .left(px(x - 6.))
                     .gap_0p5()
                     .items_center()
@@ -485,7 +489,7 @@ impl EditorScreen {
                 v_flex()
                     .id("cut-popover")
                     .absolute()
-                    .top(px(RULER + 6.))
+                    .top(px(ruler + 6.))
                     .left(px(left))
                     .w(px(POPOVER_WIDTH))
                     .p_3()
@@ -512,7 +516,7 @@ impl EditorScreen {
                             .gap_2()
                             .items_center()
                             .child(
-                                label(score_text(item.score), ACCENT)
+                                label(bardo.score(item.score), ACCENT)
                                     .text_size(px(13.))
                                     .font_family(mono.clone()),
                             )
@@ -691,9 +695,7 @@ impl EditorScreen {
                     view.estimate
                         .as_ref()
                         .filter(|_| can_ask)
-                        .and_then(|estimate| {
-                            estimate_note(bardo, estimate, Text::EstimateCost, cx)
-                        }),
+                        .map(|estimate| self.render_cut_estimate(bardo, estimate)),
                 )
         });
         let budget = self.cuts.ask.as_ref().map(|estimate| {
@@ -739,7 +741,7 @@ impl EditorScreen {
                     .items_center()
                     .child(floor_button("cuts-floor-less", IconName::Minus, lower))
                     .child(
-                        label(score_text(floor), TEXT)
+                        label(bardo.score(floor), TEXT)
                             .font_family(mono.clone())
                             .min_w(px(48.))
                             .text_center(),
@@ -753,8 +755,12 @@ impl EditorScreen {
                 .gap_2()
                 .child(label(
                     bardo.text_with(
-                        Text::CutsHidden,
-                        &[("n", &hidden.to_string()), ("score", &score_text(floor))],
+                        if self.cuts.show_all {
+                            Text::CutsShown
+                        } else {
+                            Text::CutsHidden
+                        },
+                        &[("n", &hidden.to_string()), ("score", &bardo.score(floor))],
                     ),
                     TEXT_3,
                 ))
@@ -785,7 +791,7 @@ impl EditorScreen {
                 .child(icon(IconName::Check, if strong { TEXT_2 } else { TEXT_3 }))
                 .child(bardo.text_with(
                     Text::CutsAcceptStrong,
-                    &[("score", &score_text(STRONG_CUT))],
+                    &[("score", &bardo.score(STRONG_CUT))],
                 ))
                 .when(strong, |button| {
                     button.on_click(
@@ -845,6 +851,35 @@ impl EditorScreen {
                     .children(empty)
                     .child(v_flex().gap_1().children(rows)),
             )
+            .into_any_element()
+    }
+
+    /// What asking costs, in the editor's look, with the budgets it takes
+    /// past 80%. One it reaches is asked about when the user asks.
+    fn render_cut_estimate(&self, bardo: &Bardo, estimate: &SpendEstimate) -> AnyElement {
+        let near = estimate.near_budget().map(|provider| {
+            h_flex()
+                .gap_1()
+                .items_start()
+                .child(icon(IconName::TriangleAlert, ACCENT).size_3())
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(color(TEXT_2))
+                        .child(near_line(bardo, provider)),
+                )
+        });
+        v_flex()
+            .gap_0p5()
+            .children(
+                estimate_line(bardo, estimate, Text::EstimateCost).map(|line| {
+                    div()
+                        .text_size(px(11.))
+                        .text_color(color(TEXT_3))
+                        .child(line)
+                }),
+            )
+            .children(near)
             .into_any_element()
     }
 
@@ -940,7 +975,7 @@ impl EditorScreen {
                             )
                             .child(bar)
                             .child(
-                                label(score_text(item.score), text_ink)
+                                label(bardo.score(item.score), text_ink)
                                     .font_family(mono)
                                     .when(rejected, |text| text.line_through()),
                             ),
@@ -958,17 +993,5 @@ impl EditorScreen {
             )
             .child(actions)
             .into_any_element()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scores_read_as_the_design_writes_them() {
-        assert_eq!(score_text(Score::new(82)), "0.82");
-        assert_eq!(score_text(Score::new(5)), "0.05");
-        assert_eq!(score_text(Score::new(100)), "1.00");
     }
 }

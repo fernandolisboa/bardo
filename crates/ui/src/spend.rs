@@ -21,18 +21,8 @@ pub(crate) fn estimate_note(
     cost: Text,
     cx: &App,
 ) -> Option<AnyElement> {
-    if estimate.providers.is_empty() {
-        return None;
-    }
+    let line = estimate_line(bardo, estimate, cost)?;
     let theme = cx.theme();
-    let amount = bardo.money(estimate.total());
-    let line = if estimate.providers.iter().all(|p| p.amount.is_none()) {
-        tr(bardo, Text::EstimateUnknown)
-    } else if estimate.is_partial() {
-        SharedString::from(bardo.text_with(Text::EstimatePartial, &[("amount", &amount)]))
-    } else {
-        SharedString::from(bardo.text_with(cost, &[("amount", &amount)]))
-    };
     let near = estimate
         .near_budget()
         .map(|provider| kit::notice(Tone::Warning, near_line(bardo, provider), cx).text_xs());
@@ -54,7 +44,27 @@ pub(crate) fn estimate_note(
     )
 }
 
-fn near_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedString {
+/// The estimate as one sentence; nothing when it calls nobody.
+pub(crate) fn estimate_line(
+    bardo: &Bardo,
+    estimate: &SpendEstimate,
+    cost: Text,
+) -> Option<SharedString> {
+    if estimate.providers.is_empty() {
+        return None;
+    }
+    let amount = bardo.money(estimate.total());
+    Some(if estimate.providers.iter().all(|p| p.amount.is_none()) {
+        tr(bardo, Text::EstimateUnknown)
+    } else if estimate.is_partial() {
+        SharedString::from(bardo.text_with(Text::EstimatePartial, &[("amount", &amount)]))
+    } else {
+        SharedString::from(bardo.text_with(cost, &[("amount", &amount)]))
+    })
+}
+
+/// A budget the estimate takes past 80%, as one sentence.
+pub(crate) fn near_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedString {
     SharedString::from(bardo.text_with(
         Text::EstimateNear,
         &[

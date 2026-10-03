@@ -627,6 +627,11 @@ impl Bardo {
         self.catalog.decibels(level)
     }
 
+    /// A 0–100 score as a fraction, e.g. `0.82`, `0,82`.
+    pub fn score(&self, score: bardo_domain::Score) -> String {
+        self.catalog.score(score)
+    }
+
     /// An amount to the cent, e.g. `$1,234.56`, `US$ 0,05`.
     pub fn money(&self, amount: bardo_domain::Money) -> String {
         self.catalog.money(amount)

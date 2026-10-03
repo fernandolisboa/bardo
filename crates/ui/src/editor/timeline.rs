@@ -43,7 +43,9 @@ use crate::shell::tr;
 
 /// The track header column, shared with the toolbar's timecode.
 const HEADER: f32 = 200.;
-pub(super) const RULER: f32 = 24.;
+const RULER: f32 = 24.;
+/// The row under the ruler's timecodes that holds the cut suggestions' pins.
+pub(super) const PIN_ROW: f32 = 16.;
 /// Space kept after the last clip when the timeline fits the window.
 const END_GAP: f32 = 24.;
 /// Below this zoom the narration's words would overlap; they hide.
@@ -278,6 +280,11 @@ fn ruler_label(seconds: u64) -> String {
 }
 
 impl EditorScreen {
+    /// The ruler's height: taller while the suggestions' pins show.
+    pub(super) fn ruler_height(&self) -> f32 {
+        if self.cuts.on { RULER + PIN_ROW } else { RULER }
+    }
+
     pub(super) fn render_timeline(
         &mut self,
         view: &EditorView,
@@ -298,7 +305,7 @@ impl EditorScreen {
             .border_color(color(HAIRLINE))
             .child(
                 div()
-                    .h(px(RULER))
+                    .h(px(self.ruler_height()))
                     .border_b_1()
                     .border_color(color(HAIRLINE)),
             )
@@ -857,7 +864,7 @@ impl EditorScreen {
         });
         div()
             .relative()
-            .h(px(RULER))
+            .h(px(self.ruler_height()))
             .flex_none()
             .overflow_hidden()
             .bg(color(PANEL))

@@ -12,7 +12,7 @@ use bardo_domain::{
     JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, MetadataProblem, Meter,
     MetricsSyncOnStart, Money, MoneyError, Month, MusicPromptFieldError, Network,
     NetworkAccountFieldError, NicheSeedError, PersonaFieldError, PostLinkError, Provider,
-    RateFieldError, SceneFieldError, ScriptFieldError, TemplateKind, TemplateProblem,
+    RateFieldError, SceneFieldError, Score, ScriptFieldError, TemplateKind, TemplateProblem,
     TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
     VoiceCategory, VoiceFlag,
 };
@@ -675,6 +675,7 @@ pub enum Text {
     CutsAcceptStrong,
     CutsFloor,
     CutsHidden,
+    CutsShown,
     CutsShowHidden,
     CutsHideLow,
     CutsTitle,
@@ -1809,6 +1810,7 @@ impl Text {
             Text::CutsAcceptStrong => "editor.cuts.accept_strong",
             Text::CutsFloor => "editor.cuts.floor",
             Text::CutsHidden => "editor.cuts.hidden",
+            Text::CutsShown => "editor.cuts.shown",
             Text::CutsShowHidden => "editor.cuts.show_hidden",
             Text::CutsHideLow => "editor.cuts.hide_low",
             Text::CutsTitle => "editor.cuts.title",
@@ -2435,6 +2437,18 @@ impl Catalog {
         self.format(Text::EditorDecibels, &[("n", &n)])
     }
 
+    /// A 0–100 score read as a fraction, as cut suggestions show it:
+    /// `0.82`, `0,82`, `1.00`.
+    pub fn score(&self, score: Score) -> String {
+        let value = score.value();
+        format!(
+            "{}{}{:02}",
+            value / 100,
+            self.get(Text::DecimalSeparator),
+            value % 100
+        )
+    }
+
     /// An amount spent or estimated, to the cent: `$1,234.56`, `US$ 0,05`.
     /// A non-zero amount that rounds to nothing reads `under $0.01`.
     pub fn money(&self, amount: Money) -> String {
@@ -3040,6 +3054,7 @@ mod tests {
             Text::CutsAcceptStrong,
             Text::CutsFloor,
             Text::CutsHidden,
+            Text::CutsShown,
             Text::CutsShowHidden,
             Text::CutsHideLow,
             Text::CutsTitle,
@@ -3631,6 +3646,15 @@ mod tests {
     }
 
     #[test]
+    fn scores_read_as_fractions_in_each_language() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        assert_eq!(en.score(Score::new(82)), "0.82");
+        assert_eq!(pt.score(Score::new(5)), "0,05");
+        assert_eq!(en.score(Score::new(100)), "1.00");
+    }
+
+    #[test]
     fn decibels_read_signed_in_each_language() {
         let en = Catalog::load(UiLanguage::EnUs);
         let pt = Catalog::load(UiLanguage::PtBr);
@@ -3785,6 +3809,7 @@ mod tests {
                 (Text::CutsRunning, &[("percent", "40")][..]),
                 (Text::CutsAcceptStrong, &[("score", "0.80")][..]),
                 (Text::CutsHidden, &[("n", "3"), ("score", "0.50")][..]),
+                (Text::CutsShown, &[("n", "3"), ("score", "0.50")][..]),
                 (Text::CutsConfidence, &[("n", "82")][..]),
                 (Text::CutsReasonPause, &[("ms", "420")][..]),
                 (Text::ThemesUnranked, &[("n", "3")][..]),

@@ -117,6 +117,11 @@ enum BinTab {
     Media,
 }
 
+/// The editor's key bindings.
+pub fn init(cx: &mut App) {
+    suggestions::init(cx);
+}
+
 /// What the editor asks of the window around it.
 pub enum EditorEvent {
     /// Back to the projects screen.
@@ -465,7 +470,7 @@ impl EditorScreen {
             }
             return;
         }
-        if self.cut_key(key, modifiers.shift, cx) {
+        if self.cut_key(key, cx) {
             return;
         }
         let reach = self.timeline.snap_reach();
@@ -2372,6 +2377,8 @@ impl Render for EditorScreen {
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                     this.on_key(event, window, cx)
                 }))
+                .when(self.cuts.on, |root| root.key_context(suggestions::CONTEXT))
+                .on_action(cx.listener(|this, _: &suggestions::NextCut, _, cx| this.next_cut(cx)))
                 .on_mouse_down(
                     gpui_kit::MouseButton::Left,
                     cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
