@@ -224,6 +224,7 @@ mod tests {
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
+                uploaders: Vec::new(),
             };
             Bardo::start_with(
                 Repositories::shared_with_files(

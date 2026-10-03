@@ -31,6 +31,7 @@ mod selection;
 mod stages;
 mod templates;
 mod themes;
+mod uploads;
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -45,7 +46,7 @@ use bardo_domain::{
     PublicationRepository, Redactor, RenderRepository, RepositoryError, ScenePlanRepository,
     ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository,
     TextGenerator, ThemeRepository, TimelineRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VoiceLibrary,
+    VideoStats, VideoUploader, VoiceLibrary,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore};
@@ -103,6 +104,9 @@ pub use stages::{
 };
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
+pub use uploads::{
+    UploadBlock, UploadChoices, UploadReview, UploadReviewError, UploadState, upload_state,
+};
 
 use crate::clips::ClipHandler;
 use crate::connections::ConnectionBook;
@@ -274,6 +278,8 @@ pub struct Providers {
     pub sign_ins: Vec<Arc<dyn NetworkSignIn>>,
     /// Where the browser comes back after consent: a loopback listener.
     pub consent: Arc<dyn ConsentReceiver>,
+    /// Upload per network that has one (ADR-0008): YouTube for now.
+    pub uploaders: Vec<Arc<dyn VideoUploader>>,
 }
 
 impl Providers {
@@ -297,6 +303,7 @@ impl Providers {
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
             sign_ins: vec![Arc::new(bardo_publish::YouTubeSignIn::new())],
             consent: Arc::new(bardo_publish::LoopbackReceiver),
+            uploaders: vec![Arc::new(bardo_publish::YouTubeUploader::new())],
         }
     }
 }
@@ -328,6 +335,7 @@ pub struct Bardo {
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
+    uploaders: Vec<Arc<dyn VideoUploader>>,
     /// The last voice listing of this session, for the voice picker.
     voice_list: Option<VoiceList>,
     jobs: JobQueue,
@@ -516,6 +524,14 @@ impl Bardo {
             providers.consent,
             redactor.clone(),
         );
+        let upload_handler = crate::uploads::UploadHandler {
+            publications: Arc::clone(&publications),
+            accounts: Arc::clone(&network_accounts),
+            renders: Arc::clone(&renders),
+            files: Arc::clone(&files),
+            connections: connection_book.connections().clone(),
+            uploaders: providers.uploaders.clone(),
+        };
         let jobs = JobQueue::start(
             jobs,
             profile.id,
@@ -534,6 +550,7 @@ impl Bardo {
                 exports: export_handler,
                 metrics: metrics_handler,
                 cuts: cut_handler,
+                uploads: upload_handler,
             }),
             job_settings,
             redactor,
@@ -564,6 +581,7 @@ impl Bardo {
             market_data: providers.market_data,
             voices: providers.voices,
             clips: providers.clips,
+            uploaders: providers.uploaders,
             voice_list: None,
             jobs,
             provider_keys,
@@ -1403,6 +1421,7 @@ pub(crate) mod testing {
             media: Arc::new(crate::editor::testing::FakeMedia::default()),
             sign_ins: Vec::new(),
             consent: Arc::new(crate::connections::testing::NoConsent),
+            uploaders: Vec::new(),
         }
     }
 }

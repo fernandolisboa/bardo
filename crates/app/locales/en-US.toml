@@ -214,6 +214,7 @@ metadata = "Metadata"
 export = "Export"
 metrics_sync = "Metrics sync"
 cut_suggestions = "Cut suggestions"
+upload = "Upload"
 
 [job.state]
 queued = "Queued"
@@ -1251,6 +1252,7 @@ blocked = "A chosen network can't be rendered. See its checks."
 cut_changed = "The cut changed after this review. Review it again before rendering."
 already_running = "This project is already rendering."
 while_exporting = "Wait for the export to finish before rendering again."
+while_uploading = "Wait for the upload to finish before rendering again."
 check_failed = "Bardo couldn't check this cut with ffmpeg. Check again, or see Details in Jobs."
 not_loaded = "Couldn't load the render review. Try again."
 
@@ -1438,6 +1440,8 @@ not_exported = "Export this network first, post the file, then paste the post's 
 already_linked = "This post is already linked to another project."
 not_found = "That post is no longer linked."
 not_saved = "Couldn't save the link. Try again."
+replaces_upload = "This network has an uploaded video. Confirm the link replaces it in Bardo."
+uploading = "An upload to this network is running. Stop it before linking a post or unlinking it."
 
 [metrics.error]
 missing_key = "Add your YouTube Data API key in Settings to sync views, likes and comments."
@@ -1467,6 +1471,8 @@ posted_at = "Posted {when}"
 no_metrics = "Bardo keeps the link. {network} metrics arrive with automatic publishing."
 figure = "{n} of {total} posted"
 tile_views = "Posted · {views} views"
+replace_upload_confirm = "Link this post instead of the uploaded video? The video stays on {network}."
+replace_upload_yes = "Link instead"
 
 [metrics]
 views = "Views"
@@ -1583,3 +1589,71 @@ unexpected = "The network answered in a way Bardo doesn't understand. Try again.
 [consent_page]
 done = "Bardo is connected. You can close this tab."
 failed = "Bardo didn't connect. Go back to Bardo to see why."
+
+[upload.error]
+changed = "The render, the cut or the post changed since you reviewed it. Review the upload again."
+replace_not_confirmed = "Confirm the upload replaces this network's post in Bardo."
+not_started = "Couldn't start the upload. Try again."
+
+[upload]
+title = "Upload"
+hint = "Bardo sends the rendered file to the connected channel with this title, description and tags. Nothing is sent until you confirm the review."
+open_review = "Review upload"
+review_title = "Review the upload to {network}"
+made_for_kids = "Made for kids"
+made_for_kids_hint = "YouTube requires this answer for every video. Videos made for kids lose comments, notifications and personalized ads."
+synthetic = "Altered or synthetic content"
+synthetic_hint = "Tells YouTube the video has realistic content made or changed with AI, such as a realistic voice. YouTube shows a label on it."
+synthetic_on = "On because the narration uses a realistic voice."
+replace_post = "Replace the linked post in Bardo. It stays on {network}."
+replace_upload = "Replace the earlier upload in Bardo. A video it already sent stays on {network}."
+irreversible = "Once sent, the video is on your channel. Removing it is done on {network}."
+start = "Upload"
+back = "Back"
+queued = "Upload queued."
+retrying_hint = "The connection or {network} failed on the way. Bardo tries again shortly and resumes from what already arrived."
+processing_hint = "{network} has the file and is processing it. Bardo checks on it for about an hour."
+still_processing_hint = "{network} was still processing the video when Bardo stopped checking. Check again later."
+stopped_hint = "Resume to send the rest. What {network} already has is not sent again."
+restricted_hint = "Kept private by YouTube: your Google project has not passed the YouTube API audit."
+stop = "Stop"
+resume = "Resume"
+retry = "Retry"
+check_again = "Check again"
+sent_at = "Uploaded {when}"
+
+[upload.field]
+file = "File"
+channel = "Channel"
+visibility = "Visibility"
+
+[upload.state]
+waiting = "Waiting to upload"
+uploading = "Uploading {percent}"
+retrying = "Retrying"
+processing = "Processing"
+still_processing = "Still processing"
+published = "Uploaded"
+restricted = "Kept private"
+stopped = "Upload stopped"
+failed = "Upload failed"
+
+[upload.failure]
+quota = "YouTube's daily upload quota for your Google project is used up. It resets at midnight Pacific time; retry then."
+upload_limit = "The channel reached YouTube's upload limit for now. Retry later."
+reconnect = "The network refused the sign-in. Reconnect the account in Settings › Networks, then retry."
+rejected = "{network} rejected the video ({reason}). Fix it and upload again."
+processing = "{network} could not process the video ({reason}). Render again and upload again."
+removed = "The video is no longer on {network}."
+render_changed = "The render changed after the review, so the rest of the file is not what you reviewed. Review the upload again."
+
+[upload.block]
+not_offered = "Bardo doesn't upload to this network yet. Export the file and post it by hand."
+not_connected = "Connect this account in Settings › Networks to upload from here."
+reconnect_needed = "The network refused this account's sign-in. Reconnect it in Settings › Networks."
+uploading = "An upload to this network is running."
+rendering = "A render is running. Upload once it ends."
+no_render = "Render this account's preset first."
+render_outdated = "The cut or the preset changed since the render. Render again before uploading."
+no_metadata = "Write the title, description and tags first."
+problems = "Fix the metadata problems above first."

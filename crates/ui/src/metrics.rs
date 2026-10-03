@@ -4,7 +4,7 @@
 //! comes from `bardo_app`.
 
 use bardo_app::bardo_domain::JobState;
-use bardo_app::{Bardo, MetricsStatus, PublishedPost, Text};
+use bardo_app::{Bardo, MetricsStatus, PublishedPost, Text, UploadState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -305,6 +305,9 @@ pub fn sync_notices(bardo: &Bardo, status: &MetricsStatus, id: &str, cx: &App) -
 /// went up.
 pub fn post_state(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Div {
     let publication = &post.publication;
+    if let Some(state) = bardo.upload_state(publication) {
+        return upload_state(bardo, post, &state, id, cx);
+    }
     let chip = if publication.missing_since.is_some() {
         kit::status(Tone::Warning, tr(bardo, Text::PublicationMissing), cx)
     } else {
@@ -322,21 +325,138 @@ pub fn post_state(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Di
                 tr(bardo, Text::PublicationMissingHint),
             ))
         })
-        .child(
-            div()
-                .text_sm()
-                .text_color(look(cx).tokens.text2)
-                .child(SharedString::from(bardo.text_with(
-                    Text::PublicationPostedAt,
-                    &[("when", &bardo.time_ago(publication.posted_at))],
-                ))),
+        .child(when_line(
+            bardo,
+            Text::PublicationPostedAt,
+            publication.posted_at,
+            cx,
+        ))
+}
+
+fn when_line(bardo: &Bardo, text: Text, at: std::time::SystemTime, cx: &App) -> Div {
+    div()
+        .text_sm()
+        .text_color(look(cx).tokens.text2)
+        .child(SharedString::from(
+            bardo.text_with(text, &[("when", &bardo.time_ago(at))]),
+        ))
+}
+
+/// An upload's state in a few words.
+pub fn upload_label(bardo: &Bardo, state: &UploadState) -> SharedString {
+    match state {
+        UploadState::Waiting => tr(bardo, Text::UploadStateWaiting),
+        UploadState::Uploading(progress) => bardo
+            .text_with(
+                Text::UploadStateUploading,
+                &[("percent", &format!("{}%", progress.permille() / 10))],
+            )
+            .into(),
+        UploadState::Retrying => tr(bardo, Text::UploadStateRetrying),
+        UploadState::Processing => tr(bardo, Text::UploadStateProcessing),
+        UploadState::StillProcessing => tr(bardo, Text::UploadStateStillProcessing),
+        UploadState::Published => tr(bardo, Text::UploadStatePublished),
+        UploadState::Restricted => tr(bardo, Text::UploadStateRestricted),
+        UploadState::Stopped => tr(bardo, Text::UploadStateStopped),
+        UploadState::Failed { .. } => tr(bardo, Text::UploadStateFailed),
+    }
+}
+
+/// Where an uploaded post stands: its chip, a hint where it waits on the
+/// network, and why it failed.
+fn upload_state(
+    bardo: &Bardo,
+    post: &PublishedPost,
+    state: &UploadState,
+    id: &str,
+    cx: &App,
+) -> Div {
+    let publication = &post.publication;
+    let network = bardo
+        .text(Text::NetworkName(publication.network()))
+        .into_owned();
+    let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
+    let missing = publication.missing_since.is_some();
+    let (tone, hint): (Tone, Option<SharedString>) = match state {
+        UploadState::Waiting | UploadState::Uploading(_) => (Tone::Info, None),
+        UploadState::Retrying => (
+            Tone::Warning,
+            Some(with_network(Text::UploadRetryingHint).into()),
+        ),
+        UploadState::Processing => (
+            Tone::Info,
+            Some(with_network(Text::UploadProcessingHint).into()),
+        ),
+        UploadState::StillProcessing => (
+            Tone::Warning,
+            Some(with_network(Text::UploadStillProcessingHint).into()),
+        ),
+        UploadState::Published if missing => {
+            (Tone::Warning, Some(tr(bardo, Text::PublicationMissingHint)))
+        }
+        UploadState::Published => (Tone::Success, None),
+        UploadState::Restricted => (Tone::Warning, None),
+        UploadState::Stopped => (
+            Tone::Neutral,
+            Some(with_network(Text::UploadStoppedHint).into()),
+        ),
+        UploadState::Failed { .. } => (Tone::Danger, None),
+    };
+    let label = if missing && matches!(state, UploadState::Published) {
+        tr(bardo, Text::PublicationMissing)
+    } else {
+        upload_label(bardo, state)
+    };
+    let chip = kit::status(tone, label, cx);
+    let done = matches!(state, UploadState::Published | UploadState::Restricted);
+    let row = h_flex()
+        .gap_2()
+        .items_center()
+        .flex_wrap()
+        .child(chip)
+        .children(
+            hint.map(|hint| kit::info(ElementId::Name(format!("{id}-upload").into()), None, hint)),
         )
+        .when(done, |row| {
+            row.child(when_line(
+                bardo,
+                Text::UploadSentAt,
+                publication.posted_at,
+                cx,
+            ))
+        });
+    let mut column = v_flex().gap_2().child(row);
+    if let UploadState::Uploading(progress) = state {
+        column = column.child(
+            Progress::new(ElementId::Name(format!("{id}-upload-progress").into()))
+                .small()
+                .value(progress.permille() as f32 / 10.0),
+        );
+    }
+    if matches!(state, UploadState::Restricted) {
+        column = column.child(kit::notice(
+            Tone::Warning,
+            tr(bardo, Text::UploadRestrictedHint),
+            cx,
+        ));
+    }
+    if let UploadState::Failed { failure, .. } = state {
+        column = column.child(kit::notice(
+            Tone::Danger,
+            bardo.upload_failure_text(failure, publication.network()),
+            cx,
+        ));
+    }
+    column
 }
 
 /// The post's numbers on YouTube; on another network, that only the link
 /// is kept.
 pub fn post_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Vec<AnyElement> {
     let network = post.publication.network();
+    if post.publication.upload().is_some() && !post.publication.has_public_metrics() {
+        return Vec::new();
+    }
     if !post.publication.has_public_metrics() {
         return vec![
             div()

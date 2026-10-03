@@ -1,0 +1,16 @@
+HTTP/2 403 
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 403,
+    "message": "The user has exceeded the number of videos they may upload.",
+    "errors": [
+      {
+        "message": "The user has exceeded the number of videos they may upload.",
+        "domain": "youtube.video",
+        "reason": "uploadLimitExceeded"
+      }
+    ]
+  }
+}

@@ -865,6 +865,10 @@ pub(crate) mod tests {
         pub(crate) stats: Arc<crate::testing::FakeVideoStats>,
         pub(crate) decisions: Arc<FakeDecisionEngine>,
         pub(crate) speech: Arc<FakeSpeech>,
+        /// YouTube uploads.
+        pub(crate) uploader: Arc<crate::uploads::testing::FakeUploader>,
+        /// App credentials and network tokens.
+        pub(crate) connection_secrets: Arc<MemorySecretStore>,
     }
 
     impl Harness {
@@ -885,6 +889,8 @@ pub(crate) mod tests {
                 stats: Arc::default(),
                 decisions: Arc::default(),
                 speech: Arc::default(),
+                uploader: Arc::default(),
+                connection_secrets: Arc::default(),
             }
         }
 
@@ -927,6 +933,10 @@ pub(crate) mod tests {
         }
 
         fn start_from(&self, repositories: Repositories) -> Bardo {
+            let repositories = Repositories {
+                connection_secrets: Arc::clone(&self.connection_secrets) as _,
+                ..repositories
+            };
             let providers = Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
@@ -944,6 +954,7 @@ pub(crate) mod tests {
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
+                uploaders: vec![Arc::clone(&self.uploader) as _],
             };
             let mut app = Bardo::start_with(
                 repositories,

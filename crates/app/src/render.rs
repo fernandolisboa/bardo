@@ -66,6 +66,10 @@ pub enum RenderError {
     /// files a render would rewrite.
     #[error("the project is exporting")]
     Exporting,
+    /// An upload of this project is running or waiting: it sends the file
+    /// a render would rewrite.
+    #[error("the project is uploading")]
+    Uploading,
     #[error(transparent)]
     Media(#[from] MediaError),
     #[error(transparent)]
@@ -84,6 +88,7 @@ impl RenderError {
             RenderError::CutChanged => Text::RenderCutChanged,
             RenderError::AlreadyRendering => Text::RenderAlreadyRunning,
             RenderError::Exporting => Text::RenderWhileExporting,
+            RenderError::Uploading => Text::RenderWhileUploading,
             RenderError::Media(MediaError::NotFound { .. }) => Text::EditorFfmpegMissing,
             RenderError::Media(_) => Text::RenderCheckFailed,
             RenderError::Repository(_) => Text::RenderNotLoaded,
@@ -507,6 +512,9 @@ impl Bardo {
             .is_some_and(|job| job.state().is_active())
         {
             return Err(RenderError::Exporting);
+        }
+        if self.project_uploading(review.project) {
+            return Err(RenderError::Uploading);
         }
         let reviewed: Vec<CutPlan> = review
             .plans

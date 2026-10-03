@@ -1233,6 +1233,7 @@ mod tests {
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
+                uploaders: Vec::new(),
             };
             Bardo::start_with(
                 repositories,
@@ -1857,11 +1858,15 @@ mod tests {
             project: project.id,
             account: NetworkAccountId::new(),
             render: RenderId::new(),
-            link: PostLink::parse(
-                Network::YouTube,
-                &format!("https://www.youtube.com/watch?v=video{count:06}"),
-            )
-            .unwrap(),
+            network: Network::YouTube,
+            link: Some(
+                PostLink::parse(
+                    Network::YouTube,
+                    &format!("https://www.youtube.com/watch?v=video{count:06}"),
+                )
+                .unwrap(),
+            ),
+            kind: bardo_domain::PublicationKind::Manual,
             posted_at,
             linked_at: posted_at,
             checked_at: None,

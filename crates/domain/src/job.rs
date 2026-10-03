@@ -100,10 +100,15 @@ pub enum JobKind {
     /// Has the decision engine score a video project's candidate cut
     /// points, a stretch of the script per call and per checkpoint.
     CutSuggestions,
+    /// Uploads a reviewed render to a connected network account, resumably:
+    /// the network's session is kept as the external handle and the bytes
+    /// it confirmed as the checkpoint, so a resumed upload sends only the
+    /// rest. Then waits for the network to process the video.
+    Upload,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 17] = [
+    pub const ALL: [JobKind; 18] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -121,6 +126,7 @@ impl JobKind {
         JobKind::Export,
         JobKind::MetricsSync,
         JobKind::CutSuggestions,
+        JobKind::Upload,
     ];
 
     /// Stable name stored in the database.
@@ -143,6 +149,7 @@ impl JobKind {
             JobKind::Export => "export",
             JobKind::MetricsSync => "metrics_sync",
             JobKind::CutSuggestions => "cut_suggestions",
+            JobKind::Upload => "upload",
         }
     }
 }

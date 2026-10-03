@@ -26,6 +26,7 @@ use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
+use crate::uploads::UploadHandler;
 use crate::{AppError, Bardo, Text};
 
 /// The handlers of the job kinds Bardo ships, as `Bardo::open` builds them.
@@ -44,6 +45,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) exports: ExportHandler,
     pub(crate) metrics: MetricsSyncHandler,
     pub(crate) cuts: CutSuggestionHandler,
+    pub(crate) uploads: UploadHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -65,6 +67,7 @@ pub(crate) fn built_in_handlers(
         exports,
         metrics,
         cuts,
+        uploads,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -86,6 +89,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Export, Arc::new(exports));
     handlers.insert(JobKind::MetricsSync, Arc::new(metrics));
     handlers.insert(JobKind::CutSuggestions, Arc::new(cuts));
+    handlers.insert(JobKind::Upload, Arc::new(uploads));
     handlers
 }
 

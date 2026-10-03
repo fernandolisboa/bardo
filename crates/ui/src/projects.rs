@@ -23,8 +23,8 @@ use bardo_app::bardo_domain::{
 use bardo_app::{
     Bardo, BudgetConsent, Destination, ExportSummary, ExportView, MusicPromptView, NarrationError,
     NarrationPlayer, NarrationView, Recording, RenderReview, RenderSummary, ScenesView,
-    ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text, opening_stage,
-    project_stages,
+    ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text, UploadChoices,
+    UploadReview, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -53,6 +53,7 @@ mod export;
 mod music;
 mod render;
 mod scenes;
+mod upload;
 
 /// How often the screen checks the job queue for changes, and moves the
 /// highlighted word while the narration plays.
@@ -205,6 +206,17 @@ pub struct ProjectsScreen {
     post_confirm_remove: bool,
     /// Why the last link, unlink or sync did not happen, as said.
     post_error: Option<SharedString>,
+    /// Linking a post was refused because it replaces an upload: the
+    /// inspector asks first.
+    post_confirm_replace: bool,
+    /// The upload review of the shown network as stored now, when Bardo
+    /// uploads to it.
+    upload_now: Option<UploadReview>,
+    /// "Review upload" was clicked: the review the user sees and their
+    /// choices, kept until they upload or go back.
+    upload_draft: Option<(UploadReview, UploadChoices)>,
+    /// Why the upload did not start, or what its job action did not do.
+    upload_error: Option<Text>,
     editor: Entity<TextareaState>,
     /// The stored text last placed in the editor.
     loaded: Option<String>,
@@ -357,6 +369,10 @@ impl ProjectsScreen {
             post_editing: false,
             post_confirm_remove: false,
             post_error: None,
+            post_confirm_replace: false,
+            upload_now: None,
+            upload_draft: None,
+            upload_error: None,
             editor,
             loaded: None,
             field_error: None,

@@ -315,29 +315,30 @@ impl PerformanceScreen {
     fn inspector(&self, post: &ChannelPost, cx: &mut Context<Self>) -> Inspector {
         let bardo = self.bardo.read(cx);
         let publication = &post.post.publication;
-        let url = publication.link.url().to_owned();
-        let link = h_flex()
-            .gap_2()
-            .items_center()
-            .child(
-                kit::well(cx)
-                    .flex_1()
-                    .min_w_0()
-                    .text_xs()
-                    .truncate()
-                    .child(SharedString::from(url.clone())),
-            )
-            .child(
-                Button::new("performance-open-post")
-                    .small()
-                    .outline()
-                    .label(tr(bardo, Text::PublicationOpen))
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
-            );
-        let mut body = vec![
-            metrics::post_state(bardo, &post.post, "performance-post", cx).into_any_element(),
-            link.into_any_element(),
-        ];
+        let link = publication.link.as_ref().map(|link| {
+            let url = link.url().to_owned();
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    kit::well(cx)
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .truncate()
+                        .child(SharedString::from(url.clone())),
+                )
+                .child(
+                    Button::new("performance-open-post")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::PublicationOpen))
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                )
+        });
+        let mut body =
+            vec![metrics::post_state(bardo, &post.post, "performance-post", cx).into_any_element()];
+        body.extend(link.map(IntoElement::into_any_element));
         body.extend(metrics::post_metrics(
             bardo,
             &post.post,

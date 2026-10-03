@@ -1,0 +1,16 @@
+HTTP/2 400 
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 400,
+    "message": "The request metadata specifies an invalid or empty video title.",
+    "errors": [
+      {
+        "message": "The request metadata specifies an invalid or empty video title.",
+        "domain": "youtube.video",
+        "reason": "invalidTitle"
+      }
+    ]
+  }
+}

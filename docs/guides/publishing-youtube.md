@@ -1,4 +1,4 @@
-# Connecting a YouTube channel
+# Connecting a YouTube channel and uploading
 
 Bardo signs in to YouTube with an OAuth client you register in your own
 Google Cloud project (ADR-0008). Bardo ships no client of its own, so the
@@ -97,11 +97,51 @@ channel id and name, the scopes, the token expiry and the last refresh.
   (**Third-party apps & services**).
 - A connected account must be disconnected before it can be removed.
 
+## Uploading a video
+
+1. Render the project for the YouTube account and write its metadata.
+2. At the project's **Publish** stage, pick **YouTube** and select
+   **Review upload**. The button stays off, with the reason under it, while
+   the account is not connected, a render is running or out of date, or the
+   metadata is missing or breaks YouTube's limits.
+3. The review shows the file, the connected channel, and the title,
+   description (with the account's footer) and tags as YouTube gets them.
+   Pick the visibility, answer **Made for kids**, and check **Altered or
+   synthetic content** (already on when the narrator's voice is flagged as
+   realistic).
+4. If the project already has a YouTube post linked, tick the box that
+   replaces it in Bardo; the post itself stays on YouTube.
+5. Select **Upload**. Nothing is sent before this. If the render, the cut
+   or the metadata changed since the review opened, Bardo closes it and asks
+   you to review again.
+
+The upload runs as a job: the Post section shows its progress, then
+**Processing** while YouTube works on the file, and **Uploaded** with the
+video's link. **Stop** keeps what YouTube already received; **Resume**
+sends only the rest. A dropped connection retries by itself from the same
+point.
+
+While the upload runs, Bardo refuses to render the project, since the
+render would rewrite the file being sent; **Resume** waits for a running
+render the same way. If the project was rendered again while the upload was
+stopped, resuming ends that upload with "The render changed after the
+review": the rest of the file is not what you reviewed, so review the
+upload again.
+
+Bardo checks on YouTube's processing for about an hour. If YouTube is still
+processing the video after that, the post shows **Still processing**;
+select **Check again** later.
+
+Pasting a post's link over an uploaded video asks first, and replaces the
+upload in Bardo only; the video stays on YouTube.
+
 ## Uploads stay private until the audit
 
 Google locks every video uploaded through an unaudited API project created
 after 2020-07-28 to **private**, and scheduled videos too; ADR-0008 records
-how Bardo reports such a publication (**restricted**). To publish publicly from Bardo, request the
+how Bardo reports such a publication: **Kept private**, with "Kept private
+by YouTube: your Google project has not passed the YouTube API audit". It
+is not a failure. To publish publicly from Bardo, request the
 [YouTube API Services audit](https://support.google.com/youtube/contact/yt_api_form)
 for your project; it changes the result, not anything in Bardo. Until
 then, you can make a video public yourself in YouTube Studio.
@@ -111,4 +151,5 @@ then, you can make a video public yourself in YouTube Studio.
 Uploads draw on a separate bucket of 100 uploads per day per project; other
 calls share 10,000 units per day. Connecting and checking cost 1 unit each.
 When the quota runs out, Bardo says so and the counter resets at midnight
-Pacific time.
+Pacific time. An upload that hits the daily upload quota stops at once
+instead of retrying; select **Retry** after the reset.

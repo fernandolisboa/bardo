@@ -691,7 +691,7 @@ impl Bardo {
             .ok_or(ExportError::ProjectNotFound)
     }
 
-    fn latest_job_of(&self, kind: JobKind, project: VideoProjectId) -> Option<Job> {
+    pub(crate) fn latest_job_of(&self, kind: JobKind, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
         self.jobs().into_iter().rev().find(|job| {
             job.kind() == kind

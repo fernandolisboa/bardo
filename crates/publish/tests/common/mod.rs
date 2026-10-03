@@ -23,7 +23,9 @@ pub struct Sent {
     pub method: Method,
     pub url: String,
     pub headers: Vec<(String, String)>,
+    /// The body as text (lossy for binary bodies).
     pub body: String,
+    pub bytes: Vec<u8>,
 }
 
 impl Sent {
@@ -89,7 +91,8 @@ impl Transport for Scripted {
                 .iter()
                 .map(|(name, value)| (name.to_string(), value.clone()))
                 .collect(),
-            body: String::from_utf8(request.body.clone().unwrap_or_default()).unwrap(),
+            body: String::from_utf8_lossy(request.body.as_deref().unwrap_or_default()).into_owned(),
+            bytes: request.body.clone().unwrap_or_default(),
         });
         self.answers
             .lock()

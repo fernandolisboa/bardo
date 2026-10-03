@@ -50,6 +50,9 @@ pub trait ProjectFiles: Send + Sync {
 
     fn exists(&self, project: VideoProjectId, name: &str) -> bool;
 
+    /// The file's size in bytes.
+    fn size(&self, project: VideoProjectId, name: &str) -> Result<u64, ProjectFileError>;
+
     /// Removes the file; a file already gone is not an error.
     fn remove(&self, project: VideoProjectId, name: &str) -> Result<(), ProjectFileError>;
 
@@ -86,6 +89,10 @@ impl<T: ProjectFiles + ?Sized> ProjectFiles for Arc<T> {
         source: &Path,
     ) -> Result<(), ProjectFileError> {
         (**self).copy_in(project, name, source)
+    }
+
+    fn size(&self, project: VideoProjectId, name: &str) -> Result<u64, ProjectFileError> {
+        (**self).size(project, name)
     }
 
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {

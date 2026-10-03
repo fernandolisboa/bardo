@@ -1,0 +1,5 @@
+HTTP/2 308 
+content-type: text/plain; charset=utf-8
+range: bytes=0-524287
+x-guploader-uploadid: FIXTURE-upload-id-1
+
