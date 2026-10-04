@@ -51,7 +51,8 @@ pub struct ScreenParts {
     pub sections: Option<Sections>,
     /// The scroll that holds the content, when the screen moves it itself
     /// (the guide goes to a section); the layout tracks it on the scroll
-    /// it draws the content in.
+    /// it draws a page's content in, or a list's beside it. Grids and
+    /// forms do not take it.
     pub scroll: Option<ScrollHandle>,
 }
 
@@ -200,7 +201,8 @@ impl Collection {
 pub struct Tile {
     pub id: ElementId,
     /// The name of the group this tile starts, in a list grouped under
-    /// headings (the guide's contents by pillar).
+    /// headings (the guide's contents by pillar). Each heading is a row of
+    /// its own, so the list's scroll counts it among the items.
     pub group: Option<SharedString>,
     pub selected: bool,
     /// The item's picture, filling the box it is given.

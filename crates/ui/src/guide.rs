@@ -147,6 +147,14 @@ impl Guide {
         cx.notify();
     }
 
+    /// F1 opened the guide: the menu and the shortcuts card close.
+    pub fn close_cards(&mut self, cx: &mut Context<Self>) {
+        self.button = None;
+        self.menu = None;
+        self.shortcuts = false;
+        cx.notify();
+    }
+
     /// Reset failed: the menu stays open and says so.
     pub fn reset_failed(&mut self, cx: &mut Context<Self>) {
         self.menu = Some(0);
@@ -652,7 +660,15 @@ impl Render for Guide {
                 }
                 None => {
                     if let Some(restore) = self.restore.take() {
-                        window.on_next_frame(move |window, cx| window.focus(&restore, cx));
+                        let card = self.focus.clone();
+                        window.on_next_frame(move |window, cx| {
+                            // Unless what closed the card moved the keyboard
+                            // on itself (the menu's "User guide" focuses the
+                            // guide's search box).
+                            if card.is_focused(window) || window.focused(cx).is_none() {
+                                window.focus(&restore, cx);
+                            }
+                        });
                     }
                 }
             }

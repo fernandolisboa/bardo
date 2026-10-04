@@ -176,7 +176,7 @@ impl GuideLink {
                 _ => None,
             };
         }
-        if url.starts_with("https://") || url.starts_with("http://") {
+        if url.starts_with("https://") {
             return Some(GuideLink::External(url.to_owned()));
         }
         if let Some(section) = url.strip_prefix('#') {
@@ -240,6 +240,10 @@ pub enum GuidePageError {
     UnknownTour(String),
     #[error("the page's # heading {0:?} is not its title")]
     TitleMismatch(String),
+    #[error("the page has no # heading with its title")]
+    TitleMissing,
+    #[error("a ``` block is never closed")]
+    UnclosedFence,
     #[error("the heading {0:?} has no <a id> line before it")]
     HeadingWithoutAnchor(String),
     #[error("the anchor {0:?} is not followed by a ## heading")]
@@ -259,8 +263,10 @@ fn anchor_id(line: &str) -> Option<&str> {
 impl GuidePage {
     /// Reads a page's Markdown source.
     pub fn parse(source: &str) -> Result<GuidePage, GuidePageError> {
-        // A Windows checkout may turn the files' line ends into CRLF.
+        // A Windows checkout may turn the files' line ends into CRLF, and
+        // a Windows editor may start the file with a byte order mark.
         let source = source.replace("\r\n", "\n");
+        let source = source.strip_prefix('\u{feff}').unwrap_or(&source);
         let rest = source
             .strip_prefix("---\n")
             .ok_or(GuidePageError::NoFrontMatter)?;
@@ -356,6 +362,12 @@ impl GuidePage {
         }
         if let Some(id) = anchor {
             return Err(GuidePageError::AnchorWithoutHeading(id));
+        }
+        if fenced {
+            return Err(GuidePageError::UnclosedFence);
+        }
+        if !titled {
+            return Err(GuidePageError::TitleMissing);
         }
         match sections.last_mut() {
             Some(last) => last.body = body_lines.join("\n").trim().to_owned(),
@@ -580,20 +592,27 @@ impl Guide {
                 let folded_text = fold(&text);
                 let mut score = 0;
                 let mut first_in_text = None;
+                // The page's title counts only for a unit that has one of
+                // the words itself, so a title word alone does not list
+                // every section of its page.
+                let mut in_unit = false;
                 for word in &words {
+                    let in_title = find(&page_title, word).is_some();
                     if find(&folded_heading, word).is_some() {
                         score += 3;
-                    } else if find(&page_title, word).is_some() {
-                        score += 2;
+                        in_unit = true;
                     } else if let Some(at) = find(&folded_text, word) {
-                        score += 1;
+                        score += if in_title { 2 } else { 1 };
                         first_in_text = first_in_text.or(Some(at));
+                        in_unit = true;
+                    } else if in_title {
+                        score += 2;
                     } else {
                         score = 0;
                         break;
                     }
                 }
-                if score == 0 {
+                if score == 0 || !in_unit {
                     continue;
                 }
                 hits.push((
@@ -708,6 +727,7 @@ fn link_problems(pages: &[GuidePage]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Text;
     use crate::Tour;
 
     const PAGE: &str = "---
@@ -792,8 +812,9 @@ Text of the **first** part.
     }
 
     #[test]
-    fn windows_line_ends_read_the_same() {
+    fn windows_line_ends_and_byte_order_mark_read_the_same() {
         assert_eq!(page(&PAGE.replace('\n', "\r\n")), page(PAGE));
+        assert_eq!(page(&format!("\u{feff}{PAGE}")), page(PAGE));
     }
 
     #[test]
@@ -834,6 +855,11 @@ Text of the **first** part.
         assert_eq!(
             with("# A sample", "# Another title"),
             Err(GuidePageError::TitleMismatch("Another title".into()))
+        );
+        assert_eq!(with("# A sample\n", ""), Err(GuidePageError::TitleMissing));
+        assert_eq!(
+            GuidePage::parse(&format!("{PAGE}\n```\nnever closed")),
+            Err(GuidePageError::UnclosedFence)
         );
         assert_eq!(
             with("<a id=\"second\"></a>\n", ""),
@@ -897,6 +923,7 @@ Text of the **first** part.
             "file.txt",
             "Page.md",
             "javascript:alert(1)",
+            "http://example.com",
         ] {
             assert_eq!(GuideLink::parse(broken, "here"), None, "{broken}");
         }
@@ -954,6 +981,19 @@ Text of the **first** part.
             "text matches too: {hits:?}"
         );
         assert!(guide.search("budget zzzz").is_empty(), "every word");
+        for hit in guide.search("keys") {
+            let page = guide.page(&hit.page).unwrap();
+            let unit = page
+                .units()
+                .into_iter()
+                .find(|(section, ..)| section.map(|section| &section.id) == hit.section.as_ref())
+                .unwrap();
+            let unit = fold(&format!("{} {}", unit.1, plain_text(unit.2)));
+            assert!(
+                find(&unit, &fold("key")).is_some(),
+                "a title word alone lists no section: {hit:?}"
+            );
+        }
         assert!(guide.search("   ").is_empty());
     }
 
@@ -1100,16 +1140,30 @@ Text of the **first** part.
         for language in UiLanguage::ALL {
             let guide = Guide::load(language);
             let page = guide.page("shortcuts").unwrap();
-            let text: String = page
-                .sections
-                .iter()
-                .map(|section| section.body.as_str())
-                .collect();
             for group in crate::SHORTCUTS {
+                let Text::ShortcutGroup(code) = group.name else {
+                    panic!("{:?} is not a shortcut group", group.name);
+                };
+                let section = page
+                    .section(code)
+                    .unwrap_or_else(|| panic!("{language}: no section {code}"));
+                // Each table row's keys, as the first cell writes them.
+                let rows: Vec<Vec<&str>> = section
+                    .body
+                    .lines()
+                    .filter_map(|line| line.strip_prefix('|')?.split('|').next())
+                    .map(|cell| {
+                        cell.split([' ', ','])
+                            .filter(|key| !key.is_empty() && !["or", "ou"].contains(key))
+                            .collect()
+                    })
+                    .collect();
                 for shortcut in group.shortcuts {
-                    for key in shortcut.keys {
-                        assert!(text.contains(key), "{language}: {key}");
-                    }
+                    assert!(
+                        rows.iter().any(|row| row.as_slice() == shortcut.keys),
+                        "{language}: {code} has no row for {:?}",
+                        shortcut.keys
+                    );
                 }
             }
         }
@@ -1121,7 +1175,15 @@ Text of the **first** part.
     fn coverage_report() {
         let guide = Guide::load(UiLanguage::EnUs);
         let mut lines = Vec::new();
-        for place in GuidePlace::all() {
+        // The places F1 opens a page for: not the Jobs panel, nor the
+        // editor, where F1 does nothing.
+        let reached = |place: &GuidePlace| {
+            !matches!(
+                place,
+                GuidePlace::Screen(Destination::Jobs) | GuidePlace::Stage(Stage::Edit)
+            )
+        };
+        for place in GuidePlace::all().into_iter().filter(reached) {
             let page = guide
                 .pages()
                 .iter()

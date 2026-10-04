@@ -20,8 +20,8 @@ use gpui_kit::component::{IconName, Sizable as _, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, Bounds, ClickEvent, ElementId, Entity, EventEmitter, FocusHandle, KeyBinding,
-    Pixels, ScrollHandle, SharedString, Subscription, Window, actions, canvas, div, point, px,
-    rems,
+    Pixels, Point, ScrollHandle, SharedString, Subscription, Window, actions, canvas, div, point,
+    px, rems,
 };
 
 use crate::appearance::look;
@@ -37,10 +37,11 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("f1", OpenGuide, None)]);
 }
 
-/// How many frames a move to a section keeps aiming at it: the page's
-/// Markdown is laid out in the background, so a section's place settles
-/// a frame or two after the page opens.
-const REVEAL_FRAMES: u8 = 6;
+/// The page's Markdown is laid out in the background, section by section,
+/// so a move to a section keeps aiming at it until its place has held for
+/// `REVEAL_STEADY` frames, for at most `REVEAL_FRAMES` frames.
+const REVEAL_FRAMES: u8 = 60;
+const REVEAL_STEADY: u8 = 4;
 
 /// What the guide asks of the window around it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +52,22 @@ pub enum GuideScreenEvent {
     Go(GuidePlace),
 }
 
+/// A search's results, for the query and language they answer.
+struct Found {
+    query: String,
+    language: UiLanguage,
+    hits: Rc<Vec<GuideHit>>,
+}
+
 /// A section to bring to the top of the page, or the page's top.
 struct Reveal {
     section: Option<String>,
     frames: u8,
+    /// Frames the target has held still.
+    steady: u8,
+    /// Where the reveal left the page last frame; any other offset means
+    /// the user scrolled, and the reveal gives way.
+    left_at: Option<Point<Pixels>>,
 }
 
 pub struct GuideScreen {
@@ -76,6 +89,8 @@ pub struct GuideScreen {
     reveal: Option<Reveal>,
     /// The language the search box's placeholder is in.
     language: Option<UiLanguage>,
+    /// The last search's results, for its query and language.
+    found: RefCell<Option<Found>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -111,6 +126,7 @@ impl GuideScreen {
             sections: Rc::default(),
             reveal: None,
             language: None,
+            found: RefCell::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -130,6 +146,8 @@ impl GuideScreen {
         self.reveal = Some(Reveal {
             section: section.map(str::to_owned),
             frames: REVEAL_FRAMES,
+            steady: 0,
+            left_at: None,
         });
         cx.notify();
     }
@@ -152,11 +170,26 @@ impl GuideScreen {
             .update(cx, |search, cx| search.focus(window, cx));
     }
 
-    fn hits(&self, cx: &App) -> Vec<GuideHit> {
+    /// The search's results, run once per query and language.
+    fn hits(&self, cx: &App) -> Rc<Vec<GuideHit>> {
         if self.query.trim().is_empty() {
-            return Vec::new();
+            return Rc::default();
         }
-        self.bardo.read(cx).guide().search(&self.query)
+        let guide = self.bardo.read(cx).guide();
+        let mut found = self.found.borrow_mut();
+        if let Some(found) = &*found
+            && found.query == self.query
+            && found.language == guide.language()
+        {
+            return found.hits.clone();
+        }
+        let hits = Rc::new(guide.search(&self.query));
+        *found = Some(Found {
+            query: self.query.clone(),
+            language: guide.language(),
+            hits: hits.clone(),
+        });
+        hits
     }
 
     /// The pages in the contents' order.
@@ -169,6 +202,19 @@ impl GuideScreen {
             .flat_map(|(_, pages)| pages)
             .map(|page| page.id.clone())
             .collect()
+    }
+
+    /// The contents' row of `page`, counting each group's heading row.
+    fn contents_row(&self, page: &str, cx: &App) -> usize {
+        let mut row = 0;
+        for (_, pages) in self.bardo.read(cx).guide().contents() {
+            row += 1;
+            match pages.iter().position(|entry| entry.id == page) {
+                Some(at) => return row + at,
+                None => row += pages.len(),
+            }
+        }
+        0
     }
 
     /// ↑/↓: through the search results while searching, else to the
@@ -184,6 +230,8 @@ impl GuideScreen {
             if to != at {
                 let page = order[to].clone();
                 self.open(&page, None, cx);
+                self.list_scroll
+                    .scroll_to_item(self.contents_row(&page, cx));
             }
             return;
         }
@@ -233,23 +281,31 @@ impl GuideScreen {
             return;
         };
         let current = self.scroll.offset();
-        let target = match &reveal.section {
-            None => point(current.x, px(0.)),
-            Some(section) => match self.sections.borrow().get(section) {
-                Some(bounds) => {
-                    let viewport = self.scroll.bounds();
-                    let max = self.scroll.max_offset();
-                    let y = current.y - (bounds.top() - viewport.top()) + px(8.);
-                    point(current.x, y.clamp(-max.y, px(0.)))
-                }
-                None => current,
-            },
-        };
-        if target != current {
-            self.scroll.set_offset(target);
+        if reveal.left_at.is_some_and(|left_at| left_at != current) {
+            self.reveal = None;
+            return;
         }
+        let target = match &reveal.section {
+            None => Some(point(current.x, px(0.))),
+            Some(section) => self.sections.borrow().get(section).map(|bounds| {
+                let viewport = self.scroll.bounds();
+                let max = self.scroll.max_offset();
+                let y = current.y - (bounds.top() - viewport.top()) + px(8.);
+                point(current.x, y.clamp(-max.y, px(0.)))
+            }),
+        };
+        match target {
+            Some(target) if target != current => {
+                self.scroll.set_offset(target);
+                reveal.steady = 0;
+            }
+            Some(_) => reveal.steady += 1,
+            // Not laid out yet.
+            None => {}
+        }
+        reveal.left_at = Some(target.unwrap_or(current));
         reveal.frames = reveal.frames.saturating_sub(1);
-        if reveal.frames == 0 {
+        if reveal.frames == 0 || reveal.steady >= REVEAL_STEADY {
             self.reveal = None;
         }
         cx.notify();
@@ -323,7 +379,7 @@ impl GuideScreen {
             return collection;
         }
 
-        let hits = bardo.guide().search(&self.query);
+        let hits = self.hits(cx);
         if hits.is_empty() {
             collection.empty = Some(
                 div()
@@ -337,12 +393,12 @@ impl GuideScreen {
             );
         }
         let highlight = self.highlight.min(hits.len().saturating_sub(1));
-        for (ix, hit) in hits.into_iter().enumerate() {
+        for (ix, hit) in hits.iter().enumerate() {
             let title = match &hit.section_title {
                 Some(section) => format!("{} › {section}", hit.page_title),
                 None => hit.page_title.clone(),
             };
-            let (target, section) = (hit.page, hit.section);
+            let (target, section) = (hit.page.clone(), hit.section.clone());
             let mut tile = Tile::new(
                 ("guide-hit", ix),
                 Rc::new(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -351,7 +407,7 @@ impl GuideScreen {
                 })),
             );
             tile.title = Some(SharedString::from(title));
-            tile.text = Some(SharedString::from(hit.snippet));
+            tile.text = Some(SharedString::from(hit.snippet.clone()));
             tile.selected = ix == highlight;
             collection.tiles.push(tile);
         }
@@ -486,7 +542,7 @@ impl GuideScreen {
 }
 
 /// A place's name as the navigation says it: "Settings › API keys".
-pub fn place_name(bardo: &Bardo, place: GuidePlace) -> String {
+fn place_name(bardo: &Bardo, place: GuidePlace) -> String {
     let (screen, part) = match place {
         GuidePlace::Screen(place) => (place, None),
         GuidePlace::Stage(stage) => (Destination::Projects, Some(Text::StageName(stage))),

@@ -357,13 +357,13 @@ impl Shell {
     }
 
     /// F1. Not over the editor (the guide does not sit over it), nor while
-    /// a tour or the missed posts list holds the window.
+    /// the missed posts list holds the window; during a tour it is the
+    /// step's "Learn more".
     fn on_open_guide(&mut self, _: &OpenGuide, window: &mut Window, cx: &mut Context<Self>) {
-        let missed_open = self.missed.read(cx).is_open();
-        if self.editor.is_some() || missed_open {
+        if self.editor.is_some() || self.missed.read(cx).is_open() {
             return;
         }
-        let step = self.bardo.read(cx).tour_step(missed_open);
+        let step = self.bardo.read(cx).tour_step(false);
         match step {
             Some(step) => {
                 if let Some(guide) = step.guide {
@@ -371,7 +371,7 @@ impl Shell {
                 }
             }
             None => {
-                self.guide.update(cx, |guide, cx| guide.moved(cx));
+                self.guide.update(cx, |guide, cx| guide.close_cards(cx));
                 self.open_guide(window, cx);
             }
         }
@@ -480,7 +480,10 @@ impl Render for Shell {
         crate::tour::begin_frame(window, cx);
         // Keys go to the root alone while nothing on screen has the keyboard
         // (nothing focused yet, or the focused button was on a screen that
-        // is gone), which would miss the shell's F1.
+        // is gone), which would miss the shell's F1. Everything Bardo draws,
+        // popovers included, sits inside the shell; a dialog opened through
+        // the kit's root (`open_dialog`, `open_sheet`) would sit beside it
+        // and lose the keyboard to this.
         if !self.focus.contains_focused(window, cx) {
             let focus = self.focus.clone();
             window.on_next_frame(move |window, cx| {
