@@ -23,19 +23,26 @@
 //! not monetized after its first refused money report. Nothing the owner
 //! reads can fail the sync: an account that cannot be read keeps its public
 //! numbers, and an unconnected one is never asked.
+//!
+//! Instagram and TikTok posts are read through their own connected account
+//! (#85): Instagram's media insights one post at a time (a linked post's
+//! media id found once from its shortcode by listing the account's media),
+//! TikTok's video query 20 at a time. They need no Data API key. A post the
+//! network does not show to its account is flagged like a YouTube post not
+//! found; an account that is not connected keeps its links only, as before.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, ChannelId, ChannelPoint, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Monetization, Network, NetworkAccount,
-    NetworkAccountId, NetworkAccountRepository, OwnerAnalytics, PostLink, PostLinkError,
-    PostRetention, ProfileId, Progress, Provider, Publication, PublicationId, PublicationKind,
-    PublicationRepository, ReportPeriod, RepositoryError, STATS_BATCH, SecretStore, SecretText,
-    UploadStatus, UserProfile, VideoProjectId, VideoStats, VideoUploader, channel_history,
-    read_owner_metrics,
+    ApiKey, ChannelId, ChannelPoint, InsightsReader, Job, JobFailure, JobFailureKind, JobId,
+    JobKind, MEDIA_PAGES, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Monetization,
+    Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository, OwnerAnalytics, PostLink,
+    PostLinkError, PostReading, PostRetention, ProfileId, Progress, Provider, Publication,
+    PublicationId, PublicationKind, PublicationRepository, ReportPeriod, RepositoryError,
+    STATS_BATCH, SecretStore, SecretText, UploadStatus, UserProfile, VideoProjectId, VideoStats,
+    VideoUploader, channel_history, find_media, read_insights, read_owner_metrics,
 };
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +142,9 @@ pub struct PublishedPost {
     pub history: Vec<MetricsSnapshot>,
     /// The retention curve as last read, for a connected channel's post.
     pub retention: Option<PostRetention>,
+    /// For an Instagram or TikTok post, whether its account is connected:
+    /// syncs read it only then. `None` on the other networks.
+    pub access: Option<OwnerAccess>,
 }
 
 impl PublishedPost {
@@ -157,6 +167,13 @@ impl PublishedPost {
         self.history.iter().rev().find(|s| s.owner.is_some())
     }
 
+    /// Whether syncs read the post: YouTube's public numbers, or an
+    /// Instagram or TikTok post of a connected account.
+    pub fn is_synced(&self) -> bool {
+        self.publication.has_public_metrics()
+            || reads_through_account(&self.publication, self.access)
+    }
+
     /// The engaged views screens lead with, from the latest owner's
     /// numbers; `None` leaves the public views in the lead.
     pub fn engaged_views(&self) -> Option<u64> {
@@ -166,8 +183,9 @@ impl PublishedPost {
     }
 }
 
-/// Whether a channel's owner numbers can be read: its YouTube account and
-/// that account's connection.
+/// Whether an account's own numbers can be read: the channel's YouTube
+/// account for the owner metrics, or a post's Instagram or TikTok account
+/// for its insights, and that account's connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OwnerAccess {
     /// The channel has no YouTube account.
@@ -185,13 +203,18 @@ pub struct MetricsStatus {
     pub job: Option<Job>,
     /// Whether a YouTube Data API key is saved.
     pub key_saved: bool,
-    /// Whether a sync needs the key to read anything: no tracked post is
-    /// scheduled (a scheduled one is read through its account's
-    /// connection; without a key a sync reads only those).
+    /// Whether a sync needs the key to read anything: every tracked post
+    /// is read with it (a scheduled one, and Instagram and TikTok posts,
+    /// are read through their account's connection; without a key a sync
+    /// reads only those).
     pub needs_key: bool,
     pub on_start: MetricsSyncOnStart,
-    /// YouTube publications a sync reads, scheduled ones included.
+    /// Publications a sync reads: YouTube's, scheduled ones included, and
+    /// the Instagram and TikTok posts of connected accounts.
     pub tracked: usize,
+    /// Of those, the YouTube posts (scheduled ones too): their public
+    /// numbers need the key.
+    pub with_key: usize,
     /// The latest check of any of them.
     pub last_checked: Option<SystemTime>,
 }
@@ -266,6 +289,7 @@ pub(crate) struct MetricsSyncHandler {
     pub(crate) connections: Connections,
     pub(crate) uploaders: Vec<Arc<dyn VideoUploader>>,
     pub(crate) analytics: Vec<Arc<dyn OwnerAnalytics>>,
+    pub(crate) post_insights: Vec<Arc<dyn InsightsReader>>,
 }
 
 /// How one sync reads an account's owner numbers.
@@ -390,6 +414,159 @@ impl MetricsSyncHandler {
     }
 }
 
+impl MetricsSyncHandler {
+    /// Reads Instagram and TikTok `posts` through their accounts: a
+    /// snapshot of each post with numbers into `snapshots`, and the posts
+    /// it learned something of (checked, or a media id found) returned.
+    /// A post whose account is not connected, or stopped for this sync,
+    /// stays as it was. `None` when asked to stop.
+    fn read_networked(
+        &self,
+        posts: Vec<Publication>,
+        taken_at: SystemTime,
+        snapshots: &mut Vec<MetricsSnapshot>,
+        accounts: &mut HashMap<NetworkAccountId, OwnerAccount>,
+        cx: &JobContext,
+    ) -> Option<Vec<Publication>> {
+        let mut by_account: Vec<(NetworkAccountId, Vec<Publication>)> = Vec::new();
+        for post in posts {
+            match by_account.iter_mut().find(|(id, _)| *id == post.account) {
+                Some((_, group)) => group.push(post),
+                None => by_account.push((post.account, vec![post])),
+            }
+        }
+        let mut learned = Vec::new();
+        for (id, mut group) in by_account {
+            if cx.should_stop() {
+                return None;
+            }
+            let Some(reader) = self
+                .post_insights
+                .iter()
+                .find(|reader| reader.network() == group[0].network())
+            else {
+                continue;
+            };
+            let account = accounts.entry(id).or_insert_with(|| self.owner_account(id));
+            let OwnerAccount::Reading {
+                account: network_account,
+                ..
+            } = account
+            else {
+                continue;
+            };
+            let Some(token) = self.owner_token(network_account) else {
+                *account = OwnerAccount::Off;
+                continue;
+            };
+            let network_account = network_account.clone();
+            match self.read_account(&**reader, &network_account, &token, &mut group, taken_at) {
+                Ok(read) => snapshots.extend(read),
+                Err(error) => {
+                    tracing::warn!("insights stopped for this sync: {error}");
+                    *account = OwnerAccount::Off;
+                }
+            }
+            learned.extend(
+                group
+                    .into_iter()
+                    .filter(|post| post.checked_at == Some(taken_at) || post.insights_id.is_some()),
+            );
+        }
+        Some(learned)
+    }
+
+    /// Reads one account's `posts`: finds the media of linked Instagram
+    /// posts that have none yet, then reads every post with an id. Returns
+    /// the snapshots; fails only with what stops the account.
+    fn read_account(
+        &self,
+        reader: &dyn InsightsReader,
+        account: &NetworkAccount,
+        token: &SecretText,
+        posts: &mut [Publication],
+        taken_at: SystemTime,
+    ) -> Result<Vec<MetricsSnapshot>, bardo_domain::AnalyticsError> {
+        let mut listed_at: HashMap<PublicationId, SystemTime> = HashMap::new();
+        let codes: Vec<String> = posts
+            .iter()
+            .filter(|post| post.insights_post().is_none())
+            .filter_map(|post| post.post_id().map(str::to_owned))
+            .collect();
+        if !codes.is_empty() {
+            let identity = match self.connections.identity(account) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    let kind = match error {
+                        ConnectionError::NotConnected => {
+                            bardo_domain::AnalyticsErrorKind::SignedOut
+                        }
+                        _ => bardo_domain::AnalyticsErrorKind::Unreachable,
+                    };
+                    return Err(bardo_domain::AnalyticsError::new(kind, error.to_string()));
+                }
+            };
+            let codes: Vec<&str> = codes.iter().map(String::as_str).collect();
+            match find_media(reader, token, &identity.id, &codes, MEDIA_PAGES) {
+                Ok(lookup) => {
+                    for post in posts.iter_mut().filter(|p| p.insights_post().is_none()) {
+                        let Some(code) = post.post_id().map(str::to_owned) else {
+                            continue;
+                        };
+                        match lookup.media(&code) {
+                            Ok(media) => {
+                                post.insights_id = Some(media.id.clone());
+                                if let Some(at) = media.posted_at {
+                                    listed_at.insert(post.id, at);
+                                }
+                            }
+                            // The whole listing read: not the account's.
+                            Err(true) => post.not_seen(taken_at),
+                            // Past the pages read: the next sync looks again.
+                            Err(false) => post.unread(taken_at),
+                        }
+                    }
+                }
+                Err(error) if error.stops_the_account() => return Err(error),
+                Err(error) => tracing::warn!("could not list the account's media: {error}"),
+            }
+        }
+        let ids: Vec<String> = posts
+            .iter()
+            .filter_map(|post| post.insights_post().map(str::to_owned))
+            .collect();
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut snapshots = Vec::new();
+        for (id, reading) in read_insights(reader, token, &ids)? {
+            let Some(post) = posts
+                .iter_mut()
+                .find(|post| post.insights_post() == Some(id.as_str()))
+            else {
+                continue;
+            };
+            match reading {
+                PostReading::Found(numbers) => {
+                    let posted_at = numbers.posted_at.or_else(|| {
+                        // A linked post went up when Instagram says, not
+                        // when it was linked; an upload keeps its own.
+                        post.upload()
+                            .is_none()
+                            .then(|| listed_at.get(&post.id).copied())
+                            .flatten()
+                    });
+                    post.seen(posted_at, taken_at);
+                    snapshots.extend(MetricsSnapshot::of_numbers(post.id, &numbers, taken_at));
+                }
+                PostReading::NotFound => post.not_seen(taken_at),
+                // Refused for this post (too few viewers, say): checked,
+                // never flagged, so a start does not read it again at once.
+                PostReading::Unread => post.unread(taken_at),
+            }
+        }
+        Ok(snapshots)
+    }
+}
+
 impl JobHandler for MetricsSyncHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         let payload: SyncPayload = parse(payload)?;
@@ -421,14 +598,19 @@ impl JobHandler for MetricsSyncHandler {
             // Read again: the user may have removed or relinked a post
             // since the sync was queued.
             let mut posts = Vec::new();
+            let mut networked = Vec::new();
             for text in *batch {
                 let publication: PublicationId = id(text)?;
-                if let Some(post) = self
+                let Some(post) = self
                     .publications
                     .publication(publication)
                     .map_err(unexpected)?
-                    .filter(Publication::is_tracked)
-                {
+                else {
+                    continue;
+                };
+                if post.reads_insights() {
+                    networked.push(post);
+                } else if post.is_tracked() {
                     posts.push(post);
                 }
             }
@@ -505,10 +687,19 @@ impl JobHandler for MetricsSyncHandler {
                     return Ok(());
                 }
             }
+            let Some(networked) =
+                self.read_networked(networked, taken_at, &mut snapshots, &mut owners, cx)
+            else {
+                return Ok(());
+            };
             // A post that went live is in both lists; its statistics read
             // is the later word.
             scheduled.retain(|post| public.iter().all(|p| p.id != post.id));
-            let checked: Vec<Publication> = scheduled.into_iter().chain(public).collect();
+            let checked: Vec<Publication> = scheduled
+                .into_iter()
+                .chain(public)
+                .chain(networked)
+                .collect();
             if !checked.is_empty() {
                 self.publications
                     .save_sync(&checked, &snapshots)
@@ -548,17 +739,59 @@ impl Bardo {
 
     /// Where metrics syncing stands for `publications`.
     pub(crate) fn metrics_status(&self, publications: &[Publication]) -> MetricsStatus {
+        let access = self.insights_access(publications);
         let tracked: Vec<&Publication> = publications
             .iter()
-            .filter(|publication| publication.is_tracked())
+            .filter(|publication| is_synced(publication, &access))
             .collect();
         MetricsStatus {
             job: self.latest_sync_job(),
             key_saved: self.youtube_key_saved(),
-            needs_key: !tracked.iter().any(|p| p.is_scheduled()),
+            needs_key: !tracked
+                .iter()
+                .any(|p| p.is_scheduled() || p.reads_insights()),
             on_start: self.profile.metrics_sync,
             tracked: tracked.len(),
+            with_key: tracked.iter().filter(|p| !p.reads_insights()).count(),
             last_checked: tracked.iter().filter_map(|p| p.checked_at).max(),
+        }
+    }
+
+    /// The connection of every account whose posts read insights, by id.
+    pub(crate) fn insights_access(
+        &self,
+        publications: &[Publication],
+    ) -> HashMap<NetworkAccountId, OwnerAccess> {
+        let mut access = HashMap::new();
+        for publication in publications.iter().filter(|p| p.network().reads_insights()) {
+            access
+                .entry(publication.account)
+                .or_insert_with(|| self.account_access(publication.account));
+        }
+        access
+    }
+
+    /// Whether the account is connected, as the owner's reads see it.
+    fn account_access(&self, id: NetworkAccountId) -> OwnerAccess {
+        match self.network_accounts.get(id) {
+            Ok(Some(account)) => self.connection_access(&account),
+            Ok(None) => OwnerAccess::NoAccount,
+            Err(error) => {
+                tracing::warn!("could not read the account: {error}");
+                OwnerAccess::NotConnected
+            }
+        }
+    }
+
+    fn connection_access(&self, account: &NetworkAccount) -> OwnerAccess {
+        match self.connection_state(account) {
+            Ok(crate::ConnectionState::Connected { .. }) => OwnerAccess::Connected,
+            Ok(crate::ConnectionState::ReconnectNeeded { .. }) => OwnerAccess::ReconnectNeeded,
+            Ok(_) => OwnerAccess::NotConnected,
+            Err(error) => {
+                tracing::warn!("could not read the connection: {error}");
+                OwnerAccess::NotConnected
+            }
         }
     }
 
@@ -568,13 +801,15 @@ impl Bardo {
         &self,
         project: VideoProjectId,
     ) -> Result<Vec<PublishedPost>, RepositoryError> {
-        self.publications
-            .publications(project)?
+        let publications = self.publications.publications(project)?;
+        let access = self.insights_access(&publications);
+        publications
             .into_iter()
             .map(|publication| {
                 Ok(PublishedPost {
                     history: self.publications.snapshots(publication.id)?,
                     retention: self.publications.retention(publication.id)?,
+                    access: access.get(&publication.account).copied(),
                     publication,
                 })
             })
@@ -666,6 +901,11 @@ impl Bardo {
         let publication = match current {
             Some(current) if current.post_id() == Some(link.post_id()) => Publication {
                 link: Some(link),
+                // A Reel Bardo published keeps its media id for insights.
+                insights_id: current
+                    .insights_post()
+                    .filter(|_| current.network() == Network::InstagramReels)
+                    .map(str::to_owned),
                 account: account.id,
                 kind: PublicationKind::Manual,
                 ..current
@@ -683,12 +923,17 @@ impl Bardo {
                 linked_at: now,
                 checked_at: None,
                 missing_since: None,
+                insights_id: None,
             },
         };
         self.publications.save_publication(&publication)?;
-        if publication.has_public_metrics()
+        let readable = if publication.reads_insights() {
+            self.account_access(publication.account) == OwnerAccess::Connected
+        } else {
+            publication.has_public_metrics() && self.youtube_key_saved()
+        };
+        if readable
             && publication.checked_at.is_none()
-            && self.youtube_key_saved()
             && !self
                 .latest_sync_job()
                 .is_some_and(|job| job.state().is_active())
@@ -742,22 +987,24 @@ impl Bardo {
         Ok(self.jobs.enqueue(job)?)
     }
 
-    /// The YouTube publications a sync reads, never checked first, then
-    /// the longest unchecked.
+    /// The publications a sync reads (YouTube's, and the Instagram and
+    /// TikTok posts of connected accounts), never checked first, then the
+    /// longest unchecked.
     fn tracked_publications(&self) -> Result<Vec<Publication>, RepositoryError> {
-        let mut tracked: Vec<Publication> = self
-            .publications
-            .all_publications(self.profile.id)?
+        let publications = self.publications.all_publications(self.profile.id)?;
+        let access = self.insights_access(&publications);
+        let mut tracked: Vec<Publication> = publications
             .into_iter()
-            .filter(Publication::is_tracked)
+            .filter(|publication| is_synced(publication, &access))
             .collect();
         tracked.sort_by_key(|publication| publication.checked_at);
         Ok(tracked)
     }
 
-    /// Starts a sync of every YouTube publication's public statistics, and
-    /// of where scheduled uploads stand. Without a key it reads only the
-    /// scheduled uploads.
+    /// Starts a sync of every YouTube publication's public statistics, of
+    /// where scheduled uploads stand, and of the Instagram and TikTok posts
+    /// of connected accounts. Without a key it reads only the scheduled
+    /// uploads and the posts read through their account.
     pub fn sync_metrics(&self) -> Result<JobId, MetricsError> {
         if self
             .latest_sync_job()
@@ -770,7 +1017,7 @@ impl Bardo {
             return Err(MetricsError::NothingToSync);
         }
         if !self.youtube_key_saved() {
-            tracked.retain(Publication::is_scheduled);
+            tracked.retain(|p| p.is_scheduled() || p.reads_insights());
             if tracked.is_empty() {
                 return Err(MetricsError::MissingKey);
             }
@@ -779,10 +1026,14 @@ impl Bardo {
     }
 
     /// Starts a sync when the app opens, if the profile's setting says
-    /// it is due and it can run (a key is saved, none is running). Never
-    /// fails: a start that cannot sync just does not.
+    /// it is due for the posts it can read (without a key, the scheduled
+    /// uploads and the posts read through their account) and none is
+    /// running. Never fails: a start that cannot sync just does not.
     pub fn sync_metrics_on_start(&self) -> Option<JobId> {
-        let tracked = self.tracked_publications().ok()?;
+        let mut tracked = self.tracked_publications().ok()?;
+        if !self.youtube_key_saved() {
+            tracked.retain(|p| p.is_scheduled() || p.reads_insights());
+        }
         if !self
             .profile
             .metrics_sync
@@ -829,6 +1080,7 @@ impl Bardo {
         let snapshots = self.publications.channel_snapshots(channel.id)?;
         let mut curves = self.publications.channel_retention(channel.id)?;
         let status = self.metrics_status(&publications);
+        let access = self.insights_access(&publications);
         let owner_access = self.owner_access(channel.id)?;
         let mut histories: HashMap<PublicationId, Vec<MetricsSnapshot>> = HashMap::new();
         for snapshot in &snapshots {
@@ -855,6 +1107,7 @@ impl Bardo {
                         .map(|project| project.title.clone())
                         .unwrap_or_default(),
                     post: PublishedPost {
+                        access: access.get(&publication.account).copied(),
                         publication,
                         history,
                         retention,
@@ -882,16 +1135,21 @@ impl Bardo {
         else {
             return Ok(OwnerAccess::NoAccount);
         };
-        Ok(match self.connection_state(&account) {
-            Ok(crate::ConnectionState::Connected { .. }) => OwnerAccess::Connected,
-            Ok(crate::ConnectionState::ReconnectNeeded { .. }) => OwnerAccess::ReconnectNeeded,
-            Ok(_) => OwnerAccess::NotConnected,
-            Err(error) => {
-                tracing::warn!("could not read the connection: {error}");
-                OwnerAccess::NotConnected
-            }
-        })
+        Ok(self.connection_access(&account))
     }
+}
+
+/// Whether a sync reads `publication`: YouTube's own rules, or an Instagram
+/// or TikTok post whose account `access` says is connected.
+fn is_synced(publication: &Publication, access: &HashMap<NetworkAccountId, OwnerAccess>) -> bool {
+    publication.is_tracked()
+        || reads_through_account(publication, access.get(&publication.account).copied())
+}
+
+/// Whether an Instagram or TikTok post is read through its account: only
+/// while the account is connected.
+fn reads_through_account(publication: &Publication, access: Option<OwnerAccess>) -> bool {
+    publication.reads_insights() && access == Some(OwnerAccess::Connected)
 }
 
 #[cfg(test)]
@@ -1430,6 +1688,7 @@ mod tests {
                 likes: Some(80),
                 comments: Some(12),
                 owner: None,
+                insights: bardo_domain::Insights::default(),
             }
         );
         assert_eq!(post.engaged_views(), None, "the public views lead");
@@ -1500,5 +1759,353 @@ mod tests {
                 .owner_access,
             OwnerAccess::ReconnectNeeded
         );
+    }
+
+    const REEL: &str = "https://www.instagram.com/reel/C9xYz12AbCd/?igsh=shared";
+    const MEDIA: &str = "17912345678901234";
+    const TIKTOK_ID: &str = "7301234567890123456";
+    const PAGE_TOKEN: &str = "EAAG-insights-page-token";
+    const TIKTOK_TOKEN: &str = "act.insights-access-token";
+
+    /// A project exported for YouTube, TikTok and Instagram Reels.
+    fn exported_everywhere() -> Setup {
+        let s = crate::export::tests::rendered_with(&[Network::InstagramReels]);
+        crate::uploads::reel_tests::generate(&s);
+        let view = s.app.export_view(s.project.id).unwrap();
+        done(
+            &s.app,
+            s.app
+                .start_export(
+                    &view,
+                    &[Network::YouTube, Network::TikTok, Network::InstagramReels],
+                )
+                .unwrap(),
+        );
+        s
+    }
+
+    fn account_on(s: &Setup, network: Network) -> NetworkAccount {
+        s.app
+            .network_accounts
+            .list(s.project.channel)
+            .unwrap()
+            .into_iter()
+            .find(|account| account.network == network)
+            .unwrap()
+    }
+
+    /// Connects the channel's `network` account as `identity`.
+    fn connect_on(s: &Setup, network: Network, identity: &str, token: &str) {
+        let account = account_on(s, network);
+        let now = SystemTime::now();
+        let tokens = bardo_domain::TokenSet::granted(
+            &bardo_domain::TokenGrant {
+                access_token: SecretText::new(token),
+                refresh_token: Some(SecretText::new("refresh")),
+                expires_in: std::time::Duration::from_secs(30 * 24 * 60 * 60),
+                scopes: Vec::new(),
+            },
+            now,
+        );
+        bardo_domain::ConnectionSecrets::set_tokens(
+            &*s.h.connection_secrets,
+            s.app.profile().id,
+            account.id,
+            &tokens,
+        )
+        .unwrap();
+        bardo_domain::NetworkConnectionRepository::save(
+            &*s.h.db,
+            &bardo_domain::NetworkConnection {
+                account: account.id,
+                owner: s.app.profile().id,
+                status: bardo_domain::ConnectionStatus::Connected,
+                identity: bardo_domain::ConnectedIdentity {
+                    id: identity.into(),
+                    name: "archives".into(),
+                },
+                scopes: Vec::new(),
+                expires_at: tokens.expires_at(),
+                connected_at: now,
+                refreshed_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// Both accounts connected, the Reel listed and both posts with
+    /// numbers.
+    fn connected_everywhere() -> Setup {
+        let s = exported_everywhere();
+        connect_on(&s, Network::InstagramReels, "17841400000000001", PAGE_TOKEN);
+        connect_on(&s, Network::TikTok, "open-id-archives", TIKTOK_TOKEN);
+        s.h.instagram_insights
+            .list(&[("17900000000000009", "OtherReel01"), (MEDIA, "C9xYz12AbCd")]);
+        s
+    }
+
+    fn mark_and_sync(s: &Setup, network: Network, link: &str) {
+        s.app
+            .mark_posted(s.project.id, network, link, false)
+            .unwrap();
+        let job = sync_jobs(&s.app).pop().expect("a sync was queued");
+        done(&s.app, job.id());
+    }
+
+    fn sync_now(s: &Setup) {
+        let job = s.app.sync_metrics().unwrap();
+        done(&s.app, job);
+    }
+
+    #[test]
+    fn a_linked_reel_is_found_once_in_the_accounts_media_and_read_with_its_insights() {
+        let s = connected_everywhere();
+        s.h.instagram_insights.set_numbers(
+            MEDIA,
+            bardo_domain::PostNumbers {
+                views: Some(3_400),
+                likes: Some(210),
+                comments: Some(0),
+                insights: bardo_domain::Insights {
+                    shares: Some(31),
+                    saves: Some(12),
+                    reach: Some(2_900),
+                    interactions: Some(253),
+                    average_watch: Some(std::time::Duration::from_millis(7_300)),
+                    watch_time: Some(std::time::Duration::from_secs(24_820)),
+                },
+                posted_at: None,
+            },
+        );
+        // No YouTube key: the account's own connection reads it.
+        mark_and_sync(&s, Network::InstagramReels, REEL);
+
+        let post = posted(&s, Network::InstagramReels).unwrap();
+        assert_eq!(post.publication.insights_id.as_deref(), Some(MEDIA));
+        assert!(post.publication.checked_at.is_some());
+        assert_eq!(post.access, Some(OwnerAccess::Connected));
+        let latest = *post.latest().unwrap();
+        assert_eq!(latest.views, 3_400);
+        assert_eq!(latest.likes, Some(210));
+        assert_eq!(latest.comments, Some(0), "a zero stays a zero");
+        assert_eq!(latest.owner, None, "no YouTube owner numbers");
+        assert_eq!(latest.insights.reach, Some(2_900));
+        assert_eq!(latest.insights.shares, Some(31));
+        assert_eq!(
+            latest.insights.average_watch,
+            Some(std::time::Duration::from_millis(7_300))
+        );
+        assert_eq!(s.h.instagram_insights.pages(), [None]);
+        assert_eq!(s.h.instagram_insights.reads(), [vec![MEDIA.to_owned()]]);
+
+        // The media id is kept: the next sync reads it without listing.
+        sync_now(&s);
+        assert_eq!(s.h.instagram_insights.pages().len(), 1);
+        assert_eq!(s.h.instagram_insights.reads().len(), 2);
+        assert_eq!(
+            posted(&s, Network::InstagramReels).unwrap().history.len(),
+            2
+        );
+        assert!(
+            s.h.instagram_insights
+                .tokens
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|token| token == PAGE_TOKEN)
+        );
+        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        assert_eq!(view.totals.views, 3_400);
+        assert_eq!(view.totals.shares, Some(31));
+    }
+
+    #[test]
+    fn a_reel_without_data_yet_has_no_snapshot_and_is_not_missing() {
+        let s = connected_everywhere();
+        // Instagram answers an empty set while the data have not arrived.
+        s.h.instagram_insights
+            .set_numbers(MEDIA, bardo_domain::PostNumbers::default());
+        mark_and_sync(&s, Network::InstagramReels, REEL);
+
+        let post = posted(&s, Network::InstagramReels).unwrap();
+        assert!(post.history.is_empty(), "empty is not zero");
+        assert!(post.publication.checked_at.is_some());
+        assert_eq!(post.publication.missing_since, None);
+        assert_eq!(post.publication.insights_id.as_deref(), Some(MEDIA));
+    }
+
+    #[test]
+    fn a_reel_the_account_does_not_have_is_flagged_without_reading_insights() {
+        let s = exported_everywhere();
+        connect_on(&s, Network::InstagramReels, "17841400000000001", PAGE_TOKEN);
+        s.h.instagram_insights
+            .list(&[("17900000000000009", "OtherReel01")]);
+        mark_and_sync(&s, Network::InstagramReels, REEL);
+
+        let post = posted(&s, Network::InstagramReels).unwrap();
+        assert!(post.publication.missing_since.is_some());
+        assert_eq!(post.publication.insights_id, None);
+        assert!(s.h.instagram_insights.reads().is_empty());
+    }
+
+    #[test]
+    fn a_tiktok_post_is_read_by_its_video_id_and_flagged_once_it_is_gone() {
+        let s = connected_everywhere();
+        s.h.tiktok_insights.set(TIKTOK_ID, 10_000);
+        mark_and_sync(&s, Network::TikTok, TIKTOK);
+
+        let post = posted(&s, Network::TikTok).unwrap();
+        let latest = *post.latest().unwrap();
+        assert_eq!(
+            (latest.views, latest.likes, latest.comments),
+            (10_000, Some(1_000), Some(100))
+        );
+        assert_eq!(latest.insights.shares, Some(200));
+        assert_eq!(latest.insights.average_watch, None, "TikTok has none");
+        assert_eq!(s.h.tiktok_insights.reads(), [vec![TIKTOK_ID.to_owned()]]);
+        assert!(
+            s.h.tiktok_insights.pages().is_empty(),
+            "the link has the id"
+        );
+        assert_eq!(post.publication.missing_since, None);
+
+        // Deleted or made private: TikTok leaves it out.
+        s.h.tiktok_insights.posts.lock().unwrap().clear();
+        sync_now(&s);
+        let post = posted(&s, Network::TikTok).unwrap();
+        assert!(post.publication.missing_since.is_some());
+        assert_eq!(post.history.len(), 1, "it keeps its numbers");
+    }
+
+    #[test]
+    fn unconnected_instagram_and_tiktok_accounts_keep_their_link_only() {
+        let mut s = exported_everywhere();
+        with_key(&mut s);
+        s.h.instagram_insights.list(&[(MEDIA, "C9xYz12AbCd")]);
+        s.h.instagram_insights.set(MEDIA, 3_400);
+        s.h.tiktok_insights.set(TIKTOK_ID, 10_000);
+        s.app
+            .mark_posted(s.project.id, Network::InstagramReels, REEL, false)
+            .unwrap();
+        s.app
+            .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
+            .unwrap();
+        assert!(sync_jobs(&s.app).is_empty(), "nothing to read");
+        assert!(matches!(
+            s.app.sync_metrics(),
+            Err(MetricsError::NothingToSync)
+        ));
+
+        // A YouTube post syncs; the others are never asked.
+        s.h.stats.set("dQw4w9WgXcQ", 1_200, Some(80));
+        mark_and_sync(&s, Network::YouTube, SHORT);
+        sync_now(&s);
+        assert!(s.h.instagram_insights.reads().is_empty());
+        assert!(s.h.instagram_insights.pages().is_empty());
+        assert!(s.h.tiktok_insights.reads().is_empty());
+        for network in [Network::InstagramReels, Network::TikTok] {
+            let post = posted(&s, network).unwrap();
+            assert!(post.history.is_empty());
+            assert_eq!(post.publication.checked_at, None);
+            assert_eq!(post.access, Some(OwnerAccess::NotConnected));
+            assert!(!post.is_synced());
+        }
+        let status = s.app.metrics_sync_status().unwrap();
+        assert_eq!((status.tracked, status.with_key), (1, 1));
+        assert!(status.needs_key);
+    }
+
+    #[test]
+    fn an_account_that_needs_to_reconnect_is_not_read() {
+        let s = connected_everywhere();
+        s.h.tiktok_insights.set(TIKTOK_ID, 10_000);
+        let account = account_on(&s, Network::TikTok);
+        let mut state = bardo_domain::NetworkConnectionRepository::get(&*s.h.db, account.id)
+            .unwrap()
+            .unwrap();
+        state.status = bardo_domain::ConnectionStatus::ReconnectNeeded;
+        bardo_domain::NetworkConnectionRepository::save(&*s.h.db, &state).unwrap();
+
+        s.app
+            .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
+            .unwrap();
+        assert!(sync_jobs(&s.app).is_empty());
+        let post = posted(&s, Network::TikTok).unwrap();
+        assert_eq!(post.access, Some(OwnerAccess::ReconnectNeeded));
+        assert!(s.h.tiktok_insights.reads().is_empty());
+    }
+
+    #[test]
+    fn a_read_that_stops_the_account_never_fails_the_sync() {
+        let s = connected_everywhere();
+        s.h.tiktok_insights.set(TIKTOK_ID, 10_000);
+        s.h.instagram_insights.set(MEDIA, 3_400);
+        *s.h.tiktok_insights.failure.lock().unwrap() = Some(bardo_domain::AnalyticsError::new(
+            bardo_domain::AnalyticsErrorKind::LimitReached,
+            "rate_limit_exceeded",
+        ));
+        s.app
+            .mark_posted(s.project.id, Network::TikTok, TIKTOK, false)
+            .unwrap();
+        s.app
+            .mark_posted(s.project.id, Network::InstagramReels, REEL, false)
+            .unwrap();
+        // The first link queued a sync; wait for it, then sync both.
+        wait_done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
+        sync_now(&s);
+
+        assert_eq!(s.app.latest_sync_job().unwrap().state(), JobState::Done);
+        let tiktok = posted(&s, Network::TikTok).unwrap();
+        assert!(tiktok.history.is_empty());
+        assert_eq!(tiktok.publication.missing_since, None, "unread, not gone");
+        assert_eq!(
+            posted(&s, Network::InstagramReels)
+                .unwrap()
+                .latest()
+                .unwrap()
+                .views,
+            3_400,
+            "the other account is read"
+        );
+    }
+
+    #[test]
+    fn without_a_key_a_start_waits_on_the_posts_it_can_read() {
+        let s = connected_everywhere();
+        s.h.tiktok_insights.set(TIKTOK_ID, 10_000);
+        // Never checked: without a key it never will be.
+        s.app
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
+            .unwrap();
+        mark_and_sync(&s, Network::TikTok, TIKTOK);
+        assert_eq!(s.app.sync_metrics_on_start(), None, "TikTok was just read");
+    }
+
+    #[test]
+    fn a_reel_whose_insights_are_refused_is_checked_and_never_flagged() {
+        let s = connected_everywhere();
+        *s.h.instagram_insights.failure.lock().unwrap() = Some(bardo_domain::AnalyticsError::new(
+            bardo_domain::AnalyticsErrorKind::Invalid,
+            "(#10) Not enough viewers for the media to show insights",
+        ));
+        mark_and_sync(&s, Network::InstagramReels, REEL);
+        let post = posted(&s, Network::InstagramReels).unwrap();
+        assert!(post.publication.checked_at.is_some());
+        assert_eq!(post.publication.missing_since, None);
+        assert!(post.history.is_empty());
+        assert_eq!(s.app.sync_metrics_on_start(), None);
+    }
+
+    #[test]
+    fn the_status_counts_connected_posts_and_needs_no_key_for_them() {
+        let s = connected_everywhere();
+        s.h.tiktok_insights.set(TIKTOK_ID, 10_000);
+        mark_and_sync(&s, Network::TikTok, TIKTOK);
+        let status = s.app.metrics_sync_status().unwrap();
+        assert_eq!((status.tracked, status.with_key), (1, 0));
+        assert!(!status.needs_key);
+        assert!(!status.key_saved);
+        assert!(status.can_sync());
+        assert!(status.last_checked.is_some());
     }
 }

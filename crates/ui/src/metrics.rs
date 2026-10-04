@@ -2,12 +2,15 @@
 //! time as bars, its syncs as a list, and where syncing stands. With the
 //! channel's account connected (#79) the owner's numbers join them: engaged
 //! views lead, then watch time, average view, money (or "not monetized")
-//! and the retention curve, with how late YouTube Analytics runs. The
+//! and the retention curve, with how late YouTube Analytics runs. Instagram
+//! and TikTok posts of connected accounts (#85) show their own numbers:
+//! shares on both, and saves, reach, interactions and watch time on a
+//! Reel; a number the network did not report shows as "—", never 0. The
 //! Publish stage and the Performance screen share them; what they show
 //! comes from `bardo_app`.
 
-use bardo_app::bardo_domain::{JobState, OwnerMetrics, PostRetention};
-use bardo_app::{Bardo, MetricsStatus, PublishedPost, Text, UploadState};
+use bardo_app::bardo_domain::{Insights, JobState, Network, OwnerMetrics, PostRetention};
+use bardo_app::{Bardo, MetricsStatus, OwnerAccess, PublishedPost, Text, UploadState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -141,18 +144,40 @@ fn hidden(bardo: &Bardo, id: ElementId, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// The post's latest views, likes and comments, the views' change since
-/// the sync before, and its views over time; engaged views first and the
-/// owner's numbers under them when there are some. Nothing before a sync
+/// "—" for a number the network did not report, with why behind an ⓘ.
+fn not_reported(bardo: &Bardo, network: Network, id: ElementId, cx: &App) -> AnyElement {
+    h_flex()
+        .gap_1()
+        .items_center()
+        .child(figure_value("—".into(), cx))
+        .child(kit::info(
+            id,
+            None,
+            SharedString::from(bardo.text_with(
+                Text::MetricNotReportedHint,
+                &[("network", &bardo.text(Text::NetworkName(network)))],
+            )),
+        ))
+        .into_any_element()
+}
+
+/// The post's latest views, likes and comments (and shares on Instagram
+/// and TikTok), the views' change since the sync before, and its views
+/// over time; engaged views first and the owner's numbers under them when
+/// there are some, a Reel's insights under them. Nothing before a sync
 /// found it.
 pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Option<Div> {
     let latest = post.latest()?;
+    let network = post.publication.network();
+    let insights = network.reads_insights();
     // The latest owner's numbers, and when they were read.
     let owned = post
         .latest_owner()
         .and_then(|snapshot| Some((snapshot.owner?, snapshot.taken_at)));
     let optional = |value: Option<u64>, suffix: &str| match value {
         Some(n) => figure_value(count(bardo, n), cx),
+        // Instagram leaves out what it has no data for: not a zero.
+        None if insights => not_reported(bardo, network, hint_id(id, suffix), cx),
         None => hidden(bardo, hint_id(id, suffix), cx),
     };
     let mut stats = Vec::new();
@@ -184,6 +209,13 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
         optional(latest.comments, "comments"),
         cx,
     ));
+    if insights {
+        stats.push(stat(
+            tr(bardo, Text::MetricShares),
+            optional(latest.insights.shares, "shares"),
+            cx,
+        ));
+    }
     let change_line = post.views_change().map(|n| {
         div()
             .text_xs()
@@ -212,8 +244,100 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
                     cx,
                 ))
             })
-            .children(owned.map(|(owner, read_at)| owner_numbers(bardo, &owner, read_at, id, cx))),
+            .children(owned.map(|(owner, read_at)| owner_numbers(bardo, &owner, read_at, id, cx)))
+            .when(insights, |numbers| {
+                numbers.child(insights_numbers(
+                    bardo,
+                    network,
+                    &latest.insights,
+                    latest.taken_at,
+                    id,
+                    cx,
+                ))
+            }),
     )
+}
+
+/// A Reel's saves, reach, interactions and watch time, and where the
+/// numbers come from and how late they run; TikTok has only the line
+/// saying it reports no watch time or retention.
+fn insights_numbers(
+    bardo: &Bardo,
+    network: Network,
+    insights: &Insights,
+    read_at: std::time::SystemTime,
+    id: &str,
+    cx: &App,
+) -> Div {
+    let t = look(cx).tokens;
+    let reel = network == Network::InstagramReels;
+    let number = |value: Option<u64>, suffix: &str| match value {
+        Some(n) => figure_value(count(bardo, n), cx),
+        None => not_reported(bardo, network, hint_id(id, suffix), cx),
+    };
+    let time = |value: Option<std::time::Duration>, suffix: &str, show: &dyn Fn(u64) -> String| {
+        match value {
+            Some(time) => figure_value(show(time.as_secs()).into(), cx),
+            None => not_reported(bardo, network, hint_id(id, suffix), cx),
+        }
+    };
+    let line = bardo.text_with(
+        if reel {
+            Text::MetricsInstagramLine
+        } else {
+            Text::MetricsTikTokLine
+        },
+        &[("when", &bardo.time_ago(read_at))],
+    );
+    v_flex()
+        .gap_2()
+        .pt_2()
+        .border_t(t.border_width)
+        .border_color(t.border)
+        .when(reel, |column| {
+            column.child(stat_row(vec![
+                stat(
+                    tr(bardo, Text::MetricSaves),
+                    number(insights.saves, "saves"),
+                    cx,
+                ),
+                stat_with(
+                    tr(bardo, Text::MetricReach),
+                    Some((hint_id(id, "reach-hint"), tr(bardo, Text::MetricReachHint))),
+                    number(insights.reach, "reach"),
+                    cx,
+                ),
+                stat_with(
+                    tr(bardo, Text::MetricInteractions),
+                    Some((
+                        hint_id(id, "interactions-hint"),
+                        tr(bardo, Text::MetricInteractionsHint),
+                    )),
+                    number(insights.interactions, "interactions"),
+                    cx,
+                ),
+                stat(
+                    tr(bardo, Text::MetricAverageWatch),
+                    time(insights.average_watch, "average-watch", &|secs| {
+                        bardo.clock(secs)
+                    }),
+                    cx,
+                ),
+                stat(
+                    tr(bardo, Text::MetricWatchTime),
+                    time(insights.watch_time, "watch-time", &|secs| {
+                        bardo.watch_time(secs / 60)
+                    }),
+                    cx,
+                ),
+            ]))
+        })
+        .child(
+            div()
+                .text_xs()
+                .text_color(t.text2)
+                .child(SharedString::from(line)),
+        )
 }
 
 /// The owner's numbers read at `read_at`: watch time, the average view, money
@@ -461,14 +585,14 @@ pub fn sync_state(bardo: &Bardo, status: &MetricsStatus, id: &str, cx: &App) -> 
         .child(SharedString::from(line))
 }
 
-/// What keeps metrics from syncing: no key, or the last sync stopped
-/// (with its reason behind "Details").
+/// What keeps metrics from syncing: no key for YouTube posts, or the last
+/// sync stopped (with its reason behind "Details").
 pub fn sync_notices(bardo: &Bardo, status: &MetricsStatus, id: &str, cx: &App) -> Vec<AnyElement> {
     let mut notices = Vec::new();
     if status.tracked == 0 {
         return notices;
     }
-    if !status.key_saved {
+    if !status.key_saved && status.with_key > 0 {
         notices.push(
             kit::notice(Tone::Warning, tr(bardo, Text::MetricsMissingKey), cx).into_any_element(),
         );
@@ -530,7 +654,7 @@ pub fn post_state(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Di
             row.child(kit::info(
                 ElementId::Name(format!("{id}-missing").into()),
                 None,
-                tr(bardo, Text::PublicationMissingHint),
+                missing_hint(bardo, publication.network()),
             ))
         })
         .child(when_line(
@@ -539,6 +663,16 @@ pub fn post_state(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Di
             publication.posted_at,
             cx,
         ))
+}
+
+/// Why a post reads "Not found", naming its network.
+fn missing_hint(bardo: &Bardo, network: Network) -> SharedString {
+    bardo
+        .text_with(
+            Text::PublicationMissingHint,
+            &[("network", &bardo.text(Text::NetworkName(network)))],
+        )
+        .into()
 }
 
 fn when_line(bardo: &Bardo, text: Text, at: std::time::SystemTime, cx: &App) -> Div {
@@ -632,9 +766,10 @@ fn upload_state(
         ),
         UploadState::Due(_) => (Tone::Info, Some(tr(bardo, Text::UploadDueHint))),
         UploadState::Missed(_) => (Tone::Warning, Some(tr(bardo, Text::UploadMissedHint))),
-        UploadState::Published if missing => {
-            (Tone::Warning, Some(tr(bardo, Text::PublicationMissingHint)))
-        }
+        UploadState::Published if missing => (
+            Tone::Warning,
+            Some(missing_hint(bardo, publication.network())),
+        ),
         UploadState::Published => (Tone::Success, None),
         UploadState::DraftSent => (Tone::Success, Some(tr(bardo, Text::UploadDraftSentHint))),
         UploadState::Restricted => (Tone::Warning, None),
@@ -735,24 +870,74 @@ fn upload_state(
     column
 }
 
-/// The post's numbers on YouTube; on another network, that only the link
-/// is kept.
+/// A line in muted text naming the post's network.
+fn network_line(bardo: &Bardo, text: Text, network: Network, cx: &App) -> AnyElement {
+    div()
+        .text_sm()
+        .text_color(look(cx).tokens.text2)
+        .child(SharedString::from(bardo.text_with(
+            text,
+            &[("network", &bardo.text(Text::NetworkName(network)))],
+        )))
+        .into_any_element()
+}
+
+/// An Instagram or TikTok post's numbers, read through its account: what
+/// a sync found, why there is none yet, or what the account needs.
+fn insights_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Vec<AnyElement> {
+    let publication = &post.publication;
+    let network = publication.network();
+    let mut shown = Vec::new();
+    match post.access {
+        Some(OwnerAccess::Connected) => {}
+        Some(OwnerAccess::ReconnectNeeded) => shown.push(
+            kit::notice(
+                Tone::Warning,
+                SharedString::from(bardo.text_with(
+                    Text::PublicationReconnectForMetrics,
+                    &[("network", &bardo.text(Text::NetworkName(network)))],
+                )),
+                cx,
+            )
+            .into_any_element(),
+        ),
+        Some(OwnerAccess::NotConnected | OwnerAccess::NoAccount) | None => shown.push(
+            network_line(bardo, Text::PublicationConnectForMetrics, network, cx),
+        ),
+    }
+    match post_numbers(bardo, post, id, cx) {
+        Some(numbers) => shown.push(numbers.into_any_element()),
+        None if post.access == Some(OwnerAccess::Connected) => {
+            // Checked, with no numbers: Instagram's have not arrived.
+            let text = if publication.checked_at.is_some() && network == Network::InstagramReels {
+                Text::MetricsInsightsEmpty
+            } else {
+                Text::MetricsInsightsPending
+            };
+            shown.push(network_line(bardo, text, network, cx));
+        }
+        None => {}
+    }
+    shown
+}
+
+/// The post's numbers on YouTube, and on Instagram and TikTok through
+/// their account; on another network, that only the link is kept.
 pub fn post_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Vec<AnyElement> {
     let network = post.publication.network();
+    if network.reads_insights() {
+        // An upload not yet a post (a TikTok draft, a Reel processing)
+        // shows its upload state alone.
+        if !post.publication.reads_insights() {
+            return Vec::new();
+        }
+        return insights_metrics(bardo, post, id, cx);
+    }
     if post.publication.upload().is_some() && !post.publication.has_public_metrics() {
         return Vec::new();
     }
     if !post.publication.has_public_metrics() {
-        return vec![
-            div()
-                .text_sm()
-                .text_color(look(cx).tokens.text2)
-                .child(SharedString::from(bardo.text_with(
-                    Text::PublicationNoMetrics,
-                    &[("network", &bardo.text(Text::NetworkName(network)))],
-                )))
-                .into_any_element(),
-        ];
+        return vec![network_line(bardo, Text::PublicationNoMetrics, network, cx)];
     }
     let mut shown: Vec<AnyElement> = post_numbers(bardo, post, id, cx)
         .into_iter()

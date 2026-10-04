@@ -1,8 +1,9 @@
 //! Performance screen (#29): a channel's linked posts and how they
 //! perform. The figures add up the latest public numbers of its YouTube
 //! posts, led by engaged views, watch time and revenue when the channel's
-//! account is connected (#79); the chart follows the channel's views over
-//! the syncs, and the picked post shows its own numbers, retention and
+//! account is connected (#79), and of its Instagram and TikTok posts when
+//! their account is connected (#85); the chart follows the channel's views
+//! over the syncs, and the picked post shows its own numbers, retention and
 //! history. Syncing runs as a job
 //! in `bardo_app`; this view polls the job revision and re-reads when it
 //! moves.
@@ -202,8 +203,9 @@ impl PerformanceScreen {
             .or(view.posts.first())
     }
 
-    /// The channel's totals: views (with their trend), likes, comments
-    /// and the posts they come from.
+    /// The channel's totals: views (with their trend), likes, comments,
+    /// shares where Instagram or TikTok report them, and the posts they
+    /// come from.
     fn figures(&self, view: &ChannelMetricsView, cx: &App) -> Vec<Figure> {
         let bardo = self.bardo.read(cx);
         let totals = view.totals;
@@ -250,18 +252,25 @@ impl PerformanceScreen {
             figures.push(posts);
             return figures;
         }
-        vec![
+        let mut figures = vec![
             views,
             Figure::new(tr(bardo, Text::MetricLikes), some(totals.likes)),
             Figure::new(tr(bardo, Text::MetricComments), some(totals.comments)),
-            posts,
-        ]
+        ];
+        if totals.shares.is_some() {
+            figures.push(Figure::new(
+                tr(bardo, Text::MetricShares),
+                some(totals.shares),
+            ));
+        }
+        figures.push(posts);
+        figures
     }
 
     /// Why the owner's numbers are missing, while the channel has YouTube
     /// posts: its account is not connected, or needs to reconnect.
     fn owner_notice(&self, view: &ChannelMetricsView, cx: &App) -> Option<AnyElement> {
-        if view.status.tracked == 0 {
+        if view.status.with_key == 0 {
             return None;
         }
         let bardo = self.bardo.read(cx);

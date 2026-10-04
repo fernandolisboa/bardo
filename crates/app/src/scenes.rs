@@ -875,6 +875,9 @@ pub(crate) mod tests {
         pub(crate) connection_secrets: Arc<MemorySecretStore>,
         /// Owner metrics of connected accounts.
         pub(crate) analytics: Arc<crate::testing::FakeAnalytics>,
+        /// Instagram and TikTok numbers of connected accounts.
+        pub(crate) instagram_insights: Arc<crate::testing::FakeInsights>,
+        pub(crate) tiktok_insights: Arc<crate::testing::FakeInsights>,
     }
 
     impl Harness {
@@ -900,6 +903,8 @@ pub(crate) mod tests {
                 tiktok: Arc::new(crate::uploads::testing::FakeUploader::tiktok()),
                 connection_secrets: Arc::default(),
                 analytics: Arc::default(),
+                instagram_insights: Arc::new(crate::testing::FakeInsights::instagram()),
+                tiktok_insights: Arc::new(crate::testing::FakeInsights::tiktok()),
             }
         }
 
@@ -969,6 +974,10 @@ pub(crate) mod tests {
                     Arc::clone(&self.tiktok) as _,
                 ],
                 analytics: vec![Arc::clone(&self.analytics) as _],
+                post_insights: vec![
+                    Arc::clone(&self.instagram_insights) as _,
+                    Arc::clone(&self.tiktok_insights) as _,
+                ],
             };
             let mut app = Bardo::start_with(
                 repositories,

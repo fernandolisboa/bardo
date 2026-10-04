@@ -160,6 +160,20 @@ last refresh.
 5. Back in Bardo, select **Mark as posted** and paste the post's link, so
    Bardo follows it like any other post.
 
+## Numbers on the Performance screen
+
+With the account connected, every metrics sync reads the views, likes,
+comments and shares of the channel's linked TikTok posts, 20 per request,
+with no YouTube key. TikTok reports no watch time, retention or revenue,
+so those stay empty.
+
+- TikTok returns only the account's public posts. A post it leaves out
+  (deleted, made private, or not the account's) shows as **Not found** and
+  keeps the numbers it had.
+- A draft is followed once you mark it as posted with its link.
+- Without a connected account, a linked post keeps only its link. When
+  the account needs to reconnect, syncs skip its posts until it does.
+
 ## Limits to know
 
 - TikTok keeps at most 5 drafts from an app waiting in your inbox in any

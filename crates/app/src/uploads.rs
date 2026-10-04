@@ -2083,6 +2083,7 @@ impl Bardo {
             linked_at: reviewed_at,
             checked_at: None,
             missing_since: None,
+            insights_id: None,
         };
         self.publications.save_publication(&publication)?;
         match self.jobs.enqueue(job) {
@@ -3351,7 +3352,7 @@ pub(crate) mod reel_tests {
 
     /// Metadata for every account of the project, the Reel's caption with
     /// hashtags.
-    fn generate(s: &Setup) {
+    pub(crate) fn generate(s: &Setup) {
         let answer = serde_json::json!({ "posts": [
             {
                 "network": "youtube",
@@ -3745,6 +3746,48 @@ pub(crate) mod reel_tests {
                 .upload_issue_text("The audio could not be added to the reel"),
             "Instagram published the Reel with a warning: The audio could not be added to the reel"
         );
+    }
+
+    #[test]
+    fn a_published_reel_reads_its_insights_by_media_id_linked_or_not() {
+        let s = ready();
+        done(&s.app, start(&s, review(&s).choices()));
+        s.h.instagram_insights.set("17900000000000001", 800);
+        done(&s.app, s.app.sync_metrics().unwrap());
+        assert_eq!(
+            s.h.instagram_insights.reads(),
+            [vec!["17900000000000001".to_owned()]]
+        );
+        assert!(s.h.instagram_insights.pages().is_empty(), "no listing");
+        assert!(
+            s.h.instagram_insights
+                .tokens
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|t| t == ACCESS)
+        );
+
+        // Exported and linked as the post the user made: the media id
+        // stays.
+        let view = s.app.export_view(s.project.id).unwrap();
+        done(
+            &s.app,
+            s.app
+                .start_export(&view, &[Network::InstagramReels])
+                .unwrap(),
+        );
+        let linked = s
+            .app
+            .mark_posted(s.project.id, Network::InstagramReels, REEL, true)
+            .unwrap();
+        assert_eq!(linked.kind, PublicationKind::Manual);
+        assert_eq!(linked.insights_id.as_deref(), Some("17900000000000001"));
+        done(&s.app, s.app.sync_metrics().unwrap());
+        assert!(s.h.instagram_insights.pages().is_empty());
+        let snapshots = s.app.publications.snapshots(linked.id).unwrap();
+        assert_eq!(snapshots.len(), 2, "the history goes on");
+        assert_eq!(snapshots[1].views, 800);
     }
 
     #[test]
