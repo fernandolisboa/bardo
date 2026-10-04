@@ -1,7 +1,10 @@
 //! Voices (CONTEXT.md): a voice lives with its provider (ElevenLabs);
-//! Bardo keeps only a reference to it, never samples, audio or
-//! credentials (ADR-0005). The voice library interface lists the voices
-//! the user's provider account can use, including clones made there.
+//! a persona keeps only a reference to it, never samples, audio or
+//! credentials (ADR-0005). Clips played to hear a voice are a cache of
+//! this machine (`voice_sample`), never part of a persona. The voice
+//! library interface lists the voices the user's provider account can use,
+//! including clones made there, with a link to the provider's stock
+//! preview of each voice when it has one.
 
 use std::fmt;
 use std::sync::Arc;
@@ -128,6 +131,9 @@ pub struct Voice {
     pub description: String,
     /// Short traits (gender, age, accent, use), in the provider's words.
     pub labels: Vec<String>,
+    /// An HTTPS link to the provider's own recording of the voice, free to
+    /// play. It ignores a persona's presets; clones often have none.
+    pub preview_url: Option<String>,
 }
 
 impl Voice {
@@ -153,6 +159,20 @@ pub trait VoiceLibrary: Send + Sync {
 impl<T: VoiceLibrary + ?Sized> VoiceLibrary for Arc<T> {
     fn voices(&self, key: &ApiKey) -> Result<Vec<Voice>, ProviderFailure> {
         (**self).voices(key)
+    }
+}
+
+/// Downloads a voice's stock preview (`Voice::preview_url`). The link is
+/// public: no key goes with it. Calls the network and blocks, so it runs
+/// off the UI thread.
+pub trait VoicePreviews: Send + Sync {
+    /// The preview's MP3 audio.
+    fn download(&self, url: &str) -> Result<Vec<u8>, ProviderFailure>;
+}
+
+impl<T: VoicePreviews + ?Sized> VoicePreviews for Arc<T> {
+    fn download(&self, url: &str) -> Result<Vec<u8>, ProviderFailure> {
+        (**self).download(url)
     }
 }
 
@@ -217,6 +237,7 @@ mod tests {
             category,
             description: String::new(),
             labels: vec![],
+            preview_url: None,
         };
         let mut voices = vec![
             voice("Wyatt", VoiceCategory::Default),

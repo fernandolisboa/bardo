@@ -461,7 +461,7 @@ impl JobHandler for CutSuggestionHandler {
                         model: &decisions.model,
                         purpose: CostPurpose::CutSuggestions,
                         usage: decisions.usage.into(),
-                        job: cx.id(),
+                        job: Some(cx.id()),
                         reported: None,
                     },
                     project,

@@ -86,6 +86,7 @@ mod tiktok;
 mod timeline;
 mod upload;
 mod voice;
+mod voice_sample;
 
 pub use appearance::{
     LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,
@@ -251,4 +252,7 @@ pub use upload::{
     UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
     UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
-pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};
+pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef};
+pub use voice_sample::{
+    InvalidSampleText, SampleSource, SampleText, VoiceSampleStore, VoiceSampleStoreError,
+};

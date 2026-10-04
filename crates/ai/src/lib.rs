@@ -14,7 +14,7 @@ pub mod retry;
 pub mod youtube_stats;
 
 pub use claude::ClaudeTextGenerator;
-pub use elevenlabs::{ElevenLabsAlignment, ElevenLabsSpeech, ElevenLabsVoices};
+pub use elevenlabs::{ElevenLabsAlignment, ElevenLabsPreviews, ElevenLabsSpeech, ElevenLabsVoices};
 pub use gemini::GeminiImages;
 pub use google_clips::GoogleClips;
 pub use higgsfield::HiggsfieldClips;

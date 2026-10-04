@@ -78,10 +78,17 @@ fn keeps_the_reference_category_description_and_labels() {
         ["male", "middle aged", "american", "deep", "narrative story"]
     );
 
+    assert_eq!(
+        wyatt.preview_url.as_deref(),
+        Some("https://storage.googleapis.com/eleven-public-prod/preview.mp3")
+    );
+
     let clone = &voices[0];
     assert_eq!(clone.category, VoiceCategory::Cloned);
     assert_eq!(clone.description, "");
     assert!(clone.labels.is_empty());
+    assert_eq!(clone.preview_url, None, "no preview listed");
+    assert_eq!(voices[1].preview_url, None, "a plain HTTP link is dropped");
     assert_eq!(voices[1].category, VoiceCategory::Generated);
     assert_eq!(voices[1].labels, ["male", "old", "narrative story"]);
 }

@@ -34,6 +34,7 @@ mod stages;
 mod templates;
 mod themes;
 mod uploads;
+mod voice_samples;
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -49,10 +50,12 @@ use bardo_domain::{
     RenderRepository, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
     SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
     TimelineRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
-    VoiceLibrary, Zone,
+    VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
 };
 use bardo_media::{AudioOutput, MediaEngine};
-use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore};
+use bardo_storage::{
+    Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore, MemoryVoiceSamples,
+};
 
 pub use appearance::{EditorPalette, Palette, Rgb, TrackColors, UiFont, palette};
 pub use bardo_domain;
@@ -115,6 +118,7 @@ pub use uploads::{
     DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
     UploadState, upload_state,
 };
+pub use voice_samples::{SampleAudio, SamplePlayer, VoiceSample, VoiceSampleError, VoiceSampling};
 
 use crate::clips::ClipHandler;
 use crate::connections::ConnectionBook;
@@ -186,6 +190,8 @@ pub struct Repositories {
     pub costs: Arc<dyn CostRepository>,
     /// Each video project's media folder. Shared with the job queue.
     pub files: Arc<dyn ProjectFiles>,
+    /// Voice samples heard on the Personas screen, kept on this machine.
+    pub voice_samples: Arc<dyn VoiceSampleStore>,
     /// Provider keys. Never the database (ADR-0001). Shared with jobs that
     /// call providers.
     pub secrets: Arc<dyn SecretStore>,
@@ -196,17 +202,20 @@ pub struct Repositories {
 
 impl Repositories {
     /// Every data port served by one SQLite database, keys by `secrets`,
-    /// app credentials and tokens by `connection_secrets`, media by `files`
-    /// and export packages by `export_files`.
+    /// app credentials and tokens by `connection_secrets`, media by `files`,
+    /// export packages by `export_files` and voice samples by
+    /// `voice_samples`.
     pub fn local(
         db: Database,
         secrets: Box<dyn SecretStore>,
         connection_secrets: Box<dyn ConnectionSecrets>,
         files: Box<dyn ProjectFiles>,
         export_files: Box<dyn ExportFiles>,
+        voice_samples: Box<dyn VoiceSampleStore>,
     ) -> Self {
         Self {
             export_files: Arc::from(export_files),
+            voice_samples: Arc::from(voice_samples),
             connection_secrets: Arc::from(connection_secrets),
             ..Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
         }
@@ -219,7 +228,7 @@ impl Repositories {
     }
 
     /// `shared` with the project files the caller chose, and export
-    /// packages, app credentials and tokens in memory.
+    /// packages, voice samples, app credentials and tokens in memory.
     pub fn shared_with_files(
         db: Arc<Database>,
         secrets: Arc<dyn SecretStore>,
@@ -248,6 +257,7 @@ impl Repositories {
             costs: Arc::clone(&db) as _,
             research: db,
             files,
+            voice_samples: Arc::new(MemoryVoiceSamples::default()),
             secrets,
             connection_secrets: Arc::new(MemorySecretStore::default()),
         }
@@ -268,8 +278,10 @@ pub struct Providers {
     pub decisions: Arc<dyn DecisionEngine>,
     /// The user's voices (ElevenLabs).
     pub voices: Arc<dyn VoiceLibrary>,
-    /// Narration (ElevenLabs).
+    /// Narration and voice samples (ElevenLabs).
     pub speech: Arc<dyn SpeechSynthesizer>,
+    /// The voices' stock previews (ElevenLabs).
+    pub previews: Arc<dyn VoicePreviews>,
     /// Word timings of narration the user recorded (ElevenLabs forced
     /// alignment).
     pub aligner: Arc<dyn SpeechAligner>,
@@ -308,6 +320,7 @@ impl Providers {
             decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
+            previews: Arc::new(bardo_ai::ElevenLabsPreviews::new()),
             aligner: Arc::new(bardo_ai::ElevenLabsAlignment::new()),
             images: Arc::new(bardo_ai::GeminiImages::new()),
             clips: vec![
@@ -358,7 +371,11 @@ pub struct Bardo {
     cut_suggestions: Arc<dyn CutSuggestionRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
+    voice_samples: Arc<dyn VoiceSampleStore>,
     audio: Arc<dyn AudioOutput>,
+    speech: Arc<dyn SpeechSynthesizer>,
+    previews: Arc<dyn VoicePreviews>,
+    samples_in_flight: Arc<voice_samples::SamplesInFlight>,
     media: Arc<dyn MediaEngine>,
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
@@ -430,6 +447,7 @@ impl Bardo {
             cut_suggestions,
             costs,
             files,
+            voice_samples,
             secrets,
             connection_secrets,
         } = repositories;
@@ -626,7 +644,11 @@ impl Bardo {
             cut_suggestions,
             cost_book,
             files,
+            voice_samples,
             audio: providers.audio,
+            speech: providers.speech,
+            previews: providers.previews,
+            samples_in_flight: Arc::default(),
             media: providers.media,
             market_data: providers.market_data,
             voices: providers.voices,
@@ -1085,6 +1107,18 @@ pub(crate) mod testing {
                 return Err(failure);
             }
             Ok(self.voices.lock().unwrap().clone())
+        }
+    }
+
+    /// Has no preview to give; tests of previews bring their own fake.
+    pub(crate) struct NoPreviews;
+
+    impl bardo_domain::VoicePreviews for NoPreviews {
+        fn download(&self, _url: &str) -> Result<Vec<u8>, ProviderFailure> {
+            Err(ProviderFailure::new(
+                bardo_domain::ProviderFailureKind::Unreachable,
+                "no previews in tests",
+            ))
         }
     }
 
@@ -1711,6 +1745,7 @@ pub(crate) mod testing {
             decisions: Arc::new(FakeDecisionEngine::default()),
             voices: Arc::new(FakeVoiceLibrary::default()),
             speech: Arc::new(FakeSpeech::default()),
+            previews: Arc::new(NoPreviews),
             aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
             images: Arc::new(FakeImages::default()),
             clips: vec![Arc::new(FakeClips::default())],
@@ -1809,6 +1844,7 @@ mod tests {
             export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),
+            voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
             research: db,
             secrets: Arc::new(MemorySecretStore::default()),
             connection_secrets: Arc::new(MemorySecretStore::default()),
@@ -1947,6 +1983,7 @@ mod tests {
             Box::new(MemorySecretStore::default()),
             Box::new(MemoryProjectFiles::default()),
             Box::new(MemoryExportFiles::default()),
+            Box::new(MemoryVoiceSamples::default()),
         );
         let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();

@@ -45,6 +45,8 @@ fn main() -> anyhow::Result<()> {
     let connection_secrets = bardo_storage::platform_connection_secrets()?;
     let files = bardo_storage::LocalProjectFiles::new(bardo_storage::default_projects_dir()?);
     let exports = bardo_storage::LocalExportFiles::new(bardo_storage::default_exports_dir());
+    let voice_samples =
+        bardo_storage::LocalVoiceSamples::new(bardo_storage::default_voice_samples_dir()?);
     let locale = sys_locale::get_locale();
     let bardo = Bardo::start(
         Repositories::local(
@@ -53,6 +55,7 @@ fn main() -> anyhow::Result<()> {
             connection_secrets,
             Box::new(files),
             Box::new(exports),
+            Box::new(voice_samples),
         ),
         Providers::live(),
         locale.as_deref(),

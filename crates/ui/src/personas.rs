@@ -2,7 +2,9 @@
 //! the ElevenLabs voice picker and the generation presets as its inspector.
 //! Personas are exported to and imported from package files through the
 //! system's file dialogs; an imported persona whose voice is not (yet)
-//! seen in the user's account shows a flag and how to fix it.
+//! seen in the user's account shows a flag and how to fix it. Voices are
+//! heard right here: the provider's stock preview from the picker, and a
+//! sample read with the form's voice and presets below the presets.
 //! Rules, storage and the voice listing live in `bardo_app`; this file maps
 //! the form to a `PersonaDraft` and results back to the screen.
 
@@ -11,8 +13,12 @@ use bardo_app::bardo_domain::{
     Voice, VoiceCategory, VoiceFlag, VoiceRef,
 };
 use std::rc::Rc;
+use std::time::Duration;
 
-use bardo_app::{Bardo, Destination, PersonaError, Text, VoiceStatus, persona_package_folder};
+use bardo_app::{
+    Bardo, BudgetConsent, Destination, PersonaError, SamplePlayer, SpendEstimate, Text,
+    VoiceSample, VoiceSampleError, VoiceSampling, VoiceStatus, persona_package_folder,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -30,6 +36,7 @@ use crate::kit::{self, Tone};
 use crate::layout;
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
+use crate::spend::budget_question;
 
 /// Field errors each control shows, and clears once the user edits it.
 const NAME_ERRORS: &[PersonaFieldError] = &[
@@ -110,6 +117,32 @@ impl Preset {
     }
 }
 
+/// The width of the preview button in the voice picker.
+const PREVIEW_BUTTON: f32 = 20.;
+
+/// How often a playing sample is checked for its end.
+const SAMPLE_POLL: Duration = Duration::from_millis(150);
+
+/// The sample the screen is making or playing.
+#[derive(Clone, PartialEq, Eq)]
+enum SampleKind {
+    /// The provider's stock preview of a voice in the picker.
+    Preview(VoiceRef),
+    /// The sentence read with the form's voice and presets.
+    Reading,
+}
+
+/// What the screen says about the last sample.
+enum SampleNote {
+    /// A stock preview of the named voice: free, deaf to the presets.
+    Preview(String),
+    /// Kept from before: no new call.
+    Free,
+    /// Read just now, billed this many characters.
+    Billed(u64),
+    Error(Text, Option<String>),
+}
+
 /// What the form footer says after the last action.
 enum Notice {
     Saved,
@@ -145,6 +178,22 @@ pub struct PersonasScreen {
     confirm: Option<Vec<Channel>>,
     field_errors: Vec<PersonaFieldError>,
     notice: Option<Notice>,
+    /// The sentence a sample reads; blank reads the default one.
+    sample_text: Entity<InputState>,
+    /// The sample being made or played.
+    sample: Option<SampleKind>,
+    /// A sample being made; dropping it stops waiting for it.
+    sampling: Option<Task<()>>,
+    player: Option<SamplePlayer>,
+    /// Watches the playing sample for its end.
+    sample_watch: Option<Task<()>>,
+    sample_note: Option<SampleNote>,
+    /// A reading that would reach the budget, waiting for the user's
+    /// answer.
+    sample_ask: Option<SpendEstimate>,
+    /// Whether the note is about a stock preview, so it shows in the
+    /// voice picker rather than below the presets.
+    note_in_picker: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -153,6 +202,7 @@ impl PersonasScreen {
         let name = cx.new(|cx| InputState::new(window, cx));
         let tone = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8));
         let script_style = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
+        let sample_text = cx.new(|cx| InputState::new(window, cx));
         let defaults = GenerationPresets::default();
         let sliders: Vec<_> = Preset::ALL
             .into_iter()
@@ -179,6 +229,11 @@ impl PersonasScreen {
             cx.subscribe(&script_style, |this, _, event, cx| {
                 this.edited(SCRIPT_STYLE_ERRORS, event, cx)
             }),
+            cx.subscribe(&sample_text, |this, _, event, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.forget_sample_note(cx);
+                }
+            }),
             cx.observe_in(&bardo, window, |this, _, window, cx| {
                 this.relabel(window, cx)
             }),
@@ -188,6 +243,7 @@ impl PersonasScreen {
             subscriptions.push(cx.subscribe(slider, move |this, _, event, cx| {
                 if let SliderEvent::Change(_) = event {
                     this.field_errors.retain(|error| *error != preset.error());
+                    this.forget_sample_note(cx);
                     this.touched(cx);
                 }
             }));
@@ -212,6 +268,14 @@ impl PersonasScreen {
             confirm: None,
             field_errors: Vec::new(),
             notice: None,
+            sample_text,
+            sample: None,
+            sampling: None,
+            player: None,
+            sample_watch: None,
+            sample_note: None,
+            sample_ask: None,
+            note_in_picker: false,
             _subscriptions: subscriptions,
         };
         screen.reload_list(cx);
@@ -275,6 +339,9 @@ impl PersonasScreen {
         let name = tr(bardo, Text::PersonaNamePlaceholder);
         let tone = tr(bardo, Text::PersonaTonePlaceholder);
         let style = tr(bardo, Text::PersonaScriptStylePlaceholder);
+        let sentence = SharedString::from(bardo.sample_sentence());
+        self.sample_text
+            .update(cx, |input, cx| input.set_placeholder(sentence, window, cx));
         self.name
             .update(cx, |input, cx| input.set_placeholder(name, window, cx));
         self.tone
@@ -300,6 +367,9 @@ impl PersonasScreen {
         }
         self.voice = draft.voice.clone();
         self.realistic_voice = draft.realistic_voice;
+        self.stop_sample(cx);
+        self.sample_note = None;
+        self.sample_ask = None;
     }
 
     fn presets(&self, cx: &App) -> GenerationPresets {
@@ -492,6 +562,11 @@ impl PersonasScreen {
 
     fn toggle_picker(&mut self, cx: &mut Context<Self>) {
         self.picker_open = !self.picker_open;
+        // A preview is controlled from the picker: it goes with it.
+        if !self.picker_open && self.note_in_picker {
+            self.stop_sample(cx);
+            self.sample_note = None;
+        }
         if self.picker_open && self.bardo.read(cx).voice_list().is_none() {
             self.load_voices(cx);
         }
@@ -549,7 +624,164 @@ impl PersonasScreen {
         self.voice = Some(voice);
         self.field_errors
             .retain(|error| !VOICE_ERRORS.contains(error));
+        self.forget_sample_note(cx);
         self.touched(cx);
+    }
+
+    /// Plays the stock preview of a voice in the picker, or stops it when
+    /// it is the one playing.
+    fn toggle_preview(&mut self, voice: &Voice, cx: &mut Context<Self>) {
+        let kind = SampleKind::Preview(voice.reference.clone());
+        if self.sample.as_ref() == Some(&kind) {
+            self.stop_sample(cx);
+            return;
+        }
+        let prepared = self.bardo.read(cx).voice_preview(voice);
+        self.start_sample(kind, prepared, cx);
+    }
+
+    /// Plays the sentence with the form's voice and presets, saved or
+    /// not, or stops it when it is playing.
+    fn toggle_reading(&mut self, cx: &mut Context<Self>) {
+        if self.sample == Some(SampleKind::Reading) {
+            self.stop_sample(cx);
+            return;
+        }
+        self.read_sample(BudgetConsent::Ask, cx);
+    }
+
+    /// Reads the sentence; past the budget, asks first unless `consent`
+    /// says the user already agreed.
+    fn read_sample(&mut self, consent: BudgetConsent, cx: &mut Context<Self>) {
+        let text = self.sample_text.read(cx).value().to_string();
+        let prepared =
+            self.bardo
+                .read(cx)
+                .voice_sample(self.voice.as_ref(), self.presets(cx), &text, consent);
+        if let Err(VoiceSampleError::OverBudget(estimate)) = prepared {
+            self.stop_sample(cx);
+            self.sample_note = None;
+            self.sample_ask = Some(estimate);
+            cx.notify();
+            return;
+        }
+        self.start_sample(SampleKind::Reading, prepared, cx);
+    }
+
+    /// Makes the sample, on a background thread unless it is kept from
+    /// before, then plays it. Any other sample stops first.
+    fn start_sample(
+        &mut self,
+        kind: SampleKind,
+        prepared: Result<VoiceSampling, bardo_app::VoiceSampleError>,
+        cx: &mut Context<Self>,
+    ) {
+        self.stop_sample(cx);
+        self.sample_ask = None;
+        let sampling = match prepared {
+            Ok(sampling) => sampling,
+            Err(error) => {
+                self.note_in_picker = matches!(kind, SampleKind::Preview(_));
+                self.sample_note = Some(SampleNote::Error(
+                    error.message(),
+                    error.detail().map(str::to_owned),
+                ));
+                cx.notify();
+                return;
+            }
+        };
+        self.note_in_picker = matches!(kind, SampleKind::Preview(_));
+        self.sample = Some(kind.clone());
+        self.sample_note = None;
+        if sampling.is_kept() {
+            let sample = sampling.run();
+            self.play_sample(sample, cx);
+            return;
+        }
+        self.sampling = Some(cx.spawn(async move |this, cx| {
+            let sample = cx
+                .background_executor()
+                .spawn(async move { sampling.run() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.sampling = None;
+                // Stopped or replaced meanwhile: the sample stays kept for
+                // next time, but does not play.
+                if this.sample.as_ref() == Some(&kind) {
+                    this.play_sample(sample, cx);
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    fn play_sample(&mut self, sample: VoiceSample, cx: &mut Context<Self>) {
+        self.note_in_picker = matches!(
+            sample.source,
+            bardo_app::bardo_domain::SampleSource::Preview { .. }
+        );
+        let played = sample
+            .result
+            .and_then(|audio| Ok((self.bardo.read(cx).play_voice_sample(&audio)?, audio)));
+        match played {
+            Ok((player, audio)) => {
+                self.sample_note = Some(match (&sample.source, audio.billed_characters) {
+                    (bardo_app::bardo_domain::SampleSource::Preview { voice, .. }, _) => {
+                        SampleNote::Preview(voice.name().to_owned())
+                    }
+                    (_, Some(characters)) => SampleNote::Billed(characters),
+                    (_, None) => SampleNote::Free,
+                });
+                self.player = Some(player);
+                self.sample_watch = Some(cx.spawn(async move |this, cx| {
+                    loop {
+                        cx.background_executor().timer(SAMPLE_POLL).await;
+                        let ended = this.update(cx, |this, cx| {
+                            let ended = !this.player.as_ref().is_some_and(SamplePlayer::is_playing);
+                            if ended {
+                                this.player = None;
+                                this.sample = None;
+                                cx.notify();
+                            }
+                            ended
+                        });
+                        if ended.unwrap_or(true) {
+                            break;
+                        }
+                    }
+                }));
+            }
+            Err(error) => {
+                self.sample = None;
+                self.sample_note = Some(SampleNote::Error(
+                    error.message(),
+                    error.detail().map(str::to_owned),
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Stops the sample being made or played.
+    fn stop_sample(&mut self, cx: &mut Context<Self>) {
+        if let Some(player) = self.player.as_mut() {
+            player.stop();
+        }
+        self.player = None;
+        self.sample_watch = None;
+        self.sampling = None;
+        self.sample = None;
+        cx.notify();
+    }
+
+    /// A changed voice, preset or sentence makes the note about the last
+    /// sample (free or billed) and any budget question about it stale.
+    fn forget_sample_note(&mut self, cx: &mut Context<Self>) {
+        if self.sample_note.is_some() || self.sample_ask.is_some() {
+            self.sample_note = None;
+            self.sample_ask = None;
+            cx.notify();
+        }
     }
 
     fn collection(&self, cx: &mut Context<Self>) -> Collection {
@@ -727,6 +959,10 @@ impl PersonasScreen {
     }
 
     fn render_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let note = self
+            .note_in_picker
+            .then(|| self.render_sample_note(cx))
+            .flatten();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let message = |text: SharedString, color| {
@@ -769,64 +1005,91 @@ impl PersonasScreen {
             Some(Ok(voices)) => voices,
         };
 
-        let rows: Vec<AnyElement> = voices
-            .iter()
-            .enumerate()
-            .map(|(ix, voice)| {
-                let selected = self
-                    .voice
-                    .as_ref()
-                    .is_some_and(|current| current.same_voice(&voice.reference));
-                let mut traits = vec![
-                    bardo
-                        .text(Text::VoiceCategoryName(voice.category))
-                        .into_owned(),
-                ];
-                traits.extend(voice.labels.iter().cloned());
-                let reference = voice.reference.clone();
-                let category = voice.category;
-                kit::list_row(("voice", ix), selected, cx)
-                    .child(
-                        h_flex()
-                            .justify_between()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .font_medium()
-                                    .child(SharedString::from(voice.reference.name().to_owned())),
-                            )
-                            .when(selected, |row| {
-                                row.child(kit::status_with(
-                                    Tone::Accent,
-                                    IconName::Check,
-                                    tr(bardo, Text::VoiceSelected),
-                                    cx,
+        let rows: Vec<AnyElement> =
+            voices
+                .iter()
+                .enumerate()
+                .map(|(ix, voice)| {
+                    let selected = self
+                        .voice
+                        .as_ref()
+                        .is_some_and(|current| current.same_voice(&voice.reference));
+                    let mut traits = vec![
+                        bardo
+                            .text(Text::VoiceCategoryName(voice.category))
+                            .into_owned(),
+                    ];
+                    traits.extend(voice.labels.iter().cloned());
+                    let reference = voice.reference.clone();
+                    let category = voice.category;
+                    // Names line up whether or not a voice has a preview.
+                    let preview = match voice.preview_url.is_some().then(|| {
+                        let kind = SampleKind::Preview(voice.reference.clone());
+                        let active = self.sample.as_ref() == Some(&kind);
+                        let loading = active && self.sampling.is_some();
+                        let (icon, tip) = if active {
+                            (IconName::Pause, Text::VoicePreviewStop)
+                        } else {
+                            (IconName::Play, Text::VoicePreviewPlay)
+                        };
+                        let listed = voice.clone();
+                        Button::new(("voice-preview", ix))
+                            .ghost()
+                            .xsmall()
+                            .icon(icon)
+                            .loading(loading)
+                            .tooltip(tr(bardo, tip))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                // The row behind picks the voice; this only plays.
+                                cx.stop_propagation();
+                                this.toggle_preview(&listed, cx)
+                            }))
+                    }) {
+                        Some(button) => button.into_any_element(),
+                        None => div().w(px(PREVIEW_BUTTON)).into_any_element(),
+                    };
+                    kit::list_row(("voice", ix), selected, cx)
+                        .child(
+                            h_flex()
+                                .justify_between()
+                                .gap_2()
+                                .child(h_flex().gap_1().min_w_0().child(preview).child(
+                                    div().font_medium().child(SharedString::from(
+                                        voice.reference.name().to_owned(),
+                                    )),
                                 ))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(SharedString::from(traits.join(" · "))),
-                    )
-                    .when(!voice.description.is_empty(), |row| {
-                        row.child(
+                                .when(selected, |row| {
+                                    row.child(kit::status_with(
+                                        Tone::Accent,
+                                        IconName::Check,
+                                        tr(bardo, Text::VoiceSelected),
+                                        cx,
+                                    ))
+                                }),
+                        )
+                        .child(
                             div()
                                 .text_xs()
                                 .text_color(theme.muted_foreground)
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .child(SharedString::from(voice.description.clone())),
+                                .child(SharedString::from(traits.join(" · "))),
                         )
-                    })
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.pick(reference.clone(), category, cx)
-                    }))
-                    .into_any_element()
-            })
-            .collect();
+                        .when(!voice.description.is_empty(), |row| {
+                            row.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(SharedString::from(voice.description.clone())),
+                            )
+                        })
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.pick(reference.clone(), category, cx)
+                        }))
+                        .into_any_element()
+                })
+                .collect();
 
         kit::well(cx)
             .p_0()
@@ -839,6 +1102,7 @@ impl PersonasScreen {
                     .text_color(theme.muted_foreground)
                     .child(tr(bardo, Text::VoicesTitle)),
             )
+            .children(note.map(|note| div().px_3().pt_1().child(note)))
             .child(
                 v_flex()
                     .id("voice-list")
@@ -916,6 +1180,138 @@ impl PersonasScreen {
                     .gap_y_4()
                     .children(rows),
             )
+            .child(self.render_sample(cx))
+            .into_any_element()
+    }
+
+    /// What the last sample cost, or why it did not play.
+    fn render_sample_note(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        self.sample_note.as_ref().map(|note| {
+            let (color, text, detail): (_, SharedString, Option<&String>) = match note {
+                SampleNote::Preview(voice) => (
+                    theme.muted_foreground,
+                    bardo
+                        .text_with(Text::VoicePreviewNote, &[("voice", voice)])
+                        .into(),
+                    None,
+                ),
+                SampleNote::Free => (
+                    theme.muted_foreground,
+                    tr(bardo, Text::VoiceSampleFree),
+                    None,
+                ),
+                SampleNote::Billed(characters) => (
+                    theme.muted_foreground,
+                    bardo
+                        .text_with(Text::VoiceSampleBilled, &[("n", &characters.to_string())])
+                        .into(),
+                    None,
+                ),
+                SampleNote::Error(text, detail) => {
+                    (theme.danger, tr(bardo, *text), detail.as_ref())
+                }
+            };
+            v_flex()
+                .gap_0p5()
+                .child(div().text_xs().text_color(color).child(text))
+                .children(detail.map(|detail| {
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(SharedString::from(
+                            bardo.text_with(Text::KeyCheckDetail, &[("detail", detail)]),
+                        ))
+                }))
+                .into_any_element()
+        })
+    }
+
+    /// The sentence read with the voice and presets as they are on the
+    /// form, and what the last sample cost.
+    fn render_sample(&self, cx: &mut Context<Self>) -> AnyElement {
+        let note = (!self.note_in_picker)
+            .then(|| self.render_sample_note(cx))
+            .flatten();
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let reading = self.sample == Some(SampleKind::Reading);
+        let loading = reading && self.sampling.is_some();
+        let label = if reading && !loading {
+            Text::VoiceSampleStop
+        } else {
+            Text::VoiceSamplePlay
+        };
+        let status = loading.then(|| {
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(tr(bardo, Text::VoiceSampleReading))
+        });
+
+        let ask = self.sample_ask.as_ref().map(|estimate| {
+            budget_question(
+                "voice-sample-budget",
+                bardo,
+                estimate,
+                cx,
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.read_sample(BudgetConsent::Confirmed, cx);
+                }),
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.sample_ask = None;
+                    cx.notify();
+                }),
+            )
+        });
+
+        v_flex()
+            .gap_2()
+            .pt_1()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_medium()
+                            .child(tr(bardo, Text::VoiceSampleTitle)),
+                    )
+                    .child(kit::info(
+                        "voice-sample-info",
+                        None,
+                        tr(bardo, Text::VoiceSampleHint),
+                    )),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Input::new(&self.sample_text)),
+                    )
+                    .child(
+                        Button::new("play-voice-sample")
+                            .outline()
+                            .icon(if reading && !loading {
+                                IconName::Pause
+                            } else {
+                                IconName::Play
+                            })
+                            .label(tr(bardo, label))
+                            .loading(loading)
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_reading(cx)),
+                            ),
+                    ),
+            )
+            .children(status)
+            .children(ask)
+            .children(note)
             .into_any_element()
     }
 

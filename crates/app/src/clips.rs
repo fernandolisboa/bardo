@@ -591,7 +591,7 @@ impl ClipJob<'_> {
                 model: &order.model,
                 purpose: CostPurpose::SceneClip,
                 usage: Metered::video_seconds(u64::from(run.seconds)),
-                job: self.job,
+                job: Some(self.job),
                 reported: run.quote_micros.map(Money::from_micros),
             },
             self.project,

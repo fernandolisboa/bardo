@@ -25,6 +25,7 @@ mod secrets;
 mod template;
 mod theme;
 mod timeline;
+mod voice_samples;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -42,6 +43,7 @@ pub use secrets::{
     MemorySecretStore, app_credentials_target, credential_target, platform_connection_secrets,
     platform_secret_store, tokens_target,
 };
+pub use voice_samples::{LocalVoiceSamples, MemoryVoiceSamples, default_voice_samples_dir};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
