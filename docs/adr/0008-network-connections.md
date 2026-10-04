@@ -23,7 +23,7 @@ The publishing phase (PRD stories 83-90) uploads to YouTube, TikTok and Instagra
    - **Instagram Reels**: Facebook Login for Business with a linked Facebook Page, resumable local upload, then `media_publish`; scheduling through the in-app scheduler (ADR-0006).
    - **X and Kick**: export only (unchanged).
 5. **Publications gain a kind and a status.** Kinds: manual (posted by hand from an export) and uploaded. An uploaded publication moves through queued, uploading, processing, then scheduled, published, draft sent (TikTok) or **restricted** (the network kept it private because the app is not audited); failed keeps its reason. Still one publication per project and network.
-6. **Limits are checked before queuing and read from the network where it reports them**: the YouTube uploads bucket, the TikTok pending-drafts cap, the Instagram publishing limit from `content_publishing_limit` (never a hard-coded number).
+6. **Limits are checked before queuing and read from the network where it reports them**: the YouTube uploads bucket, the TikTok pending-drafts cap, the Instagram publishing limit from `content_publishing_limit` (never a hard-coded number). Amended with the Reels upload: the Instagram limit is read by the upload job, before it makes the container and again before it publishes, since the limit moves between the review and the upload; over it, the job stays queued and the post shows when it goes.
 
 ## Consequences
 

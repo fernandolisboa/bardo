@@ -57,6 +57,26 @@ impl Network {
         }
     }
 
+    /// Whether an upload can carry a publish time the network keeps, so
+    /// the network publishes the video by itself (YouTube's `publishAt`).
+    /// Instagram has no such field: its posts wait for the in-app
+    /// scheduler (ADR-0006).
+    pub fn schedules_uploads(self) -> bool {
+        self == Network::YouTube
+    }
+
+    /// Whether an upload declares whether the video is made for kids
+    /// (YouTube's `selfDeclaredMadeForKids`).
+    pub fn asks_made_for_kids(self) -> bool {
+        self == Network::YouTube
+    }
+
+    /// Whether an upload is a Reel: it picks its cover frame and whether it
+    /// also shows in the feed, and the file must meet the Reel specs.
+    pub fn uploads_reels(self) -> bool {
+        self == Network::InstagramReels
+    }
+
     /// The preset a render for this network uses unless the account
     /// overrides it.
     ///

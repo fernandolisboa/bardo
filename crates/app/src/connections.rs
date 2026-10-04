@@ -233,6 +233,14 @@ impl Connections {
             .ok_or(ConnectionError::NotConnected)
     }
 
+    /// Who the account is connected as on the network.
+    pub(crate) fn identity(
+        &self,
+        account: &NetworkAccount,
+    ) -> Result<ConnectedIdentity, ConnectionError> {
+        Ok(self.state(account.id)?.identity)
+    }
+
     /// The account's tokens, fresh: refreshed first when they expire
     /// within the network's `refresh_margin`. A refused refresh marks the
     /// account "reconnect needed". Blocks on the network when refreshing.

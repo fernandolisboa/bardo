@@ -1,0 +1,3 @@
+HTTP/2 400 
+
+{"debug_info":{"retriable":false,"type":"NotAuthorizedError","message":"User not authorized to perform this request"}}

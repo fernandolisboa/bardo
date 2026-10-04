@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"id":"17895695668004550","status_code":"FINISHED","status":"Finished: Media has been uploaded and it is ready to be published.","video_status":{"uploading_phase":{"status":"complete","bytes_transferred":10},"processing_phase":{"status":"complete"}}}

@@ -282,7 +282,8 @@ pub struct Providers {
     pub sign_ins: Vec<Arc<dyn NetworkSignIn>>,
     /// Where the browser comes back after consent: a loopback listener.
     pub consent: Arc<dyn ConsentReceiver>,
-    /// Upload per network that has one (ADR-0008): YouTube for now.
+    /// Upload per network that has one (ADR-0008): YouTube and Instagram
+    /// Reels for now.
     pub uploaders: Vec<Arc<dyn VideoUploader>>,
     /// Owner metrics per network that has them (#79): YouTube Analytics
     /// for now.
@@ -313,7 +314,10 @@ impl Providers {
                 Arc::new(bardo_publish::InstagramSignIn::new()),
             ],
             consent: Arc::new(bardo_publish::LoopbackReceiver),
-            uploaders: vec![Arc::new(bardo_publish::YouTubeUploader::new())],
+            uploaders: vec![
+                Arc::new(bardo_publish::YouTubeUploader::new()),
+                Arc::new(bardo_publish::InstagramUploader::new()),
+            ],
             analytics: vec![Arc::new(bardo_publish::YouTubeAnalytics::new())],
         }
     }
@@ -347,6 +351,13 @@ pub struct Bardo {
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
     uploaders: Vec<Arc<dyn VideoUploader>>,
+    /// What the Reel specs found in each render, by render and size.
+    reel_checks: std::sync::Mutex<
+        std::collections::HashMap<
+            (bardo_domain::RenderId, u64),
+            Vec<bardo_domain::ReelSpecProblem>,
+        >,
+    >,
     /// The last voice listing of this session, for the voice picker.
     voice_list: Option<VoiceList>,
     jobs: JobQueue,
@@ -601,6 +612,7 @@ impl Bardo {
             voices: providers.voices,
             clips: providers.clips,
             uploaders: providers.uploaders,
+            reel_checks: std::sync::Mutex::default(),
             voice_list: None,
             jobs,
             provider_keys,

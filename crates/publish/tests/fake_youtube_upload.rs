@@ -174,6 +174,8 @@ fn video() -> VideoUpload {
         made_for_kids: false,
         synthetic: false,
         publish_at: None,
+        share_to_feed: true,
+        cover: Duration::ZERO,
     }
 }
 

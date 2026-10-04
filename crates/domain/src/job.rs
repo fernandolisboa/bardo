@@ -652,6 +652,19 @@ impl Job {
         Ok(())
     }
 
+    /// Ends the running attempt without failing it and queues the job again
+    /// for `until`: the handler waits on something outside Bardo (a
+    /// network's publishing limit). Its attempts start over, so a wait
+    /// never spends the retries of a later failure.
+    pub fn defer(&mut self, until: SystemTime) -> Result<(), InvalidJobTransition> {
+        self.expect_running("defer")?;
+        self.state = JobState::Queued;
+        self.attempts = 0;
+        self.failure = None;
+        self.retry_at = Some(until);
+        Ok(())
+    }
+
     /// Stops a queued or running job for good. A running handler is told to
     /// stop by the queue; whatever it reports afterwards is rejected here.
     pub fn cancel(&mut self) -> Result<(), InvalidJobTransition> {
@@ -816,6 +829,27 @@ mod tests {
         assert_eq!(job.state(), JobState::Done);
         assert_eq!(job.progress(), Progress::DONE);
         assert_eq!(job.failure(), None);
+    }
+
+    #[test]
+    fn a_deferred_job_waits_until_its_time_with_its_attempts_back() {
+        let mut job = running();
+        job.fail_attempt(transient(), now(), &policy()).unwrap();
+        job.start(now() + Duration::from_secs(2)).unwrap();
+        job.record_progress(Progress::of(1, 2), Some("held".into()))
+            .unwrap();
+        let until = now() + Duration::from_secs(3600);
+        job.defer(until).unwrap();
+        assert_eq!(job.state(), JobState::Queued);
+        assert_eq!(job.retry_at(), Some(until));
+        assert_eq!(job.attempts(), 0);
+        assert_eq!(job.failure(), None, "waiting is not failing");
+        assert_eq!(job.checkpoint(), Some("held"));
+        assert!(!job.is_due(until - Duration::from_secs(1)));
+        assert!(job.is_due(until));
+        assert!(job.defer(until).is_err(), "only a running job");
+        let restored = Job::restore(JobRecord::from(&job)).unwrap();
+        assert_eq!(restored.retry_at(), Some(until));
     }
 
     #[test]

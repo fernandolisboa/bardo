@@ -1,0 +1,4 @@
+HTTP/2 500 
+content-type: application/json
+
+{"debug_info":{"retriable":true,"type":"ProcessingFailedError","message":"Request processing failed"}}

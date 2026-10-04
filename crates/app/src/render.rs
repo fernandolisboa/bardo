@@ -600,7 +600,7 @@ impl Bardo {
 /// What the render review reads, in the interface language.
 impl Bardo {
     /// A figure to the tenth, signed: `−14.2`, `+6,3`.
-    fn tenths(&self, value: f64) -> String {
+    pub(crate) fn tenths(&self, value: f64) -> String {
         let tenths = (value * 10.0).round() as i64;
         let sign = match tenths {
             ..0 => "\u{2212}",

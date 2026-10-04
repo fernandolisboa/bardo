@@ -117,6 +117,43 @@ last renewal.
   **Settings & privacy › Business integrations**.
 - A connected account must be disconnected before it can be removed.
 
+## Uploading a Reel
+
+At the Publish stage, a connected Instagram Reels account offers **Review
+upload** once its preset is rendered and its caption written.
+
+- **Reel specs.** Before the review opens, Bardo checks the rendered file
+  against what Instagram takes as a Reel: MP4 or MOV in fast start, H.264
+  or HEVC, 23 to 60 frames per second, at most 1920 pixels wide, 3 seconds
+  to 15 minutes and at most 300 MB. Each one it fails is listed under the
+  upload, and the review stays closed until a new render passes.
+- **The review** shows the file, the account, and the caption with its
+  hashtags as Instagram gets them. You choose the **cover** (the frame at
+  that time, as seconds or m:ss), **Also show in Feed** (on: the Reel also
+  shows in your grid and followers' feeds), and the **AI info label**, on
+  when the narration used a realistic voice.
+- **Upload and publish** sends the file and, once Instagram has processed
+  it, publishes the Reel. Bardo checks once a minute; if Instagram is still
+  processing after about a quarter of an hour, the post shows **Still
+  processing** and **Check again** picks it up later.
+- **Publishing limit.** Instagram lets an account publish a set number of
+  posts through apps in 24 hours (Bardo reads the number from Instagram).
+  Over it, the Reel stays queued and the post says when it goes. When other
+  apps also published on the account, Bardo can't tell when their posts
+  leave the window, so it says when it reads the limit again (within the
+  hour) instead. Stopping and resuming it reads the limit again.
+- **Stop and resume.** A stopped or interrupted upload resumes from what
+  Instagram already has. A container left unpublished for 24 hours expires
+  at Instagram; Bardo then sends the file again in a new one, twice at
+  most.
+- If Instagram publishes the Reel with a warning (for example that it left
+  the audio out), the post shows Instagram's warning.
+- If the account is reconnected as another Instagram account before the
+  Reel goes, the upload stops and asks for a new review.
+
+Instagram takes no publish time from Bardo yet: a Reel goes out once it is
+processed.
+
 ## If the Page needs publishing authorization
 
 Meta may ask a Page's admins to complete **Page Publishing Authorization**

@@ -563,6 +563,7 @@ pub fn upload_label(bardo: &Bardo, state: &UploadState) -> SharedString {
         UploadState::Retrying => tr(bardo, Text::UploadStateRetrying),
         UploadState::Processing => tr(bardo, Text::UploadStateProcessing),
         UploadState::StillProcessing => tr(bardo, Text::UploadStateStillProcessing),
+        UploadState::OverLimit { .. } => tr(bardo, Text::UploadStateOverLimit),
         UploadState::Scheduled(_) => tr(bardo, Text::UploadStateScheduled),
         UploadState::Published => tr(bardo, Text::UploadStatePublished),
         UploadState::Restricted => tr(bardo, Text::UploadStateRestricted),
@@ -594,7 +595,27 @@ fn upload_state(
         ),
         UploadState::Processing => (
             Tone::Info,
-            Some(with_network(Text::UploadProcessingHint).into()),
+            Some(
+                with_network(if publication.network().uploads_reels() {
+                    Text::UploadReelProcessingHint
+                } else {
+                    Text::UploadProcessingHint
+                })
+                .into(),
+            ),
+        ),
+        UploadState::OverLimit {
+            until,
+            frees,
+            used,
+            total,
+        } => (
+            Tone::Warning,
+            Some(
+                bardo
+                    .upload_over_limit_text(*until, *frees, *used, *total)
+                    .into(),
+            ),
         ),
         UploadState::StillProcessing => (
             Tone::Warning,
@@ -638,18 +659,26 @@ fn upload_state(
                 cx,
             ))
         });
-    let row = match state {
-        UploadState::Scheduled(at) => row.child(
-            div()
-                .text_sm()
-                .text_color(look(cx).tokens.text2)
-                .child(SharedString::from(bardo.text_with(
-                    Text::UploadScheduledAt,
-                    &[("when", &bardo.publish_time_text(*at))],
-                ))),
-        ),
-        _ => row,
+    let when = match state {
+        UploadState::Scheduled(at) => Some((Text::UploadScheduledAt, *at)),
+        UploadState::OverLimit { until, frees, .. } => Some((
+            if *frees {
+                Text::UploadOverLimitAt
+            } else {
+                Text::UploadOverLimitRetryAt
+            },
+            *until,
+        )),
+        _ => None,
     };
+    let row = row.children(when.map(|(text, at)| {
+        div()
+            .text_sm()
+            .text_color(look(cx).tokens.text2)
+            .child(SharedString::from(
+                bardo.text_with(text, &[("when", &bardo.publish_time_text(at))]),
+            ))
+    }));
     let mut column = v_flex().gap_2().child(row);
     if let UploadState::Uploading(progress) = state {
         column = column.child(
@@ -672,6 +701,16 @@ fn upload_state(
             Text::UploadRestrictedHint
         };
         column = column.child(kit::notice(Tone::Warning, tr(bardo, hint), cx));
+    }
+    if let Some(issue) = publication
+        .upload()
+        .and_then(|upload| upload.issue.as_deref())
+    {
+        column = column.child(kit::notice(
+            Tone::Warning,
+            bardo.upload_issue_text(issue),
+            cx,
+        ));
     }
     if let UploadState::Failed { failure, .. } = state {
         column = column.child(kit::notice(

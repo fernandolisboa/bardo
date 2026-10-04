@@ -88,6 +88,8 @@ pub struct JobContext {
     attempt: u32,
     checkpoint: Option<String>,
     external_handle: Option<String>,
+    /// Set by `defer`: the attempt ends waiting, not done.
+    deferred: Option<SystemTime>,
     stop: Arc<StopSignal>,
     shared: Arc<Shared>,
 }
@@ -128,6 +130,16 @@ impl JobContext {
     /// time passed, false when the handler should return.
     pub fn sleep(&self, duration: Duration) -> bool {
         self.stop.sleep(duration)
+    }
+
+    /// Asks the queue to run the job again at `until` once the handler
+    /// returns `Ok`, instead of counting it done: it waits on something
+    /// outside Bardo (a network's publishing limit). The job stays queued,
+    /// with its checkpoint and external handle, and holds no place in the
+    /// queue meanwhile. A handler that defers and then fails fails as
+    /// usual.
+    pub fn defer(&mut self, until: SystemTime) {
+        self.deferred = Some(until);
     }
 
     /// Shows progress in the UI. Not saved: after a restart the job shows
@@ -240,8 +252,9 @@ impl Shared {
         saved
     }
 
-    /// Records how a worker's attempt ended.
-    fn finish(&self, id: JobId, result: Result<(), JobFailure>) {
+    /// Records how a worker's attempt ended: done, failed, or waiting
+    /// until `deferred`.
+    fn finish(&self, id: JobId, result: Result<(), JobFailure>, deferred: Option<SystemTime>) {
         let mut state = self.state();
         if state.closing {
             // The job stays running in storage and resumes on next start.
@@ -251,7 +264,10 @@ impl Shared {
         let retry = self.settings.retry;
         if let Some(job) = state.job_mut(id) {
             let ended = match result {
-                Ok(()) => job.complete(),
+                Ok(()) => match deferred {
+                    Some(until) => job.defer(until),
+                    None => job.complete(),
+                },
                 Err(failure) => {
                     let failure = self.redacted(id, failure);
                     job.fail_attempt(failure, SystemTime::now(), &retry)
@@ -465,6 +481,7 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
         attempt: job.attempts(),
         checkpoint: job.checkpoint().map(str::to_owned),
         external_handle: job.external_handle().map(str::to_owned),
+        deferred: None,
         stop,
         shared: Arc::clone(shared),
     };
@@ -479,7 +496,7 @@ fn spawn_worker(shared: &Arc<Shared>, job: &Job, stop: Arc<StopSignal>) -> std::
                 }
             };
             let shared = Arc::clone(&cx.shared);
-            shared.finish(cx.id, result);
+            shared.finish(cx.id, result, cx.deferred);
         })
         .map(drop)
 }

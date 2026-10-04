@@ -69,6 +69,7 @@ mod profile;
 mod provider_key;
 mod publication;
 mod redaction;
+mod reel;
 mod render;
 mod repository;
 mod research;
@@ -184,6 +185,11 @@ pub use publication::{
     VideoStats, channel_history, latest_of_each, sync_quota_units,
 };
 pub use redaction::Redactor;
+pub use reel::{
+    Container, LIMIT_RECHECK, Mp4Layout, NextTry, PublishingLimit, REEL_FPS, REEL_MAX_BYTES,
+    REEL_MAX_DURATION, REEL_MAX_WIDTH, REEL_MIN_DURATION, ReelFile, ReelSpecProblem, check_reel,
+    format_cover_time, mp4_layout, parse_cover_time,
+};
 pub use render::{
     CutFacts, Gate, GateLevel, LOUDNESS_GAIN_WARNING, LOUDNESS_TOLERANCE, MeasuredLoudness, Render,
     RenderId, RenderRepository, SILENCE, TRUE_PEAK_CEILING, cut_gates, output_gates,
@@ -227,8 +233,8 @@ pub use timeline::{
     snap, timecode,
 };
 pub use upload::{
-    InvalidUploadTransition, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT,
-    Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
-    UploadedVideo, VideoState, VideoUpload, VideoUploader,
+    InvalidUploadTransition, NetworkPost, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK,
+    UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
+    UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoiceRef};

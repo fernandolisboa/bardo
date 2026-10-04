@@ -24,18 +24,27 @@
 //! publish time in the user's time zone that must still be ahead when they
 //! confirm. It goes up private with that time, and the network makes it
 //! public by itself, with Bardo and the PC off (ADR-0006).
+//!
+//! A Reel (#81) is reviewed with its caption, cover frame, "also show in
+//! Feed" and AI label, and its rendered file must pass Instagram's Reel
+//! specs. Instagram only makes the post when asked: once the container is
+//! processed, the job publishes it, within the account's publishing limit.
+//! Over the limit the job waits queued, holding no place in the queue,
+//! until the oldest post Bardo published in the window leaves it. A
+//! container Instagram dropped (24 hours unpublished) goes again.
 
 use std::io::Read;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, MetadataProblem, Network,
-    NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post, PostLink, Progress,
-    ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository,
-    RenderRepository, RepositoryError, ScheduleProblem, SecretText, SignInFailureKind, Upload,
-    UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
-    VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time,
+    Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, LIMIT_RECHECK, MetadataProblem,
+    Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post, Progress,
+    ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile,
+    ReelSpecProblem, Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText,
+    SignInFailureKind, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
+    UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility,
+    check_publish_time, check_reel, mp4_layout,
 };
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +72,8 @@ pub enum UploadBlock {
     NoRender,
     /// The cut or the preset changed since the render: render again.
     RenderOutdated,
+    /// The rendered file falls short of the network's specs (a Reel's).
+    Specs,
     /// No metadata generated yet.
     NoMetadata,
     /// The metadata breaks the network's rules.
@@ -70,7 +81,7 @@ pub enum UploadBlock {
 }
 
 impl UploadBlock {
-    pub const ALL: [UploadBlock; 9] = [
+    pub const ALL: [UploadBlock; 10] = [
         UploadBlock::NotOffered,
         UploadBlock::NotConnected,
         UploadBlock::ReconnectNeeded,
@@ -78,6 +89,7 @@ impl UploadBlock {
         UploadBlock::Rendering,
         UploadBlock::NoRender,
         UploadBlock::RenderOutdated,
+        UploadBlock::Specs,
         UploadBlock::NoMetadata,
         UploadBlock::Problems,
     ];
@@ -91,6 +103,7 @@ impl UploadBlock {
             UploadBlock::Rendering => "rendering",
             UploadBlock::NoRender => "no_render",
             UploadBlock::RenderOutdated => "render_outdated",
+            UploadBlock::Specs => "specs",
             UploadBlock::NoMetadata => "no_metadata",
             UploadBlock::Problems => "problems",
         }
@@ -113,6 +126,9 @@ pub struct UploadReview {
     /// network takes them.
     pub post: Option<Post>,
     pub problems: Vec<MetadataProblem>,
+    /// What keeps the rendered file from being a Reel, in the order the
+    /// review lists them; empty on networks without such specs.
+    pub spec_problems: Vec<ReelSpecProblem>,
     /// The account's default visibility, picked until the user changes it.
     pub visibility: Visibility,
     /// The narration was read with a realistic voice: the disclosure
@@ -124,6 +140,9 @@ pub struct UploadReview {
     uploading: bool,
     /// The rendered file's size now; `None` when it is gone.
     size: Option<u64>,
+    /// The connected account's id on the network (Instagram's IG user id),
+    /// which the upload goes to.
+    destination: String,
     /// What was reviewed (render, cut, post, publication replaced), to
     /// tell when it changed.
     stamp: String,
@@ -157,6 +176,9 @@ impl UploadReview {
             ConnectionState::Connected { .. } if !self.render_current => {
                 UploadBlock::RenderOutdated
             }
+            ConnectionState::Connected { .. } if !self.spec_problems.is_empty() => {
+                UploadBlock::Specs
+            }
             ConnectionState::Connected { .. } if self.post.is_none() => UploadBlock::NoMetadata,
             ConnectionState::Connected { .. } if !self.problems.is_empty() => UploadBlock::Problems,
             ConnectionState::Connected { .. } => return None,
@@ -175,7 +197,15 @@ impl UploadReview {
             synthetic: self.synthetic,
             replace: false,
             publish_at: None,
+            share_to_feed: true,
+            cover: Duration::ZERO,
         }
+    }
+
+    /// Where the post goes: the network's own post page (a Reel shows its
+    /// caption, cover and feed choice) or a video with a title.
+    pub fn is_reel(&self) -> bool {
+        self.network.uploads_reels()
     }
 }
 
@@ -192,6 +222,10 @@ pub struct UploadChoices {
     /// then. A scheduled upload is public at that time, whatever
     /// `visibility` says.
     pub publish_at: Option<SystemTime>,
+    /// A Reel also shows in the feed.
+    pub share_to_feed: bool,
+    /// The frame of a Reel its cover shows, from the start.
+    pub cover: Duration,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -218,6 +252,13 @@ pub enum UploadReviewError {
     /// The publish time cannot be used (already past).
     #[error("the publish time cannot be used: {0}")]
     Schedule(ScheduleProblem),
+    /// The network takes no publish time from Bardo (Instagram waits for
+    /// the in-app scheduler).
+    #[error("the network takes no publish time")]
+    NoSchedule,
+    /// The cover frame is past the video's end.
+    #[error("the cover is past the end of the video")]
+    CoverPastEnd,
     #[error(transparent)]
     Job(#[from] JobActionError),
     #[error(transparent)]
@@ -234,7 +275,9 @@ impl UploadReviewError {
             UploadReviewError::Changed => Text::UploadChanged,
             UploadReviewError::ReplaceNotConfirmed => Text::UploadReplaceNotConfirmed,
             UploadReviewError::Schedule(problem) => Text::ScheduleProblem(*problem),
-            UploadReviewError::NotNow
+            UploadReviewError::CoverPastEnd => Text::UploadCoverPastEnd,
+            UploadReviewError::NoSchedule
+            | UploadReviewError::NotNow
             | UploadReviewError::Job(_)
             | UploadReviewError::Repository(_) => Text::UploadNotStarted,
         }
@@ -278,6 +321,16 @@ pub enum UploadState {
     /// The network was still processing the video when Bardo stopped
     /// waiting for it: check again later.
     StillProcessing,
+    /// Over the network's publishing limit (Instagram's): queued until
+    /// `until`, when Bardo reads the limit again; `frees` when a place
+    /// frees by then, so the post goes. `used` of `total` posts in the
+    /// window, when the network said.
+    OverLimit {
+        until: SystemTime,
+        frees: bool,
+        used: Option<u32>,
+        total: Option<u32>,
+    },
     Published,
     /// Kept private by the network although more was asked.
     Restricted,
@@ -300,6 +353,7 @@ impl UploadState {
                 | UploadState::Uploading(_)
                 | UploadState::Retrying
                 | UploadState::Processing
+                | UploadState::OverLimit { .. }
         )
     }
 }
@@ -329,10 +383,26 @@ pub fn upload_state(upload: &Upload, job: Option<&Job>) -> UploadState {
             },
         };
     };
+    // Held for the publishing limit: deferred, so queued with a time and
+    // no failure.
+    let held = job
+        .checkpoint()
+        .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
+        .and_then(|checkpoint| checkpoint.held)
+        .filter(|_| job.retry_at().is_some());
     match job.state() {
         JobState::Running if *status == UploadStatus::Processing => UploadState::Processing,
         JobState::Running => UploadState::Uploading(job.progress()),
         JobState::Queued if job.failure().is_some() => UploadState::Retrying,
+        JobState::Queued if held.is_some() => {
+            let held = held.expect("checked");
+            UploadState::OverLimit {
+                until: from_millis(held.until),
+                frees: held.frees,
+                used: held.used,
+                total: held.total,
+            }
+        }
         JobState::Queued if *status == UploadStatus::Processing => UploadState::Processing,
         JobState::Queued => UploadState::Waiting,
         JobState::Cancelled => match status {
@@ -390,6 +460,20 @@ struct UploadPayload {
     /// When the network makes the video public, in Unix milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     publish_at: Option<u64>,
+    /// A Reel also shows in the feed.
+    #[serde(default = "shown_in_feed")]
+    share_to_feed: bool,
+    /// A Reel's cover frame, in milliseconds from the start.
+    #[serde(default)]
+    cover_ms: u64,
+    /// The connected account's id on the network when the user confirmed:
+    /// a job refuses to send to another one. Empty in jobs from before.
+    #[serde(default)]
+    destination: String,
+}
+
+fn shown_in_feed() -> bool {
+    true
 }
 
 impl UploadPayload {
@@ -402,12 +486,14 @@ impl UploadPayload {
             made_for_kids: self.made_for_kids,
             synthetic: self.synthetic,
             publish_at: self.publish_at.map(from_millis),
+            share_to_feed: self.share_to_feed,
+            cover: Duration::from_millis(self.cover_ms),
         })
     }
 }
 
 fn from_millis(millis: u64) -> SystemTime {
-    SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis)
+    SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
 }
 
 fn to_millis(at: SystemTime) -> u64 {
@@ -422,6 +508,40 @@ fn to_millis(at: SystemTime) -> u64 {
 struct UploadCheckpoint {
     confirmed: u64,
     video: Option<String>,
+    /// Waiting for the publishing limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    held: Option<Held>,
+    /// The video the network dropped (Instagram expires an unpublished
+    /// container): the file goes again in a new one, whatever video the
+    /// payload or the job's session names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dropped: Option<String>,
+    /// How many times the file went again so far.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    restarts: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// How many times an upload goes again in a new container before it fails:
+/// a network that keeps dropping it won't take it on the next try either.
+const MAX_RESTARTS: u32 = 2;
+
+/// Why a job waits queued: the publishing limit, read again `until` (Unix
+/// milliseconds), with what the network said of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct Held {
+    until: u64,
+    /// A place frees by `until` (Bardo's own oldest post leaves the
+    /// window), so the post goes then; otherwise Bardo reads again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    frees: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    used: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    total: Option<u32>,
 }
 
 /// The part of an upload job's progress the file takes; processing takes
@@ -453,7 +573,12 @@ fn failure_of(error: &UploadError, network: Network) -> (JobFailure, Option<Uplo
         UploadErrorKind::RateLimited
         | UploadErrorKind::NetworkDown
         | UploadErrorKind::Unreachable => (JobFailureKind::ProviderUnavailable, None),
-        UploadErrorKind::Invalid | UploadErrorKind::Unexpected => (
+        // Not ready and expired are handled where they come (publishing);
+        // anywhere else they are answers Bardo did not expect.
+        UploadErrorKind::Invalid
+        | UploadErrorKind::Unexpected
+        | UploadErrorKind::NotReady
+        | UploadErrorKind::Expired => (
             JobFailureKind::UnexpectedAnswer,
             Some(UploadFailure::Job(JobFailureKind::UnexpectedAnswer)),
         ),
@@ -506,11 +631,6 @@ pub(crate) fn access_token(
         )),
     }
 }
-
-/// How many times an upload job checks on a video the network is
-/// processing before it stops waiting: about an hour with YouTube's
-/// `poll_delay`.
-const PROCESSING_POLLS: u32 = 16;
 
 /// Runs uploads.
 pub(crate) struct UploadHandler {
@@ -575,7 +695,7 @@ impl UploadRun for JobRun<'_> {
     }
 
     fn session(&self) -> Option<String> {
-        self.cx.external_handle().map(str::to_owned)
+        live_session(self.cx, &self.checkpoint)
     }
 
     fn session_started(&mut self, session: &str) -> Result<(), UploadError> {
@@ -595,6 +715,31 @@ impl UploadRun for JobRun<'_> {
     fn should_stop(&self) -> bool {
         self.cx.should_stop()
     }
+
+    /// The account's id on the network the user reviewed the upload for,
+    /// not Bardo's account id.
+    fn account(&self) -> &str {
+        self.payload.destination.as_str()
+    }
+}
+
+/// The upload session the job started at the network, unless it is the
+/// one the network dropped.
+fn live_session(cx: &JobContext, checkpoint: &UploadCheckpoint) -> Option<String> {
+    cx.external_handle()
+        .filter(|handle| checkpoint.dropped.as_deref() != Some(*handle))
+        .map(str::to_owned)
+}
+
+/// How the publish step of a processed upload ended, short of a failure.
+enum Publishing {
+    Done,
+    /// The network is not done with it after all: check again.
+    NotReady,
+    /// Over the publishing limit.
+    Held(Held),
+    /// The network dropped it: send it again.
+    Expired,
 }
 
 impl UploadHandler {
@@ -686,6 +831,7 @@ impl UploadHandler {
                 let mut checkpoint = run.checkpoint;
                 checkpoint.confirmed = payload.size;
                 checkpoint.video = Some(video.id);
+                checkpoint.dropped = None;
                 run.cx
                     .save_checkpoint(to_json(&checkpoint), sending_progress(9, 10))
                     .map_err(JobRun::local)?;
@@ -693,15 +839,174 @@ impl UploadHandler {
             }
         }
     }
-}
 
-/// The network's address for an uploaded video.
-fn video_link(network: Network, id: &str) -> Option<PostLink> {
-    match network {
-        Network::YouTube => {
-            PostLink::parse(network, &format!("https://www.youtube.com/watch?v={id}")).ok()
+    /// Whether the account is still connected to the one the user
+    /// reviewed the upload for: reconnected to another, the upload would go
+    /// there.
+    fn check_target(
+        &self,
+        account: &NetworkAccount,
+        payload: &UploadPayload,
+    ) -> Result<bool, UploadError> {
+        if payload.destination.is_empty() {
+            return Ok(true);
         }
-        _ => None,
+        let identity = self
+            .connections
+            .identity(account)
+            .map_err(|error| UploadError::new(UploadErrorKind::SignedOut, error.to_string()))?;
+        Ok(identity.id == payload.destination)
+    }
+
+    /// When the account is over the network's publishing limit, how long
+    /// the upload waits; `None` when it may go now or the network has no
+    /// limit. A limit Bardo may not read does not hold the upload: the
+    /// network enforces it when publishing anyway.
+    fn limit_hold(
+        &self,
+        uploader: &dyn VideoUploader,
+        account: &NetworkAccount,
+        payload: &UploadPayload,
+    ) -> Result<Option<Held>, UploadError> {
+        let token = access_token(&self.connections, account)?;
+        let limit = match uploader.publishing_limit(&token, &payload.destination) {
+            Ok(Some(limit)) => limit,
+            Ok(None) => return Ok(None),
+            Err(error) if error.kind == UploadErrorKind::NotAllowed => {
+                tracing::warn!(
+                    network = account.network.code(),
+                    "could not read the publishing limit: {}",
+                    error.detail
+                );
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        if limit.has_room() {
+            return Ok(None);
+        }
+        let published = self
+            .publications
+            .all_publications(account.owner)
+            .map_err(|error| UploadError::new(UploadErrorKind::Local, error.to_string()))?
+            .into_iter()
+            .filter(|publication| {
+                publication.account == account.id
+                    && publication
+                        .upload()
+                        .is_some_and(|upload| upload.status == UploadStatus::Published)
+            })
+            .map(|publication| publication.posted_at)
+            .collect::<Vec<_>>();
+        let next = limit.next_try(SystemTime::now(), &published);
+        tracing::info!(
+            network = account.network.code(),
+            used = limit.used,
+            total = limit.total,
+            "an upload waits for the publishing limit"
+        );
+        Ok(Some(Held {
+            until: to_millis(next.at),
+            frees: next.frees,
+            used: Some(limit.used),
+            total: Some(limit.total),
+        }))
+    }
+
+    /// Leaves the job queued until `held.until`, keeping where it got.
+    fn hold(
+        cx: &mut JobContext,
+        mut checkpoint: UploadCheckpoint,
+        held: Held,
+        size: u64,
+    ) -> Result<(), JobFailure> {
+        checkpoint.held = Some(held);
+        let progress = match checkpoint.video {
+            Some(_) => sending_progress(9, 10),
+            None => sending_progress(checkpoint.confirmed, size),
+        };
+        cx.save_checkpoint(to_json(&checkpoint), progress)
+            .map_err(unexpected)?;
+        cx.defer(from_millis(held.until));
+        Ok(())
+    }
+
+    /// The network dropped `video` before it was published: the job sends
+    /// the file again, from its first byte, right away, at most
+    /// [`MAX_RESTARTS`] times. The checkpoint goes first, so a job stopped
+    /// in between still starts over.
+    fn start_over(
+        &self,
+        cx: &mut JobContext,
+        checkpoint: &UploadCheckpoint,
+        video: &str,
+        publication: PublicationId,
+        job: JobId,
+        network: Network,
+    ) -> Result<(), JobFailure> {
+        if checkpoint.restarts >= MAX_RESTARTS {
+            let error = UploadError::new(
+                UploadErrorKind::Unexpected,
+                "the network dropped the upload again",
+            );
+            return Err(self.failed(publication, job, &error, network));
+        }
+        let restarted = UploadCheckpoint {
+            dropped: Some(video.to_owned()),
+            restarts: checkpoint.restarts + 1,
+            ..UploadCheckpoint::default()
+        };
+        cx.save_checkpoint(to_json(&restarted), Progress::of(0, 1))
+            .map_err(unexpected)?;
+        self.update(publication, job, |p| {
+            p.upload_mut().map_or(Ok(()), Upload::expired)
+        })?;
+        tracing::info!("the network dropped an upload; it goes again");
+        cx.defer(SystemTime::now());
+        Ok(())
+    }
+
+    /// Publishes the processed upload `video`, within the publishing limit.
+    #[allow(clippy::too_many_arguments)]
+    fn publish(
+        &self,
+        uploader: &dyn VideoUploader,
+        account: &NetworkAccount,
+        payload: &UploadPayload,
+        video: &str,
+        publication: PublicationId,
+        job: JobId,
+        network: Network,
+    ) -> Result<Publishing, JobFailure> {
+        match self.limit_hold(uploader, account, payload) {
+            Ok(Some(held)) => return Ok(Publishing::Held(held)),
+            Ok(None) => {}
+            Err(error) => return Err(self.failed(publication, job, &error, network)),
+        }
+        let post = access_token(&self.connections, account)
+            .and_then(|token| uploader.publish(&token, &payload.destination, video));
+        match post {
+            Ok(post) => {
+                if let Some(issue) = &post.issue {
+                    tracing::info!(network = network.code(), %issue, "published with an issue");
+                }
+                self.update(publication, job, |p| p.published(post, SystemTime::now()))?;
+                Ok(Publishing::Done)
+            }
+            Err(error) => match error.kind {
+                UploadErrorKind::NotReady => Ok(Publishing::NotReady),
+                UploadErrorKind::Expired => Ok(Publishing::Expired),
+                // Over the limit after all (another app published in
+                // between): read it again later.
+                UploadErrorKind::UploadLimit => Ok(Publishing::Held(Held {
+                    until: to_millis(SystemTime::now() + LIMIT_RECHECK),
+                    frees: false,
+                    used: None,
+                    total: None,
+                })),
+                _ => Err(self.failed(publication, job, &error, network)),
+            },
+        }
     }
 }
 
@@ -735,11 +1040,34 @@ impl JobHandler for UploadHandler {
             let error = UploadError::new(UploadErrorKind::SignedOut, "the account was removed");
             return Err(self.failed(publication_id, job, &error, network));
         };
+        match self.check_target(&account, &payload) {
+            Ok(true) => {}
+            // Not retryable: the user reviews the upload for the account
+            // as it is connected now.
+            Ok(false) => {
+                return self.update(publication_id, job, |p| {
+                    p.upload_mut()
+                        .map_or(Ok(()), |upload| upload.fail(UploadFailure::AccountChanged))
+                });
+            }
+            Err(error) => return Err(self.failed(publication_id, job, &error, network)),
+        }
         let mut checkpoint: UploadCheckpoint = match cx.checkpoint() {
             Some(text) => parse(text)?,
             None => UploadCheckpoint::default(),
         };
-        checkpoint.video = checkpoint.video.or_else(|| payload.video.clone());
+        if checkpoint.dropped.is_none() {
+            checkpoint.video = checkpoint.video.or_else(|| payload.video.clone());
+        } else {
+            // Starting over: the publication too, if the job stopped
+            // before it was saved.
+            self.update(publication_id, job, |p| {
+                p.upload_mut().map_or(Ok(()), |upload| match upload.status {
+                    UploadStatus::Uploading | UploadStatus::Processing => upload.expired(),
+                    _ => Ok(()),
+                })
+            })?;
+        }
 
         if checkpoint.video.is_none() {
             let project: VideoProjectId = id(&payload.project)?;
@@ -750,6 +1078,18 @@ impl JobHandler for UploadHandler {
                         .map_or(Ok(()), |upload| upload.fail(UploadFailure::RenderChanged))
                 });
             }
+            // A new post only goes up within the publishing limit; one on
+            // its way finishes, and the limit is read again before it is
+            // published.
+            if live_session(cx, &checkpoint).is_none() {
+                match self.limit_hold(uploader.as_ref(), &account, &payload) {
+                    Ok(Some(held)) => return Self::hold(cx, checkpoint, held, payload.size),
+                    Ok(None) => {}
+                    Err(_) if cx.should_stop() => return Ok(()),
+                    Err(error) => return Err(self.failed(publication_id, job, &error, network)),
+                }
+            }
+            checkpoint.held = None;
             self.update(publication_id, job, |p| {
                 p.upload_mut().map_or(Ok(()), Upload::start)
             })?;
@@ -775,13 +1115,9 @@ impl JobHandler for UploadHandler {
             }
         }
         let video = checkpoint.video.clone().expect("sent above or before");
-        let link = video_link(network, &video).ok_or_else(|| {
-            let error = UploadError::new(
-                UploadErrorKind::Unexpected,
-                format!("the network answered an unknown video id {video:?}"),
-            );
-            self.failed(publication_id, job, &error, network)
-        })?;
+        let link = uploader
+            .link(&video)
+            .map_err(|error| self.failed(publication_id, job, &error, network))?;
         self.update(publication_id, job, |p| p.sent(link))?;
 
         // Wait for the network to process it, for a while: the job holds a
@@ -796,11 +1132,51 @@ impl JobHandler for UploadHandler {
                 .and_then(|token| uploader.state(&token, &video));
             let outcome = match state {
                 Ok(VideoState::Processing) => {
-                    if polls >= PROCESSING_POLLS || !cx.sleep(uploader.poll_delay(polls)) {
+                    if polls >= uploader.processing_polls() || !cx.sleep(uploader.poll_delay(polls))
+                    {
                         return Ok(());
                     }
                     polls += 1;
                     continue;
+                }
+                // Instagram: processed, and Bardo makes the post.
+                Ok(VideoState::Processed) => {
+                    match self.publish(
+                        uploader.as_ref(),
+                        &account,
+                        &payload,
+                        &video,
+                        publication_id,
+                        job,
+                        network,
+                    )? {
+                        Publishing::Done => return Ok(()),
+                        Publishing::Held(held) => {
+                            return Self::hold(cx, checkpoint, held, payload.size);
+                        }
+                        Publishing::Expired => {
+                            return self.start_over(
+                                cx,
+                                &checkpoint,
+                                &video,
+                                publication_id,
+                                job,
+                                network,
+                            );
+                        }
+                        Publishing::NotReady => {
+                            if polls >= uploader.processing_polls()
+                                || !cx.sleep(uploader.poll_delay(polls))
+                            {
+                                return Ok(());
+                            }
+                            polls += 1;
+                            continue;
+                        }
+                    }
+                }
+                Ok(VideoState::Expired) => {
+                    return self.start_over(cx, &checkpoint, &video, publication_id, job, network);
                 }
                 Ok(VideoState::Ready {
                     visibility,
@@ -885,8 +1261,81 @@ impl Bardo {
             UploadFailure::ScheduleMissed => {
                 self.text(Text::UploadFailureScheduleMissed).into_owned()
             }
+            UploadFailure::AccountChanged => with(Text::UploadFailureAccountChanged, ""),
             UploadFailure::Job(kind) => self.text(Text::JobFailureKindName(*kind)).into_owned(),
         }
+    }
+
+    /// One Reel spec problem as the review lists it.
+    pub fn reel_spec_text(&self, problem: &ReelSpecProblem) -> String {
+        let text = Text::UploadSpec(problem.code());
+        let duration =
+            |at: &Duration| self.localized_decimal(&bardo_domain::format_cover_time(*at));
+        match problem {
+            ReelSpecProblem::Unreadable
+            | ReelSpecProblem::Container
+            | ReelSpecProblem::MoovNotFirst
+            | ReelSpecProblem::NoVideo => self.text(text).into_owned(),
+            ReelSpecProblem::Codec(codec) => self.text_with(text, &[("codec", codec)]),
+            ReelSpecProblem::FrameRate(hundredths) => {
+                let fps = f64::from(*hundredths) / 100.0;
+                let fps = if hundredths % 100 == 0 {
+                    format!("{}", hundredths / 100)
+                } else {
+                    self.localized_decimal(&format!("{fps:.2}"))
+                };
+                self.text_with(text, &[("fps", &fps)])
+            }
+            ReelSpecProblem::TooWide(width) => {
+                self.text_with(text, &[("width", &width.to_string())])
+            }
+            ReelSpecProblem::TooShort(at) | ReelSpecProblem::TooLong(at) => {
+                self.text_with(text, &[("duration", &duration(at))])
+            }
+            ReelSpecProblem::TooBig(bytes) => {
+                let size = self.text_with(
+                    Text::RenderSize,
+                    &[(
+                        "value",
+                        &self.tenths(*bytes as f64 / 1_000_000.0).replace('+', ""),
+                    )],
+                );
+                self.text_with(text, &[("size", &size)])
+            }
+        }
+    }
+
+    /// Why a Reel waits queued for Instagram's publishing limit, and when
+    /// it goes or Bardo reads the limit again (`frees`, see
+    /// [`UploadState::OverLimit`]).
+    pub fn upload_over_limit_text(
+        &self,
+        until: SystemTime,
+        frees: bool,
+        used: Option<u32>,
+        total: Option<u32>,
+    ) -> String {
+        let when = self.publish_time_text(until);
+        match (used, total) {
+            (Some(used), Some(total)) => self.text_with(
+                if frees {
+                    Text::UploadOverLimitHint
+                } else {
+                    Text::UploadOverLimitRecheckHint
+                },
+                &[
+                    ("used", &used.to_string()),
+                    ("total", &total.to_string()),
+                    ("when", &when),
+                ],
+            ),
+            _ => self.text_with(Text::UploadOverLimitSoonHint, &[("when", &when)]),
+        }
+    }
+
+    /// The warning Instagram published the Reel with, in its words.
+    pub fn upload_issue_text(&self, issue: &str) -> String {
+        self.text_with(Text::UploadIssue, &[("issue", issue)])
     }
 
     fn upload_target(
@@ -942,8 +1391,24 @@ impl Bardo {
             | ConnectionState::ReconnectNeeded { channel } => channel.as_str(),
             _ => "",
         };
+        let destination = match &connection {
+            ConnectionState::Connected { .. } | ConnectionState::ReconnectNeeded { .. } => self
+                .connection_book
+                .connections()
+                .identity(&account)
+                .map(|identity| identity.id)
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let spec_problems = match (&target.render, size) {
+            // A render on its way rewrites the file: checked once it is done.
+            (Some(render), Some(size)) if network.uploads_reels() && size > 0 && !rendering => {
+                self.reel_problems(project, render, size)
+            }
+            _ => Vec::new(),
+        };
         let stamp = format!(
-            "{}|{}|{}|{}|{synthetic}|{channel}",
+            "{}|{}|{}|{}|{synthetic}|{channel}|{destination}",
             target
                 .render
                 .as_ref()
@@ -972,7 +1437,54 @@ impl Bardo {
             rendering,
             uploading,
             size,
+            destination,
+            spec_problems,
             stamp,
+        })
+    }
+
+    /// What keeps `render` (of `size` bytes) from being a Reel. Read once
+    /// per render and size, a file Bardo could not read included: probing
+    /// runs ffprobe, and the review is read again whenever a job moves.
+    fn reel_problems(
+        &self,
+        project: VideoProjectId,
+        render: &Render,
+        size: u64,
+    ) -> Vec<ReelSpecProblem> {
+        let key = (render.id, size);
+        let mut checked = self
+            .reel_checks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(problems) = checked.get(&key) {
+            return problems.clone();
+        }
+        let problems = match self.read_reel(project, render, size) {
+            Some(file) => check_reel(&file),
+            None => vec![ReelSpecProblem::Unreadable],
+        };
+        checked.insert(key, problems.clone());
+        problems
+    }
+
+    fn read_reel(&self, project: VideoProjectId, render: &Render, size: u64) -> Option<ReelFile> {
+        let mut file = self.files.open(project, &render.file).ok()?;
+        let layout = mp4_layout(&mut file).ok()?;
+        let info = match self.media.probe(&self.files.path(project, &render.file)) {
+            Ok(info) => info,
+            Err(error) => {
+                tracing::warn!("could not probe the render for the Reel specs: {error}");
+                return None;
+            }
+        };
+        Some(ReelFile {
+            layout,
+            codec: info.video.as_ref().map(|video| video.codec.clone()),
+            width: info.video.as_ref().map_or(0, |video| video.width),
+            fps: info.video.as_ref().map_or(0.0, |video| video.fps()),
+            duration: info.duration,
+            size,
         })
     }
 
@@ -1000,7 +1512,14 @@ impl Bardo {
             return Err(UploadReviewError::Changed);
         };
         if let Some(at) = choices.publish_at {
+            if !now.network.schedules_uploads() {
+                return Err(UploadReviewError::NoSchedule);
+            }
             check_publish_time(at, SystemTime::now()).map_err(UploadReviewError::Schedule)?;
+        }
+        let reel = now.is_reel();
+        if reel && choices.cover >= render.duration {
+            return Err(UploadReviewError::CoverPastEnd);
         }
         // A scheduled upload is public at its time.
         let visibility = match choices.publish_at {
@@ -1020,10 +1539,17 @@ impl Bardo {
             description: post.text.clone().unwrap_or_default(),
             tags: post.tags.clone(),
             visibility: visibility.code().to_owned(),
-            made_for_kids: choices.made_for_kids,
+            made_for_kids: choices.made_for_kids && now.network.asks_made_for_kids(),
             synthetic: choices.synthetic,
             video: None,
             publish_at: choices.publish_at.map(to_millis),
+            share_to_feed: !reel || choices.share_to_feed,
+            cover_ms: if reel {
+                choices.cover.as_millis() as u64
+            } else {
+                0
+            },
+            destination: now.destination.clone(),
         };
         let job = Job::new(self.profile.id, JobKind::Upload, to_json(&payload));
         let upload = match choices.publish_at {
@@ -1104,11 +1630,28 @@ impl Bardo {
             .publication(publication)?
             .filter(|publication| publication.owner == self.profile.id)
             .ok_or(UploadReviewError::NotNow)?;
-        let video = publication.post_id().map(str::to_owned);
+        let network = publication.network();
+        let post_id = publication.post_id().map(str::to_owned);
         let Some(upload) = publication.upload_mut() else {
             return Err(UploadReviewError::NotNow);
         };
         let (old, mut payload) = self.upload_job(upload.job)?;
+        // A Reel's post id is its shortcode, which only comes once Bardo
+        // publishes it: the container is the job's.
+        let video = if network.uploads_reels() {
+            let checkpoint = old
+                .checkpoint()
+                .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
+                .unwrap_or_default();
+            // A job that only checked has no video of its own: its payload
+            // names it.
+            match checkpoint.dropped {
+                Some(_) => None,
+                None => checkpoint.video.or_else(|| payload.video.clone()),
+            }
+        } else {
+            post_id
+        };
         if old.state().is_active() || video.is_none() {
             return Err(UploadReviewError::NotNow);
         }
@@ -1142,8 +1685,9 @@ pub(crate) mod testing {
     use std::time::Duration;
 
     use bardo_domain::{
-        Network, ScheduleChange, ScheduleOutcome, SecretText, UploadError, UploadErrorKind,
-        UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload, VideoUploader,
+        Network, NetworkPost, PostLink, PublishingLimit, ScheduleChange, ScheduleOutcome,
+        SecretText, UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo,
+        VideoState, VideoUpload, VideoUploader,
     };
 
     /// The bytes the fake sends per request.
@@ -1161,9 +1705,22 @@ pub(crate) mod testing {
     }
 
     /// A network that keeps what each session received: a session it
-    /// knows resumes where it stopped, as YouTube's do.
+    /// knows resumes where it stopped, as YouTube's do. As Instagram
+    /// (`reels`), a processed upload waits for Bardo to publish it, within
+    /// a publishing limit.
     #[derive(Default)]
     pub(crate) struct FakeUploader {
+        pub(crate) reels: bool,
+        /// Answers to publishing limit reads; when empty, there is no limit.
+        pub(crate) limits: Mutex<VecDeque<Result<PublishingLimit, UploadErrorKind>>>,
+        /// The account each limit read was for.
+        pub(crate) limit_reads: Mutex<Vec<String>>,
+        /// Answers to publishing; when empty, the post is made.
+        pub(crate) publishes: Mutex<VecDeque<Result<NetworkPost, UploadErrorKind>>>,
+        /// Every publish: the account and the upload.
+        pub(crate) published: Mutex<Vec<(String, String)>>,
+        /// The account each upload went to.
+        pub(crate) accounts: Mutex<Vec<String>>,
         pub(crate) attempts: Mutex<VecDeque<Attempt>>,
         /// Answers to the processing checks; when empty, the video is ready
         /// with the visibility asked.
@@ -1186,7 +1743,25 @@ pub(crate) mod testing {
         pub(crate) holding: AtomicBool,
     }
 
+    /// The address of the Reel the fake makes.
+    pub(crate) const REEL: &str = "https://www.instagram.com/reel/C1aBcDeFgHi/";
+
     impl FakeUploader {
+        pub(crate) fn reels() -> Self {
+            Self {
+                reels: true,
+                ..Self::default()
+            }
+        }
+
+        pub(crate) fn limit(&self, limit: Result<PublishingLimit, UploadErrorKind>) {
+            self.limits.lock().unwrap().push_back(limit);
+        }
+
+        pub(crate) fn publish_answer(&self, post: Result<NetworkPost, UploadErrorKind>) {
+            self.publishes.lock().unwrap().push_back(post);
+        }
+
         pub(crate) fn will(&self, attempt: Attempt) {
             self.attempts.lock().unwrap().push_back(attempt);
         }
@@ -1212,7 +1787,66 @@ pub(crate) mod testing {
 
     impl VideoUploader for FakeUploader {
         fn network(&self) -> Network {
-            Network::YouTube
+            if self.reels {
+                Network::InstagramReels
+            } else {
+                Network::YouTube
+            }
+        }
+
+        fn link(&self, id: &str) -> Result<Option<PostLink>, UploadError> {
+            if self.reels {
+                return Ok(None);
+            }
+            Ok(Some(
+                PostLink::parse(
+                    Network::YouTube,
+                    &format!("https://www.youtube.com/watch?v={id}"),
+                )
+                .unwrap(),
+            ))
+        }
+
+        fn publishing_limit(
+            &self,
+            access_token: &SecretText,
+            account: &str,
+        ) -> Result<Option<PublishingLimit>, UploadError> {
+            self.tokens
+                .lock()
+                .unwrap()
+                .push(access_token.expose().to_owned());
+            self.limit_reads.lock().unwrap().push(account.to_owned());
+            match self.limits.lock().unwrap().pop_front() {
+                Some(Ok(limit)) => Ok(Some(limit)),
+                Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
+                None => Ok(None),
+            }
+        }
+
+        fn publish(
+            &self,
+            access_token: &SecretText,
+            account: &str,
+            id: &str,
+        ) -> Result<NetworkPost, UploadError> {
+            self.tokens
+                .lock()
+                .unwrap()
+                .push(access_token.expose().to_owned());
+            self.published
+                .lock()
+                .unwrap()
+                .push((account.to_owned(), id.to_owned()));
+            match self.publishes.lock().unwrap().pop_front() {
+                Some(Ok(post)) => Ok(post),
+                Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
+                None => Ok(NetworkPost {
+                    id: "17900000000000001".into(),
+                    link: Some(PostLink::parse(Network::InstagramReels, REEL).unwrap()),
+                    issue: None,
+                }),
+            }
         }
 
         fn upload(
@@ -1226,6 +1860,7 @@ pub(crate) mod testing {
                 return Err(UploadError::new(UploadErrorKind::Late, "the fake refused"));
             }
             self.videos.lock().unwrap().push(video.clone());
+            self.accounts.lock().unwrap().push(run.account().to_owned());
             let attempt = self
                 .attempts
                 .lock()
@@ -1292,7 +1927,13 @@ pub(crate) mod testing {
                 .push(access_token.expose().to_owned());
             self.checks.lock().unwrap().push(id.to_owned());
             match self.states.lock().unwrap().pop_front() {
+                // Instagram drops the container and its bytes.
+                Some(Ok(VideoState::Expired)) => {
+                    self.forget_sessions();
+                    Ok(VideoState::Expired)
+                }
                 Some(Ok(state)) => Ok(state),
+                None if self.reels => Ok(VideoState::Processed),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
                 // As asked: a scheduled video stays private with its time.
                 None => {
@@ -1617,6 +2258,8 @@ pub(crate) mod tests {
             synthetic: true,
             replace: false,
             publish_at: None,
+            share_to_feed: true,
+            cover: Duration::ZERO,
         };
         let job = s.app.start_upload(&review, choices).unwrap();
         done(&s.app, job);
@@ -1633,6 +2276,8 @@ pub(crate) mod tests {
                 made_for_kids: true,
                 synthetic: true,
                 publish_at: None,
+                share_to_feed: true,
+                cover: Duration::ZERO,
             }]
         );
         assert!(
@@ -1826,7 +2471,8 @@ pub(crate) mod tests {
     #[test]
     fn a_video_still_processing_frees_the_queue_and_is_checked_again() {
         let s = ready();
-        for _ in 0..=PROCESSING_POLLS {
+        let polls = s.h.uploader.processing_polls();
+        for _ in 0..=polls {
             s.h.uploader.answer(Ok(VideoState::Processing));
         }
         let review = review(&s);
@@ -1834,7 +2480,7 @@ pub(crate) mod tests {
         done(&s.app, first);
         assert_eq!(
             s.h.uploader.checks.lock().unwrap().len(),
-            PROCESSING_POLLS as usize + 1
+            polls as usize + 1
         );
         assert_eq!(state(&s), UploadState::StillProcessing);
         let publication = upload(&s);
@@ -2055,5 +2701,567 @@ pub(crate) mod tests {
         s.app.retry_job(job).unwrap();
         done(&s.app, job);
         assert!(s.h.uploader.files.lock().unwrap().is_empty());
+    }
+}
+
+/// Reels (#81): the review's specs and choices, publishing within the
+/// limit, and a dropped container sent again.
+#[cfg(test)]
+mod reel_tests {
+    use std::time::{Duration, Instant, SystemTime};
+
+    use bardo_domain::{
+        ConnectedIdentity, ConnectionSecrets, ConnectionStatus, NetworkConnection,
+        NetworkConnectionRepository, NetworkPost, PublishingLimit, TokenGrant, TokenSet,
+    };
+    use bardo_media::ffmpeg::{AudioStream, MediaInfo, VideoStream};
+
+    use super::testing::{Attempt, REEL};
+    use super::*;
+    use crate::export::tests::{Setup, rendered_with};
+    use crate::scenes::tests::{done, wait_done};
+
+    const IG_USER: &str = "17841400008460056";
+    const ACCESS: &str = "EAAG-reel-page-token";
+    const FILE: &str = "render-instagram_reels.mp4";
+
+    fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut bytes = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(kind);
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    /// A small MP4 file, its index first or last.
+    fn reel_file(fast_start: bool) -> Vec<u8> {
+        let ftyp = mp4_box(b"ftyp", b"isom\0\0\x02\0isomavc1");
+        let moov = mp4_box(b"moov", b"index");
+        let mdat = mp4_box(b"mdat", b"frames frames");
+        if fast_start {
+            [ftyp, moov, mdat].concat()
+        } else {
+            [ftyp, mdat, moov, b"!".to_vec()].concat()
+        }
+    }
+
+    fn write_reel(s: &Setup, bytes: &[u8]) {
+        s.h.files.write(s.project.id, FILE, bytes).unwrap();
+        s.h.media.probes.lock().unwrap().insert(
+            String::from_utf8_lossy(bytes).into_owned(),
+            MediaInfo {
+                duration: Duration::from_secs(30),
+                video: Some(VideoStream {
+                    codec: "h264".into(),
+                    width: 1080,
+                    height: 1920,
+                    frame_rate: (30, 1),
+                }),
+                audio: Some(AudioStream {
+                    codec: "aac".into(),
+                    sample_rate: 48_000,
+                    channels: 2,
+                }),
+            },
+        );
+    }
+
+    fn reels(s: &Setup) -> NetworkAccount {
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+            .unwrap()
+            .into_iter()
+            .find(|account| account.network == Network::InstagramReels)
+            .unwrap()
+    }
+
+    fn connect_as(s: &Setup, id: &str, name: &str) {
+        let account = reels(s);
+        let now = SystemTime::now();
+        let tokens = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(ACCESS),
+                refresh_token: Some(SecretText::new("EAAG-user-token")),
+                expires_in: Duration::from_secs(60 * 24 * 60 * 60),
+                scopes: Vec::new(),
+            },
+            now,
+        );
+        s.h.connection_secrets
+            .set_tokens(s.app.profile().id, account.id, &tokens)
+            .unwrap();
+        NetworkConnectionRepository::save(
+            &*s.h.db,
+            &NetworkConnection {
+                account: account.id,
+                owner: s.app.profile().id,
+                status: ConnectionStatus::Connected,
+                identity: ConnectedIdentity {
+                    id: id.into(),
+                    name: name.into(),
+                },
+                scopes: Vec::new(),
+                expires_at: tokens.expires_at(),
+                connected_at: now,
+                refreshed_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    /// Metadata for every account of the project, the Reel's caption with
+    /// hashtags.
+    fn generate(s: &Setup) {
+        let answer = serde_json::json!({ "posts": [
+            {
+                "network": "youtube",
+                "title": "The probe nobody found",
+                "description": "In 1969 a probe went silent.",
+                "tags": ["space history", "nasa"]
+            },
+            {
+                "network": "tiktok",
+                "title": "",
+                "description": "The probe nobody found.",
+                "tags": ["#space", "nasa"]
+            },
+            {
+                "network": "instagram_reels",
+                "title": "",
+                "description": "In 1969 a probe went silent. Nobody found it.",
+                "tags": ["space", "nasa"]
+            }
+        ]});
+        s.h.text.answers.lock().unwrap().push(answer.to_string());
+        done(
+            &s.app,
+            s.app
+                .generate_metadata(s.project.id, crate::BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    /// The project rendered with metadata, its Instagram account connected
+    /// and its Reel's file in fast start.
+    fn ready() -> Setup {
+        let s = rendered_with(&[Network::InstagramReels]);
+        generate(&s);
+        write_reel(&s, &reel_file(true));
+        connect_as(&s, IG_USER, "@arquivosdoespaco");
+        s
+    }
+
+    fn review(s: &Setup) -> UploadReview {
+        s.app
+            .upload_review(s.project.id, Network::InstagramReels)
+            .unwrap()
+    }
+
+    fn start(s: &Setup, choices: UploadChoices) -> JobId {
+        let review = review(s);
+        s.app.start_upload(&review, choices).unwrap()
+    }
+
+    fn upload(s: &Setup) -> Publication {
+        s.app
+            .publications
+            .publications(s.project.id)
+            .unwrap()
+            .into_iter()
+            .find(|publication| publication.network() == Network::InstagramReels)
+            .unwrap()
+    }
+
+    fn state(s: &Setup) -> UploadState {
+        s.app.upload_state(&upload(s)).unwrap()
+    }
+
+    fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !check() {
+            assert!(Instant::now() < deadline, "never {what}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn full() -> PublishingLimit {
+        PublishingLimit {
+            used: 50,
+            total: 50,
+            window: Duration::from_secs(24 * 60 * 60),
+        }
+    }
+
+    #[test]
+    fn a_job_saved_before_reels_reads_with_their_defaults() {
+        let payload: UploadPayload = serde_json::from_str(
+            r#"{"project":"p","publication":"q","account":"a","network":"youtube",
+                "render":"r","file":"f","size":1,"title":"t","description":"d",
+                "tags":[],"visibility":"public","made_for_kids":false,"synthetic":false}"#,
+        )
+        .unwrap();
+        assert!(payload.share_to_feed);
+        assert_eq!(payload.cover_ms, 0);
+        assert_eq!(payload.destination, "");
+        let checkpoint: UploadCheckpoint =
+            serde_json::from_str(r#"{"confirmed":4,"video":null}"#).unwrap();
+        assert_eq!(checkpoint.held, None);
+        assert_eq!(checkpoint.dropped, None);
+        assert_eq!(
+            to_json(&UploadCheckpoint {
+                confirmed: 4,
+                ..UploadCheckpoint::default()
+            }),
+            r#"{"confirmed":4,"video":null}"#
+        );
+    }
+
+    #[test]
+    fn spec_problems_read_with_their_numbers() {
+        let s = ready();
+        let text = |problem| s.app.reel_spec_text(&problem);
+        assert_eq!(
+            text(ReelSpecProblem::Codec("vp9".into())),
+            "Video codec vp9: Instagram takes H.264 or HEVC."
+        );
+        assert_eq!(
+            text(ReelSpecProblem::FrameRate(1500)),
+            "15 frames per second: Instagram takes 23 to 60."
+        );
+        assert_eq!(
+            text(ReelSpecProblem::FrameRate(2397)),
+            "23.97 frames per second: Instagram takes 23 to 60."
+        );
+        assert_eq!(
+            text(ReelSpecProblem::TooShort(Duration::from_millis(2_500))),
+            "0:02.5 long: a Reel is at least 3 seconds."
+        );
+        assert!(text(ReelSpecProblem::TooBig(312_400_000)).contains("312.4"));
+    }
+
+    #[test]
+    fn no_reel_goes_up_without_a_confirmed_review_of_a_file_that_meets_the_specs() {
+        let s = rendered_with(&[Network::InstagramReels]);
+        generate(&s);
+        write_reel(&s, &reel_file(false));
+        connect_as(&s, IG_USER, "@arquivosdoespaco");
+
+        let seen = review(&s);
+        assert!(seen.is_reel());
+        assert_eq!(seen.spec_problems, [ReelSpecProblem::MoovNotFirst]);
+        assert_eq!(seen.block(), Some(UploadBlock::Specs));
+        assert!(matches!(
+            s.app.start_upload(&seen, seen.choices()),
+            Err(UploadReviewError::Blocked(UploadBlock::Specs))
+        ));
+        assert_eq!(
+            s.app.reel_spec_text(&ReelSpecProblem::MoovNotFirst),
+            "The file's index comes after the media (not fast start)."
+        );
+
+        // A file that meets them, reviewed before it changed: review again.
+        write_reel(&s, &reel_file(true));
+        let review = review(&s);
+        assert_eq!(review.block(), None);
+        assert_eq!(review.channel(), Some("@arquivosdoespaco"));
+        let caption = review.post.as_ref().unwrap().text.clone().unwrap();
+        assert!(caption.ends_with("#space #nasa"), "{caption}");
+        assert!(matches!(
+            s.app.start_upload(&seen, seen.choices()),
+            Err(UploadReviewError::Blocked(_) | UploadReviewError::Changed)
+        ));
+        // Instagram takes no publish time from Bardo, nor a cover past the
+        // end.
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        assert!(matches!(
+            s.app.start_upload(
+                &review,
+                UploadChoices {
+                    publish_at: Some(later),
+                    ..review.choices()
+                }
+            ),
+            Err(UploadReviewError::NoSchedule)
+        ));
+        let end = review.render.as_ref().unwrap().duration;
+        assert!(matches!(
+            s.app.start_upload(
+                &review,
+                UploadChoices {
+                    cover: end + Duration::from_secs(1),
+                    ..review.choices()
+                }
+            ),
+            Err(UploadReviewError::CoverPastEnd)
+        ));
+        assert!(s.h.reels.videos.lock().unwrap().is_empty(), "nothing sent");
+        assert!(s.h.reels.limit_reads.lock().unwrap().is_empty());
+        assert!(
+            s.app
+                .publications
+                .publications(s.project.id)
+                .unwrap()
+                .is_empty()
+        );
+
+        done(
+            &s.app,
+            s.app.start_upload(&review, review.choices()).unwrap(),
+        );
+        assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_confirmed_reel_goes_up_with_its_choices_and_bardo_publishes_it() {
+        let s = ready();
+        let review = review(&s);
+        let caption = review.post.as_ref().unwrap().text.clone().unwrap();
+        let cover = review.render.as_ref().unwrap().duration / 2;
+        let choices = UploadChoices {
+            synthetic: true,
+            share_to_feed: false,
+            cover,
+            ..review.choices()
+        };
+        done(&s.app, s.app.start_upload(&review, choices).unwrap());
+
+        let sent = s.h.reels.videos.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].description, caption);
+        assert!(sent[0].synthetic);
+        assert!(!sent[0].share_to_feed);
+        assert_eq!(
+            sent[0].cover,
+            Duration::from_millis(cover.as_millis() as u64)
+        );
+        assert_eq!(sent[0].publish_at, None);
+        assert_eq!(*s.h.reels.accounts.lock().unwrap(), [IG_USER]);
+        assert_eq!(*s.h.reels.files.lock().unwrap(), [reel_file(true)]);
+        // The limit before the container and again before publishing.
+        assert_eq!(*s.h.reels.limit_reads.lock().unwrap(), [IG_USER, IG_USER]);
+        let published = s.h.reels.published.lock().unwrap().clone();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, IG_USER);
+        assert_eq!(
+            published[0].1,
+            *s.h.reels.checks.lock().unwrap().last().unwrap()
+        );
+        assert!(
+            s.h.reels
+                .tokens
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|token| token == ACCESS)
+        );
+
+        let publication = upload(&s);
+        let upload = publication.upload().unwrap();
+        assert_eq!(upload.status, UploadStatus::Published);
+        assert_eq!(upload.issue, None);
+        assert_eq!(publication.link.as_ref().unwrap().url(), REEL);
+        assert_eq!(state(&s), UploadState::Published);
+        assert!(
+            s.h.uploader.videos.lock().unwrap().is_empty(),
+            "not YouTube"
+        );
+    }
+
+    #[test]
+    fn a_reel_over_the_publishing_limit_waits_queued_and_says_when_it_goes() {
+        let s = ready();
+        s.h.reels.limit(Ok(full()));
+        let review = review(&s);
+        let before = SystemTime::now();
+        let job = start(&s, review.choices());
+        wait_until("held", || {
+            matches!(state(&s), UploadState::OverLimit { .. })
+        });
+
+        let UploadState::OverLimit {
+            until,
+            frees,
+            used,
+            total,
+        } = state(&s)
+        else {
+            unreachable!()
+        };
+        assert_eq!((used, total), (Some(50), Some(50)));
+        assert!(!frees, "other apps filled it: Bardo only reads it again");
+        // No post of Bardo's in the window: read again in an hour.
+        let hour = Duration::from_secs(3600);
+        assert!(until >= before + hour - Duration::from_secs(1));
+        assert!(until <= SystemTime::now() + hour + Duration::from_secs(1));
+        assert!(state(&s).is_active());
+        assert_eq!(self::review(&s).block(), Some(UploadBlock::Uploading));
+        assert!(s.h.reels.videos.lock().unwrap().is_empty(), "nothing sent");
+        let queued = s.app.jobs().into_iter().find(|j| j.id() == job).unwrap();
+        assert_eq!(queued.state(), JobState::Queued);
+        assert_eq!(queued.attempts(), 0, "waiting is not a failed attempt");
+        assert!(
+            s.app
+                .upload_over_limit_text(until, frees, used, total)
+                .contains("and 50 went out, some through other apps")
+        );
+
+        // Stopped while it waits, it resumes and goes when there is room.
+        s.app.cancel_job(job).unwrap();
+        assert_eq!(state(&s), UploadState::Stopped);
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+        assert_eq!(state(&s), UploadState::Published);
+        assert_eq!(*s.h.reels.files.lock().unwrap(), [reel_file(true)]);
+    }
+
+    #[test]
+    fn a_reel_refused_over_the_limit_when_publishing_waits_for_the_next_read() {
+        let s = ready();
+        s.h.reels.publish_answer(Err(UploadErrorKind::UploadLimit));
+        let job = start(&s, review(&s).choices());
+        wait_until("held", || {
+            matches!(state(&s), UploadState::OverLimit { .. })
+        });
+        let UploadState::OverLimit { used, total, .. } = state(&s) else {
+            unreachable!()
+        };
+        assert_eq!((used, total), (None, None));
+        assert_eq!(s.h.reels.files.lock().unwrap().len(), 1, "the file went");
+        assert_eq!(
+            upload(&s).upload().unwrap().status,
+            UploadStatus::Processing
+        );
+        s.app.cancel_job(job).unwrap();
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+        assert_eq!(state(&s), UploadState::Published);
+        assert_eq!(s.h.reels.files.lock().unwrap().len(), 1, "not sent again");
+        assert_eq!(s.h.reels.published.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_expired_container_sends_the_file_again_and_then_publishes() {
+        let s = ready();
+        s.h.reels.answer(Ok(VideoState::Expired));
+        let job = done(&s.app, start(&s, review(&s).choices()));
+
+        assert_eq!(
+            *s.h.reels.files.lock().unwrap(),
+            [reel_file(true), reel_file(true)]
+        );
+        let size = reel_file(true).len() as u64;
+        let starts = s.h.reels.chunk_starts();
+        assert_eq!(starts.first(), Some(&0));
+        assert_eq!(starts.iter().filter(|at| **at == 0).count(), 2);
+        assert!(starts.iter().all(|at| *at < size));
+        assert_eq!(s.h.reels.published.lock().unwrap().len(), 1);
+        assert_eq!(job.attempts(), 1, "starting over is not a failed attempt");
+        assert!(job.failure().is_none());
+        assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_reel_instagram_keeps_dropping_goes_again_twice_and_then_fails() {
+        let s = ready();
+        for _ in 0..=MAX_RESTARTS {
+            s.h.reels.answer(Ok(VideoState::Expired));
+        }
+        let job = wait_done(&s.app, start(&s, review(&s).choices()));
+
+        assert_eq!(
+            s.h.reels.files.lock().unwrap().len(),
+            1 + MAX_RESTARTS as usize
+        );
+        assert!(job.failure().is_some(), "{:?}", job.state());
+        assert!(s.h.reels.published.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn what_instagram_published_without_shows_on_the_publication() {
+        let s = ready();
+        s.h.reels.publish_answer(Ok(NetworkPost {
+            id: "17900000000000001".into(),
+            link: None,
+            issue: Some("The audio could not be added to the reel".into()),
+        }));
+        done(&s.app, start(&s, review(&s).choices()));
+
+        let publication = upload(&s);
+        assert_eq!(
+            publication.upload().unwrap().issue.as_deref(),
+            Some("The audio could not be added to the reel")
+        );
+        assert_eq!(publication.link, None, "made, without a known address");
+        assert_eq!(
+            publication.upload().unwrap().network_id.as_deref(),
+            Some("17900000000000001"),
+            "its media id is kept to read its insights"
+        );
+        assert_eq!(state(&s), UploadState::Published);
+        assert_eq!(
+            s.app
+                .upload_issue_text("The audio could not be added to the reel"),
+            "Instagram published the Reel with a warning: The audio could not be added to the reel"
+        );
+    }
+
+    #[test]
+    fn a_reel_not_ready_to_publish_is_checked_again_first() {
+        let s = ready();
+        s.h.reels.publish_answer(Err(UploadErrorKind::NotReady));
+        done(&s.app, start(&s, review(&s).choices()));
+        assert_eq!(s.h.reels.published.lock().unwrap().len(), 2);
+        assert_eq!(s.h.reels.checks.lock().unwrap().len(), 2);
+        assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_limit_bardo_may_not_read_does_not_hold_the_reel() {
+        let s = ready();
+        s.h.reels.limit(Err(UploadErrorKind::NotAllowed));
+        done(&s.app, start(&s, review(&s).choices()));
+        assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_reel_still_processing_is_checked_again_on_its_container() {
+        let s = ready();
+        let polls = s.h.reels.processing_polls();
+        // Still processing after the upload and after the first check.
+        for _ in 0..2 * (polls + 1) {
+            s.h.reels.answer(Ok(VideoState::Processing));
+        }
+        done(&s.app, start(&s, review(&s).choices()));
+        assert_eq!(state(&s), UploadState::StillProcessing);
+
+        let check = s.app.check_upload(upload(&s).id).unwrap();
+        done(&s.app, check);
+        assert_eq!(state(&s), UploadState::StillProcessing);
+        let check = s.app.check_upload(upload(&s).id).unwrap();
+        done(&s.app, check);
+        assert_eq!(state(&s), UploadState::Published);
+        let checks = s.h.reels.checks.lock().unwrap().clone();
+        assert!(checks.iter().all(|id| *id == checks[0]), "{checks:?}");
+        assert_eq!(s.h.reels.files.lock().unwrap().len(), 1, "not sent again");
+    }
+
+    #[test]
+    fn a_reel_never_goes_to_another_account_than_the_one_reviewed() {
+        let s = ready();
+        s.h.reels.will(Attempt::HoldAfter(1));
+        let job = start(&s, review(&s).choices());
+        wait_until("held", || {
+            s.h.reels.holding.load(std::sync::atomic::Ordering::SeqCst)
+        });
+        s.app.cancel_job(job).unwrap();
+        wait_done(&s.app, job);
+
+        connect_as(&s, "17841400000000001", "@another");
+        s.app.resume_upload(job).unwrap();
+        wait_done(&s.app, job);
+        assert_eq!(
+            upload(&s).upload().unwrap().status,
+            UploadStatus::Failed(UploadFailure::AccountChanged)
+        );
+        assert_eq!(s.h.reels.chunk_starts(), [0], "nothing more sent");
+        assert!(s.h.reels.published.lock().unwrap().is_empty());
     }
 }

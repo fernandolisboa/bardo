@@ -12,7 +12,7 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
 
-use crate::{JobFailureKind, JobId, Network, SecretText, Visibility};
+use crate::{JobFailureKind, JobId, Network, PostLink, PublishingLimit, SecretText, Visibility};
 
 /// The unit chunk sizes are multiples of: YouTube takes chunks in
 /// multiples of 256 KiB, except the last one.
@@ -47,6 +47,9 @@ pub enum UploadFailure {
     /// The publish time passed before the upload could start: the network
     /// would publish the video at once. The user reviews it again.
     ScheduleMissed,
+    /// The account was reconnected as another one at the network than the
+    /// one the upload was reviewed for. The user reviews it again.
+    AccountChanged,
     /// The upload job failed for another reason.
     Job(JobFailureKind),
 }
@@ -63,6 +66,7 @@ impl UploadFailure {
             UploadFailure::Removed => "removed".to_owned(),
             UploadFailure::RenderChanged => "render_changed".to_owned(),
             UploadFailure::ScheduleMissed => "schedule_missed".to_owned(),
+            UploadFailure::AccountChanged => "account_changed".to_owned(),
             UploadFailure::Job(kind) => format!("job:{}", kind.code()),
         }
     }
@@ -83,6 +87,7 @@ impl UploadFailure {
                 "removed" => UploadFailure::Removed,
                 "render_changed" => UploadFailure::RenderChanged,
                 "schedule_missed" => UploadFailure::ScheduleMissed,
+                "account_changed" => UploadFailure::AccountChanged,
                 _ => UploadFailure::Job(JobFailureKind::Unexpected),
             },
         }
@@ -182,6 +187,13 @@ pub struct Upload {
     pub publish_at: Option<SystemTime>,
     /// The job that uploads it; retrying that job resumes the upload.
     pub job: JobId,
+    /// What the network published without, in its words: Instagram's
+    /// `config_issue` (a caption or tags it did not attach). `None` when it
+    /// said nothing.
+    pub issue: Option<String>,
+    /// The post's id at the network once Bardo published it, when its
+    /// address does not carry it (Instagram's media id).
+    pub network_id: Option<String>,
 }
 
 impl Upload {
@@ -192,6 +204,8 @@ impl Upload {
             visibility,
             publish_at: None,
             job,
+            issue: None,
+            network_id: None,
         }
     }
 
@@ -232,6 +246,19 @@ impl Upload {
                 Ok(())
             }
             _ => Err(self.invalid("finish sending")),
+        }
+    }
+
+    /// The network dropped the upload before it was published (Instagram
+    /// keeps an unpublished upload for 24 hours): the job sends the file
+    /// again, from the first byte.
+    pub fn expired(&mut self) -> Result<(), InvalidUploadTransition> {
+        match self.status {
+            UploadStatus::Uploading | UploadStatus::Processing => {
+                self.status = UploadStatus::Queued;
+                Ok(())
+            }
+            _ => Err(self.invalid("start over")),
         }
     }
 
@@ -338,6 +365,11 @@ pub struct VideoUpload {
     /// When the network makes the video public: it goes up private until
     /// then (YouTube's `publishAt`). `visibility` is public.
     pub publish_at: Option<SystemTime>,
+    /// A Reel also shows in the feed, not only in the Reels tab
+    /// (Instagram's `share_to_feed`).
+    pub share_to_feed: bool,
+    /// The frame of the video its cover shows (Instagram's `thumb_offset`).
+    pub cover: Duration,
 }
 
 impl VideoUpload {
@@ -355,6 +387,21 @@ pub struct UploadedVideo {
     pub id: String,
 }
 
+/// The post a network made when Bardo published an uploaded video
+/// (Instagram's `media_publish`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkPost {
+    /// The post's id at the network (Instagram's media id, which its
+    /// insights take; the address carries another one).
+    pub id: String,
+    /// The post's address; `None` when the network made the post but Bardo
+    /// could not read its address.
+    pub link: Option<PostLink>,
+    /// What the network published without, in its words (Instagram's
+    /// `config_issue`).
+    pub issue: Option<String>,
+}
+
 /// How an upload call ended without an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UploadOutcome {
@@ -368,6 +415,12 @@ pub enum UploadOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VideoState {
     Processing,
+    /// Processed and waiting for Bardo to publish it: Instagram's container
+    /// is `FINISHED`. YouTube publishes by itself and never says this.
+    Processed,
+    /// The network dropped the upload before it was published (Instagram's
+    /// container `EXPIRED` after 24 hours): the file goes again.
+    Expired,
     /// Processed, showing as `visibility`.
     Ready {
         visibility: Visibility,
@@ -419,6 +472,11 @@ pub enum UploadErrorKind {
     ScheduleRefused,
     /// The video is no longer on the network.
     NotFound,
+    /// The network is not done with the video yet (Instagram's "media is
+    /// not ready for publishing"): ask again later.
+    NotReady,
+    /// The network dropped the upload (Instagram's expired container).
+    Expired,
 }
 
 impl UploadErrorKind {
@@ -498,6 +556,13 @@ pub trait UploadRun {
 
     /// True once the run should stop and leave the rest for later.
     fn should_stop(&self) -> bool;
+
+    /// The connected account's id on the network, which some networks take
+    /// in the upload's address (Instagram's IG user id). YouTube goes by the
+    /// token alone and ignores it; empty when the run does not know it.
+    fn account(&self) -> &str {
+        ""
+    }
 }
 
 /// Uploads videos to one network, resumably. Calls the network and blocks,
@@ -517,6 +582,47 @@ pub trait VideoUploader: Send + Sync {
 
     /// Where the uploaded video `id` stands.
     fn state(&self, access_token: &SecretText, id: &str) -> Result<VideoState, UploadError>;
+
+    /// The post's address for the uploaded video `id`, once the network has
+    /// the whole file: YouTube's watch address. `None` where the post only
+    /// exists once Bardo publishes it (`publish`).
+    fn link(&self, id: &str) -> Result<Option<PostLink>, UploadError> {
+        let _ = id;
+        Ok(None)
+    }
+
+    /// How much of the network's publishing limit `account` used, where
+    /// the network reports one (Instagram's `content_publishing_limit`).
+    fn publishing_limit(
+        &self,
+        access_token: &SecretText,
+        account: &str,
+    ) -> Result<Option<PublishingLimit>, UploadError> {
+        let _ = (access_token, account);
+        Ok(None)
+    }
+
+    /// Publishes the processed upload `id` on `account`, for networks
+    /// where an upload only becomes a post when asked to (Instagram's
+    /// `media_publish`, once its container is `FINISHED`).
+    fn publish(
+        &self,
+        access_token: &SecretText,
+        account: &str,
+        id: &str,
+    ) -> Result<NetworkPost, UploadError> {
+        let _ = (access_token, account, id);
+        Err(UploadError::new(
+            UploadErrorKind::NotAllowed,
+            "the network publishes uploads by itself",
+        ))
+    }
+
+    /// How many times a job checks on a video being processed before it
+    /// stops waiting: about an hour with the default `poll_delay`.
+    fn processing_polls(&self) -> u32 {
+        16
+    }
 
     /// Changes the publish time of the scheduled video `id`, or cancels it
     /// (`change.publish_at` is `None`: the video stays private). Only while
@@ -668,6 +774,24 @@ mod tests {
         assert_eq!(u.job, next);
     }
 
+    #[test]
+    fn an_upload_the_network_dropped_starts_over_until_it_is_on_the_network() {
+        let mut u = upload(Visibility::Public);
+        assert!(u.expired().is_err(), "nothing went yet");
+        u.start().unwrap();
+        u.expired().unwrap();
+        assert_eq!(u.status, UploadStatus::Queued);
+        u.start().unwrap();
+        u.sent().unwrap();
+        u.expired().unwrap();
+        assert_eq!(u.status, UploadStatus::Queued, "dropped while processing");
+        u.start().unwrap();
+        u.sent().unwrap();
+        u.processed(Visibility::Public, None).unwrap();
+        assert!(u.expired().is_err(), "published");
+        assert_eq!(u.status, UploadStatus::Published);
+    }
+
     fn at(secs: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
     }
@@ -759,6 +883,8 @@ mod tests {
             made_for_kids: false,
             synthetic: false,
             publish_at: None,
+            share_to_feed: true,
+            cover: Duration::ZERO,
         };
         assert!(!video.is_late(at(100)), "not scheduled");
         video.publish_at = Some(at(100));
@@ -814,7 +940,10 @@ mod tests {
             UploadErrorKind::Unexpected,
             UploadErrorKind::Local,
             UploadErrorKind::Late,
+            UploadErrorKind::ScheduleRefused,
             UploadErrorKind::NotFound,
+            UploadErrorKind::NotReady,
+            UploadErrorKind::Expired,
         ]
         .into_iter()
         .filter(|kind| kind.is_transient())

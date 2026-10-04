@@ -24,9 +24,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ChannelId, InvalidUploadTransition, Money, Network, NetworkAccountId, OwnerMetrics,
-    ProfileId, ProviderFailure, RenderId, RepositoryError, RetentionCurve, SCHEDULE_GRACE, Upload,
-    UploadStatus, VideoProjectId, Visibility,
+    ApiKey, ChannelId, InvalidUploadTransition, Money, Network, NetworkAccountId, NetworkPost,
+    OwnerMetrics, ProfileId, ProviderFailure, RenderId, RepositoryError, RetentionCurve,
+    SCHEDULE_GRACE, Upload, UploadStatus, VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -515,14 +515,37 @@ impl Publication {
         }
     }
 
-    /// The upload sent the whole file and the network made `video` of it.
-    pub fn sent(&mut self, video: PostLink) -> Result<(), InvalidUploadTransition> {
+    /// The upload sent the whole file and the network made `video` of it:
+    /// its post, where the network makes one at once (YouTube). Where the
+    /// post only comes when Bardo publishes it (Instagram), `None` keeps
+    /// the publication without one until then.
+    pub fn sent(&mut self, video: Option<PostLink>) -> Result<(), InvalidUploadTransition> {
         let upload = self.upload_mut().ok_or(InvalidUploadTransition {
             from: "manual",
             action: "finish sending",
         })?;
         upload.sent()?;
-        self.link = Some(video);
+        if video.is_some() {
+            self.link = video;
+        }
+        Ok(())
+    }
+
+    /// Bardo published the processed upload and the network made `post`
+    /// of it at `at`, public, with what it said it left out.
+    pub fn published(
+        &mut self,
+        post: NetworkPost,
+        at: SystemTime,
+    ) -> Result<(), InvalidUploadTransition> {
+        let upload = self.scheduled_upload("publish")?;
+        upload.processed(Visibility::Public, None)?;
+        upload.issue = post.issue;
+        upload.network_id = Some(post.id);
+        if post.link.is_some() {
+            self.link = post.link;
+        }
+        self.posted_at = at;
         Ok(())
     }
 
@@ -1260,6 +1283,7 @@ mod tests {
     fn publication(network: Network, checked_at: Option<SystemTime>) -> Publication {
         let link = match network {
             Network::YouTube => "https://youtu.be/dQw4w9WgXcQ",
+            Network::InstagramReels => "https://www.instagram.com/reel/C1aBcDeFgHi/",
             _ => "https://www.tiktok.com/@a/video/7301234567890123456",
         };
         Publication {
@@ -1332,7 +1356,7 @@ mod tests {
         assert!(!p.has_public_metrics(), "no video yet");
         assert!(!p.is_posted());
 
-        p.sent(video()).unwrap();
+        p.sent(Some(video())).unwrap();
         assert_eq!(p.post_id(), Some("dQw4w9WgXcQ"));
         assert_eq!(p.upload().unwrap().status, UploadStatus::Processing);
         assert!(!p.has_public_metrics(), "still processing");
@@ -1345,7 +1369,7 @@ mod tests {
         assert!(p.is_posted());
 
         let mut failed = uploading(Visibility::Public);
-        failed.sent(video()).unwrap();
+        failed.sent(Some(video())).unwrap();
         failed
             .upload_mut()
             .unwrap()
@@ -1355,9 +1379,71 @@ mod tests {
     }
 
     #[test]
+    fn a_reel_gets_its_link_and_the_networks_issue_when_bardo_publishes_it() {
+        let mut p = publication(Network::InstagramReels, None);
+        p.link = None;
+        p.kind = PublicationKind::Uploaded(Upload::queued(Visibility::Public, crate::JobId::new()));
+        p.upload_mut().unwrap().start().unwrap();
+        p.sent(None).unwrap();
+        assert_eq!(p.upload().unwrap().status, UploadStatus::Processing);
+        assert_eq!(p.link, None, "no post until it is published");
+        assert!(!p.is_posted());
+
+        let reel = PostLink::parse(
+            Network::InstagramReels,
+            "https://www.instagram.com/reel/C9xYz12AbCd/",
+        )
+        .unwrap();
+        p.published(
+            NetworkPost {
+                id: "17900000000000001".into(),
+                link: Some(reel.clone()),
+                issue: Some("Caption not attached".into()),
+            },
+            at(70),
+        )
+        .unwrap();
+        assert_eq!(p.upload().unwrap().status, UploadStatus::Published);
+        assert_eq!(
+            p.upload().unwrap().issue.as_deref(),
+            Some("Caption not attached")
+        );
+        assert_eq!(p.link, Some(reel));
+        assert_eq!(p.posted_at, at(70));
+        assert!(p.is_posted());
+        assert!(!p.has_public_metrics(), "no Instagram statistics yet");
+        assert!(
+            p.published(
+                NetworkPost {
+                    id: "17900000000000001".into(),
+                    link: None,
+                    issue: None
+                },
+                at(80)
+            )
+            .is_err(),
+            "once"
+        );
+
+        let mut manual = publication(Network::InstagramReels, None);
+        assert!(
+            manual
+                .published(
+                    NetworkPost {
+                        id: "17900000000000001".into(),
+                        link: None,
+                        issue: None
+                    },
+                    at(1)
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn private_and_restricted_uploads_have_no_public_metrics() {
         let mut restricted = uploading(Visibility::Unlisted);
-        restricted.sent(video()).unwrap();
+        restricted.sent(Some(video())).unwrap();
         restricted
             .processed(Visibility::Private, None, at(5))
             .unwrap();
@@ -1369,7 +1455,7 @@ mod tests {
         assert!(restricted.is_posted(), "on the channel, private");
 
         let mut private = uploading(Visibility::Private);
-        private.sent(video()).unwrap();
+        private.sent(Some(video())).unwrap();
         private.processed(Visibility::Private, None, at(5)).unwrap();
         assert_eq!(private.upload().unwrap().status, UploadStatus::Published);
         assert!(!private.has_public_metrics());
@@ -1381,7 +1467,7 @@ mod tests {
         p.link = None;
         p.kind = PublicationKind::Uploaded(Upload::scheduled(at(1000), crate::JobId::new()));
         p.upload_mut().unwrap().start().unwrap();
-        p.sent(video()).unwrap();
+        p.sent(Some(video())).unwrap();
         p.processed(Visibility::Private, Some(at(1000)), at(5))
             .unwrap();
         p
@@ -1528,7 +1614,7 @@ mod tests {
     #[test]
     fn a_manual_publication_takes_no_upload_steps() {
         let mut p = publication(Network::YouTube, None);
-        assert!(p.sent(video()).is_err());
+        assert!(p.sent(Some(video())).is_err());
         assert!(p.processed(Visibility::Public, None, at(1)).is_err());
         assert_eq!(p.kind.code(), "manual");
     }

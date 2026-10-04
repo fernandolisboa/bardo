@@ -302,6 +302,40 @@ mod tests {
     }
 
     #[test]
+    fn a_deferred_job_waits_queued_then_runs_again_from_its_checkpoint() {
+        let (db, owner) = memory_db();
+        let runs = Arc::new(AtomicU32::new(0));
+        let seen = Arc::clone(&runs);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                    cx.save_checkpoint("waiting", Progress::from_permille(500))
+                        .unwrap();
+                    cx.defer(SystemTime::now() + Duration::from_millis(150));
+                } else {
+                    assert_eq!(cx.checkpoint(), Some("waiting"));
+                    assert_eq!(cx.attempt(), 1, "the wait spent no attempt");
+                }
+                Ok(())
+            }),
+            settings(),
+        );
+        let id = enqueue(&q, owner);
+        let waiting = wait_for(
+            || q.jobs(),
+            id,
+            |j| j.state() == JobState::Queued && j.retry_at().is_some(),
+        );
+        assert_eq!(waiting.failure(), None);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Queued);
+        let done = wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+        assert_eq!(done.attempts(), 1);
+    }
+
+    #[test]
     fn progress_is_visible_while_the_job_runs() {
         let (db, owner) = memory_db();
         let q = queue(
