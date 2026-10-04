@@ -65,6 +65,14 @@ impl Network {
         self == Network::YouTube
     }
 
+    /// Whether Bardo publishes a scheduled upload itself, at its due time,
+    /// while the app is open (the in-app scheduler, ADR-0006): the network
+    /// takes no publish time, and Bardo makes the post (Instagram's
+    /// `media_publish`).
+    pub fn schedules_in_app(self) -> bool {
+        self == Network::InstagramReels
+    }
+
     /// Whether an upload declares whether the video is made for kids
     /// (YouTube's `selfDeclaredMadeForKids`).
     pub fn asks_made_for_kids(self) -> bool {
@@ -75,6 +83,22 @@ impl Network {
     /// also shows in the feed, and the file must meet the Reel specs.
     pub fn uploads_reels(self) -> bool {
         self == Network::InstagramReels
+    }
+
+    /// Whether an upload lands in the creator's inbox as a draft, which
+    /// they finish and post in the network's app (TikTok's upload to
+    /// inbox, ADR-0008): no caption, visibility or publish time goes with
+    /// it, and the file must meet the network's specs.
+    pub fn uploads_drafts(self) -> bool {
+        self == Network::TikTok
+    }
+
+    /// Whether the metrics sync reads the network's posts through the
+    /// connected account (#85): Instagram's media insights and TikTok's
+    /// video query. YouTube's public numbers need no account, and X and
+    /// Kick keep only the link.
+    pub fn reads_insights(self) -> bool {
+        matches!(self, Network::InstagramReels | Network::TikTok)
     }
 
     /// The preset a render for this network uses unless the account

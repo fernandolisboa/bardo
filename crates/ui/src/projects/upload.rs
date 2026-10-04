@@ -13,9 +13,20 @@
 //! until the network publishes it.
 //!
 //! A Reel (#81) is reviewed with its caption, the cover time (seconds or
-//! m:ss), "Also show in Feed" and the AI label; Instagram takes no publish
-//! time from Bardo yet, so the card has no When. A rendered file that falls
+//! m:ss), "Also show in Feed" and the AI label. A rendered file that falls
 //! short of the Reel specs blocks the review, and the section lists why.
+//!
+//! Instagram takes no publish time, so a Reel scheduled in the review (#82)
+//! is published by Bardo at its due time; the card says Bardo must be open
+//! then and the computer on. A Reel whose due time passed without it offers
+//! "Post now", "New time" and "Cancel post", as the missed-posts list does
+//! when Bardo opens ([`crate::missed`]).
+//!
+//! A TikTok upload (#84) goes to the creator's inbox as a draft: the review
+//! shows the file, the account and the caption to paste, says the post is
+//! finished in the TikTok app, and has no visibility, time or made for kids.
+//! A file outside TikTok's specs blocks it, and so does TikTok's cap of
+//! drafts from apps in 24 hours, with when the next one may go.
 
 use std::time::SystemTime;
 
@@ -23,7 +34,7 @@ use bardo_app::bardo_domain::{
     JobId, PublicationId, ScheduleProblem, Visibility, format_cover_time, parse_cover_time,
 };
 use bardo_app::{
-    ScheduleError, ScheduleResult, Text, UploadBlock, UploadChoices, UploadReview,
+    MissedPostError, ScheduleError, ScheduleResult, Text, UploadBlock, UploadChoices, UploadReview,
     UploadReviewError, UploadState,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -56,12 +67,31 @@ fn account_line(channel: &str, handle: &str) -> String {
     }
 }
 
-/// What the user is doing to a scheduled upload.
+/// What the user is doing to a scheduled upload, or to one that missed
+/// its due time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::projects) enum ScheduleEdit {
     /// Typing a new publish time.
     Change,
     /// Asked to cancel the schedule; the stage asks first.
+    Cancel,
+    /// Typing a new due time for a missed post.
+    NewTime,
+    /// Asked to cancel a missed post; the stage asks first.
+    CancelPost,
+}
+
+impl ScheduleEdit {
+    fn of_missed(self) -> bool {
+        matches!(self, ScheduleEdit::NewTime | ScheduleEdit::CancelPost)
+    }
+}
+
+/// What the user does with a missed post.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MissedAction {
+    SendNow,
+    NewTime,
     Cancel,
 }
 
@@ -88,9 +118,25 @@ impl ProjectsScreen {
         {
             self.upload_draft = None;
         }
-        // A change of time only stays open while the upload is scheduled.
-        if self.scheduled_upload(cx).is_none() {
+        // A change of time only stays open while the upload is scheduled,
+        // or missed for a missed post's.
+        let open = match self.schedule_edit {
+            Some(edit) if edit.of_missed() => self.missed_upload(cx).is_some(),
+            Some(_) => self.scheduled_upload(cx).is_some(),
+            None => true,
+        };
+        if !open {
             self.schedule_edit = None;
+        }
+    }
+
+    /// The shown network's upload when its due time passed without it: its
+    /// publication and due time.
+    fn missed_upload(&self, cx: &Context<Self>) -> Option<(PublicationId, SystemTime)> {
+        let publication = self.upload_now.as_ref()?.replaces.as_ref()?;
+        match self.bardo.read(cx).upload_state(publication)? {
+            UploadState::Missed(at) => Some((publication.id, at)),
+            _ => None,
         }
     }
 
@@ -157,7 +203,7 @@ impl ProjectsScreen {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if edit == ScheduleEdit::Change {
+        if matches!(edit, ScheduleEdit::Change | ScheduleEdit::NewTime) {
             self.fill_schedule(at, window, cx);
         }
         self.schedule_edit = Some(edit);
@@ -239,6 +285,46 @@ impl ProjectsScreen {
         cx.notify();
     }
 
+    /// Sends a missed post now, gives it the typed time or cancels it.
+    fn missed_action(
+        &mut self,
+        publication: PublicationId,
+        action: MissedAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = match action {
+            MissedAction::SendNow => self.bardo.read(cx).send_missed_now(publication),
+            MissedAction::NewTime => match self.typed_publish_time(cx) {
+                Ok(at) => self.bardo.read(cx).reschedule_missed(publication, at),
+                Err(problem) => Err(MissedPostError::Schedule(problem)),
+            },
+            MissedAction::Cancel => self.bardo.read(cx).cancel_missed(publication),
+        };
+        match result {
+            Ok(()) => {
+                self.schedule_edit = None;
+                self.schedule_notice = Some((
+                    Tone::Success,
+                    match action {
+                        MissedAction::SendNow => Text::MissedSent,
+                        MissedAction::NewTime => Text::MissedRescheduled,
+                        MissedAction::Cancel => Text::MissedCancelled,
+                    },
+                ));
+            }
+            Err(MissedPostError::Schedule(problem)) => {
+                self.schedule_problem = Some(Text::ScheduleProblem(problem));
+            }
+            Err(error) => {
+                self.schedule_edit = None;
+                self.schedule_notice = Some((Tone::Danger, error.message()));
+            }
+        }
+        self.load(window, cx);
+        cx.notify();
+    }
+
     fn change_upload(&mut self, change: impl FnOnce(&mut UploadChoices), cx: &mut Context<Self>) {
         if let Some((_, choices)) = self.upload_draft.as_mut() {
             change(choices);
@@ -262,7 +348,8 @@ impl ProjectsScreen {
                     return;
                 }
             }
-        } else if self.upload_scheduled {
+        }
+        if self.upload_scheduled {
             match self.typed_publish_time(cx) {
                 Ok(at) => choices.publish_at = Some(at),
                 Err(problem) => {
@@ -347,6 +434,8 @@ impl ProjectsScreen {
                     bardo,
                     if now.is_reel() {
                         Text::UploadReelHint
+                    } else if now.is_draft() {
+                        Text::UploadDraftHint
                     } else {
                         Text::UploadHint
                     },
@@ -446,17 +535,47 @@ impl ProjectsScreen {
                         })),
                 );
         }
+        // A missed post: send it now, give it a new time or cancel it.
+        let missed = self.missed_upload(cx);
+        if let Some((publication, _)) = missed.filter(|_| idle) {
+            let next = bardo.default_publish_time();
+            actions = actions
+                .child(
+                    Button::new("missed-send")
+                        .small()
+                        .primary()
+                        .label(tr(bardo, Text::MissedSendNow))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.missed_action(publication, MissedAction::SendNow, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("missed-new-time")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::MissedNewTime))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.open_schedule_edit(ScheduleEdit::NewTime, next, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("missed-cancel")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::MissedCancel))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.open_schedule_edit(ScheduleEdit::CancelPost, next, window, cx);
+                        })),
+                );
+        }
         let block = now.block();
+        let waits = scheduled.is_some() || missed.is_some();
         if !active {
             actions = actions.child(
                 Button::new("upload-review")
                     .small()
-                    .when(block.is_none() && scheduled.is_none(), |button| {
-                        button.primary()
-                    })
-                    .when(block.is_some() || scheduled.is_some(), |button| {
-                        button.outline()
-                    })
+                    .when(block.is_none() && !waits, |button| button.primary())
+                    .when(block.is_some() || waits, |button| button.outline())
                     .label(tr(bardo, Text::UploadOpenReview))
                     .disabled(block.is_some())
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
@@ -469,16 +588,31 @@ impl ProjectsScreen {
             section = section.child(muted(cx, tr(bardo, Text::UploadBlocked(block))));
         }
         if block == Some(UploadBlock::Specs) && !active {
-            section = section.child(
-                v_flex()
-                    .gap_1()
-                    .child(label(tr(bardo, Text::UploadSpecsTitle)))
-                    .children(now.spec_problems.iter().map(|problem| {
-                        kit::notice(Tone::Danger, bardo.reel_spec_text(problem), cx)
-                    })),
-            );
+            section =
+                section.child(
+                    v_flex()
+                        .gap_1()
+                        .child(label(tr(
+                            bardo,
+                            if now.is_draft() {
+                                Text::UploadTikTokSpecsTitle
+                            } else {
+                                Text::UploadSpecsTitle
+                            },
+                        )))
+                        .children(now.spec_problems.iter().map(|problem| {
+                            kit::notice(Tone::Danger, bardo.spec_text(problem), cx)
+                        })),
+                );
         }
-        if let Some((publication, _)) = scheduled {
+        if let Some(free_at) = now.drafts_free_at.filter(|_| !active) {
+            section = section.child(kit::notice(
+                Tone::Warning,
+                bardo.draft_limit_text(free_at),
+                cx,
+            ));
+        }
+        if let Some((publication, _)) = scheduled.or(missed) {
             section = section.children(self.schedule_editor(publication, cx));
         }
         let network = bardo.text(Text::NetworkName(now.network)).into_owned();
@@ -606,6 +740,48 @@ impl ProjectsScreen {
                                 })),
                         ),
                 ),
+            ScheduleEdit::NewTime => v_flex().gap_2().child(self.schedule_fields(cx)).child(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(back("missed-back", Text::UploadBack))
+                    .child(
+                        Button::new("missed-save")
+                            .small()
+                            .primary()
+                            .label(tr(bardo, Text::MissedSave))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.missed_action(publication, MissedAction::NewTime, window, cx);
+                            })),
+                    ),
+            ),
+            ScheduleEdit::CancelPost => v_flex()
+                .gap_2()
+                .child(kit::notice(
+                    Tone::Warning,
+                    bardo.text_with(Text::MissedCancelConfirm, &[("network", &network)]),
+                    cx,
+                ))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .child(back("missed-keep", Text::MissedKeep))
+                        .child(
+                            Button::new("missed-cancel-yes")
+                                .small()
+                                .danger()
+                                .label(tr(bardo, Text::MissedCancelYes))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.missed_action(
+                                        publication,
+                                        MissedAction::Cancel,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        ),
+                ),
         };
         Some(
             kit::card(cx)
@@ -626,6 +802,7 @@ impl ProjectsScreen {
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let reel = review.is_reel();
+        let draft = review.is_draft();
         let network = bardo.text(Text::NetworkName(review.network)).into_owned();
         let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
         let row = |name: Text, value: AnyElement| {
@@ -664,7 +841,7 @@ impl ProjectsScreen {
             ));
         }
         card = card.child(row(
-            if reel {
+            if reel || draft {
                 Text::UploadFieldAccount
             } else {
                 Text::UploadFieldChannel
@@ -682,6 +859,8 @@ impl ProjectsScreen {
                 card = card.child(row(
                     if reel {
                         Text::UploadFieldCaption
+                    } else if draft {
+                        Text::UploadFieldDraftCaption
                     } else {
                         Text::MetadataFieldDescription
                     },
@@ -691,8 +870,8 @@ impl ProjectsScreen {
                         .into_any_element(),
                 ));
             }
-            // A Reel's hashtags are in its caption.
-            if !reel {
+            // A Reel's or a TikTok's hashtags are in its caption.
+            if !reel && !draft {
                 card = card.child(row(Text::MetadataFieldTags, text(post.tags.join(", "))));
             }
         }
@@ -733,8 +912,27 @@ impl ProjectsScreen {
                 }
             }));
         let screen = cx.entity().downgrade();
-        if reel {
+        if draft {
+            // TikTok takes the video only; the rest is the creator's, in
+            // the app.
+            card = card.child(kit::notice(
+                Tone::Info,
+                tr(bardo, Text::UploadDraftNotice),
+                cx,
+            ));
+        } else if reel {
             card = card.child(self.cover_field(cx));
+            card = card.child(row(
+                Text::UploadFieldWhen,
+                h_flex().child(when).into_any_element(),
+            ));
+            if scheduled {
+                card = card.child(self.schedule_fields(cx)).child(kit::notice(
+                    Tone::Info,
+                    with_network(Text::UploadReelScheduleHint),
+                    cx,
+                ));
+            }
             let feed = Checkbox::new("upload-feed")
                 .label(tr(bardo, Text::UploadShareToFeed))
                 .checked(choices.share_to_feed)
@@ -782,7 +980,7 @@ impl ProjectsScreen {
                     });
                 }
             });
-        if !reel {
+        if !reel && !draft {
             card = card.child(h_flex().gap_1().items_center().child(kids).child(kit::info(
                 "upload-kids-info",
                 None,
@@ -791,6 +989,8 @@ impl ProjectsScreen {
         }
         let (synthetic_label, synthetic_hint) = if reel {
             (Text::UploadAiLabel, Text::UploadAiLabelHint)
+        } else if draft {
+            (Text::UploadDraftAiLabel, Text::UploadDraftAiLabelHint)
         } else {
             (Text::UploadSynthetic, Text::UploadSyntheticHint)
         };
@@ -847,6 +1047,8 @@ impl ProjectsScreen {
             Tone::Warning,
             with_network(if reel {
                 Text::UploadReelIrreversible
+            } else if draft {
+                Text::UploadDraftIrreversible
             } else {
                 Text::UploadIrreversible
             }),
@@ -873,7 +1075,11 @@ impl ProjectsScreen {
                         .primary()
                         .label(tr(
                             bardo,
-                            if reel {
+                            if draft {
+                                Text::UploadDraftStart
+                            } else if reel && scheduled {
+                                Text::UploadReelStartScheduled
+                            } else if reel {
                                 Text::UploadReelStart
                             } else if scheduled {
                                 Text::UploadStartScheduled

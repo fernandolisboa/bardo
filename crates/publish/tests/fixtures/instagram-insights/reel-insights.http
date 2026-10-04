@@ -1,0 +1,16 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "data": [
+    { "name": "views", "period": "lifetime", "values": [{ "value": 48210 }], "title": "Views", "description": "Total number of times IG Media has been played on Instagram.", "id": "17900000000000001/insights/views/lifetime" },
+    { "name": "reach", "period": "lifetime", "values": [{ "value": 31544 }], "title": "Accounts reached", "description": "Number of unique Instagram users that have seen the reel at least once.", "id": "17900000000000001/insights/reach/lifetime" },
+    { "name": "likes", "period": "lifetime", "values": [{ "value": 2190 }], "title": "Likes", "description": "Number of likes on the media object.", "id": "17900000000000001/insights/likes/lifetime" },
+    { "name": "comments", "period": "lifetime", "values": [{ "value": 87 }], "title": "Comments", "description": "Number of comments on the media object.", "id": "17900000000000001/insights/comments/lifetime" },
+    { "name": "shares", "period": "lifetime", "values": [{ "value": 412 }], "title": "Shares", "description": "Number of shares of the reel.", "id": "17900000000000001/insights/shares/lifetime" },
+    { "name": "saved", "period": "lifetime", "values": [{ "value": 0 }], "title": "Saved", "description": "Number of time your app user's Instagram media was saved by an Instagram user.", "id": "17900000000000001/insights/saved/lifetime" },
+    { "name": "total_interactions", "period": "lifetime", "values": [{ "value": 2689 }], "title": "Interactions", "description": "Number of likes, saves, comments, and shares on the reel, minus the number of unlikes, unsaves, and deleted comments.", "id": "17900000000000001/insights/total_interactions/lifetime" },
+    { "name": "ig_reels_avg_watch_time", "period": "lifetime", "values": [{ "value": 7342 }], "title": "Average watch time", "description": "The average amount of time spent playing the reel.", "id": "17900000000000001/insights/ig_reels_avg_watch_time/lifetime" },
+    { "name": "ig_reels_video_view_total_time", "period": "lifetime", "values": [{ "value": 353957820 }], "title": "Total watch time", "description": "The total amount of time the reel was played, including any time spent replaying the reel.", "id": "17900000000000001/insights/ig_reels_video_view_total_time/lifetime" }
+  ]
+}

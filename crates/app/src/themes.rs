@@ -1235,6 +1235,7 @@ mod tests {
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
                 analytics: Vec::new(),
+                post_insights: Vec::new(),
             };
             Bardo::start_with(
                 repositories,
@@ -1872,6 +1873,7 @@ mod tests {
             linked_at: posted_at,
             checked_at: None,
             missing_since: None,
+            insights_id: None,
         };
         h.db.save_publication(&publication).unwrap();
         if let Some(age) = age {
@@ -1882,6 +1884,7 @@ mod tests {
                 likes: None,
                 comments: None,
                 owner: None,
+                insights: bardo_domain::Insights::default(),
             };
             h.db.save_sync(&[], &[snapshot]).unwrap();
         }

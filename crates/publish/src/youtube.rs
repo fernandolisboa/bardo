@@ -14,7 +14,7 @@ use bardo_domain::{
 };
 use serde_json::Value;
 
-use crate::oauth::{ChallengeEncoding, Pkce, new_state};
+use crate::oauth::{ChallengeEncoding, Pkce, new_state, parse_grant};
 
 /// Upload videos and set thumbnails.
 pub const SCOPE_UPLOAD: &str = "https://www.googleapis.com/auth/youtube.upload";
@@ -134,7 +134,11 @@ impl<T: Transport> NetworkSignIn for YouTubeSignIn<T> {
         ])
     }
 
-    fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure> {
+    fn revoke(
+        &self,
+        _credentials: Option<&AppCredentials>,
+        tokens: &TokenSet,
+    ) -> Result<(), SignInFailure> {
         // Revoking the refresh token revokes its access tokens too.
         let token = tokens.refresh_token().unwrap_or(tokens.access_token());
         let response = self.send(&HttpRequest::post_form(
@@ -232,41 +236,6 @@ impl<T: Transport> BrowserSignIn for YouTubeSignIn<T> {
 
 fn unexpected(detail: &str) -> SignInFailure {
     SignInFailure::new(SignInFailureKind::Unexpected, detail)
-}
-
-/// The scopes, access and refresh token a token endpoint granted.
-fn parse_grant(body: &str) -> Result<TokenGrant, SignInFailure> {
-    let body: Value = serde_json::from_str(body)
-        .map_err(|error| unexpected(&format!("unreadable token answer: {error}")))?;
-    let token = |name: &str| {
-        body[name]
-            .as_str()
-            .filter(|token| !token.is_empty() && token.chars().all(|c| c.is_ascii_graphic()))
-            .map(SecretText::new)
-    };
-    let access_token =
-        token("access_token").ok_or_else(|| unexpected("the token answer has no access token"))?;
-    if !body["token_type"]
-        .as_str()
-        .is_some_and(|kind| kind.eq_ignore_ascii_case("bearer"))
-    {
-        return Err(unexpected("the token answer is not a bearer token"));
-    }
-    let expires_in = body["expires_in"]
-        .as_u64()
-        .filter(|secs| *secs > 0)
-        .ok_or_else(|| unexpected("the token answer has no lifetime"))?;
-    Ok(TokenGrant {
-        access_token,
-        refresh_token: token("refresh_token"),
-        expires_in: Duration::from_secs(expires_in),
-        scopes: body["scope"]
-            .as_str()
-            .unwrap_or_default()
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect(),
-    })
 }
 
 /// The `error` code of an OAuth error answer.

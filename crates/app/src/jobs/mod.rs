@@ -302,6 +302,104 @@ mod tests {
     }
 
     #[test]
+    fn a_scheduled_job_waits_for_its_time_then_runs() {
+        let (db, owner) = memory_db();
+        let started = Arc::new(Mutex::new(None));
+        let seen = Arc::clone(&started);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |_, _| {
+                *seen.lock().unwrap() = Some(SystemTime::now());
+                Ok(())
+            }),
+            settings(),
+        );
+        let at = crate::publications::whole_millis(SystemTime::now() + Duration::from_millis(150));
+        let id = q
+            .enqueue(Job::scheduled(owner, JobKind::Countdown, "{}", at))
+            .unwrap();
+        assert_eq!(stored(&db, owner, id).run_at(), Some(at));
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        let started = started.lock().unwrap().unwrap();
+        assert!(started >= at, "not before its time");
+    }
+
+    #[test]
+    fn a_job_whose_time_came_goes_before_older_ones() {
+        let (db, owner) = memory_db();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&order);
+        let release = Arc::new(AtomicBool::new(false));
+        let go = Arc::clone(&release);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |payload, _| {
+                seen.lock().unwrap().push(payload.to_owned());
+                if payload == "first" {
+                    while !go.load(Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                }
+                Ok(())
+            }),
+            JobSettings {
+                max_running: 1,
+                ..settings()
+            },
+        );
+        let first = q
+            .enqueue(Job::new(owner, JobKind::Countdown, "first"))
+            .unwrap();
+        wait_for(|| q.jobs(), first, |j| j.state() == JobState::Running);
+        let plain = q
+            .enqueue(Job::new(owner, JobKind::Countdown, "plain"))
+            .unwrap();
+        let scheduled = q
+            .enqueue(Job::scheduled(
+                owner,
+                JobKind::Countdown,
+                "scheduled",
+                SystemTime::now(),
+            ))
+            .unwrap();
+        release.store(true, Ordering::SeqCst);
+        wait_for(|| q.jobs(), plain, |j| j.state() == JobState::Done);
+        wait_for(|| q.jobs(), scheduled, |j| j.state() == JobState::Done);
+        assert_eq!(*order.lock().unwrap(), ["first", "scheduled", "plain"]);
+    }
+
+    #[test]
+    fn a_job_queued_again_for_a_time_waits_for_it() {
+        let (db, owner) = memory_db();
+        let runs = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&runs);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |_, _| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Err(JobFailure::unexpected("boom"))
+            }),
+            settings(),
+        );
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Failed);
+        let at = crate::publications::whole_millis(SystemTime::now() + Duration::from_secs(3600));
+        q.retry_at(id, Some(at)).unwrap();
+        let queued = stored(&db, owner, id);
+        assert_eq!(queued.state(), JobState::Queued);
+        assert_eq!(queued.run_at(), Some(at));
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "it waits for its time");
+        assert!(
+            q.retry_at(id, None).is_err(),
+            "only a failed or cancelled one"
+        );
+    }
+
+    #[test]
     fn a_deferred_job_waits_queued_then_runs_again_from_its_checkpoint() {
         let (db, owner) = memory_db();
         let runs = Arc::new(AtomicU32::new(0));
@@ -326,7 +424,7 @@ mod tests {
         let waiting = wait_for(
             || q.jobs(),
             id,
-            |j| j.state() == JobState::Queued && j.retry_at().is_some(),
+            |j| j.state() == JobState::Queued && j.run_at().is_some(),
         );
         assert_eq!(waiting.failure(), None);
         assert_eq!(stored(&db, owner, id).state(), JobState::Queued);

@@ -220,7 +220,7 @@ fn token_endpoint_failures_are_classified() {
 fn revoking_sends_the_refresh_token() {
     let sign_in = answers(&["revoke-ok"]);
     sign_in
-        .revoke(&tokens(Some("1//0gRefresh-to-revoke")))
+        .revoke(None, &tokens(Some("1//0gRefresh-to-revoke")))
         .unwrap();
     let sent = &sign_in.transport().sent()[0];
     assert_eq!(sent.url, "https://oauth2.googleapis.com/revoke");
@@ -234,7 +234,7 @@ fn revoking_sends_the_refresh_token() {
 #[test]
 fn without_a_refresh_token_the_access_token_is_revoked() {
     let sign_in = answers(&["revoke-ok"]);
-    sign_in.revoke(&tokens(None)).unwrap();
+    sign_in.revoke(None, &tokens(None)).unwrap();
     assert_eq!(
         sign_in.transport().sent()[0].field("token").as_deref(),
         Some("ya29.fixture-access")
@@ -244,10 +244,10 @@ fn without_a_refresh_token_the_access_token_is_revoked() {
 #[test]
 fn a_token_already_revoked_counts_as_revoked() {
     answers(&["revoke-invalid-token"])
-        .revoke(&tokens(Some("1//gone")))
+        .revoke(None, &tokens(Some("1//gone")))
         .unwrap();
     let down = answers(&["token-server-error"])
-        .revoke(&tokens(Some("1//r")))
+        .revoke(None, &tokens(Some("1//r")))
         .unwrap_err();
     assert_eq!(down.kind, SignInFailureKind::NetworkDown);
 }

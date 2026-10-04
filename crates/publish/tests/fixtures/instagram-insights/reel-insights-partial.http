@@ -1,0 +1,10 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "data": [
+    { "name": "views", "period": "lifetime", "values": [{ "value": 1204 }], "title": "Views", "id": "17900000000000003/insights/views/lifetime" },
+    { "name": "likes", "period": "lifetime", "values": [{ "value": 0 }], "title": "Likes", "id": "17900000000000003/insights/likes/lifetime" },
+    { "name": "comments", "period": "lifetime", "values": [{ "value": 3 }], "title": "Comments", "id": "17900000000000003/insights/comments/lifetime" }
+  ]
+}

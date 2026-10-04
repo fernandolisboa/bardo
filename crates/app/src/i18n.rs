@@ -875,6 +875,8 @@ pub enum Text {
     ConnectionDisconnectedNotRevoked,
     /// Placeholder: `{network}`.
     ConnectionDisconnectedKeptForOthers,
+    /// Placeholder: `{network}`.
+    ConnectionDisconnectedCredentialsRefused,
     ConnectionReconnectHint(Network),
     ConnectionNotOffered,
     ConnectionNeedsAppCredentials(Network),
@@ -1160,6 +1162,8 @@ pub enum Text {
     PublicationRemoved,
     PublicationPostedAt,
     PublicationNoMetrics,
+    PublicationConnectForMetrics,
+    PublicationReconnectForMetrics,
     PublicationFigure,
     PublicationTileViews,
     PublicationTileEngaged,
@@ -1199,6 +1203,18 @@ pub enum Text {
     MetricsHours,
     MetricsMinutes,
     MetricsPercent,
+    MetricShares,
+    MetricSaves,
+    MetricReach,
+    MetricReachHint,
+    MetricInteractions,
+    MetricInteractionsHint,
+    MetricAverageWatch,
+    MetricNotReportedHint,
+    MetricsInstagramLine,
+    MetricsTikTokLine,
+    MetricsInsightsEmpty,
+    MetricsInsightsPending,
     PerformanceInfo,
     PerformanceEmpty,
     PerformanceNoChannels,
@@ -1329,6 +1345,52 @@ pub enum Text {
     DateTimeWithZone,
     ZoneWithOffset,
     WeekdayName(u8),
+    JobWaitsUntil,
+    UploadStateDue,
+    UploadStateMissed,
+    UploadDueAt,
+    UploadDueHint,
+    UploadMissedAt,
+    UploadMissedHint,
+    UploadReelScheduleHint,
+    UploadReelStartScheduled,
+    /// One TikTok spec problem, by `TikTokSpecProblem::code`.
+    UploadTikTokSpec(&'static str),
+    UploadTikTokSpecsTitle,
+    UploadDraftHint,
+    UploadDraftNotice,
+    UploadFieldDraftCaption,
+    UploadDraftAiLabel,
+    UploadDraftAiLabelHint,
+    UploadDraftIrreversible,
+    UploadDraftStart,
+    UploadDraftProcessingHint,
+    UploadStateDraftSent,
+    UploadDraftSentHint,
+    UploadDraftAiReminder,
+    UploadDraftLinkHint,
+    UploadDraftCopy,
+    UploadDraftCopied,
+    UploadDraftLimitHint,
+    UploadDraftLimitHeldHint,
+    UploadDraftLimitRecheckHint,
+    MissedTitle,
+    MissedHint,
+    MissedDue,
+    MissedSendNow,
+    MissedNewTime,
+    MissedSave,
+    MissedCancel,
+    MissedCancelConfirm,
+    MissedCancelYes,
+    MissedKeep,
+    MissedLater,
+    MissedLaterHint,
+    MissedSent,
+    MissedRescheduled,
+    MissedCancelled,
+    MissedNotMissed,
+    MissedNotUpdated,
     ScheduleProblem(ScheduleProblem),
 }
 
@@ -1690,6 +1752,9 @@ impl Text {
             Text::ConnectionDisconnected => "connection.disconnected",
             Text::ConnectionDisconnectedNotRevoked => "connection.disconnected_not_revoked",
             Text::ConnectionDisconnectedKeptForOthers => "connection.disconnected_kept_for_others",
+            Text::ConnectionDisconnectedCredentialsRefused => {
+                "connection.disconnected_credentials_refused"
+            }
             Text::ConnectionReconnectHint(network) => {
                 return format!("connection.{}.reconnect_hint", network.code()).into();
             }
@@ -2599,6 +2664,8 @@ impl Text {
             Text::PublicationRemoved => "publication.removed",
             Text::PublicationPostedAt => "publication.posted_at",
             Text::PublicationNoMetrics => "publication.no_metrics",
+            Text::PublicationConnectForMetrics => "publication.connect_for_metrics",
+            Text::PublicationReconnectForMetrics => "publication.reconnect_for_metrics",
             Text::PublicationFigure => "publication.figure",
             Text::PublicationTileViews => "publication.tile_views",
             Text::PublicationTileEngaged => "publication.tile_engaged",
@@ -2638,6 +2705,18 @@ impl Text {
             Text::MetricsHours => "metrics.hours",
             Text::MetricsMinutes => "metrics.minutes",
             Text::MetricsPercent => "metrics.percent",
+            Text::MetricShares => "metrics.shares",
+            Text::MetricSaves => "metrics.saves",
+            Text::MetricReach => "metrics.reach",
+            Text::MetricReachHint => "metrics.reach_hint",
+            Text::MetricInteractions => "metrics.interactions",
+            Text::MetricInteractionsHint => "metrics.interactions_hint",
+            Text::MetricAverageWatch => "metrics.average_watch",
+            Text::MetricNotReportedHint => "metrics.not_reported_hint",
+            Text::MetricsInstagramLine => "metrics.instagram_line",
+            Text::MetricsTikTokLine => "metrics.tiktok_line",
+            Text::MetricsInsightsEmpty => "metrics.insights_empty",
+            Text::MetricsInsightsPending => "metrics.insights_pending",
             Text::PerformanceOwnerNotConnected => "performance.owner_not_connected",
             Text::PerformanceOwnerReconnect => "performance.owner_reconnect",
             Text::PerformanceTileEngaged => "performance.tile_engaged",
@@ -2768,6 +2847,51 @@ impl Text {
             Text::ScheduleNotScheduled => "schedule.not_scheduled",
             Text::ScheduleFailed => "schedule.failed",
             Text::ScheduleNotAllowed => "schedule.not_allowed",
+            Text::JobWaitsUntil => "job.waits_until",
+            Text::UploadStateDue => "upload.state.due",
+            Text::UploadStateMissed => "upload.state.missed",
+            Text::UploadDueAt => "upload.due_at",
+            Text::UploadDueHint => "upload.due_hint",
+            Text::UploadMissedAt => "upload.missed_at",
+            Text::UploadMissedHint => "upload.missed_hint",
+            Text::UploadReelScheduleHint => "upload.reel_schedule_hint",
+            Text::UploadReelStartScheduled => "upload.reel_start_scheduled",
+            Text::UploadTikTokSpec(code) => return format!("upload.tiktok_spec.{code}").into(),
+            Text::UploadTikTokSpecsTitle => "upload.tiktok_specs_title",
+            Text::UploadDraftHint => "upload.draft_hint",
+            Text::UploadDraftNotice => "upload.draft_notice",
+            Text::UploadFieldDraftCaption => "upload.field.draft_caption",
+            Text::UploadDraftAiLabel => "upload.draft_ai_label",
+            Text::UploadDraftAiLabelHint => "upload.draft_ai_label_hint",
+            Text::UploadDraftIrreversible => "upload.draft_irreversible",
+            Text::UploadDraftStart => "upload.draft_start",
+            Text::UploadDraftProcessingHint => "upload.draft_processing_hint",
+            Text::UploadStateDraftSent => "upload.state.draft_sent",
+            Text::UploadDraftSentHint => "upload.draft_sent_hint",
+            Text::UploadDraftAiReminder => "upload.draft_ai_reminder",
+            Text::UploadDraftLinkHint => "upload.draft_link_hint",
+            Text::UploadDraftCopy => "upload.draft_copy",
+            Text::UploadDraftCopied => "upload.draft_copied",
+            Text::UploadDraftLimitHint => "upload.draft_limit_hint",
+            Text::UploadDraftLimitHeldHint => "upload.draft_limit_held_hint",
+            Text::UploadDraftLimitRecheckHint => "upload.draft_limit_recheck_hint",
+            Text::MissedTitle => "missed.title",
+            Text::MissedHint => "missed.hint",
+            Text::MissedDue => "missed.due",
+            Text::MissedSendNow => "missed.send_now",
+            Text::MissedNewTime => "missed.new_time",
+            Text::MissedSave => "missed.save",
+            Text::MissedCancel => "missed.cancel",
+            Text::MissedCancelConfirm => "missed.cancel_confirm",
+            Text::MissedCancelYes => "missed.cancel_yes",
+            Text::MissedKeep => "missed.keep",
+            Text::MissedLater => "missed.later",
+            Text::MissedLaterHint => "missed.later_hint",
+            Text::MissedSent => "missed.sent",
+            Text::MissedRescheduled => "missed.rescheduled",
+            Text::MissedCancelled => "missed.cancelled",
+            Text::MissedNotMissed => "missed.not_missed",
+            Text::MissedNotUpdated => "missed.not_updated",
             Text::DateTimeFormat => "date_time.format",
             Text::TimeFormat => "date_time.time",
             Text::TimeAm => "date_time.am",
@@ -3875,6 +3999,7 @@ mod tests {
             Text::ConnectionDisconnected,
             Text::ConnectionDisconnectedNotRevoked,
             Text::ConnectionDisconnectedKeptForOthers,
+            Text::ConnectionDisconnectedCredentialsRefused,
             Text::ConnectionNotOffered,
             Text::ConnectionNotConnected,
             Text::ConnectionDenied,
@@ -4189,6 +4314,8 @@ mod tests {
         texts.push(Text::PublicationRemoved);
         texts.push(Text::PublicationPostedAt);
         texts.push(Text::PublicationNoMetrics);
+        texts.push(Text::PublicationConnectForMetrics);
+        texts.push(Text::PublicationReconnectForMetrics);
         texts.push(Text::PublicationFigure);
         texts.push(Text::PublicationTileViews);
         texts.push(Text::PublicationTileEngaged);
@@ -4228,6 +4355,18 @@ mod tests {
         texts.push(Text::MetricsHours);
         texts.push(Text::MetricsMinutes);
         texts.push(Text::MetricsPercent);
+        texts.push(Text::MetricShares);
+        texts.push(Text::MetricSaves);
+        texts.push(Text::MetricReach);
+        texts.push(Text::MetricReachHint);
+        texts.push(Text::MetricInteractions);
+        texts.push(Text::MetricInteractionsHint);
+        texts.push(Text::MetricAverageWatch);
+        texts.push(Text::MetricNotReportedHint);
+        texts.push(Text::MetricsInstagramLine);
+        texts.push(Text::MetricsTikTokLine);
+        texts.push(Text::MetricsInsightsEmpty);
+        texts.push(Text::MetricsInsightsPending);
         texts.push(Text::PerformanceOwnerNotConnected);
         texts.push(Text::PerformanceOwnerReconnect);
         texts.push(Text::PerformanceTileEngaged);
@@ -4361,6 +4500,51 @@ mod tests {
         texts.push(Text::ScheduleNotScheduled);
         texts.push(Text::ScheduleFailed);
         texts.push(Text::ScheduleNotAllowed);
+        texts.push(Text::JobWaitsUntil);
+        texts.push(Text::UploadStateDue);
+        texts.push(Text::UploadStateMissed);
+        texts.push(Text::UploadDueAt);
+        texts.push(Text::UploadDueHint);
+        texts.push(Text::UploadMissedAt);
+        texts.push(Text::UploadMissedHint);
+        texts.push(Text::UploadReelScheduleHint);
+        texts.push(Text::UploadReelStartScheduled);
+        texts.extend(bardo_domain::TikTokSpecProblem::CODES.map(Text::UploadTikTokSpec));
+        texts.push(Text::UploadTikTokSpecsTitle);
+        texts.push(Text::UploadDraftHint);
+        texts.push(Text::UploadDraftNotice);
+        texts.push(Text::UploadFieldDraftCaption);
+        texts.push(Text::UploadDraftAiLabel);
+        texts.push(Text::UploadDraftAiLabelHint);
+        texts.push(Text::UploadDraftIrreversible);
+        texts.push(Text::UploadDraftStart);
+        texts.push(Text::UploadDraftProcessingHint);
+        texts.push(Text::UploadStateDraftSent);
+        texts.push(Text::UploadDraftSentHint);
+        texts.push(Text::UploadDraftAiReminder);
+        texts.push(Text::UploadDraftLinkHint);
+        texts.push(Text::UploadDraftCopy);
+        texts.push(Text::UploadDraftCopied);
+        texts.push(Text::UploadDraftLimitHint);
+        texts.push(Text::UploadDraftLimitHeldHint);
+        texts.push(Text::UploadDraftLimitRecheckHint);
+        texts.push(Text::MissedTitle);
+        texts.push(Text::MissedHint);
+        texts.push(Text::MissedDue);
+        texts.push(Text::MissedSendNow);
+        texts.push(Text::MissedNewTime);
+        texts.push(Text::MissedSave);
+        texts.push(Text::MissedCancel);
+        texts.push(Text::MissedCancelConfirm);
+        texts.push(Text::MissedCancelYes);
+        texts.push(Text::MissedKeep);
+        texts.push(Text::MissedLater);
+        texts.push(Text::MissedLaterHint);
+        texts.push(Text::MissedSent);
+        texts.push(Text::MissedRescheduled);
+        texts.push(Text::MissedCancelled);
+        texts.push(Text::MissedNotMissed);
+        texts.push(Text::MissedNotUpdated);
         texts.push(Text::DateTimeFormat);
         texts.push(Text::TimeFormat);
         texts.push(Text::TimeAm);

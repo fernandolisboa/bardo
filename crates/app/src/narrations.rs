@@ -867,6 +867,7 @@ pub(crate) mod tests {
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
                 analytics: Vec::new(),
+                post_insights: Vec::new(),
             };
             let mut app = Bardo::start_with(
                 Repositories::shared_with_files(

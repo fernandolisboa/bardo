@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json
+
+{"data":{"publish_id":"v_inbox_file~v2.7301234567890123456","upload_url":"https://open-upload.tiktokapis.com/video/?upload_id=7301234567890123456&upload_token=fixture-upload-token-1"},"error":{"code":"ok","message":"","log_id":"202610041200001A2B3C4D5E6F7A8B9C0D"}}

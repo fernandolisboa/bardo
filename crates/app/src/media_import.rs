@@ -226,6 +226,7 @@ mod tests {
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
                 analytics: Vec::new(),
+                post_insights: Vec::new(),
             };
             Bardo::start_with(
                 Repositories::shared_with_files(

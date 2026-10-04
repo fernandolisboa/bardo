@@ -1,0 +1,14 @@
+HTTP/2 200 
+content-type: application/json
+
+{
+  "data": {
+    "videos": [
+      { "id": "7301234567890123456", "create_time": 1790000000, "view_count": 125400, "like_count": 9810, "comment_count": 312, "share_count": 0 },
+      { "id": "7301234567890123999", "create_time": 1790500000, "view_count": 880, "like_count": 41, "comment_count": 2, "share_count": 7 }
+    ],
+    "cursor": 0,
+    "has_more": false
+  },
+  "error": { "code": "ok", "message": "", "log_id": "20261004070000FIXTURE0001" }
+}

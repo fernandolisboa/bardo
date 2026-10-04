@@ -280,6 +280,8 @@ pub enum AnalyticsErrorKind {
     /// The network refuses the report: money metrics outside the Partner
     /// Program, or a video that is not the channel's.
     Forbidden,
+    /// The network does not have the post (any more).
+    NotFound,
     /// The token was refused.
     SignedOut,
     /// The project's quota or rate limit.

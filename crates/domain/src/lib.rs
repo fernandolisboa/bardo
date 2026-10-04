@@ -48,6 +48,7 @@ mod connection;
 mod cost;
 mod cut_suggestion;
 mod decision;
+mod due;
 mod edit;
 mod files;
 mod framing;
@@ -65,6 +66,7 @@ mod network_account;
 mod owner_metrics;
 mod performance;
 mod persona;
+mod post_insights;
 mod profile;
 mod provider_key;
 mod publication;
@@ -80,6 +82,7 @@ mod speech;
 mod template;
 mod text;
 mod theme;
+mod tiktok;
 mod timeline;
 mod upload;
 mod voice;
@@ -120,6 +123,7 @@ pub use decision::{
     Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,
     Questions, ScoreAnswer, YesNoAnswer,
 };
+pub use due::{DUE_GRACE, DueStep, PREPARE_AHEAD, UNPUBLISHED_LIFETIME, due_step, prepare_at};
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
 pub use files::{ProjectFileError, ProjectFiles};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
@@ -172,6 +176,10 @@ pub use performance::{
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
     PersonaRepository, VoiceFlag,
+};
+pub use post_insights::{
+    Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,
+    PostReading, find_media, read_insights,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{
@@ -226,6 +234,12 @@ pub use theme::{
     Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,
     rank_themes,
+};
+pub use tiktok::{
+    ChunkPlan, ChunkPlanError, DraftRoom, TIKTOK_CHUNK, TIKTOK_DRAFT_WINDOW, TIKTOK_FPS,
+    TIKTOK_MAX_BYTES, TIKTOK_MAX_CHUNK, TIKTOK_MAX_CHUNKS, TIKTOK_MAX_DURATION,
+    TIKTOK_MAX_LAST_CHUNK, TIKTOK_MIN_CHUNK, TIKTOK_PENDING_DRAFTS, TIKTOK_SIDE, TikTokFile,
+    TikTokSpecProblem, VideoContainer, check_tiktok, draft_room, video_container,
 };
 pub use timeline::{
     AudioItem, CaptionSpan, FPS, Picture, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,

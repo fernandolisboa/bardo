@@ -20,6 +20,7 @@ struct JobRow {
     failure_kind: Option<String>,
     failure_detail: Option<String>,
     retry_at: Option<i64>,
+    run_at: Option<i64>,
 }
 
 impl JobRow {
@@ -37,6 +38,7 @@ impl JobRow {
             failure_kind: row.get(9)?,
             failure_detail: row.get(10)?,
             retry_at: row.get(11)?,
+            run_at: row.get(12)?,
         })
     }
 
@@ -61,6 +63,7 @@ impl JobRow {
             external_handle: self.external_handle,
             failure,
             retry_at: self.retry_at.map(from_unix_millis),
+            run_at: self.run_at.map(from_unix_millis),
         };
         Job::restore(record).map_err(boxed)
     }
@@ -72,7 +75,7 @@ impl JobRepository for Database {
             .conn()
             .prepare(
                 "SELECT id, profile_id, kind, payload, state, progress, attempts, checkpoint,
-                        external_handle, failure_kind, failure_detail, retry_at
+                        external_handle, failure_kind, failure_detail, retry_at, run_at
                  FROM job WHERE profile_id = ?1 ORDER BY rowid",
             )
             .and_then(|mut statement| {
@@ -90,8 +93,8 @@ impl JobRepository for Database {
             .execute(
                 "INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts,
                                   checkpoint, external_handle, failure_kind, failure_detail,
-                                  retry_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                                  retry_at, run_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                  ON CONFLICT (id) DO UPDATE SET
                      state = excluded.state,
                      progress = excluded.progress,
@@ -101,6 +104,7 @@ impl JobRepository for Database {
                      failure_kind = excluded.failure_kind,
                      failure_detail = excluded.failure_detail,
                      retry_at = excluded.retry_at,
+                     run_at = excluded.run_at,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
                 params![
                     job.id().to_string(),
@@ -115,6 +119,7 @@ impl JobRepository for Database {
                     failure.map(|f| f.kind.code()),
                     failure.map(|f| f.detail.as_str()),
                     job.retry_at().map(to_unix_millis),
+                    job.run_at().map(to_unix_millis),
                 ],
             )
             .map_err(boxed)?;
@@ -167,6 +172,17 @@ mod tests {
         let saved = busy_job(owner);
         JobRepository::save(&db, &saved).unwrap();
         assert_eq!(JobRepository::list(&db, owner).unwrap(), [saved]);
+    }
+
+    #[test]
+    fn a_waiting_job_keeps_its_time() {
+        let (db, owner) = database_with_profile();
+        let at = SystemTime::UNIX_EPOCH + Duration::from_millis(1_700_000_600_456);
+        let saved = Job::scheduled(owner, JobKind::Countdown, "{}", at);
+        JobRepository::save(&db, &saved).unwrap();
+        let listed = JobRepository::list(&db, owner).unwrap();
+        assert_eq!(listed, [saved]);
+        assert_eq!(listed[0].run_at(), Some(at));
     }
 
     #[test]

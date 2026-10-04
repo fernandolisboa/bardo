@@ -20,3 +20,5 @@ Scheduled posts must go out at the chosen time. Secrets live in the user's Windo
 - YouTube, the primary network, needs neither the app nor the PC at publish time.
 - Instagram posts in the MVP go out only while the app is open; the UI shows this on the scheduling screen.
 - The job queue and publication state must be shareable between the app and the future agent (same SQLite database, with locking).
+- The in-app scheduler keeps each post's due time and its claim in SQLite with the publication: the run that publishes a post claims it in one statement that also checks it is due, so the agent can read and claim due posts from the same database without posting one twice. The agent still needs a lease on the job itself, so the app and the agent never run the same job at once.
+- A post whose due time passed while the app was closed is never sent silently: the app lists it on the next launch and the user sends it now, reschedules or cancels it.

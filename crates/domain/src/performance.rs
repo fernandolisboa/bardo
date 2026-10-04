@@ -297,6 +297,7 @@ mod tests {
             likes: None,
             comments: None,
             owner: None,
+            insights: crate::Insights::default(),
         }
     }
 
@@ -483,6 +484,7 @@ mod tests {
                 linked_at: at(day * DAY),
                 checked_at: None,
                 missing_since: None,
+                insights_id: None,
             };
             for &(age, n) in views {
                 self.snapshots

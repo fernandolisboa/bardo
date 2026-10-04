@@ -112,6 +112,10 @@ pub enum UploadStatus {
     /// for unlisted or public: the user's API project has not passed the
     /// network's audit (YouTube's API Services audit).
     Restricted,
+    /// In the creator's inbox as a draft (TikTok's `SEND_TO_USER_INBOX`):
+    /// the creator finishes the post in the network's app, so Bardo has
+    /// nothing more to do and no post to link until they link it.
+    DraftSent,
     Failed(UploadFailure),
 }
 
@@ -126,6 +130,7 @@ impl UploadStatus {
             UploadStatus::Scheduled => "scheduled",
             UploadStatus::Published => "published",
             UploadStatus::Restricted => "restricted",
+            UploadStatus::DraftSent => "draft_sent",
             UploadStatus::Failed(_) => "failed",
         }
     }
@@ -139,6 +144,7 @@ impl UploadStatus {
             "scheduled" => UploadStatus::Scheduled,
             "published" => UploadStatus::Published,
             "restricted" => UploadStatus::Restricted,
+            "draft_sent" => UploadStatus::DraftSent,
             "failed" => UploadStatus::Failed(UploadFailure::from_code(failure.unwrap_or(""))),
             _ => return None,
         })
@@ -150,10 +156,11 @@ impl UploadStatus {
         matches!(self, UploadStatus::Published | UploadStatus::Restricted)
     }
 
-    /// Whether the network has the video, live or waiting for its publish
-    /// time: the upload job has nothing left to do.
+    /// Whether the network has the video, live, waiting for its publish
+    /// time or waiting in the creator's inbox: the upload job has nothing
+    /// left to do.
     pub fn is_on_network(&self) -> bool {
-        self.is_final() || *self == UploadStatus::Scheduled
+        self.is_final() || matches!(self, UploadStatus::Scheduled | UploadStatus::DraftSent)
     }
 
     pub fn failure(&self) -> Option<&UploadFailure> {
@@ -194,6 +201,10 @@ pub struct Upload {
     /// The post's id at the network once Bardo published it, when its
     /// address does not carry it (Instagram's media id).
     pub network_id: Option<String>,
+    /// When the run that publishes it at its due time took it, for a
+    /// network Bardo publishes on at a time (`crate::due`). `None` until
+    /// then, and for every other upload.
+    pub claimed_at: Option<SystemTime>,
 }
 
 impl Upload {
@@ -206,6 +217,7 @@ impl Upload {
             job,
             issue: None,
             network_id: None,
+            claimed_at: None,
         }
     }
 
@@ -288,6 +300,16 @@ impl Upload {
         Ok(())
     }
 
+    /// The network processed the video and put it in the creator's inbox
+    /// as a draft, for them to finish in the network's app (TikTok).
+    pub fn drafted(&mut self) -> Result<(), InvalidUploadTransition> {
+        if self.status != UploadStatus::Processing {
+            return Err(self.invalid("send as a draft"));
+        }
+        self.status = UploadStatus::DraftSent;
+        Ok(())
+    }
+
     /// The network made the scheduled video public at its publish time.
     pub fn went_live(&mut self) -> Result<(), InvalidUploadTransition> {
         self.require_scheduled("go live")?;
@@ -323,6 +345,69 @@ impl Upload {
         match self.status {
             UploadStatus::Scheduled => Ok(()),
             _ => Err(self.invalid(action)),
+        }
+    }
+
+    /// The run due at its time takes the scheduled upload, once: it is
+    /// still to publish (one that failed on the way is tried again, one
+    /// missed waits for the user), due by `now`, and not taken yet. Taken
+    /// already, it stays as it was (the same run resumes). The repository
+    /// applies the same rule in one statement
+    /// (`PublicationRepository::claim_upload`).
+    pub fn claim(&mut self, now: SystemTime) -> Result<(), InvalidUploadTransition> {
+        let due = self.publish_at.filter(|due| *due <= now);
+        let open = match &self.status {
+            UploadStatus::Queued | UploadStatus::Uploading | UploadStatus::Processing => true,
+            UploadStatus::Failed(failure) => *failure != UploadFailure::ScheduleMissed,
+            _ => false,
+        };
+        if !open || due.is_none() {
+            return Err(self.invalid("claim"));
+        }
+        self.claimed_at.get_or_insert(now);
+        Ok(())
+    }
+
+    /// Its due time passed without it (`crate::due`): it waits for the user
+    /// to send it now, reschedule or cancel it. One that failed on the way
+    /// and is tried again after its time is missed too.
+    pub fn miss(&mut self) -> Result<(), InvalidUploadTransition> {
+        if self.publish_at.is_none() || self.status.is_on_network() || self.is_missed() {
+            return Err(self.invalid("miss"));
+        }
+        self.status = UploadStatus::Failed(UploadFailure::ScheduleMissed);
+        Ok(())
+    }
+
+    /// The user sends a missed upload now, without a due time.
+    pub fn send_now(&mut self) -> Result<(), InvalidUploadTransition> {
+        self.require_missed("send now")?;
+        self.status = UploadStatus::Queued;
+        self.publish_at = None;
+        self.claimed_at = None;
+        Ok(())
+    }
+
+    /// The user gives a missed upload a new due time.
+    pub fn due_again(&mut self, due: SystemTime) -> Result<(), InvalidUploadTransition> {
+        self.require_missed("reschedule")?;
+        self.status = UploadStatus::Queued;
+        self.publish_at = Some(due);
+        self.claimed_at = None;
+        Ok(())
+    }
+
+    /// Whether its due time passed without it and it waits for the user.
+    pub fn is_missed(&self) -> bool {
+        self.publish_at.is_some()
+            && self.status == UploadStatus::Failed(UploadFailure::ScheduleMissed)
+    }
+
+    fn require_missed(&self, action: &'static str) -> Result<(), InvalidUploadTransition> {
+        if self.is_missed() {
+            Ok(())
+        } else {
+            Err(self.invalid(action))
         }
     }
 
@@ -421,6 +506,10 @@ pub enum VideoState {
     /// The network dropped the upload before it was published (Instagram's
     /// container `EXPIRED` after 24 hours): the file goes again.
     Expired,
+    /// Processed and waiting in the creator's inbox as a draft, for them to
+    /// finish the post in the network's app (TikTok's `SEND_TO_USER_INBOX`).
+    /// Unlike `Processed`, Bardo does nothing more with it.
+    InInbox,
     /// Processed, showing as `visibility`.
     Ready {
         visibility: Visibility,
@@ -553,6 +642,13 @@ pub trait UploadRun {
 
     /// Keeps how many bytes the network confirmed.
     fn confirmed(&mut self, bytes: u64) -> Result<(), UploadError>;
+
+    /// The bytes an earlier run kept with `confirmed` for the current
+    /// session, for a network that cannot be asked what it has (TikTok):
+    /// it resumes after them. 0 when nothing was kept.
+    fn resumed(&self) -> u64 {
+        0
+    }
 
     /// True once the run should stop and leave the rest for later.
     fn should_stop(&self) -> bool;
@@ -804,6 +900,74 @@ mod tests {
     }
 
     #[test]
+    fn a_due_upload_is_claimed_once_and_only_from_its_due_time() {
+        let mut u = Upload::scheduled(at(100), JobId::new());
+        assert!(u.claim(at(99)).is_err(), "not due yet");
+        assert_eq!(u.claimed_at, None);
+        u.claim(at(100)).unwrap();
+        assert_eq!(u.claimed_at, Some(at(100)));
+        u.start().unwrap();
+        u.claim(at(130)).unwrap();
+        assert_eq!(u.claimed_at, Some(at(100)), "the same run resumes");
+        assert!(
+            upload(Visibility::Public).claim(at(100)).is_err(),
+            "nothing to claim without a due time"
+        );
+        let mut done = scheduled(at(100));
+        done.processed(Visibility::Public, None).unwrap();
+        assert!(done.claim(at(200)).is_err(), "published");
+        // A run that failed on the way is retried and claims it; a missed
+        // one waits for the user.
+        let mut failed = Upload::scheduled(at(100), JobId::new());
+        failed.fail(UploadFailure::ReconnectNeeded).unwrap();
+        failed.claim(at(110)).unwrap();
+        failed.miss().unwrap();
+        let mut missed = failed.clone();
+        missed.claimed_at = None;
+        assert!(missed.claim(at(120)).is_err(), "missed");
+    }
+
+    #[test]
+    fn a_missed_upload_waits_until_sent_now_or_rescheduled() {
+        let mut u = Upload::scheduled(at(100), JobId::new());
+        u.start().unwrap();
+        u.claim(at(100)).unwrap();
+        u.miss().unwrap();
+        assert!(u.is_missed());
+        assert_eq!(u.status.failure(), Some(&UploadFailure::ScheduleMissed));
+        assert_eq!(u.publish_at, Some(at(100)), "it shows when it was due");
+        assert!(u.miss().is_err(), "missed already");
+
+        let mut now = u.clone();
+        now.send_now().unwrap();
+        assert_eq!(now.status, UploadStatus::Queued);
+        assert_eq!(now.publish_at, None);
+        assert_eq!(now.claimed_at, None);
+        assert!(now.send_now().is_err(), "only a missed one");
+
+        u.due_again(at(500)).unwrap();
+        assert_eq!(u.status, UploadStatus::Queued);
+        assert_eq!(u.publish_at, Some(at(500)));
+        assert_eq!(u.claimed_at, None, "a new run claims it");
+        assert!(u.due_again(at(600)).is_err());
+    }
+
+    #[test]
+    fn only_an_upload_still_to_publish_with_a_due_time_is_missed() {
+        assert!(upload(Visibility::Public).miss().is_err(), "no due time");
+        let mut on_network = scheduled(at(100));
+        on_network
+            .processed(Visibility::Private, Some(at(100)))
+            .unwrap();
+        assert!(on_network.miss().is_err(), "scheduled on the network");
+        let mut failed = Upload::scheduled(at(100), JobId::new());
+        failed.fail(UploadFailure::ReconnectNeeded).unwrap();
+        assert!(!failed.is_missed());
+        failed.miss().unwrap();
+        assert!(failed.is_missed(), "retried after its time");
+    }
+
+    #[test]
     fn a_scheduled_upload_asks_for_public_at_its_time() {
         let u = Upload::scheduled(at(100), JobId::new());
         assert_eq!(u.visibility, Visibility::Public);
@@ -893,6 +1057,22 @@ mod tests {
     }
 
     #[test]
+    fn a_draft_in_the_inbox_is_done_for_bardo_but_not_a_post() {
+        let mut u = upload(Visibility::Public);
+        assert!(u.drafted().is_err(), "only once processed");
+        u.start().unwrap();
+        u.sent().unwrap();
+        u.drafted().unwrap();
+        assert_eq!(u.status, UploadStatus::DraftSent);
+        assert!(u.status.is_on_network(), "the job has nothing left to do");
+        assert!(!u.status.is_final(), "the creator has not posted it yet");
+        assert!(u.fail(UploadFailure::Removed).is_err());
+        assert!(u.start().is_err());
+        assert!(u.check_again(JobId::new()).is_err());
+        assert!(u.drafted().is_err());
+    }
+
+    #[test]
     fn statuses_and_failures_round_trip_through_their_codes() {
         let statuses = [
             UploadStatus::Queued,
@@ -901,6 +1081,7 @@ mod tests {
             UploadStatus::Scheduled,
             UploadStatus::Published,
             UploadStatus::Restricted,
+            UploadStatus::DraftSent,
             UploadStatus::Failed(UploadFailure::QuotaExceeded),
             UploadStatus::Failed(UploadFailure::ScheduleMissed),
             UploadStatus::Failed(UploadFailure::UploadLimit),

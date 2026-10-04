@@ -173,6 +173,7 @@ fn schedule_reading(state: VideoState) -> Option<ScheduleReading> {
         VideoState::Removed => Some(ScheduleReading::Missing),
         VideoState::Processing
         | VideoState::Processed
+        | VideoState::InInbox
         | VideoState::Expired
         | VideoState::Failed(_)
         | VideoState::Rejected(_) => None,

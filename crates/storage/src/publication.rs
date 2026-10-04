@@ -1,10 +1,10 @@
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ChannelId, Earnings, JobId, MetricsSnapshot, Money, MoneyReport, Network, NetworkAccountId,
-    OwnerMetrics, PostLink, PostRetention, ProfileId, Publication, PublicationId, PublicationKind,
-    PublicationRepository, RenderId, RepositoryError, RetentionCurve, RetentionPoint, Share,
-    Upload, UploadStatus, VideoProjectId, Visibility,
+    ChannelId, Earnings, Insights, JobId, MetricsSnapshot, Money, MoneyReport, Network,
+    NetworkAccountId, OwnerMetrics, PostLink, PostRetention, ProfileId, Publication, PublicationId,
+    PublicationKind, PublicationRepository, RenderId, RepositoryError, RetentionCurve,
+    RetentionPoint, Share, Upload, UploadStatus, VideoProjectId, Visibility,
 };
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
@@ -21,7 +21,7 @@ const PUBLICATION_COLUMNS: &str = "publication.id, publication.project_id, publi
      publication.checked_at, publication.missing_since, publication.kind,
      publication.upload_status, publication.upload_failure, publication.upload_visibility,
      publication.upload_job, publication.upload_publish_at, publication.upload_issue,
-     publication.upload_network_id";
+     publication.upload_network_id, publication.upload_claimed_at, publication.insights_id";
 
 /// A publication row as SQLite returns it.
 struct PublicationRow {
@@ -45,6 +45,8 @@ struct PublicationRow {
     upload_publish_at: Option<i64>,
     upload_issue: Option<String>,
     upload_network_id: Option<String>,
+    upload_claimed_at: Option<i64>,
+    insights_id: Option<String>,
 }
 
 impl PublicationRow {
@@ -70,6 +72,8 @@ impl PublicationRow {
             upload_publish_at: row.get(17)?,
             upload_issue: row.get(18)?,
             upload_network_id: row.get(19)?,
+            upload_claimed_at: row.get(20)?,
+            insights_id: row.get(21)?,
         })
     }
 
@@ -101,6 +105,7 @@ impl PublicationRow {
                 )?),
                 issue: self.upload_issue,
                 network_id: self.upload_network_id,
+                claimed_at: self.upload_claimed_at.map(from_unix_millis),
             }),
             other => return Err(broken(&format!("unknown kind {other}"))),
         };
@@ -121,6 +126,7 @@ impl PublicationRow {
             linked_at: from_unix_millis(self.linked_at),
             checked_at: self.checked_at.map(from_unix_millis),
             missing_since: self.missing_since.map(from_unix_millis),
+            insights_id: self.insights_id,
         })
     }
 }
@@ -144,7 +150,8 @@ fn query_publications(
 /// The snapshot columns `read_snapshot` reads, in order.
 const SNAPSHOT_COLUMNS: &str = "s.publication_id, s.taken_at, s.views, s.likes, s.comments,
      s.owner_views, s.engaged_views, s.minutes_watched, s.average_view_seconds,
-     s.average_view_share, s.revenue_micros, s.cpm_micros, s.playback_cpm_micros, s.monetized";
+     s.average_view_share, s.revenue_micros, s.cpm_micros, s.playback_cpm_micros, s.monetized,
+     s.shares, s.saves, s.reach, s.interactions, s.average_watch_ms, s.watch_time_ms";
 
 /// A snapshot row as SQLite returns it.
 struct SnapshotRow {
@@ -156,6 +163,8 @@ struct SnapshotRow {
     /// Revenue, CPM, playback-based CPM.
     money: [Option<i64>; 3],
     monetized: Option<i64>,
+    /// Shares, saves, reach, interactions, average and total watch time.
+    insights: [Option<i64>; 6],
 }
 
 impl SnapshotRow {
@@ -173,6 +182,14 @@ impl SnapshotRow {
             ],
             money: [row.get(10)?, row.get(11)?, row.get(12)?],
             monetized: row.get(13)?,
+            insights: [
+                row.get(14)?,
+                row.get(15)?,
+                row.get(16)?,
+                row.get(17)?,
+                row.get(18)?,
+                row.get(19)?,
+            ],
         })
     }
 
@@ -214,6 +231,15 @@ impl SnapshotRow {
             }
             _ => None,
         };
+        let [
+            shares,
+            saves,
+            reach,
+            interactions,
+            average_watch,
+            watch_time,
+        ] = self.insights;
+        let millis = |n: i64| Duration::from_millis(count(n));
         Ok(MetricsSnapshot {
             publication: PublicationId::from(uuid(&self.publication)?),
             taken_at: from_unix_millis(self.taken_at),
@@ -221,6 +247,14 @@ impl SnapshotRow {
             likes: likes.map(count),
             comments: comments.map(count),
             owner,
+            insights: Insights {
+                shares: shares.map(count),
+                saves: saves.map(count),
+                reach: reach.map(count),
+                interactions: interactions.map(count),
+                average_watch: average_watch.map(millis),
+                watch_time: watch_time.map(millis),
+            },
         })
     }
 }
@@ -309,14 +343,28 @@ fn owner_columns(owner: Option<&OwnerMetrics>) -> [Option<i64>; 9] {
     ]
 }
 
+/// A snapshot's insights columns, in `SNAPSHOT_COLUMNS` order from
+/// `shares`.
+fn insights_columns(insights: &Insights) -> [Option<i64>; 6] {
+    let millis = |d: Duration| stored(u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    [
+        insights.shares.map(stored),
+        insights.saves.map(stored),
+        insights.reach.map(stored),
+        insights.interactions.map(stored),
+        insights.average_watch.map(millis),
+        insights.watch_time.map(millis),
+    ]
+}
+
 /// Counts beyond SQLite's integers are not real view counts; they clamp.
 fn stored(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-/// The statuses whose upload sets `posted_at`: it went live, or waits
-/// for its publish time.
-const SETS_POSTED_AT: &str = "('published', 'restricted', 'scheduled')";
+/// The statuses whose upload sets `posted_at`: it went live, waits for
+/// its publish time, or reached the creator's inbox as a draft.
+const SETS_POSTED_AT: &str = "('published', 'restricted', 'scheduled', 'draft_sent')";
 
 /// The statuses after which a later save keeps `posted_at`: it went live.
 const LIVE: &str = "('published', 'restricted')";
@@ -343,9 +391,10 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                                       post_id, url, posted_at, linked_at, checked_at,
                                       missing_since, kind, upload_status, upload_failure,
                                       upload_visibility, upload_job, upload_publish_at,
-                                      upload_issue, upload_network_id)
+                                      upload_issue, upload_network_id, upload_claimed_at,
+                                      insights_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20)
+                     ?18, ?19, ?20, ?21, ?22)
              ON CONFLICT (id) DO UPDATE SET
                  account_id = excluded.account_id,
                  render_id = excluded.render_id,
@@ -359,6 +408,8 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                  upload_publish_at = excluded.upload_publish_at,
                  upload_issue = excluded.upload_issue,
                  upload_network_id = excluded.upload_network_id,
+                 upload_claimed_at = excluded.upload_claimed_at,
+                 insights_id = COALESCE(excluded.insights_id, publication.insights_id),
                  posted_at = CASE WHEN excluded.upload_status IN {SETS_POSTED_AT}
                                        AND publication.upload_status NOT IN {LIVE}
                                   THEN excluded.posted_at ELSE publication.posted_at END"
@@ -384,6 +435,8 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             upload.and_then(|upload| upload.publish_at.map(to_unix_millis)),
             upload.and_then(|upload| upload.issue.as_deref()),
             upload.and_then(|upload| upload.network_id.as_deref()),
+            upload.and_then(|upload| upload.claimed_at.map(to_unix_millis)),
+            publication.insights_id.as_deref(),
         ],
     )
     .map_err(boxed)?;
@@ -456,6 +509,34 @@ impl PublicationRepository for Database {
         update_upload(&self.conn(), publication, Some(from))
     }
 
+    fn claim_upload(
+        &self,
+        publication: &Publication,
+        now: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        let Some(upload) = publication.upload() else {
+            return Ok(false);
+        };
+        // One statement, so two runners racing for it cannot both win: the
+        // second finds the row claimed by then. The job claims it again on
+        // resume, keeping the first claim's time.
+        let now = to_unix_millis(now);
+        let claimed = self
+            .conn()
+            .execute(
+                "UPDATE publication
+                 SET upload_claimed_at = coalesce(upload_claimed_at, ?3)
+                 WHERE id = ?1 AND upload_job = ?2
+                   AND (upload_status IN ('queued', 'uploading', 'processing')
+                        OR (upload_status = 'failed'
+                            AND coalesce(upload_failure, '') <> 'schedule_missed'))
+                   AND upload_publish_at IS NOT NULL AND upload_publish_at <= ?3",
+                params![publication.id.to_string(), upload.job.to_string(), now],
+            )
+            .map_err(boxed)?;
+        Ok(claimed > 0)
+    }
+
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
         self.conn()
             .execute("DELETE FROM publication WHERE id = ?1", [id.to_string()])
@@ -474,13 +555,15 @@ impl PublicationRepository for Database {
             // Only what a sync learns; a publication removed meanwhile
             // stays removed.
             tx.execute(
-                "UPDATE publication SET posted_at = ?2, checked_at = ?3, missing_since = ?4
+                "UPDATE publication SET posted_at = ?2, checked_at = ?3, missing_since = ?4,
+                     insights_id = COALESCE(?5, insights_id)
                  WHERE id = ?1",
                 params![
                     publication.id.to_string(),
                     to_unix_millis(publication.posted_at),
                     publication.checked_at.map(to_unix_millis),
                     publication.missing_since.map(to_unix_millis),
+                    publication.insights_id.as_deref(),
                 ],
             )
             .map_err(boxed)?;
@@ -497,12 +580,22 @@ impl PublicationRepository for Database {
                 playback,
                 monetized,
             ] = owner_columns(snapshot.owner.as_ref());
+            let [
+                shares,
+                saves,
+                reach,
+                interactions,
+                average_watch,
+                watch_time,
+            ] = insights_columns(&snapshot.insights);
             tx.execute(
                 "INSERT INTO metrics_snapshot (publication_id, taken_at, views, likes, comments,
                      owner_views, engaged_views, minutes_watched, average_view_seconds,
                      average_view_share, revenue_micros, cpm_micros, playback_cpm_micros,
-                     monetized)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+                     monetized, shares, saves, reach, interactions, average_watch_ms,
+                     watch_time_ms)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                        ?17, ?18, ?19, ?20
                  WHERE EXISTS (SELECT 1 FROM publication WHERE id = ?1)
                  ON CONFLICT (publication_id, taken_at) DO UPDATE SET
                      views = excluded.views,
@@ -516,7 +609,13 @@ impl PublicationRepository for Database {
                      revenue_micros = excluded.revenue_micros,
                      cpm_micros = excluded.cpm_micros,
                      playback_cpm_micros = excluded.playback_cpm_micros,
-                     monetized = excluded.monetized",
+                     monetized = excluded.monetized,
+                     shares = excluded.shares,
+                     saves = excluded.saves,
+                     reach = excluded.reach,
+                     interactions = excluded.interactions,
+                     average_watch_ms = excluded.average_watch_ms,
+                     watch_time_ms = excluded.watch_time_ms",
                 params![
                     snapshot.publication.to_string(),
                     to_unix_millis(snapshot.taken_at),
@@ -532,6 +631,12 @@ impl PublicationRepository for Database {
                     cpm,
                     playback,
                     monetized,
+                    shares,
+                    saves,
+                    reach,
+                    interactions,
+                    average_watch,
+                    watch_time,
                 ],
             )
             .map_err(boxed)?;
@@ -741,6 +846,7 @@ mod tests {
             linked_at: time(100),
             checked_at: None,
             missing_since: None,
+            insights_id: None,
         }
     }
 
@@ -756,6 +862,7 @@ mod tests {
             likes: Some(views / 10),
             comments: None,
             owner: None,
+            insights: bardo_domain::Insights::default(),
         }
     }
 
@@ -824,6 +931,109 @@ mod tests {
             .unwrap();
         db.save_publication(&failed).unwrap();
         assert_eq!(db.publications(project.id).unwrap(), [failed], "replaced");
+    }
+
+    /// A Reel scheduled in the app for `time(1000)`, saved.
+    fn due_reel(db: &Database, project: &VideoProject) -> Publication {
+        let reel = Publication {
+            network: Network::InstagramReels,
+            link: None,
+            kind: PublicationKind::Uploaded(Upload::scheduled(time(1000), JobId::new())),
+            ..youtube(project, "dQw4w9WgXcQ")
+        };
+        db.save_publication(&reel).unwrap();
+        reel
+    }
+
+    fn claimed_at(db: &Database, reel: &Publication) -> Option<SystemTime> {
+        db.publication(reel.id)
+            .unwrap()
+            .unwrap()
+            .upload()
+            .unwrap()
+            .claimed_at
+    }
+
+    #[test]
+    fn a_due_upload_is_claimed_once_and_keeps_its_first_claim() {
+        let (db, _, project) = setup();
+        let reel = due_reel(&db, &project);
+        assert!(!db.claim_upload(&reel, time(999)).unwrap(), "not due yet");
+        assert_eq!(claimed_at(&db, &reel), None);
+
+        assert!(db.claim_upload(&reel, time(1000)).unwrap());
+        assert_eq!(claimed_at(&db, &reel), Some(time(1000)));
+        assert!(
+            db.claim_upload(&reel, time(1300)).unwrap(),
+            "its own job resumes"
+        );
+        assert_eq!(claimed_at(&db, &reel), Some(time(1000)), "the first claim");
+
+        // A run of another job never takes it.
+        let mut other = reel.clone();
+        other.upload_mut().unwrap().job = JobId::new();
+        assert!(!db.claim_upload(&other, time(1300)).unwrap());
+
+        // Progress saved by the run keeps the claim.
+        let mut read = db.publication(reel.id).unwrap().unwrap();
+        read.upload_mut().unwrap().start().unwrap();
+        let mut stale = read.clone();
+        stale.upload_mut().unwrap().claimed_at = None;
+        assert!(db.save_upload(&stale).unwrap());
+        assert_eq!(claimed_at(&db, &reel), Some(time(1000)));
+    }
+
+    #[test]
+    fn a_missed_upload_is_not_claimed_and_a_new_time_clears_the_claim() {
+        let (db, _, project) = setup();
+        let reel = due_reel(&db, &project);
+        assert!(db.claim_upload(&reel, time(1000)).unwrap());
+        let mut missed = db.publication(reel.id).unwrap().unwrap();
+        missed.upload_mut().unwrap().miss().unwrap();
+        assert!(db.save_upload(&missed).unwrap());
+        assert!(
+            !db.claim_upload(&missed, time(2000)).unwrap(),
+            "it waits for the user"
+        );
+        assert!(db.publication(reel.id).unwrap().unwrap().is_missed());
+
+        missed.upload_mut().unwrap().due_again(time(5000)).unwrap();
+        db.save_publication(&missed).unwrap();
+        let read = db.publication(reel.id).unwrap().unwrap();
+        assert_eq!(read.due(), Some(time(5000)));
+        assert_eq!(read.upload().unwrap().claimed_at, None);
+        assert_eq!(read, missed);
+
+        // Sent now, it has no due time, and nothing claims it.
+        let mut now = read;
+        now.upload_mut().unwrap().miss().unwrap();
+        now.upload_mut().unwrap().send_now().unwrap();
+        db.save_publication(&now).unwrap();
+        assert!(!db.claim_upload(&now, time(9000)).unwrap());
+    }
+
+    #[test]
+    fn an_upload_that_failed_on_the_way_is_claimed_when_tried_again() {
+        let (db, _, project) = setup();
+        let mut reel = due_reel(&db, &project);
+        reel.upload_mut()
+            .unwrap()
+            .fail(bardo_domain::UploadFailure::ReconnectNeeded)
+            .unwrap();
+        assert!(db.save_upload(&reel).unwrap());
+        assert!(db.claim_upload(&reel, time(1000)).unwrap());
+    }
+
+    #[test]
+    fn only_an_upload_with_a_due_time_holds_a_claim() {
+        let (db, _, project) = setup();
+        let reel = due_reel(&db, &project);
+        let refused = db.conn().execute(
+            "UPDATE publication SET upload_publish_at = NULL, upload_claimed_at = 5
+             WHERE id = ?1",
+            [reel.id.to_string()],
+        );
+        assert!(refused.is_err());
     }
 
     #[test]
@@ -1018,6 +1228,28 @@ mod tests {
     }
 
     #[test]
+    fn a_tiktok_draft_round_trips_with_no_post_and_when_it_reached_the_inbox() {
+        let (db, _, project) = setup();
+        let mut draft = Publication {
+            network: Network::TikTok,
+            link: None,
+            kind: PublicationKind::Uploaded(Upload::queued(Visibility::Private, JobId::new())),
+            ..uploading(&project)
+        };
+        db.save_publication(&draft).unwrap();
+        draft.upload_mut().unwrap().start().unwrap();
+        draft.sent(None).unwrap();
+        assert!(db.save_upload(&draft).unwrap());
+        draft.drafted(time(900)).unwrap();
+        assert!(db.save_upload(&draft).unwrap());
+        let read = db.publication(draft.id).unwrap().unwrap();
+        assert_eq!(read.upload().unwrap().status, UploadStatus::DraftSent);
+        assert_eq!(read.link, None);
+        assert_eq!(read.posted_at, time(900), "reached the inbox");
+        assert_eq!(read, draft);
+    }
+
+    #[test]
     fn an_upload_replaces_a_linked_post_and_its_snapshots() {
         let (db, _, project) = setup();
         let manual = youtube(&project, "dQw4w9WgXcQ");
@@ -1087,6 +1319,73 @@ mod tests {
 
         db.remove_publication(yt.id).unwrap();
         assert_eq!(db.snapshots(yt.id).unwrap(), []);
+    }
+
+    #[test]
+    fn insights_ride_on_the_snapshot_and_keep_empty_apart_from_zero() {
+        let (db, _, project) = setup();
+        let reel = publication(
+            &project,
+            Network::InstagramReels,
+            "https://www.instagram.com/reel/C9xYz12AbCd/",
+        );
+        db.save_publication(&reel).unwrap();
+        let read = MetricsSnapshot {
+            likes: Some(0),
+            comments: None,
+            insights: Insights {
+                shares: Some(0),
+                saves: Some(12),
+                reach: Some(3_400),
+                interactions: None,
+                average_watch: Some(Duration::from_millis(5_250)),
+                watch_time: Some(Duration::from_millis(9_876_543)),
+            },
+            ..snapshot(&reel, 100, 4_100)
+        };
+        db.save_sync(std::slice::from_ref(&reel), &[read]).unwrap();
+        assert_eq!(db.snapshots(reel.id).unwrap(), [read]);
+
+        // A YouTube snapshot has none of them.
+        let yt = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&yt).unwrap();
+        db.save_sync(std::slice::from_ref(&yt), &[snapshot(&yt, 100, 7)])
+            .unwrap();
+        assert!(db.snapshots(yt.id).unwrap()[0].insights.is_empty());
+    }
+
+    #[test]
+    fn a_linked_reels_media_id_is_kept_once_a_sync_found_it() {
+        let (db, _, project) = setup();
+        let mut reel = publication(
+            &project,
+            Network::InstagramReels,
+            "https://www.instagram.com/reel/C9xYz12AbCd/",
+        );
+        db.save_publication(&reel).unwrap();
+        assert_eq!(db.publication(reel.id).unwrap().unwrap().insights_id, None);
+
+        reel.insights_id = Some("17900000000000001".into());
+        reel.checked_at = Some(time(60));
+        db.save_sync(std::slice::from_ref(&reel), &[]).unwrap();
+        assert_eq!(db.publication(reel.id).unwrap(), Some(reel.clone()));
+
+        // A later save that does not know it (the link saved again) and a
+        // sync that did not look it up keep it.
+        let stale = Publication {
+            insights_id: None,
+            ..reel.clone()
+        };
+        db.save_publication(&stale).unwrap();
+        db.save_sync(std::slice::from_ref(&stale), &[]).unwrap();
+        assert_eq!(
+            db.publication(reel.id)
+                .unwrap()
+                .unwrap()
+                .insights_id
+                .as_deref(),
+            Some("17900000000000001")
+        );
     }
 
     fn owner(engaged: u64, money: Option<MoneyReport>) -> OwnerMetrics {

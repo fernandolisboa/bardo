@@ -301,10 +301,13 @@ pub enum JobFailureKind {
     /// ffmpeg could not read or write a media file (a broken or missing
     /// file, or no ffmpeg). Retrying fails the same way until that changes.
     Media,
+    /// A scheduled job's time passed without it (Bardo was closed, or busy):
+    /// it waits for the user to send it now or give it a new time.
+    Missed,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 10] = [
+    pub const ALL: [JobFailureKind; 11] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -315,6 +318,7 @@ impl JobFailureKind {
         JobFailureKind::UnexpectedAnswer,
         JobFailureKind::Declined,
         JobFailureKind::Media,
+        JobFailureKind::Missed,
     ];
 
     /// Stable name stored in the database.
@@ -330,6 +334,7 @@ impl JobFailureKind {
             JobFailureKind::UnexpectedAnswer => "unexpected_answer",
             JobFailureKind::Declined => "declined",
             JobFailureKind::Media => "media",
+            JobFailureKind::Missed => "missed",
         }
     }
 
@@ -344,7 +349,8 @@ impl JobFailureKind {
             | JobFailureKind::LimitReached
             | JobFailureKind::UnexpectedAnswer
             | JobFailureKind::Declined
-            | JobFailureKind::Media => false,
+            | JobFailureKind::Media
+            | JobFailureKind::Missed => false,
         }
     }
 }
@@ -457,6 +463,7 @@ pub struct JobRecord {
     pub external_handle: Option<String>,
     pub failure: Option<JobFailure>,
     pub retry_at: Option<SystemTime>,
+    pub run_at: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -478,6 +485,7 @@ pub struct Job {
     external_handle: Option<String>,
     failure: Option<JobFailure>,
     retry_at: Option<SystemTime>,
+    run_at: Option<SystemTime>,
 }
 
 impl Job {
@@ -496,6 +504,20 @@ impl Job {
             external_handle: None,
             failure: None,
             retry_at: None,
+            run_at: None,
+        }
+    }
+
+    /// A queued job that starts no earlier than `at`: a schedule.
+    pub fn scheduled(
+        owner: ProfileId,
+        kind: JobKind,
+        payload: impl Into<String>,
+        at: SystemTime,
+    ) -> Self {
+        Self {
+            run_at: Some(at),
+            ..Self::new(owner, kind, payload)
         }
     }
 
@@ -507,6 +529,9 @@ impl Job {
         }
         if record.retry_at.is_some() && record.state != JobState::Queued {
             return Err(InconsistentJob("only a queued job waits for a retry"));
+        }
+        if record.run_at.is_some() && record.state != JobState::Queued {
+            return Err(InconsistentJob("only a queued job waits for its time"));
         }
         if record.state == JobState::Done && record.progress != Progress::DONE {
             return Err(InconsistentJob("a done job has full progress"));
@@ -523,6 +548,7 @@ impl Job {
             external_handle: record.external_handle,
             failure: record.failure,
             retry_at: record.retry_at,
+            run_at: record.run_at,
         })
     }
 
@@ -577,9 +603,19 @@ impl Job {
         self.retry_at
     }
 
-    /// Whether the job may start at `now`.
+    /// When a queued job starts: its schedule, or the time it waits for
+    /// outside Bardo (`defer`). Apart from `retry_at`, which is the backoff
+    /// after a failed attempt.
+    pub fn run_at(&self) -> Option<SystemTime> {
+        self.run_at
+    }
+
+    /// Whether the job may start at `now`: queued, past its backoff and its
+    /// time.
     pub fn is_due(&self, now: SystemTime) -> bool {
-        self.state == JobState::Queued && self.retry_at.is_none_or(|at| at <= now)
+        self.state == JobState::Queued
+            && self.retry_at.is_none_or(|at| at <= now)
+            && self.run_at.is_none_or(|at| at <= now)
     }
 
     pub fn can_cancel(&self) -> bool {
@@ -598,6 +634,7 @@ impl Job {
         self.state = JobState::Running;
         self.attempts += 1;
         self.retry_at = None;
+        self.run_at = None;
         Ok(())
     }
 
@@ -654,14 +691,23 @@ impl Job {
 
     /// Ends the running attempt without failing it and queues the job again
     /// for `until`: the handler waits on something outside Bardo (a
-    /// network's publishing limit). Its attempts start over, so a wait
-    /// never spends the retries of a later failure.
+    /// network's publishing limit) or for its schedule. Its attempts start
+    /// over, so a wait never spends the retries of a later failure.
     pub fn defer(&mut self, until: SystemTime) -> Result<(), InvalidJobTransition> {
         self.expect_running("defer")?;
         self.state = JobState::Queued;
         self.attempts = 0;
         self.failure = None;
-        self.retry_at = Some(until);
+        self.run_at = Some(until);
+        Ok(())
+    }
+
+    /// Has a queued job start no earlier than `at` (a new schedule).
+    pub fn wait_until(&mut self, at: SystemTime) -> Result<(), InvalidJobTransition> {
+        if self.state != JobState::Queued {
+            return Err(self.invalid("schedule"));
+        }
+        self.run_at = Some(at);
         Ok(())
     }
 
@@ -673,11 +719,13 @@ impl Job {
         }
         self.state = JobState::Cancelled;
         self.retry_at = None;
+        self.run_at = None;
         Ok(())
     }
 
-    /// Queues a failed or cancelled job again with a fresh set of attempts.
-    /// Checkpoint and external handle stay, so it resumes where it stopped.
+    /// Queues a failed or cancelled job again with a fresh set of attempts,
+    /// to start now. Checkpoint and external handle stay, so it resumes
+    /// where it stopped.
     pub fn retry(&mut self) -> Result<(), InvalidJobTransition> {
         if !self.can_retry() {
             return Err(self.invalid("retry"));
@@ -686,6 +734,7 @@ impl Job {
         self.attempts = 0;
         self.failure = None;
         self.retry_at = None;
+        self.run_at = None;
         Ok(())
     }
 
@@ -728,6 +777,7 @@ impl From<&Job> for JobRecord {
             external_handle: job.external_handle.clone(),
             failure: job.failure.clone(),
             retry_at: job.retry_at,
+            run_at: job.run_at,
         }
     }
 }
@@ -841,7 +891,8 @@ mod tests {
         let until = now() + Duration::from_secs(3600);
         job.defer(until).unwrap();
         assert_eq!(job.state(), JobState::Queued);
-        assert_eq!(job.retry_at(), Some(until));
+        assert_eq!(job.run_at(), Some(until));
+        assert_eq!(job.retry_at(), None, "waiting is not a backoff");
         assert_eq!(job.attempts(), 0);
         assert_eq!(job.failure(), None, "waiting is not failing");
         assert_eq!(job.checkpoint(), Some("held"));
@@ -849,7 +900,55 @@ mod tests {
         assert!(job.is_due(until));
         assert!(job.defer(until).is_err(), "only a running job");
         let restored = Job::restore(JobRecord::from(&job)).unwrap();
-        assert_eq!(restored.retry_at(), Some(until));
+        assert_eq!(restored.run_at(), Some(until));
+    }
+
+    #[test]
+    fn a_scheduled_job_starts_at_its_time_and_not_before() {
+        let at = now() + Duration::from_secs(600);
+        let mut job = Job::scheduled(ProfileId::new(), JobKind::Countdown, "{}", at);
+        assert_eq!(job.run_at(), Some(at));
+        assert!(!job.is_due(at - Duration::from_secs(1)));
+        assert!(job.start(now()).is_err(), "too early");
+        assert!(job.is_due(at));
+        job.start(at).unwrap();
+        assert_eq!(job.run_at(), None, "its time came");
+    }
+
+    #[test]
+    fn a_backoff_and_a_time_both_hold_a_job() {
+        let mut job = running();
+        job.fail_attempt(transient(), now(), &policy()).unwrap();
+        let later = now() + Duration::from_secs(600);
+        job.wait_until(later).unwrap();
+        assert_eq!(job.retry_at(), Some(now() + Duration::from_secs(2)));
+        assert!(
+            !job.is_due(now() + Duration::from_secs(2)),
+            "its time holds it"
+        );
+        assert!(job.is_due(later));
+    }
+
+    #[test]
+    fn only_a_queued_job_gets_a_new_time() {
+        let at = now() + Duration::from_secs(60);
+        assert!(running().wait_until(at).is_err());
+        let mut cancelled = queued();
+        cancelled.cancel().unwrap();
+        assert!(cancelled.wait_until(at).is_err());
+        let mut job = queued();
+        job.wait_until(at).unwrap();
+        assert_eq!(job.run_at(), Some(at));
+    }
+
+    #[test]
+    fn cancel_and_retry_drop_the_time_a_job_waited_for() {
+        let at = now() + Duration::from_secs(600);
+        let mut job = Job::scheduled(ProfileId::new(), JobKind::Countdown, "{}", at);
+        job.cancel().unwrap();
+        assert_eq!(job.run_at(), None);
+        job.retry().unwrap();
+        assert!(job.is_due(now()), "a retry starts now");
     }
 
     #[test]
@@ -1069,9 +1168,19 @@ mod tests {
         let done_halfway = JobRecord {
             state: JobState::Done,
             progress: Progress::of(1, 2),
+            ..base.clone()
+        };
+        let running_with_time = JobRecord {
+            state: JobState::Running,
+            run_at: Some(now()),
             ..base
         };
-        for record in [failed_without_failure, running_with_retry, done_halfway] {
+        for record in [
+            failed_without_failure,
+            running_with_retry,
+            done_halfway,
+            running_with_time,
+        ] {
             assert!(Job::restore(record).is_err());
         }
     }

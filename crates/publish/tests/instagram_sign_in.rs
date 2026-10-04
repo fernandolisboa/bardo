@@ -358,7 +358,7 @@ fn a_refresh_meta_cannot_answer_now_keeps_the_connection() {
 fn revoking_removes_the_apps_permissions_with_the_user_token() {
     let sign_in = answers(&["revoke-ok"]);
     sign_in
-        .revoke(&kept(Some("fixture-long-lived-user-token-0001")))
+        .revoke(None, &kept(Some("fixture-long-lived-user-token-0001")))
         .unwrap();
     let sent = &sign_in.transport().sent()[0];
     assert_eq!(sent.method, Method::Delete);
@@ -369,11 +369,11 @@ fn revoking_removes_the_apps_permissions_with_the_user_token() {
     );
     // A token Meta no longer reads has nothing left to revoke.
     answers(&["revoke-invalid-token"])
-        .revoke(&kept(Some("fixture-user")))
+        .revoke(None, &kept(Some("fixture-user")))
         .unwrap();
     assert_eq!(
         answers(&["server-error"])
-            .revoke(&kept(Some("fixture-user")))
+            .revoke(None, &kept(Some("fixture-user")))
             .unwrap_err()
             .kind,
         SignInFailureKind::NetworkDown
