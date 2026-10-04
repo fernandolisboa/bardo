@@ -2287,7 +2287,7 @@ body = "O formato do quadro do corte inteiro. Em 9:16, o clipe selecionado mostr
 
 [tour.editor-more.suggestions]
 title = "Sugestões de corte"
-body = "O Bardo pontua os pontos onde uma frase termina, o narrador pausa ou a cena muda, e diz por quê. Aceite (A) ou rejeite (R) cada um na linha do tempo ou na lista que toma o lugar do inspetor; nada muda até você aceitar."
+body = "O Bardo dá uma nota a cada ponto onde uma frase termina, o narrador pausa ou a cena muda, e diz por quê. Aceite (A) ou rejeite (R) cada um na linha do tempo ou na lista que toma o lugar do inspetor; nada muda até você aceitar."
 
 [tour.editor-more.render]
 title = "Revisar e renderizar"

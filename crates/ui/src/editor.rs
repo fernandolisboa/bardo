@@ -560,8 +560,6 @@ impl EditorScreen {
         self.edit(action, cx);
     }
 
-    /// Frees the preview's picture from the window's atlas; the shell calls
-    /// it before closing the editor.
     /// Whether there is a cut to show: its tour is offered only then.
     pub fn has_content(&self) -> bool {
         self.editor.as_ref().is_some_and(|editor| {
@@ -573,8 +571,8 @@ impl EditorScreen {
         })
     }
 
-    /// A tour step shows over the editor: playback pauses under the card,
-    /// and nothing else changes.
+    /// A tour step or the guide shows over the editor: playback pauses
+    /// under it, and nothing else changes.
     pub fn hold_for_tour(&mut self, cx: &mut Context<Self>) {
         self.with_editor(cx, Editor::hold_for_tour);
     }
@@ -584,6 +582,8 @@ impl EditorScreen {
         window.focus(&self.focus, cx);
     }
 
+    /// Frees the preview's picture from the window's atlas; the shell calls
+    /// it before closing the editor.
     pub fn release(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(old) = self.frame.take() {
             cx.drop_image(old, Some(window));

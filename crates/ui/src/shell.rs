@@ -284,7 +284,13 @@ impl Shell {
         // nothing back there.
         let missed_open = self.editor.is_none() && self.missed.read(cx).is_open();
         let from = self.screen;
+        // In the editor, Resume tour is out of reach: its tours go back to
+        // the step they closed on.
+        let in_editor = self.editor.is_some();
         let moved = self.bardo.update(cx, |bardo, _| match event {
+            GuideEvent::Start(tour @ (TourId::Editor | TourId::EditorMore)) if in_editor => {
+                bardo.continue_tour(tour, from, missed_open).ok()
+            }
             GuideEvent::Start(tour) => bardo.start_tour(tour, from, missed_open).ok(),
             GuideEvent::Resume => bardo.resume_tour(from, missed_open).ok(),
             GuideEvent::Next => Some(bardo.tour_next()),
@@ -316,6 +322,8 @@ impl Shell {
         }
         match moved {
             Some(TourMove::Show(Some(place))) => self.show_tour_place(place, window, cx),
+            // A tour of no one place (the welcome) shows over the screens.
+            Some(TourMove::Show(None)) if self.editor.is_some() => self.close_editor(window, cx),
             Some(TourMove::Left(origin)) if origin != self.screen => {
                 self.show(origin, window, cx);
             }
@@ -338,9 +346,12 @@ impl Shell {
         if place == TourPlace::Stage(Stage::Edit) {
             self.guide_over_editor = false;
             match &self.editor {
-                Some((editor, _)) => {
-                    editor.update(cx, |editor, cx| editor.hold_for_tour(cx));
-                }
+                Some((editor, _)) => editor.update(cx, |editor, cx| {
+                    editor.hold_for_tour(cx);
+                    // From the guide over it, the keyboard was in the
+                    // guide's search box: the card gives it back here.
+                    editor.focus(window, cx);
+                }),
                 None => {
                     self.pick(Destination::Projects, window, cx);
                     self.projects.update(cx, |projects, cx| {
@@ -397,7 +408,7 @@ impl Shell {
                 self.guide_screen
                     .update(cx, |screen, cx| screen.focus_search(window, cx));
             } else {
-                self.guide_over_editor = true;
+                self.cover_editor(cx);
                 let place = Some(GuidePlace::Stage(Stage::Edit));
                 self.guide_screen
                     .update(cx, |screen, cx| screen.open_at(place, window, cx));
@@ -510,9 +521,18 @@ impl Shell {
             screen.open(section.page, Some(section.section), cx);
         });
         if self.editor.is_some() {
-            self.guide_over_editor = true;
+            self.cover_editor(cx);
         } else {
             self.screen = Destination::Guide;
+        }
+    }
+
+    /// The guide goes over the editor, which is no longer drawn: playback
+    /// pauses rather than play on unseen.
+    fn cover_editor(&mut self, cx: &mut Context<Self>) {
+        self.guide_over_editor = true;
+        if let Some((editor, _)) = &self.editor {
+            editor.update(cx, |editor, cx| editor.hold_for_tour(cx));
         }
     }
 

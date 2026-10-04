@@ -1020,13 +1020,35 @@ impl Bardo {
     ) -> Result<TourMove, TourError> {
         let id = self.resumable_tour().ok_or(TourError::NothingToResume)?;
         let tour = Tour::get(id);
-        let step = self
+        self.begin_tour(tour, self.closed_step(tour), from, missed_posts_open)
+    }
+
+    /// Starts `tour`, or takes it back to the step it closed on when it
+    /// closed midway: the editor's tour button, where the Guide's menu with
+    /// Resume tour is out of reach.
+    pub fn continue_tour(
+        &mut self,
+        tour: TourId,
+        from: Destination,
+        missed_posts_open: bool,
+    ) -> Result<TourMove, TourError> {
+        let tour = Tour::get(tour);
+        let closed = self
             .tours
             .progress
-            .get(&id)
-            .filter(|progress| progress.version == tour.version)
-            .map_or(0, |progress| progress.last_step as usize);
+            .get(&tour.id)
+            .is_some_and(|progress| progress.state == TourState::InProgress);
+        let step = if closed { self.closed_step(tour) } else { 0 };
         self.begin_tour(tour, step, from, missed_posts_open)
+    }
+
+    /// The step `tour` closed on; the first when its content changed since.
+    fn closed_step(&self, tour: &Tour) -> usize {
+        self.tours
+            .progress
+            .get(&tour.id)
+            .filter(|progress| progress.version == tour.version)
+            .map_or(0, |progress| progress.last_step as usize)
     }
 
     fn begin_tour(
@@ -1831,6 +1853,24 @@ mod tests {
             }),
             "both done: part one again, without the mark"
         );
+    }
+
+    #[test]
+    fn the_editor_button_takes_a_closed_tour_back_to_its_step() {
+        let progress = FakeProgress::default();
+        let mut app = start(&progress);
+        let from = Destination::Projects;
+        let step = |app: &Bardo| app.tour_step(false).map(|step| step.number);
+        app.continue_tour(TourId::Editor, from, false).unwrap();
+        assert_eq!(step(&app), Some(1), "never run: from the start");
+        app.tour_next();
+        app.tour_next();
+        app.tour_close();
+        app.continue_tour(TourId::Editor, from, false).unwrap();
+        assert_eq!(step(&app), Some(3), "closed on the third step");
+        while app.tour_next() != TourMove::Finished {}
+        app.continue_tour(TourId::Editor, from, false).unwrap();
+        assert_eq!(step(&app), Some(1), "done: from the start again");
     }
 
     #[test]

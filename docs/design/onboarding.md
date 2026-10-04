@@ -130,8 +130,9 @@ The editor covers the whole window, so it carries its tours itself: **Editor tou
 
 - It comes in two parts, so neither runs past seven steps: playback, the tracks, cutting, snapping and undo; then the mix, ducking, captions, framing, cut suggestions and leaving to render. The button starts the first part the user has neither completed nor dismissed (and the first again once both are), with the part's name as its label.
 - Over the editor, the Guide shows the tour's cards alone: no first-run offer, menu or shortcuts card, and the missed posts list (not drawn over the editor) does not hold a tour back.
-- Every step holds the editor: playback pauses when a step shows, and nothing else changes; a test walks both parts and checks the cut, its undo history and the selection.
-- F1 in the editor opens the Guide screen over it, at the editor's page, under a bar with **Back to the editor**, which returns to the editor as it was. A tour card's **Learn more** does the same. A guide link to another place, or another tour, closes the editor first.
+- Over the editor the Guide menu, with Resume tour, is out of reach, so the editor's button (and Shift+F1) takes a tour closed midway back to the step it closed on (`Bardo::continue_tour`).
+- Every step holds the editor: playback pauses when a step or the guide shows, and nothing else changes; a test walks both parts and checks the cut, its undo history and the selection.
+- F1 in the editor opens the Guide screen over it, at the editor's page, under a bar with **Back to the editor**, which returns to the editor as it was. A tour card's **Learn more** does the same. A guide link to another place, or another tour (the welcome tour included), closes the editor first.
 
 The Render stage has a tour like the other stages ("something to show" is a cut to review): the figures (a new part anchor, tagged where each layout draws them), the targets, the picked target's checks, the toolbar and its last file.
 

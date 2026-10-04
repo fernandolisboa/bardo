@@ -29,13 +29,13 @@ Um número em âmbar merece uma olhada: uma mixagem sem som, ou legendas desliga
 
 Cada conta de rede do canal é um destino, listado com o identificador, o preset, a situação e o último arquivo. Cada rede parte do próprio preset:
 
-| Rede | Quadro | Tamanho | Duração máxima |
-| --- | --- | --- | --- |
-| YouTube | 9:16 | 1080×1920 | 3 min |
-| TikTok | 9:16 | 1080×1920 | 10 min |
-| Instagram Reels | 9:16 | 1080×1920 | 15 min |
-| X | 9:16 | 720×1280 | 2 min 20 s |
-| Kick | 16:9 | 1920×1080 | sem limite |
+| Rede | Quadro | Tamanho | Bitrate | Duração máxima |
+| --- | --- | --- | --- | --- |
+| YouTube | 9:16 | 1080×1920 | 12 Mbps | 3 min |
+| TikTok | 9:16 | 1080×1920 | 10 Mbps | 10 min |
+| Instagram Reels | 9:16 | 1080×1920 | 10 Mbps | 15 min |
+| X | 9:16 | 720×1280 | 6 Mbps | 2 min 20 s |
+| Kick | 16:9 | 1920×1080 | 8 Mbps | 12 h |
 
 Todas usam H.264 e miram −14 LUFS. Dá para mudar o preset de uma conta (quadro, tamanho, codec, bitrate, duração máxima e loudness) em [Contas](bardo:go/accounts). Um canal sem contas não tem para o que renderizar: adicione uma lá primeiro.
 

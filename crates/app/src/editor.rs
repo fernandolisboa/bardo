@@ -2823,6 +2823,10 @@ mod tests {
         assert!(!editor.can_redo());
     }
 
+    /// The tours never reach the editor but through what the shell does on
+    /// each step shown (`hold_for_tour`), so the walk does just that: what
+    /// the test pins is that every move of both tours, with that hold, keeps
+    /// the cut, its history and the selection.
     #[test]
     fn the_editor_tours_pause_playback_and_leave_the_cut_and_its_history_alone() {
         use crate::{Destination, Stage, TourMove, TourPlace};

@@ -10,7 +10,7 @@ tour: editor
 
 É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/projects/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Projetos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento e as sugestões de corte.
 
-F1 abre este guia sobre o editor, e **Voltar ao editor** devolve você a ele como estava.
+F1 abre este guia sobre o editor, e **Voltar ao editor** devolve você a ele como estava. Esc fecha um tour; o botão **Tour do editor** na barra de cima (Shift+F1) volta ao passo em que ele fechou.
 
 <a id="preview"></a>
 ## Prévia e reprodução
@@ -34,7 +34,7 @@ O corte corre da esquerda para a direita em cinco faixas:
 
 Clique na linha do tempo para mover o cursor de reprodução, e clique num item para selecioná-lo: o cursor vai até ele e o inspetor, à direita, mostra as propriedades. **Esc** limpa a seleção. Ctrl e a roda do mouse dão zoom, ou use − e + no fim da barra de ferramentas.
 
-O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe dela) e a **Mídia**: **Importar mídia** traz arquivos de vídeo e áudio do seu computador, e os botões de cada arquivo o colocam numa faixa, no cursor de reprodução.
+O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe dela) e a **Mídia**: **Importar arquivos…** traz arquivos de vídeo e áudio do seu computador, e os botões de cada arquivo o colocam numa faixa, no cursor de reprodução.
 
 <a id="cuts"></a>
 ## Cortar
@@ -93,7 +93,7 @@ No 9:16, cada clipe é recortado da imagem 16:9. Selecione um clipe e deixe o cu
 
 **Sugestões de corte da IA** mostra onde um corte cairia bem. **Sugerir cortes** manda os pontos onde uma frase termina, o narrador pausa ou a cena muda para o motor de decisão (TypeSafe, com a sua chave), que pontua cada um; a estimativa ao lado do botão diz quanto custa. Nada muda até você aceitar.
 
-Cada sugestão é um marcador na régua com a nota. Clique num marcador para ver o motivo (**Fim de frase**, uma pausa, **Troca de cena**, **Mudança de assunto**), e então **Aceitar (A)** para dividir ali ou **Rejeitar (R)** para descartar; **Tab** vai para a próxima. Enquanto as sugestões aparecem, a lista toma o lugar do inspetor: **Aceitar todas acima de** uma nota, **Mostrar a partir de** para esconder as fracas, e **Desfazer** em qualquer linha já decidida. **Sugerir de novo** pontua os pontos sem corte e substitui a lista.
+Cada sugestão é um marcador na régua com a nota. Clique num marcador para ver o motivo (**Fim de frase**, uma pausa, **Troca de cena**, **Mudança de assunto**), e então **Aceitar (A)** para dividir ali ou **Rejeitar (R)** para descartar; **Tab** vai para a próxima. Enquanto as sugestões aparecem, a lista toma o lugar do inspetor: **Aceitar todas acima de** uma nota, **Mostrar a partir de** para esconder as fracas, e **Desfazer** em qualquer linha já decidida. **Sugerir de novo** dá nota de novo aos pontos sem corte e substitui a lista.
 
 <a id="render"></a>
 ## Ir para o render

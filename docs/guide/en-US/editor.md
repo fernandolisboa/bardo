@@ -10,7 +10,7 @@ tour: editor
 
 The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/projects/edit) stage of a project, once the scenes are planned and narrated, and **Projects** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing and cut suggestions.
 
-F1 opens this guide over the editor, and **Back to the editor** returns to it as you left it.
+F1 opens this guide over the editor, and **Back to the editor** returns to it as you left it. Esc closes a tour; the **Editor tour** button in the top bar (Shift+F1) takes it back to the step it closed on.
 
 <a id="preview"></a>
 ## Preview and playback
@@ -34,7 +34,7 @@ The cut runs left to right on five tracks:
 
 Click the timeline to move the playhead, and click an item to select it: the playhead goes there and the inspector on the right shows its properties. **Esc** clears the selection. Ctrl and the scroll wheel zoom, or use − and + at the end of the toolbar.
 
-The bin on the left lists the project's **Scenes** (click one to jump to its clip) and its **Media**: **Import media** adds video and audio files from your computer, and each file's buttons put it on a track at the playhead.
+The bin on the left lists the project's **Scenes** (click one to jump to its clip) and its **Media**: **Import files…** adds video and audio files from your computer, and each file's buttons put it on a track at the playhead.
 
 <a id="cuts"></a>
 ## Cutting

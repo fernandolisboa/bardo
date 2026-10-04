@@ -29,13 +29,13 @@ A figure in amber deserves a look: a silent mix, or captions turned off. **Check
 
 Each network account of the channel is a target, listed with its handle, its preset, its state and its last file. Each network starts from its own preset:
 
-| Network | Frame | Size | Longest |
-| --- | --- | --- | --- |
-| YouTube | 9:16 | 1080×1920 | 3 min |
-| TikTok | 9:16 | 1080×1920 | 10 min |
-| Instagram Reels | 9:16 | 1080×1920 | 15 min |
-| X | 9:16 | 720×1280 | 2 min 20 s |
-| Kick | 16:9 | 1920×1080 | no limit |
+| Network | Frame | Size | Bitrate | Longest |
+| --- | --- | --- | --- | --- |
+| YouTube | 9:16 | 1080×1920 | 12 Mbps | 3 min |
+| TikTok | 9:16 | 1080×1920 | 10 Mbps | 10 min |
+| Instagram Reels | 9:16 | 1080×1920 | 10 Mbps | 15 min |
+| X | 9:16 | 720×1280 | 6 Mbps | 2 min 20 s |
+| Kick | 16:9 | 1920×1080 | 8 Mbps | 12 h |
 
 All of them use H.264 and aim at −14 LUFS. You can change an account's preset (frame, size, codec, bitrate, length limit and loudness) on [Accounts](bardo:go/accounts). A channel with no accounts has nothing to render for: add one there first.
 
