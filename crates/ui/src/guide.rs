@@ -1,6 +1,8 @@
 //! The Guide (issue #105): the first-run offer, the help menu behind the
 //! Guide place, the keyboard shortcuts, and the guided tour on screen. All
 //! of it is drawn deferred over the content area, after everything else.
+//! The user guide itself is a screen of its own ([`crate::guide_screen`]),
+//! opened from the menu, F1 or a tour card's "Learn more".
 //! The tour's moves go to the shell as [`GuideEvent`]s, since some of them
 //! open a place; what the tour is and where it stands is `bardo_app`'s.
 
@@ -8,7 +10,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
-use bardo_app::{Bardo, Destination, SHORTCUTS, Spot, Text, TourAnchor, TourStepView};
+use bardo_app::{Bardo, Destination, GuideRef, SHORTCUTS, Spot, Text, TourAnchor, TourStepView};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -48,11 +50,17 @@ pub enum GuideEvent {
         never: bool,
     },
     Reset,
+    /// "User guide": the Guide screen, at the page for where the user is.
+    OpenGuide,
+    /// A tour card's "Learn more": the tour closes (Resume tour goes back
+    /// to it) and the guide opens at the step's section.
+    LearnMore(GuideRef),
 }
 
 /// A row of the help menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuItem {
+    UserGuide,
     Tour(TourId),
     Resume,
     Shortcuts,
@@ -167,7 +175,8 @@ impl Guide {
 
     fn menu_items(&self, cx: &App) -> Vec<MenuItem> {
         let bardo = self.bardo.read(cx);
-        let mut items: Vec<MenuItem> = TourId::ALL.into_iter().map(MenuItem::Tour).collect();
+        let mut items = vec![MenuItem::UserGuide];
+        items.extend(TourId::ALL.into_iter().map(MenuItem::Tour));
         if bardo.resumable_tour().is_some() {
             items.push(MenuItem::Resume);
         }
@@ -178,6 +187,7 @@ impl Guide {
     fn pick(&mut self, item: MenuItem, cx: &mut Context<Self>) {
         self.menu = None;
         match item {
+            MenuItem::UserGuide => cx.emit(GuideEvent::OpenGuide),
             MenuItem::Tour(tour) => cx.emit(GuideEvent::Start(tour)),
             MenuItem::Resume => cx.emit(GuideEvent::Resume),
             MenuItem::Shortcuts => self.shortcuts = true,
@@ -200,6 +210,13 @@ impl Guide {
         match layer {
             Layer::Tour(step) => {
                 let mut buttons = vec![(Text::TourSkip, Kind::Ghost, Act::Send(GuideEvent::Skip))];
+                if let Some(guide) = step.guide {
+                    buttons.push((
+                        Text::TourLearnMore,
+                        Kind::Ghost,
+                        Act::Send(GuideEvent::LearnMore(guide)),
+                    ));
+                }
                 if !step.is_first() {
                     buttons.push((Text::TourBack, Kind::Outline, Act::Send(GuideEvent::Back)));
                 }
@@ -468,6 +485,9 @@ impl Guide {
 
     fn menu_card(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let t = look(cx).tokens;
+        let mono = gpui_kit::component::ActiveTheme::theme(&**cx)
+            .mono_font_family
+            .clone();
         let items = self.menu_items(cx);
         let bardo = self.bardo.read(cx);
         let rows: Vec<AnyElement> = items
@@ -476,6 +496,7 @@ impl Guide {
             .map(|(ix, item)| {
                 let item = *item;
                 let (label, new) = match item {
+                    MenuItem::UserGuide => (tr(bardo, Text::GuideUserGuide), false),
                     MenuItem::Tour(tour) => {
                         (tr(bardo, Text::TourName(tour)), bardo.tour_is_new(tour))
                     }
@@ -483,6 +504,20 @@ impl Guide {
                     MenuItem::Shortcuts => (tr(bardo, Text::GuideShortcuts), false),
                     MenuItem::Reset => (tr(bardo, Text::GuideResetTours), false),
                 };
+                // The guide's key, as the shortcuts list draws keys.
+                let key = (item == MenuItem::UserGuide).then(|| {
+                    div()
+                        .px_1p5()
+                        .rounded(t.radius)
+                        .border(t.border_width)
+                        .border_b_2()
+                        .border_color(t.border_strong)
+                        .bg(t.sunken)
+                        .text_xs()
+                        .text_color(t.text2)
+                        .font_family(mono.clone())
+                        .child("F1")
+                });
                 h_flex()
                     .id(("guide-menu", ix))
                     .h(px(32.))
@@ -499,6 +534,7 @@ impl Guide {
                     .when(new, |row| {
                         row.child(kit::status(kit::Tone::Accent, tr(bardo, Text::TourNew), cx))
                     })
+                    .children(key)
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.pick(item, cx);
                     }))

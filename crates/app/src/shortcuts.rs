@@ -27,6 +27,15 @@ const fn shortcut(keys: &'static [&'static str], action: &'static str) -> Shortc
 /// Every shortcut the app has, in the order the Guide lists them.
 pub const SHORTCUTS: &[ShortcutGroup] = &[
     ShortcutGroup {
+        name: Text::ShortcutGroup("guide"),
+        shortcuts: &[
+            shortcut(&["F1"], "guide_open"),
+            shortcut(&["↑", "↓"], "guide_move"),
+            shortcut(&["Enter"], "guide_pick"),
+            shortcut(&["Esc"], "guide_clear"),
+        ],
+    },
+    ShortcutGroup {
         name: Text::ShortcutGroup("tour"),
         shortcuts: &[
             shortcut(&["→", "Enter"], "tour_next"),

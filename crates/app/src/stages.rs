@@ -47,6 +47,23 @@ impl Stage {
                 | Stage::Publish
         )
     }
+
+    /// The stage's name in links (`bardo:go/projects/script`).
+    pub fn code(self) -> &'static str {
+        match self {
+            Stage::Script => "script",
+            Stage::Narration => "narration",
+            Stage::Scenes => "scenes",
+            Stage::Clips => "clips",
+            Stage::Edit => "edit",
+            Stage::Render => "render",
+            Stage::Publish => "publish",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|stage| stage.code() == code)
+    }
 }
 
 /// Where a stage stands.

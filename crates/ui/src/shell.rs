@@ -1,8 +1,10 @@
 use bardo_app::bardo_domain::{BudgetLevel, VideoProjectId};
-use bardo_app::{Bardo, Destination, SpendSummary, Stage, Text, TourMove, TourPlace};
+use bardo_app::{Bardo, Destination, GuidePlace, SpendSummary, Stage, Text, TourMove, TourPlace};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Entity, ScrollHandle, SharedString, Subscription, Window, div};
+use gpui_kit::{
+    AnyElement, App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Window, div,
+};
 
 use crate::accounts::AccountsScreen;
 use crate::appearance;
@@ -10,6 +12,7 @@ use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
 use crate::editor::{EditorEvent, EditorScreen};
 use crate::guide::{Guide, GuideEvent};
+use crate::guide_screen::{GuideScreen, GuideScreenEvent, OpenGuide};
 use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
@@ -56,6 +59,8 @@ pub struct Shell {
     /// The first-run offer, the help menu and the guided tour, over the
     /// screens.
     guide: Entity<Guide>,
+    /// The user guide, a screen of its own.
+    guide_screen: Entity<GuideScreen>,
     /// The navigation's scroll, kept across frames so the tour can bring
     /// a place into view.
     nav_scroll: ScrollHandle,
@@ -65,6 +70,9 @@ pub struct Shell {
     spend_revision: u64,
     /// The editor, open over the whole window in place of the screens.
     editor: Option<(Entity<EditorScreen>, Subscription)>,
+    /// Keeps the window's keys reaching the shell (F1) when nothing inside
+    /// it has the keyboard.
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -84,6 +92,7 @@ impl Shell {
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let missed = cx.new(|cx| MissedPosts::new(bardo.clone(), window, cx));
         let guide = cx.new(|cx| Guide::new(bardo.clone(), missed.clone(), cx));
+        let guide_screen = cx.new(|cx| GuideScreen::new(bardo.clone(), window, cx));
         // The startup theme guessed the system's appearance before any
         // window existed; this window knows it.
         appearance::follow(
@@ -113,6 +122,16 @@ impl Shell {
             }),
             // The Guide place shows whether its menu is open.
             cx.observe(&guide, |_, _, cx| cx.notify()),
+            cx.subscribe_in(
+                &guide_screen,
+                window,
+                |this, _, event: &GuideScreenEvent, window, cx| match *event {
+                    GuideScreenEvent::Tour(tour) => {
+                        this.guide_event(GuideEvent::Start(tour), window, cx);
+                    }
+                    GuideScreenEvent::Go(place) => this.go(place, window, cx),
+                },
+            ),
             // Budgets change on the costs screen.
             cx.observe(&costs, |this, _, cx| {
                 this.refresh_spend(cx);
@@ -161,10 +180,12 @@ impl Shell {
             jobs_open: false,
             missed,
             guide,
+            guide_screen,
             nav_scroll: ScrollHandle::new(),
             spend: None,
             spend_revision: 0,
             editor: None,
+            focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
         shell.refresh_spend(cx);
@@ -250,7 +271,9 @@ impl Shell {
                 bardo.decline_tour_offer(never);
                 None
             }
-            GuideEvent::Reset => None,
+            GuideEvent::Reset | GuideEvent::OpenGuide => None,
+            // The tour closes as Esc closes it, so Resume tour goes back.
+            GuideEvent::LearnMore(_) => Some(bardo.tour_close()),
         });
         if event == GuideEvent::Reset {
             let reset = self.bardo.update(cx, |bardo, _| bardo.reset_tours());
@@ -272,12 +295,103 @@ impl Shell {
                     .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
             }
             Some(TourMove::Left(origin)) if origin != self.screen => {
-                self.pick(origin, window, cx);
+                self.show(origin, window, cx);
             }
             _ => {}
         }
         self.guide.update(cx, |guide, cx| guide.moved(cx));
+        match event {
+            GuideEvent::OpenGuide => self.open_guide(window, cx),
+            GuideEvent::LearnMore(guide) => {
+                self.guide_screen.update(cx, |screen, cx| {
+                    screen.open(guide.page, Some(guide.section), cx);
+                });
+                self.screen = Destination::Guide;
+            }
+            _ => {}
+        }
         cx.notify();
+    }
+
+    /// Shows `place`; unlike a pick in the navigation, the Guide shows its
+    /// screen rather than its menu.
+    fn show(&mut self, place: Destination, window: &mut Window, cx: &mut Context<Self>) {
+        if place == Destination::Guide {
+            self.screen = Destination::Guide;
+            cx.notify();
+        } else {
+            self.pick(place, window, cx);
+        }
+    }
+
+    /// Where the user is, as the guide names places: the open project's
+    /// stage, the Settings tab, or the screen.
+    fn place(&self, cx: &App) -> Option<GuidePlace> {
+        match self.screen {
+            Destination::Guide => None,
+            Destination::Projects => Some(
+                self.projects
+                    .read(cx)
+                    .current_stage()
+                    .map_or(GuidePlace::Screen(Destination::Projects), GuidePlace::Stage),
+            ),
+            Destination::Settings => Some(GuidePlace::Settings(self.settings.read(cx).tab())),
+            place => Some(GuidePlace::Screen(place)),
+        }
+    }
+
+    /// F1 or the menu's "User guide": the Guide screen at the page for
+    /// where the user is (staying on the open page when already there),
+    /// with the keyboard in its search box.
+    fn open_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.screen == Destination::Guide {
+            self.guide_screen
+                .update(cx, |screen, cx| screen.focus_search(window, cx));
+            return;
+        }
+        let place = self.place(cx);
+        self.guide_screen
+            .update(cx, |screen, cx| screen.open_at(place, window, cx));
+        self.screen = Destination::Guide;
+        cx.notify();
+    }
+
+    /// F1. Not over the editor (the guide does not sit over it), nor while
+    /// a tour or the missed posts list holds the window.
+    fn on_open_guide(&mut self, _: &OpenGuide, window: &mut Window, cx: &mut Context<Self>) {
+        let missed_open = self.missed.read(cx).is_open();
+        if self.editor.is_some() || missed_open {
+            return;
+        }
+        let step = self.bardo.read(cx).tour_step(missed_open);
+        match step {
+            Some(step) => {
+                if let Some(guide) = step.guide {
+                    self.guide_event(GuideEvent::LearnMore(guide), window, cx);
+                }
+            }
+            None => {
+                self.guide.update(cx, |guide, cx| guide.moved(cx));
+                self.open_guide(window, cx);
+            }
+        }
+    }
+
+    /// A guide link or "Go to …": opens the place.
+    fn go(&mut self, place: GuidePlace, window: &mut Window, cx: &mut Context<Self>) {
+        match place {
+            GuidePlace::Screen(place) => self.show(place, window, cx),
+            GuidePlace::Stage(stage) => {
+                self.pick(Destination::Projects, window, cx);
+                self.projects
+                    .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
+            }
+            GuidePlace::Settings(tab) => {
+                self.settings
+                    .update(cx, |settings, cx| settings.show_tab(tab, cx));
+                self.pick(Destination::Settings, window, cx);
+            }
+        }
     }
 
     fn open_editor(
@@ -364,6 +478,17 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The tour's anchors are recorded afresh as this frame prepaints.
         crate::tour::begin_frame(window, cx);
+        // Keys go to the root alone while nothing on screen has the keyboard
+        // (nothing focused yet, or the focused button was on a screen that
+        // is gone), which would miss the shell's F1.
+        if !self.focus.contains_focused(window, cx) {
+            let focus = self.focus.clone();
+            window.on_next_frame(move |window, cx| {
+                if !focus.contains_focused(window, cx) {
+                    window.focus(&focus, cx);
+                }
+            });
+        }
         let name = tr(self.bardo.read(cx), Text::AppName);
         let (colors, content) = match &self.editor {
             Some((editor, _)) => (title_bar::Colors::editor(), self.render_editor(editor)),
@@ -373,6 +498,8 @@ impl Render for Shell {
         let guide = self.editor.is_none().then(|| self.guide.clone());
         v_flex()
             .size_full()
+            .track_focus(&self.focus)
+            .on_action(cx.listener(Self::on_open_guide))
             .child(TitleBar::new(name, colors))
             .child(
                 div()
@@ -407,9 +534,8 @@ impl Shell {
             Destination::Research => self.research.clone().into_any_element(),
             Destination::Themes => self.themes.clone().into_any_element(),
             Destination::Performance => self.performance.clone().into_any_element(),
-            Destination::Projects | Destination::Jobs | Destination::Guide => {
-                self.projects.clone().into_any_element()
-            }
+            Destination::Guide => self.guide_screen.clone().into_any_element(),
+            Destination::Projects | Destination::Jobs => self.projects.clone().into_any_element(),
             Destination::Templates => self.templates.clone().into_any_element(),
             Destination::Costs => self.costs.clone().into_any_element(),
             Destination::Settings => self.settings.clone().into_any_element(),

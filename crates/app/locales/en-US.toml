@@ -1955,6 +1955,7 @@ next = "Next"
 finish = "Finish"
 skip = "Skip tour"
 new = "New"
+learn_more = "Learn more"
 
 [tour.offer]
 title = "Take a 2-minute tour?"
@@ -1996,25 +1997,48 @@ body = "What you spent this month, and how much of your budgets is used. Set a m
 
 [tour.welcome.guide]
 title = "Guide and tours"
-body = "Come back here to take this tour again, resume one you closed, or see the keyboard shortcuts. Each screen's tour and the user guide will live here too."
+body = "Come back here to take this tour again, resume one you closed, see the keyboard shortcuts or read the user guide. F1 opens the guide from any screen."
 
 [guide]
 resume_tour = "Resume tour"
 shortcuts = "Keyboard shortcuts"
 reset_tours = "Reset tours"
 reset_failed = "Could not reset the tours. Try again."
+user_guide = "User guide"
+on_this_page = "On this page"
+show_me = "Show me"
+go_to = "Go to {place}"
+
+[guide.search]
+placeholder = "Search the guide"
+keys = "↑ and ↓ move through the list, Enter opens, Esc clears the search."
+empty = "Nothing in the guide matches “{query}”."
+
+[guide.group]
+getting-started = "Getting started"
+strategy = "Strategy"
+production = "Production"
+editing = "Editing"
+publishing = "Publishing"
+costs = "Costs and budgets"
+reference = "Reference"
 
 [shortcuts]
 title = "Keyboard shortcuts"
 close = "Close"
 
 [shortcuts.group]
+guide = "User guide"
 tour = "Guided tour"
 lists = "Lists"
 editor = "Editor"
 suggestions = "Cut suggestions in the editor"
 
 [shortcuts.action]
+guide_open = "Open the guide at the page for this screen"
+guide_move = "Move through the contents or the search results"
+guide_pick = "Open the highlighted page"
+guide_clear = "Clear the search"
 tour_next = "Next step"
 tour_back = "Previous step"
 tour_close = "Close the tour; resume it from the Guide"

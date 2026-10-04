@@ -9,6 +9,7 @@ mod channels;
 mod costs;
 mod editor;
 mod guide;
+mod guide_screen;
 mod icons;
 mod jobs;
 mod kit;
@@ -82,6 +83,7 @@ fn main() -> anyhow::Result<()> {
             gpui_kit::init(cx);
             appearance::init(bardo.ui_theme(), cx);
             editor::init(cx);
+            guide_screen::init(cx);
             layout::show(bardo.ui_layout(), cx);
             let title = SharedString::from(bardo.text(bardo_app::Text::AppName).into_owned());
             let options = WindowOptions {

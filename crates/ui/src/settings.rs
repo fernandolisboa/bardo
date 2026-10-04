@@ -11,7 +11,9 @@ use bardo_app::bardo_domain::{
     AppCredentialsFieldError, KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Network, Provider,
     ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
-use bardo_app::{AppCredentialsStatus, Bardo, Destination, KeyState, ProviderKeyStatus, Text};
+use bardo_app::{
+    AppCredentialsStatus, Bardo, Destination, KeyState, ProviderKeyStatus, SettingsTab, Text,
+};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
@@ -31,24 +33,6 @@ use crate::kit::{self, Tone};
 use crate::layout;
 use crate::parts::{Header, ScreenParts};
 use crate::shell::tr;
-
-/// The settings tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SettingsTab {
-    Keys,
-    Networks,
-    Appearance,
-    Metrics,
-}
-
-impl SettingsTab {
-    const ALL: [SettingsTab; 4] = [
-        SettingsTab::Keys,
-        SettingsTab::Networks,
-        SettingsTab::Appearance,
-        SettingsTab::Metrics,
-    ];
-}
 
 /// One theme in a light or dark picker.
 #[derive(Clone)]
@@ -290,6 +274,16 @@ impl SettingsScreen {
         self.credentials
             .get_mut(&network)
             .expect("a row per sign-in network")
+    }
+
+    /// The tab on screen.
+    pub fn tab(&self) -> SettingsTab {
+        self.tab
+    }
+
+    pub fn show_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
+        self.tab = tab;
+        cx.notify();
     }
 
     /// Opens the Networks tab, where a connection's app credentials live.

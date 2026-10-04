@@ -9,6 +9,7 @@ mod costs;
 mod cut_suggestions;
 mod editor;
 mod export;
+mod guide;
 pub mod i18n;
 mod jobs;
 pub mod logging;
@@ -85,13 +86,16 @@ pub use editor::{
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
 };
+pub use guide::{
+    Guide, GuideGroup, GuideHit, GuideLink, GuidePage, GuidePageError, GuidePlace, GuideSection,
+};
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
-pub use navigation::{Destination, Pillar};
+pub use navigation::{Destination, Pillar, SettingsTab};
 pub use network_accounts::NetworkAccountError;
 pub use persona_package::PackageError;
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus, persona_package_folder};
@@ -118,8 +122,8 @@ pub use stages::{
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 pub use tours::{
-    Side, Spot, Tour, TourAnchor, TourError, TourMove, TourPlace, TourStep, TourStepView, WELCOME,
-    WhenMissing,
+    GuideRef, Side, Spot, Tour, TourAnchor, TourError, TourMove, TourPlace, TourStep, TourStepView,
+    WELCOME, WhenMissing,
 };
 pub use uploads::{
     DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
@@ -405,6 +409,8 @@ pub struct Bardo {
     tours: TourBook,
     profile: UserProfile,
     catalog: Catalog,
+    /// The user guide in the interface language.
+    guide: Guide,
     /// The system's time zone, which publish times are typed and shown in.
     /// Read once at start: a zone changed while Bardo runs applies after a
     /// restart.
@@ -479,6 +485,7 @@ impl Bardo {
         // was closed.
         let opened_at = SystemTime::now();
         let catalog = Catalog::load(profile.ui_language);
+        let guide = Guide::load(profile.ui_language);
         let tours = TourBook::load(profile.id, tours);
         let redactor = Redactor::new();
         let cost_book = CostBook {
@@ -676,6 +683,7 @@ impl Bardo {
             tours,
             profile,
             catalog,
+            guide,
             zone: Zone::new(jiff::tz::TimeZone::system()),
         })
     }
@@ -707,7 +715,13 @@ impl Bardo {
         self.profiles.save(&updated)?;
         self.profile = updated;
         self.catalog = Catalog::load(language);
+        self.guide = Guide::load(language);
         Ok(())
+    }
+
+    /// The user guide in the interface language.
+    pub fn guide(&self) -> &Guide {
+        &self.guide
     }
 
     /// How the profile picks its interface theme.

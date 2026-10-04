@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -97,6 +97,7 @@ Eight steps, each lighting the navigation, which every screen shows:
 
 **Guide** is a pinned place next to Jobs, Costs and Settings: at the foot of the Workspace sidebar, between Jobs and Settings on the right of the Studio top bar. It opens a menu over the screen (the screen stays):
 
+- **User guide** (F1): opens the Guide screen;
 - **Welcome tour**, marked **New** until it is started or turned down, and again when its content changes;
 - **Resume tour**, when a tour was closed midway;
 - **Keyboard shortcuts**: the tour's, the lists', the editor's and the cut suggestions' keys, from `bardo_app::SHORTCUTS`;
@@ -104,11 +105,24 @@ Eight steps, each lighting the navigation, which every screen shows:
 
 The menu takes ↑/↓, Tab, Enter and Esc; a click outside closes it.
 
+## The Guide screen
+
+The user guide inside the app, built from the same screen parts as every other screen, so each layout places it like the rest:
+
+- **Collection**: a search box over the contents, grouped by pillar (Getting started, Strategy, Production, Editing, Publishing, Costs and budgets, Reference; empty groups are left out). While a query is typed, the collection lists the matching sections instead, as "Page › Section" with a snippet around the first match.
+- **Content**: the page, rendered from Markdown. Links to other pages and sections open them and scroll to the section; `bardo:go/` links go to a place; `bardo:tour/` links start a tour; web links open in the browser.
+- **Aside**: "On this page" with a link to each section, **Show me** when the page has a tour, and **Go to <place>** when it explains one.
+
+Keys: F1 from any screen (not over the editor) opens the page for the current screen, project stage or Settings tab, else the first page, with the search box focused. ↑/↓ move through the contents or the results, Enter opens the highlighted result, Esc clears the search. During a tour, F1 is the step's **Learn more**.
+
+Tour cards whose step names a guide section show **Learn more**: it closes the tour (Resume tour brings it back) and opens that section.
+
+The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says how to write one. The app embeds them when it is built, and its tests fail on a page missing in one language, a section that differs, a broken link or a tour step pointing to no section. A coverage report lists the places no page explains yet; #111 makes it fail.
+
 ## Later slices
 
 | Issue | Adds |
 | --- | --- |
-| #106 | The Guide screen, "Getting started", and `docs/guide/` in pt-BR and en-US from one source |
 | #107 | The Strategy tour and a "Tour of this screen" button |
 | #108 | The Production tour |
 | #109 | The Editing and render tour |
