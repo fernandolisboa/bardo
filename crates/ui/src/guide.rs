@@ -547,10 +547,7 @@ impl Guide {
             Layer::Tour(step) => {
                 let bardo = self.bardo.clone();
                 let resolve: crate::tour::Resolve = Rc::new(move |drawn, cx| {
-                    bardo
-                        .read(cx)
-                        .tour_spot(drawn)
-                        .unwrap_or(Spot::Center)
+                    bardo.read(cx).tour_spot(drawn).unwrap_or(Spot::Center)
                 });
                 let number = step.number;
                 Spotlight::new(resolve, self.tour_card(step, cx), Rc::clone(&self.motion))
