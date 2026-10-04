@@ -14,7 +14,7 @@ Keys are named as they are printed on the keyboard. The Guide menu lists them to
 | Keys | Does |
 | --- | --- |
 | F1 | Opens the guide at the page for the screen you are on |
-| Shift+F1 | Starts the tour of the screen you are on, when it has one |
+| Shift+F1 | Starts the tour of the project stage you are on, else of the screen, when it has one |
 | ↑ ↓ | Moves through the contents or the search results while you type |
 | Enter | Opens the highlighted page |
 | Esc | Clears the search |

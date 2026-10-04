@@ -2287,7 +2287,7 @@ suggestions = "Sugestões de corte no editor"
 
 [shortcuts.action]
 guide_open = "Abrir o guia na página desta tela"
-tour_screen = "Começar o tour desta tela"
+tour_screen = "Começar o tour desta tela ou etapa"
 guide_move = "Percorrer o sumário ou os resultados da busca"
 guide_pick = "Abrir a página destacada"
 guide_clear = "Limpar a busca"

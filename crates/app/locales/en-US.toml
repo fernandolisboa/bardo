@@ -2287,7 +2287,7 @@ suggestions = "Cut suggestions in the editor"
 
 [shortcuts.action]
 guide_open = "Open the guide at the page for this screen"
-tour_screen = "Start the tour of this screen"
+tour_screen = "Start the tour of this screen or stage"
 guide_move = "Move through the contents or the search results"
 guide_pick = "Open the highlighted page"
 guide_clear = "Clear the search"
