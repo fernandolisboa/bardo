@@ -24,10 +24,10 @@ use gpui_kit::{
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::metrics;
 use crate::parts::{Collection, CollectionKind, Figure, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
+use crate::{guide, layout};
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
@@ -179,6 +179,14 @@ impl PerformanceScreen {
         }
     }
 
+    /// Whether the channel has linked posts to show: the screen offers its
+    /// tour only then.
+    pub fn has_content(&self) -> bool {
+        self.view
+            .as_ref()
+            .is_some_and(|view| !view.posts.is_empty())
+    }
+
     fn sync_now(&mut self, cx: &mut Context<Self>) {
         self.error = self
             .bardo
@@ -301,10 +309,11 @@ impl PerformanceScreen {
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.sync_now(cx))),
                 )
             })
-            .child(kit::info(
+            .child(guide::info(
+                bardo,
                 "performance-sync-info",
-                None,
                 tr(bardo, Text::MetricsSyncHint),
+                guide::refs::PERFORMANCE_SYNC,
             ))
             .into_any_element()
     }
@@ -469,9 +478,18 @@ impl Render for PerformanceScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Performance);
-        header.info = Some(
-            kit::info("performance-info", None, tr(bardo, Text::PerformanceInfo))
-                .into_any_element(),
+        let info = guide::info(
+            bardo,
+            "performance-info",
+            tr(bardo, Text::PerformanceInfo),
+            guide::refs::PERFORMANCE_LINK,
+        );
+        header.info = guide::header_info(
+            bardo,
+            Destination::Performance,
+            self.has_content(),
+            Some(info.into_any_element()),
+            cx,
         );
         if self.channels.is_empty() {
             let mut parts = ScreenParts::new(header);

@@ -7,11 +7,19 @@
 //! which anchors are on screen; everything else (where the run is, what a
 //! missing anchor turns into, what is saved) is decided here. Steps only
 //! explain: a tour never creates, changes or deletes the user's data.
+//!
+//! Besides the welcome tour, a screen can have a tour of its own (issue
+//! #107), started from its "Tour this screen" button, Shift+F1 or the
+//! Guide. The button carries a "new" mark from the first visit that finds
+//! something to show until the tour is completed or dismissed, and again
+//! when the tour's content changes; a screen tour never starts on its own.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use bardo_domain::{ProfileId, TourId, TourProgress, TourProgressRepository, TourState};
+use bardo_domain::{
+    ProfileId, TourId, TourProgress, TourProgressRepository, TourState, UserProfile,
+};
 
 use crate::{AppError, Bardo, Destination, Pillar, Stage, Text};
 
@@ -37,6 +45,32 @@ pub enum TourAnchor {
     Inspector,
     /// What a page shows when it is not a collection.
     Content,
+    /// One of a screen's own controls, tagged by the screen.
+    Control(Control),
+}
+
+/// A screen's own control a tour step lights, where a part is too broad.
+/// The screen tags it with `kit::anchor`, in every layout alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Control {
+    /// Research: the channel picker and the market it sets.
+    ResearchChannel,
+    /// Research: the niches or keywords to look up.
+    ResearchSeeds,
+    /// Research: Run research and Refresh all.
+    ResearchRun,
+    /// Themes: the channel and niche pickers, with the niche's scores.
+    ThemesPick,
+    /// Themes: Suggest themes and Rank again.
+    ThemesSuggest,
+    /// Themes: the first idea's title, priority and confidence.
+    ThemeIdea,
+    /// Themes: the reasons behind the first idea's ranking.
+    ThemeReasons,
+    /// Themes: Approve, Edit and Discard on the first idea that has them.
+    ThemeActions,
+    /// Themes: the projects started from the channel's ideas.
+    ThemesProjects,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -119,6 +153,24 @@ impl TourStep {
         }
     }
 
+    /// The step opens `place` first, so a tour started or resumed elsewhere
+    /// shows its screen.
+    const fn on(self, place: Destination) -> Self {
+        Self {
+            place: Some(TourPlace::Screen(place)),
+            ..self
+        }
+    }
+
+    /// What the step does when its component is missing (the default
+    /// shows the card in the middle).
+    const fn missing(self, when_missing: WhenMissing) -> Self {
+        Self {
+            when_missing,
+            ..self
+        }
+    }
+
     /// The step's "Learn more" opens `page` at `section`.
     const fn learn(self, page: &'static str, section: &'static str) -> Self {
         Self {
@@ -135,6 +187,9 @@ impl TourStep {
 pub struct Tour {
     pub id: TourId,
     pub version: u32,
+    /// The screen it explains, whose "Tour this screen" starts it; `None`
+    /// for the welcome tour.
+    pub screen: Option<Destination>,
     pub steps: &'static [TourStep],
 }
 
@@ -143,6 +198,7 @@ pub struct Tour {
 pub const WELCOME: Tour = Tour {
     id: TourId::Welcome,
     version: 1,
+    screen: None,
     steps: &[
         TourStep::centered("intro").learn("what-bardo-is", "flow"),
         TourStep::at("strategy", TourAnchor::NavGroup(Pillar::Strategy))
@@ -161,14 +217,110 @@ pub const WELCOME: Tour = Tour {
     ],
 };
 
+/// A step of a screen's tour: it lights `anchor` on `screen`.
+const fn on(screen: Destination, key: &'static str, anchor: TourAnchor) -> TourStep {
+    TourStep::at(key, anchor).on(screen)
+}
+
+/// Research: the market, the niches, a run and its quota, the results.
+pub const RESEARCH: Tour = {
+    const AT: Destination = Destination::Research;
+    const PAGE: &str = "niche-research";
+    Tour {
+        id: TourId::Research,
+        version: 1,
+        screen: Some(AT),
+        steps: &[
+            on(AT, "channel", TourAnchor::Control(Control::ResearchChannel))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "market"),
+            on(AT, "seeds", TourAnchor::Control(Control::ResearchSeeds))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "seeds"),
+            // A running job shows its progress in place of the buttons.
+            on(AT, "run", TourAnchor::Control(Control::ResearchRun))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "run"),
+            on(AT, "results", TourAnchor::Collection).learn(PAGE, "results"),
+            on(AT, "next", TourAnchor::NavPlace(Destination::Themes)).learn(PAGE, "next"),
+        ],
+    }
+};
+
+/// Themes: the niche, suggesting ideas, an idea's ranking and reasons,
+/// reviewing it, and the projects approved ideas start.
+pub const THEMES: Tour = {
+    const AT: Destination = Destination::Themes;
+    const PAGE: &str = "themes-ranking";
+    const IDEAS: WhenMissing = WhenMissing::LightPart(TourAnchor::Collection);
+    Tour {
+        id: TourId::Themes,
+        version: 1,
+        screen: Some(AT),
+        steps: &[
+            on(AT, "pick", TourAnchor::Control(Control::ThemesPick))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "pick"),
+            on(AT, "suggest", TourAnchor::Control(Control::ThemesSuggest))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "suggest"),
+            on(AT, "idea", TourAnchor::Control(Control::ThemeIdea))
+                .missing(IDEAS)
+                .learn(PAGE, "ranking"),
+            on(AT, "reasons", TourAnchor::Control(Control::ThemeReasons))
+                .missing(IDEAS)
+                .learn(PAGE, "reasons"),
+            on(AT, "review", TourAnchor::Control(Control::ThemeActions))
+                .missing(IDEAS)
+                .learn(PAGE, "review"),
+            on(AT, "projects", TourAnchor::Control(Control::ThemesProjects))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "projects"),
+        ],
+    }
+};
+
+/// Performance: the channel's posts, a post's numbers, syncing, and
+/// where posts are linked.
+pub const PERFORMANCE: Tour = {
+    const AT: Destination = Destination::Performance;
+    const PAGE: &str = "performance-metrics";
+    Tour {
+        id: TourId::Performance,
+        version: 1,
+        screen: Some(AT),
+        steps: &[
+            on(AT, "channel", TourAnchor::Header).learn(PAGE, "channel"),
+            on(AT, "posts", TourAnchor::Collection).learn(PAGE, "posts"),
+            on(AT, "numbers", TourAnchor::Inspector)
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "numbers"),
+            on(AT, "sync", TourAnchor::Toolbar)
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "sync"),
+            on(AT, "link", TourAnchor::NavPlace(Destination::Projects)).learn(PAGE, "link"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 1] = [&WELCOME];
+    pub const ALL: [&'static Tour; 4] = [&WELCOME, &RESEARCH, &THEMES, &PERFORMANCE];
 
     pub fn get(id: TourId) -> &'static Tour {
         match id {
             TourId::Welcome => &WELCOME,
+            TourId::Research => &RESEARCH,
+            TourId::Themes => &THEMES,
+            TourId::Performance => &PERFORMANCE,
         }
+    }
+
+    /// The tour of `screen`, if it has one.
+    pub fn of_screen(screen: Destination) -> Option<&'static Tour> {
+        Self::ALL
+            .into_iter()
+            .find(|tour| tour.screen == Some(screen))
     }
 
     pub fn len(&self) -> usize {
@@ -238,6 +390,14 @@ impl TourStepView {
     pub fn is_last(&self) -> bool {
         self.number == self.count
     }
+}
+
+/// A screen's tour as its "Tour this screen" button shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenTour {
+    pub tour: TourId,
+    /// The button carries the "new" mark.
+    pub new: bool,
 }
 
 /// A tour being shown: its step, where the user was when it started, and
@@ -424,16 +584,17 @@ impl Bardo {
     }
 
     /// The tour closed midway, if any: "Resume tour" goes back to it.
+    /// With several, the one closed last.
     pub fn resumable_tour(&self) -> Option<TourId> {
         let running = self.tours.run.map(|run| run.tour.id);
-        TourId::ALL.into_iter().find(|tour| {
-            Some(*tour) != running
-                && self
-                    .tours
-                    .progress
-                    .get(tour)
-                    .is_some_and(|progress| progress.state == TourState::InProgress)
-        })
+        self.tours
+            .progress
+            .values()
+            .filter(|progress| {
+                progress.state == TourState::InProgress && Some(progress.tour) != running
+            })
+            .max_by_key(|progress| (progress.updated_at, progress.tour.code()))
+            .map(|progress| progress.tour)
     }
 
     /// Goes back to the step the closed tour was on. A tour whose content
@@ -565,6 +726,45 @@ impl Bardo {
         })
     }
 
+    /// The tour `screen` offers ("Tour this screen"), when it has one and
+    /// something to show (`has_content`: research results, ideas,
+    /// publications). A screen with nothing yet offers none: its empty
+    /// state says what to do. The button is marked new while the tour,
+    /// at its current content, was neither completed nor dismissed, unless
+    /// the profile turned the mark off.
+    pub fn screen_tour(&self, screen: Destination, has_content: bool) -> Option<ScreenTour> {
+        let tour = Tour::of_screen(screen).filter(|_| has_content)?;
+        let done = self.tours.progress.get(&tour.id).is_some_and(|progress| {
+            progress.version >= tour.version
+                && matches!(progress.state, TourState::Completed | TourState::Dismissed)
+        });
+        Some(ScreenTour {
+            tour: tour.id,
+            new: self.profile.offer_screen_tours && !done,
+        })
+    }
+
+    /// Whether "Tour this screen" is marked new on screens whose tour the
+    /// user has not taken ("Offer tours on new screens").
+    pub fn offers_screen_tours(&self) -> bool {
+        self.profile.offer_screen_tours
+    }
+
+    /// Turns the "new" mark on screens' tours on or off and remembers it.
+    /// On failure the current setting stays.
+    pub fn set_offer_screen_tours(&mut self, on: bool) -> Result<(), AppError> {
+        if on == self.profile.offer_screen_tours {
+            return Ok(());
+        }
+        let updated = UserProfile {
+            offer_screen_tours: on,
+            ..self.profile.clone()
+        };
+        self.profiles.save(&updated)?;
+        self.profile = updated;
+        Ok(())
+    }
+
     /// "Reset tours": every tour reads as never seen, and the welcome offer
     /// comes back at once.
     pub fn reset_tours(&mut self) -> Result<(), AppError> {
@@ -660,6 +860,7 @@ mod tests {
     static SAMPLE: Tour = Tour {
         id: TourId::Welcome,
         version: 1,
+        screen: None,
         steps: &[LIT, SKIPPED, PLACED, PART],
     };
 
@@ -706,6 +907,7 @@ mod tests {
         static FIRST_MISSING: Tour = Tour {
             id: TourId::Welcome,
             version: 1,
+            screen: None,
             steps: &[SKIPPED, LIT],
         };
         let mut run = TourRun::new(&FIRST_MISSING, 1, Destination::Projects);
@@ -719,6 +921,7 @@ mod tests {
         static LAST_MISSING: Tour = Tour {
             id: TourId::Welcome,
             version: 1,
+            screen: None,
             steps: &[LIT, SKIPPED],
         };
         let mut run = TourRun::new(&LAST_MISSING, 1, Destination::Projects);
@@ -921,6 +1124,24 @@ mod tests {
     }
 
     #[test]
+    fn resume_tour_goes_back_to_the_tour_closed_last() {
+        let progress = FakeProgress::default();
+        let mut app = start(&progress);
+        app.start_tour(TourId::Welcome, Destination::Projects, false)
+            .unwrap();
+        app.tour_next();
+        assert_eq!(app.tour_close(), TourMove::Closed);
+        app.start_tour(TourId::Research, Destination::Research, false)
+            .unwrap();
+        app.tour_next();
+        assert_eq!(app.tour_close(), TourMove::Closed);
+        assert_eq!(app.resumable_tour(), Some(TourId::Research));
+
+        app.resume_tour(Destination::Research, false).unwrap();
+        assert_eq!(app.resumable_tour(), Some(TourId::Welcome), "the other one");
+    }
+
+    #[test]
     fn nothing_to_resume_without_a_closed_tour() {
         let mut app = start(&FakeProgress::default());
         assert_eq!(
@@ -1026,6 +1247,166 @@ mod tests {
         assert_eq!(app.resumable_tour(), None);
         assert!(app.tour_is_new(TourId::Welcome));
         assert_eq!(progress.state(TourId::Welcome), None);
+    }
+
+    fn saved(progress: &FakeProgress, tour: TourId, version: u32, state: TourState) {
+        progress.rows.borrow_mut().push(TourProgress {
+            profile: ProfileId::new(),
+            tour,
+            version,
+            state,
+            last_step: 0,
+            updated_at: SystemTime::UNIX_EPOCH,
+        });
+    }
+
+    fn mark(app: &Bardo, screen: Destination) -> Option<bool> {
+        app.screen_tour(screen, true).map(|tour| tour.new)
+    }
+
+    #[test]
+    fn each_strategy_screen_has_its_own_tour() {
+        assert_eq!(
+            Tour::of_screen(Destination::Research).map(|t| t.id),
+            Some(TourId::Research)
+        );
+        assert_eq!(
+            Tour::of_screen(Destination::Themes).map(|t| t.id),
+            Some(TourId::Themes)
+        );
+        assert_eq!(
+            Tour::of_screen(Destination::Performance).map(|t| t.id),
+            Some(TourId::Performance)
+        );
+        assert_eq!(Tour::of_screen(Destination::Costs), None, "not yet");
+        for tour in Tour::ALL {
+            assert_eq!(Tour::get(tour.id), tour);
+        }
+    }
+
+    #[test]
+    fn screen_tours_have_three_to_seven_steps_on_their_screen() {
+        for tour in [&RESEARCH, &THEMES, &PERFORMANCE] {
+            let screen = tour.screen.unwrap();
+            assert!((3..=7).contains(&tour.len()), "{:?}", tour.id);
+            for step in tour.steps {
+                assert_eq!(
+                    step.place,
+                    Some(TourPlace::Screen(screen)),
+                    "{:?} {}: opens its screen, so a resumed tour shows it",
+                    tour.id,
+                    step.key
+                );
+                assert!(
+                    step.guide.is_some(),
+                    "{:?} {}: learn more",
+                    tour.id,
+                    step.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_screen_with_nothing_to_show_offers_no_tour() {
+        let app = start(&FakeProgress::default());
+        assert_eq!(app.screen_tour(Destination::Research, false), None);
+        assert_eq!(app.screen_tour(Destination::Costs, true), None, "no tour");
+    }
+
+    #[test]
+    fn the_first_visit_with_content_marks_the_tour_new() {
+        let app = start(&FakeProgress::default());
+        assert_eq!(
+            app.screen_tour(Destination::Themes, true),
+            Some(ScreenTour {
+                tour: TourId::Themes,
+                new: true
+            })
+        );
+        assert_eq!(app.tour_step(false), None, "it never starts on its own");
+    }
+
+    #[test]
+    fn completing_or_dismissing_the_tour_takes_the_mark_away() {
+        let progress = FakeProgress::default();
+        let mut app = start(&progress);
+        app.start_tour(TourId::Research, Destination::Research, false)
+            .unwrap();
+        assert_eq!(mark(&app, Destination::Research), Some(true), "under way");
+        app.tour_close();
+        assert_eq!(
+            mark(&app, Destination::Research),
+            Some(true),
+            "closed midway"
+        );
+        app.resume_tour(Destination::Research, false).unwrap();
+        while app.tour_next() != TourMove::Finished {}
+        assert_eq!(mark(&app, Destination::Research), Some(false), "completed");
+
+        app.start_tour(TourId::Themes, Destination::Themes, false)
+            .unwrap();
+        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Themes));
+        assert_eq!(mark(&app, Destination::Themes), Some(false), "dismissed");
+
+        let app = start(&progress);
+        assert_eq!(mark(&app, Destination::Research), Some(false), "kept");
+        assert_eq!(mark(&app, Destination::Performance), Some(true));
+    }
+
+    #[test]
+    fn new_content_brings_the_mark_back() {
+        let progress = FakeProgress::default();
+        // Completed at a version below the tour's (the tours are at 1, and
+        // the fake keeps a 0 the database would refuse).
+        saved(
+            &progress,
+            TourId::Performance,
+            PERFORMANCE.version - 1,
+            TourState::Completed,
+        );
+        let app = start(&progress);
+        assert_eq!(mark(&app, Destination::Performance), Some(true));
+    }
+
+    #[test]
+    fn turning_the_setting_off_hides_the_mark_and_keeps_the_tour() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let secrets = Arc::new(bardo_storage::MemorySecretStore::default());
+        let mut app = Bardo::start(
+            Repositories::shared(Arc::clone(&db), secrets.clone()),
+            testing::providers(),
+            None,
+        )
+        .unwrap();
+        assert!(app.offers_screen_tours(), "on by default");
+        app.set_offer_screen_tours(false).unwrap();
+        assert_eq!(mark(&app, Destination::Research), Some(false));
+
+        let mut app = Bardo::start(
+            Repositories::shared(db, secrets),
+            testing::providers(),
+            None,
+        )
+        .unwrap();
+        assert!(!app.offers_screen_tours(), "remembered");
+        app.set_offer_screen_tours(true).unwrap();
+        assert_eq!(mark(&app, Destination::Research), Some(true));
+    }
+
+    #[test]
+    fn reset_tours_marks_screen_tours_new_again() {
+        let progress = FakeProgress::default();
+        saved(
+            &progress,
+            TourId::Themes,
+            THEMES.version,
+            TourState::Dismissed,
+        );
+        let mut app = start(&progress);
+        assert_eq!(mark(&app, Destination::Themes), Some(false));
+        app.reset_tours().unwrap();
+        assert_eq!(mark(&app, Destination::Themes), Some(true));
     }
 
     #[test]

@@ -94,6 +94,9 @@ pub struct UserProfile {
     /// The score a cut suggestion needs to show unless the user asks for
     /// all of them.
     pub cut_suggestion_floor: Score,
+    /// Whether a screen's "Tour this screen" button is marked new until its
+    /// tour is completed or dismissed.
+    pub offer_screen_tours: bool,
 }
 
 impl UserProfile {
@@ -105,6 +108,7 @@ impl UserProfile {
             ui_layout: LayoutId::default(),
             metrics_sync: MetricsSyncOnStart::default(),
             cut_suggestion_floor: DEFAULT_CUT_FLOOR,
+            offer_screen_tours: true,
         }
     }
 }

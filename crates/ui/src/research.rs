@@ -6,7 +6,9 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{Channel, ChannelId, JobState, NicheScores, NicheSeedError, Score};
-use bardo_app::{Bardo, Destination, NicheResearchView, NicheResult, NicheRow, Text};
+use bardo_app::{
+    Bardo, Control, Destination, NicheResearchView, NicheResult, NicheRow, Text, TourAnchor,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::progress::Progress;
@@ -20,9 +22,9 @@ use gpui_kit::{
 };
 
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts};
 use crate::shell::tr;
+use crate::{guide, layout};
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
@@ -133,6 +135,14 @@ impl ResearchScreen {
         screen.relabel(window, cx);
         screen.reload_channels(window, cx);
         screen
+    }
+
+    /// Whether the channel has research results to show: the screen
+    /// offers its tour only then.
+    pub fn has_content(&self) -> bool {
+        self.view
+            .as_ref()
+            .is_some_and(|view| view.rows.iter().any(|row| row.result.is_some()))
     }
 
     fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -307,7 +317,8 @@ impl ResearchScreen {
 
         v_flex()
             .gap_3()
-            .child(
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ResearchChannel),
                 v_flex()
                     .gap_1()
                     .child(
@@ -323,8 +334,9 @@ impl ResearchScreen {
                             .text_color(theme.muted_foreground)
                             .child(SharedString::from(market))
                     })),
-            )
-            .child(
+            ))
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ResearchSeeds),
                 v_flex()
                     .gap_1()
                     .child(
@@ -336,18 +348,20 @@ impl ResearchScreen {
                                     .font_medium()
                                     .child(tr(bardo, Text::ResearchSeeds)),
                             )
-                            .child(kit::info(
+                            .child(guide::info(
+                                bardo,
                                 "research-seeds-info",
-                                None,
                                 tr(bardo, Text::ResearchSeedsHint),
+                                guide::refs::RESEARCH_SEEDS,
                             )),
                     )
                     .child(Textarea::new(&self.seeds))
                     .children(messages),
-            )
+            ))
             // A running job shows its progress instead of the buttons.
             .when(!running, |editor| {
-                editor.child(
+                editor.child(kit::anchor(
+                    TourAnchor::Control(Control::ResearchRun),
                     h_flex()
                         .gap_2()
                         .flex_wrap()
@@ -367,8 +381,15 @@ impl ResearchScreen {
                                     cx.listener(|this, _: &ClickEvent, _, cx| this.run(true, cx)),
                                 ),
                         )
-                        .children(cost.map(|cost| kit::info("research-cost-info", None, cost))),
-                )
+                        .children(cost.map(|cost| {
+                            guide::info(
+                                bardo,
+                                "research-cost-info",
+                                cost,
+                                guide::refs::RESEARCH_RUN,
+                            )
+                        })),
+                ))
             })
             .children(self.render_job(cx))
     }
@@ -442,10 +463,11 @@ impl ResearchScreen {
         let mut collection = Collection::new(CollectionKind::Feed, "research-results");
         collection.controls = vec![
             kit::section_heading(tr(bardo, Text::ResearchResultsTitle))
-                .child(kit::info(
+                .child(guide::info(
+                    bardo,
                     "research-scores-info",
-                    None,
                     tr(bardo, Text::ResearchScoresHint),
+                    guide::refs::RESEARCH_SCORES,
                 ))
                 .into_any_element(),
         ];
@@ -625,7 +647,9 @@ fn score_tags(bardo: &Bardo, scores: NicheScores) -> impl IntoElement {
 impl Render for ResearchScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let header = Header::place(bardo, Destination::Research);
+        let mut header = Header::place(bardo, Destination::Research);
+        header.info =
+            guide::header_info(bardo, Destination::Research, self.has_content(), None, cx);
         if self.channels.is_empty() {
             let mut parts = ScreenParts::new(header);
             parts.content = vec![muted(cx, tr(bardo, Text::ResearchNoChannels))];

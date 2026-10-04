@@ -15,6 +15,7 @@ use bardo_app::{
     AppCredentialsStatus, Bardo, Destination, KeyState, ProviderKeyStatus, SettingsTab, Text,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -382,6 +383,17 @@ impl SettingsScreen {
             result
         });
         self.metrics_error = result.err().map(|_| Text::MetricsSettingNotSaved);
+        cx.notify();
+    }
+
+    /// "Offer tours on new screens": the "new" mark on screens' tours.
+    fn set_offer_tours(&mut self, on: bool, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.set_offer_screen_tours(on);
+            cx.notify();
+            result
+        });
+        self.appearance_error = result.err().map(|_| Text::ToursSettingNotSaved);
         cx.notify();
     }
 
@@ -941,6 +953,26 @@ impl SettingsScreen {
             .child(div().h_2())
             .child(kit::section_heading(tr(bardo, Text::UiLanguageLabel)))
             .child(h_flex().child(language_switch))
+            .child(div().h_2())
+            .child(kit::section_heading(tr(bardo, Text::ToursSettingTitle)))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        Checkbox::new("offer-screen-tours")
+                            .label(tr(bardo, Text::ToursSettingOffer))
+                            .checked(bardo.offers_screen_tours())
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.set_offer_tours(*checked, cx);
+                            })),
+                    )
+                    .child(kit::info(
+                        "offer-screen-tours-info",
+                        None,
+                        tr(bardo, Text::ToursSettingHint),
+                    )),
+            )
             .into_any_element()
     }
 

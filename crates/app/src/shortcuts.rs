@@ -30,6 +30,7 @@ pub const SHORTCUTS: &[ShortcutGroup] = &[
         name: Text::ShortcutGroup("guide"),
         shortcuts: &[
             shortcut(&["F1"], "guide_open"),
+            shortcut(&["Shift+F1"], "tour_screen"),
             shortcut(&["↑", "↓"], "guide_move"),
             shortcut(&["Enter"], "guide_pick"),
             shortcut(&["Esc"], "guide_clear"),

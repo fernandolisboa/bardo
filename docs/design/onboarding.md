@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -66,7 +66,7 @@ A step names:
 A **tour anchor** names a component a tour can light. Anchors live in `bardo_app::TourAnchor` (no GPUI), and the UI tags what it draws:
 
 - **The layouts tag the parts**: each navigation group by pillar, each place (pinned ones included), the header, the stages, the toolbar, the collection, the inspector and the page content. Each layout tags them where it draws them, with the side it leaves open and the scroll that holds them.
-- **Screens tag their own controls** with `kit::anchor(TourAnchor::…, element)` (later tours).
+- **Screens tag their own controls** with `kit::anchor(TourAnchor::Control(Control::…), element)`. A control is drawn by its screen in both layouts, so the test checks that its screen tags it rather than each layout.
 
 A tag adds an invisible child that records the element's bounds while the window prepaints, into a per-window map rebuilt every frame. The spotlight is drawn deferred, above everything else (popovers and the missed posts list included), after the whole window has prepainted, so it reads the bounds of the same frame: resizing the window, or switching the layout, theme or language mid-tour, only moves the light.
 
@@ -99,11 +99,23 @@ Eight steps, each lighting the navigation, which every screen shows:
 
 - **User guide** (F1): opens the Guide screen;
 - **Welcome tour**, marked **New** until it is started or turned down, and again when its content changes;
+- **Tour this screen** (Shift+F1), when the current screen has a tour and something to show (below);
 - **Resume tour**, when a tour was closed midway;
 - **Keyboard shortcuts**: the tour's, the lists', the editor's and the cut suggestions' keys, from `bardo_app::SHORTCUTS`;
 - **Reset tours**: every tour reads as never seen, and the welcome offer comes back.
 
 The menu takes ↑/↓, Tab, Enter and Esc; a click outside closes it.
+
+## Screen tours
+
+A screen with a tour of its own (Research, Themes and Performance so far) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it with **Shift+F1**. A tour never starts on its own:
+
+- **Nothing to show, no tour**: while the screen is empty (no research results, no themes, no posts), the button and the menu row are hidden and Shift+F1 does nothing; the screen's empty state says what to do first. The guide page's **Show me** still starts the tour, and steps fall back as they say.
+- **The "new" mark**: from the first visit with content, the button and the menu row carry **New** until the tour is completed or dismissed (a tour closed midway keeps it), and again when the tour's content version rises. These rules are `app` logic (`Bardo::screen_tour`).
+- **Offer tours on new screens** (Settings › Appearance, on by default): turned off, the mark never shows; the button stays.
+- **Reset tours** brings the mark back on every screen tour.
+
+Each ⓘ on a screen with a guide page ends with **More in the guide**, which opens the section that explains it.
 
 ## The Guide screen
 
@@ -123,7 +135,7 @@ The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says
 
 | Issue | Adds |
 | --- | --- |
-| #107 | The Strategy tour and a "Tour of this screen" button |
+| #107 | The Research, Themes and Performance tours and "Tour this screen" (built) |
 | #108 | The Production tour |
 | #109 | The Editing and render tour |
 | #110 | The Publishing tour (network guides in pt-BR too) |

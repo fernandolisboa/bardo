@@ -10,18 +10,23 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
-use bardo_app::{Bardo, Destination, GuideRef, SHORTCUTS, Spot, Text, TourAnchor, TourStepView};
+use bardo_app::{
+    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, Spot, Text, TourAnchor, TourStepView,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, Entity, EventEmitter, FocusHandle, KeyDownEvent,
-    SharedString, Window, deferred, div, px,
+    AnyElement, App, ClickEvent, ElementId, Entity, EventEmitter, FocusHandle, Global,
+    KeyDownEvent, SharedString, Window, deferred, div, px,
 };
 
 use crate::appearance::look;
+use crate::icons::Lucide;
 use crate::kit;
 use crate::missed::MissedPosts;
+use crate::parts::OnPick;
 use crate::shell::tr;
 use crate::tour::{Motion, Ring, Spotlight};
 
@@ -57,11 +62,134 @@ pub enum GuideEvent {
     LearnMore(GuideRef),
 }
 
+/// What a screen's own controls ask of the Guide: start the screen's tour
+/// ("Tour this screen"), or open the guide at a section (an ⓘ's "More in
+/// the guide"). The shell sets them, so a screen needs no handle on it.
+pub struct GuideHooks {
+    pub tour: OnPick<TourId>,
+    pub section: OnPick<GuideRef>,
+}
+
+impl Global for GuideHooks {}
+
+fn start_tour(tour: TourId, window: &mut Window, cx: &mut App) {
+    if let Some(start) = cx
+        .try_global::<GuideHooks>()
+        .map(|hooks| hooks.tour.clone())
+    {
+        start(tour, window, cx);
+    }
+}
+
+fn open_section(section: GuideRef, window: &mut Window, cx: &mut App) {
+    if let Some(open) = cx
+        .try_global::<GuideHooks>()
+        .map(|hooks| hooks.section.clone())
+    {
+        open(section, window, cx);
+    }
+}
+
+/// The guide sections the screens' ⓘs open. A test checks that each one
+/// resolves in every language; add new ones here and to [`refs::ALL`].
+pub mod refs {
+    use bardo_app::GuideRef;
+
+    const fn at(page: &'static str, section: &'static str) -> GuideRef {
+        GuideRef { page, section }
+    }
+
+    pub const RESEARCH_SEEDS: GuideRef = at("niche-research", "seeds");
+    pub const RESEARCH_RUN: GuideRef = at("niche-research", "run");
+    pub const RESEARCH_SCORES: GuideRef = at("niche-research", "scores");
+    pub const THEMES_SUGGEST: GuideRef = at("themes-ranking", "suggest");
+    pub const THEMES_REASONS: GuideRef = at("themes-ranking", "reasons");
+    pub const PERFORMANCE_LINK: GuideRef = at("performance-metrics", "link");
+    pub const PERFORMANCE_POSTS: GuideRef = at("performance-metrics", "posts");
+    pub const PERFORMANCE_NUMBERS: GuideRef = at("performance-metrics", "numbers");
+    pub const PERFORMANCE_SYNC: GuideRef = at("performance-metrics", "sync");
+
+    #[cfg(test)]
+    pub const ALL: [GuideRef; 9] = [
+        RESEARCH_SEEDS,
+        RESEARCH_RUN,
+        RESEARCH_SCORES,
+        THEMES_SUGGEST,
+        THEMES_REASONS,
+        PERFORMANCE_LINK,
+        PERFORMANCE_POSTS,
+        PERFORMANCE_NUMBERS,
+        PERFORMANCE_SYNC,
+    ];
+}
+
+/// A screen header's info slot: its ⓘ, then "Tour this screen" when the
+/// screen offers its tour (it has a tour and something to show), with the
+/// "new" mark while the user has not taken it.
+pub fn header_info(
+    bardo: &Bardo,
+    screen: Destination,
+    has_content: bool,
+    info: Option<AnyElement>,
+    cx: &App,
+) -> Option<AnyElement> {
+    let Some(tour) = bardo.screen_tour(screen, has_content) else {
+        return info;
+    };
+    Some(
+        h_flex()
+            .gap_1()
+            .items_center()
+            .children(info)
+            .child(tour_button(bardo, tour, cx))
+            .into_any_element(),
+    )
+}
+
+fn tour_button(bardo: &Bardo, tour: ScreenTour, cx: &App) -> impl IntoElement {
+    let id = tour.tour;
+    h_flex()
+        .gap_1()
+        .items_center()
+        .child(
+            Button::new("tour-this-screen")
+                .ghost()
+                .xsmall()
+                .icon(Lucide::BookOpen)
+                .label(tr(bardo, Text::TourThisScreen))
+                .tooltip("Shift+F1")
+                .on_click(move |_, window, cx| start_tour(id, window, cx)),
+        )
+        .when(tour.new, |row| {
+            row.child(kit::status(kit::Tone::Accent, tr(bardo, Text::TourNew), cx))
+        })
+}
+
+/// An ⓘ whose popover ends with "More in the guide", opening `section`
+/// (one of [`refs`]).
+pub fn info(
+    bardo: &Bardo,
+    id: impl Into<ElementId>,
+    text: SharedString,
+    section: GuideRef,
+) -> Popover {
+    kit::info_more(
+        id,
+        text,
+        tr(bardo, Text::GuideMoreInGuide),
+        move |window, cx| {
+            open_section(section, window, cx);
+        },
+    )
+}
+
 /// A row of the help menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuItem {
     UserGuide,
     Tour(TourId),
+    /// The current screen's tour (Shift+F1).
+    ScreenTour(TourId),
     Resume,
     Shortcuts,
     Reset,
@@ -100,6 +228,8 @@ pub struct Guide {
     shown: Option<Layer>,
     /// The help menu, with its highlighted row, while open.
     menu: Option<usize>,
+    /// The tour the screen under the menu offers.
+    screen_tour: Option<ScreenTour>,
     shortcuts: bool,
     /// The card button the keyboard is on.
     button: Option<usize>,
@@ -119,6 +249,7 @@ impl Guide {
             restore: None,
             shown: None,
             menu: None,
+            screen_tour: None,
             shortcuts: false,
             button: None,
             motion: Rc::default(),
@@ -130,12 +261,14 @@ impl Guide {
         self.menu.is_some()
     }
 
-    /// The Guide place was picked: opens or closes its menu.
-    pub fn toggle_menu(&mut self, cx: &mut Context<Self>) {
+    /// The Guide place was picked: opens or closes its menu, which offers
+    /// `screen_tour`, the tour of the screen under it.
+    pub fn toggle_menu(&mut self, screen_tour: Option<ScreenTour>, cx: &mut Context<Self>) {
         self.menu = match self.menu {
             Some(_) => None,
             None => Some(0),
         };
+        self.screen_tour = screen_tour;
         self.problem = None;
         cx.notify();
     }
@@ -183,8 +316,10 @@ impl Guide {
 
     fn menu_items(&self, cx: &App) -> Vec<MenuItem> {
         let bardo = self.bardo.read(cx);
-        let mut items = vec![MenuItem::UserGuide];
-        items.extend(TourId::ALL.into_iter().map(MenuItem::Tour));
+        // The welcome tour, and the screen's own; the other screens' tours
+        // start from their screens and their guide pages.
+        let mut items = vec![MenuItem::UserGuide, MenuItem::Tour(TourId::Welcome)];
+        items.extend(self.screen_tour.map(|tour| MenuItem::ScreenTour(tour.tour)));
         if bardo.resumable_tour().is_some() {
             items.push(MenuItem::Resume);
         }
@@ -196,7 +331,7 @@ impl Guide {
         self.menu = None;
         match item {
             MenuItem::UserGuide => cx.emit(GuideEvent::OpenGuide),
-            MenuItem::Tour(tour) => cx.emit(GuideEvent::Start(tour)),
+            MenuItem::Tour(tour) | MenuItem::ScreenTour(tour) => cx.emit(GuideEvent::Start(tour)),
             MenuItem::Resume => cx.emit(GuideEvent::Resume),
             MenuItem::Shortcuts => self.shortcuts = true,
             MenuItem::Reset => cx.emit(GuideEvent::Reset),
@@ -508,12 +643,21 @@ impl Guide {
                     MenuItem::Tour(tour) => {
                         (tr(bardo, Text::TourName(tour)), bardo.tour_is_new(tour))
                     }
+                    MenuItem::ScreenTour(_) => (
+                        tr(bardo, Text::TourThisScreen),
+                        self.screen_tour.is_some_and(|tour| tour.new),
+                    ),
                     MenuItem::Resume => (tr(bardo, Text::GuideResumeTour), false),
                     MenuItem::Shortcuts => (tr(bardo, Text::GuideShortcuts), false),
                     MenuItem::Reset => (tr(bardo, Text::GuideResetTours), false),
                 };
-                // The guide's key, as the shortcuts list draws keys.
-                let key = (item == MenuItem::UserGuide).then(|| {
+                // The row's key, as the shortcuts list draws keys.
+                let key = match item {
+                    MenuItem::UserGuide => Some("F1"),
+                    MenuItem::ScreenTour(_) => Some("Shift+F1"),
+                    _ => None,
+                };
+                let key = key.map(|key| {
                     div()
                         .px_1p5()
                         .rounded(t.radius)
@@ -524,7 +668,7 @@ impl Guide {
                         .text_xs()
                         .text_color(t.text2)
                         .font_family(mono.clone())
-                        .child("F1")
+                        .child(key)
                 });
                 h_flex()
                     .id(("guide-menu", ix))
@@ -539,10 +683,19 @@ impl Guide {
                     .when(ix == row, |row| row.bg(t.hover))
                     .hover(|row| row.bg(t.hover))
                     .child(label)
-                    .when(new, |row| {
-                        row.child(kit::status(kit::Tone::Accent, tr(bardo, Text::TourNew), cx))
-                    })
-                    .children(key)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .when(new, |side| {
+                                side.child(kit::status(
+                                    kit::Tone::Accent,
+                                    tr(bardo, Text::TourNew),
+                                    cx,
+                                ))
+                            })
+                            .children(key),
+                    )
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.pick(item, cx);
                     }))
@@ -683,6 +836,32 @@ impl Render for Guide {
             Some(layer) => root
                 .child(deferred(self.layer_element(layer, cx)).with_priority(PRIORITY))
                 .into_any_element(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bardo_app::Guide;
+    use bardo_app::bardo_domain::UiLanguage;
+
+    use super::refs;
+
+    #[test]
+    fn every_info_opens_a_section_in_every_language() {
+        for language in UiLanguage::ALL {
+            let guide = Guide::load(language);
+            for at in refs::ALL {
+                let page = guide
+                    .page(at.page)
+                    .unwrap_or_else(|| panic!("no page {} in {language:?}", at.page));
+                assert!(
+                    page.section(at.section).is_some(),
+                    "no section {}#{} in {language:?}",
+                    at.page,
+                    at.section
+                );
+            }
         }
     }
 }

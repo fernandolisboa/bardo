@@ -1956,6 +1956,7 @@ finish = "Concluir"
 skip = "Pular tour"
 new = "Novo"
 learn_more = "Saiba mais"
+this_screen = "Tour desta tela"
 
 [tour.offer]
 title = "Quer um tour de 2 minutos?"
@@ -1999,6 +2000,79 @@ body = "Quanto você gastou neste mês e quanto dos seus orçamentos já foi usa
 title = "Guia e tours"
 body = "Volte aqui para refazer este tour, retomar um que você fechou, ver os atalhos de teclado ou ler o guia do usuário. F1 abre o guia em qualquer tela."
 
+[tour.research]
+name = "Tour da Pesquisa"
+
+[tour.research.channel]
+title = "Canal e mercado"
+body = "A pesquisa roda para um canal. O país-alvo e o idioma do conteúdo dele definem o mercado: os números vêm dos uploads do YouTube nesse país e idioma."
+
+[tour.research.seeds]
+title = "Nichos ou palavras-chave"
+body = "Digite um nicho ou palavra-chave por linha, até 20. Cada um vira uma busca no YouTube, então escreva do jeito que o público buscaria."
+
+[tour.research.run]
+title = "Pesquisar e atualizar"
+body = "O botão Pesquisar consulta cada nicho, usando cerca de 1% da sua cota diária do YouTube por nicho. Os resultados ficam guardados por 7 dias, então pesquisar de novo dentro de uma semana não custa nada; Atualizar tudo busca todos os nichos outra vez."
+
+[tour.research.results]
+title = "Resultados ranqueados"
+body = "Os nichos são ranqueados pela oportunidade, que pesa a tendência contra a concorrência. Cada cartão mostra os números por trás das notas e quando foram buscados."
+
+[tour.research.next]
+title = "Próximo passo: temas"
+body = "Achou um nicho promissor? Em Temas, o Claude sugere ideias de vídeo para ele e as ranqueia para o seu canal."
+
+[tour.themes]
+name = "Tour dos Temas"
+
+[tour.themes.pick]
+title = "Canal e nicho"
+body = "As ideias são escritas para um canal e um dos nichos dele: o nicho do próprio canal ou um que você pesquisou. As notas da pesquisa do nicho aparecem aqui quando existem."
+
+[tour.themes.suggest]
+title = "Sugerir temas"
+body = "O Claude propõe ideias de vídeo para o nicho e depois o motor de decisão as ranqueia. O botão Ranquear de novo só ranqueia as ideias que estão esperando, como as que você editou. O custo aparece antes de qualquer execução."
+
+[tour.themes.idea]
+title = "Uma ideia e sua prioridade"
+body = "As ideias aparecem por prioridade, de 0 a 100. A confiança diz o quanto o motor de decisão teve certeza da sua resposta menos segura."
+
+[tour.themes.reasons]
+title = "Por que ela está ali"
+body = "A prioridade pesa o encaixe com o canal, a tendência e o espaço que a concorrência deixa. Quando seus vídeos publicados têm métricas, o desempenho passado também conta. Detalhes mostra os números usados."
+
+[tour.themes.review]
+title = "Aprovar, editar ou descartar"
+body = "Aprovar uma ideia começa um projeto de vídeo a partir dela. Editar o título ou o ângulo apaga o ranqueamento, então ranqueie de novo depois. Ideias descartadas saem da lista."
+
+[tour.themes.projects]
+title = "Seus projetos"
+body = "Os projetos começados a partir das ideias deste canal. Abra-os em Projetos para escrever o roteiro e seguir em frente."
+
+[tour.performance]
+name = "Tour do Desempenho"
+
+[tour.performance.channel]
+title = "Um canal por vez"
+body = "Escolha o canal cujas publicações você acompanha. Os números dele somam os dados mais recentes de todas as publicações."
+
+[tour.performance.posts]
+title = "Publicações vinculadas"
+body = "Cada publicação vinculada a um projeto do canal, da mais nova para a mais antiga, com a rede e as visualizações. Uma publicação marcada como “Não encontrado” foi removida ou ficou privada."
+
+[tour.performance.numbers]
+title = "Os números de uma publicação"
+body = "Escolha uma publicação para ver os números dela, quanto mudaram desde a sincronização anterior e o histórico. Com a conta do YouTube do canal conectada, entram também visualizações engajadas, tempo de exibição, retenção e receita."
+
+[tour.performance.sync]
+title = "Sincronizar agora"
+body = "Uma sincronização lê os números mais recentes de cada publicação vinculada, como tarefa. O Bardo também sincroniza sozinho quando abre, conforme Configurações › Métricas."
+
+[tour.performance.link]
+title = "Vincular uma publicação"
+body = "As publicações são vinculadas na etapa Publicação de um projeto: os envios feitos pelo Bardo se vinculam sozinhos, e para uma exportação você cola o link da publicação. Desvincule ali também; a publicação continua na rede."
+
 [guide]
 resume_tour = "Retomar tour"
 shortcuts = "Atalhos de teclado"
@@ -2008,6 +2082,7 @@ user_guide = "Guia do usuário"
 on_this_page = "Nesta página"
 show_me = "Mostre para mim"
 go_to = "Ir para {place}"
+more = "Mais no guia"
 
 [guide.search]
 placeholder = "Buscar no guia"
@@ -2023,6 +2098,12 @@ publishing = "Publicação"
 costs = "Custos e orçamentos"
 reference = "Referência"
 
+[tours_setting]
+title = "Tours guiados"
+offer = "Oferecer tours em telas novas"
+hint = "Marca o botão “Tour desta tela” como novo até você fazer ou pular o tour dela. Os tours nunca começam sozinhos."
+not_saved = "Não foi possível salvar a configuração. Tente de novo."
+
 [shortcuts]
 title = "Atalhos de teclado"
 close = "Fechar"
@@ -2036,6 +2117,7 @@ suggestions = "Sugestões de corte no editor"
 
 [shortcuts.action]
 guide_open = "Abrir o guia na página desta tela"
+tour_screen = "Começar o tour desta tela"
 guide_move = "Percorrer o sumário ou os resultados da busca"
 guide_pick = "Abrir a página destacada"
 guide_clear = "Limpar a busca"

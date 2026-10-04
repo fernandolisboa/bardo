@@ -30,11 +30,14 @@ use crate::layout;
 use crate::parts::{Collection, CollectionKeys, CollectionKind, Header, ScreenParts, Tile};
 use crate::shell::tr;
 
-actions!(guide, [OpenGuide]);
+actions!(guide, [OpenGuide, TourThisScreen]);
 
-/// F1 opens the guide from any screen.
+/// F1 opens the guide from any screen; Shift+F1 starts the screen's tour.
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("f1", OpenGuide, None)]);
+    cx.bind_keys([
+        KeyBinding::new("f1", OpenGuide, None),
+        KeyBinding::new("shift-f1", TourThisScreen, None),
+    ]);
 }
 
 /// The page's Markdown is laid out in the background, section by section,
