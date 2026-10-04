@@ -13,8 +13,9 @@
 //!   unavailable, the API returns an empty data set instead of 0 for
 //!   individual metrics", and the data can be 48 hours late: a metric left
 //!   out reads as `None`, an answer with none as no data yet.
-//! - The watch metrics come in milliseconds, as Instagram's own reports
-//!   show them (the reference gives no unit; checked on #86).
+//! - The watch metrics are read as milliseconds, as Instagram's own
+//!   reports show them. The reference gives no unit: an assumption until a
+//!   real account confirms it.
 //! - `GET /<IG_USER_ID>/media?fields=id,permalink,shortcode,timestamp`
 //!   lists the account's media, newest first, a page at a time with the
 //!   `after` cursor while `paging.next` is there. A linked post carries a

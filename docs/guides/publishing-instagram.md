@@ -170,8 +170,11 @@ posted**. No YouTube key is needed for them.
   take, so the first sync looks for the post in the account's media (the
   newest 2,000) and keeps its id. A linked post the account doesn't have
   shows as **Not found**.
-- **Cost.** About one request per Reel per sync, plus the media list once
-  per linked post.
+- **Cost.** About one request per Reel per sync (two for a feed post),
+  plus the media list for a linked post until the sync finds it there.
+- If Instagram won't show a post's insights (it holds them back from posts
+  with too few viewers), the post keeps its link and waits for the next
+  sync; it is not marked **Not found**.
 - Without a connected account, a linked post keeps only its link. When
   the account needs to reconnect, syncs skip its posts until it does.
 

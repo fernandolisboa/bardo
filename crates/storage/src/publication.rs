@@ -1,6 +1,4 @@
-use std::time::SystemTime;
-
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ChannelId, Earnings, Insights, JobId, MetricsSnapshot, Money, MoneyReport, Network,

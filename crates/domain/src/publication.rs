@@ -568,6 +568,14 @@ impl Publication {
         }
     }
 
+    /// A sync asked for the post `at` and learned nothing of it (the
+    /// network refused this post's numbers, or its post was past what the
+    /// sync listed): checked, keeping its flag and numbers, so it waits
+    /// for the next sync like any other.
+    pub fn unread(&mut self, at: SystemTime) {
+        self.checked_at = Some(at);
+    }
+
     /// A sync did not find the post `at`: flagged, with its numbers kept.
     pub fn not_seen(&mut self, at: SystemTime) {
         self.checked_at = Some(at);
@@ -1909,6 +1917,14 @@ mod tests {
         p.seen(None, at(40));
         assert_eq!(p.posted_at, at(5), "kept when the network does not say");
         assert_eq!(p.checked_at, Some(at(40)));
+        p.not_seen(at(50));
+        p.unread(at(60));
+        assert_eq!(p.checked_at, Some(at(60)));
+        assert_eq!(
+            p.missing_since,
+            Some(at(50)),
+            "an unread post keeps its flag"
+        );
     }
 
     #[test]
