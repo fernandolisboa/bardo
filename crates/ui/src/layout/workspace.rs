@@ -1,12 +1,12 @@
 //! The Workspace layout (direction B of spike #52): a sidebar grouped by
-//! pillar, with jobs, costs and settings pinned at its foot; each screen's
-//! header on top, the project stages as a stepper under it; a grid of
-//! cards (or a feed) with the inspector in a right column, or a list
-//! beside the record it opens.
+//! pillar, with jobs, costs, the guide and settings pinned at its foot;
+//! each screen's header on top, the project stages as a stepper under it;
+//! a grid of cards (or a feed) with the inspector in a right column, or a
+//! list beside the record it opens.
 
 use std::rc::Rc;
 
-use bardo_app::{Destination, Stage, StageState};
+use bardo_app::{Destination, Side, Stage, StageState, TourAnchor};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -19,6 +19,7 @@ use crate::parts::{
     Collection, CollectionKind, Figure, Header, Inspector, NavItem, Navigation, OnPick,
     ScreenParts, Sections, StageItem, Stages, Tile,
 };
+use crate::tour::Anchored as _;
 
 const SIDEBAR_WIDTH: f32 = 216.;
 /// A list of records beside the one open.
@@ -83,11 +84,17 @@ fn sidebar(nav: Navigation, cx: &App) -> AnyElement {
                     .text_color(t.text2)
                     .child(group.label.to_uppercase()),
             )
-            .children(
-                group
-                    .places
-                    .iter()
-                    .map(|item| row(item, item.place == nav.current, None)),
+            .children(group.places.iter().map(|item| {
+                row(item, item.place == nav.current, None).tour_anchor(
+                    TourAnchor::NavPlace(item.place),
+                    Side::Right,
+                    Some(&nav.scroll),
+                )
+            }))
+            .tour_anchor(
+                TourAnchor::NavGroup(group.pillar),
+                Side::Right,
+                Some(&nav.scroll),
             )
     });
 
@@ -106,7 +113,9 @@ fn sidebar(nav: Navigation, cx: &App) -> AnyElement {
                     .child(nav.jobs.to_string())
                     .into_any_element()
             });
-            row(item, nav.jobs_open, count).into_any_element()
+            row(item, nav.jobs_open, count)
+                .tour_anchor(TourAnchor::NavPlace(item.place), Side::Right, None)
+                .into_any_element()
         }
         Destination::Costs => {
             let spent = nav.spent.clone().map(|spent| {
@@ -153,9 +162,19 @@ fn sidebar(nav: Navigation, cx: &App) -> AnyElement {
                 .gap_1()
                 .child(row(item, nav.current == Destination::Costs, spent))
                 .children(meter)
+                .tour_anchor(TourAnchor::NavPlace(item.place), Side::Right, None)
                 .into_any_element()
         }
-        _ => row(item, nav.current == item.place, None).into_any_element(),
+        _ => {
+            // The Guide opens a menu over the screen, which stays.
+            let selected = match item.place {
+                Destination::Guide => nav.guide_open,
+                place => nav.current == place,
+            };
+            row(item, selected, None)
+                .tour_anchor(TourAnchor::NavPlace(item.place), Side::Right, None)
+                .into_any_element()
+        }
     });
 
     v_flex()
@@ -171,6 +190,7 @@ fn sidebar(nav: Navigation, cx: &App) -> AnyElement {
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
+                .track_scroll(&nav.scroll)
                 .px_2()
                 .children(groups),
         )
@@ -232,7 +252,9 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
     if !summary.is_empty() {
         lead.push(figures(summary, cx));
     }
-    lead.extend(toolbar);
+    lead.extend(
+        toolbar.map(|toolbar| kit::anchor(TourAnchor::Toolbar, toolbar).into_any_element()),
+    );
     if let Some(sections) = sections {
         let (tabs, shown) = section_tabs(sections);
         lead.push(tabs);
@@ -303,6 +325,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                         )
                     }),
             )
+            .tour_anchor(TourAnchor::Content, Side::Right, None)
             .into_any_element(),
     };
 
@@ -373,6 +396,7 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
                 .items_center()
                 .children(header.actions),
         )
+        .tour_anchor(TourAnchor::Header, Side::Below, None)
         .into_any_element()
 }
 
@@ -390,6 +414,7 @@ fn stepper(stages: Stages, cx: &App) -> AnyElement {
         .border_b(t.border_width)
         .border_color(t.border)
         .children(steps)
+        .tour_anchor(TourAnchor::Stages, Side::Below, None)
         .into_any_element()
 }
 
@@ -533,6 +558,7 @@ fn main_with_inspector(
                         .border_color(t.border)
                         .child(footer)
                 }))
+                .tour_anchor(TourAnchor::Inspector, Side::Left, None)
         }))
         .into_any_element()
 }
@@ -543,6 +569,7 @@ fn inspector_body(inspector: Inspector, _cx: &App) -> AnyElement {
         .children(inspector.title)
         .children(inspector.body)
         .children(inspector.footer)
+        .tour_anchor(TourAnchor::Inspector, Side::Below, None)
         .into_any_element()
 }
 
@@ -576,6 +603,7 @@ fn collection_body(collection: Collection, cx: &App) -> AnyElement {
         .gap_3()
         .children(controls)
         .child(items)
+        .tour_anchor(TourAnchor::Collection, Side::Below, None)
         .into_any_element()
 }
 
@@ -613,6 +641,7 @@ fn list_column(collection: Collection, cx: &App) -> AnyElement {
                 .children(collection.tiles.into_iter().map(|tile| row(tile, cx)))
                 .children(collection.cards),
         )
+        .tour_anchor(TourAnchor::Collection, Side::Right, None)
         .into_any_element()
 }
 

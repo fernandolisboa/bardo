@@ -25,6 +25,7 @@ mod secrets;
 mod template;
 mod theme;
 mod timeline;
+mod tour;
 mod voice_samples;
 
 use std::path::{Path, PathBuf};

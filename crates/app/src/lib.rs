@@ -30,9 +30,11 @@ mod scheduler;
 mod schedules;
 mod scripts;
 mod selection;
+mod shortcuts;
 mod stages;
 mod templates;
 mod themes;
+mod tours;
 mod uploads;
 mod voice_samples;
 
@@ -49,15 +51,15 @@ use bardo_domain::{
     PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, Redactor,
     RenderRepository, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
     SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
-    TimelineRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
-    VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
+    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
+    VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{
     Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore, MemoryVoiceSamples,
 };
 
-pub use appearance::{EditorPalette, Palette, Rgb, TrackColors, UiFont, palette};
+pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
@@ -108,12 +110,17 @@ pub use scheduler::{MissedPost, MissedPostError};
 pub use schedules::{ScheduleError, ScheduleResult, ScheduleUpdate};
 pub use scripts::{ScriptError, ScriptView};
 pub use selection::{Step, step_selection};
+pub use shortcuts::{SHORTCUTS, Shortcut, ShortcutGroup};
 pub use stages::{
     SceneState, Stage, StageNote, StageState, StageStatus, opening_stage, project_stages,
     scene_states,
 };
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
+pub use tours::{
+    Side, Spot, Tour, TourAnchor, TourError, TourMove, TourPlace, TourStep, TourStepView, WELCOME,
+    WhenMissing,
+};
 pub use uploads::{
     DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
     UploadState, upload_state,
@@ -137,6 +144,7 @@ use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
+use crate::tours::TourBook;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -198,6 +206,8 @@ pub struct Repositories {
     /// Network app credentials and OAuth tokens. Never the database
     /// (ADR-0008).
     pub connection_secrets: Arc<dyn ConnectionSecrets>,
+    /// How far the profile got in each guided tour.
+    pub tours: Box<dyn TourProgressRepository>,
 }
 
 impl Repositories {
@@ -255,6 +265,7 @@ impl Repositories {
             publications: Arc::clone(&db) as _,
             cut_suggestions: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
+            tours: Box::new(Arc::clone(&db)),
             research: db,
             files,
             voice_samples: Arc::new(MemoryVoiceSamples::default()),
@@ -391,6 +402,7 @@ pub struct Bardo {
     jobs: JobQueue,
     provider_keys: ProviderKeys,
     connection_book: ConnectionBook,
+    tours: TourBook,
     profile: UserProfile,
     catalog: Catalog,
     /// The system's time zone, which publish times are typed and shown in.
@@ -450,6 +462,7 @@ impl Bardo {
             voice_samples,
             secrets,
             connection_secrets,
+            tours,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -466,6 +479,7 @@ impl Bardo {
         // was closed.
         let opened_at = SystemTime::now();
         let catalog = Catalog::load(profile.ui_language);
+        let tours = TourBook::load(profile.id, tours);
         let redactor = Redactor::new();
         let cost_book = CostBook {
             owner: profile.id,
@@ -659,6 +673,7 @@ impl Bardo {
             jobs,
             provider_keys,
             connection_book,
+            tours,
             profile,
             catalog,
             zone: Zone::new(jiff::tz::TimeZone::system()),
@@ -1824,6 +1839,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
             profiles: Box::new(profiles.clone()),
+            tours: Box::new(Arc::clone(&db)),
             channels: Box::new(Arc::clone(&db)),
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,

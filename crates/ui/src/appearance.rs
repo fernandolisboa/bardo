@@ -52,6 +52,10 @@ pub struct Tokens {
     pub danger_bg: Hsla,
     pub info: Hsla,
     pub info_bg: Hsla,
+    /// Focus rings, and the ring around what a guided tour lights.
+    pub focus: Hsla,
+    /// What dims the window around what a guided tour lights.
+    pub scrim: Hsla,
     /// Corner radius of controls and wells.
     pub radius: Pixels,
     /// Corner radius of cards and panels.
@@ -87,6 +91,8 @@ impl Tokens {
             danger_bg: color(p.danger_bg),
             info: color(p.info),
             info_bg: color(p.info_bg),
+            focus: color(p.focus),
+            scrim: color(p.scrim.rgb).opacity(f32::from(p.scrim.alpha) / 255.),
             radius: px(radius),
             // Cards round a little more than controls; square stays square.
             radius_lg: px(if radius == 0. { 0. } else { radius + 2. }),

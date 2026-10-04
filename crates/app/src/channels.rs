@@ -133,6 +133,7 @@ mod tests {
     fn start(db: &Arc<Database>) -> Bardo {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(db)),
+            tours: Box::new(Arc::clone(db)),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as _,
             themes: Arc::clone(db) as _,
@@ -347,6 +348,7 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(&db)),
+            tours: Box::new(Arc::clone(&db)),
             channels: Box::new(Broken),
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,

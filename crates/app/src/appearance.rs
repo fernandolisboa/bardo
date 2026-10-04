@@ -58,6 +58,35 @@ impl<'de> Deserialize<'de> for Rgb {
     }
 }
 
+/// A color laid over what is behind it, `#RRGGBBAA` in the theme file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Rgba {
+    pub rgb: Rgb,
+    /// 0 (clear) to 255 (opaque).
+    pub alpha: u8,
+}
+
+impl Rgba {
+    /// What `ground` looks like under this color.
+    pub fn over(self, ground: Rgb) -> Rgb {
+        self.rgb.over(ground, f64::from(self.alpha) / 255.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Rgba {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.strip_prefix('#')
+            .filter(|hex| hex.len() == 8)
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+            .map(|value| Rgba {
+                rgb: Rgb(value >> 8),
+                alpha: (value & 0xFF) as u8,
+            })
+            .ok_or_else(|| serde::de::Error::custom(format!("not a #RRGGBBAA color: {text}")))
+    }
+}
+
 /// The font a theme draws its interface in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiFont {
@@ -121,6 +150,9 @@ pub struct Palette {
     pub danger_bg: Rgb,
     pub info: Rgb,
     pub info_bg: Rgb,
+    /// What dims the window around the component a guided tour lights:
+    /// stronger in high contrast.
+    pub scrim: Rgba,
     /// Corner radius of controls, in px (0 in terminal themes).
     pub radius: u8,
     /// Outline width in px (2 in high contrast).
@@ -304,6 +336,11 @@ mod tests {
         assert!((Rgb(0x777777).contrast(Rgb(0x777777)) - 1.0).abs() < 1e-9);
         // #767676 on white is the classic 4.54:1.
         assert!((Rgb(0x767676).contrast(Rgb(0xFFFFFF)) - 4.54).abs() < 0.01);
+        let half_black = Rgba {
+            rgb: Rgb(0x000000),
+            alpha: 128,
+        };
+        assert_eq!(half_black.over(Rgb(0xFFFFFF)), Rgb(0x7F7F7F));
         assert_eq!(Rgb(0xFFFFFF).over(Rgb(0x000000), 0.5), Rgb(0x808080));
     }
 
@@ -373,6 +410,34 @@ mod tests {
                 let ring = format!("focus ring on {ground_name}");
                 assert_contrast(theme, &ring, p.focus, ground, 3.0);
             }
+        }
+    }
+
+    #[test]
+    fn the_scrim_makes_what_is_under_it_recede() {
+        for theme in UiTheme::ALL {
+            let p = palette(theme);
+            for ground in [p.app, p.surface] {
+                let lit = p.text.contrast(ground);
+                let dimmed = p.scrim.over(p.text).contrast(p.scrim.over(ground));
+                assert!(
+                    dimmed <= lit / 2.0,
+                    "{theme}: text keeps {dimmed:.2}:1 of {lit:.2}:1 under the scrim"
+                );
+            }
+            assert!(
+                (128..=216).contains(&p.scrim.alpha),
+                "{theme}: dims, and still shows the screen"
+            );
+        }
+        for (high, base) in [
+            (UiTheme::HighContrastLight, UiTheme::Paper),
+            (UiTheme::HighContrastDark, UiTheme::Graphite),
+        ] {
+            assert!(
+                palette(high).scrim.alpha > palette(base).scrim.alpha,
+                "{high} dims more than {base}"
+            );
         }
     }
 

@@ -1,14 +1,15 @@
 use bardo_app::bardo_domain::{BudgetLevel, VideoProjectId};
-use bardo_app::{Bardo, Destination, SpendSummary, Stage, Text};
+use bardo_app::{Bardo, Destination, SpendSummary, Stage, Text, TourMove, TourPlace};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Entity, SharedString, Subscription, Window, div};
+use gpui_kit::{AnyElement, Entity, ScrollHandle, SharedString, Subscription, Window, div};
 
 use crate::accounts::AccountsScreen;
 use crate::appearance;
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
 use crate::editor::{EditorEvent, EditorScreen};
+use crate::guide::{Guide, GuideEvent};
 use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
@@ -52,6 +53,12 @@ pub struct Shell {
     /// Scheduled posts that missed their time, over the window until the
     /// user decides on each or puts them off.
     missed: Entity<MissedPosts>,
+    /// The first-run offer, the help menu and the guided tour, over the
+    /// screens.
+    guide: Entity<Guide>,
+    /// The navigation's scroll, kept across frames so the tour can bring
+    /// a place into view.
+    nav_scroll: ScrollHandle,
     /// This month's spend for the navigation, and the job revision it was
     /// read at.
     spend: Option<SpendSummary>,
@@ -76,6 +83,7 @@ impl Shell {
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
         let missed = cx.new(|cx| MissedPosts::new(bardo.clone(), window, cx));
+        let guide = cx.new(|cx| Guide::new(bardo.clone(), missed.clone(), cx));
         // The startup theme guessed the system's appearance before any
         // window existed; this window knows it.
         appearance::follow(
@@ -100,6 +108,11 @@ impl Shell {
                 cx.notify();
             }),
             cx.observe(&missed, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&guide, window, |this, _, event: &GuideEvent, window, cx| {
+                this.guide_event(*event, window, cx);
+            }),
+            // The Guide place shows whether its menu is open.
+            cx.observe(&guide, |_, _, cx| cx.notify()),
             // Budgets change on the costs screen.
             cx.observe(&costs, |this, _, cx| {
                 this.refresh_spend(cx);
@@ -147,6 +160,8 @@ impl Shell {
             jobs,
             jobs_open: false,
             missed,
+            guide,
+            nav_scroll: ScrollHandle::new(),
             spend: None,
             spend_revision: 0,
             editor: None,
@@ -165,11 +180,16 @@ impl Shell {
             .map(|view| view.summary());
     }
 
-    /// Goes to `place`; Jobs opens or closes its panel beside the screen.
+    /// Goes to `place`; Jobs opens or closes its panel beside the screen,
+    /// Guide its menu.
     fn pick(&mut self, place: Destination, window: &mut Window, cx: &mut Context<Self>) {
         if place == Destination::Jobs {
             self.jobs_open = !self.jobs_open;
             cx.notify();
+            return;
+        }
+        if place == Destination::Guide {
+            self.guide.update(cx, |guide, cx| guide.toggle_menu(cx));
             return;
         }
         // What a screen lists may have changed on another one: channels,
@@ -201,11 +221,62 @@ impl Shell {
                     .templates
                     .update(cx, |templates, cx| templates.reload(window, cx)),
                 Destination::Costs => self.costs.update(cx, |costs, cx| costs.reload(cx)),
-                Destination::Settings | Destination::Jobs => {}
+                Destination::Settings | Destination::Jobs | Destination::Guide => {}
             }
         }
         self.screen = place;
         self.refresh_spend(cx);
+        cx.notify();
+    }
+
+    /// Runs what the user asked of the Guide, and opens the place the
+    /// tour's step is on.
+    fn guide_event(&mut self, event: GuideEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let missed_open = self.missed.read(cx).is_open();
+        let from = self.screen;
+        let moved = self.bardo.update(cx, |bardo, _| match event {
+            GuideEvent::Start(tour) => bardo.start_tour(tour, from, missed_open).ok(),
+            GuideEvent::Resume => bardo.resume_tour(from, missed_open).ok(),
+            GuideEvent::Next => Some(bardo.tour_next()),
+            GuideEvent::Back => Some(bardo.tour_back()),
+            GuideEvent::Skip => Some(bardo.tour_skip()),
+            GuideEvent::Close => Some(bardo.tour_close()),
+            // A frame drawn twice asks twice; only the step it saw goes.
+            GuideEvent::StepOver(number) => bardo
+                .tour_step(missed_open)
+                .filter(|step| step.number == number)
+                .map(|_| bardo.tour_step_over()),
+            GuideEvent::Decline { never } => {
+                bardo.decline_tour_offer(never);
+                None
+            }
+            GuideEvent::Reset => None,
+        });
+        if event == GuideEvent::Reset {
+            let reset = self.bardo.update(cx, |bardo, _| bardo.reset_tours());
+            if let Err(error) = reset {
+                tracing::warn!(%error, "could not reset the tours");
+                // The menu stays open and says so.
+                self.guide.update(cx, |guide, cx| guide.reset_failed(cx));
+                cx.notify();
+                return;
+            }
+        }
+        match moved {
+            Some(TourMove::Show(Some(TourPlace::Screen(place)))) => {
+                self.pick(place, window, cx);
+            }
+            Some(TourMove::Show(Some(TourPlace::Stage(stage)))) => {
+                self.pick(Destination::Projects, window, cx);
+                self.projects
+                    .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
+            }
+            Some(TourMove::Left(origin)) if origin != self.screen => {
+                self.pick(origin, window, cx);
+            }
+            _ => {}
+        }
+        self.guide.update(cx, |guide, cx| guide.moved(cx));
         cx.notify();
     }
 
@@ -256,6 +327,8 @@ impl Shell {
             let _ = shell.update(cx, |shell, cx| shell.pick(place, window, cx));
         });
         navigation.jobs_open = self.jobs_open;
+        navigation.guide_open = self.guide.read(cx).is_menu_open();
+        navigation.scroll = self.nav_scroll.clone();
         navigation.jobs = self.jobs.read(cx).active();
         navigation.jobs_line = match navigation.jobs {
             0 => tr(bardo, Text::StatusNoJobs),
@@ -288,16 +361,28 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The tour's anchors are recorded afresh as this frame prepaints.
+        crate::tour::begin_frame(window, cx);
         let name = tr(self.bardo.read(cx), Text::AppName);
         let (colors, content) = match &self.editor {
             Some((editor, _)) => (title_bar::Colors::editor(), self.render_editor(editor)),
             None => (title_bar::Colors::interface(cx), self.render_screens(cx)),
         };
+        // The Guide sits over the screens, not over the editor.
+        let guide = self.editor.is_none().then(|| self.guide.clone());
         v_flex()
             .size_full()
             .child(TitleBar::new(name, colors))
-            .child(div().flex_1().min_h_0().w_full().child(content))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(content)
+                    .children(guide),
+            )
     }
 }
 
@@ -322,7 +407,9 @@ impl Shell {
             Destination::Research => self.research.clone().into_any_element(),
             Destination::Themes => self.themes.clone().into_any_element(),
             Destination::Performance => self.performance.clone().into_any_element(),
-            Destination::Projects | Destination::Jobs => self.projects.clone().into_any_element(),
+            Destination::Projects | Destination::Jobs | Destination::Guide => {
+                self.projects.clone().into_any_element()
+            }
             Destination::Templates => self.templates.clone().into_any_element(),
             Destination::Costs => self.costs.clone().into_any_element(),
             Destination::Settings => self.settings.clone().into_any_element(),

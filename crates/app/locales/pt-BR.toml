@@ -1198,6 +1198,7 @@ production = "Produção"
 publishing = "Publicação"
 
 [nav.place]
+guide = "Guia"
 performance = "Desempenho"
 research = "Pesquisa"
 themes = "Temas"
@@ -1945,3 +1946,91 @@ past = "Esse horário já passou. Escolha um mais tarde."
 5 = "sex."
 6 = "sáb."
 7 = "dom."
+
+[tour]
+step_count = "{n} de {count}"
+esc_hint = "Esc fecha"
+back = "Voltar"
+next = "Próximo"
+finish = "Concluir"
+skip = "Pular tour"
+new = "Novo"
+
+[tour.offer]
+title = "Quer um tour de 2 minutos?"
+body = "Uma olhada rápida em onde fica cada coisa: os três pilares, suas chaves de API, as tarefas, os custos e onde encontrar ajuda. O tour só explica; nada é alterado."
+start = "Começar o tour"
+not_now = "Agora não"
+never = "Não mostrar mais"
+
+[tour.welcome]
+name = "Tour de boas-vindas"
+
+[tour.welcome.intro]
+title = "Boas-vindas ao Bardo"
+body = "Em dois minutos, este tour mostra onde fica cada coisa. Avance com Próximo ou com as setas do teclado e saia quando quiser com Esc. Retomar tour, no Guia, volta para onde você parou."
+
+[tour.welcome.strategy]
+title = "Estratégia"
+body = "Pesquise nichos, ranqueie ideias de vídeo e veja como foram os vídeos que você publicou. É aqui que você decide o que fazer em seguida."
+
+[tour.welcome.production]
+title = "Produção"
+body = "Seus projetos de vídeo, do roteiro ao render. As personas são os narradores, e os modelos guardam as instruções que o Claude segue para escrever."
+
+[tour.welcome.publishing]
+title = "Publicação"
+body = "Seus canais e as contas de cada um nas redes. Os envios, os agendamentos e os números dos seus posts partem daqui."
+
+[tour.welcome.settings]
+title = "Comece pelas chaves"
+body = "O Bardo usa as suas próprias contas de IA, então comece adicionando suas chaves de API em Configurações. Elas ficam no Gerenciador de Credenciais do Windows, nunca no banco de dados do Bardo."
+
+[tour.welcome.jobs]
+title = "Tarefas"
+body = "Trabalho longo, como narração, imagens ou um render, roda como tarefa. Continue usando o Bardo enquanto isso, e acompanhe, cancele ou retome cada tarefa aqui."
+
+[tour.welcome.costs]
+title = "Custos e orçamentos"
+body = "Quanto você gastou neste mês e quanto dos seus orçamentos já foi usado. Defina um orçamento mensal para cada provedor na tela Custos."
+
+[tour.welcome.guide]
+title = "Guia e tours"
+body = "Volte aqui para refazer este tour, retomar um que você fechou ou ver os atalhos de teclado. O tour de cada tela e o guia do usuário também vão ficar aqui."
+
+[guide]
+resume_tour = "Retomar tour"
+shortcuts = "Atalhos de teclado"
+reset_tours = "Reiniciar tours"
+reset_failed = "Não foi possível reiniciar os tours. Tente de novo."
+
+[shortcuts]
+title = "Atalhos de teclado"
+close = "Fechar"
+
+[shortcuts.group]
+tour = "Tour guiado"
+lists = "Listas"
+editor = "Editor"
+suggestions = "Sugestões de corte no editor"
+
+[shortcuts.action]
+tour_next = "Próximo passo"
+tour_back = "Passo anterior"
+tour_close = "Fechar o tour; dá para retomar pelo Guia"
+tour_buttons = "Passar pelos botões do cartão"
+list_move = "Selecionar o item anterior ou o próximo"
+list_accept = "Aceitar o que o item selecionado espera"
+play = "Tocar ou pausar"
+frame = "Voltar ou avançar um quadro"
+start_end = "Ir para o início ou o fim"
+split = "Dividir no cursor"
+trim = "Aparar o início ou o fim do clipe selecionado até o cursor"
+delete = "Excluir a seleção"
+nudge = "Mover o clipe selecionado uma posição, ou o áudio um quadro"
+deselect = "Limpar a seleção"
+undo = "Desfazer"
+redo = "Refazer"
+next_cut = "Próxima sugestão"
+accept_cut = "Aceitar a sugestão"
+reject_cut = "Rejeitar a sugestão"
