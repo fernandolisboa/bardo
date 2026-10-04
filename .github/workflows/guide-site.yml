@@ -57,11 +57,14 @@ jobs:
           tar -xzf "$RUNNER_TEMP/mdbook.tar.gz" -C "$RUNNER_TEMP/mdbook"
           echo "$RUNNER_TEMP/mdbook" >> "$GITHUB_PATH"
       - name: Write the books from docs/guide (fails on a broken link)
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
         run: >
           cargo run --locked -p bardo-app --example guide_site --
           target/guide-site
-          --base-path "/${{ github.event.repository.name }}"
-          --repository "${{ github.server_url }}/${{ github.repository }}"
+          --base-path "/$REPOSITORY_NAME"
+          --repository "$REPOSITORY_URL"
       - name: Build the books
         run: |
           for book in target/guide-site/*/book.toml; do

@@ -47,8 +47,7 @@ pub struct SiteOptions {
 struct SiteText {
     title: &'static str,
     description: &'static str,
-    /// The language switch on every page of the *other* language's book,
-    /// and the link on the landing page.
+    /// The language switch on every page of the *other* language's book.
     read_in: &'static str,
     /// After the text of a link that only works inside Bardo.
     in_app: &'static str,
@@ -88,11 +87,16 @@ fn build(guides: &[Guide], options: &SiteOptions) -> Result<Vec<SiteFile>, Vec<S
                 .map(|problem| format!("{}: broken link in {problem}", guide.language())),
         );
     }
-    for (index, guide) in guides.iter().enumerate() {
-        for other in &guides[index + 1..] {
-            problems.extend(sync_problems(guide.pages(), other.pages()).into_iter().map(
-                |problem| format!("{} and {}: {problem}", guide.language(), other.language()),
-            ));
+    // en-US sets the structure; every other language follows it.
+    if let Some(en_us) = guides
+        .iter()
+        .find(|guide| guide.language() == UiLanguage::EnUs)
+    {
+        for other in guides
+            .iter()
+            .filter(|guide| guide.language() != UiLanguage::EnUs)
+        {
+            problems.extend(sync_problems(en_us.pages(), other.pages()));
         }
     }
 
@@ -225,10 +229,7 @@ fn page_markdown(guide: &Guide, page: &GuidePage, others: &[UiLanguage]) -> Stri
         out.push_str(&format!("\n{}\n", convert(&page.intro)));
     }
     for section in &page.sections {
-        out.push_str(&format!(
-            "\n<a id=\"{}\"></a>\n## {}\n",
-            section.id, section.title
-        ));
+        out.push_str(&format!("\n## {} {{#{}}}\n", section.title, section.id));
         if !section.body.is_empty() {
             out.push_str(&format!("\n{}\n", convert(&section.body)));
         }
@@ -512,7 +513,7 @@ mod tests {
         let [en, _] = pair(vec![sample("a", None, "Intro.")]);
         assert_eq!(
             page_markdown(&en, &en.pages()[0], &[]),
-            "# Title of a\n\nIntro.\n\n<a id=\"one\"></a>\n## One\n\nBody.\n"
+            "# Title of a\n\nIntro.\n\n## One {#one}\n\nBody.\n"
         );
     }
 
@@ -542,15 +543,15 @@ mod tests {
 
     #[test]
     fn a_page_missing_in_one_language_fails_the_build() {
-        let guides = [
-            Guide::from_pages(
-                UiLanguage::EnUs,
-                vec![sample("a", None, ""), sample("b", None, "")],
-            ),
-            Guide::from_pages(UiLanguage::PtBr, vec![sample("a", None, "")]),
-        ];
+        // In the order the app lists its languages, pt-BR first.
+        let guides = UiLanguage::ALL.map(|language| match language {
+            UiLanguage::EnUs => Guide::from_pages(language, vec![sample("a", None, "")]),
+            UiLanguage::PtBr => {
+                Guide::from_pages(language, vec![sample("a", None, ""), sample("b", None, "")])
+            }
+        });
         let problems = build(&guides, &options()).unwrap_err();
-        assert_eq!(problems, ["en-US and pt-BR: b: missing in pt-BR"]);
+        assert_eq!(problems, ["b: missing in en-US"]);
     }
 
     #[test]
