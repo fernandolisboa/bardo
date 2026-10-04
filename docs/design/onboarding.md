@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages), #110 (Channels, Accounts, Settings › Networks, Publish stage and missed posts tours, Publishing pages with the network setup guides in both languages)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -42,6 +42,8 @@ The card takes the keyboard when it appears and gives it back where it was when 
 ### The missed posts list comes first
 
 A tour does not start while the missed posts list is open, and if the list opens during a tour, the tour waits behind it and comes back on the same step once the list closes.
+
+The list's own tour is the one exception: it runs over the list (`TourPlace::Missed`). **Tour this list** in the list's title, or Shift+F1 while the list is up, starts it. Its **Learn more**, and F1, put the list off as **Decide later** does, so the guide shows. Started from its guide page with the list closed, it brings back the posts put off this session; with no missed posts, its cards show in the middle.
 
 ### Steps
 
@@ -109,7 +111,7 @@ Shift+F1 starts the stage tour when one is offered, else the screen tour, and th
 
 ## Screen tours
 
-A screen with a tour of its own (Research, Themes, Performance, Projects, Personas and Templates so far) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it. A tour never starts on its own:
+A screen with a tour of its own (Research, Themes, Performance, Projects, Personas, Templates, Channels and Accounts) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it. A tour never starts on its own:
 
 - **Nothing to show, no tour**: while the screen is empty (no research results, no themes, no posts), the button and the menu row are hidden and Shift+F1 does nothing; the screen's empty state says what to do first. The guide page's **Show me** still starts the tour, and steps fall back as they say.
 - **The "new" mark**: from the first visit with content, the button and the menu row carry **New** until the tour is completed or dismissed (a tour closed midway keeps it), and again when the tour's content version rises. These rules are `app` logic (`Bardo::screen_tour`).
@@ -135,6 +137,12 @@ The editor covers the whole window, so it carries its tours itself: **Editor tou
 - F1 in the editor opens the Guide screen over it, at the editor's page, under a bar with **Back to the editor**, which returns to the editor as it was. A tour card's **Learn more** does the same. A guide link to another place, or another tour (the welcome tour included), closes the editor first.
 
 The Render stage has a tour like the other stages ("something to show" is a cut to review): the figures (a new part anchor, tagged where each layout draws them), the targets, the picked target's checks, the toolbar and its last file.
+
+### Publishing
+
+- **Channels** and **Accounts** offer their tours once there is a channel, and a channel with network accounts. The Accounts tour lights the first account's card, its Edit, its preset and the first connection; Connect and Add are passed over when there is nothing to connect or add.
+- **Settings › Networks** has a tab tour (`TourPlace::Settings`): **Tour this screen** shows in the Settings header on that tab only, and Shift+F1 starts it there. Starting it from the guide opens the tab first.
+- The **Publish** stage offers its tour once the channel has networks to post on. Its steps only explain: the review's scheduling row is lit when the review is open, the upload otherwise; nothing is uploaded, exported, scheduled or linked.
 
 ## The Guide screen
 
