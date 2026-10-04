@@ -685,13 +685,14 @@ impl SettingsScreen {
             .into_any_element()
     }
 
-    /// A provider's card. The tour lights the first card and its state
-    /// (`first`), and the first Test key (`first_test`).
+    /// A provider's card. The tour lights the first card (`first`), and the
+    /// state and Test key of the first card with a saved key
+    /// (`first_saved`).
     fn render_card(
         &self,
         status: ProviderKeyStatus,
         first: bool,
-        first_test: bool,
+        first_saved: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
@@ -716,7 +717,7 @@ impl SettingsScreen {
             KeyState::Unreadable => kit::status(Tone::Danger, tr(bardo, Text::KeyUnreadable), cx),
         };
         let scroll = Some(&self.scroll);
-        let state = if first {
+        let state = if first_saved {
             kit::anchor_in(TourAnchor::Control(Control::KeyState), state, scroll).into_any_element()
         } else {
             state.into_any_element()
@@ -810,7 +811,7 @@ impl SettingsScreen {
                                     this.test(provider, cx)
                                 }
                             }));
-                        if first_test {
+                        if first_saved {
                             actions.child(kit::anchor_in(
                                 TourAnchor::Control(Control::KeyTest),
                                 test,
@@ -1018,7 +1019,10 @@ impl SettingsScreen {
         );
         let follow_part = part(
             TourAnchor::Control(Control::AppearanceFollow),
-            vec![follow.into_any_element()],
+            vec![
+                kit::section_heading(tr(bardo, Text::AppearanceTheme)).into_any_element(),
+                follow.into_any_element(),
+            ],
         );
         let theme_part = part(
             TourAnchor::Control(Control::AppearanceTheme),
@@ -1071,7 +1075,6 @@ impl SettingsScreen {
             )
             .child(layout_part)
             .child(div().h_2())
-            .child(kit::section_heading(tr(bardo, Text::AppearanceTheme)))
             .child(follow_part)
             .child(theme_part)
             .child(div().h_2())

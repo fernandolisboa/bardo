@@ -30,6 +30,11 @@ The layout decides where every screen places its parts; the screens do the same 
 
 Switching keeps the screen and the selection you are on, and a tour running at the time goes on in the new layout.
 
+<a id="follow"></a>
+## Following Windows
+
+**Follow Windows** switches between a light and a dark theme of your choice when Windows switches between light and dark mode. Pick both beside it.
+
 <a id="theme"></a>
 ## Theme
 
@@ -43,11 +48,6 @@ Ten interface themes, each checked for text contrast (the card says which WCAG l
 | Terminal | Black Gold, Brass, Phosphor (dark), Phosphor Light |
 
 The terminal themes draw everything in a monospace font with square corners. **Always the same theme** keeps the one you click.
-
-<a id="follow"></a>
-## Following Windows
-
-**Follow Windows** switches between a light and a dark theme of your choice when Windows switches between light and dark mode. Pick both beside it.
 
 <a id="language"></a>
 ## Interface language

@@ -2453,7 +2453,6 @@ body = "Nothing goes to the network. To post it later, review the upload again a
 title = "Decide later"
 body = "Closes the list for now. Each post also waits on its project's Publish stage, with the same three choices."
 
-
 [tour.costs]
 name = "Costs tour"
 
@@ -2498,7 +2497,7 @@ body = "Cancel stops a running or queued job and keeps what it made for a retry.
 
 [tour.jobs.retry]
 title = "Retry"
-body = "A passing failure, like a timeout, is retried by itself up to four times. A lasting one stops the job: fix what it says, then Retry goes on from where it stopped."
+body = "A passing failure, like a timeout, is tried again by itself, up to four attempts in all. A lasting one stops the job: fix what it says, then Retry goes on from where it stopped."
 
 [tour.jobs.restart]
 title = "Closing Bardo mid-job"

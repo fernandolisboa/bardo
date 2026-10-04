@@ -827,8 +827,8 @@ impl CostsScreen {
                     bardo.money(row.amount),
                 ))
         });
-        // The aside scrolls apart from the page in Studio, so the tour does
-        // not scroll to these: they lead it.
+        // The aside scrolls apart from the page in Studio, so the tour
+        // lights these where they are, without scrolling.
         vec![
             kit::anchor(
                 TourAnchor::Control(Control::CostsChannels),

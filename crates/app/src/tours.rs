@@ -1050,14 +1050,14 @@ pub const APPEARANCE: Tour = {
                 .on(AT)
                 .missing(TAB)
                 .learn(PAGE, "layout"),
-            TourStep::at("theme", control(Control::AppearanceTheme))
-                .on(AT)
-                .missing(TAB)
-                .learn(PAGE, "theme"),
             TourStep::at("follow", control(Control::AppearanceFollow))
                 .on(AT)
                 .missing(TAB)
                 .learn(PAGE, "follow"),
+            TourStep::at("theme", control(Control::AppearanceTheme))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "theme"),
             TourStep::at("language", control(Control::AppearanceLanguage))
                 .on(AT)
                 .missing(TAB)

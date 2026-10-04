@@ -16,7 +16,7 @@ What Bardo's messages mean when something stops, and what to do. A job that stop
 <a id="budget"></a>
 ## A budget is reached
 
-**Over budget** before a generation means it would take a provider past the monthly budget you set, or the budget is already used. **Generate anyway** goes on for this generation only; **Cancel** leaves it. To stop being asked, raise or remove the budget on [Costs](costs.md#budgets). Nothing is ever cut off midway because of a budget.
+**Over budget** before a generation means it would make a provider reach the monthly budget you set, or the budget is already used. **Generate anyway** goes on for this generation only; **Cancel** leaves it. To stop being asked, raise or remove the budget on [Costs](costs.md#budgets). Nothing is ever cut off midway because of a budget.
 
 <a id="quota"></a>
 ## A quota is used up

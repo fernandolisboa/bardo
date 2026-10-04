@@ -17,7 +17,7 @@ O Bardo lê os números dos seus posts em cada rede como uma tarefa: uma **sincr
 - **Instagram** e **TikTok**: os números de cada post pela conta conectada do canal naquela rede, sem chave.
 - **X** e **Kick**: nada; o Bardo guarda só o link.
 
-Um post cuja conta precisa reconectar fica de fora até ela reconectar; veja [Solução de problemas](troubleshooting.md#reconnect).
+Enquanto uma conta precisa reconectar, os números dos posts por essa conta ficam de fora; os números públicos do YouTube continuam sincronizando com a chave da Data API; veja [Solução de problemas](troubleshooting.md#reconnect).
 
 <a id="on-start"></a>
 ## Sincronizar quando o Bardo abre

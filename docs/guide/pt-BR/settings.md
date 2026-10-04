@@ -30,6 +30,11 @@ O layout decide onde cada tela coloca as suas partes; as telas fazem as mesmas c
 
 Trocar mantém a tela e a seleção em que você está, e um tour em andamento continua no novo layout.
 
+<a id="follow"></a>
+## Seguir o Windows
+
+**Seguir o Windows** troca entre um tema claro e um escuro, à sua escolha, quando o Windows troca entre o modo claro e o escuro. Escolha os dois ao lado.
+
 <a id="theme"></a>
 ## Tema
 
@@ -43,11 +48,6 @@ Dez temas de interface, cada um conferido quanto ao contraste do texto (o cartã
 | Terminal | Ouro Negro, Latão, Fósforo (escuro), Fósforo Claro |
 
 Os temas de terminal desenham tudo numa fonte monoespaçada, com cantos retos. **Sempre o mesmo tema** fica com o que você clicar.
-
-<a id="follow"></a>
-## Seguir o Windows
-
-**Seguir o Windows** troca entre um tema claro e um escuro, à sua escolha, quando o Windows troca entre o modo claro e o escuro. Escolha os dois ao lado.
 
 <a id="language"></a>
 ## Idioma da interface

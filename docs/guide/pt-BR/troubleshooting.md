@@ -16,7 +16,7 @@ O que as mensagens do Bardo querem dizer quando algo para, e o que fazer. Uma ta
 <a id="budget"></a>
 ## Um orçamento foi atingido
 
-**Orçamento atingido** antes de uma geração quer dizer que ela levaria um provedor além do orçamento mensal que você definiu, ou que o orçamento já foi usado. **Gerar mesmo assim** segue só com esta geração; **Cancelar** desiste dela. Para não ser mais perguntado, aumente ou remova o orçamento em [Custos](costs.md#budgets). Nada é interrompido no meio por causa de um orçamento.
+**Orçamento atingido** antes de uma geração quer dizer que ela faria um provedor atingir o orçamento mensal que você definiu, ou que o orçamento já foi usado. **Gerar mesmo assim** segue só com esta geração; **Cancelar** desiste dela. Para não ser mais perguntado, aumente ou remova o orçamento em [Custos](costs.md#budgets). Nada é interrompido no meio por causa de um orçamento.
 
 <a id="quota"></a>
 ## Uma cota acabou
@@ -29,7 +29,7 @@ O que as mensagens do Bardo querem dizer quando algo para, e o que fazer. Uma ta
 **Reconexão necessária** numa conta quer dizer que a rede recusou renovar o acesso do Bardo: você revogou, ele expirou (um cliente do Google em status de Teste dura sete dias, um login do TikTok um ano sem uso) ou, no Instagram, a conta não está mais ligada a uma Página que você gerencia. Até você reconectar, os envios para ela esperam e as sincronizações pulam os números de dono. Use **Reconectar** no cartão dela em [Contas](network-accounts.md#states); no Instagram, gere um token novo antes.
 
 <a id="upload-limit"></a>
-## Um envio está segurado por um limite
+## Um envio está retido por um limite
 
 **Acima do limite de publicação** quer dizer que a rede só aceita um tanto de posts de apps por dia: o Instagram conta posts em 24 horas, o TikTok rascunhos em 24 horas, e o YouTube tem uma cota diária de envios por projeto do Google e um limite de envios por canal. O envio fica na fila, o cartão diz quando sai, e o Bardo manda sozinho nessa hora (deixe o Bardo aberto). Posts enviados por outros apps também contam, então o Bardo lê o limite de novo antes de tentar. Veja [Estados do envio](uploading.md#states).
 

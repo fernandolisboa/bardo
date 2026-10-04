@@ -755,12 +755,17 @@ impl Guide {
                 trail.push(framed.into_any_element());
             }
         }
+        // Long labels (Portuguese in a monospace theme) wrap the trailing
+        // buttons to a line of their own, still on the right, rather than
+        // past the card's edge.
         h_flex()
-            .gap_2()
+            .flex_wrap()
+            .gap_x_2()
+            .gap_y_1()
             .items_center()
             .justify_between()
             .child(h_flex().gap_1().children(lead))
-            .child(h_flex().gap_1().children(trail))
+            .child(h_flex().ml_auto().gap_1().children(trail))
             .into_any_element()
     }
 

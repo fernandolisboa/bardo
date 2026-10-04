@@ -2453,7 +2453,6 @@ body = "Nada vai para a rede. Para publicar depois, revise o envio de novo na et
 title = "Decidir depois"
 body = "Fecha a lista por enquanto. Cada post também espera na etapa Publicação do projeto, com as mesmas três escolhas."
 
-
 [tour.costs]
 name = "Tour de Custos"
 
@@ -2498,10 +2497,10 @@ body = "Cancelar para uma tarefa em execução ou na fila e guarda o que ela fez
 
 [tour.jobs.retry]
 title = "Tentar de novo"
-body = "Uma falha passageira, como tempo esgotado, é tentada de novo sozinha até quatro vezes. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou."
+body = "Uma falha passageira, como tempo esgotado, faz a tarefa tentar de novo sozinha, até quatro tentativas no total. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou."
 
 [tour.jobs.restart]
-title = "Fechar o Bardo no meio"
+title = "Fechar o Bardo no meio de uma tarefa"
 body = "Feche o Bardo quando quiser: na próxima vez que ele abrir, cada tarefa continua do último ponto salvo, e o trabalho que um provedor já fez não é pago duas vezes."
 
 [tour.keys]

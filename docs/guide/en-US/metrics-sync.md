@@ -17,7 +17,7 @@ Bardo reads your posts' numbers from each network as a job: a **sync**. [Setting
 - **Instagram** and **TikTok**: each post's numbers through the channel's connected account on that network, with no key.
 - **X** and **Kick**: nothing; Bardo keeps the link only.
 
-A post whose account needs to reconnect is skipped until it does; see [Troubleshooting](troubleshooting.md#reconnect).
+While an account needs to reconnect, its posts' numbers through that account are skipped; YouTube's public numbers still sync with the Data API key; see [Troubleshooting](troubleshooting.md#reconnect).
 
 <a id="on-start"></a>
 ## Syncing when Bardo opens
