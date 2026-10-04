@@ -10,6 +10,7 @@ mod cut_suggestions;
 mod editor;
 mod export;
 mod guide;
+mod guide_site;
 pub mod i18n;
 mod jobs;
 pub mod logging;
@@ -89,6 +90,7 @@ pub use export::{
 pub use guide::{
     Guide, GuideGroup, GuideHit, GuideLink, GuidePage, GuidePageError, GuidePlace, GuideSection,
 };
+pub use guide_site::{SiteFile, SiteOptions, guide_site};
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
