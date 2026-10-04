@@ -256,7 +256,10 @@ impl Shell {
             let reset = self.bardo.update(cx, |bardo, _| bardo.reset_tours());
             if let Err(error) = reset {
                 tracing::warn!(%error, "could not reset the tours");
+                // The menu stays open and says so.
                 self.guide.update(cx, |guide, cx| guide.reset_failed(cx));
+                cx.notify();
+                return;
             }
         }
         match moved {

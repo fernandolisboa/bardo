@@ -479,7 +479,7 @@ impl Bardo {
         // was closed.
         let opened_at = SystemTime::now();
         let catalog = Catalog::load(profile.ui_language);
-        let tours = TourBook::load(profile.id, tours)?;
+        let tours = TourBook::load(profile.id, tours);
         let redactor = Redactor::new();
         let cost_book = CostBook {
             owner: profile.id,

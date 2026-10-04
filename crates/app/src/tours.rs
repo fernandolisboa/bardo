@@ -308,22 +308,27 @@ pub(crate) struct TourBook {
 }
 
 impl TourBook {
-    pub(crate) fn load(
-        owner: ProfileId,
-        repository: Box<dyn TourProgressRepository>,
-    ) -> Result<Self, AppError> {
-        let progress = repository
-            .tour_progress(owner)?
-            .into_iter()
-            .map(|progress| (progress.tour, progress))
-            .collect();
-        Ok(Self {
+    /// Reads the profile's progress. Progress is a convenience: when it
+    /// cannot be read, every tour starts as never seen and the failure is
+    /// logged, rather than Bardo not opening.
+    pub(crate) fn load(owner: ProfileId, repository: Box<dyn TourProgressRepository>) -> Self {
+        let progress = match repository.tour_progress(owner) {
+            Ok(progress) => progress
+                .into_iter()
+                .map(|progress| (progress.tour, progress))
+                .collect(),
+            Err(error) => {
+                tracing::warn!(%error, "could not read tour progress");
+                HashMap::new()
+            }
+        };
+        Self {
             owner,
             repository,
             progress,
             run: None,
             offer_answered: false,
-        })
+        }
     }
 
     /// Remembers `state` at `step` of `tour`. Progress is a convenience:
@@ -574,6 +579,9 @@ mod tests {
 
     impl TourProgressRepository for FakeProgress {
         fn tour_progress(&self, _: ProfileId) -> Result<Vec<TourProgress>, RepositoryError> {
+            if *self.fail.borrow() {
+                return Err(RepositoryError(std::io::Error::other("unreadable").into()));
+            }
             Ok(self.rows.borrow().clone())
         }
 
@@ -965,6 +973,16 @@ mod tests {
         app.tour_next();
         assert_eq!(at(&app), 2);
         assert_eq!(progress.state(TourId::Welcome), None);
+    }
+
+    #[test]
+    fn unreadable_progress_still_opens_bardo() {
+        let progress = FakeProgress::default();
+        start(&progress).decline_tour_offer(true);
+        *progress.fail.borrow_mut() = true;
+        let app = start(&progress);
+        assert!(app.tour_offer(), "every tour as never seen");
+        assert!(app.tour_is_new(TourId::Welcome));
     }
 
     #[test]

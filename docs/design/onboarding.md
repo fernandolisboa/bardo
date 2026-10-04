@@ -1,7 +1,6 @@
 # Onboarding: guided tours, the Guide and the user guide
 
-- Status: Approved by the owner, 2026-10-04 (#105 to #112)
-- Design proposal: https://claude.ai/artifact/2XhWoYxS71mW1ieQUSZfyC
+- Status: Approved 2026-10-04 (#105 to #112)
 - Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
@@ -75,7 +74,7 @@ A test checks that every anchor a tour step uses is tagged in every layout.
 
 ### Progress
 
-Per profile and tour, `tour_progress` (migration 0035) keeps the **content version** the user saw, the state (offered, in progress, completed, dismissed), the last step and when it changed. Raising a tour's content version shows it as **New** in the Guide menu; it never restarts a tour on its own. Saving progress is best-effort: a failure is logged and the tour goes on.
+Per profile and tour, `tour_progress` (migration 0035) keeps the **content version** the user saw, the state (offered, in progress, completed, dismissed), the last step and when it changed. Raising a tour's content version shows it as **New** in the Guide menu; it never restarts a tour on its own. Reading and saving it are best-effort: a failure is logged, the tour goes on, and progress that cannot be read counts as none.
 
 ## The welcome tour
 
@@ -98,7 +97,7 @@ Eight steps, each lighting the navigation, which every screen shows:
 
 **Guide** is a pinned place next to Jobs, Costs and Settings: at the foot of the Workspace sidebar, between Jobs and Settings on the right of the Studio top bar. It opens a menu over the screen (the screen stays):
 
-- **Welcome tour**, marked **New** when never taken or changed since;
+- **Welcome tour**, marked **New** until it is started or turned down, and again when its content changes;
 - **Resume tour**, when a tour was closed midway;
 - **Keyboard shortcuts**: the tour's, the lists', the editor's and the cut suggestions' keys, from `bardo_app::SHORTCUTS`;
 - **Reset tours**: every tour reads as never seen, and the welcome offer comes back.

@@ -5,10 +5,10 @@
 CREATE TABLE tour_progress (
     profile_id      TEXT NOT NULL REFERENCES user_profile (id) ON DELETE CASCADE,
     tour            TEXT NOT NULL,
-    content_version INTEGER NOT NULL CHECK (content_version >= 1),
+    content_version INTEGER NOT NULL CHECK (content_version BETWEEN 1 AND 4294967295),
     state           TEXT NOT NULL
                     CHECK (state IN ('offered', 'in_progress', 'completed', 'dismissed')),
-    last_step       INTEGER NOT NULL DEFAULT 0 CHECK (last_step >= 0),
+    last_step       INTEGER NOT NULL DEFAULT 0 CHECK (last_step BETWEEN 0 AND 4294967295),
     updated_at      INTEGER NOT NULL,
     PRIMARY KEY (profile_id, tour)
 ) STRICT;

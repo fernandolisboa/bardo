@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
-use bardo_app::{Bardo, Destination, SHORTCUTS, Side, Spot, Text, TourAnchor, TourStepView};
+use bardo_app::{Bardo, Destination, SHORTCUTS, Spot, Text, TourAnchor, TourStepView};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -196,7 +196,7 @@ impl Guide {
 
     /// The buttons of the card on screen, in Tab order, and the one Enter
     /// presses when Tab was not used.
-    fn buttons(&self, layer: Layer, cx: &App) -> (Vec<(Text, Kind, Act)>, usize) {
+    fn buttons(layer: Layer) -> (Vec<(Text, Kind, Act)>, usize) {
         match layer {
             Layer::Tour(step) => {
                 let mut buttons = vec![(Text::TourSkip, Kind::Ghost, Act::Send(GuideEvent::Skip))];
@@ -236,10 +236,7 @@ impl Guide {
                 vec![(Text::ShortcutsClose, Kind::Primary, Act::CloseShortcuts)],
                 0,
             ),
-            Layer::Menu(_) => {
-                let _ = cx;
-                (Vec::new(), 0)
-            }
+            Layer::Menu(_) => (Vec::new(), 0),
         }
     }
 
@@ -271,7 +268,7 @@ impl Guide {
             cx.notify();
             return;
         }
-        let (buttons, default) = self.buttons(layer, cx);
+        let (buttons, default) = Self::buttons(layer);
         let focused = self.button.unwrap_or(default).min(buttons.len() - 1);
         match (layer, key) {
             (Layer::Tour(_), "right") => cx.emit(GuideEvent::Next),
@@ -295,7 +292,7 @@ impl Guide {
     }
 
     fn button_row(&self, layer: Layer, cx: &mut Context<Self>) -> AnyElement {
-        let (buttons, default) = self.buttons(layer, cx);
+        let (buttons, default) = Self::buttons(layer);
         let focused = self.button.unwrap_or(default);
         let t = look(cx).tokens;
         let bardo = self.bardo.read(cx);
@@ -594,9 +591,7 @@ impl Guide {
             }
             Layer::Offer => {
                 let center: crate::tour::Resolve = Rc::new(|_, _| Spot::Center);
-                Spotlight::new(center, self.offer_card(cx), Rc::default())
-                    .side(Side::Open)
-                    .into_any_element()
+                Spotlight::new(center, self.offer_card(cx), Rc::default()).into_any_element()
             }
         }
     }

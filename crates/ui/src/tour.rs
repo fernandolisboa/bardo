@@ -123,29 +123,47 @@ fn reveal(tagged: &Tagged) -> bool {
     let Some(scroll) = &tagged.scroll else {
         return false;
     };
-    let bounds = tagged.bounds;
     let viewport = scroll.bounds();
-    let mut delta = point(px(0.), px(0.));
-    if bounds.top() < viewport.top() {
-        delta.y = viewport.top() - bounds.top() + px(PADDING);
-    } else if bounds.bottom() > viewport.bottom() {
-        delta.y = viewport.bottom() - bounds.bottom() - px(PADDING);
-    }
-    if bounds.left() < viewport.left() {
-        delta.x = viewport.left() - bounds.left() + px(PADDING);
-    } else if bounds.right() > viewport.right() {
-        delta.x = viewport.right() - bounds.right() - px(PADDING);
-    }
-    if delta == point(px(0.), px(0.)) {
-        return false;
-    }
+    let delta = point(
+        into_view(
+            tagged.bounds.left(),
+            tagged.bounds.right(),
+            viewport.left(),
+            viewport.right(),
+        ),
+        into_view(
+            tagged.bounds.top(),
+            tagged.bounds.bottom(),
+            viewport.top(),
+            viewport.bottom(),
+        ),
+    );
     let max = scroll.max_offset();
-    let offset = scroll.offset() + delta;
-    scroll.set_offset(point(
+    let current = scroll.offset();
+    let offset = current + delta;
+    let offset = point(
         offset.x.clamp(-max.x, px(0.)),
         offset.y.clamp(-max.y, px(0.)),
-    ));
+    );
+    if offset == current {
+        return false;
+    }
+    scroll.set_offset(offset);
     true
+}
+
+/// How far to scroll along one axis so `start..end` shows in
+/// `view_start..view_end`. Something longer than the view shows its start,
+/// so the scroll settles instead of swinging between the two ends.
+fn into_view(start: Pixels, end: Pixels, view_start: Pixels, view_end: Pixels) -> Pixels {
+    let padding = px(PADDING);
+    if start < view_start || end - start + padding * 2. > view_end - view_start {
+        view_start - start + padding
+    } else if end > view_end {
+        view_end - end - padding
+    } else {
+        px(0.)
+    }
 }
 
 /// Where the light was and is going, so it slides between components.
@@ -583,6 +601,21 @@ mod tests {
     }
 
     #[test]
+    fn scrolling_into_view_settles() {
+        let view = (px(0.), px(200.));
+        assert_eq!(into_view(px(50.), px(100.), view.0, view.1), px(0.));
+        assert_eq!(into_view(px(-30.), px(20.), view.0, view.1), px(34.));
+        assert_eq!(into_view(px(180.), px(240.), view.0, view.1), px(-44.));
+        // Longer than the view: its start shows, wherever it is.
+        let long = into_view(px(-30.), px(300.), view.0, view.1);
+        assert_eq!(long, px(34.));
+        assert_eq!(
+            into_view(px(-30.) + long, px(300.) + long, view.0, view.1),
+            px(0.)
+        );
+    }
+
+    #[test]
     fn the_light_slides_then_settles() {
         let mut motion = Motion::default();
         let start = Instant::now();
@@ -647,16 +680,59 @@ mod tests {
         }
     }
 
+    /// The arms of the `match` a layout draws its pinned places with, as
+    /// (the place an arm names, or `None` for `_`, and the arm's code).
+    fn pinned_arms(source: &str) -> Vec<(Option<&str>, String)> {
+        let start = ["nav.pinned.iter().map(", "for item in &nav.pinned {"]
+            .iter()
+            .find_map(|marker| source.find(marker))
+            .expect("the layout draws the pinned places");
+        let mut arms: Vec<(Option<&str>, String)> = Vec::new();
+        // Arms start at the first arm's indent; a `match` inside one is its
+        // code.
+        let mut indent = None;
+        for line in source[start..].lines().skip(1) {
+            if line.starts_with("    }") {
+                break;
+            }
+            let code = line.trim_start();
+            let depth = line.len() - code.len();
+            let arm = code.starts_with("Destination::") || code.starts_with("_ =>");
+            if arm && indent.is_none() {
+                indent = Some(depth);
+            }
+            if arm && indent == Some(depth) {
+                let name = code
+                    .strip_prefix("Destination::")
+                    .and_then(|rest| rest.split_once(" =>"))
+                    .map(|(name, _)| name);
+                arms.push((name, String::new()));
+            }
+            if let Some((_, body)) = arms.last_mut() {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+        arms
+    }
+
     #[test]
     fn every_pinned_place_is_tagged_in_every_layout() {
-        // The pinned places are drawn one by one, each layout its own way.
+        // Each layout draws the pinned places its own way, one arm each.
         for layout in LayoutId::ALL {
-            let source = layout_source(layout);
-            let tags = source.matches("TourAnchor::NavPlace(").count();
-            assert!(
-                tags >= Destination::PINNED.len(),
-                "{layout:?} tags {tags} places"
-            );
+            let arms = pinned_arms(layout_source(layout));
+            for place in Destination::PINNED {
+                let name = format!("{place:?}");
+                let arm = arms
+                    .iter()
+                    .find(|(named, _)| *named == Some(name.as_str()))
+                    .or_else(|| arms.iter().find(|(named, _)| named.is_none()))
+                    .unwrap_or_else(|| panic!("{layout:?} does not draw {name}"));
+                assert!(
+                    arm.1.contains("TourAnchor::NavPlace("),
+                    "{layout:?} does not tag {name}"
+                );
+            }
         }
     }
 }
