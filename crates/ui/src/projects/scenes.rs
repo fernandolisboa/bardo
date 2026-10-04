@@ -703,7 +703,11 @@ impl ProjectsScreen {
             focus: self.scene_keys.clone(),
             on_step,
             on_enter,
-            hint: Some(tr(self.bardo.read(cx), Text::SceneKeysHint)),
+            hint: Some(guide::keys_hint(
+                self.bardo.read(cx),
+                Text::SceneKeysHint,
+                guide::refs::SHORTCUTS_LISTS,
+            )),
             scroll: self.scene_scroll.clone(),
         }
     }

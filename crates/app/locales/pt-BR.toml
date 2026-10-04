@@ -276,7 +276,7 @@ placeholder = "AIza…"
 [provider.higgsfield]
 name = "Higgsfield"
 purpose = "Clipes de vídeo pelos modelos que a Higgsfield oferece."
-placeholder = "ID da chave:segredo"
+placeholder = "ID da chave:chave secreta"
 
 [provider.typesafe]
 name = "TypeSafe (JEV)"
@@ -303,7 +303,7 @@ required = "Cole uma chave primeiro."
 too_short = "Isto é curto demais para ser uma chave de API."
 too_long = "Use no máximo 512 caracteres."
 invalid_characters = "Chaves não têm espaços, quebras de linha nem acentos."
-not_id_and_secret = "Cole o ID da chave e o segredo unidos por dois-pontos: KEY_ID:KEY_SECRET."
+not_id_and_secret = "Cole o ID da chave e a chave secreta unidos por dois-pontos: KEY_ID:KEY_SECRET."
 
 [research]
 title = "Pesquisa"
@@ -1958,6 +1958,7 @@ new = "Novo"
 learn_more = "Saiba mais"
 this_screen = "Tour desta tela"
 this_list = "Tour desta lista"
+this_panel = "Tour deste painel"
 this_stage = "Tour desta etapa"
 
 [tour.offer]
@@ -2451,6 +2452,121 @@ body = "Nada vai para a rede. Para publicar depois, revise o envio de novo na et
 [tour.missed.later]
 title = "Decidir depois"
 body = "Fecha a lista por enquanto. Cada post também espera na etapa Publicação do projeto, com as mesmas três escolhas."
+
+[tour.costs]
+name = "Tour de Custos"
+
+[tour.costs.month]
+title = "O mês"
+body = "Custos mostra um mês por vez, começando pelo atual. As setas voltam um mês e avançam de novo; os meses seguem o UTC, como os provedores cobram."
+
+[tour.costs.spent]
+title = "Quanto o mês gastou"
+body = "Quanto o mês gastou nos seus provedores, quantos orçamentos estão perto ou além do limite e quantos modelos rodaram sem preço."
+
+[tour.costs.budgets]
+title = "Orçamentos"
+body = "Defina um orçamento mensal para cada provedor pago. A partir de 80% a estimativa de uma geração avisa; quando um orçamento seria atingido, o Bardo pergunta antes de começar, e nunca interrompe uma tarefa no meio."
+
+[tour.costs.rates]
+title = "Tarifas"
+body = "Quando o provedor não diz quanto a chamada custou, o Bardo usa as tarifas: altere uma, restaure a do próprio Bardo ou adicione um modelo. Um modelo sem tarifa conta como zero até você adicionar uma."
+
+[tour.costs.channels]
+title = "Gasto por canal"
+body = "Quanto os vídeos de cada canal custaram no mês. Um mês sem gastos diz isso aqui."
+
+[tour.costs.videos]
+title = "Os vídeos mais caros"
+body = "Os projetos de vídeo que mais custaram no mês, com o canal de cada um."
+
+[tour.jobs]
+name = "Tour de Tarefas"
+
+[tour.jobs.panel]
+title = "O painel Tarefas"
+body = "Trabalho longo roda como tarefa enquanto você continua trabalhando. Este painel abre ao lado de qualquer tela e agrupa as tarefas: em execução, na fila, com falha e encerradas."
+
+[tour.jobs.progress]
+title = "Progresso"
+body = "Uma tarefa em execução mostra o progresso. A tela dela mostra o resultado quando termina, então não precisa ficar olhando aqui."
+
+[tour.jobs.cancel]
+title = "Cancelar"
+body = "Cancelar para uma tarefa em execução ou na fila e guarda o que ela fez para uma nova tentativa. Chamadas que o provedor já respondeu estão pagas."
+
+[tour.jobs.retry]
+title = "Tentar de novo"
+body = "Uma falha passageira, como tempo esgotado, faz a tarefa tentar de novo sozinha, até quatro tentativas no total. Uma duradoura para a tarefa: resolva o que ela diz, e Tentar de novo continua de onde parou."
+
+[tour.jobs.restart]
+title = "Fechar o Bardo no meio de uma tarefa"
+body = "Feche o Bardo quando quiser: na próxima vez que ele abrir, cada tarefa continua do último ponto salvo, e o trabalho que um provedor já fez não é pago duas vezes."
+
+[tour.keys]
+name = "Tour de Chaves de API"
+
+[tour.keys.tab]
+title = "Chaves de API"
+body = "O Bardo trabalha com a sua própria conta em cada provedor de IA, uma chave por provedor. Você paga cada um diretamente, pelos preços dele."
+
+[tour.keys.card]
+title = "Uma chave por provedor"
+body = "Cada cartão diz o que o provedor faz por você. Cole a chave que você criou no site dele e salve; uma tela que precisa de uma chave que falta avisa."
+
+[tour.keys.test]
+title = "Testar chave"
+body = "Com a chave salva, Testar chave faz a chamada mais barata que precisa dela e diz se funciona, ou o que há de errado: chave recusada, permissão faltando ou cota esgotada."
+
+[tour.keys.kept]
+title = "Onde as chaves ficam"
+body = "As chaves vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados nem para os logs do Bardo."
+
+[tour.keys.masked]
+title = "Só os últimos caracteres"
+body = "Uma chave salva nunca mais aparece: o cartão mostra os quatro últimos caracteres, e em todo texto que sai do Bardo a chave aparece mascarada. Trocar chave põe uma nova no lugar."
+
+[tour.appearance]
+name = "Tour de Aparência"
+
+[tour.appearance.tab]
+title = "Aparência"
+body = "Como o Bardo aparece e fala, salvo no seu perfil assim que você muda."
+
+[tour.appearance.layout]
+title = "Layout"
+body = "O Workspace tem barra lateral por pilar e cartões; o Studio é mais denso, com abas no topo e tabelas. Toda tela faz as mesmas coisas nos dois, e trocar mantém você onde está."
+
+[tour.appearance.theme]
+title = "Temas"
+body = "Dez temas: claros, escuros, de alto contraste e de terminal. Cada cartão diz o contraste de texto que atende."
+
+[tour.appearance.follow]
+title = "Seguir o Windows"
+body = "Troca entre um tema claro e um escuro, à sua escolha, quando o Windows troca de modo. Sempre o mesmo tema fica com o que você clicar."
+
+[tour.appearance.language]
+title = "Idioma da interface"
+body = "As palavras do próprio Bardo, este guia incluído, em português ou inglês. O que o Claude escreve segue o idioma de cada canal."
+
+[tour.appearance.tours]
+title = "Tours em telas novas"
+body = "Marca o Tour desta tela de uma tela como Novo até você fazer ou pular o tour dela. Os tours nunca começam sozinhos."
+
+[tour.metrics-sync]
+name = "Tour de Métricas"
+
+[tour.metrics-sync.tab]
+title = "Métricas"
+body = "O Bardo lê os números dos seus posts em cada rede numa sincronização: os números públicos do YouTube com a sua chave da Data API, o resto pelas contas conectadas."
+
+[tour.metrics-sync.on-start]
+title = "Sincronizar ao abrir"
+body = "Quando o Bardo abre, ele sincroniza se a verificação mais antiga passou deste tempo, ou nunca. Sincronizar agora, em Desempenho, sempre funciona."
+
+[tour.metrics-sync.where]
+title = "Onde aparecem"
+body = "Os números aparecem em Desempenho, e a primeira semana de cada post alimenta o ranqueamento de novas ideias."
 
 [guide]
 back_to_editor = "Voltar ao editor"

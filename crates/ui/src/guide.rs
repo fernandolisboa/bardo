@@ -27,7 +27,7 @@ use crate::appearance::look;
 use crate::icons::Lucide;
 use crate::kit;
 use crate::missed::MissedPosts;
-use crate::parts::OnPick;
+use crate::parts::{KeysHint, OnPick};
 use crate::shell::tr;
 use crate::tour::{Motion, Ring, Spotlight};
 
@@ -149,9 +149,19 @@ pub mod refs {
     pub const EXPORTING_OUTDATED: GuideRef = at("exporting", "outdated");
     pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
     pub const INSTAGRAM_UPLOAD: GuideRef = at("connect-instagram", "upload");
+    pub const COSTS_MONTH: GuideRef = at("costs", "month");
+    pub const COSTS_BUDGETS: GuideRef = at("costs", "budgets");
+    pub const COSTS_RATES: GuideRef = at("costs", "rates");
+    pub const JOBS_TEST: GuideRef = at("jobs", "test");
+    pub const KEYS_KEPT: GuideRef = at("api-keys", "where-kept");
+    pub const SETTINGS_LAYOUT: GuideRef = at("settings", "layout");
+    pub const SETTINGS_TOURS: GuideRef = at("settings", "tours");
+    pub const METRICS_ON_START: GuideRef = at("metrics-sync", "on-start");
+    pub const SHORTCUTS_LISTS: GuideRef = at("shortcuts", "lists");
+    pub const SHORTCUTS_GUIDE: GuideRef = at("shortcuts", "guide");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 48] = [
+    pub const ALL: [GuideRef; 58] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -200,6 +210,16 @@ pub mod refs {
         EXPORTING_OUTDATED,
         YOUTUBE_UPLOAD,
         INSTAGRAM_UPLOAD,
+        COSTS_MONTH,
+        COSTS_BUDGETS,
+        COSTS_RATES,
+        JOBS_TEST,
+        KEYS_KEPT,
+        SETTINGS_LAYOUT,
+        SETTINGS_TOURS,
+        METRICS_ON_START,
+        SHORTCUTS_LISTS,
+        SHORTCUTS_GUIDE,
     ];
 }
 
@@ -291,6 +311,23 @@ pub fn place_info(
     )
 }
 
+/// The Jobs panel's "Tour this panel", once the panel has jobs to show.
+/// The panel sits beside the screen, so Shift+F1 stays the screen's.
+pub fn panel_tour(bardo: &Bardo, has_content: bool, cx: &App) -> Option<AnyElement> {
+    let tour = bardo.place_tour(TourPlace::Screen(Destination::Jobs), has_content)?;
+    Some(
+        tour_button(
+            bardo,
+            "tour-this-panel",
+            Text::TourThisPanel,
+            tour,
+            false,
+            cx,
+        )
+        .into_any_element(),
+    )
+}
+
 /// The missed posts list's "Tour this list", the one tour that runs while
 /// the list is up (Shift+F1 there). Hidden while another tour waits behind
 /// the list, which Shift+F1 leaves alone too.
@@ -360,6 +397,24 @@ pub fn labeled_info(
             open_section(section, window, cx);
         },
     )
+}
+
+/// What the keys over a collection do, for its ⓘ, with the guide
+/// `section` that says more.
+pub fn keys_hint(bardo: &Bardo, text: Text, section: GuideRef) -> KeysHint {
+    KeysHint {
+        text: tr(bardo, text),
+        more: tr(bardo, Text::GuideMoreInGuide),
+        section,
+    }
+}
+
+/// The ⓘ of a [`KeysHint`], drawn by the layout that shows it.
+pub fn keys_info(id: impl Into<ElementId>, hint: KeysHint) -> Popover {
+    let section = hint.section;
+    kit::info_more(id, None, hint.text, hint.more, move |window, cx| {
+        open_section(section, window, cx);
+    })
 }
 
 /// A row of the help menu.
@@ -700,12 +755,17 @@ impl Guide {
                 trail.push(framed.into_any_element());
             }
         }
+        // Long labels (Portuguese in a monospace theme) wrap the trailing
+        // buttons to a line of their own, still on the right, rather than
+        // past the card's edge.
         h_flex()
-            .gap_2()
+            .flex_wrap()
+            .gap_x_2()
+            .gap_y_1()
             .items_center()
             .justify_between()
             .child(h_flex().gap_1().children(lead))
-            .child(h_flex().gap_1().children(trail))
+            .child(h_flex().ml_auto().gap_1().children(trail))
             .into_any_element()
     }
 

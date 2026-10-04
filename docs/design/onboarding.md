@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages), #110 (Channels, Accounts, Settings › Networks, Publish stage and missed posts tours, Publishing pages with the network setup guides in both languages)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages), #110 (Channels, Accounts, Settings › Networks, Publish stage and missed posts tours, Publishing pages with the network setup guides in both languages), #111 (Costs, Jobs panel and Settings tab tours, the reference pages, and full coverage)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -111,7 +111,7 @@ Shift+F1 starts the stage tour when one is offered, else the screen tour, and th
 
 ## Screen tours
 
-A screen with a tour of its own (Research, Themes, Performance, Projects, Personas, Templates, Channels and Accounts) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it. A tour never starts on its own:
+A screen with a tour of its own (Research, Themes, Performance, Projects, Personas, Templates, Channels, Accounts and Costs) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it. A tour never starts on its own:
 
 - **Nothing to show, no tour**: while the screen is empty (no research results, no themes, no posts), the button and the menu row are hidden and Shift+F1 does nothing; the screen's empty state says what to do first. The guide page's **Show me** still starts the tour, and steps fall back as they say.
 - **The "new" mark**: from the first visit with content, the button and the menu row carry **New** until the tour is completed or dismissed (a tour closed midway keeps it), and again when the tour's content version rises. These rules are `app` logic (`Bardo::screen_tour`).
@@ -124,7 +124,7 @@ The Script, Narration, Scenes and Clips stages of a project have tours of their 
 
 A step whose control is out of view scrolls the page to it; a step whose control is missing (no scene selected, no narration yet) lights the part that holds it, or is passed over when the step says so.
 
-Each ⓘ on a screen with a guide page ends with **More in the guide**, which opens the section that explains it.
+Each ⓘ ends with **More in the guide**, which opens the section that explains it.
 
 ### The editor and the Render stage
 
@@ -144,6 +144,16 @@ The Render stage has a tour like the other stages ("something to show" is a cut 
 - **Settings › Networks** has a tab tour (`TourPlace::Settings`): **Tour this screen** shows in the Settings header on that tab only, and Shift+F1 starts it there. Starting it from the guide opens the tab first.
 - The **Publish** stage offers its tour once the channel has networks to post on. Its steps only explain: the review's scheduling row is lit when the review is open, the upload otherwise; nothing is uploaded, exported, scheduled or linked.
 
+### Costs, Jobs and Settings
+
+- **Costs** always offers its tour: the month, the figures, the budgets (the warning from 80%, the question at 100%), the rates and the models without one, spend by channel and the most expensive videos. Workspace shows the budgets or the rates, one tab at a time: the step for the tab not shown lights its figure at the top instead. A month without spend shows the channels step in the middle and passes over the videos.
+- The **Jobs panel** sits beside the screen, so its tour is its own button, **Tour this panel**, shown once the panel holds a job (Shift+F1 stays the screen's). A step on the panel opens it rather than toggling it, and a link to `bardo:go/jobs` does the same. The progress, Cancel and Retry steps light the first job that has one, else the panel; nothing is cancelled or retried.
+- Every **Settings** tab has a tour: API keys (one key per provider, testing, where keys are kept, what of a key shows), Networks, Appearance (layout, theme, following Windows, interface language, the "new" mark) and Metrics (syncing on start, where the numbers show).
+
+### Coverage
+
+Every place has a guide page that names it as its `place` and a tour: each screen (the Guide itself aside, and the Settings screen, which always shows one of its tabs), each project stage with the editor, each Settings tab and the Jobs panel. A test in `bardo_app` fails on a place without both, in either language, so a new place or stage cannot ship without them. Every ⓘ in the app ends with **More in the guide**: the plain ⓘ is gone, and screens draw theirs with the guide section it opens.
+
 ## The Guide screen
 
 The user guide inside the app, built from the same screen parts as every other screen, so each layout places it like the rest:
@@ -156,7 +166,7 @@ Keys: F1 from any screen (over the editor too, see above) opens the page for the
 
 Tour cards whose step names a guide section show **Learn more**: it closes the tour (Resume tour brings it back) and opens that section.
 
-The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says how to write one. The app embeds them when it is built, and its tests fail on a page missing in one language, a section that differs, a broken link or a tour step pointing to no section. A coverage report lists the places no page explains yet; #111 makes it fail.
+The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says how to write one. The app embeds them when it is built, and its tests fail on a page missing in one language, a section that differs, a broken link, a tour step pointing to no section, or a place with no page or no tour.
 
 ## Later slices
 
@@ -165,8 +175,8 @@ The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says
 | #107 | The Research, Themes and Performance tours and "Tour this screen" (built) |
 | #108 | The Projects, Personas and Templates tours, the Script, Narration, Scenes and Clips stage tours and "Tour this stage" (built) |
 | #109 | The editor's tour, the Render stage tour and the guide over the editor (built) |
-| #110 | The Publishing tour (network guides in pt-BR too) |
-| #111 | Costs, Jobs and Settings tours, and full coverage |
+| #110 | The Publishing tours (network guides in pt-BR too) (built) |
+| #111 | Costs, Jobs and Settings tours, and full coverage (built) |
 | #112 | The documentation site on GitHub Pages |
 
 The user guide has one source, `docs/guide/<language>/`, read by the Guide screen and published as the site, so the app and the site never drift apart.

@@ -370,7 +370,7 @@ impl Shell {
         }
         self.close_editor(window, cx);
         match place {
-            TourPlace::Screen(place) => self.pick(place, window, cx),
+            TourPlace::Screen(place) => self.reveal(place, window, cx),
             TourPlace::Stage(stage) => {
                 self.pick(Destination::Projects, window, cx);
                 self.projects
@@ -384,6 +384,18 @@ impl Shell {
             // The list's tour runs over the list: posts put off come back
             // for it. With none missed, its cards show in the middle.
             TourPlace::Missed => self.missed.update(cx, |missed, cx| missed.reopen(cx)),
+        }
+    }
+
+    /// Brings `place` on screen for a tour's step: like a pick in the
+    /// navigation, except that the Jobs panel opens rather than toggles,
+    /// beside the screen the user is on.
+    fn reveal(&mut self, place: Destination, window: &mut Window, cx: &mut Context<Self>) {
+        if place == Destination::Jobs {
+            self.jobs_open = true;
+            cx.notify();
+        } else {
+            self.pick(place, window, cx);
         }
     }
 
@@ -486,6 +498,8 @@ impl Shell {
             Destination::Projects => self.projects.read(cx).has_content(),
             Destination::Personas => self.personas.read(cx).has_content(),
             Destination::Templates => self.templates.read(cx).has_content(),
+            // Its providers and rates always show.
+            Destination::Costs => true,
             _ => false,
         };
         self.bardo.read(cx).screen_tour(self.screen, has_content)
@@ -578,6 +592,7 @@ impl Shell {
             self.close_editor(window, cx);
         }
         match place {
+            GuidePlace::Screen(Destination::Jobs) => self.reveal(Destination::Jobs, window, cx),
             GuidePlace::Screen(place) => self.show(place, window, cx),
             GuidePlace::Stage(stage) => {
                 self.pick(Destination::Projects, window, cx);

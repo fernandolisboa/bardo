@@ -9,7 +9,7 @@
 
 use std::rc::Rc;
 
-use bardo_app::{Bardo, Destination, Pillar, Stage, StageStatus, Step, Text};
+use bardo_app::{Bardo, Destination, GuideRef, Pillar, Stage, StageStatus, Step, Text};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, ScrollHandle, SharedString, Window,
@@ -280,10 +280,19 @@ pub struct CollectionKeys {
     /// nothing.
     pub on_enter: Option<OnKey>,
     /// What the keys do, behind an ⓘ.
-    pub hint: Option<SharedString>,
+    pub hint: Option<KeysHint>,
     /// Scrolls the items, when a layout gives them a scroll of their own,
     /// so the screen can bring the selected one into view.
     pub scroll: ScrollHandle,
+}
+
+/// What the keys over a collection do, as its ⓘ says it: the text, the
+/// guide's "More in the guide" and the section that opens.
+#[derive(Clone)]
+pub struct KeysHint {
+    pub text: SharedString,
+    pub more: SharedString,
+    pub section: GuideRef,
 }
 
 /// A figure of the page: "Spent in October: $40.70".
