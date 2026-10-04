@@ -62,7 +62,7 @@ X e Kick não conectam: os posts deles são [exportados](exporting.md) e postado
 | Conectada como | O Bardo pode enviar e ler números como essa conta | **Verificar**, **Desconectar** |
 | Reconexão necessária | A rede recusou renovar o acesso: ele foi revogado ou expirou | **Reconectar**, **Desconectar** |
 
-Os tokens ficam no Gerenciador de Credenciais do Windows, por perfil e por conta; o banco de dados do Bardo guarda só o nome e o id da conta e quando o acesso expira. Uma conta conectada precisa ser desconectada antes de ser removida.
+Os tokens ficam no Gerenciador de Credenciais do Windows, por perfil e por conta; o banco de dados do Bardo guarda só o nome e o id da conta, os escopos concedidos, quando o acesso expira e a última renovação. Uma conta conectada precisa ser desconectada antes de ser removida.
 
 <a id="add"></a>
 ## Adicionar uma rede

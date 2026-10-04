@@ -51,7 +51,7 @@ Bardo works from the app's sandbox; it never needs the app approved.
 
 TikTok's Content Sharing and App Review guidelines reject apps for private or personal use; "a utility tool to help upload contents to the account(s) you or your team manages" is listed as not acceptable. A personal Bardo setup is exactly that, so it would not pass, and it does not need to: uploading drafts to your own inbox needs no audit. What an audit would add is Direct Post (posting without the TikTok app), which Bardo does not build.
 
-**Keep the account private while you test.** TikTok documents that every account posting through an unaudited app must be private at the time of posting, and that such posts are visible only to the creator (`SELF_ONLY`). TikTok writes these rules for Direct Post; whether it also applies them to drafts sent from a sandbox is checked in the publishing regression pass. Set the account to **Private account** in TikTok's **Settings and privacy › Privacy** until then.
+**Keep the account private while you test.** TikTok documents that every account posting through an unaudited app must be private at the time of posting, and that such posts are visible only to the creator (`SELF_ONLY`). TikTok writes these rules for Direct Post; it is unconfirmed whether it also applies them to drafts sent from a sandbox. To be safe, set the account to **Private account** in TikTok's **Settings and privacy › Privacy** while you test.
 
 <a id="save"></a>
 ## 4. Save the app in Bardo

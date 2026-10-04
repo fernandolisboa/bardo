@@ -15,8 +15,6 @@ Um canal é um nicho para um mercado: um assunto, um idioma, um país e um narra
 
 A lista mostra cada canal com o nicho e o país. Escolha um para editá-lo ao lado da lista; **Novo canal** limpa o formulário para um canal novo. **Criar canal** (ou **Salvar alterações**) confere o formulário e diz, embaixo de cada campo, o que ainda falta.
 
-Um canal é só seu: nada dele é enviado a lugar nenhum até você publicar um vídeo.
-
 <a id="niche"></a>
 ## Nicho e temas
 
@@ -50,4 +48,4 @@ A [persona](personas.md) que narra os vídeos do canal: a voz, o tom e o estilo 
 <a id="accounts"></a>
 ## Depois: as contas de rede
 
-Um canal posta pelas suas contas, uma por rede. Adicione-as em [Contas](bardo:go/accounts): cada uma tem o identificador com que posta, os metadados de que todo post parte e o preset de render dos arquivos. Veja [Contas de rede](network-accounts.md).
+Um canal posta pelas suas contas, uma por rede. Adicione-as em [Contas](bardo:go/accounts): cada uma tem o @ com que posta, os metadados de que todo post parte e o preset de render dos arquivos. Veja [Contas de rede](network-accounts.md).

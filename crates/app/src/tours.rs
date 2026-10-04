@@ -203,7 +203,7 @@ pub enum Control {
     PublishPost,
     /// Missed posts: the list.
     MissedList,
-    /// Missed posts: the first post's Send now.
+    /// Missed posts: the first post's Post now.
     MissedSend,
     /// Missed posts: the first post's New time.
     MissedNewTime,

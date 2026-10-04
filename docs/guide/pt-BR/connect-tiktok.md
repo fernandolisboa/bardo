@@ -53,7 +53,7 @@ O Bardo funciona a partir do sandbox do app; ele nunca precisa do app aprovado.
 
 As diretrizes de Compartilhamento de Conteúdo e de Revisão de Apps do TikTok rejeitam apps de uso privado ou pessoal; "uma ferramenta para ajudar a enviar conteúdo às contas que você ou sua equipe gerenciam" aparece como não aceitável. Uma configuração pessoal do Bardo é exatamente isso, então não passaria, e nem precisa: enviar rascunhos à sua própria caixa de entrada não exige auditoria. O que uma auditoria acrescentaria é o Direct Post (postar sem o app do TikTok), que o Bardo não implementa.
 
-**Mantenha a conta privada enquanto testa.** O TikTok documenta que toda conta que posta por um app sem auditoria precisa estar privada no momento do post, e que esses posts ficam visíveis só para quem criou (`SELF_ONLY`). O TikTok escreve essas regras para o Direct Post; se ele as aplica também a rascunhos mandados de um sandbox é conferido no teste de regressão da publicação. Até lá, deixe a conta como **Conta privada** em **Configurações e privacidade › Privacidade** no TikTok.
+**Mantenha a conta privada enquanto testa.** O TikTok documenta que toda conta que posta por um app sem auditoria precisa estar privada no momento do post, e que esses posts ficam visíveis só para quem criou (`SELF_ONLY`). O TikTok escreve essas regras para o Direct Post; não está confirmado se ele as aplica também a rascunhos mandados de um sandbox. Por segurança, deixe a conta como **Conta privada** em **Configurações e privacidade › Privacidade** no TikTok enquanto testa.
 
 <a id="save"></a>
 ## 4. Salve o app no Bardo

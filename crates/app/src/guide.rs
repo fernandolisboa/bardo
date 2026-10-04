@@ -151,9 +151,7 @@ impl GuidePlace {
             GuidePlace::Settings(_) => Destination::Settings,
         }
     }
-}
 
-impl GuidePlace {
     /// The place a tour of `place` runs on; `None` for the missed posts
     /// list, which is no place to go to.
     pub fn of_tour(place: TourPlace) -> Option<Self> {

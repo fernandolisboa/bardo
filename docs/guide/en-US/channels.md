@@ -15,8 +15,6 @@ A channel is one niche for one market: a subject, a language, a country and a na
 
 The list shows each channel with its niche and country. Pick one to edit it beside the list; **New channel** empties the form for a new one. **Create channel** (or **Save changes**) checks the form and says, under each field, what it still needs.
 
-A channel is yours alone: nothing on it is sent anywhere until you publish a video.
-
 <a id="niche"></a>
 ## Niche and themes
 

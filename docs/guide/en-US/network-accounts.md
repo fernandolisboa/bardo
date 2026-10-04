@@ -62,7 +62,7 @@ X and Kick don't connect: their posts are [exported](exporting.md) and posted by
 | Connected as | Bardo can upload and read numbers as that account | **Check**, **Disconnect** |
 | Reconnect needed | The network refused to renew the access: it was revoked or ran out | **Reconnect**, **Disconnect** |
 
-The tokens are kept in Windows Credential Manager, per profile and account; Bardo's database keeps only the account's name and id and when the access runs out. A connected account has to be disconnected before it can be removed.
+The tokens are kept in Windows Credential Manager, per profile and account; Bardo's database keeps only the account's name and id, the granted scopes, when the access runs out and when it was last renewed. A connected account has to be disconnected before it can be removed.
 
 <a id="add"></a>
 ## Adding a network

@@ -292,8 +292,12 @@ pub fn place_info(
 }
 
 /// The missed posts list's "Tour this list", the one tour that runs while
-/// the list is up (Shift+F1 there).
+/// the list is up (Shift+F1 there). Hidden while another tour waits behind
+/// the list, which Shift+F1 leaves alone too.
 pub fn missed_posts_tour(bardo: &Bardo, cx: &App) -> Option<AnyElement> {
+    if bardo.tour_step(false).is_some() {
+        return None;
+    }
     let tour = bardo.place_tour(TourPlace::Missed, true)?;
     Some(
         tour_button(bardo, "tour-this-list", Text::TourThisList, tour, true, cx).into_any_element(),

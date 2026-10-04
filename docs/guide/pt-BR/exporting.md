@@ -16,7 +16,7 @@ A linha de cada rede tem uma caixa: marque as redes a exportar. Redes ainda não
 <a id="export"></a>
 ## Exportar
 
-**Exportar (n)** roda uma tarefa para as redes escolhidas, com o progresso na etapa e em Tarefas, para você continuar trabalhando. **Cancelar** para a tarefa; **Retomar** exporta as redes que faltam e mantém as prontas. Uma exportação espera enquanto o projeto renderiza, porque o render reescreve os arquivos que ela copia.
+**Exportar (n)** roda uma tarefa para as redes escolhidas, com o progresso na etapa e em Tarefas, para você continuar trabalhando. **Cancelar** para a tarefa; **Retomar** exporta as redes que faltam e mantém as prontas. Uma exportação só começa depois que o render do projeto termina, porque o render reescreve os arquivos que ela copia.
 
 <a id="folder"></a>
 ## A pasta

@@ -101,7 +101,7 @@ In the review, **When** offers **Once processed** or **Schedule**. With **Schedu
 
 The post then shows **Scheduled** with the time it goes public. Until then, **Change time** sends a new time and **Cancel schedule** leaves the video private on YouTube with no publish time; publishing it later is done in YouTube Studio. Both resend the made-for-kids answer and the synthetic-content disclosure YouTube already has, because YouTube clears whatever a change leaves out. A change made in YouTube Studio shows up the next time Bardo syncs metrics.
 
-Each metrics sync reads a scheduled video back through the connected account. Once YouTube made it public, the post becomes **Published** with YouTube's publish time and its metrics are read like any other post's. The sync needs no API key while only scheduled videos are tracked.
+Each metrics sync reads a scheduled video back through the connected account. Once YouTube made it public, the post becomes **Posted** with YouTube's publish time and its metrics are read like any other post's. The sync needs no API key while only scheduled videos are tracked.
 
 <a id="private"></a>
 ## Uploads stay private until the audit

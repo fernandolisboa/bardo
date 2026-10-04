@@ -2338,7 +2338,7 @@ body = "O idioma em que roteiros e narração são escritos, e o país cujo púb
 
 [tour.channels.persona]
 title = "Persona padrão"
-body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra pessoa. As personas ficam numa tela própria, e uma pode narrar vários canais."
+body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra persona. As personas ficam numa tela própria, e uma pode narrar vários canais."
 
 [tour.channels.defaults]
 title = "Modelo de vídeo e legendas"
@@ -2346,7 +2346,7 @@ body = "O modelo que anima as imagens das cenas do canal em clipes, e o visual d
 
 [tour.channels.accounts]
 title = "Contas de rede"
-body = "Depois, dê ao canal suas contas em Contas: uma por rede, com o identificador, os padrões de metadados e o preset de render."
+body = "Depois, dê ao canal suas contas em Contas: uma por rede, com o @, os padrões de metadados e o preset de render."
 
 [tour.accounts]
 name = "Tour das contas"
@@ -2357,7 +2357,7 @@ body = "As contas de rede pertencem a um canal. Escolha um aqui para ver as cont
 
 [tour.accounts.accounts]
 title = "Uma conta por rede"
-body = "Cada rede em que o canal publica tem uma conta, com o identificador com que ele publica. Renders, exportações e envios para essa rede usam essa conta."
+body = "Cada rede em que o canal publica tem uma conta, com o @ com que ele publica. Renders, exportações e envios para essa rede usam essa conta."
 
 [tour.accounts.metadata]
 title = "Padrões de metadados"
@@ -2387,12 +2387,12 @@ title = "Seus próprios apps"
 body = "O Bardo não traz app próprio: você registra um em cada rede, então a cota, a tela de consentimento e qualquer revisão são suas. O guia mostra cada um, passo a passo."
 
 [tour.networks.card]
-title = "O ID e o segredo do app"
-body = "Cole o ID (o TikTok chama de client key) e o segredo do site de desenvolvedores da rede, e salve. Substitua-os aqui quando criar um segredo novo."
+title = "O ID e a chave secreta do app"
+body = "Cole o ID (o TikTok chama de client key) e a chave secreta do site de desenvolvedores da rede, e salve. Troque-os aqui quando criar uma chave secreta nova."
 
 [tour.networks.kept]
 title = "Onde ficam guardados"
-body = "As credenciais salvas vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados ou os logs do Bardo. O cartão mostra só os quatro últimos caracteres do segredo."
+body = "As credenciais salvas vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados ou os logs do Bardo. O cartão mostra só os quatro últimos caracteres da chave secreta."
 
 [tour.networks.connect]
 title = "Depois, conecte"

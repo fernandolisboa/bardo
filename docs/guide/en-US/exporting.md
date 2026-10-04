@@ -16,7 +16,7 @@ Each network's row has a box: tick the networks to export. Networks not exported
 <a id="export"></a>
 ## Exporting
 
-**Export (n)** runs one job for the chosen networks, with its progress on the stage and in Jobs, so you can keep working. **Cancel** stops it; **Resume** exports the networks left and keeps the finished ones. An export waits while the project is rendering, since the render rewrites the files it copies.
+**Export (n)** runs one job for the chosen networks, with its progress on the stage and in Jobs, so you can keep working. **Cancel** stops it; **Resume** exports the networks left and keeps the finished ones. An export can't start until a render of the project ends, since the render rewrites the files it copies.
 
 <a id="folder"></a>
 ## The folder
