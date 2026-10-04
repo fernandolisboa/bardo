@@ -1152,7 +1152,7 @@ impl Bardo {
 
     /// The tour `stage` of the open project offers ("Tour this stage"),
     /// under the same rules as a screen's: only once the stage has made
-    /// something (a script, a narration, scenes, a clip).
+    /// something (a script, a narration, scenes, a clip, a cut).
     pub fn stage_tour(&self, stage: Stage, has_content: bool) -> Option<ScreenTour> {
         self.place_tour(TourPlace::Stage(stage), has_content)
     }

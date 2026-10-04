@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use bardo_app::bardo_domain::{CutReasons, JobState, Score, timecode};
 use bardo_app::{
-    Bardo, BudgetConsent, CutSuggestionError, SpendEstimate, SuggestionState, SuggestionView,
-    SuggestionsView, Text,
+    Bardo, BudgetConsent, Control, CutSuggestionError, Side, SpendEstimate, SuggestionState,
+    SuggestionView, SuggestionsView, Text, TourAnchor,
 };
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
@@ -31,6 +31,7 @@ use super::{EditorScreen, color, icon, label, tool_button};
 use crate::appearance::EditorColor;
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_line, near_line};
+use crate::tour::Anchored as _;
 
 actions!(cut_suggestions, [NextCut]);
 
@@ -347,6 +348,7 @@ impl EditorScreen {
             .map_or(0, |view| self.cuts.pending(view).count());
         let running = self.suggestions().is_some_and(SuggestionsView::is_running);
         tool_button("toggle-cuts", editing, on)
+            .relative()
             .when(!on, |button| {
                 button.border_1().border_color(color(HAIRLINE))
             })
@@ -374,6 +376,11 @@ impl EditorScreen {
             .when(editing, |button| {
                 button.on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_cuts(cx)))
             })
+            .tour_anchor(
+                TourAnchor::Control(Control::EditorSuggestions),
+                Side::Above,
+                None,
+            )
             .into_any_element()
     }
 

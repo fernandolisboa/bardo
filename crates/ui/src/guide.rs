@@ -73,7 +73,8 @@ pub struct GuideHooks {
 
 impl Global for GuideHooks {}
 
-fn start_tour(tour: TourId, window: &mut Window, cx: &mut App) {
+/// Starts `tour` through the shell, as a screen's tour button does.
+pub fn start_tour(tour: TourId, window: &mut Window, cx: &mut App) {
     if let Some(start) = cx
         .try_global::<GuideHooks>()
         .map(|hooks| hooks.tour.clone())
@@ -131,9 +132,11 @@ pub mod refs {
     pub const TEMPLATES_VERSIONS: GuideRef = at("templates", "versions");
     pub const TEMPLATES_FIELDS: GuideRef = at("templates", "fields");
     pub const TEMPLATES_VARIABLES: GuideRef = at("templates", "variables");
+    pub const RENDER_TARGETS: GuideRef = at("render", "targets");
+    pub const RENDER_LAST: GuideRef = at("render", "last");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 31] = [
+    pub const ALL: [GuideRef; 33] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -165,6 +168,8 @@ pub mod refs {
         TEMPLATES_VERSIONS,
         TEMPLATES_FIELDS,
         TEMPLATES_VARIABLES,
+        RENDER_TARGETS,
+        RENDER_LAST,
     ];
 }
 
@@ -331,6 +336,9 @@ pub struct Guide {
     motion: Rc<RefCell<Motion>>,
     /// Why the last menu action failed.
     problem: Option<Text>,
+    /// Over the editor only its tours show: no offer, menu or shortcuts
+    /// card, and the missed posts, not drawn there, hold nothing back.
+    over_editor: bool,
 }
 
 impl EventEmitter<GuideEvent> for Guide {}
@@ -350,6 +358,17 @@ impl Guide {
             button: None,
             motion: Rc::default(),
             problem: None,
+            over_editor: false,
+        }
+    }
+
+    /// The editor opened over the screens (`true`) or closed.
+    pub fn set_over_editor(&mut self, over: bool, cx: &mut Context<Self>) {
+        if self.over_editor != over {
+            self.over_editor = over;
+            self.menu = None;
+            self.shortcuts = false;
+            cx.notify();
         }
     }
 
@@ -399,6 +418,9 @@ impl Guide {
     }
 
     fn layer(&self, cx: &App) -> Option<Layer> {
+        if self.over_editor {
+            return self.bardo.read(cx).tour_step(false).map(Layer::Tour);
+        }
         let missed_open = self.missed.read(cx).is_open();
         if missed_open {
             // The missed posts come first; the tour waits behind them.

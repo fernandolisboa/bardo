@@ -27,7 +27,9 @@ use bardo_app::bardo_domain::{
     AudioItem, AudioLane, DUCK_RANGE, Decibels, DuckEnvelope, Ducking, Edge, ItemRef, LaneMix,
     Track as Lane, timecode,
 };
-use bardo_app::{ClipMedia, ClipView, EditAction, Editor, EditorView, Text};
+use bardo_app::{
+    ClipMedia, ClipView, Control, EditAction, Editor, EditorView, Side, Text, TourAnchor,
+};
 use gpui_kit::component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -40,6 +42,7 @@ use super::tokens::*;
 use super::{EditorScreen, clip_name, color, icon, label, tool_button};
 use crate::appearance::EditorColor;
 use crate::shell::tr;
+use crate::tour::Anchored as _;
 
 /// The track header column, shared with the toolbar's timecode.
 const HEADER: f32 = 200.;
@@ -309,7 +312,16 @@ impl EditorScreen {
                     .border_b_1()
                     .border_color(color(HAIRLINE)),
             )
-            .children(Track::ALL.map(|track| self.render_track_header(view, track, cx)));
+            .child(self.render_track_header(view, Track::Captions, cx))
+            .child(self.render_track_header(view, Track::Video, cx))
+            .child(
+                v_flex()
+                    .relative()
+                    .child(self.render_track_header(view, Track::Narration, cx))
+                    .child(self.render_track_header(view, Track::Music, cx))
+                    .child(self.render_track_header(view, Track::Sfx, cx))
+                    .tour_anchor(TourAnchor::Control(Control::EditorMix), Side::Right, None),
+            );
 
         let lanes_bounds = self.timeline.lanes.clone();
         let measure = canvas(
@@ -384,6 +396,7 @@ impl EditorScreen {
                 )
         });
         let body = h_flex()
+            .relative()
             .flex_1()
             .min_h_0()
             .items_start()
@@ -437,6 +450,11 @@ impl EditorScreen {
                         }
                         cx.notify();
                     })),
+            )
+            .tour_anchor(
+                TourAnchor::Control(Control::EditorTracks),
+                Side::Above,
+                None,
             );
         v_flex()
             .size_full()
@@ -467,6 +485,7 @@ impl EditorScreen {
             .map_or(Duration::ZERO, |editor| editor.playhead());
         let snapping = self.editor.as_ref().is_some_and(Editor::snapping);
         let snap = tool_button("toggle-snap", editing, snapping)
+            .relative()
             .when(!snapping, |button| {
                 button.border_1().border_color(color(HAIRLINE))
             })
@@ -478,7 +497,8 @@ impl EditorScreen {
             .child(tr(bardo, Text::EditorSnapWords))
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.with_editor(cx, |editor| editor.set_snapping(!editor.snapping()));
-            }));
+            }))
+            .tour_anchor(TourAnchor::Control(Control::EditorSnap), Side::Above, None);
         let ducking = self
             .editor
             .as_ref()
@@ -486,6 +506,7 @@ impl EditorScreen {
             .map(|timeline| timeline.mix().ducking);
         let ducking_on = ducking.is_some_and(|ducking| ducking.on);
         let duck = tool_button("toggle-duck", editing, ducking_on)
+            .relative()
             .when(!ducking_on, |button| {
                 button.border_1().border_color(color(HAIRLINE))
             })
@@ -505,7 +526,8 @@ impl EditorScreen {
                         cx,
                     );
                 }))
-            });
+            })
+            .tour_anchor(TourAnchor::Control(Control::EditorDuck), Side::Above, None);
         let shown = self
             .editor
             .as_ref()
@@ -513,6 +535,7 @@ impl EditorScreen {
             .map(|timeline| timeline.captions().shown());
         let captions_on = shown == Some(true);
         let captions = tool_button("toggle-captions", editing, captions_on)
+            .relative()
             .when(!captions_on, |button| {
                 button.border_1().border_color(color(HAIRLINE))
             })
@@ -526,7 +549,12 @@ impl EditorScreen {
                 button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.edit(EditAction::ShowCaptions(!shown), cx);
                 }))
-            });
+            })
+            .tour_anchor(
+                TourAnchor::Control(Control::EditorCaptions),
+                Side::Above,
+                None,
+            );
         h_flex()
             .h(px(36.))
             .flex_none()
@@ -548,16 +576,26 @@ impl EditorScreen {
                     .gap_1()
                     .items_center()
                     .child(
-                        tool_button("tool-select", true, true)
-                            .child(tr(bardo, Text::EditorToolSelect)),
-                    )
-                    .child(
-                        tool_button("tool-split", editing, false)
-                            .child(tr(bardo, Text::EditorToolSplit))
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                let reach = this.timeline.snap_reach();
-                                this.edit(EditAction::SplitAtPlayhead { reach }, cx);
-                            })),
+                        h_flex()
+                            .relative()
+                            .gap_1()
+                            .child(
+                                tool_button("tool-select", true, true)
+                                    .child(tr(bardo, Text::EditorToolSelect)),
+                            )
+                            .child(
+                                tool_button("tool-split", editing, false)
+                                    .child(tr(bardo, Text::EditorToolSplit))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                        let reach = this.timeline.snap_reach();
+                                        this.edit(EditAction::SplitAtPlayhead { reach }, cx);
+                                    })),
+                            )
+                            .tour_anchor(
+                                TourAnchor::Control(Control::EditorTools),
+                                Side::Above,
+                                None,
+                            ),
                     )
                     .child(div().w(px(1.)).h(px(18.)).mx_1().bg(color(HAIRLINE)))
                     .child(snap)

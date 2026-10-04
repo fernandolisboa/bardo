@@ -12,7 +12,10 @@
 use std::rc::Rc;
 
 use bardo_app::bardo_domain::{Gate, GateLevel, Job, JobState, NetworkAccountId, VideoProjectId};
-use bardo_app::{Bardo, RenderError, RenderReview, RenderTarget, Stage, Text, render_job_files};
+use bardo_app::{
+    Bardo, Control, RenderError, RenderReview, RenderTarget, Stage, Text, TourAnchor,
+    render_job_files,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::progress::Progress;
@@ -23,6 +26,7 @@ use gpui_kit::{AnyElement, App, ClickEvent, SharedString, Window, div, px};
 
 use super::{ProjectsScreen, clock, muted};
 use crate::appearance::look;
+use crate::guide;
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Figure, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
@@ -323,11 +327,16 @@ impl ProjectsScreen {
             matches!(job.state(), JobState::Failed | JobState::Cancelled) && job.can_retry()
         });
         let bardo = self.bardo.read(cx);
-        let mut row = h_flex().gap_2().flex_wrap().items_center().child(kit::info(
-            "render-info",
-            None,
-            tr(bardo, Text::RenderInfo),
-        ));
+        let mut row = h_flex()
+            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .child(guide::info(
+                bardo,
+                "render-info",
+                tr(bardo, Text::RenderInfo),
+                guide::refs::RENDER_TARGETS,
+            ));
         if review.is_checked() && !running {
             row = row.child(div().text_sm().text_color(look(cx).tokens.text2).child(
                 SharedString::from(bardo.text_with(
@@ -679,7 +688,13 @@ impl ProjectsScreen {
                     .map(|gate| gate_line(bardo, gate, cx))
                     .collect()
             };
-            body.push(section(Text::RenderColumnChecks, checks));
+            body.push(
+                kit::anchor(
+                    TourAnchor::Control(Control::RenderChecks),
+                    section(Text::RenderColumnChecks, checks),
+                )
+                .into_any_element(),
+            );
         }
 
         let mut last = vec![
@@ -696,10 +711,11 @@ impl ProjectsScreen {
                     }
                 })
                 .when(target.last.is_some() && !target.last_current, |row| {
-                    row.child(kit::info(
+                    row.child(guide::info(
+                        bardo,
                         "render-outdated-info",
-                        None,
                         tr(bardo, Text::RenderLastOutdatedHint),
+                        guide::refs::RENDER_LAST,
                     ))
                 })
                 .into_any_element(),
@@ -754,7 +770,13 @@ impl ProjectsScreen {
                 .into_any_element(),
             );
         }
-        body.push(section(Text::RenderColumnLast, last));
+        body.push(
+            kit::anchor(
+                TourAnchor::Control(Control::RenderLast),
+                section(Text::RenderColumnLast, last),
+            )
+            .into_any_element(),
+        );
 
         let mut inspector = Inspector::new(body);
         inspector.title = Some(title);

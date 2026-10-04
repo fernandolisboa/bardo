@@ -31,8 +31,8 @@ use bardo_app::bardo_domain::{
     VideoProjectId, crop_window, frame_time, timecode,
 };
 use bardo_app::{
-    Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, EditAction, Editor, EditorView,
-    PREVIEW_LANDSCAPE, Text, caption_look,
+    Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, Control, EditAction, Editor, EditorView,
+    PREVIEW_LANDSCAPE, Side, Stage, Text, TourAnchor, caption_look,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -45,7 +45,10 @@ use gpui_kit::{
 };
 
 use crate::appearance::{self, EditorColor};
+use crate::guide;
+use crate::icons::Lucide;
 use crate::shell::tr;
+use crate::tour::Anchored as _;
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
@@ -559,6 +562,28 @@ impl EditorScreen {
 
     /// Frees the preview's picture from the window's atlas; the shell calls
     /// it before closing the editor.
+    /// Whether there is a cut to show: its tour is offered only then.
+    pub fn has_content(&self) -> bool {
+        self.editor.as_ref().is_some_and(|editor| {
+            editor
+                .view()
+                .timeline
+                .as_ref()
+                .is_some_and(|timeline| !timeline.is_empty())
+        })
+    }
+
+    /// A tour step shows over the editor: playback pauses under the card,
+    /// and nothing else changes.
+    pub fn hold_for_tour(&mut self, cx: &mut Context<Self>) {
+        self.with_editor(cx, Editor::hold_for_tour);
+    }
+
+    /// Takes the keyboard back, after the guide or a tour over the editor.
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus, cx);
+    }
+
     pub fn release(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(old) = self.frame.take() {
             cx.drop_image(old, Some(window));
@@ -736,6 +761,7 @@ impl EditorScreen {
         let render = has_cut.then(|| {
             div()
                 .id("editor-render")
+                .relative()
                 .h(px(28.))
                 .px_3()
                 .flex()
@@ -749,6 +775,39 @@ impl EditorScreen {
                 .hover(|style| style.opacity(0.9))
                 .child(tr(bardo, Text::EditorReviewRender))
                 .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(EditorEvent::Render)))
+                .tour_anchor(
+                    TourAnchor::Control(Control::EditorRender),
+                    Side::Below,
+                    None,
+                )
+        });
+        // The editor's tour, part one or two, once there is a cut to show.
+        let tour = bardo.stage_tour(Stage::Edit, has_cut).map(|tour| {
+            let started = tour.tour;
+            tool_button("editor-tour", true, false)
+                .child(
+                    Icon::new(Lucide::BookOpen)
+                        .size_4()
+                        .text_color(color(TEXT_2)),
+                )
+                .child(tr(bardo, Text::TourName(tour.tour)))
+                .when(tour.new, |button| {
+                    button.child(
+                        div()
+                            .ml_1()
+                            .px_1()
+                            .rounded(px(3.))
+                            .border_1()
+                            .border_color(color(ACCENT))
+                            .text_size(px(10.))
+                            .text_color(color(ACCENT))
+                            .child(tr(bardo, Text::TourNew)),
+                    )
+                })
+                .tooltip(|window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new("Shift+F1").build(window, cx)
+                })
+                .on_click(move |_, window, cx| guide::start_tour(started, window, cx))
         });
         h_flex()
             .h(px(44.))
@@ -763,9 +822,16 @@ impl EditorScreen {
             .children(breadcrumb)
             .child(div().flex_1())
             .children(status)
+            .children(tour)
             .child(jobs)
-            .child(undo)
-            .child(redo)
+            .child(
+                h_flex()
+                    .relative()
+                    .gap_3()
+                    .child(undo)
+                    .child(redo)
+                    .tour_anchor(TourAnchor::Control(Control::EditorUndo), Side::Below, None),
+            )
             .children(render)
             .into_any_element()
     }
@@ -1084,6 +1150,7 @@ impl EditorScreen {
         let aspect = editor.map_or(AspectRatio::Landscape, Editor::aspect);
         let has_cut = editor.is_some_and(|editor| editor.view().timeline.is_some());
         let aspects = h_flex()
+            .relative()
             .gap_0p5()
             .p_0p5()
             .rounded(px(4.))
@@ -1102,6 +1169,11 @@ impl EditorScreen {
                                 }))
                             })
                     }),
+            )
+            .tour_anchor(
+                TourAnchor::Control(Control::EditorAspect),
+                Side::Below,
+                None,
             );
         let header = h_flex()
             .h(px(36.))
@@ -1222,6 +1294,7 @@ impl EditorScreen {
                 .font_family(mono),
             );
         v_flex()
+            .relative()
             .flex_1()
             .min_w_0()
             .h_full()
@@ -1229,6 +1302,11 @@ impl EditorScreen {
             .child(header)
             .child(stage)
             .child(transport)
+            .tour_anchor(
+                TourAnchor::Control(Control::EditorPreview),
+                Side::Right,
+                None,
+            )
             .into_any_element()
     }
 
