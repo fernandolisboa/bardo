@@ -4,9 +4,12 @@
 //! generator. The challenge encoding is per network: base64url for Google
 //! and Meta, hex for TikTok.
 
-use bardo_domain::SecretText;
+use std::time::Duration;
+
+use bardo_domain::{SecretText, SignInFailure, SignInFailureKind, TokenGrant};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// How a network wants the SHA-256 of the verifier written.
@@ -86,6 +89,47 @@ pub fn same_secret(a: &str, b: &str) -> bool {
             == 0
 }
 
+fn grant_unexpected(detail: &str) -> SignInFailure {
+    SignInFailure::new(SignInFailureKind::Unexpected, detail)
+}
+
+/// The scopes, access and refresh token a token endpoint granted. Scopes
+/// are split on spaces (RFC 6749) and on commas (TikTok).
+pub(crate) fn parse_grant(body: &str) -> Result<TokenGrant, SignInFailure> {
+    let body: Value = serde_json::from_str(body)
+        .map_err(|error| grant_unexpected(&format!("unreadable token answer: {error}")))?;
+    let token = |name: &str| {
+        body[name]
+            .as_str()
+            .filter(|token| !token.is_empty() && token.chars().all(|c| c.is_ascii_graphic()))
+            .map(SecretText::new)
+    };
+    let access_token = token("access_token")
+        .ok_or_else(|| grant_unexpected("the token answer has no access token"))?;
+    if !body["token_type"]
+        .as_str()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("bearer"))
+    {
+        return Err(grant_unexpected("the token answer is not a bearer token"));
+    }
+    let expires_in = body["expires_in"]
+        .as_u64()
+        .filter(|secs| *secs > 0)
+        .ok_or_else(|| grant_unexpected("the token answer has no lifetime"))?;
+    Ok(TokenGrant {
+        access_token,
+        refresh_token: token("refresh_token"),
+        expires_in: Duration::from_secs(expires_in),
+        scopes: body["scope"]
+            .as_str()
+            .unwrap_or_default()
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|scope| !scope.is_empty())
+            .map(str::to_owned)
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +184,20 @@ mod tests {
         let (s, t) = (new_state(), new_state());
         assert_ne!(s, t);
         assert_eq!(s.expose().len(), 43);
+    }
+
+    #[test]
+    fn granted_scopes_split_on_spaces_and_commas() {
+        let google = parse_grant(
+            r#"{"access_token":"a","token_type":"Bearer","expires_in":1,"scope":"x y"}"#,
+        )
+        .unwrap();
+        assert_eq!(google.scopes, ["x", "y"]);
+        let tiktok = parse_grant(
+            r#"{"access_token":"a","token_type":"Bearer","expires_in":1,"scope":"user.info.basic,video.upload"}"#,
+        )
+        .unwrap();
+        assert_eq!(tiktok.scopes, ["user.info.basic", "video.upload"]);
     }
 
     #[test]

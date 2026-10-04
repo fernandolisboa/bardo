@@ -1,0 +1,16 @@
+HTTP/2 200 
+content-type: application/json
+
+{
+  "data": {
+    "user": {
+      "open_id": "723f24d7-e717-40f8-a2b6-cb8464cd23b4",
+      "display_name": "Arquivos do Espaço"
+    }
+  },
+  "error": {
+    "code": "ok",
+    "message": "",
+    "log_id": "20261004050000FIXTURE0000000000003"
+  }
+}

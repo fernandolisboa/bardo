@@ -1,0 +1,10 @@
+HTTP/2 200 
+content-type: application/json
+
+{
+  "access_token": "act.fixture-access-token-0001",
+  "expires_in": 86400,
+  "open_id": "723f24d7-e717-40f8-a2b6-cb8464cd23b4",
+  "scope": "user.info.basic,video.upload,video.list",
+  "token_type": "Bearer"
+}

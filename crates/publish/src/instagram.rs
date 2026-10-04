@@ -242,7 +242,11 @@ impl<T: Transport> NetworkSignIn for InstagramSignIn<T> {
 
     /// Removes every permission the user granted to the app, which ends
     /// its user and Page tokens.
-    fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure> {
+    fn revoke(
+        &self,
+        _credentials: Option<&AppCredentials>,
+        tokens: &TokenSet,
+    ) -> Result<(), SignInFailure> {
         let user_token = tokens.refresh_token().ok_or_else(|| {
             SignInFailure::new(
                 SignInFailureKind::Unexpected,

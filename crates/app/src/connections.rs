@@ -375,8 +375,14 @@ impl Connections {
 
     /// Revokes tokens that will not be kept. Best effort: nothing else
     /// holds them, so a failure leaves them unused until they expire.
-    fn discard(&self, network: Network, sign_in: &dyn NetworkSignIn, tokens: &TokenSet) {
-        if let Err(failure) = sign_in.revoke(tokens) {
+    fn discard(
+        &self,
+        network: Network,
+        sign_in: &dyn NetworkSignIn,
+        credentials: &AppCredentials,
+        tokens: &TokenSet,
+    ) {
+        if let Err(failure) = sign_in.revoke(Some(credentials), tokens) {
             let _ = self.sign_in_failure(network, failure);
         }
     }
@@ -408,7 +414,11 @@ impl Connections {
             Some(_) if kept_for_others => false,
             Some(tokens) => {
                 self.redactor.add_parts(&tokens.sensitive_parts());
-                match sign_in.revoke(tokens) {
+                // Removed or unreadable app credentials do not stop a
+                // disconnect; a network that revokes with them (TikTok)
+                // reports it could not, and Bardo forgets the tokens.
+                let credentials = self.app_credentials(account.network).ok();
+                match sign_in.revoke(credentials.as_ref(), tokens) {
                     Ok(()) => true,
                     Err(failure) => {
                         let _ = self.sign_in_failure(account.network, failure);
@@ -632,7 +642,7 @@ impl ConnectAttempt {
                 .map(|connection| connection.identity)
         })();
         if kept.is_err() {
-            connections.discard(network, self.sign_in.as_ref(), &tokens);
+            connections.discard(network, self.sign_in.as_ref(), &self.credentials, &tokens);
         }
         kept
     }
@@ -1033,7 +1043,10 @@ impl Bardo {
             .browser()
             .ok_or(ConnectionError::NotOffered(account.network))?;
         let credentials = connections.app_credentials(account.network)?;
-        let callback = self.connection_book.consent.listen()?;
+        let callback = self
+            .connection_book
+            .consent
+            .listen(browser.redirect_path())?;
         let request = browser.consent_request(&credentials, callback.redirect_uri());
         connections
             .redactor
@@ -1237,7 +1250,7 @@ pub(crate) mod testing {
     pub(crate) struct NoConsent;
 
     impl ConsentReceiver for NoConsent {
-        fn listen(&self) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+        fn listen(&self, _: &str) -> Result<Box<dyn ConsentCallback>, ConsentError> {
             Err(ConsentError::Listen("no browser in this test".into()))
         }
     }
@@ -1250,6 +1263,8 @@ pub(crate) mod testing {
     pub(crate) struct FakeConsent {
         pub(crate) outcomes: Mutex<VecDeque<Result<SecretText, ConsentError>>>,
         pub(crate) states: Arc<Mutex<Vec<String>>>,
+        /// The callback path each listen was asked for.
+        pub(crate) paths: Mutex<Vec<String>>,
     }
 
     impl FakeConsent {
@@ -1287,7 +1302,8 @@ pub(crate) mod testing {
     }
 
     impl ConsentReceiver for FakeConsent {
-        fn listen(&self) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+        fn listen(&self, path: &str) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+            self.paths.lock().unwrap().push(path.to_owned());
             let outcome = self
                 .outcomes
                 .lock()
@@ -1320,7 +1336,13 @@ pub(crate) mod testing {
     /// A network whose answers tests script. Each exchange or refresh
     /// grants numbered tokens unless a failure is set.
     pub(crate) struct FakeSignIn {
+        pub(crate) network: Network,
+        pub(crate) redirect_path: &'static str,
+        /// Whether a refresh grants a new refresh token (TikTok rotates).
+        pub(crate) rotates: bool,
         pub(crate) calls: Mutex<Vec<Call>>,
+        /// The client id each revoke was given, if any.
+        pub(crate) revoked_with: Mutex<Vec<Option<String>>>,
         pub(crate) issued: Mutex<u32>,
         /// Lifetime of each granted access token.
         pub(crate) expires_in: Mutex<Duration>,
@@ -1336,7 +1358,11 @@ pub(crate) mod testing {
     impl Default for FakeSignIn {
         fn default() -> Self {
             Self {
+                network: Network::YouTube,
+                redirect_path: "/",
+                rotates: false,
                 calls: Mutex::default(),
+                revoked_with: Mutex::default(),
                 issued: Mutex::default(),
                 expires_in: Mutex::new(Duration::from_secs(3600)),
                 scopes: Mutex::new(ALL_SCOPES.map(str::to_owned).to_vec()),
@@ -1378,7 +1404,7 @@ pub(crate) mod testing {
 
     impl NetworkSignIn for FakeSignIn {
         fn network(&self) -> Network {
-            Network::YouTube
+            self.network
         }
 
         fn scopes(&self) -> &'static [&'static str] {
@@ -1408,16 +1434,24 @@ pub(crate) mod testing {
             }
             match self.refresh_failure.lock().unwrap().clone() {
                 Some(failure) => Err(failure),
-                None => Ok(self.grant(false)),
+                None => Ok(self.grant(self.rotates)),
             }
         }
 
-        fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure> {
+        fn revoke(
+            &self,
+            credentials: Option<&AppCredentials>,
+            tokens: &TokenSet,
+        ) -> Result<(), SignInFailure> {
             let token = tokens.refresh_token().unwrap_or(tokens.access_token());
             self.calls
                 .lock()
                 .unwrap()
                 .push(Call::Revoke(token.to_owned()));
+            self.revoked_with
+                .lock()
+                .unwrap()
+                .push(credentials.map(|credentials| credentials.client_id().to_owned()));
             match self.revoke_failure.lock().unwrap().clone() {
                 Some(failure) => Err(failure),
                 None => Ok(()),
@@ -1434,6 +1468,10 @@ pub(crate) mod testing {
     }
 
     impl BrowserSignIn for FakeSignIn {
+        fn redirect_path(&self) -> &'static str {
+            self.redirect_path
+        }
+
         fn consent_request(
             &self,
             credentials: &AppCredentials,
@@ -1598,7 +1636,11 @@ pub(crate) mod meta {
             })
         }
 
-        fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure> {
+        fn revoke(
+            &self,
+            _: Option<&AppCredentials>,
+            tokens: &TokenSet,
+        ) -> Result<(), SignInFailure> {
             self.call(MetaCall::Revoke(
                 tokens.refresh_token().unwrap_or_default().to_owned(),
             ));
@@ -1675,12 +1717,15 @@ mod tests {
     pub(super) const META_ID: &str = "1234567890123456";
     const META_SECRET: &str = concat!("0123456789abcdef", "0123456789abcdef");
     const PASTED: &str = "pasted-explorer-token-0001";
+    const TIKTOK_KEY: &str = concat!("awfixture", "key0000001");
+    const TIKTOK_SECRET: &str = concat!("FixtureClientSecret", "0000000000000");
 
     struct Harness {
         db: Arc<Database>,
         secrets: Arc<MemorySecretStore>,
         sign_in: Arc<FakeSignIn>,
         meta: Arc<FakeMeta>,
+        tiktok: Arc<FakeSignIn>,
         consent: Arc<FakeConsent>,
     }
 
@@ -1695,6 +1740,17 @@ mod tests {
                 secrets: Arc::default(),
                 sign_in: Arc::default(),
                 meta: Arc::default(),
+                tiktok: Arc::new(FakeSignIn {
+                    network: Network::TikTok,
+                    redirect_path: "/callback/",
+                    rotates: true,
+                    expires_in: Mutex::new(Duration::from_secs(86_400)),
+                    identity: Mutex::new(Ok(ConnectedIdentity {
+                        id: "723f24d7-open-id".into(),
+                        name: "Arquivos do Espaço".into(),
+                    })),
+                    ..FakeSignIn::default()
+                }),
                 consent: Arc::default(),
             }
         }
@@ -1705,7 +1761,11 @@ mod tests {
                 ..Repositories::shared(Arc::clone(&self.db), Arc::new(MemorySecretStore::default()))
             };
             let providers = Providers {
-                sign_ins: vec![Arc::clone(&self.sign_in) as _, Arc::clone(&self.meta) as _],
+                sign_ins: vec![
+                    Arc::clone(&self.sign_in) as _,
+                    Arc::clone(&self.meta) as _,
+                    Arc::clone(&self.tiktok) as _,
+                ],
                 consent: Arc::clone(&self.consent) as _,
                 ..testing::providers()
             };
@@ -1732,6 +1792,16 @@ mod tests {
             (app, account)
         }
 
+        /// A started app with a channel, its TikTok account and saved
+        /// TikTok app credentials.
+        fn tiktok(&self) -> (Bardo, NetworkAccount) {
+            let mut app = self.start();
+            let account = account_on(&app, Network::TikTok);
+            app.save_app_credentials(Network::TikTok, TIKTOK_KEY, TIKTOK_SECRET)
+                .unwrap();
+            (app, account)
+        }
+
         fn tokens(&self, app: &Bardo, account: &NetworkAccount) -> Option<TokenSet> {
             self.secrets.tokens(app.profile().id, account.id).unwrap()
         }
@@ -1753,6 +1823,26 @@ mod tests {
         app.add_network_account(
             channel,
             Network::YouTube,
+            NetworkAccountDraft {
+                handle: "arquivosdoespaco".into(),
+                ..NetworkAccountDraft::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn account_on(app: &Bardo, network: Network) -> NetworkAccount {
+        let channel = app
+            .create_channel(ChannelDraft {
+                name: format!("{network} {}", app.channels().unwrap().len()),
+                language: ContentLanguage::Portuguese,
+                ..ChannelDraft::default()
+            })
+            .unwrap()
+            .id;
+        app.add_network_account(
+            channel,
+            network,
             NetworkAccountDraft {
                 handle: "arquivosdoespaco".into(),
                 ..NetworkAccountDraft::default()
@@ -1814,6 +1904,10 @@ mod tests {
             [
                 AppCredentialsStatus {
                     network: Network::YouTube,
+                    state: KeyState::NotSet
+                },
+                AppCredentialsStatus {
+                    network: Network::TikTok,
                     state: KeyState::NotSet
                 },
                 AppCredentialsStatus {
@@ -2913,5 +3007,131 @@ mod tests {
             attempt.pages.done,
             crate::Catalog::load(bardo_domain::UiLanguage::EnUs).get(Text::ConsentPageDone)
         );
+    }
+    #[test]
+    fn tiktok_connects_in_the_browser_at_its_callback_path() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.tiktok();
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+        assert_eq!(
+            connect(&mut app, &account).unwrap().name,
+            "Arquivos do Espaço"
+        );
+        assert_eq!(*harness.consent.paths.lock().unwrap(), ["/callback/"]);
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::Connected {
+                channel: "Arquivos do Espaço".into()
+            }
+        );
+        assert!(matches!(
+            harness.tiktok.calls()[0],
+            Call::Exchange { ref client_secret, .. } if client_secret == TIKTOK_SECRET
+        ));
+        assert!(harness.sign_in.calls().is_empty(), "YouTube was not asked");
+        let state = harness.state(&account).unwrap();
+        assert_eq!(state.identity.id, "723f24d7-open-id");
+        assert!(
+            app.redactor()
+                .redact(&format!("{TIKTOK_KEY} {TIKTOK_SECRET}"))
+                .contains("[redacted]")
+        );
+    }
+
+    #[test]
+    fn a_tiktok_refresh_keeps_the_rotated_refresh_token() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.tiktok();
+        // A token this close to its expiry is refreshed by the next check.
+        *harness.tiktok.expires_in.lock().unwrap() = Duration::from_secs(60);
+        connect(&mut app, &account).unwrap();
+        assert_eq!(
+            harness.tokens(&app, &account).unwrap().refresh_token(),
+            Some("1//fake-refresh-0001")
+        );
+        app.connection_check(account.id).unwrap().run().unwrap();
+        assert!(
+            harness
+                .tiktok
+                .calls()
+                .contains(&Call::Refresh("1//fake-refresh-0001".into()))
+        );
+        let tokens = harness.tokens(&app, &account).unwrap();
+        assert_eq!(tokens.access_token(), "ya29.fake-access-0002");
+        assert_eq!(tokens.refresh_token(), Some("1//fake-refresh-0002"));
+        assert!(harness.state(&account).unwrap().refreshed_at.is_some());
+    }
+
+    #[test]
+    fn a_refused_tiktok_refresh_needs_a_reconnect() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.tiktok();
+        *harness.tiktok.expires_in.lock().unwrap() = Duration::from_secs(60);
+        connect(&mut app, &account).unwrap();
+        *harness.tiktok.refresh_failure.lock().unwrap() = Some(failure(
+            SignInFailureKind::Refused,
+            "invalid_grant: Refresh token is invalid or expired.",
+        ));
+        assert!(matches!(
+            app.connection_check(account.id).unwrap().run(),
+            Err(ConnectionError::ReconnectNeeded(Network::TikTok))
+        ));
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::ReconnectNeeded {
+                channel: "Arquivos do Espaço".into()
+            }
+        );
+    }
+
+    #[test]
+    fn disconnecting_hands_the_saved_app_credentials_to_the_revocation() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.tiktok();
+        connect(&mut app, &account).unwrap();
+        let disconnected = app.disconnection(account.id).unwrap().run().unwrap();
+        assert!(disconnected.revoked);
+        assert_eq!(
+            *harness.tiktok.revoked_with.lock().unwrap(),
+            [Some(TIKTOK_KEY.to_owned())]
+        );
+
+        // Without saved credentials TikTok cannot revoke; Bardo still
+        // forgets the tokens.
+        connect(&mut app, &account).unwrap();
+        app.remove_app_credentials(Network::TikTok).unwrap();
+        *harness.tiktok.revoke_failure.lock().unwrap() = Some(failure(
+            SignInFailureKind::ClientRejected,
+            "revoking needs the app credentials",
+        ));
+        let disconnected = app.disconnection(account.id).unwrap().run().unwrap();
+        assert!(!disconnected.revoked);
+        assert_eq!(harness.tiktok.revoked_with.lock().unwrap()[1], None);
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(harness.state(&account), None);
+    }
+
+    #[test]
+    fn tiktok_tokens_and_secrets_never_reach_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bardo.db");
+        let harness = Harness::over(Arc::new(Database::open(&path).unwrap()));
+        let (mut app, account) = harness.tiktok();
+        connect(&mut app, &account).unwrap();
+        let written = database_bytes(&path);
+        assert!(contains(&written, "723f24d7-open-id"), "the state is there");
+        for secret in [
+            "ya29.fake-access-0001",
+            "1//fake-refresh-0001",
+            "verifier-0001-abcdefgh",
+            "4/fake-code",
+            TIKTOK_KEY,
+            TIKTOK_SECRET,
+        ] {
+            assert!(!contains(&written, secret), "{secret} reached SQLite");
+        }
     }
 }

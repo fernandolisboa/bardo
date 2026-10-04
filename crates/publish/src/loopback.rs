@@ -1,6 +1,6 @@
 //! The one-shot loopback callback (ADR-0008): a listener on `127.0.0.1` at
-//! a random port, which takes exactly one browser request carrying the
-//! expected `state` and then closes.
+//! a random port and the network's callback path, which takes exactly one
+//! browser request carrying the expected `state` and then closes.
 //!
 //! Plain `std::net`, no unsafe code: the listener is polled so a timeout or
 //! a cancel from the app ends the wait.
@@ -27,8 +27,8 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 pub struct LoopbackReceiver;
 
 impl ConsentReceiver for LoopbackReceiver {
-    fn listen(&self) -> Result<Box<dyn ConsentCallback>, ConsentError> {
-        Ok(Box::new(LoopbackCallback::bind()?))
+    fn listen(&self, path: &str) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+        Ok(Box::new(LoopbackCallback::bind(path)?))
     }
 }
 
@@ -37,22 +37,43 @@ impl ConsentReceiver for LoopbackReceiver {
 pub struct LoopbackCallback {
     listener: TcpListener,
     redirect_uri: String,
+    path: String,
 }
 
 impl LoopbackCallback {
-    /// Listens on `127.0.0.1` at a port the system picks. The literal IP,
-    /// not `localhost`, as Google asks: `localhost` could resolve to
-    /// another interface.
-    pub fn bind() -> Result<Self, ConsentError> {
+    /// Listens on `127.0.0.1` at a port the system picks, for a callback
+    /// on `path`. The literal IP, not `localhost`, as Google asks:
+    /// `localhost` could resolve to another interface. The root path keeps
+    /// the bare address (`http://127.0.0.1:port`), as Google's examples
+    /// write it; any other is appended as given (TikTok registers
+    /// `http://127.0.0.1:*/callback/`).
+    pub fn bind(path: &str) -> Result<Self, ConsentError> {
+        if !is_path(path) {
+            return Err(ConsentError::Listen(format!(
+                "not a callback path: {path:?}"
+            )));
+        }
         let listen = |error: std::io::Error| ConsentError::Listen(error.to_string());
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(listen)?;
         listener.set_nonblocking(true).map_err(listen)?;
         let port = listener.local_addr().map_err(listen)?.port();
+        let suffix = if path == "/" { "" } else { path };
         Ok(Self {
             listener,
-            redirect_uri: format!("http://127.0.0.1:{port}"),
+            redirect_uri: format!("http://127.0.0.1:{port}{suffix}"),
+            path: path.to_owned(),
         })
     }
+}
+
+/// An absolute path with no query or fragment, as redirect addresses are
+/// registered.
+fn is_path(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() <= 256
+        && path
+            .chars()
+            .all(|c| c.is_ascii_graphic() && !matches!(c, '?' | '#' | '%'))
 }
 
 /// What one browser request said.
@@ -87,7 +108,7 @@ impl ConsentCallback for LoopbackCallback {
                 return Err(ConsentError::TimedOut);
             }
             match self.listener.accept() {
-                Ok((stream, _)) => match answer(stream, state, pages) {
+                Ok((stream, _)) => match answer(stream, &self.path, state, pages) {
                     Callback::Code(code) => return Ok(code),
                     Callback::Denied(error) => return Err(ConsentError::Denied(error)),
                     Callback::Ignored => {}
@@ -101,7 +122,12 @@ impl ConsentCallback for LoopbackCallback {
 }
 
 /// Reads one request and answers it with a page.
-fn answer(mut stream: TcpStream, state: &SecretText, pages: &ConsentPages) -> Callback {
+fn answer(
+    mut stream: TcpStream,
+    expected_path: &str,
+    state: &SecretText,
+    pages: &ConsentPages,
+) -> Callback {
     // An accepted socket may inherit the listener's non-blocking mode.
     if stream.set_nonblocking(false).is_err()
         || stream.set_read_timeout(Some(READ_TIMEOUT)).is_err()
@@ -114,7 +140,7 @@ fn answer(mut stream: TcpStream, state: &SecretText, pages: &ConsentPages) -> Ca
         return Callback::Ignored;
     };
     let (path, query) = target.split_once('?').unwrap_or((&target, ""));
-    if path != "/" {
+    if path != expected_path {
         respond(&mut stream, 404, "Not Found", &pages.failed);
         return Callback::Ignored;
     }
@@ -252,7 +278,18 @@ mod tests {
         thread::JoinHandle<Result<SecretText, ConsentError>>,
         Arc<AtomicBool>,
     ) {
-        let callback = Box::new(LoopbackCallback::bind().unwrap());
+        start_on("/", timeout)
+    }
+
+    fn start_on(
+        path: &str,
+        timeout: Duration,
+    ) -> (
+        String,
+        thread::JoinHandle<Result<SecretText, ConsentError>>,
+        Arc<AtomicBool>,
+    ) {
+        let callback = Box::new(LoopbackCallback::bind(path).unwrap());
         let uri = callback.redirect_uri().to_owned();
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
@@ -264,11 +301,43 @@ mod tests {
 
     #[test]
     fn the_redirect_is_the_loopback_ip_with_a_random_port() {
-        let a = LoopbackCallback::bind().unwrap();
-        let b = LoopbackCallback::bind().unwrap();
+        let a = LoopbackCallback::bind("/").unwrap();
+        let b = LoopbackCallback::bind("/").unwrap();
         assert!(a.redirect_uri().starts_with("http://127.0.0.1:"));
         assert_ne!(a.redirect_uri(), b.redirect_uri());
         assert!(!a.redirect_uri().ends_with(":0"));
+        let port = a.redirect_uri().rsplit(':').next().unwrap();
+        assert!(
+            port.parse::<u16>().is_ok(),
+            "the root path adds nothing: {port}"
+        );
+    }
+
+    #[test]
+    fn a_callback_path_is_part_of_the_redirect_and_the_only_one_answered() {
+        let (uri, waiting, _) = start_on("/callback/", Duration::from_secs(10));
+        assert!(uri.starts_with("http://127.0.0.1:"), "{uri}");
+        assert!(uri.ends_with("/callback/"), "{uri}");
+        let root = uri.trim_end_matches("/callback/");
+        let (status, _) = browse(&format!("{root}/?state=state-123&code=at-the-root"));
+        assert_eq!(status, 404);
+        let (status, _) = browse(&format!("{root}/callback?state=state-123&code=no-slash"));
+        assert_eq!(status, 404);
+        let (status, _) = browse(&format!(
+            "{uri}?code=tiktok-code%2A1&scopes=user.info.basic%2Cvideo.upload&state=state-123"
+        ));
+        assert_eq!(status, 200);
+        assert_eq!(waiting.join().unwrap().unwrap().expose(), "tiktok-code*1");
+    }
+
+    #[test]
+    fn a_path_that_is_not_one_is_refused() {
+        for bad in ["", "callback", "/call back", "/cb?x=1", "/cb#top", "/%2F"] {
+            assert!(
+                matches!(LoopbackCallback::bind(bad), Err(ConsentError::Listen(_))),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

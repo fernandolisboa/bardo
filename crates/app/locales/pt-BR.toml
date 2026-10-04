@@ -1574,6 +1574,20 @@ client_id_invalid = "Cole o ID de um cliente OAuth do Google. Ele termina em .ap
 client_secret_required = "Informe a chave secreta do cliente."
 client_secret_invalid = "Isso não parece uma chave secreta de cliente. Copie de novo do Google Cloud."
 
+[app_credentials.tiktok]
+name = "TikTok · app do TikTok for Developers"
+purpose = "Um app (ou o sandbox dele) na sua conta do TikTok for Developers com o Login Kit para computador e a Content Posting API, os escopos user.info.basic, video.upload e video.list, e o URI de redirecionamento http://127.0.0.1:*/callback/. Num sandbox, adicione a sua conta do TikTok como usuário de teste."
+client_id = "Client key"
+client_secret = "Client secret"
+client_id_placeholder = "aw… ou sbaw…"
+client_secret_placeholder = "32 letras e números"
+
+[app_credentials.tiktok.error]
+client_id_required = "Informe o client key."
+client_id_invalid = "Cole o client key das credenciais do seu app do TikTok. Ele tem só letras e números."
+client_secret_required = "Informe o client secret."
+client_secret_invalid = "Isso não parece um client secret. Copie de novo das credenciais do app."
+
 [app_credentials.instagram_reels]
 name = "Instagram · app da Meta"
 purpose = "Um app do tipo Empresa na sua conta de desenvolvedor da Meta, com o caso de uso do Instagram (configuração da API com login do Facebook) e o Login do Facebook para Empresas. Sua conta do Facebook precisa de uma função no app e na Página vinculada à sua conta profissional do Instagram."
@@ -1612,6 +1626,13 @@ checked = "A conexão funciona. Canal: {channel}."
 reconnect_hint = "A rede recusou renovar o acesso: ele foi revogado ou expirou (um cliente do Google em status Teste expira depois de sete dias). Reconecte para entrar de novo."
 needs_app_credentials = "Salve o seu cliente OAuth em Configurações › Redes antes de conectar."
 missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e deixe todas as caixas marcadas: o Bardo precisa delas para enviar, agendar e ler as análises."
+
+[connection.tiktok]
+connecting = "Aguardando você autorizar o Bardo no navegador…"
+checked = "A conexão funciona. Conta: {channel}."
+reconnect_hint = "O TikTok recusou renovar o acesso: ele foi revogado, o token de renovação venceu depois de um ano sem uso ou o client secret mudou. Reconecte para entrar de novo."
+needs_app_credentials = "Salve o seu app do TikTok em Configurações › Redes antes de conectar."
+missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e permita todas: o Bardo precisa delas para ler a sua conta, enviar rascunhos e ler os números dos seus vídeos."
 
 [connection.instagram_reels]
 connecting = "Conferindo o token com a Meta…"
@@ -1653,6 +1674,14 @@ not_allowed = "O acesso foi recusado. Ative a YouTube Data API v3 e a YouTube An
 no_channel = "Esta conta do Google não tem canal no YouTube. Entre com a conta dona do canal."
 limit_reached = "A cota do YouTube do projeto acabou por hoje. Tente de novo depois da meia-noite no horário do Pacífico."
 network_down = "O YouTube está com falha do lado dele. Tente mais tarde."
+
+[connection.failure.tiktok]
+refused = "O TikTok recusou a entrada. Conecte de novo."
+client_rejected = "O TikTok não reconhece o client key ou o client secret. Confira em Configurações › Redes; um sandbox tem os seus próprios."
+not_allowed = "O TikTok recusou o acesso. Confira se o seu app tem o Login Kit e a Content Posting API com user.info.basic, video.upload e video.list e, num sandbox, se a sua conta é usuária de teste."
+no_channel = "O TikTok não devolveu esta conta. Entre com a conta de onde você posta."
+limit_reached = "O TikTok está limitando as chamadas do seu app agora. Tente de novo em alguns minutos."
+network_down = "O TikTok está com falha do lado dele. Tente mais tarde."
 
 [connection.failure.instagram_reels]
 refused = "A Meta recusou o token: ele expirou, foi revogado ou é de outro app. Gere um novo para o seu app e conecte de novo."
