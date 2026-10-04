@@ -155,24 +155,6 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
         .border_color(t.border)
         .child(
             h_flex()
-                .flex_none()
-                .gap_2()
-                .pr_3()
-                .items_center()
-                .child(
-                    div()
-                        .size(px(16.))
-                        .rounded(if t.radius == px(0.) { px(0.) } else { px(4.) })
-                        .bg(t.accent),
-                )
-                .child(
-                    div()
-                        .font_weight(gpui_kit::FontWeight::BOLD)
-                        .child(nav.app_name.clone()),
-                ),
-        )
-        .child(
-            h_flex()
                 .id("nav-tabs")
                 .flex_1()
                 .min_w_0()

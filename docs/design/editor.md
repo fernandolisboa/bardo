@@ -21,7 +21,7 @@ The canvas is the visual reference. This file is the contract the editing slices
 
 Top to bottom, filling the window:
 
-1. **Top bar** (44 px): app name, breadcrumb `Channel › Video title`, save state and duration (`Saved · 01:04 · 30 fps`), jobs indicator (opens the jobs panel, #8), undo/redo, primary button **Review & render** (opens the review screen, #27; disabled when the timeline is empty).
+1. **Top bar** (44 px), under the window's title bar (which carries the app name, in the editor's palette): back to projects, breadcrumb `Channel › Video title`, save state and duration (`Saved · 01:04 · 30 fps`), jobs indicator (opens the jobs panel, #8), undo/redo, primary button **Review & render** (opens the review screen, #27; disabled when the timeline is empty).
 2. **Middle row**: three columns `260 px | 1fr | 320 px`, separated by 1 px hairlines.
    - **Bin** (left): tabs Scenes · Media · Caption styles; search; scene rows (thumbnail, `Scene N`, duration, prompt summary). Dragging a scene or media item onto a track inserts it.
    - **Preview** (center): header with aspect switch `16:9 | 9:16`, fit menu and a `Proxy` quality badge; the frame; transport row (previous frame, play/pause, next frame, loop, volume, full screen) with timecode `HH:MM:SS:FF / duration`.

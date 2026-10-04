@@ -166,25 +166,6 @@ fn sidebar(nav: Navigation, cx: &App) -> AnyElement {
         .border_r(t.border_width)
         .border_color(t.border)
         .child(
-            h_flex()
-                .px_4()
-                .pt_4()
-                .pb_2()
-                .gap_2()
-                .child(
-                    div()
-                        .size(px(18.))
-                        .rounded(if t.radius == px(0.) { px(0.) } else { px(5.) })
-                        .bg(t.accent),
-                )
-                .child(
-                    div()
-                        .text_lg()
-                        .font_weight(gpui_kit::FontWeight::BOLD)
-                        .child(nav.app_name.clone()),
-                ),
-        )
-        .child(
             v_flex()
                 .id("nav-groups")
                 .flex_1()

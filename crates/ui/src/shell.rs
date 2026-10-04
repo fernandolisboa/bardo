@@ -1,8 +1,8 @@
 use bardo_app::bardo_domain::{BudgetLevel, VideoProjectId};
 use bardo_app::{Bardo, Destination, SpendSummary, Stage, Text};
-use gpui_kit::component::h_flex;
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{Entity, SharedString, Subscription, Window, div};
+use gpui_kit::{AnyElement, Entity, SharedString, Subscription, Window, div};
 
 use crate::accounts::AccountsScreen;
 use crate::appearance;
@@ -22,6 +22,7 @@ use crate::research::ResearchScreen;
 use crate::settings::SettingsScreen;
 use crate::templates::TemplatesScreen;
 use crate::themes::ThemesScreen;
+use crate::title_bar::{self, TitleBar};
 
 /// A UI string in the active language.
 pub(crate) fn tr(bardo: &Bardo, text: Text) -> SharedString {
@@ -288,14 +289,31 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some((editor, _)) = &self.editor {
-            return h_flex()
-                .size_full()
-                .items_start()
-                .child(div().flex_1().h_full().min_w_0().child(editor.clone()))
-                .when(self.jobs_open, |row| row.child(self.jobs.clone()))
-                .into_any_element();
-        }
+        let name = tr(self.bardo.read(cx), Text::AppName);
+        let (colors, content) = match &self.editor {
+            Some((editor, _)) => (title_bar::Colors::editor(), self.render_editor(editor)),
+            None => (title_bar::Colors::interface(cx), self.render_screens(cx)),
+        };
+        v_flex()
+            .size_full()
+            .child(TitleBar::new(name, colors))
+            .child(div().flex_1().min_h_0().w_full().child(content))
+    }
+}
+
+impl Shell {
+    /// The editor over the whole window, the jobs panel beside it when open.
+    fn render_editor(&self, editor: &Entity<EditorScreen>) -> AnyElement {
+        h_flex()
+            .size_full()
+            .items_start()
+            .child(div().flex_1().h_full().min_w_0().child(editor.clone()))
+            .when(self.jobs_open, |row| row.child(self.jobs.clone()))
+            .into_any_element()
+    }
+
+    /// The current screen in the layout, under the missed posts when any.
+    fn render_screens(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let navigation = self.navigation(cx);
         let screen = match self.screen {
             Destination::Channels => self.channels.clone().into_any_element(),
