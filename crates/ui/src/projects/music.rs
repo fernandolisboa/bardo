@@ -13,6 +13,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, ClipboardItem, SharedString, Window, div};
 
 use super::{ProjectsScreen, PromptShown, muted};
+use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
@@ -178,7 +179,12 @@ impl ProjectsScreen {
                 .gap_1()
                 .items_center()
                 .child(generate)
-                .child(kit::info("music-prompt-info", None, hint))
+                .child(guide::info(
+                    bardo,
+                    "music-prompt-info",
+                    hint,
+                    guide::refs::SCRIPT_MUSIC,
+                ))
         });
         let body: AnyElement = match prompt {
             None => v_flex()

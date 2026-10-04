@@ -650,10 +650,14 @@ mod tests {
     }
 
     /// The screens that tag their own controls, in every layout alike.
-    const SCREENS: [&str; 3] = [
+    const SCREENS: [&str; 7] = [
         include_str!("research.rs"),
         include_str!("themes.rs"),
         include_str!("performance.rs"),
+        include_str!("projects.rs"),
+        include_str!("projects/scenes.rs"),
+        include_str!("personas.rs"),
+        include_str!("templates.rs"),
     ];
 
     /// How a layout tags `anchor`: a pillar's group and each place come

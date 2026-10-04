@@ -1454,6 +1454,9 @@ pub enum Text {
     TourLearnMore,
     /// A screen's button, and the Guide menu row, that start its tour.
     TourThisScreen,
+    /// A project stage's button, and the Guide menu row, that start its
+    /// tour.
+    TourThisStage,
     /// An ⓘ's link to the guide section that says more.
     GuideMoreInGuide,
     /// The Appearance tab's tour settings.
@@ -1517,6 +1520,7 @@ impl Text {
             Text::GuideGoTo => "guide.go_to",
             Text::TourLearnMore => "tour.learn_more",
             Text::TourThisScreen => "tour.this_screen",
+            Text::TourThisStage => "tour.this_stage",
             Text::GuideMoreInGuide => "guide.more",
             Text::ToursSettingTitle => "tours_setting.title",
             Text::ToursSettingOffer => "tours_setting.offer",
@@ -4749,6 +4753,7 @@ mod tests {
             Text::GuideGoTo,
             Text::TourLearnMore,
             Text::TourThisScreen,
+            Text::TourThisStage,
             Text::GuideMoreInGuide,
             Text::ToursSettingTitle,
             Text::ToursSettingOffer,

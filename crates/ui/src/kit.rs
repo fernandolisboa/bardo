@@ -11,7 +11,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, SharedString, Stateful, Window, div, px};
+use gpui_kit::{
+    AnyElement, App, Div, ElementId, Hsla, ScrollHandle, SharedString, Stateful, Window, div, px,
+};
 
 use crate::appearance::look;
 use crate::tour::Anchored as _;
@@ -289,8 +291,19 @@ pub fn field(
 /// `element` tagged with the component a tour step points at (issue
 /// #105): a screen's own control, where the layouts tag its parts.
 pub fn anchor(anchor: TourAnchor, element: impl IntoElement) -> Div {
+    anchor_in(anchor, element, None)
+}
+
+/// [`anchor`] for a control inside the scroll the screen hands its layout
+/// (`ScreenParts::scroll`): the tour scrolls it into view rather than
+/// taking it for missing.
+pub fn anchor_in(
+    anchor: TourAnchor,
+    element: impl IntoElement,
+    scroll: Option<&ScrollHandle>,
+) -> Div {
     div()
         .relative()
         .child(element)
-        .tour_anchor(anchor, Side::Below, None)
+        .tour_anchor(anchor, Side::Below, scroll)
 }

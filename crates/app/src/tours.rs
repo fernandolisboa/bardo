@@ -13,6 +13,8 @@
 //! Guide. The button carries a "new" mark from the first visit that finds
 //! something to show until the tour is completed or dismissed, and again
 //! when the tour's content changes; a screen tour never starts on its own.
+//! A stage of a video project has its own tour too (issue #108), behind
+//! "Tour this stage", under the same rules.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -71,6 +73,64 @@ pub enum Control {
     ThemeActions,
     /// Themes: the projects started from the channel's ideas.
     ThemesProjects,
+    /// Projects: the open project's name and the menu that switches it.
+    ProjectSwitcher,
+    /// Projects: who narrates the open project.
+    ProjectNarrator,
+    /// Script: the script's editor, or the button that generates it.
+    ScriptBody,
+    /// Script: a new version waiting beside the current one.
+    ScriptReview,
+    /// Script: Save, Discard changes and Regenerate.
+    ScriptActions,
+    /// Script: what the next generation would cost.
+    ScriptEstimate,
+    /// Script: the current script's details and prompt.
+    ScriptDetails,
+    /// Script: the music prompt.
+    MusicPrompt,
+    /// Narration: its title, out of date mark and details.
+    NarrationStatus,
+    /// Narration: generating it with the narrator's voice.
+    NarrationGenerate,
+    /// Narration: the player and the narrated words.
+    NarrationPlayer,
+    /// Narration: importing a recording.
+    NarrationImport,
+    /// Scenes: planning them and drawing the missing images.
+    ScenesPlan,
+    /// Scenes and Clips: All and Pending over the scenes.
+    ScenesFilter,
+    /// Scenes: drawing a scene's image again, or the new one to review.
+    SceneRedraw,
+    /// Clips: animating every scene without a clip.
+    ClipsAnimate,
+    /// Clips: the picked scene's motion prompt.
+    ClipMotion,
+    /// Clips: the picked scene's video model.
+    ClipModel,
+    /// Clips: how long the scene's next clip runs and what it costs.
+    ClipCost,
+    /// Clips: the scene's clip, and a new one to review.
+    ClipReview,
+    /// Personas: the voice and the way to pick one.
+    PersonaVoice,
+    /// Personas: the tone and the script style.
+    PersonaStyle,
+    /// Personas: the generation presets and the sample.
+    PersonaPresets,
+    /// Personas: the realistic synthetic voice flag.
+    PersonaRealistic,
+    /// Personas: Save, Duplicate and Export.
+    PersonaShare,
+    /// Templates: one button per kind of template.
+    TemplateKinds,
+    /// Templates: the instructions and the prompt.
+    TemplateFields,
+    /// Templates: the variables a template can use.
+    TemplateVariables,
+    /// Templates: Save as new version, Discard and Load Bardo's default.
+    TemplateActions,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -154,10 +214,10 @@ impl TourStep {
     }
 
     /// The step opens `place` first, so a tour started or resumed elsewhere
-    /// shows its screen.
-    const fn on(self, place: Destination) -> Self {
+    /// shows its screen or stage.
+    const fn on(self, place: TourPlace) -> Self {
         Self {
-            place: Some(TourPlace::Screen(place)),
+            place: Some(place),
             ..self
         }
     }
@@ -187,9 +247,9 @@ impl TourStep {
 pub struct Tour {
     pub id: TourId,
     pub version: u32,
-    /// The screen it explains, whose "Tour this screen" starts it; `None`
-    /// for the welcome tour.
-    pub screen: Option<Destination>,
+    /// The screen or stage it explains, whose "Tour this screen" or "Tour
+    /// this stage" starts it; `None` for the welcome tour.
+    pub place: Option<TourPlace>,
     pub steps: &'static [TourStep],
 }
 
@@ -198,7 +258,7 @@ pub struct Tour {
 pub const WELCOME: Tour = Tour {
     id: TourId::Welcome,
     version: 1,
-    screen: None,
+    place: None,
     steps: &[
         TourStep::centered("intro").learn("what-bardo-is", "flow"),
         TourStep::at("strategy", TourAnchor::NavGroup(Pillar::Strategy))
@@ -219,7 +279,17 @@ pub const WELCOME: Tour = Tour {
 
 /// A step of a screen's tour: it lights `anchor` on `screen`.
 const fn on(screen: Destination, key: &'static str, anchor: TourAnchor) -> TourStep {
-    TourStep::at(key, anchor).on(screen)
+    TourStep::at(key, anchor).on(TourPlace::Screen(screen))
+}
+
+/// A step of a stage's tour: it lights `anchor` at `stage` of the open
+/// project.
+const fn at_stage(stage: Stage, key: &'static str, anchor: TourAnchor) -> TourStep {
+    TourStep::at(key, anchor).on(TourPlace::Stage(stage))
+}
+
+const fn control(control: Control) -> TourAnchor {
+    TourAnchor::Control(control)
 }
 
 /// Research: the market, the niches, a run and its quota, the results.
@@ -229,7 +299,7 @@ pub const RESEARCH: Tour = {
     Tour {
         id: TourId::Research,
         version: 1,
-        screen: Some(AT),
+        place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "channel", TourAnchor::Control(Control::ResearchChannel))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
@@ -256,7 +326,7 @@ pub const THEMES: Tour = {
     Tour {
         id: TourId::Themes,
         version: 1,
-        screen: Some(AT),
+        place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "pick", TourAnchor::Control(Control::ThemesPick))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
@@ -288,7 +358,7 @@ pub const PERFORMANCE: Tour = {
     Tour {
         id: TourId::Performance,
         version: 1,
-        screen: Some(AT),
+        place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "channel", TourAnchor::Header).learn(PAGE, "channel"),
             on(AT, "posts", TourAnchor::Collection).learn(PAGE, "posts"),
@@ -303,9 +373,229 @@ pub const PERFORMANCE: Tour = {
     }
 };
 
+/// Projects: the project and its narrator, the stages and how they open,
+/// and what the project has cost.
+pub const PROJECTS: Tour = {
+    const AT: Destination = Destination::Projects;
+    const PAGE: &str = "projects";
+    const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
+    Tour {
+        id: TourId::Projects,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "switcher", control(Control::ProjectSwitcher))
+                .missing(HEADER)
+                .learn(PAGE, "switch"),
+            on(AT, "narrator", control(Control::ProjectNarrator))
+                .missing(HEADER)
+                .learn(PAGE, "narrator"),
+            on(AT, "stages", TourAnchor::Stages).learn(PAGE, "stages"),
+            on(AT, "unlock", TourAnchor::Stages).learn(PAGE, "unlock"),
+            on(AT, "cost", TourAnchor::Header).learn(PAGE, "cost"),
+        ],
+    }
+};
+
+/// Script: writing or generating it, a new version to review, saving,
+/// what a generation costs, where the script came from, the music prompt.
+pub const SCRIPT: Tour = {
+    const AT: Stage = Stage::Script;
+    const PAGE: &str = "script";
+    const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Script,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "write", control(Control::ScriptBody))
+                .missing(PAGE_PART)
+                .learn(PAGE, "write"),
+            // No new version waiting: the buttons that ask for one.
+            at_stage(AT, "review", control(Control::ScriptReview))
+                .missing(WhenMissing::LightPart(control(Control::ScriptActions)))
+                .learn(PAGE, "review"),
+            at_stage(AT, "save", control(Control::ScriptActions))
+                .missing(PAGE_PART)
+                .learn(PAGE, "save"),
+            at_stage(AT, "cost", control(Control::ScriptEstimate))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "cost"),
+            at_stage(AT, "details", control(Control::ScriptDetails))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "details"),
+            at_stage(AT, "music", control(Control::MusicPrompt))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "music"),
+        ],
+    }
+};
+
+/// Narration: generating it with the narrator's voice, playing it, when
+/// it is out of date, importing a recording.
+pub const NARRATION: Tour = {
+    const AT: Stage = Stage::Narration;
+    const PAGE: &str = "narration";
+    const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Narration,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            // A running job, or a narrator whose voice cannot read yet,
+            // hides the button.
+            at_stage(AT, "generate", control(Control::NarrationGenerate))
+                .missing(PAGE_PART)
+                .learn(PAGE, "generate"),
+            at_stage(AT, "play", control(Control::NarrationPlayer))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "play"),
+            at_stage(AT, "stale", control(Control::NarrationStatus))
+                .missing(PAGE_PART)
+                .learn(PAGE, "stale"),
+            at_stage(AT, "import", control(Control::NarrationImport))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "import"),
+        ],
+    }
+};
+
+/// Scenes: planning them, the scene list, a scene's image and prompt,
+/// drawing it again, the filter, and planning again.
+pub const SCENES: Tour = {
+    const AT: Stage = Stage::Scenes;
+    const PAGE: &str = "scenes";
+    const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
+    Tour {
+        id: TourId::Scenes,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "plan", control(Control::ScenesPlan))
+                .missing(TOOLBAR)
+                .learn(PAGE, "plan"),
+            at_stage(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),
+            // No scene picked: nothing to show beside the list.
+            at_stage(AT, "scene", TourAnchor::Inspector)
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "scene"),
+            at_stage(AT, "redraw", control(Control::SceneRedraw))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "redraw"),
+            at_stage(AT, "filter", control(Control::ScenesFilter))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "filter"),
+            at_stage(AT, "replan", control(Control::ScenesPlan))
+                .missing(TOOLBAR)
+                .learn(PAGE, "replan"),
+        ],
+    }
+};
+
+/// Clips: animating scenes, the motion prompt, the video model, reviewing
+/// a new clip, and what a clip costs.
+pub const CLIPS: Tour = {
+    const AT: Stage = Stage::Clips;
+    const PAGE: &str = "clips";
+    const SCENE: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Clips,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "animate", control(Control::ClipsAnimate))
+                .missing(WhenMissing::LightPart(TourAnchor::Toolbar))
+                .learn(PAGE, "animate"),
+            at_stage(AT, "motion", control(Control::ClipMotion))
+                .missing(SCENE)
+                .learn(PAGE, "motion"),
+            at_stage(AT, "model", control(Control::ClipModel))
+                .missing(SCENE)
+                .learn(PAGE, "model"),
+            at_stage(AT, "review", control(Control::ClipReview))
+                .missing(SCENE)
+                .learn(PAGE, "review"),
+            at_stage(AT, "cost", control(Control::ClipCost))
+                .missing(WhenMissing::LightPart(control(Control::ClipModel)))
+                .learn(PAGE, "cost"),
+        ],
+    }
+};
+
+/// Personas: the library, a persona's voice, tone and script style,
+/// presets, sharing it, and the realistic voice flag.
+pub const PERSONAS: Tour = {
+    const AT: Destination = Destination::Personas;
+    const PAGE: &str = "personas";
+    const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Personas,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
+            on(AT, "voice", control(Control::PersonaVoice))
+                .missing(FORM)
+                .learn(PAGE, "voice"),
+            on(AT, "style", control(Control::PersonaStyle))
+                .missing(FORM)
+                .learn(PAGE, "style"),
+            on(AT, "presets", control(Control::PersonaPresets))
+                .missing(FORM)
+                .learn(PAGE, "presets"),
+            on(AT, "share", control(Control::PersonaShare))
+                .missing(FORM)
+                .learn(PAGE, "share"),
+            on(AT, "realistic", control(Control::PersonaRealistic))
+                .missing(FORM)
+                .learn(PAGE, "realistic"),
+        ],
+    }
+};
+
+/// Templates: the kinds, their versions, instructions and prompt,
+/// variables, saving a version and Bardo's default.
+pub const TEMPLATES: Tour = {
+    const AT: Destination = Destination::Templates;
+    const PAGE: &str = "templates";
+    const EDITOR: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Templates,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "kinds", control(Control::TemplateKinds))
+                .missing(WhenMissing::LightPart(TourAnchor::Collection))
+                .learn(PAGE, "kinds"),
+            on(AT, "versions", TourAnchor::Collection).learn(PAGE, "versions"),
+            on(AT, "fields", control(Control::TemplateFields))
+                .missing(EDITOR)
+                .learn(PAGE, "fields"),
+            on(AT, "variables", control(Control::TemplateVariables))
+                .missing(EDITOR)
+                .learn(PAGE, "variables"),
+            on(AT, "save", control(Control::TemplateActions))
+                .missing(EDITOR)
+                .learn(PAGE, "save"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 4] = [&WELCOME, &RESEARCH, &THEMES, &PERFORMANCE];
+    pub const ALL: [&'static Tour; 11] = [
+        &WELCOME,
+        &RESEARCH,
+        &THEMES,
+        &PERFORMANCE,
+        &PROJECTS,
+        &SCRIPT,
+        &NARRATION,
+        &SCENES,
+        &CLIPS,
+        &PERSONAS,
+        &TEMPLATES,
+    ];
 
     pub fn get(id: TourId) -> &'static Tour {
         match id {
@@ -313,14 +603,25 @@ impl Tour {
             TourId::Research => &RESEARCH,
             TourId::Themes => &THEMES,
             TourId::Performance => &PERFORMANCE,
+            TourId::Projects => &PROJECTS,
+            TourId::Script => &SCRIPT,
+            TourId::Narration => &NARRATION,
+            TourId::Scenes => &SCENES,
+            TourId::Clips => &CLIPS,
+            TourId::Personas => &PERSONAS,
+            TourId::Templates => &TEMPLATES,
         }
+    }
+
+    /// The tour of `place` (a screen, or a stage of a project), if it has
+    /// one.
+    pub fn of(place: TourPlace) -> Option<&'static Tour> {
+        Self::ALL.into_iter().find(|tour| tour.place == Some(place))
     }
 
     /// The tour of `screen`, if it has one.
     pub fn of_screen(screen: Destination) -> Option<&'static Tour> {
-        Self::ALL
-            .into_iter()
-            .find(|tour| tour.screen == Some(screen))
+        Self::of(TourPlace::Screen(screen))
     }
 
     pub fn len(&self) -> usize {
@@ -733,7 +1034,18 @@ impl Bardo {
     /// at its current content, was neither completed nor dismissed, unless
     /// the profile turned the mark off.
     pub fn screen_tour(&self, screen: Destination, has_content: bool) -> Option<ScreenTour> {
-        let tour = Tour::of_screen(screen).filter(|_| has_content)?;
+        self.place_tour(TourPlace::Screen(screen), has_content)
+    }
+
+    /// The tour `stage` of the open project offers ("Tour this stage"),
+    /// under the same rules as a screen's: only once the stage has made
+    /// something (a script, a narration, scenes, a clip).
+    pub fn stage_tour(&self, stage: Stage, has_content: bool) -> Option<ScreenTour> {
+        self.place_tour(TourPlace::Stage(stage), has_content)
+    }
+
+    fn place_tour(&self, place: TourPlace, has_content: bool) -> Option<ScreenTour> {
+        let tour = Tour::of(place).filter(|_| has_content)?;
         let done = self.tours.progress.get(&tour.id).is_some_and(|progress| {
             progress.version >= tour.version
                 && matches!(progress.state, TourState::Completed | TourState::Dismissed)
@@ -860,7 +1172,7 @@ mod tests {
     static SAMPLE: Tour = Tour {
         id: TourId::Welcome,
         version: 1,
-        screen: None,
+        place: None,
         steps: &[LIT, SKIPPED, PLACED, PART],
     };
 
@@ -907,7 +1219,7 @@ mod tests {
         static FIRST_MISSING: Tour = Tour {
             id: TourId::Welcome,
             version: 1,
-            screen: None,
+            place: None,
             steps: &[SKIPPED, LIT],
         };
         let mut run = TourRun::new(&FIRST_MISSING, 1, Destination::Projects);
@@ -921,7 +1233,7 @@ mod tests {
         static LAST_MISSING: Tour = Tour {
             id: TourId::Welcome,
             version: 1,
-            screen: None,
+            place: None,
             steps: &[LIT, SKIPPED],
         };
         let mut run = TourRun::new(&LAST_MISSING, 1, Destination::Projects);
@@ -1265,35 +1577,50 @@ mod tests {
     }
 
     #[test]
-    fn each_strategy_screen_has_its_own_tour() {
-        assert_eq!(
-            Tour::of_screen(Destination::Research).map(|t| t.id),
-            Some(TourId::Research)
-        );
-        assert_eq!(
-            Tour::of_screen(Destination::Themes).map(|t| t.id),
-            Some(TourId::Themes)
-        );
-        assert_eq!(
-            Tour::of_screen(Destination::Performance).map(|t| t.id),
-            Some(TourId::Performance)
-        );
+    fn each_screen_and_stage_with_a_tour_finds_it() {
+        let screens = [
+            (Destination::Research, TourId::Research),
+            (Destination::Themes, TourId::Themes),
+            (Destination::Performance, TourId::Performance),
+            (Destination::Projects, TourId::Projects),
+            (Destination::Personas, TourId::Personas),
+            (Destination::Templates, TourId::Templates),
+        ];
+        for (screen, tour) in screens {
+            assert_eq!(Tour::of_screen(screen).map(|t| t.id), Some(tour));
+        }
+        let stages = [
+            (Stage::Script, TourId::Script),
+            (Stage::Narration, TourId::Narration),
+            (Stage::Scenes, TourId::Scenes),
+            (Stage::Clips, TourId::Clips),
+        ];
+        for (stage, tour) in stages {
+            assert_eq!(Tour::of(TourPlace::Stage(stage)).map(|t| t.id), Some(tour));
+        }
         assert_eq!(Tour::of_screen(Destination::Costs), None, "not yet");
+        assert_eq!(Tour::of(TourPlace::Stage(Stage::Render)), None, "not yet");
         for tour in Tour::ALL {
             assert_eq!(Tour::get(tour.id), tour);
         }
+        let mut ids: Vec<_> = Tour::ALL.iter().map(|tour| tour.id.code()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), TourId::ALL.len(), "every tour, once");
     }
 
     #[test]
-    fn screen_tours_have_three_to_seven_steps_on_their_screen() {
-        for tour in [&RESEARCH, &THEMES, &PERFORMANCE] {
-            let screen = tour.screen.unwrap();
+    fn place_tours_have_three_to_seven_steps_on_their_place() {
+        for tour in Tour::ALL {
+            let Some(place) = tour.place else {
+                continue;
+            };
             assert!((3..=7).contains(&tour.len()), "{:?}", tour.id);
             for step in tour.steps {
                 assert_eq!(
                     step.place,
-                    Some(TourPlace::Screen(screen)),
-                    "{:?} {}: opens its screen, so a resumed tour shows it",
+                    Some(place),
+                    "{:?} {}: opens its place, so a resumed tour shows it",
                     tour.id,
                     step.key
                 );
@@ -1305,6 +1632,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_stage_offers_its_tour_once_it_has_made_something() {
+        let progress = FakeProgress::default();
+        let mut app = start(&progress);
+        assert_eq!(app.stage_tour(Stage::Script, false), None, "no script yet");
+        assert_eq!(app.stage_tour(Stage::Render, true), None, "no tour yet");
+        assert_eq!(
+            app.stage_tour(Stage::Scenes, true),
+            Some(ScreenTour {
+                tour: TourId::Scenes,
+                new: true
+            })
+        );
+        app.start_tour(TourId::Scenes, Destination::Projects, false)
+            .unwrap();
+        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Projects));
+        assert_eq!(
+            app.stage_tour(Stage::Scenes, true).map(|tour| tour.new),
+            Some(false),
+            "dismissed"
+        );
+        assert_eq!(
+            app.stage_tour(Stage::Clips, true).map(|tour| tour.new),
+            Some(true),
+            "each stage keeps its own"
+        );
+    }
+
+    #[test]
+    fn a_stage_tour_opens_its_stage_first() {
+        let mut app = start(&FakeProgress::default());
+        assert_eq!(
+            app.start_tour(TourId::Narration, Destination::Personas, false),
+            Ok(TourMove::Show(Some(TourPlace::Stage(Stage::Narration))))
+        );
+        assert_eq!(
+            app.tour_next(),
+            TourMove::Show(Some(TourPlace::Stage(Stage::Narration)))
+        );
+    }
+
+    #[test]
+    fn a_missing_scene_passes_over_its_step() {
+        // No scene picked: the scene step goes, and drawing again lights
+        // the part that holds it.
+        let mut run = TourRun::new(&SCENES, 2, Destination::Projects);
+        assert_eq!(
+            run.spot(|anchor| anchor != TourAnchor::Inspector),
+            Spot::Skip
+        );
+        run.next();
+        assert_eq!(
+            run.spot(|anchor| anchor == TourAnchor::Inspector),
+            Spot::Lit(TourAnchor::Inspector)
+        );
+        assert_eq!(run.spot(|_| false), Spot::Center);
     }
 
     #[test]

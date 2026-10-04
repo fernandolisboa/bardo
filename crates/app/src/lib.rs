@@ -122,8 +122,9 @@ pub use stages::{
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 pub use tours::{
-    Control, GuideRef, PERFORMANCE, RESEARCH, ScreenTour, Side, Spot, THEMES, Tour, TourAnchor,
-    TourError, TourMove, TourPlace, TourStep, TourStepView, WELCOME, WhenMissing,
+    CLIPS, Control, GuideRef, NARRATION, PERFORMANCE, PERSONAS, PROJECTS, RESEARCH, SCENES, SCRIPT,
+    ScreenTour, Side, Spot, TEMPLATES, THEMES, Tour, TourAnchor, TourError, TourMove, TourPlace,
+    TourStep, TourStepView, WELCOME, WhenMissing,
 };
 pub use uploads::{
     DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,

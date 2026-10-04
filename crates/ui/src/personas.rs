@@ -16,8 +16,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bardo_app::{
-    Bardo, BudgetConsent, Destination, PersonaError, SamplePlayer, SpendEstimate, Text,
-    VoiceSample, VoiceSampleError, VoiceSampling, VoiceStatus, persona_package_folder,
+    Bardo, BudgetConsent, Control, Destination, PersonaError, SamplePlayer, SpendEstimate, Text,
+    TourAnchor, VoiceSample, VoiceSampleError, VoiceSampling, VoiceStatus, persona_package_folder,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -28,15 +28,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, PathPromptOptions, SharedString, Subscription, Task,
-    Window, div, px,
+    AnyElement, App, ClickEvent, Entity, PathPromptOptions, ScrollHandle, SharedString,
+    Subscription, Task, Window, div, px,
 };
 
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 use crate::spend::budget_question;
+use crate::{guide, layout};
 
 /// Field errors each control shows, and clears once the user edits it.
 const NAME_ERRORS: &[PersonaFieldError] = &[
@@ -156,6 +156,8 @@ pub struct PersonasScreen {
     bardo: Entity<Bardo>,
     personas: Vec<Persona>,
     load_failed: bool,
+    /// Scrolls the form, so a tour can bring its parts into view.
+    form_scroll: ScrollHandle,
     /// The persona being edited; `None` while creating a new one.
     editing: Option<PersonaId>,
     /// Channels that use the edited persona as their default.
@@ -253,6 +255,7 @@ impl PersonasScreen {
             bardo,
             personas: Vec::new(),
             load_failed: false,
+            form_scroll: ScrollHandle::new(),
             editing: None,
             usage: Vec::new(),
             realistic_voice: false,
@@ -784,6 +787,12 @@ impl PersonasScreen {
         }
     }
 
+    /// Whether there are personas to show: the screen offers its tour
+    /// only then.
+    pub fn has_content(&self) -> bool {
+        !self.load_failed && !self.personas.is_empty()
+    }
+
     fn collection(&self, cx: &mut Context<Self>) -> Collection {
         let mut collection = Collection::new(CollectionKind::List, "persona-list");
         let tiles: Vec<Tile> = self
@@ -927,34 +936,47 @@ impl PersonasScreen {
                         this.touched(cx);
                     })),
             )
-            .child(kit::info(
+            .child(guide::info(
+                bardo,
                 "persona-realistic-voice-info",
-                None,
                 tr(bardo, Text::PersonaRealisticVoiceHint),
+                guide::refs::PERSONAS_REALISTIC,
             ));
 
+        let scroll = Some(&self.form_scroll);
         v_flex()
             .gap_2()
-            .child(
-                h_flex()
-                    .gap_1()
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::PersonaVoice),
+                v_flex()
+                    .gap_2()
                     .child(
-                        div()
-                            .text_sm()
-                            .font_medium()
-                            .child(tr(bardo, Text::PersonaVoice)),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(tr(bardo, Text::PersonaVoice)),
+                            )
+                            .child(guide::info(
+                                bardo,
+                                "persona-voice-info",
+                                tr(bardo, Text::PersonaVoiceHint),
+                                guide::refs::PERSONAS_VOICE,
+                            )),
                     )
-                    .child(kit::info(
-                        "persona-voice-info",
-                        None,
-                        tr(bardo, Text::PersonaVoiceHint),
-                    )),
-            )
-            .child(current)
-            .child(buttons)
-            .children(picker)
-            .children(error)
-            .child(realistic)
+                    .child(current)
+                    .child(buttons)
+                    .children(picker)
+                    .children(error),
+                scroll,
+            ))
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::PersonaRealistic),
+                realistic,
+                scroll,
+            ))
             .into_any_element()
     }
 
@@ -1138,10 +1160,11 @@ impl PersonasScreen {
                                 h_flex()
                                     .gap_1()
                                     .child(div().text_sm().child(tr(bardo, preset.label())))
-                                    .child(kit::info(
+                                    .child(guide::info(
+                                        bardo,
                                         ("preset-info", *preset as usize),
-                                        None,
                                         tr(bardo, preset.hint()),
+                                        guide::refs::PERSONAS_PRESETS,
                                     )),
                             )
                             .child(div().text_sm().font_medium().child(SharedString::from(
@@ -1165,10 +1188,11 @@ impl PersonasScreen {
                             .font_medium()
                             .child(tr(bardo, Text::PersonaPresets)),
                     )
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "persona-presets-info",
-                        None,
                         tr(bardo, Text::PersonaPresetsHint),
+                        guide::refs::PERSONAS_PRESETS,
                     )),
             )
             .child(
@@ -1278,10 +1302,11 @@ impl PersonasScreen {
                             .font_medium()
                             .child(tr(bardo, Text::VoiceSampleTitle)),
                     )
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "voice-sample-info",
-                        None,
                         tr(bardo, Text::VoiceSampleHint),
+                        guide::refs::PERSONAS_SAMPLE,
                     )),
             )
             .child(
@@ -1424,6 +1449,7 @@ impl PersonasScreen {
             .map(|channels| self.render_confirm(channels, cx));
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
+        let scroll = Some(&self.form_scroll);
         let error_for = |fields: &[PersonaFieldError]| -> Option<AnyElement> {
             let error = self.field_errors.iter().find(|e| fields.contains(e))?;
             Some(
@@ -1504,20 +1530,31 @@ impl PersonasScreen {
                             error_for(NAME_ERRORS),
                         ))
                         .child(voice)
-                        .child(field(
-                            Text::PersonaTone,
-                            Textarea::new(&self.tone).into_any_element(),
-                            error_for(TONE_ERRORS),
+                        .child(kit::anchor_in(
+                            TourAnchor::Control(Control::PersonaStyle),
+                            v_flex()
+                                .gap_4()
+                                .child(field(
+                                    Text::PersonaTone,
+                                    Textarea::new(&self.tone).into_any_element(),
+                                    error_for(TONE_ERRORS),
+                                ))
+                                .child(field(
+                                    Text::PersonaScriptStyle,
+                                    Textarea::new(&self.script_style).into_any_element(),
+                                    error_for(SCRIPT_STYLE_ERRORS),
+                                )),
+                            scroll,
                         ))
-                        .child(field(
-                            Text::PersonaScriptStyle,
-                            Textarea::new(&self.script_style).into_any_element(),
-                            error_for(SCRIPT_STYLE_ERRORS),
-                        ))
-                        .child(presets),
+                        .child(kit::anchor_in(
+                            TourAnchor::Control(Control::PersonaPresets),
+                            presets,
+                            scroll,
+                        )),
                 )
                 .children(confirm)
-                .child(
+                .child(kit::anchor_in(
+                    TourAnchor::Control(Control::PersonaShare),
                     h_flex()
                         .gap_3()
                         .child(
@@ -1547,14 +1584,16 @@ impl PersonasScreen {
                                         cx.listener(|this, _: &ClickEvent, _, cx| this.export(cx)),
                                     ),
                             )
-                            .child(kit::info(
+                            .child(guide::info(
+                                bardo,
                                 "persona-export-info",
-                                None,
                                 tr(bardo, Text::PersonaExportHint),
+                                guide::refs::PERSONAS_SHARE,
                             ))
                         })
                         .children(notice.map(|notice| notice.flex_1())),
-                ),
+                    scroll,
+                )),
         )
     }
 }
@@ -1565,8 +1604,19 @@ impl Render for PersonasScreen {
         let form = self.render_form(cx).into_any_element();
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Personas);
-        header.info = Some(
-            kit::info("personas-info", None, tr(bardo, Text::PersonasHint)).into_any_element(),
+        let info = guide::info(
+            bardo,
+            "personas-info",
+            tr(bardo, Text::PersonasHint),
+            guide::refs::PERSONAS_LIBRARY,
+        )
+        .into_any_element();
+        header.info = guide::header_info(
+            bardo,
+            Destination::Personas,
+            self.has_content(),
+            Some(info),
+            cx,
         );
         header.actions = vec![
             Button::new("import-persona")
@@ -1588,6 +1638,7 @@ impl Render for PersonasScreen {
         let mut parts = ScreenParts::new(header);
         parts.collection = Some(collection);
         parts.inspector = Some(Inspector::new(vec![form]));
+        parts.scroll = Some(self.form_scroll.clone());
         layout::screen(parts, cx)
     }
 }
