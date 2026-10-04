@@ -25,6 +25,7 @@ mod shell;
 mod spend;
 mod templates;
 mod themes;
+mod title_bar;
 
 use anyhow::Context as _;
 use bardo_app::{Bardo, Providers, Repositories};
@@ -84,10 +85,14 @@ fn main() -> anyhow::Result<()> {
                     size(px(1260.), px(780.)),
                     cx,
                 ))),
+                // Bardo draws the title bar in the interface theme
+                // (`title_bar`); the system keeps the title for the taskbar.
                 titlebar: Some(TitlebarOptions {
                     title: Some(title),
+                    appears_transparent: true,
                     ..Default::default()
                 }),
+                app_owns_titlebar_drag: true,
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, |window, cx| {

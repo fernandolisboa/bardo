@@ -344,7 +344,6 @@ impl Inspector {
 /// where the user is, the month's spend and the job count, and what
 /// picking a place does.
 pub struct Navigation {
-    pub app_name: SharedString,
     pub groups: Vec<NavGroup>,
     pub pinned: Vec<NavItem>,
     pub current: Destination,
@@ -391,7 +390,6 @@ impl Navigation {
         on_pick: impl Fn(Destination, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
-            app_name: tr(bardo, Text::AppName),
             groups: Destination::GROUPS
                 .iter()
                 .map(|(pillar, places)| NavGroup {

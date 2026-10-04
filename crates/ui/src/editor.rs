@@ -759,13 +759,6 @@ impl EditorScreen {
             .bg(color(PANEL))
             .border_b_1()
             .border_color(color(HAIRLINE))
-            .child(
-                div()
-                    .text_size(px(13.))
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .text_color(color(TEXT))
-                    .child(tr(bardo, Text::AppName)),
-            )
             .child(back)
             .children(breadcrumb)
             .child(div().flex_1())
