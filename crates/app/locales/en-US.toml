@@ -1574,6 +1574,20 @@ client_id_invalid = "Paste the client ID of a Google OAuth client. It ends in .a
 client_secret_required = "Enter the client secret."
 client_secret_invalid = "That doesn't look like a client secret. Copy it again from Google Cloud."
 
+[app_credentials.tiktok]
+name = "TikTok · TikTok for Developers app"
+purpose = "An app (or its sandbox) in your TikTok for Developers account with Login Kit for Desktop and the Content Posting API, the scopes user.info.basic, video.upload and video.list, and the redirect URI http://127.0.0.1:*/callback/. In a sandbox, add your TikTok account as a target user."
+client_id = "Client key"
+client_secret = "Client secret"
+client_id_placeholder = "aw… or sbaw…"
+client_secret_placeholder = "32 letters and digits"
+
+[app_credentials.tiktok.error]
+client_id_required = "Enter the client key."
+client_id_invalid = "Paste the client key from your TikTok app's Credentials. It's letters and digits only."
+client_secret_required = "Enter the client secret."
+client_secret_invalid = "That doesn't look like a client secret. Copy it again from the app's Credentials."
+
 [app_credentials.instagram_reels]
 name = "Instagram · Meta app"
 purpose = "A Business app in your Meta developer account with the Instagram use case (API setup with Facebook login) and Facebook Login for Business. Your Facebook account needs a role on the app and on the Page linked to your Instagram professional account."
@@ -1603,6 +1617,7 @@ open_settings = "Open Settings › Networks"
 disconnected = "Disconnected. Bardo's access was revoked."
 disconnected_not_revoked = "Disconnected here, but {network} couldn't be reached to revoke Bardo's access. You can remove it from your account's security settings on {network}."
 disconnected_kept_for_others = "Disconnected here. Bardo's access on {network} wasn't revoked because another account in Bardo still uses it."
+disconnected_credentials_refused = "Disconnected here, but Bardo's access on {network} wasn't revoked: revoking needs your app's credentials, which are missing from Settings › Networks or no longer accepted. You can remove Bardo from your account's security settings on {network}."
 use_account = "Connect this one"
 choose_label = "Choose an account"
 
@@ -1612,6 +1627,13 @@ checked = "The connection works. Channel: {channel}."
 reconnect_hint = "The network refused to renew access: it was revoked or expired (a Google client in Testing status expires after seven days). Reconnect to sign in again."
 needs_app_credentials = "Save your OAuth client in Settings › Networks before connecting."
 missing_scopes = "Not every permission was allowed. Connect again and leave every box ticked: Bardo needs them to upload, schedule and read analytics."
+
+[connection.tiktok]
+connecting = "Waiting for you to authorize Bardo in the browser…"
+checked = "The connection works. Account: {channel}."
+reconnect_hint = "TikTok refused to renew access: it was revoked, or the refresh token ran out after a year unused. Reconnect to sign in again."
+needs_app_credentials = "Save your TikTok app in Settings › Networks before connecting."
+missing_scopes = "Not every permission was allowed. Connect again and allow them all: Bardo needs them to read your account, send drafts and read your videos' numbers."
 
 [connection.instagram_reels]
 connecting = "Checking the token with Meta…"
@@ -1653,6 +1675,14 @@ not_allowed = "Access was refused. Enable YouTube Data API v3 and YouTube Analyt
 no_channel = "This Google account has no YouTube channel. Sign in with the account that owns the channel."
 limit_reached = "The project's YouTube quota is used up for today. Try again after midnight Pacific time."
 network_down = "YouTube is failing on its side. Try again later."
+
+[connection.failure.tiktok]
+refused = "TikTok refused the sign-in. Connect again."
+client_rejected = "TikTok doesn't recognize the client key or secret. Check them in Settings › Networks; a sandbox has its own."
+not_allowed = "TikTok refused access. Check that your app has Login Kit and the Content Posting API with user.info.basic, video.upload and video.list, and, in a sandbox, that your account is a target user."
+no_channel = "TikTok didn't return this account. Sign in with the account you post from."
+limit_reached = "TikTok is limiting requests from your app right now. Try again in a few minutes."
+network_down = "TikTok is failing on its side. Try again later."
 
 [connection.failure.instagram_reels]
 refused = "Meta refused the token: it expired, was revoked, or belongs to another app. Generate a new one for your app and connect again."

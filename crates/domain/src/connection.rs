@@ -67,7 +67,7 @@ fn is_token_text(text: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignInMethod {
     /// Consent in the system browser, which comes back to a one-shot
-    /// loopback listener with an authorization code (YouTube).
+    /// loopback listener with an authorization code (YouTube, TikTok).
     Browser,
     /// The user pastes an access token generated in the network's developer
     /// tools (Instagram: Facebook Login documents no loopback redirect for
@@ -76,13 +76,13 @@ pub enum SignInMethod {
 }
 
 impl Network {
-    /// How Bardo signs in to this network, or `None` for export only.
-    /// TikTok follows in its own slice; X and Kick stay export only.
+    /// How Bardo signs in to this network, or `None` for export only. X
+    /// and Kick stay export only.
     pub fn sign_in_method(self) -> Option<SignInMethod> {
         match self {
-            Network::YouTube => Some(SignInMethod::Browser),
+            Network::YouTube | Network::TikTok => Some(SignInMethod::Browser),
             Network::InstagramReels => Some(SignInMethod::PastedToken),
-            Network::TikTok | Network::X | Network::Kick => None,
+            Network::X | Network::Kick => None,
         }
     }
 
@@ -104,7 +104,8 @@ impl Network {
 pub enum AppCredentialsFieldError {
     ClientIdRequired,
     /// Spaces, characters ids never have, (Google) not a Google OAuth
-    /// client id, or (Meta) not a numeric app id.
+    /// client id, (Meta) not a numeric app id, or (TikTok) not a client
+    /// key of letters and digits.
     ClientIdInvalid,
     ClientSecretRequired,
     ClientSecretInvalid,
@@ -139,6 +140,9 @@ impl AppCredentials {
     pub const GOOGLE_CLIENT_SUFFIX: &str = ".apps.googleusercontent.com";
     /// Meta app ids are numbers, today 15 or 16 digits long.
     pub const META_APP_ID_DIGITS: std::ops::RangeInclusive<usize> = 5..=32;
+    /// TikTok client keys are letters and digits, today about 18 long
+    /// (a sandbox's start with `sb`).
+    pub const TIKTOK_CLIENT_KEY_CHARS: std::ops::RangeInclusive<usize> = 8..=64;
 
     /// Validates credentials as the user typed or pasted them. Surrounding
     /// whitespace is dropped.
@@ -183,7 +187,11 @@ impl AppCredentials {
                 Self::META_APP_ID_DIGITS.contains(&id.len())
                     && id.bytes().all(|b| b.is_ascii_digit())
             }
-            Network::TikTok | Network::X | Network::Kick => true,
+            Network::TikTok => {
+                Self::TIKTOK_CLIENT_KEY_CHARS.contains(&id.len())
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric())
+            }
+            Network::X | Network::Kick => true,
         }
     }
 
@@ -688,8 +696,14 @@ pub trait NetworkSignIn: Send + Sync {
     ) -> Result<TokenGrant, SignInFailure>;
 
     /// Revokes the tokens at the network. Tokens the network no longer
-    /// knows count as revoked.
-    fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure>;
+    /// knows count as revoked. `credentials` are the saved app
+    /// credentials, when there are any: a network whose revocation
+    /// authenticates the app (TikTok) cannot revoke without them.
+    fn revoke(
+        &self,
+        credentials: Option<&AppCredentials>,
+        tokens: &TokenSet,
+    ) -> Result<(), SignInFailure>;
 
     /// Whether `revoke` ends every connection the same person made with
     /// these app credentials, not just this one: Meta removes the app's
@@ -714,6 +728,13 @@ pub trait NetworkSignIn: Send + Sync {
 
 /// Authorization code with PKCE over a loopback redirect.
 pub trait BrowserSignIn: Send + Sync {
+    /// The path the network sends the browser back to on the loopback
+    /// listener. It is part of the redirect address the user registers
+    /// where the network asks for one (TikTok: `/callback/`).
+    fn redirect_path(&self) -> &'static str {
+        "/"
+    }
+
     /// A fresh PKCE verifier and `state`, and the consent address that
     /// carries them, sending the browser back to `redirect_uri`.
     fn consent_request(&self, credentials: &AppCredentials, redirect_uri: &str) -> ConsentRequest;
@@ -801,7 +822,8 @@ pub trait ConsentCallback: Send {
 
 /// Starts callbacks: a one-shot loopback listener on `127.0.0.1`.
 pub trait ConsentReceiver: Send + Sync {
-    fn listen(&self) -> Result<Box<dyn ConsentCallback>, ConsentError>;
+    /// Listens for a callback on `path` (`BrowserSignIn::redirect_path`).
+    fn listen(&self, path: &str) -> Result<Box<dyn ConsentCallback>, ConsentError>;
 }
 
 #[cfg(test)]
@@ -830,21 +852,49 @@ mod tests {
     const META_SECRET: &str = concat!("0123456789abcdef", "0123456789abcdef");
 
     #[test]
-    fn youtube_signs_in_in_the_browser_and_instagram_with_a_pasted_token() {
+    fn youtube_and_tiktok_sign_in_in_the_browser_and_instagram_with_a_pasted_token() {
         assert_eq!(
             Network::sign_in_networks().collect::<Vec<_>>(),
-            [Network::YouTube, Network::InstagramReels]
+            [Network::YouTube, Network::TikTok, Network::InstagramReels]
         );
-        assert_eq!(
-            Network::YouTube.sign_in_method(),
-            Some(SignInMethod::Browser)
-        );
+        for network in [Network::YouTube, Network::TikTok] {
+            assert_eq!(
+                network.sign_in_method(),
+                Some(SignInMethod::Browser),
+                "{network}"
+            );
+        }
         assert_eq!(
             Network::InstagramReels.sign_in_method(),
             Some(SignInMethod::PastedToken)
         );
-        for network in [Network::TikTok, Network::X, Network::Kick] {
+        for network in [Network::X, Network::Kick] {
             assert!(!network.signs_in(), "{network}");
+        }
+    }
+
+    // A TikTok client key and secret in the published shapes.
+    const TIKTOK_KEY: &str = concat!("awfixture", "key0000001");
+    const TIKTOK_SECRET: &str = concat!("FixtureClientSecret", "0000000000000");
+
+    #[test]
+    fn a_tiktok_client_key_is_letters_and_digits() {
+        for key in [TIKTOK_KEY, concat!("sbawfixture", "key00001")] {
+            let credentials = AppCredentials::parse(Network::TikTok, key, TIKTOK_SECRET).unwrap();
+            assert_eq!(credentials.client_id(), key);
+        }
+        for bad in [
+            "awkey",
+            "aw-fixture-key-0001",
+            "aw fixture key 0001",
+            GOOGLE_ID,
+            &"a".repeat(65),
+        ] {
+            assert_eq!(
+                AppCredentials::parse(Network::TikTok, bad, TIKTOK_SECRET).unwrap_err(),
+                [AppCredentialsFieldError::ClientIdInvalid],
+                "{bad}"
+            );
         }
     }
 

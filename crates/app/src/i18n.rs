@@ -875,6 +875,8 @@ pub enum Text {
     ConnectionDisconnectedNotRevoked,
     /// Placeholder: `{network}`.
     ConnectionDisconnectedKeptForOthers,
+    /// Placeholder: `{network}`.
+    ConnectionDisconnectedCredentialsRefused,
     ConnectionReconnectHint(Network),
     ConnectionNotOffered,
     ConnectionNeedsAppCredentials(Network),
@@ -1716,6 +1718,9 @@ impl Text {
             Text::ConnectionDisconnected => "connection.disconnected",
             Text::ConnectionDisconnectedNotRevoked => "connection.disconnected_not_revoked",
             Text::ConnectionDisconnectedKeptForOthers => "connection.disconnected_kept_for_others",
+            Text::ConnectionDisconnectedCredentialsRefused => {
+                "connection.disconnected_credentials_refused"
+            }
             Text::ConnectionReconnectHint(network) => {
                 return format!("connection.{}.reconnect_hint", network.code()).into();
             }
@@ -3927,6 +3932,7 @@ mod tests {
             Text::ConnectionDisconnected,
             Text::ConnectionDisconnectedNotRevoked,
             Text::ConnectionDisconnectedKeptForOthers,
+            Text::ConnectionDisconnectedCredentialsRefused,
             Text::ConnectionNotOffered,
             Text::ConnectionNotConnected,
             Text::ConnectionDenied,

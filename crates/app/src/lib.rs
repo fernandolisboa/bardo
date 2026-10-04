@@ -313,6 +313,7 @@ impl Providers {
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
             sign_ins: vec![
                 Arc::new(bardo_publish::YouTubeSignIn::new()),
+                Arc::new(bardo_publish::TikTokSignIn::new()),
                 Arc::new(bardo_publish::InstagramSignIn::new()),
             ],
             consent: Arc::new(bardo_publish::LoopbackReceiver),

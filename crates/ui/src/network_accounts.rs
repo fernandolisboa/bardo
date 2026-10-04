@@ -866,6 +866,16 @@ impl NetworkAccountsPanel {
                         let network_name = bardo.text(Text::NetworkName(network));
                         let (tone, text) = if done.revoked {
                             (Tone::Success, bardo.text(Text::ConnectionDisconnected))
+                        } else if done.credentials_refused {
+                            (
+                                Tone::Warning,
+                                bardo
+                                    .text_with(
+                                        Text::ConnectionDisconnectedCredentialsRefused,
+                                        &[("network", &network_name)],
+                                    )
+                                    .into(),
+                            )
                         } else if done.kept_for_others {
                             (
                                 Tone::Info,
