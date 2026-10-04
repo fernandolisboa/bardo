@@ -11,12 +11,14 @@
 
 use bardo_app::bardo_domain::{Insights, JobState, Network, OwnerMetrics, PostRetention};
 use bardo_app::{Bardo, MetricsStatus, OwnerAccess, PublishedPost, Text, UploadState};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Div, ElementId, SharedString, Stateful, div, px};
 
 use crate::appearance::look;
+use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 
@@ -83,16 +85,23 @@ pub fn bars(
 
 /// A figure in a row of them: its label over its value.
 fn stat(label: SharedString, value: AnyElement, cx: &App) -> Div {
-    stat_with(label, None, value, cx)
+    figure(label, None, value, cx)
 }
 
 /// A figure whose label has what it means behind an ⓘ.
 fn stat_with(
+    bardo: &Bardo,
     label: SharedString,
     hint: Option<(ElementId, SharedString)>,
     value: AnyElement,
     cx: &App,
 ) -> Div {
+    let info =
+        hint.map(|(id, hint)| guide::info(bardo, id, hint, guide::refs::PERFORMANCE_NUMBERS));
+    figure(label, info, value, cx)
+}
+
+fn figure(label: SharedString, info: Option<Popover>, value: AnyElement, cx: &App) -> Div {
     let t = look(cx).tokens;
     v_flex()
         .gap_0p5()
@@ -102,7 +111,7 @@ fn stat_with(
                 .gap_0p5()
                 .items_center()
                 .child(div().text_xs().text_color(t.text2).child(label))
-                .children(hint.map(|(id, hint)| kit::info(id, None, hint))),
+                .children(info),
         )
         .child(value)
 }
@@ -140,7 +149,12 @@ fn hidden(bardo: &Bardo, id: ElementId, cx: &App) -> AnyElement {
                 .text_color(look(cx).tokens.text2)
                 .child(tr(bardo, Text::MetricHidden)),
         )
-        .child(kit::info(id, None, tr(bardo, Text::MetricHiddenHint)))
+        .child(guide::info(
+            bardo,
+            id,
+            tr(bardo, Text::MetricHiddenHint),
+            guide::refs::PERFORMANCE_NUMBERS,
+        ))
         .into_any_element()
 }
 
@@ -150,13 +164,14 @@ fn not_reported(bardo: &Bardo, network: Network, id: ElementId, cx: &App) -> Any
         .gap_1()
         .items_center()
         .child(figure_value("—".into(), cx))
-        .child(kit::info(
+        .child(guide::info(
+            bardo,
             id,
-            None,
             SharedString::from(bardo.text_with(
                 Text::MetricNotReportedHint,
                 &[("network", &bardo.text(Text::NetworkName(network)))],
             )),
+            guide::refs::PERFORMANCE_NUMBERS,
         ))
         .into_any_element()
 }
@@ -185,6 +200,7 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
     let engaged = owned.is_some();
     if let Some((owner, _)) = &owned {
         stats.push(stat_with(
+            bardo,
             tr(bardo, Text::MetricEngagedViews),
             Some((
                 hint_id(id, "engaged"),
@@ -302,12 +318,14 @@ fn insights_numbers(
                     cx,
                 ),
                 stat_with(
+                    bardo,
                     tr(bardo, Text::MetricReach),
                     Some((hint_id(id, "reach-hint"), tr(bardo, Text::MetricReachHint))),
                     number(insights.reach, "reach"),
                     cx,
                 ),
                 stat_with(
+                    bardo,
                     tr(bardo, Text::MetricInteractions),
                     Some((
                         hint_id(id, "interactions-hint"),
@@ -391,6 +409,7 @@ fn owner_numbers(
 fn money(bardo: &Bardo, owner: &OwnerMetrics, id: &str, cx: &App) -> Div {
     let Some(money) = owner.money() else {
         return stat_row(vec![stat_with(
+            bardo,
             tr(bardo, Text::MetricRevenue),
             Some((
                 hint_id(id, "unpaid"),
@@ -411,18 +430,21 @@ fn money(bardo: &Bardo, owner: &OwnerMetrics, id: &str, cx: &App) -> Div {
     stat_row(vec![
         stat(tr(bardo, Text::MetricRevenue), amount(money.revenue), cx),
         stat_with(
+            bardo,
             tr(bardo, Text::MetricRpm),
             Some((hint_id(id, "rpm"), tr(bardo, Text::MetricRpmHint))),
             rpm,
             cx,
         ),
         stat_with(
+            bardo,
             tr(bardo, Text::MetricCpm),
             Some((hint_id(id, "cpm"), tr(bardo, Text::MetricCpmHint))),
             amount(money.cpm),
             cx,
         ),
         stat_with(
+            bardo,
             tr(bardo, Text::MetricPlaybackCpm),
             Some((
                 hint_id(id, "playback-cpm"),
@@ -483,10 +505,11 @@ pub fn retention(bardo: &Bardo, retention: &PostRetention, id: &str, cx: &App) -
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .child(tr(bardo, Text::MetricsRetention)),
                     )
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         hint_id(id, "retention"),
-                        None,
                         tr(bardo, Text::MetricsRetentionHint),
+                        guide::refs::PERFORMANCE_NUMBERS,
                     )),
             )
             .child(chart)
@@ -651,10 +674,11 @@ pub fn post_state(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Di
         .flex_wrap()
         .child(chip)
         .when(publication.missing_since.is_some(), |row| {
-            row.child(kit::info(
+            row.child(guide::info(
+                bardo,
                 ElementId::Name(format!("{id}-missing").into()),
-                None,
                 missing_hint(bardo, publication.network()),
+                guide::refs::PERFORMANCE_POSTS,
             ))
         })
         .child(when_line(
@@ -794,9 +818,14 @@ fn upload_state(
         .items_center()
         .flex_wrap()
         .child(chip)
-        .children(
-            hint.map(|hint| kit::info(ElementId::Name(format!("{id}-upload").into()), None, hint)),
-        )
+        .children(hint.map(|hint| {
+            guide::info(
+                bardo,
+                ElementId::Name(format!("{id}-upload").into()),
+                hint,
+                guide::refs::PERFORMANCE_POSTS,
+            )
+        }))
         .when(done, |row| {
             row.child(when_line(
                 bardo,

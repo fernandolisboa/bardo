@@ -14,6 +14,7 @@ As teclas têm o nome que aparece impresso no teclado. O menu do Guia também li
 | Teclas | Faz |
 | --- | --- |
 | F1 | Abre o guia na página da tela em que você está |
+| Shift+F1 | Começa o tour da tela em que você está, quando ela tem um |
 | ↑ ↓ | Percorre o sumário ou os resultados da busca enquanto você digita |
 | Enter | Abre a página destacada |
 | Esc | Limpa a busca |

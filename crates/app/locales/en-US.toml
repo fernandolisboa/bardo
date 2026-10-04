@@ -1956,6 +1956,7 @@ finish = "Finish"
 skip = "Skip tour"
 new = "New"
 learn_more = "Learn more"
+this_screen = "Tour this screen"
 
 [tour.offer]
 title = "Take a 2-minute tour?"
@@ -1999,6 +2000,79 @@ body = "What you spent this month, and how much of your budgets is used. Set a m
 title = "Guide and tours"
 body = "Come back here to take this tour again, resume one you closed, see the keyboard shortcuts or read the user guide. F1 opens the guide from any screen."
 
+[tour.research]
+name = "Research tour"
+
+[tour.research.channel]
+title = "Channel and market"
+body = "Research runs for one channel. Its target country and content language set the market: the numbers come from YouTube uploads in that country and language."
+
+[tour.research.seeds]
+title = "Niches or keywords"
+body = "Type one niche or keyword per line, up to 20. Each one becomes a YouTube search, so write it the way viewers would search."
+
+[tour.research.run]
+title = "Run and refresh"
+body = "Run research looks up each niche, at about 1% of your daily YouTube quota per niche. Results are kept for 7 days, so running again within a week costs nothing; Refresh all fetches every niche anew."
+
+[tour.research.results]
+title = "Ranked results"
+body = "Niches are ranked by opportunity, which weighs trend against competition. Each card shows the numbers behind its scores and when they were fetched."
+
+[tour.research.next]
+title = "Next: themes"
+body = "Found a promising niche? On Themes, Claude suggests video ideas for it and ranks them for your channel."
+
+[tour.themes]
+name = "Themes tour"
+
+[tour.themes.pick]
+title = "Channel and niche"
+body = "Ideas are written for one channel and one of its niches: the channel's own niche or one you researched. The niche's research scores show here when it has them."
+
+[tour.themes.suggest]
+title = "Suggest themes"
+body = "Claude proposes video ideas for the niche, then the decision engine ranks them. Rank again ranks the ideas still waiting, such as ones you edited. The cost shows before anything runs."
+
+[tour.themes.idea]
+title = "An idea and its priority"
+body = "Ideas are listed by priority, from 0 to 100. Confidence says how sure the decision engine was of its least certain answer."
+
+[tour.themes.reasons]
+title = "Why it ranks there"
+body = "Priority weighs fit with the channel, trend and the room competition leaves. Once your published videos have metrics, past performance counts too. Details shows the numbers it used."
+
+[tour.themes.review]
+title = "Approve, edit or discard"
+body = "Approving an idea starts a video project from it. Editing its title or angle clears the ranking, so rank again afterwards. Discarded ideas leave the list."
+
+[tour.themes.projects]
+title = "Your projects"
+body = "The projects started from this channel's ideas. Open them on Projects to write the script and carry on."
+
+[tour.performance]
+name = "Performance tour"
+
+[tour.performance.channel]
+title = "One channel at a time"
+body = "Pick the channel whose posts you follow. Its figures add up the latest numbers of all its posts."
+
+[tour.performance.posts]
+title = "Linked posts"
+body = "Every post linked to one of the channel's projects, newest first, with its network and views. A post marked Not found was removed or made private."
+
+[tour.performance.numbers]
+title = "A post's numbers"
+body = "Pick a post to see its numbers, how they moved since the sync before, and its history. With the channel's YouTube account connected, engaged views, watch time, retention and revenue join them."
+
+[tour.performance.sync]
+title = "Sync now"
+body = "A sync reads the latest numbers of every linked post, as a job. Bardo also syncs by itself when it opens, as set under Settings › Metrics."
+
+[tour.performance.link]
+title = "Linking a post"
+body = "Posts are linked at a project's Publish stage: Bardo's uploads link themselves, and for an export you paste the post's link. Unlink a post there too; it stays on the network."
+
 [guide]
 resume_tour = "Resume tour"
 shortcuts = "Keyboard shortcuts"
@@ -2008,6 +2082,7 @@ user_guide = "User guide"
 on_this_page = "On this page"
 show_me = "Show me"
 go_to = "Go to {place}"
+more = "More in the guide"
 
 [guide.search]
 placeholder = "Search the guide"
@@ -2023,6 +2098,12 @@ publishing = "Publishing"
 costs = "Costs and budgets"
 reference = "Reference"
 
+[tours_setting]
+title = "Guided tours"
+offer = "Offer tours on new screens"
+hint = "Marks a screen's “Tour this screen” button as new until you take or skip its tour. Tours never start on their own."
+not_saved = "Couldn't save the setting. Try again."
+
 [shortcuts]
 title = "Keyboard shortcuts"
 close = "Close"
@@ -2036,6 +2117,7 @@ suggestions = "Cut suggestions in the editor"
 
 [shortcuts.action]
 guide_open = "Open the guide at the page for this screen"
+tour_screen = "Start the tour of this screen"
 guide_move = "Move through the contents or the search results"
 guide_pick = "Open the highlighted page"
 guide_clear = "Clear the search"

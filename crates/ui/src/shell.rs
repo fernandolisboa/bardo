@@ -1,5 +1,10 @@
-use bardo_app::bardo_domain::{BudgetLevel, VideoProjectId};
-use bardo_app::{Bardo, Destination, GuidePlace, SpendSummary, Stage, Text, TourMove, TourPlace};
+use std::rc::Rc;
+
+use bardo_app::bardo_domain::{BudgetLevel, TourId, VideoProjectId};
+use bardo_app::{
+    Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SpendSummary, Stage, Text, TourMove,
+    TourPlace,
+};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -11,8 +16,8 @@ use crate::appearance;
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
 use crate::editor::{EditorEvent, EditorScreen};
-use crate::guide::{Guide, GuideEvent};
-use crate::guide_screen::{GuideScreen, GuideScreenEvent, OpenGuide};
+use crate::guide::{Guide, GuideEvent, GuideHooks};
+use crate::guide_screen::{GuideScreen, GuideScreenEvent, OpenGuide, TourThisScreen};
 use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
@@ -163,6 +168,19 @@ impl Shell {
                 },
             ),
         ];
+        // A screen's "Tour this screen" and its ⓘ's "More in the guide".
+        let tour_shell = cx.entity().downgrade();
+        let section_shell = cx.entity().downgrade();
+        cx.set_global(GuideHooks {
+            tour: Rc::new(move |tour, window, cx| {
+                let _ =
+                    tour_shell.update(cx, |shell, cx| shell.start_screen_tour(tour, window, cx));
+            }),
+            section: Rc::new(move |section, window, cx| {
+                let _ =
+                    section_shell.update(cx, |shell, cx| shell.open_section(section, window, cx));
+            }),
+        });
         let mut shell = Self {
             bardo,
             screen: Destination::START,
@@ -210,7 +228,9 @@ impl Shell {
             return;
         }
         if place == Destination::Guide {
-            self.guide.update(cx, |guide, cx| guide.toggle_menu(cx));
+            let screen_tour = self.screen_tour(cx);
+            self.guide
+                .update(cx, |guide, cx| guide.toggle_menu(screen_tour, cx));
             return;
         }
         // What a screen lists may have changed on another one: channels,
@@ -302,12 +322,7 @@ impl Shell {
         self.guide.update(cx, |guide, cx| guide.moved(cx));
         match event {
             GuideEvent::OpenGuide => self.open_guide(window, cx),
-            GuideEvent::LearnMore(guide) => {
-                self.guide_screen.update(cx, |screen, cx| {
-                    screen.open(guide.page, Some(guide.section), cx);
-                });
-                self.screen = Destination::Guide;
-            }
+            GuideEvent::LearnMore(guide) => self.show_section(guide, cx),
             _ => {}
         }
         cx.notify();
@@ -375,6 +390,60 @@ impl Shell {
                 self.open_guide(window, cx);
             }
         }
+    }
+
+    /// The tour the screen on display offers: one with a tour of its own
+    /// and something to show.
+    fn screen_tour(&self, cx: &App) -> Option<ScreenTour> {
+        let has_content = match self.screen {
+            Destination::Research => self.research.read(cx).has_content(),
+            Destination::Themes => self.themes.read(cx).has_content(),
+            Destination::Performance => self.performance.read(cx).has_content(),
+            _ => false,
+        };
+        self.bardo.read(cx).screen_tour(self.screen, has_content)
+    }
+
+    /// Shift+F1: the screen's tour, when it offers one. Not over the
+    /// editor, nor while the missed posts list holds the window.
+    fn on_tour_this_screen(
+        &mut self,
+        _: &TourThisScreen,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Not over the editor or the missed posts, nor mid-tour: a running
+        // tour keeps its step.
+        if self.editor.is_some()
+            || self.missed.read(cx).is_open()
+            || self.bardo.read(cx).tour_step(false).is_some()
+        {
+            return;
+        }
+        if let Some(tour) = self.screen_tour(cx) {
+            self.start_screen_tour(tour.tour, window, cx);
+        }
+    }
+
+    /// "Tour this screen": the cards over the screen close first.
+    fn start_screen_tour(&mut self, tour: TourId, window: &mut Window, cx: &mut Context<Self>) {
+        self.guide.update(cx, |guide, cx| guide.close_cards(cx));
+        self.guide_event(GuideEvent::Start(tour), window, cx);
+    }
+
+    /// An ⓘ's "More in the guide": the Guide screen at that section.
+    fn open_section(&mut self, section: GuideRef, _: &mut Window, cx: &mut Context<Self>) {
+        self.guide.update(cx, |guide, cx| guide.close_cards(cx));
+        self.show_section(section, cx);
+        cx.notify();
+    }
+
+    /// The Guide screen at `section`.
+    fn show_section(&mut self, section: GuideRef, cx: &mut Context<Self>) {
+        self.guide_screen.update(cx, |screen, cx| {
+            screen.open(section.page, Some(section.section), cx);
+        });
+        self.screen = Destination::Guide;
     }
 
     /// A guide link or "Go to …": opens the place.
@@ -503,6 +572,7 @@ impl Render for Shell {
             .size_full()
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_open_guide))
+            .on_action(cx.listener(Self::on_tour_this_screen))
             .child(TitleBar::new(name, colors))
             .child(
                 div()

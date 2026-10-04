@@ -12,7 +12,8 @@ impl ProfileRepository for Database {
         let row = self
             .conn()
             .query_row(
-                "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor
+                "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
+                        offer_screen_tours
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -24,13 +25,16 @@ impl ProfileRepository for Database {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, i64>(5)?,
+                        row.get::<_, bool>(6)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
 
-        let Some((id, ui_language, ui_theme, ui_layout, metrics_sync, cut_floor)) = row else {
+        let Some((id, ui_language, ui_theme, ui_layout, metrics_sync, cut_floor, screen_tours)) =
+            row
+        else {
             return Ok(None);
         };
         Ok(Some(UserProfile {
@@ -40,6 +44,7 @@ impl ProfileRepository for Database {
             ui_layout: LayoutId::from_code_or_default(&ui_layout),
             metrics_sync: MetricsSyncOnStart::from_code_or_default(&metrics_sync),
             cut_suggestion_floor: Score::new(u8::try_from(cut_floor).map_err(boxed)?),
+            offer_screen_tours: screen_tours,
         }))
     }
 
@@ -47,14 +52,15 @@ impl ProfileRepository for Database {
         self.conn()
             .execute(
                 "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
-                                           cut_suggestion_floor)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                                           cut_suggestion_floor, offer_screen_tours)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
                      ui_layout = excluded.ui_layout,
                      metrics_sync = excluded.metrics_sync,
-                     cut_suggestion_floor = excluded.cut_suggestion_floor",
+                     cut_suggestion_floor = excluded.cut_suggestion_floor,
+                     offer_screen_tours = excluded.offer_screen_tours",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -62,6 +68,7 @@ impl ProfileRepository for Database {
                     profile.ui_layout.code(),
                     profile.metrics_sync.code(),
                     profile.cut_suggestion_floor.value(),
+                    profile.offer_screen_tours,
                 ],
             )
             .map_err(boxed)?;
@@ -103,6 +110,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM user_profile", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn offering_screen_tours_is_on_until_turned_off() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert!(db.load_default().unwrap().unwrap().offer_screen_tours);
+
+        profile.offer_screen_tours = false;
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
     }
 
     #[test]

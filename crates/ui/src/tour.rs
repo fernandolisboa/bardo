@@ -349,7 +349,15 @@ impl Element for Spotlight {
         window: &mut Window,
         cx: &mut App,
     ) -> Placed {
-        let drawn: Vec<TourAnchor> = frames(window, cx).current.keys().copied().collect();
+        // A component scrolled wholly out of view with no scroll to bring
+        // it back (a screen's own control) counts as missing, so its
+        // step falls back as it says instead of lighting nothing.
+        let drawn: Vec<TourAnchor> = frames(window, cx)
+            .current
+            .iter()
+            .filter(|(_, tagged)| tagged.scroll.is_some() || !tagged.visible.is_empty())
+            .map(|(anchor, _)| *anchor)
+            .collect();
         let spot = (self.resolve)(&|anchor| drawn.contains(&anchor), cx);
         let lit = match spot {
             Spot::Lit(anchor) => find(anchor, window, cx),
@@ -641,6 +649,13 @@ mod tests {
         }
     }
 
+    /// The screens that tag their own controls, in every layout alike.
+    const SCREENS: [&str; 3] = [
+        include_str!("research.rs"),
+        include_str!("themes.rs"),
+        include_str!("performance.rs"),
+    ];
+
     /// How a layout tags `anchor`: a pillar's group and each place come
     /// from the navigation it is handed, which holds every one.
     fn tag(anchor: TourAnchor) -> String {
@@ -667,6 +682,16 @@ mod tests {
                     WhenMissing::Skip | WhenMissing::Center => None,
                 };
                 for anchor in step.anchor.into_iter().chain(fallback) {
+                    if let TourAnchor::Control(control) = anchor {
+                        let tag = format!("TourAnchor::Control(Control::{control:?})");
+                        assert!(
+                            SCREENS.iter().any(|source| source.contains(&tag)),
+                            "no screen tags {control:?} ({:?} step {})",
+                            tour.id,
+                            step.key
+                        );
+                        continue;
+                    }
                     for layout in LayoutId::ALL {
                         assert!(
                             layout_source(layout).contains(&tag(anchor)),

@@ -37,6 +37,9 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("what-bardo-is"),
     page!("api-keys"),
     page!("first-video"),
+    page!("niche-research"),
+    page!("themes-ranking"),
+    page!("performance-metrics"),
     page!("glossary"),
     page!("shortcuts"),
 ];
@@ -1011,7 +1014,14 @@ Text of the **first** part.
         let guide = Guide::load(UiLanguage::EnUs);
         let contents = guide.contents();
         let groups: Vec<GuideGroup> = contents.iter().map(|(group, _)| *group).collect();
-        assert_eq!(groups, [GuideGroup::GettingStarted, GuideGroup::Reference]);
+        assert_eq!(
+            groups,
+            [
+                GuideGroup::GettingStarted,
+                GuideGroup::Strategy,
+                GuideGroup::Reference
+            ]
+        );
         assert_eq!(guide.first().id, "what-bardo-is");
     }
 
@@ -1131,6 +1141,28 @@ Text of the **first** part.
                     guide.page,
                     guide.section
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn every_screen_tour_has_the_page_of_its_screen() {
+        for language in UiLanguage::ALL {
+            let guide = Guide::load(language);
+            for tour in Tour::ALL {
+                let Some(screen) = tour.screen else {
+                    continue;
+                };
+                let page = guide
+                    .pages()
+                    .iter()
+                    .find(|page| page.tour == Some(tour.id))
+                    .unwrap_or_else(|| panic!("{language}: no page shows {:?}", tour.id));
+                assert_eq!(page.place, Some(GuidePlace::Screen(screen)), "{}", page.id);
+                // Every step's "Learn more" stays on the screen's page.
+                for step in tour.steps {
+                    assert_eq!(step.guide.map(|guide| guide.page), Some(page.id.as_str()));
+                }
             }
         }
     }

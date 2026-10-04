@@ -3,13 +3,15 @@
 //! behind a click. Colors come from the current [`look`], so every piece
 //! repaints with the theme.
 
+use std::rc::Rc;
+
 use bardo_app::bardo_domain::ThemeFamily;
 use bardo_app::{Side, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, SharedString, Stateful, div, px};
+use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, SharedString, Stateful, Window, div, px};
 
 use crate::appearance::look;
 use crate::tour::Anchored as _;
@@ -156,6 +158,44 @@ pub fn info(id: impl Into<ElementId>, label: Option<SharedString>, text: SharedS
             .text_sm()
             .text_color(look(cx).tokens.text)
             .child(text.clone())
+    })
+}
+
+/// [`info`] whose popover ends with a link (the guide's "More in the
+/// guide"); a click closes the popover and runs `on_more`.
+pub fn info_more(
+    id: impl Into<ElementId>,
+    text: SharedString,
+    more: SharedString,
+    on_more: impl Fn(&mut Window, &mut App) + 'static,
+) -> Popover {
+    let id = id.into();
+    let trigger = Button::new(id.clone())
+        .ghost()
+        .xsmall()
+        .icon(IconName::Info);
+    let on_more = Rc::new(on_more);
+    Popover::new(id).trigger(trigger).content(move |_, _, cx| {
+        let popover = cx.entity();
+        let on_more = Rc::clone(&on_more);
+        v_flex()
+            .max_w(px(360.))
+            .gap_2()
+            .text_sm()
+            .text_color(look(cx).tokens.text)
+            .child(text.clone())
+            .child(
+                h_flex().child(
+                    Button::new("info-more")
+                        .link()
+                        .xsmall()
+                        .label(more.clone())
+                        .on_click(move |_, window, cx| {
+                            popover.update(cx, |popover, cx| popover.dismiss(window, cx));
+                            on_more(window, cx);
+                        }),
+                ),
+            )
     })
 }
 

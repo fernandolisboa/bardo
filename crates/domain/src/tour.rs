@@ -12,14 +12,28 @@ use crate::{ProfileId, RepositoryError};
 pub enum TourId {
     /// The first-run tour of the navigation and the first steps.
     Welcome,
+    /// The Research screen's tour.
+    Research,
+    /// The Themes screen's tour.
+    Themes,
+    /// The Performance screen's tour.
+    Performance,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 1] = [TourId::Welcome];
+    pub const ALL: [TourId; 4] = [
+        TourId::Welcome,
+        TourId::Research,
+        TourId::Themes,
+        TourId::Performance,
+    ];
 
     pub fn code(self) -> &'static str {
         match self {
             TourId::Welcome => "welcome",
+            TourId::Research => "research",
+            TourId::Themes => "themes",
+            TourId::Performance => "performance",
         }
     }
 

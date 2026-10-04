@@ -1452,6 +1452,15 @@ pub enum Text {
     GuideGoTo,
     /// A tour card's way into the guide.
     TourLearnMore,
+    /// A screen's button, and the Guide menu row, that start its tour.
+    TourThisScreen,
+    /// An ⓘ's link to the guide section that says more.
+    GuideMoreInGuide,
+    /// The Appearance tab's tour settings.
+    ToursSettingTitle,
+    ToursSettingOffer,
+    ToursSettingHint,
+    ToursSettingNotSaved,
     /// A group of keyboard shortcuts, by key.
     ShortcutGroup(&'static str),
     /// What a keyboard shortcut does, by key.
@@ -1507,6 +1516,12 @@ impl Text {
             Text::GuideShowMe => "guide.show_me",
             Text::GuideGoTo => "guide.go_to",
             Text::TourLearnMore => "tour.learn_more",
+            Text::TourThisScreen => "tour.this_screen",
+            Text::GuideMoreInGuide => "guide.more",
+            Text::ToursSettingTitle => "tours_setting.title",
+            Text::ToursSettingOffer => "tours_setting.offer",
+            Text::ToursSettingHint => "tours_setting.hint",
+            Text::ToursSettingNotSaved => "tours_setting.not_saved",
             Text::ChannelsTitle => "channels.title",
             Text::ChannelsEmpty => "channels.empty",
             Text::ChannelsNotLoaded => "channels.not_loaded",
@@ -4733,6 +4748,12 @@ mod tests {
             Text::GuideShowMe,
             Text::GuideGoTo,
             Text::TourLearnMore,
+            Text::TourThisScreen,
+            Text::GuideMoreInGuide,
+            Text::ToursSettingTitle,
+            Text::ToursSettingOffer,
+            Text::ToursSettingHint,
+            Text::ToursSettingNotSaved,
         ]);
         texts.extend(GuideGroup::ALL.map(Text::GuideGroupName));
         texts

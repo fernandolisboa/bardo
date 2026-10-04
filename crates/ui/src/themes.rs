@@ -10,8 +10,8 @@ use bardo_app::bardo_domain::{
     ThemeFieldError, ThemeId, ThemeStatus,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, Destination, SUGGESTIONS_PER_RUN, SpendEstimate, Text, ThemeError,
-    ThemesView,
+    Bardo, BudgetConsent, Control, Destination, SUGGESTIONS_PER_RUN, SpendEstimate, Text,
+    ThemeError, ThemesView, TourAnchor,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
@@ -26,10 +26,10 @@ use gpui_kit::{
 };
 
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
+use crate::{guide, layout};
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
@@ -259,6 +259,14 @@ impl ThemesScreen {
         }
     }
 
+    /// Whether the niche has ideas to show: the screen offers its tour
+    /// only then.
+    pub fn has_content(&self) -> bool {
+        self.view
+            .as_ref()
+            .is_some_and(|view| !view.themes.is_empty())
+    }
+
     fn running(&self) -> bool {
         self.view
             .as_ref()
@@ -364,7 +372,7 @@ impl ThemesScreen {
         let before_history = view.map_or(0, |view| view.before_history);
         let waiting = unranked + before_history;
 
-        v_flex()
+        let pick = v_flex()
             .gap_3()
             .child(field(
                 tr(bardo, Text::ThemesChannel),
@@ -382,7 +390,11 @@ impl ThemesScreen {
             .children(
                 view.and_then(|view| view.research)
                     .map(|scores| research_tags(bardo, scores)),
-            )
+            );
+
+        v_flex()
+            .gap_3()
+            .child(kit::anchor(TourAnchor::Control(Control::ThemesPick), pick))
             .when(has_niche, |panel| {
                 panel.child(past_performance(
                     bardo,
@@ -393,7 +405,8 @@ impl ThemesScreen {
             // Nothing to suggest for without a niche; a running job shows
             // its progress instead of the buttons.
             .when(has_niche && !running, |panel| {
-                panel.child(
+                panel.child(kit::anchor(
+                    TourAnchor::Control(Control::ThemesSuggest),
                     h_flex()
                         .gap_2()
                         .flex_wrap()
@@ -415,15 +428,16 @@ impl ThemesScreen {
                                     })),
                             )
                         })
-                        .child(kit::info(
+                        .child(guide::info(
+                            bardo,
                             "suggest-themes-info",
-                            None,
                             SharedString::from(bardo.text_with(
                                 Text::SuggestThemesHint,
                                 &[("n", &SUGGESTIONS_PER_RUN.to_string())],
                             )),
+                            guide::refs::THEMES_SUGGEST,
                         )),
-                )
+                ))
             })
             .children(view.filter(|_| has_niche && !running).and_then(|view| {
                 estimate_note(bardo, &view.suggest_estimate, Text::EstimateCost, cx)
@@ -547,10 +561,19 @@ impl ThemesScreen {
             .iter()
             .flat_map(|view| view.themes.iter().cloned())
             .collect();
+        // The tour's review step lights the first idea that can still be
+        // approved, edited or discarded.
+        let reviewable = themes.iter().position(|idea| {
+            idea.status() != ThemeStatus::Approved
+                && self
+                    .editing
+                    .as_ref()
+                    .is_none_or(|editing| editing.id != idea.id)
+        });
         let cards: Vec<AnyElement> = themes
             .iter()
             .enumerate()
-            .map(|(ix, idea)| self.render_theme(ix, idea, cx))
+            .map(|(ix, idea)| self.render_theme(ix, idea, reviewable == Some(ix), cx))
             .collect();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
@@ -559,10 +582,11 @@ impl ThemesScreen {
         collection.controls =
             vec![
                 kit::section_heading(tr(bardo, Text::ThemesListTitle))
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "themes-ranking-info",
-                        None,
                         tr(bardo, Text::ThemesRankingHint),
+                        guide::refs::THEMES_REASONS,
                     ))
                     .when(discarded > 0, |row| {
                         row.child(div().text_xs().text_color(theme.muted_foreground).child(
@@ -579,7 +603,15 @@ impl ThemesScreen {
         collection
     }
 
-    fn render_theme(&self, ix: usize, idea: &Theme, cx: &Context<Self>) -> AnyElement {
+    /// An idea's card; the first one's parts and the first `reviewable`
+    /// one's actions are tagged for the tour.
+    fn render_theme(
+        &self,
+        ix: usize,
+        idea: &Theme,
+        reviewable: bool,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let editing = self
@@ -737,6 +769,23 @@ impl ThemesScreen {
                 }
             };
 
+        let tagged = |anchor: TourAnchor, part: AnyElement| -> AnyElement {
+            if ix == 0 {
+                kit::anchor(anchor, part).into_any_element()
+            } else {
+                part
+            }
+        };
+        let header = tagged(
+            TourAnchor::Control(Control::ThemeIdea),
+            header.into_any_element(),
+        );
+        let reasons = tagged(TourAnchor::Control(Control::ThemeReasons), reasons);
+        let body = if reviewable {
+            kit::anchor(TourAnchor::Control(Control::ThemeActions), body).into_any_element()
+        } else {
+            body
+        };
         kit::card(cx)
             .id(("theme", ix))
             .p_3()
@@ -843,16 +892,21 @@ impl ThemesScreen {
             .collect();
         let empty = rows.is_empty();
 
-        v_flex()
-            .pt_3()
+        let list = v_flex()
             .gap_2()
-            .border_t_1()
-            .border_color(theme.border)
             .child(kit::section_heading(tr(bardo, Text::ProjectsTitle)))
             .when(empty, |list| {
                 list.child(muted(cx, tr(bardo, Text::ProjectsEmpty)))
             })
-            .children(rows)
+            .children(rows);
+        v_flex()
+            .pt_3()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(kit::anchor(
+                TourAnchor::Control(Control::ThemesProjects),
+                list,
+            ))
     }
 }
 
@@ -956,7 +1010,8 @@ fn research_tags(bardo: &Bardo, scores: NicheScores) -> impl IntoElement {
 impl Render for ThemesScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let bardo = self.bardo.read(cx);
-        let header = Header::place(bardo, Destination::Themes);
+        let mut header = Header::place(bardo, Destination::Themes);
+        header.info = guide::header_info(bardo, Destination::Themes, self.has_content(), None, cx);
         let mut parts = ScreenParts::new(header);
         if self.channels.is_empty() {
             parts.content = vec![muted(cx, tr(bardo, Text::ThemesNoChannels))];
