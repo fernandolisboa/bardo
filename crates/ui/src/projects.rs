@@ -115,7 +115,7 @@ pub struct ProjectsScreen {
     /// Scrolls the Script and Narration pages, so a tour can bring their
     /// controls into view.
     page_scroll: ScrollHandle,
-    /// The scene inspector's scroll, for the Scenes and Clips tours.
+    /// The inspector's scroll, for the Scenes, Clips and Render tours.
     inspector_scroll: ScrollHandle,
     /// Whether the scene grid shows only the scenes with something left.
     pending_only: bool,

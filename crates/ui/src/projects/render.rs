@@ -689,9 +689,10 @@ impl ProjectsScreen {
                     .collect()
             };
             body.push(
-                kit::anchor(
+                kit::anchor_in(
                     TourAnchor::Control(Control::RenderChecks),
                     section(Text::RenderColumnChecks, checks),
+                    Some(&self.inspector_scroll),
                 )
                 .into_any_element(),
             );
@@ -771,9 +772,10 @@ impl ProjectsScreen {
             );
         }
         body.push(
-            kit::anchor(
+            kit::anchor_in(
                 TourAnchor::Control(Control::RenderLast),
                 section(Text::RenderColumnLast, last),
+                Some(&self.inspector_scroll),
             )
             .into_any_element(),
         );
@@ -781,6 +783,7 @@ impl ProjectsScreen {
         let mut inspector = Inspector::new(body);
         inspector.title = Some(title);
         inspector.footer = footer;
+        inspector.scroll = Some(self.inspector_scroll.clone());
         inspector
     }
 }
