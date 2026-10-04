@@ -2,10 +2,13 @@
 //! app credentials per network, and signing a network account in, checking
 //! it, and disconnecting it.
 //!
-//! Signing in waits for the user in the browser, so it is not a job: a job
-//! resumes after a restart, and a consent cannot (its callback listener and
-//! PKCE verifier end with the app). Like a key test, each step is prepared
-//! here, run on a background thread and handed back.
+//! Signing in waits for the user, so it is not a job: a job resumes after a
+//! restart, and a consent cannot (its callback listener and PKCE verifier
+//! end with the app). Like a key test, each step is prepared here, run on a
+//! background thread and handed back. A network signs in either in the
+//! browser (YouTube) or with a token the user pastes from the network's
+//! developer tools (Instagram), which may reach several accounts for the
+//! user to choose from.
 //!
 //! Tokens go only to the secret store and the redactor; the database keeps
 //! the connection's state. A refresh the network refuses marks the account
@@ -20,8 +23,9 @@ use bardo_domain::{
     AppCredentials, AppCredentialsFieldError, ConnectedIdentity, ConnectionSecrets,
     ConnectionStatus, ConsentCallback, ConsentError, ConsentPages, ConsentReceiver, ConsentRequest,
     Network, NetworkAccount, NetworkAccountId, NetworkConnection, NetworkConnectionRepository,
-    NetworkSignIn, ProfileId, Redactor, RepositoryError, SecretStoreError, SignInFailure,
-    SignInFailureKind, TokenSet, TokenSetTooLarge,
+    NetworkSignIn, PastedTokenError, ProfileId, Redactor, RepositoryError, SecretStoreError,
+    SecretText, SignInFailure, SignInFailureKind, TokenGrant, TokenSet, TokenSetTooLarge,
+    parse_pasted_token,
 };
 
 use crate::{Bardo, KeyState, Text};
@@ -46,15 +50,30 @@ pub enum ConnectionError {
     NotConnected,
     /// The network refused a refresh; signing in again fixes it.
     #[error("the account needs to reconnect")]
-    ReconnectNeeded,
+    ReconnectNeeded(Network),
     #[error(transparent)]
     Consent(#[from] ConsentError),
-    /// The user unticked some of the permissions on the consent screen.
+    /// The user unticked some of the permissions on the consent screen (or
+    /// in the developer tools that made the pasted token).
     #[error("not every scope was granted")]
-    MissingScopes,
+    MissingScopes(Network),
+    /// The pasted token is empty or not a token.
+    #[error("the pasted token is not usable: {0:?}")]
+    PastedToken(PastedTokenError),
+    /// The pasted token reaches no Facebook Page.
+    #[error("the token reaches no Page")]
+    NoPages,
+    /// None of the Pages the token reaches has an Instagram professional
+    /// account linked.
+    #[error("no Page has a linked account")]
+    NoLinkedAccount,
+    /// The account offered for choosing is gone: the choice was cancelled
+    /// or replaced.
+    #[error("that account is no longer offered")]
+    ChoiceGone,
     /// A call to the network failed. The detail is already redacted.
-    #[error(transparent)]
-    SignIn(SignInFailure),
+    #[error("{1}")]
+    SignIn(Network, SignInFailure),
     #[error(transparent)]
     TooLarge(#[from] TokenSetTooLarge),
     #[error(transparent)]
@@ -71,15 +90,23 @@ impl ConnectionError {
             ConnectionError::Invalid(_) => return None,
             ConnectionError::NotOffered(_) => Text::ConnectionNotOffered,
             ConnectionError::AccountNotFound => Text::NetworkAccountNotFound,
-            ConnectionError::NoAppCredentials(_) => Text::ConnectionNeedsAppCredentials,
+            ConnectionError::NoAppCredentials(network) => {
+                Text::ConnectionNeedsAppCredentials(*network)
+            }
             ConnectionError::NotConnected => Text::ConnectionNotConnected,
-            ConnectionError::ReconnectNeeded => Text::ConnectionReconnectHint,
+            ConnectionError::ReconnectNeeded(network) => Text::ConnectionReconnectHint(*network),
             ConnectionError::Consent(ConsentError::Denied(_)) => Text::ConnectionDenied,
             ConnectionError::Consent(ConsentError::TimedOut) => Text::ConnectionTimedOut,
             ConnectionError::Consent(ConsentError::Cancelled) => Text::ConnectionCancelled,
             ConnectionError::Consent(ConsentError::Listen(_)) => Text::ConnectionListenFailed,
-            ConnectionError::MissingScopes => Text::ConnectionMissingScopes,
-            ConnectionError::SignIn(failure) => Text::SignInFailure(failure.kind),
+            ConnectionError::MissingScopes(network) => Text::ConnectionMissingScopes(*network),
+            ConnectionError::PastedToken(error) => Text::PastedTokenError(*error),
+            ConnectionError::NoPages => Text::ConnectionNoPages,
+            ConnectionError::NoLinkedAccount => Text::ConnectionNoLinkedAccount,
+            ConnectionError::ChoiceGone => Text::ConnectionChoiceGone,
+            ConnectionError::SignIn(network, failure) => {
+                Text::SignInFailure(*network, failure.kind)
+            }
             ConnectionError::TooLarge(_) => Text::ConnectionTokensTooLarge,
             ConnectionError::Store(_) => Text::ConnectionStoreFailed,
             ConnectionError::Repository(_) => Text::ConnectionNotSaved,
@@ -100,8 +127,13 @@ pub enum ConnectionState {
     /// Bardo does not sign in to this network: export only.
     Unavailable,
     NotConnected,
-    /// Waiting for the user's consent in the browser.
+    /// Waiting for the user's consent in the browser, or checking a pasted
+    /// token.
     Connecting,
+    /// The pasted token reaches several accounts: the user picks one.
+    Choosing {
+        choices: Vec<AccountChoice>,
+    },
     /// Signed in; the network's name for who the tokens act as.
     Connected {
         channel: String,
@@ -110,6 +142,15 @@ pub enum ConnectionState {
     ReconnectNeeded {
         channel: String,
     },
+}
+
+/// An account a pasted token reaches, as the card offers it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountChoice {
+    /// The network's name for the account, e.g. `@username`.
+    pub name: String,
+    /// Where it was found: the Facebook Page it is linked to.
+    pub via: String,
 }
 
 /// One row of Settings › Networks.
@@ -123,10 +164,14 @@ pub struct AppCredentialsStatus {
 /// How a disconnection ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Disconnected {
-    /// False when the network could not be reached to revoke the tokens.
-    /// Bardo forgot them anyway; the user can revoke access from the
-    /// network's account settings.
+    /// False when the network could not be reached to revoke the tokens,
+    /// or when revoking would end other connections too. Bardo forgot them
+    /// anyway; the user can revoke access from the network's account
+    /// settings.
     pub revoked: bool,
+    /// Revoking was skipped because the network revokes app-wide and
+    /// another account of this profile on the network is still connected.
+    pub kept_for_others: bool,
 }
 
 /// Everything that touches tokens, shared with background work: it reads
@@ -167,7 +212,7 @@ impl Connections {
             detail = %failure.detail,
             "network sign-in call failed"
         );
-        ConnectionError::SignIn(failure)
+        ConnectionError::SignIn(network, failure)
     }
 
     /// The saved app credentials, masked from then on.
@@ -189,7 +234,7 @@ impl Connections {
     }
 
     /// The account's tokens, fresh: refreshed first when they expire
-    /// within `TokenSet::REFRESH_MARGIN`. A refused refresh marks the
+    /// within the network's `refresh_margin`. A refused refresh marks the
     /// account "reconnect needed". Blocks on the network when refreshing.
     pub(crate) fn access_token(
         &self,
@@ -199,9 +244,10 @@ impl Connections {
             .refreshing
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let network = account.network;
         let state = self.state(account.id)?;
         if state.status == ConnectionStatus::ReconnectNeeded {
-            return Err(ConnectionError::ReconnectNeeded);
+            return Err(ConnectionError::ReconnectNeeded(network));
         }
         let tokens = self
             .secrets
@@ -209,17 +255,17 @@ impl Connections {
             .map_err(|error| self.store_failure("read tokens", error))?
             .ok_or(ConnectionError::NotConnected)?;
         self.redactor.add_parts(&tokens.sensitive_parts());
+        let sign_in = self.sign_in(network);
+        let margin = sign_in
+            .as_ref()
+            .map_or(TokenSet::REFRESH_MARGIN, |sign_in| sign_in.refresh_margin());
         let now = SystemTime::now();
-        if !tokens.needs_refresh(now) {
+        if !tokens.needs_refresh_within(now, margin) {
             return Ok(tokens);
         }
-        let Some(refresh_token) = tokens.refresh_token() else {
-            self.mark_reconnect_needed(state)?;
-            return Err(ConnectionError::ReconnectNeeded);
-        };
-        let sign_in = self.sign_in(account.network)?;
-        let credentials = self.app_credentials(account.network)?;
-        match sign_in.refresh(&credentials, refresh_token) {
+        let sign_in = sign_in?;
+        let credentials = self.app_credentials(network)?;
+        match sign_in.refresh(&credentials, &tokens, &state.identity) {
             Ok(grant) => {
                 let fresh = tokens.refreshed(&grant, now);
                 self.redactor.add_parts(&fresh.sensitive_parts());
@@ -236,11 +282,17 @@ impl Connections {
                 Ok(fresh)
             }
             Err(failure) if failure.kind == SignInFailureKind::Refused => {
-                let _ = self.sign_in_failure(account.network, failure);
+                let _ = self.sign_in_failure(network, failure);
                 self.mark_reconnect_needed(state)?;
-                Err(ConnectionError::ReconnectNeeded)
+                Err(ConnectionError::ReconnectNeeded(network))
             }
-            Err(failure) => Err(self.sign_in_failure(account.network, failure)),
+            // Still valid for a while: renewing early failed, so the next
+            // use tries again.
+            Err(failure) if !tokens.needs_refresh(now) => {
+                let _ = self.sign_in_failure(network, failure);
+                Ok(tokens)
+            }
+            Err(failure) => Err(self.sign_in_failure(network, failure)),
         }
     }
 
@@ -286,6 +338,33 @@ impl Connections {
         Ok(connection)
     }
 
+    /// Keeps the account a pasted token reached: its own token (a Page's)
+    /// acts, the long-lived user token renews it.
+    fn keep_pasted(
+        &self,
+        account: &NetworkAccount,
+        choice: &PendingChoice,
+        identity: ConnectedIdentity,
+        token: SecretText,
+    ) -> Result<NetworkConnection, ConnectionError> {
+        let tokens = TokenSet::granted(
+            &TokenGrant {
+                access_token: token,
+                refresh_token: Some(choice.user.access_token.clone()),
+                expires_in: choice.user.expires_in,
+                scopes: Vec::new(),
+            },
+            choice.granted_at,
+        );
+        self.keep(
+            account,
+            &tokens,
+            choice.user.scopes.clone(),
+            identity,
+            SystemTime::now(),
+        )
+    }
+
     /// Revokes tokens that will not be kept. Best effort: nothing else
     /// holds them, so a failure leaves them unused until they expire.
     fn discard(&self, network: Network, sign_in: &dyn NetworkSignIn, tokens: &TokenSet) {
@@ -294,13 +373,31 @@ impl Connections {
         }
     }
 
+    /// Whether another account of this profile on `account`'s network is
+    /// connected, so an app-wide revocation would end it too.
+    fn shares_access(&self, account: &NetworkAccount) -> Result<bool, ConnectionError> {
+        Ok(self
+            .states
+            .connected_on(self.owner, account.network)?
+            .into_iter()
+            .any(|other| other != account.id))
+    }
+
     fn disconnect(&self, account: &NetworkAccount) -> Result<Disconnected, ConnectionError> {
+        // A refresh in flight would write the tokens back after they are
+        // forgotten.
+        let _one_at_a_time = self
+            .refreshing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let sign_in = self.sign_in(account.network)?;
         let tokens = self
             .secrets
             .tokens(self.owner, account.id)
             .map_err(|error| self.store_failure("read tokens", error))?;
+        let kept_for_others = sign_in.revokes_app_wide() && self.shares_access(account)?;
         let revoked = match &tokens {
+            Some(_) if kept_for_others => false,
             Some(tokens) => {
                 self.redactor.add_parts(&tokens.sensitive_parts());
                 match sign_in.revoke(tokens) {
@@ -320,9 +417,13 @@ impl Connections {
         tracing::info!(
             network = account.network.code(),
             revoked,
+            kept_for_others,
             "disconnected network account"
         );
-        Ok(Disconnected { revoked })
+        Ok(Disconnected {
+            revoked,
+            kept_for_others,
+        })
     }
 }
 
@@ -332,12 +433,23 @@ struct Attempt {
     cancel: Arc<AtomicBool>,
 }
 
+/// Accounts a pasted token reaches, waiting for the user to pick one. The
+/// tokens stay in memory only, wiped when dropped.
+struct PendingChoice {
+    /// The long-lived user token and its lifetime.
+    user: TokenGrant,
+    accounts: Vec<(ConnectedIdentity, String, SecretText)>,
+    /// When the user token was granted.
+    granted_at: SystemTime,
+}
+
 /// What `Bardo` holds for connections.
 pub(crate) struct ConnectionBook {
     connections: Connections,
     consent: Arc<dyn ConsentReceiver>,
     credentials: HashMap<Network, KeyState>,
     attempts: HashMap<NetworkAccountId, Attempt>,
+    choices: HashMap<NetworkAccountId, PendingChoice>,
     generations: u64,
 }
 
@@ -392,6 +504,7 @@ impl ConnectionBook {
             consent,
             credentials,
             attempts: HashMap::new(),
+            choices: HashMap::new(),
             generations: 0,
         }
     }
@@ -476,6 +589,8 @@ impl ConnectAttempt {
         connections.redactor.add_parts(&[code.expose()]);
         let grant = self
             .sign_in
+            .browser()
+            .ok_or(ConnectionError::NotOffered(network))?
             .exchange(
                 &self.credentials,
                 &code,
@@ -495,7 +610,7 @@ impl ConnectAttempt {
                 .iter()
                 .any(|scope| !grant.scopes.iter().any(|granted| granted == scope));
             if missing {
-                return Err(ConnectionError::MissingScopes);
+                return Err(ConnectionError::MissingScopes(network));
             }
             let identity = self
                 .sign_in
@@ -534,6 +649,142 @@ impl ConsentCallback for Spent {
     }
 }
 
+/// A pasted-token sign-in ready to run on a background thread: trades the
+/// token for a long-lived one, checks the permissions and lists the
+/// accounts it reaches. Hand the result to `Bardo::record_token_connect`.
+pub struct TokenConnect {
+    account: NetworkAccount,
+    generation: u64,
+    pasted: SecretText,
+    credentials: AppCredentials,
+    sign_in: Arc<dyn NetworkSignIn>,
+    connections: Connections,
+    cancel: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for TokenConnect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenConnect")
+            .field("account", &self.account.id)
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a pasted token led to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenConnected {
+    /// It reached one account, now connected.
+    Connected(ConnectedIdentity),
+    /// It reached several: the card offers them (`ConnectionState::Choosing`)
+    /// and `Bardo::choose_account` connects one.
+    Choose,
+}
+
+/// How a pasted-token sign-in ended, for `Bardo::record_token_connect`.
+pub struct TokenConnectResult {
+    pub account: NetworkAccountId,
+    generation: u64,
+    outcome: Result<TokenOutcome, ConnectionError>,
+}
+
+impl std::fmt::Debug for TokenConnectResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenConnectResult")
+            .field("account", &self.account)
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a pasted token reached. Nothing is kept on the background
+/// thread: `Bardo::record_token_connect` keeps a single account only once
+/// it knows the attempt was not cancelled or replaced.
+enum TokenOutcome {
+    One(PendingChoice),
+    Choose(PendingChoice),
+}
+
+impl TokenConnect {
+    pub fn account(&self) -> NetworkAccountId {
+        self.account.id
+    }
+
+    /// Blocks on the network for a few calls.
+    pub fn run(self) -> TokenConnectResult {
+        let outcome = self.finish();
+        if let Err(error) = &outcome {
+            tracing::info!(
+                network = self.account.network.code(),
+                error = %error,
+                "sign-in did not finish"
+            );
+        }
+        TokenConnectResult {
+            account: self.account.id,
+            generation: self.generation,
+            outcome,
+        }
+    }
+
+    /// Nothing is revoked on the way out: the grant is the one the user
+    /// made in the network's developer tools, and Meta revokes app-wide,
+    /// which would end the profile's other connections too. Bardo just
+    /// forgets the tokens.
+    fn finish(&self) -> Result<TokenOutcome, ConnectionError> {
+        let network = self.account.network;
+        let connections = &self.connections;
+        let pasted = self
+            .sign_in
+            .pasted()
+            .ok_or(ConnectionError::NotOffered(network))?;
+        let grant = pasted
+            .exchange_pasted(&self.credentials, &self.pasted)
+            .map_err(|failure| connections.sign_in_failure(network, failure))?;
+        let granted_at = SystemTime::now();
+        connections
+            .redactor
+            .add_parts(&[grant.access_token.expose()]);
+        let missing = self
+            .sign_in
+            .scopes()
+            .iter()
+            .any(|scope| !grant.scopes.iter().any(|granted| granted == scope));
+        if missing {
+            return Err(ConnectionError::MissingScopes(network));
+        }
+        let found = pasted
+            .discover(grant.access_token.expose())
+            .map_err(|failure| connections.sign_in_failure(network, failure))?;
+        connections.redactor.add_parts(
+            &found
+                .iter()
+                .map(|page| page.token.expose())
+                .collect::<Vec<_>>(),
+        );
+        if found.is_empty() {
+            return Err(ConnectionError::NoPages);
+        }
+        let accounts: Vec<_> = found
+            .into_iter()
+            .filter_map(|page| Some((page.identity?, page.via, page.token)))
+            .collect();
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(ConnectionError::Consent(ConsentError::Cancelled));
+        }
+        let choice = PendingChoice {
+            user: grant,
+            accounts: Vec::new(),
+            granted_at,
+        };
+        match accounts.len() {
+            0 => Err(ConnectionError::NoLinkedAccount),
+            1 => Ok(TokenOutcome::One(PendingChoice { accounts, ..choice })),
+            _ => Ok(TokenOutcome::Choose(PendingChoice { accounts, ..choice })),
+        }
+    }
+}
+
 /// A connection check ready to run on a background thread: refreshes the
 /// tokens when due and reads the connected channel again.
 pub struct ConnectionCheck {
@@ -552,20 +803,65 @@ impl ConnectionCheck {
         let network = self.account.network;
         let tokens = connections.access_token(&self.account)?;
         match self.sign_in.identity(tokens.access_token()) {
+            // A renamed channel or account keeps its id; another id means
+            // the tokens now act as someone else (a Page linked to another
+            // Instagram account), which the user must confirm by
+            // reconnecting.
             Ok(identity) => {
                 let state = connections.state(self.account.id)?;
+                if identity.id != state.identity.id {
+                    tracing::warn!(
+                        network = network.code(),
+                        "the tokens act as another account"
+                    );
+                    connections.mark_reconnect_needed(state)?;
+                    return Err(ConnectionError::ReconnectNeeded(network));
+                }
                 connections.states.save(&NetworkConnection {
                     identity: identity.clone(),
                     ..state
                 })?;
                 Ok(identity)
             }
-            Err(failure) if failure.kind == SignInFailureKind::Refused => {
+            // Refused, or the tokens reach no channel or account any more
+            // (an Instagram account unlinked from its Page).
+            Err(failure)
+                if matches!(
+                    failure.kind,
+                    SignInFailureKind::Refused | SignInFailureKind::NoChannel
+                ) =>
+            {
                 connections.mark_reconnect_needed(connections.state(self.account.id)?)?;
                 let _ = connections.sign_in_failure(network, failure);
-                Err(ConnectionError::ReconnectNeeded)
+                Err(ConnectionError::ReconnectNeeded(network))
             }
             Err(failure) => Err(connections.sign_in_failure(network, failure)),
+        }
+    }
+}
+
+/// Renewals of the profile's connections, ready to run on a background
+/// thread when the app starts: each one whose tokens expire within its
+/// network's margin is refreshed, so a connection lasts as long as the app
+/// is opened now and then, used or not (an Instagram user token runs out
+/// about 60 days after it was traded).
+pub struct ConnectionRenewal {
+    accounts: Vec<NetworkAccount>,
+    connections: Connections,
+}
+
+impl ConnectionRenewal {
+    /// Blocks on the network for each renewal due; the others cost nothing.
+    /// A refused renewal marks the account "reconnect needed".
+    pub fn run(self) {
+        for account in &self.accounts {
+            if let Err(error) = self.connections.access_token(account) {
+                tracing::info!(
+                    network = account.network.code(),
+                    error = %error,
+                    "could not renew a connection"
+                );
+            }
         }
     }
 }
@@ -661,6 +957,18 @@ impl Bardo {
             return Ok(ConnectionState::Connecting);
         }
         let book = &self.connection_book;
+        if let Some(choice) = book.choices.get(&account.id) {
+            return Ok(ConnectionState::Choosing {
+                choices: choice
+                    .accounts
+                    .iter()
+                    .map(|(identity, via, _)| AccountChoice {
+                        name: identity.name.clone(),
+                        via: via.clone(),
+                    })
+                    .collect(),
+            });
+        }
         Ok(match book.connections.states.get(account.id)? {
             Some(connection) => match connection.status {
                 ConnectionStatus::Connected => ConnectionState::Connected {
@@ -674,19 +982,9 @@ impl Bardo {
         })
     }
 
-    /// Prepares a sign-in (or a reconnect) of the account: starts the
-    /// callback listener and builds the consent address. An earlier attempt
-    /// for the same account is cancelled.
-    pub fn connect(&mut self, id: NetworkAccountId) -> Result<ConnectAttempt, ConnectionError> {
-        let account = self.connection_account(id)?;
-        let connections = self.connection_book.connections.clone();
-        let sign_in = connections.sign_in(account.network)?;
-        let credentials = connections.app_credentials(account.network)?;
-        let callback = self.connection_book.consent.listen()?;
-        let request = sign_in.consent_request(&credentials, callback.redirect_uri());
-        connections
-            .redactor
-            .add_parts(&[request.state.expose(), request.verifier.expose()]);
+    /// Starts tracking a sign-in of the account, cancelling an earlier one:
+    /// the card shows "connecting" until it is recorded.
+    fn begin_attempt(&mut self, id: NetworkAccountId) -> (u64, Arc<AtomicBool>) {
         self.cancel_connect(id);
         let book = &mut self.connection_book;
         book.generations += 1;
@@ -698,9 +996,44 @@ impl Bardo {
                 cancel: Arc::clone(&cancel),
             },
         );
+        (book.generations, cancel)
+    }
+
+    /// Whether `generation` is the account's current attempt; ends it if
+    /// so.
+    fn end_attempt(&mut self, id: NetworkAccountId, generation: u64) -> bool {
+        let book = &mut self.connection_book;
+        let current = book
+            .attempts
+            .get(&id)
+            .is_some_and(|attempt| attempt.generation == generation);
+        if current {
+            book.attempts.remove(&id);
+        }
+        current
+    }
+
+    /// Prepares a sign-in (or a reconnect) of the account in the browser:
+    /// starts the callback listener and builds the consent address. An
+    /// earlier attempt for the same account is cancelled. Networks that
+    /// sign in with a pasted token use `connect_with_token`.
+    pub fn connect(&mut self, id: NetworkAccountId) -> Result<ConnectAttempt, ConnectionError> {
+        let account = self.connection_account(id)?;
+        let connections = self.connection_book.connections.clone();
+        let sign_in = connections.sign_in(account.network)?;
+        let browser = sign_in
+            .browser()
+            .ok_or(ConnectionError::NotOffered(account.network))?;
+        let credentials = connections.app_credentials(account.network)?;
+        let callback = self.connection_book.consent.listen()?;
+        let request = browser.consent_request(&credentials, callback.redirect_uri());
+        connections
+            .redactor
+            .add_parts(&[request.state.expose(), request.verifier.expose()]);
+        let (generation, cancel) = self.begin_attempt(id);
         Ok(ConnectAttempt {
             account,
-            generation: book.generations,
+            generation,
             callback,
             request,
             credentials,
@@ -715,12 +1048,43 @@ impl Bardo {
         })
     }
 
-    /// Stops waiting for the account's consent. The card goes back to its
-    /// earlier state at once.
+    /// Prepares a sign-in (or a reconnect) of the account with a user
+    /// access token the user pasted from the network's developer tools.
+    /// An earlier attempt or choice for the same account is cancelled.
+    pub fn connect_with_token(
+        &mut self,
+        id: NetworkAccountId,
+        pasted: &str,
+    ) -> Result<TokenConnect, ConnectionError> {
+        let account = self.connection_account(id)?;
+        let connections = self.connection_book.connections.clone();
+        let sign_in = connections.sign_in(account.network)?;
+        if sign_in.pasted().is_none() {
+            return Err(ConnectionError::NotOffered(account.network));
+        }
+        let pasted = parse_pasted_token(pasted).map_err(ConnectionError::PastedToken)?;
+        // Masked before any call can quote it.
+        connections.redactor.add_parts(&[pasted.expose()]);
+        let credentials = connections.app_credentials(account.network)?;
+        let (generation, cancel) = self.begin_attempt(id);
+        Ok(TokenConnect {
+            account,
+            generation,
+            pasted,
+            credentials,
+            sign_in,
+            connections,
+            cancel,
+        })
+    }
+
+    /// Stops waiting for the account's consent or choice. The card goes
+    /// back to its earlier state at once.
     pub fn cancel_connect(&mut self, account: NetworkAccountId) {
         if let Some(attempt) = self.connection_book.attempts.remove(&account) {
             attempt.cancel.store(true, Ordering::Relaxed);
         }
+        self.connection_book.choices.remove(&account);
     }
 
     /// Ends the account's "connecting" state with a finished sign-in.
@@ -730,16 +1094,60 @@ impl Bardo {
         &mut self,
         result: ConnectResult,
     ) -> Option<Result<ConnectedIdentity, ConnectionError>> {
-        let book = &mut self.connection_book;
-        let current = book
-            .attempts
-            .get(&result.account)
-            .is_some_and(|attempt| attempt.generation == result.generation);
-        if !current {
+        self.end_attempt(result.account, result.generation)
+            .then_some(result.outcome)
+    }
+
+    /// Ends the account's "connecting" state with a finished pasted-token
+    /// sign-in: a single account reached is connected (writing to the
+    /// secret store and the database), several wait on the card for the
+    /// user's choice. Returns `None` for an attempt cancelled or replaced
+    /// while it ran; nothing of it is kept.
+    pub fn record_token_connect(
+        &mut self,
+        result: TokenConnectResult,
+    ) -> Option<Result<TokenConnected, ConnectionError>> {
+        if !self.end_attempt(result.account, result.generation) {
             return None;
         }
-        book.attempts.remove(&result.account);
-        Some(result.outcome)
+        Some(result.outcome.and_then(|outcome| match outcome {
+            TokenOutcome::One(mut choice) => {
+                let account = self.connection_account(result.account)?;
+                let (identity, _, token) = choice.accounts.remove(0);
+                self.connection_book
+                    .connections
+                    .keep_pasted(&account, &choice, identity, token)
+                    .map(|connection| TokenConnected::Connected(connection.identity))
+            }
+            TokenOutcome::Choose(choice) => {
+                self.connection_book.choices.insert(result.account, choice);
+                Ok(TokenConnected::Choose)
+            }
+        }))
+    }
+
+    /// Connects the account the user picked among those the pasted token
+    /// reached (`ConnectionState::Choosing`, in that order). Writes to the
+    /// secret store and the database only.
+    pub fn choose_account(
+        &mut self,
+        id: NetworkAccountId,
+        index: usize,
+    ) -> Result<ConnectedIdentity, ConnectionError> {
+        let account = self.connection_account(id)?;
+        let mut choice = self
+            .connection_book
+            .choices
+            .remove(&id)
+            .ok_or(ConnectionError::ChoiceGone)?;
+        if index >= choice.accounts.len() {
+            return Err(ConnectionError::ChoiceGone);
+        }
+        let (identity, _, token) = choice.accounts.swap_remove(index);
+        self.connection_book
+            .connections
+            .keep_pasted(&account, &choice, identity, token)
+            .map(|connection| connection.identity)
     }
 
     /// Prepares a check of the account's connection.
@@ -772,6 +1180,28 @@ impl Bardo {
         })
     }
 
+    /// Prepares renewing the profile's connections that are due, for the
+    /// app's start.
+    pub fn connection_renewal(&self) -> ConnectionRenewal {
+        let connections = self.connection_book.connections.clone();
+        let accounts = Network::sign_in_networks()
+            .flat_map(|network| {
+                connections
+                    .states
+                    .connected_on(self.profile.id, network)
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(error = %error, "could not list connections");
+                        Vec::new()
+                    })
+            })
+            .filter_map(|id| self.connection_account(id).ok())
+            .collect();
+        ConnectionRenewal {
+            accounts,
+            connections,
+        }
+    }
+
     fn connection_account(&self, id: NetworkAccountId) -> Result<NetworkAccount, ConnectionError> {
         let account = self
             .network_accounts
@@ -791,7 +1221,7 @@ pub(crate) mod testing {
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
-    use bardo_domain::{SecretText, TokenGrant};
+    use bardo_domain::{BrowserSignIn, SecretText, TokenGrant};
 
     use super::*;
 
@@ -947,6 +1377,55 @@ pub(crate) mod testing {
             &ALL_SCOPES
         }
 
+        fn browser(&self) -> Option<&dyn BrowserSignIn> {
+            Some(self)
+        }
+
+        fn refresh(
+            &self,
+            _: &AppCredentials,
+            tokens: &TokenSet,
+            _: &ConnectedIdentity,
+        ) -> Result<TokenGrant, SignInFailure> {
+            let refresh_token = tokens.refresh_token().unwrap_or_default();
+            self.calls
+                .lock()
+                .unwrap()
+                .push(Call::Refresh(refresh_token.to_owned()));
+            if refresh_token.is_empty() {
+                return Err(SignInFailure::new(
+                    SignInFailureKind::Refused,
+                    "no refresh token",
+                ));
+            }
+            match self.refresh_failure.lock().unwrap().clone() {
+                Some(failure) => Err(failure),
+                None => Ok(self.grant(false)),
+            }
+        }
+
+        fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure> {
+            let token = tokens.refresh_token().unwrap_or(tokens.access_token());
+            self.calls
+                .lock()
+                .unwrap()
+                .push(Call::Revoke(token.to_owned()));
+            match self.revoke_failure.lock().unwrap().clone() {
+                Some(failure) => Err(failure),
+                None => Ok(()),
+            }
+        }
+
+        fn identity(&self, access_token: &str) -> Result<ConnectedIdentity, SignInFailure> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(Call::Identity(access_token.to_owned()));
+            self.identity.lock().unwrap().clone()
+        }
+    }
+
+    impl BrowserSignIn for FakeSignIn {
         fn consent_request(
             &self,
             credentials: &AppCredentials,
@@ -980,40 +1459,192 @@ pub(crate) mod testing {
                 None => Ok(self.grant(true)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod meta {
+    //! A Meta-like network for the pasted-token flow.
+
+    use std::sync::Mutex;
+
+    use bardo_domain::{DiscoveredAccount, PastedTokenSignIn, SecretText, TokenGrant};
+
+    use super::*;
+
+    pub(crate) const SCOPES: [&str; 2] = ["instagram_content_publish", "pages_show_list"];
+    pub(crate) const MARGIN: Duration = Duration::from_secs(7 * 86_400);
+    pub(crate) const LIFETIME: Duration = Duration::from_secs(60 * 86_400);
+
+    /// One call to the fake Meta.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) enum MetaCall {
+        Exchange(String),
+        Discover(String),
+        Refresh(String),
+        Revoke(String),
+        Identity(String),
+    }
+
+    /// A page the fake token reaches: (Page name, linked account).
+    pub(crate) type Page = (&'static str, Option<(&'static str, &'static str)>);
+
+    pub(crate) struct FakeMeta {
+        pub(crate) calls: Mutex<Vec<MetaCall>>,
+        pub(crate) issued: Mutex<u32>,
+        pub(crate) scopes: Mutex<Vec<String>>,
+        pub(crate) pages: Mutex<Vec<Page>>,
+        pub(crate) exchange_failure: Mutex<Option<SignInFailure>>,
+        pub(crate) refresh_failure: Mutex<Option<SignInFailure>>,
+        /// Who a Page token acts as, when `identity` is asked; by default
+        /// the account linked to its Page.
+        pub(crate) identity: Mutex<Option<Result<ConnectedIdentity, SignInFailure>>>,
+    }
+
+    impl Default for FakeMeta {
+        fn default() -> Self {
+            Self {
+                calls: Mutex::default(),
+                issued: Mutex::default(),
+                scopes: Mutex::new(SCOPES.map(str::to_owned).to_vec()),
+                pages: Mutex::new(vec![(
+                    "Arquivos do Espaço",
+                    Some(("17841400000000001", "arquivosdoespaco")),
+                )]),
+                exchange_failure: Mutex::default(),
+                refresh_failure: Mutex::default(),
+                identity: Mutex::default(),
+            }
+        }
+    }
+
+    impl FakeMeta {
+        pub(crate) fn calls(&self) -> Vec<MetaCall> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn call(&self, call: MetaCall) {
+            self.calls.lock().unwrap().push(call);
+        }
+
+        fn user_token(&self) -> SecretText {
+            let mut issued = self.issued.lock().unwrap();
+            *issued += 1;
+            SecretText::new(format!("fake-user-token-{:04}", *issued))
+        }
+
+        /// The Page tokens of a user token: `page-<n>-of-<user token>`.
+        fn found(&self, user_token: &str) -> Vec<DiscoveredAccount> {
+            self.pages
+                .lock()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(n, (via, account))| DiscoveredAccount {
+                    via: (*via).into(),
+                    identity: account.map(|(id, username)| ConnectedIdentity {
+                        id: id.into(),
+                        name: format!("@{username}"),
+                    }),
+                    token: SecretText::new(format!("page-{n}-of-{user_token}")),
+                })
+                .collect()
+        }
+    }
+
+    impl NetworkSignIn for FakeMeta {
+        fn network(&self) -> Network {
+            Network::InstagramReels
+        }
+
+        fn scopes(&self) -> &'static [&'static str] {
+            &SCOPES
+        }
+
+        fn refresh_margin(&self) -> Duration {
+            MARGIN
+        }
 
         fn refresh(
             &self,
             _: &AppCredentials,
-            refresh_token: &str,
+            tokens: &TokenSet,
+            identity: &ConnectedIdentity,
         ) -> Result<TokenGrant, SignInFailure> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(Call::Refresh(refresh_token.to_owned()));
-            match self.refresh_failure.lock().unwrap().clone() {
-                Some(failure) => Err(failure),
-                None => Ok(self.grant(false)),
+            let user = tokens.refresh_token().unwrap_or_default().to_owned();
+            self.call(MetaCall::Refresh(user));
+            if let Some(failure) = self.refresh_failure.lock().unwrap().clone() {
+                return Err(failure);
             }
+            let user = self.user_token();
+            let page = self
+                .found(user.expose())
+                .into_iter()
+                .find(|page| page.identity.as_ref().is_some_and(|a| a.id == identity.id))
+                .ok_or_else(|| SignInFailure::new(SignInFailureKind::Refused, "gone"))?;
+            Ok(TokenGrant {
+                access_token: page.token,
+                refresh_token: Some(user),
+                expires_in: LIFETIME,
+                scopes: Vec::new(),
+            })
         }
 
         fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure> {
-            let token = tokens.refresh_token().unwrap_or(tokens.access_token());
-            self.calls
-                .lock()
-                .unwrap()
-                .push(Call::Revoke(token.to_owned()));
-            match self.revoke_failure.lock().unwrap().clone() {
-                Some(failure) => Err(failure),
-                None => Ok(()),
-            }
+            self.call(MetaCall::Revoke(
+                tokens.refresh_token().unwrap_or_default().to_owned(),
+            ));
+            Ok(())
+        }
+
+        fn revokes_app_wide(&self) -> bool {
+            true
         }
 
         fn identity(&self, access_token: &str) -> Result<ConnectedIdentity, SignInFailure> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(Call::Identity(access_token.to_owned()));
-            self.identity.lock().unwrap().clone()
+            self.call(MetaCall::Identity(access_token.to_owned()));
+            if let Some(answer) = self.identity.lock().unwrap().clone() {
+                return answer;
+            }
+            let n: usize = access_token
+                .strip_prefix("page-")
+                .and_then(|rest| rest.split('-').next())
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_default();
+            self.found("x")
+                .into_iter()
+                .nth(n)
+                .and_then(|page| page.identity)
+                .ok_or_else(|| SignInFailure::new(SignInFailureKind::NoChannel, "no account"))
+        }
+
+        fn pasted(&self) -> Option<&dyn PastedTokenSignIn> {
+            Some(self)
+        }
+    }
+
+    impl PastedTokenSignIn for FakeMeta {
+        fn exchange_pasted(
+            &self,
+            credentials: &AppCredentials,
+            pasted: &SecretText,
+        ) -> Result<TokenGrant, SignInFailure> {
+            assert_eq!(credentials.client_id(), super::tests::META_ID);
+            self.call(MetaCall::Exchange(pasted.expose().to_owned()));
+            if let Some(failure) = self.exchange_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            Ok(TokenGrant {
+                access_token: self.user_token(),
+                refresh_token: None,
+                expires_in: LIFETIME,
+                scopes: self.scopes.lock().unwrap().clone(),
+            })
+        }
+
+        fn discover(&self, user_token: &str) -> Result<Vec<DiscoveredAccount>, SignInFailure> {
+            self.call(MetaCall::Discover(user_token.to_owned()));
+            Ok(self.found(user_token))
         }
     }
 }
@@ -1025,6 +1656,7 @@ mod tests {
     use bardo_domain::{ChannelDraft, ContentLanguage, NetworkAccountDraft};
     use bardo_storage::{Database, MemorySecretStore};
 
+    use super::meta::{FakeMeta, MetaCall};
     use super::testing::{ALL_SCOPES, Call, FakeConsent, FakeSignIn, REDIRECT};
     use super::*;
     use crate::{NetworkAccountError, Providers, Repositories, testing};
@@ -1032,11 +1664,15 @@ mod tests {
     // Fake values, split so secret scanners do not take them for real ones.
     const CLIENT_ID: &str = concat!("1234567890-abc123def456", ".apps.googleusercontent.com");
     const CLIENT_SECRET: &str = concat!("GOCSPX", "-client-secret-0001");
+    pub(super) const META_ID: &str = "1234567890123456";
+    const META_SECRET: &str = concat!("0123456789abcdef", "0123456789abcdef");
+    const PASTED: &str = "pasted-explorer-token-0001";
 
     struct Harness {
         db: Arc<Database>,
         secrets: Arc<MemorySecretStore>,
         sign_in: Arc<FakeSignIn>,
+        meta: Arc<FakeMeta>,
         consent: Arc<FakeConsent>,
     }
 
@@ -1050,6 +1686,7 @@ mod tests {
                 db,
                 secrets: Arc::default(),
                 sign_in: Arc::default(),
+                meta: Arc::default(),
                 consent: Arc::default(),
             }
         }
@@ -1060,7 +1697,7 @@ mod tests {
                 ..Repositories::shared(Arc::clone(&self.db), Arc::new(MemorySecretStore::default()))
             };
             let providers = Providers {
-                sign_ins: vec![Arc::clone(&self.sign_in) as _],
+                sign_ins: vec![Arc::clone(&self.sign_in) as _, Arc::clone(&self.meta) as _],
                 consent: Arc::clone(&self.consent) as _,
                 ..testing::providers()
             };
@@ -1073,6 +1710,16 @@ mod tests {
             let mut app = self.start();
             let account = youtube_account(&app);
             app.save_app_credentials(Network::YouTube, CLIENT_ID, CLIENT_SECRET)
+                .unwrap();
+            (app, account)
+        }
+
+        /// A started app with a channel, its Instagram account and saved
+        /// Meta app credentials.
+        fn instagram(&self) -> (Bardo, NetworkAccount) {
+            let mut app = self.start();
+            let account = instagram_account(&app);
+            app.save_app_credentials(Network::InstagramReels, META_ID, META_SECRET)
                 .unwrap();
             (app, account)
         }
@@ -1106,6 +1753,37 @@ mod tests {
         .unwrap()
     }
 
+    fn instagram_account(app: &Bardo) -> NetworkAccount {
+        let channel = app
+            .create_channel(ChannelDraft {
+                name: format!("Reels {}", app.channels().unwrap().len()),
+                language: ContentLanguage::Portuguese,
+                ..ChannelDraft::default()
+            })
+            .unwrap()
+            .id;
+        app.add_network_account(
+            channel,
+            Network::InstagramReels,
+            NetworkAccountDraft {
+                handle: "arquivosdoespaco".into(),
+                ..NetworkAccountDraft::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn paste(
+        app: &mut Bardo,
+        account: &NetworkAccount,
+        token: &str,
+    ) -> Result<TokenConnected, ConnectionError> {
+        let attempt = app.connect_with_token(account.id, token)?;
+        let result = attempt.run();
+        app.record_token_connect(result)
+            .expect("the current attempt")
+    }
+
     fn connect(
         app: &mut Bardo,
         account: &NetworkAccount,
@@ -1125,10 +1803,16 @@ mod tests {
         let mut app = harness.start();
         assert_eq!(
             app.app_credentials(),
-            [AppCredentialsStatus {
-                network: Network::YouTube,
-                state: KeyState::NotSet
-            }]
+            [
+                AppCredentialsStatus {
+                    network: Network::YouTube,
+                    state: KeyState::NotSet
+                },
+                AppCredentialsStatus {
+                    network: Network::InstagramReels,
+                    state: KeyState::NotSet
+                }
+            ]
         );
         app.save_app_credentials(Network::YouTube, &format!(" {CLIENT_ID} "), CLIENT_SECRET)
             .unwrap();
@@ -1208,7 +1892,10 @@ mod tests {
             error,
             ConnectionError::NoAppCredentials(Network::YouTube)
         ));
-        assert_eq!(error.message(), Some(Text::ConnectionNeedsAppCredentials));
+        assert_eq!(
+            error.message(),
+            Some(Text::ConnectionNeedsAppCredentials(Network::YouTube))
+        );
 
         let channel = account.channel;
         let x = app
@@ -1340,8 +2027,14 @@ mod tests {
         let (mut app, account) = harness.ready();
         *harness.sign_in.scopes.lock().unwrap() = vec!["scope.upload".into()];
         let error = connect(&mut app, &account).unwrap_err();
-        assert!(matches!(error, ConnectionError::MissingScopes));
-        assert_eq!(error.message(), Some(Text::ConnectionMissingScopes));
+        assert!(matches!(
+            error,
+            ConnectionError::MissingScopes(Network::YouTube)
+        ));
+        assert_eq!(
+            error.message(),
+            Some(Text::ConnectionMissingScopes(Network::YouTube))
+        );
         assert_eq!(
             harness.sign_in.calls().last(),
             Some(&Call::Revoke("1//fake-refresh-0001".into()))
@@ -1359,7 +2052,10 @@ mod tests {
         let error = connect(&mut app, &account).unwrap_err();
         assert_eq!(
             error.message(),
-            Some(Text::SignInFailure(SignInFailureKind::NoChannel))
+            Some(Text::SignInFailure(
+                Network::YouTube,
+                SignInFailureKind::NoChannel
+            ))
         );
         assert!(matches!(
             harness.sign_in.calls().last(),
@@ -1476,7 +2172,10 @@ mod tests {
         ));
 
         let error = app.connection_check(account.id).unwrap().run().unwrap_err();
-        assert!(matches!(error, ConnectionError::ReconnectNeeded));
+        assert!(matches!(
+            error,
+            ConnectionError::ReconnectNeeded(Network::YouTube)
+        ));
         assert_eq!(
             app.connection_state(&account).unwrap(),
             ConnectionState::ReconnectNeeded {
@@ -1487,7 +2186,7 @@ mod tests {
         let refreshes = harness.sign_in.calls().len();
         assert!(matches!(
             app.connection_check(account.id).unwrap().run(),
-            Err(ConnectionError::ReconnectNeeded)
+            Err(ConnectionError::ReconnectNeeded(Network::YouTube))
         ));
         assert_eq!(harness.sign_in.calls().len(), refreshes);
 
@@ -1517,7 +2216,10 @@ mod tests {
         let error = app.connection_check(account.id).unwrap().run().unwrap_err();
         assert_eq!(
             error.message(),
-            Some(Text::SignInFailure(SignInFailureKind::Unreachable))
+            Some(Text::SignInFailure(
+                Network::YouTube,
+                SignInFailureKind::Unreachable
+            ))
         );
         assert!(matches!(
             app.connection_state(&account).unwrap(),
@@ -1534,7 +2236,7 @@ mod tests {
             Err(failure(SignInFailureKind::Refused, "HTTP 401"));
         assert!(matches!(
             app.connection_check(account.id).unwrap().run(),
-            Err(ConnectionError::ReconnectNeeded)
+            Err(ConnectionError::ReconnectNeeded(Network::YouTube))
         ));
         assert!(matches!(
             app.connection_state(&account).unwrap(),
@@ -1558,7 +2260,13 @@ mod tests {
         let (mut app, account) = harness.ready();
         connect(&mut app, &account).unwrap();
         let disconnected = app.disconnection(account.id).unwrap().run().unwrap();
-        assert_eq!(disconnected, Disconnected { revoked: true });
+        assert_eq!(
+            disconnected,
+            Disconnected {
+                revoked: true,
+                kept_for_others: false
+            }
+        );
         assert_eq!(
             harness.sign_in.calls().last(),
             Some(&Call::Revoke("1//fake-refresh-0001".into()))
@@ -1595,7 +2303,13 @@ mod tests {
         *harness.sign_in.revoke_failure.lock().unwrap() =
             Some(failure(SignInFailureKind::Unreachable, "dns error"));
         let disconnected = app.disconnection(account.id).unwrap().run().unwrap();
-        assert_eq!(disconnected, Disconnected { revoked: false });
+        assert_eq!(
+            disconnected,
+            Disconnected {
+                revoked: false,
+                kept_for_others: false
+            }
+        );
         assert_eq!(harness.tokens(&app, &account), None);
         assert_eq!(harness.state(&account), None);
     }
@@ -1686,6 +2400,495 @@ mod tests {
             "verifier-0001-abcdefgh",
             CLIENT_ID,
             CLIENT_SECRET,
+        ] {
+            assert!(!contains(&written, secret), "{secret} reached SQLite");
+        }
+    }
+
+    #[test]
+    fn a_pasted_token_reaching_one_account_connects_it_with_the_page_token() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        let connected = paste(&mut app, &account, &format!("  {PASTED}\n")).unwrap();
+        let expected = ConnectedIdentity {
+            id: "17841400000000001".into(),
+            name: "@arquivosdoespaco".into(),
+        };
+        assert_eq!(connected, TokenConnected::Connected(expected.clone()));
+        assert_eq!(
+            harness.meta.calls(),
+            [
+                MetaCall::Exchange(PASTED.into()),
+                MetaCall::Discover("fake-user-token-0001".into()),
+            ]
+        );
+        let tokens = harness.tokens(&app, &account).unwrap();
+        assert_eq!(tokens.access_token(), "page-0-of-fake-user-token-0001");
+        assert_eq!(tokens.refresh_token(), Some("fake-user-token-0001"));
+        let state = harness.state(&account).unwrap();
+        assert_eq!(state.identity, expected);
+        assert_eq!(state.scopes, meta::SCOPES);
+        assert_eq!(state.expires_at, tokens.expires_at());
+        let lifetime = tokens
+            .expires_at()
+            .duration_since(SystemTime::now())
+            .unwrap();
+        assert!(
+            lifetime > meta::LIFETIME - Duration::from_secs(60),
+            "{lifetime:?}"
+        );
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::Connected {
+                channel: "@arquivosdoespaco".into()
+            }
+        );
+        // What was pasted is masked from then on.
+        assert_eq!(app.redactor().redact(PASTED), "[redacted]");
+    }
+
+    #[test]
+    fn several_accounts_wait_for_the_users_choice() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        *harness.meta.pages.lock().unwrap() = vec![
+            (
+                "Arquivos do Espaço",
+                Some(("17841400000000001", "arquivosdoespaco")),
+            ),
+            ("Padaria da Esquina", None),
+            (
+                "Space Archives",
+                Some(("17841400000000002", "spacearchives")),
+            ),
+        ];
+        assert_eq!(
+            paste(&mut app, &account, PASTED).unwrap(),
+            TokenConnected::Choose
+        );
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::Choosing {
+                choices: vec![
+                    AccountChoice {
+                        name: "@arquivosdoespaco".into(),
+                        via: "Arquivos do Espaço".into()
+                    },
+                    AccountChoice {
+                        name: "@spacearchives".into(),
+                        via: "Space Archives".into()
+                    },
+                ]
+            }
+        );
+        let chosen = app.choose_account(account.id, 1).unwrap();
+        assert_eq!(chosen.name, "@spacearchives");
+        assert_eq!(
+            harness.tokens(&app, &account).unwrap().access_token(),
+            "page-2-of-fake-user-token-0001"
+        );
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::Connected {
+                channel: "@spacearchives".into()
+            }
+        );
+        assert!(matches!(
+            app.choose_account(account.id, 0),
+            Err(ConnectionError::ChoiceGone)
+        ));
+    }
+
+    #[test]
+    fn a_paste_cancelled_while_it_ran_keeps_nothing() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        let attempt = app.connect_with_token(account.id, PASTED).unwrap();
+        let result = attempt.run();
+        app.cancel_connect(account.id);
+        assert!(app.record_token_connect(result).is_none());
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(harness.state(&account), None);
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+    }
+
+    #[test]
+    fn a_cancelled_choice_keeps_nothing() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        *harness.meta.pages.lock().unwrap() = vec![
+            ("One", Some(("17841400000000001", "one"))),
+            ("Two", Some(("17841400000000002", "two"))),
+        ];
+        paste(&mut app, &account, PASTED).unwrap();
+        app.cancel_connect(account.id);
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+        assert!(matches!(
+            app.choose_account(account.id, 0),
+            Err(ConnectionError::ChoiceGone)
+        ));
+        assert_eq!(harness.tokens(&app, &account), None);
+        // Meta revokes app-wide: nothing is revoked for a sign-in that did
+        // not finish.
+        assert!(
+            !harness
+                .meta
+                .calls()
+                .iter()
+                .any(|call| matches!(call, MetaCall::Revoke(_)))
+        );
+    }
+
+    #[test]
+    fn a_token_reaching_no_page_or_no_linked_account_connects_nothing() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        *harness.meta.pages.lock().unwrap() = Vec::new();
+        let error = paste(&mut app, &account, PASTED).unwrap_err();
+        assert!(matches!(error, ConnectionError::NoPages));
+        assert_eq!(error.message(), Some(Text::ConnectionNoPages));
+        *harness.meta.pages.lock().unwrap() = vec![("Padaria da Esquina", None), ("Loja", None)];
+        let error = paste(&mut app, &account, PASTED).unwrap_err();
+        assert!(matches!(error, ConnectionError::NoLinkedAccount));
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(harness.state(&account), None);
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+    }
+
+    #[test]
+    fn a_token_missing_a_permission_connects_nothing() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        *harness.meta.scopes.lock().unwrap() = vec!["pages_show_list".into()];
+        let error = paste(&mut app, &account, PASTED).unwrap_err();
+        assert!(matches!(
+            error,
+            ConnectionError::MissingScopes(Network::InstagramReels)
+        ));
+        assert_eq!(
+            error.message(),
+            Some(Text::ConnectionMissingScopes(Network::InstagramReels))
+        );
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(harness.meta.calls(), [MetaCall::Exchange(PASTED.into())]);
+    }
+
+    #[test]
+    fn a_pasted_token_is_checked_before_any_call() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        for (pasted, expected) in [
+            (" ", PastedTokenError::Required),
+            ("two words", PastedTokenError::Invalid),
+        ] {
+            let error = app.connect_with_token(account.id, pasted).unwrap_err();
+            assert!(
+                matches!(error, ConnectionError::PastedToken(found) if found == expected),
+                "{error:?}"
+            );
+            assert_eq!(error.message(), Some(Text::PastedTokenError(expected)));
+        }
+        assert!(harness.meta.calls().is_empty());
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+    }
+
+    #[test]
+    fn each_network_signs_in_its_own_way() {
+        let harness = Harness::new();
+        let (mut app, instagram) = harness.instagram();
+        assert!(matches!(
+            app.connect(instagram.id),
+            Err(ConnectionError::NotOffered(Network::InstagramReels))
+        ));
+        let youtube = youtube_account(&app);
+        assert!(matches!(
+            app.connect_with_token(youtube.id, PASTED),
+            Err(ConnectionError::NotOffered(Network::YouTube))
+        ));
+        let other = Harness::new();
+        let mut fresh = other.start();
+        let account = instagram_account(&fresh);
+        let error = fresh.connect_with_token(account.id, PASTED).unwrap_err();
+        assert!(matches!(
+            error,
+            ConnectionError::NoAppCredentials(Network::InstagramReels)
+        ));
+        assert_eq!(
+            error.message(),
+            Some(Text::ConnectionNeedsAppCredentials(Network::InstagramReels))
+        );
+    }
+
+    #[test]
+    fn an_exchange_failure_is_reported_without_the_pasted_token() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        *harness.meta.exchange_failure.lock().unwrap() = Some(failure(
+            SignInFailureKind::Refused,
+            &format!("HTTP 400: 190: cannot trade {PASTED} for app {META_SECRET}"),
+        ));
+        let error = paste(&mut app, &account, PASTED).unwrap_err();
+        assert_eq!(
+            error.message(),
+            Some(Text::SignInFailure(
+                Network::InstagramReels,
+                SignInFailureKind::Refused
+            ))
+        );
+        let shown = format!("{error} {error:?}");
+        assert!(!shown.contains(PASTED), "{shown}");
+        assert!(!shown.contains(META_SECRET), "{shown}");
+    }
+
+    #[test]
+    fn instagram_tokens_renew_a_week_before_the_user_token_expires() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        paste(&mut app, &account, PASTED).unwrap();
+        app.connection_check(account.id).unwrap().run().unwrap();
+        assert!(
+            !harness
+                .meta
+                .calls()
+                .iter()
+                .any(|call| matches!(call, MetaCall::Refresh(_)))
+        );
+
+        // Six days left: renewed first.
+        let mut tokens = harness.tokens(&app, &account).unwrap();
+        tokens = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(tokens.access_token()),
+                refresh_token: tokens.refresh_token().map(SecretText::new),
+                expires_in: meta::MARGIN - Duration::from_secs(86_400),
+                scopes: Vec::new(),
+            },
+            SystemTime::now(),
+        );
+        harness
+            .secrets
+            .set_tokens(app.profile().id, account.id, &tokens)
+            .unwrap();
+        let identity = app.connection_check(account.id).unwrap().run().unwrap();
+        assert_eq!(identity.name, "@arquivosdoespaco");
+        assert!(
+            harness
+                .meta
+                .calls()
+                .contains(&MetaCall::Refresh("fake-user-token-0001".into()))
+        );
+        let renewed = harness.tokens(&app, &account).unwrap();
+        assert_eq!(renewed.access_token(), "page-0-of-fake-user-token-0002");
+        assert_eq!(renewed.refresh_token(), Some("fake-user-token-0002"));
+        assert!(!renewed.needs_refresh_within(SystemTime::now(), meta::MARGIN));
+        assert_eq!(
+            harness.state(&account).unwrap().expires_at,
+            renewed.expires_at()
+        );
+    }
+
+    #[test]
+    fn opening_the_app_renews_only_the_connections_that_are_due() {
+        let harness = Harness::new();
+        let (mut app, due) = harness.instagram();
+        let fresh = instagram_account(&app);
+        paste(&mut app, &due, PASTED).unwrap();
+        paste(&mut app, &fresh, "pasted-explorer-token-0002").unwrap();
+        let tokens = harness.tokens(&app, &due).unwrap();
+        let tokens = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(tokens.access_token()),
+                refresh_token: tokens.refresh_token().map(SecretText::new),
+                expires_in: meta::MARGIN - Duration::from_secs(86_400),
+                scopes: Vec::new(),
+            },
+            SystemTime::now(),
+        );
+        harness
+            .secrets
+            .set_tokens(app.profile().id, due.id, &tokens)
+            .unwrap();
+
+        app.connection_renewal().run();
+        let refreshes: Vec<_> = harness
+            .meta
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, MetaCall::Refresh(_)))
+            .collect();
+        assert_eq!(
+            refreshes,
+            [MetaCall::Refresh("fake-user-token-0001".into())]
+        );
+        let renewed = harness.tokens(&app, &due).unwrap();
+        assert!(!renewed.needs_refresh_within(SystemTime::now(), meta::MARGIN));
+        assert!(harness.state(&due).unwrap().refreshed_at.is_some());
+        assert!(harness.state(&fresh).unwrap().refreshed_at.is_none());
+    }
+
+    #[test]
+    fn an_early_renewal_meta_cannot_answer_keeps_the_valid_tokens() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        paste(&mut app, &account, PASTED).unwrap();
+        let tokens = harness.tokens(&app, &account).unwrap();
+        let soon = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(tokens.access_token()),
+                refresh_token: tokens.refresh_token().map(SecretText::new),
+                expires_in: Duration::from_secs(86_400),
+                scopes: Vec::new(),
+            },
+            SystemTime::now(),
+        );
+        harness
+            .secrets
+            .set_tokens(app.profile().id, account.id, &soon)
+            .unwrap();
+        *harness.meta.refresh_failure.lock().unwrap() =
+            Some(failure(SignInFailureKind::NetworkDown, "HTTP 500"));
+        app.connection_check(account.id).unwrap().run().unwrap();
+        assert_eq!(harness.tokens(&app, &account), Some(soon));
+
+        *harness.meta.refresh_failure.lock().unwrap() =
+            Some(failure(SignInFailureKind::Refused, "HTTP 400: 190"));
+        let error = app.connection_check(account.id).unwrap().run().unwrap_err();
+        assert!(matches!(
+            error,
+            ConnectionError::ReconnectNeeded(Network::InstagramReels)
+        ));
+        assert_eq!(
+            error.message(),
+            Some(Text::ConnectionReconnectHint(Network::InstagramReels))
+        );
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::ReconnectNeeded {
+                channel: "@arquivosdoespaco".into()
+            }
+        );
+        // Pasting a new token reconnects.
+        paste(&mut app, &account, "pasted-explorer-token-0002").unwrap();
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::Connected {
+                channel: "@arquivosdoespaco".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_page_now_linked_to_another_account_needs_a_reconnect() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        paste(&mut app, &account, PASTED).unwrap();
+        *harness.meta.identity.lock().unwrap() = Some(Ok(ConnectedIdentity {
+            id: "17841400000000099".into(),
+            name: "@someoneelse".into(),
+        }));
+        let error = app.connection_check(account.id).unwrap().run().unwrap_err();
+        assert!(matches!(
+            error,
+            ConnectionError::ReconnectNeeded(Network::InstagramReels)
+        ));
+        assert_eq!(
+            harness.state(&account).unwrap().identity.name,
+            "@arquivosdoespaco"
+        );
+    }
+
+    #[test]
+    fn a_page_no_longer_linked_needs_a_reconnect() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.instagram();
+        paste(&mut app, &account, PASTED).unwrap();
+        *harness.meta.identity.lock().unwrap() = Some(Err(failure(
+            SignInFailureKind::NoChannel,
+            "the Page has no linked Instagram account",
+        )));
+        let error = app.connection_check(account.id).unwrap().run().unwrap_err();
+        assert!(matches!(
+            error,
+            ConnectionError::ReconnectNeeded(Network::InstagramReels)
+        ));
+        assert_eq!(
+            harness.state(&account).unwrap().status,
+            ConnectionStatus::ReconnectNeeded
+        );
+    }
+
+    #[test]
+    fn disconnecting_revokes_only_when_no_other_instagram_account_shares_the_access() {
+        let harness = Harness::new();
+        let (mut app, first) = harness.instagram();
+        let second = instagram_account(&app);
+        paste(&mut app, &first, PASTED).unwrap();
+        paste(&mut app, &second, "pasted-explorer-token-0002").unwrap();
+
+        let done = app.disconnection(first.id).unwrap().run().unwrap();
+        assert_eq!(
+            done,
+            Disconnected {
+                revoked: false,
+                kept_for_others: true
+            }
+        );
+        assert_eq!(harness.tokens(&app, &first), None);
+        assert_eq!(harness.state(&first), None);
+        assert!(
+            !harness
+                .meta
+                .calls()
+                .iter()
+                .any(|call| matches!(call, MetaCall::Revoke(_)))
+        );
+
+        let done = app.disconnection(second.id).unwrap().run().unwrap();
+        assert_eq!(
+            done,
+            Disconnected {
+                revoked: true,
+                kept_for_others: false
+            }
+        );
+        assert!(
+            harness
+                .meta
+                .calls()
+                .contains(&MetaCall::Revoke("fake-user-token-0002".into()))
+        );
+    }
+
+    #[test]
+    fn instagram_tokens_never_reach_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bardo.db");
+        let harness = Harness::over(Arc::new(Database::open(&path).unwrap()));
+        let (mut app, account) = harness.instagram();
+        paste(&mut app, &account, PASTED).unwrap();
+        let written = database_bytes(&path);
+        assert!(
+            contains(&written, "17841400000000001"),
+            "the state is there"
+        );
+        for secret in [
+            PASTED,
+            "fake-user-token-0001",
+            "page-0-of-fake-user-token-0001",
+            META_SECRET,
         ] {
             assert!(!contains(&written, secret), "{secret} reached SQLite");
         }

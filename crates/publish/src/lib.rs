@@ -4,12 +4,14 @@
 //! `bardo_ai::http`, so it is tested against recorded responses and fake
 //! servers, never live calls.
 
+pub mod instagram;
 pub mod loopback;
 pub mod oauth;
 pub mod youtube;
 pub mod youtube_analytics;
 pub mod youtube_upload;
 
+pub use instagram::{InstagramSignIn, MetaEndpoints};
 pub use loopback::LoopbackReceiver;
 pub use youtube::{GoogleEndpoints, YouTubeSignIn};
 pub use youtube_analytics::YouTubeAnalytics;

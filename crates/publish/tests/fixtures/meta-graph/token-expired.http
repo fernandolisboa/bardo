@@ -1,0 +1,5 @@
+HTTP/2 400 
+content-type: application/json; charset=UTF-8
+www-authenticate: OAuth "Facebook Platform" "invalid_token" "Error validating access token: Session has expired on Saturday, 05-Dec-26 10:00:00 PST. The current time is Sunday, 06-Dec-26 09:00:00 PST."
+
+{"error":{"message":"Error validating access token: Session has expired on Saturday, 05-Dec-26 10:00:00 PST. The current time is Sunday, 06-Dec-26 09:00:00 PST.","type":"OAuthException","code":190,"error_subcode":463,"fbtrace_id":"AFixtureTrace0001"}}

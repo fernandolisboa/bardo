@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"data":[{"id":"134895793791914","name":"Arquivos do Espaço","access_token":"fixture-page-token-0001","instagram_business_account":{"id":"17841405309211844","username":"arquivosdoespaco"}},{"id":"134895793791917","name":"Read-only Page"}],"paging":{"cursors":{"before":"MTM0ODk1NzkzNzkxOTE0","after":"MTM0ODk1NzkzNzkxOTE3"},"next":"https://graph.facebook.com/v25.0/1000000000000001/accounts?fields=id%2Cname%2Caccess_token%2Cinstagram_business_account%7Bid%2Cusername%7D&limit=100&after=MTM0ODk1NzkzNzkxOTE3"}}

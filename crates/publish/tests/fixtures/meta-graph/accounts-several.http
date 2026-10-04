@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"data":[{"id":"134895793791914","name":"Arquivos do Espaço","access_token":"fixture-page-token-0001","instagram_business_account":{"id":"17841405309211844","username":"arquivosdoespaco"}},{"id":"134895793791915","name":"Space Archives","access_token":"fixture-page-token-0002","instagram_business_account":{"id":"17841405309211845","username":"spacearchives"}},{"id":"134895793791916","name":"Padaria da Esquina","access_token":"fixture-page-token-0003"}],"paging":{"cursors":{"before":"MTM0ODk1NzkzNzkxOTE0","after":"MTM0ODk1NzkzNzkxOTE2"}}}

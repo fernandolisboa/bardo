@@ -63,6 +63,9 @@ fn main() -> anyhow::Result<()> {
     // Public post numbers catch up in the background when the profile's
     // setting says they are due.
     bardo.sync_metrics_on_start();
+    // Connections close to expiring are renewed off the UI thread.
+    let renewal = bardo.connection_renewal();
+    std::thread::spawn(move || renewal.run());
 
     // The bundled icons (gpui-kit's default set and Bardo's extra ones);
     // without them icons draw nothing.

@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"data":[{"id":"134895793791915","name":"Space Archives","access_token":"fixture-page-token-0002","instagram_business_account":{"id":"17841405309211845","username":"spacearchives"}}],"paging":{"cursors":{"before":"MTM0ODk1NzkzNzkxOTE1","after":"MTM0ODk1NzkzNzkxOTE1"}}}

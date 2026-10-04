@@ -1549,10 +1549,8 @@ off = "Never"
 
 [app_credentials]
 title = "App credentials"
-hint = "Bardo signs in to each network with an OAuth app you register on it, and ships none of its own. The client ID and secret are kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
+hint = "Bardo signs in to each network with an app you register on it, and ships none of its own. The app's ID and secret are kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
 info = "Where credentials are kept"
-client_id = "Client ID"
-client_secret = "Client secret"
 not_set = "Not saved"
 saved = "Saved, secret ending in {hint}"
 unreadable = "Could not read these credentials from Windows Credential Manager."
@@ -1563,18 +1561,33 @@ remove = "Remove"
 [app_credentials.youtube]
 name = "YouTube · Google OAuth client"
 purpose = "A Desktop app client in your Google Cloud project, with YouTube Data API v3 and YouTube Analytics API enabled and the consent screen In production. In Testing, Google ends the connection after seven days."
+client_id = "Client ID"
+client_secret = "Client secret"
 client_id_placeholder = "…apps.googleusercontent.com"
 client_secret_placeholder = "GOCSPX-…"
 
-[app_credentials.error]
+[app_credentials.youtube.error]
 client_id_required = "Enter the client ID."
 client_id_invalid = "Paste the client ID of a Google OAuth client. It ends in .apps.googleusercontent.com."
 client_secret_required = "Enter the client secret."
 client_secret_invalid = "That doesn't look like a client secret. Copy it again from Google Cloud."
 
+[app_credentials.instagram_reels]
+name = "Instagram · Meta app"
+purpose = "A Business app in your Meta developer account with the Instagram use case (API setup with Facebook login) and Facebook Login for Business. Your Facebook account needs a role on the app and on the Page linked to your Instagram professional account."
+client_id = "App ID"
+client_secret = "App secret"
+client_id_placeholder = "1234567890123456"
+client_secret_placeholder = "32 letters and digits"
+
+[app_credentials.instagram_reels.error]
+client_id_required = "Enter the app ID."
+client_id_invalid = "Paste the app ID from your Meta app's Basic settings. It's a number."
+client_secret_required = "Enter the app secret."
+client_secret_invalid = "That doesn't look like an app secret. Copy it again from the app's Basic settings."
+
 [connection]
 not_connected = "Not connected"
-connecting = "Waiting for you to allow access in the browser…"
 connected = "Connected as {channel}"
 reconnect_needed = "Reconnect needed · {channel}"
 connect = "Connect"
@@ -1585,33 +1598,67 @@ disconnecting = "Disconnecting…"
 check = "Check"
 checking = "Checking…"
 open_settings = "Open Settings › Networks"
-checked = "The connection works. Channel: {channel}."
 disconnected = "Disconnected. Bardo's access was revoked."
 disconnected_not_revoked = "Disconnected here, but {network} couldn't be reached to revoke Bardo's access. You can remove it from your account's security settings on {network}."
+disconnected_kept_for_others = "Disconnected here. Bardo's access on {network} wasn't revoked because another account in Bardo still uses it."
+use_account = "Connect this one"
+choose_label = "Choose an account"
+
+[connection.youtube]
+connecting = "Waiting for you to allow access in the browser…"
+checked = "The connection works. Channel: {channel}."
 reconnect_hint = "The network refused to renew access: it was revoked or expired (a Google client in Testing status expires after seven days). Reconnect to sign in again."
+needs_app_credentials = "Save your OAuth client in Settings › Networks before connecting."
+missing_scopes = "Not every permission was allowed. Connect again and leave every box ticked: Bardo needs them to upload, schedule and read analytics."
+
+[connection.instagram_reels]
+connecting = "Checking the token with Meta…"
+checked = "The connection works. Account: {channel}."
+reconnect_hint = "Meta refused to renew access: the token was revoked or expired, or the account is no longer linked to a Page you manage. Generate a new token and reconnect."
+needs_app_credentials = "Save your Meta app in Settings › Networks before connecting."
+missing_scopes = "The token is missing permissions. Generate it again with instagram_basic, instagram_content_publish, instagram_manage_insights, pages_show_list and pages_read_engagement ticked."
+token_label = "User access token"
+token_placeholder = "Paste the token from the Graph API Explorer"
+token_help = "In the Graph API Explorer, pick your Meta app, choose Get User Access Token, tick instagram_basic, instagram_content_publish, instagram_manage_insights, pages_show_list and pages_read_engagement (plus business_management, ads_management and ads_read if your Page is in a business portfolio), then Generate Access Token and paste it here. Bardo trades it for a long-lived one and never stores what you paste."
+open_token_tool = "Open the Graph API Explorer"
+choose = "The token reaches several Instagram accounts. Choose the one for this channel."
+choice_via = "Page: {via}"
 
 [connection.error]
 not_offered = "Bardo doesn't sign in to this network yet."
-needs_app_credentials = "Save your OAuth client in Settings › Networks before connecting."
 not_connected = "This account isn't connected."
 denied = "Access wasn't allowed in the browser. Connect again and choose Allow."
 timed_out = "No answer came back from the browser within five minutes. Connect again."
 cancelled = "Connection cancelled."
 listen_failed = "Bardo couldn't wait for the browser's answer on this computer. Try again; if it keeps failing, check that a firewall allows Bardo on 127.0.0.1."
-missing_scopes = "Not every permission was allowed. Connect again and leave every box ticked: Bardo needs them to upload, schedule and read analytics."
 tokens_too_large = "The network's tokens are too large for Windows Credential Manager, so they weren't kept."
 store_failed = "Could not reach Windows Credential Manager. Try again."
 not_saved = "Couldn't save the connection. Try again."
+no_pages = "The token reaches no Facebook Page. Generate it with the Facebook account that manages the Page linked to your Instagram account, and tick pages_show_list."
+no_linked_account = "None of your Facebook Pages has an Instagram professional account linked. Link the account to a Page in Instagram's settings, then connect again."
+choice_gone = "That choice is no longer open. Connect again."
+token_required = "Paste the access token."
+token_invalid = "That doesn't look like an access token. Copy it again from the Graph API Explorer."
 
 [connection.failure]
+unreachable = "Couldn't reach the network. Check your internet connection."
+unexpected = "The network answered in a way Bardo doesn't understand. Try again."
+
+[connection.failure.youtube]
 refused = "The network refused the sign-in. Connect again."
 client_rejected = "Google doesn't recognize the client ID or secret. Check them in Settings › Networks."
 not_allowed = "Access was refused. Enable YouTube Data API v3 and YouTube Analytics API in your Google Cloud project."
 no_channel = "This Google account has no YouTube channel. Sign in with the account that owns the channel."
 limit_reached = "The project's YouTube quota is used up for today. Try again after midnight Pacific time."
 network_down = "YouTube is failing on its side. Try again later."
-unreachable = "Couldn't reach the network. Check your internet connection."
-unexpected = "The network answered in a way Bardo doesn't understand. Try again."
+
+[connection.failure.instagram_reels]
+refused = "Meta refused the token: it expired, was revoked, or belongs to another app. Generate a new one for your app and connect again."
+client_rejected = "Meta doesn't recognize the app ID or secret. Check them in Settings › Networks."
+not_allowed = "Meta refused access. Check that the token has every permission and that your Facebook account has a role on the app and the Page."
+no_channel = "The Page is no longer linked to an Instagram professional account. Link it again in Instagram's settings, then reconnect."
+limit_reached = "Meta is limiting requests from your app right now. Try again in a few minutes."
+network_down = "Meta is failing on its side. Try again later."
 
 [consent_page]
 done = "Bardo is connected. You can close this tab."

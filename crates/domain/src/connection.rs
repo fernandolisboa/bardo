@@ -63,12 +63,32 @@ fn is_token_text(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|c| c.is_ascii_graphic())
 }
 
+/// How the user lets Bardo act on a network account (ADR-0008).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SignInMethod {
+    /// Consent in the system browser, which comes back to a one-shot
+    /// loopback listener with an authorization code (YouTube).
+    Browser,
+    /// The user pastes an access token generated in the network's developer
+    /// tools (Instagram: Facebook Login documents no loopback redirect for
+    /// desktop apps, only an embedded web view or an HTTPS address).
+    PastedToken,
+}
+
 impl Network {
-    /// Whether Bardo signs in to this network (ADR-0008). TikTok and
-    /// Instagram Reels follow in their own slices; X and Kick stay export
-    /// only.
+    /// How Bardo signs in to this network, or `None` for export only.
+    /// TikTok follows in its own slice; X and Kick stay export only.
+    pub fn sign_in_method(self) -> Option<SignInMethod> {
+        match self {
+            Network::YouTube => Some(SignInMethod::Browser),
+            Network::InstagramReels => Some(SignInMethod::PastedToken),
+            Network::TikTok | Network::X | Network::Kick => None,
+        }
+    }
+
+    /// Whether Bardo signs in to this network.
     pub fn signs_in(self) -> bool {
-        matches!(self, Network::YouTube)
+        self.sign_in_method().is_some()
     }
 
     /// The networks Bardo signs in to, in network order.
@@ -83,8 +103,8 @@ impl Network {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppCredentialsFieldError {
     ClientIdRequired,
-    /// Spaces, characters ids never have, or (Google) not a Google OAuth
-    /// client id.
+    /// Spaces, characters ids never have, (Google) not a Google OAuth
+    /// client id, or (Meta) not a numeric app id.
     ClientIdInvalid,
     ClientSecretRequired,
     ClientSecretInvalid,
@@ -117,6 +137,8 @@ impl AppCredentials {
     pub const MIN_SECRET_CHARS: usize = 8;
     /// Google OAuth client ids end with this.
     pub const GOOGLE_CLIENT_SUFFIX: &str = ".apps.googleusercontent.com";
+    /// Meta app ids are numbers, today 15 or 16 digits long.
+    pub const META_APP_ID_DIGITS: std::ops::RangeInclusive<usize> = 5..=32;
 
     /// Validates credentials as the user typed or pasted them. Surrounding
     /// whitespace is dropped.
@@ -129,12 +151,7 @@ impl AppCredentials {
         let id = client_id.trim();
         if id.is_empty() {
             errors.push(AppCredentialsFieldError::ClientIdRequired);
-        } else if !is_token_text(id)
-            || id.len() > Self::MAX_CHARS
-            || (network == Network::YouTube
-                && (!id.ends_with(Self::GOOGLE_CLIENT_SUFFIX)
-                    || id.len() == Self::GOOGLE_CLIENT_SUFFIX.len()))
-        {
+        } else if !is_token_text(id) || id.len() > Self::MAX_CHARS || !Self::id_fits(network, id) {
             errors.push(AppCredentialsFieldError::ClientIdInvalid);
         }
         let secret = client_secret.trim();
@@ -153,6 +170,21 @@ impl AppCredentials {
             client_id: SecretText::new(id),
             client_secret: SecretText::new(secret),
         })
+    }
+
+    /// The network's own shape of a client id.
+    fn id_fits(network: Network, id: &str) -> bool {
+        match network {
+            Network::YouTube => {
+                id.ends_with(Self::GOOGLE_CLIENT_SUFFIX)
+                    && id.len() > Self::GOOGLE_CLIENT_SUFFIX.len()
+            }
+            Network::InstagramReels => {
+                Self::META_APP_ID_DIGITS.contains(&id.len())
+                    && id.bytes().all(|b| b.is_ascii_digit())
+            }
+            Network::TikTok | Network::X | Network::Kick => true,
+        }
     }
 
     pub fn client_id(&self) -> &str {
@@ -281,8 +313,15 @@ impl TokenSet {
     /// Whether the access token is expired or within `REFRESH_MARGIN` of
     /// it at `now`.
     pub fn needs_refresh(&self, now: SystemTime) -> bool {
+        self.needs_refresh_within(now, Self::REFRESH_MARGIN)
+    }
+
+    /// Whether the tokens expire within `margin` of `now`: a network whose
+    /// renewal needs the user's tokens to still be valid renews them well
+    /// ahead (`NetworkSignIn::refresh_margin`).
+    pub fn needs_refresh_within(&self, now: SystemTime, margin: Duration) -> bool {
         self.expires_at
-            .checked_sub(Self::REFRESH_MARGIN)
+            .checked_sub(margin)
             .is_none_or(|limit| now >= limit)
     }
 
@@ -349,12 +388,38 @@ impl fmt::Debug for TokenSet {
     }
 }
 
-/// Who the tokens act as on the network: for YouTube, the channel.
+/// Why a pasted access token is not usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PastedTokenError {
+    Required,
+    /// Spaces inside, characters tokens never have, or too long.
+    Invalid,
+}
+
+/// An access token the user pasted from a network's developer tools
+/// (`SignInMethod::PastedToken`). Surrounding whitespace is dropped.
+pub fn parse_pasted_token(text: &str) -> Result<SecretText, PastedTokenError> {
+    /// Meta user tokens run to a few hundred characters; anything near the
+    /// secret store's size is a paste of something else.
+    const MAX_CHARS: usize = 1024;
+    let token = text.trim();
+    if token.is_empty() {
+        Err(PastedTokenError::Required)
+    } else if !is_token_text(token) || token.len() > MAX_CHARS {
+        Err(PastedTokenError::Invalid)
+    } else {
+        Ok(SecretText::new(token))
+    }
+}
+
+/// Who the tokens act as on the network: for YouTube, the channel; for
+/// Instagram, the professional account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectedIdentity {
-    /// The network's id, e.g. a YouTube channel id (`UC…`).
+    /// The network's id, e.g. a YouTube channel id (`UC…`) or an Instagram
+    /// user id.
     pub id: String,
-    /// The name the network shows, e.g. the channel title.
+    /// The name the network shows, e.g. the channel title or `@username`.
     pub name: String,
 }
 
@@ -411,6 +476,14 @@ pub trait NetworkConnectionRepository: Send + Sync {
 
     /// Removing one that does not exist is not an error.
     fn delete(&self, account: NetworkAccountId) -> Result<(), RepositoryError>;
+
+    /// The owner's accounts on `network` that have a connection, even one
+    /// needing reconnect.
+    fn connected_on(
+        &self,
+        owner: ProfileId,
+        network: Network,
+    ) -> Result<Vec<NetworkAccountId>, RepositoryError>;
 }
 
 impl<T: NetworkConnectionRepository + ?Sized> NetworkConnectionRepository for Arc<T> {
@@ -424,6 +497,14 @@ impl<T: NetworkConnectionRepository + ?Sized> NetworkConnectionRepository for Ar
 
     fn delete(&self, account: NetworkAccountId) -> Result<(), RepositoryError> {
         (**self).delete(account)
+    }
+
+    fn connected_on(
+        &self,
+        owner: ProfileId,
+        network: Network,
+    ) -> Result<Vec<NetworkAccountId>, RepositoryError> {
+        (**self).connected_on(owner, network)
     }
 }
 
@@ -579,14 +660,60 @@ pub struct ConsentRequest {
     pub verifier: SecretText,
 }
 
-/// A network's OAuth: authorization code with PKCE (ADR-0008). Calls the
-/// network and blocks, so the app runs it off the UI thread.
+/// A network's OAuth (ADR-0008): how a connection starts depends on the
+/// network (`browser` or `pasted`); refreshing, revoking and reading who the
+/// tokens act as are shared. Calls the network and blocks, so the app runs
+/// it off the UI thread.
 pub trait NetworkSignIn: Send + Sync {
     fn network(&self) -> Network;
 
-    /// Every scope Bardo asks at the first connection.
+    /// Every scope Bardo needs, asked (or checked) at the first connection.
     fn scopes(&self) -> &'static [&'static str];
 
+    /// How long before the tokens' expiry they are renewed. A network whose
+    /// renewal needs still-valid tokens (Meta's long-lived user token)
+    /// renews well ahead, so an app left closed for a while still finds
+    /// them alive.
+    fn refresh_margin(&self) -> Duration {
+        TokenSet::REFRESH_MARGIN
+    }
+
+    /// Renews `tokens`, which act as `identity`. The grant replaces the
+    /// access token, and the refresh token when it carries one.
+    fn refresh(
+        &self,
+        credentials: &AppCredentials,
+        tokens: &TokenSet,
+        identity: &ConnectedIdentity,
+    ) -> Result<TokenGrant, SignInFailure>;
+
+    /// Revokes the tokens at the network. Tokens the network no longer
+    /// knows count as revoked.
+    fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure>;
+
+    /// Whether `revoke` ends every connection the same person made with
+    /// these app credentials, not just this one: Meta removes the app's
+    /// permissions for the whole Facebook account.
+    fn revokes_app_wide(&self) -> bool {
+        false
+    }
+
+    /// Who the access token acts as.
+    fn identity(&self, access_token: &str) -> Result<ConnectedIdentity, SignInFailure>;
+
+    /// The browser consent, for `SignInMethod::Browser` networks.
+    fn browser(&self) -> Option<&dyn BrowserSignIn> {
+        None
+    }
+
+    /// The pasted token, for `SignInMethod::PastedToken` networks.
+    fn pasted(&self) -> Option<&dyn PastedTokenSignIn> {
+        None
+    }
+}
+
+/// Authorization code with PKCE over a loopback redirect.
+pub trait BrowserSignIn: Send + Sync {
     /// A fresh PKCE verifier and `state`, and the consent address that
     /// carries them, sending the browser back to `redirect_uri`.
     fn consent_request(&self, credentials: &AppCredentials, redirect_uri: &str) -> ConsentRequest;
@@ -599,19 +726,37 @@ pub trait NetworkSignIn: Send + Sync {
         verifier: &SecretText,
         redirect_uri: &str,
     ) -> Result<TokenGrant, SignInFailure>;
+}
 
-    fn refresh(
+/// A user access token the user generated in the network's developer tools
+/// with their own app, then the accounts it reaches.
+pub trait PastedTokenSignIn: Send + Sync {
+    /// Trades the pasted (short-lived) user token for a long-lived one, and
+    /// reads the scopes the user granted. The grant's `refresh_token` is
+    /// empty: the long-lived user token is its `access_token`.
+    fn exchange_pasted(
         &self,
         credentials: &AppCredentials,
-        refresh_token: &str,
+        pasted: &SecretText,
     ) -> Result<TokenGrant, SignInFailure>;
 
-    /// Revokes the tokens at the network. Tokens the network no longer
-    /// knows count as revoked.
-    fn revoke(&self, tokens: &TokenSet) -> Result<(), SignInFailure>;
+    /// Every account the user token reaches, with the token that acts as
+    /// it (Instagram: one per Facebook Page, with the Page's token).
+    fn discover(&self, user_token: &str) -> Result<Vec<DiscoveredAccount>, SignInFailure>;
+}
 
-    /// Who the access token acts as.
-    fn identity(&self, access_token: &str) -> Result<ConnectedIdentity, SignInFailure>;
+/// One place a pasted user token reaches: for Instagram, a Facebook Page
+/// and the professional account linked to it, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredAccount {
+    /// Where the account was found, shown when the user picks one: the
+    /// Page's name.
+    pub via: String,
+    /// The account that can be connected, or `None` when the Page has no
+    /// Instagram professional account linked.
+    pub identity: Option<ConnectedIdentity>,
+    /// The token that acts as the account: the Page's token.
+    pub token: SecretText,
 }
 
 /// Why no authorization code came back from the browser.
@@ -680,12 +825,66 @@ mod tests {
         }
     }
 
+    // A Meta app id and secret in the published shapes (digits; 32 hex).
+    const META_ID: &str = "1234567890123456";
+    const META_SECRET: &str = concat!("0123456789abcdef", "0123456789abcdef");
+
     #[test]
-    fn only_youtube_signs_in_for_now() {
+    fn youtube_signs_in_in_the_browser_and_instagram_with_a_pasted_token() {
         assert_eq!(
             Network::sign_in_networks().collect::<Vec<_>>(),
-            [Network::YouTube]
+            [Network::YouTube, Network::InstagramReels]
         );
+        assert_eq!(
+            Network::YouTube.sign_in_method(),
+            Some(SignInMethod::Browser)
+        );
+        assert_eq!(
+            Network::InstagramReels.sign_in_method(),
+            Some(SignInMethod::PastedToken)
+        );
+        for network in [Network::TikTok, Network::X, Network::Kick] {
+            assert!(!network.signs_in(), "{network}");
+        }
+    }
+
+    #[test]
+    fn a_meta_app_id_is_a_number() {
+        let credentials =
+            AppCredentials::parse(Network::InstagramReels, META_ID, META_SECRET).unwrap();
+        assert_eq!(credentials.client_id(), META_ID);
+        for bad in [
+            "1234",
+            "12345678901234567890123456789012345",
+            "1234567890abcdef",
+            "123 456 789",
+            GOOGLE_ID,
+        ] {
+            assert_eq!(
+                AppCredentials::parse(Network::InstagramReels, bad, META_SECRET).unwrap_err(),
+                [AppCredentialsFieldError::ClientIdInvalid],
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            AppCredentials::decode(Network::YouTube, &credentials.encode()),
+            None,
+            "credentials are read back only for their own network"
+        );
+    }
+
+    #[test]
+    fn a_pasted_token_loses_surrounding_whitespace() {
+        let token = parse_pasted_token("  fixture-token_1.2\n").unwrap();
+        assert_eq!(token.expose(), "fixture-token_1.2");
+        assert_eq!(parse_pasted_token(" \t"), Err(PastedTokenError::Required));
+        for bad in ["fixture token", "fixtüre", &"E".repeat(1025)] {
+            assert_eq!(
+                parse_pasted_token(bad),
+                Err(PastedTokenError::Invalid),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
@@ -807,6 +1006,15 @@ mod tests {
         assert!(!tokens.needs_refresh(at(3600 - margin - 1)));
         assert!(tokens.needs_refresh(at(3600 - margin)));
         assert!(tokens.needs_refresh(at(9000)));
+    }
+
+    #[test]
+    fn a_wider_margin_renews_earlier() {
+        let tokens = TokenSet::granted(&grant("user-token", None, 60 * 86_400), at(0));
+        let week = Duration::from_secs(7 * 86_400);
+        assert!(!tokens.needs_refresh_within(at(53 * 86_400 - 1), week));
+        assert!(tokens.needs_refresh_within(at(53 * 86_400), week));
+        assert!(!tokens.needs_refresh(at(53 * 86_400)));
     }
 
     #[test]

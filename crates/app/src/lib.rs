@@ -59,8 +59,9 @@ pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
 pub use channels::ChannelError;
 pub use clips::{ClipsView, SceneClipView};
 pub use connections::{
-    AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult, ConnectionCheck,
-    ConnectionError, ConnectionState, Disconnected, Disconnection,
+    AccountChoice, AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult,
+    ConnectionCheck, ConnectionError, ConnectionRenewal, ConnectionState, Disconnected,
+    Disconnection, TokenConnect, TokenConnectResult, TokenConnected,
 };
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
@@ -307,7 +308,10 @@ impl Providers {
             ],
             audio: Arc::new(bardo_media::DeviceAudio),
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
-            sign_ins: vec![Arc::new(bardo_publish::YouTubeSignIn::new())],
+            sign_ins: vec![
+                Arc::new(bardo_publish::YouTubeSignIn::new()),
+                Arc::new(bardo_publish::InstagramSignIn::new()),
+            ],
             consent: Arc::new(bardo_publish::LoopbackReceiver),
             uploaders: vec![Arc::new(bardo_publish::YouTubeUploader::new())],
             analytics: vec![Arc::new(bardo_publish::YouTubeAnalytics::new())],

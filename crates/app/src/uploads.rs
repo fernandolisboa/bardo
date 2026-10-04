@@ -143,9 +143,9 @@ impl UploadReview {
     pub fn block(&self) -> Option<UploadBlock> {
         Some(match &self.connection {
             ConnectionState::Unavailable => UploadBlock::NotOffered,
-            ConnectionState::NotConnected | ConnectionState::Connecting => {
-                UploadBlock::NotConnected
-            }
+            ConnectionState::NotConnected
+            | ConnectionState::Connecting
+            | ConnectionState::Choosing { .. } => UploadBlock::NotConnected,
             ConnectionState::ReconnectNeeded { .. } => UploadBlock::ReconnectNeeded,
             ConnectionState::Connected { .. } if self.uploading => UploadBlock::Uploading,
             ConnectionState::Connected { .. } if self.rendering => UploadBlock::Rendering,
@@ -483,7 +483,7 @@ pub(crate) fn access_token(
 ) -> Result<SecretText, UploadError> {
     match connections.access_token(account) {
         Ok(tokens) => Ok(SecretText::new(tokens.access_token())),
-        Err(ConnectionError::SignIn(failure))
+        Err(ConnectionError::SignIn(_, failure))
             if matches!(
                 failure.kind,
                 SignInFailureKind::NetworkDown

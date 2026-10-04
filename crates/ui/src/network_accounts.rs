@@ -5,24 +5,29 @@
 //! `NetworkAccountDraft` and errors back to fields.
 //!
 //! An account on a network Bardo signs in to also shows its connection:
-//! connect (consent in the system browser), check, reconnect and
-//! disconnect, each run off the UI thread.
+//! connect (consent in the system browser, or a token pasted from the
+//! network's developer tools), check, reconnect and disconnect, each run
+//! off the UI thread.
 
 use std::collections::HashMap;
 
 use bardo_app::bardo_domain::{
     AspectRatio, ChannelId, ContentLanguage, Network, NetworkAccount, NetworkAccountDraft,
-    NetworkAccountFieldError, NetworkAccountId, Resolution, SignInFailureKind, VideoCodec,
-    Visibility,
+    NetworkAccountFieldError, NetworkAccountId, Resolution, SignInFailureKind, SignInMethod,
+    VideoCodec, Visibility,
 };
-use bardo_app::{Bardo, ConnectionError, ConnectionState, NetworkAccountError, Text};
+use bardo_app::{
+    AccountChoice, Bardo, ConnectionError, ConnectionState, NetworkAccountError, Text,
+    TokenConnected,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, IconName, IndexPath, Sizable as _, StyledExt as _, h_flex,
+    v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -154,6 +159,15 @@ enum Notice {
 /// credentials are saved.
 pub struct OpenNetworkSettings;
 
+/// Where the user generates a token to paste, for networks that sign in
+/// with one.
+fn token_tool(network: Network) -> Option<&'static str> {
+    match network {
+        Network::InstagramReels => Some("https://developers.facebook.com/tools/explorer/"),
+        _ => None,
+    }
+}
+
 /// Connection work running off the UI thread for one account.
 #[derive(Clone, Copy, PartialEq)]
 enum Work {
@@ -203,6 +217,11 @@ pub struct NetworkAccountsPanel {
     /// Connection work in flight; dropping its task stops waiting for it.
     work: HashMap<NetworkAccountId, (Work, Task<()>)>,
     connection_notices: HashMap<NetworkAccountId, ConnectionNotice>,
+    /// The pasted token, masked; one paste form is open at a time.
+    token: Entity<InputState>,
+    /// The account whose paste form is open.
+    pasting: Option<NetworkAccountId>,
+    token_error: Option<Text>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -216,6 +235,8 @@ impl NetworkAccountsPanel {
         let bitrate = input(window, cx);
         let max_duration = input(window, cx);
         let loudness = input(window, cx);
+        // Masked like an API key: the token never shows on screen.
+        let token = cx.new(|cx| InputState::new(window, cx).masked(true));
         let tags = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8));
         let footer = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8));
         let language: ChoiceSelect<Option<ContentLanguage>> = empty_select(window, cx);
@@ -268,6 +289,23 @@ impl NetworkAccountsPanel {
                 |this, _, _: &SelectEvent<Choices<Option<VideoCodec>>>, cx| this.selected(cx),
             ),
         ];
+        subscriptions.push(cx.subscribe_in(
+            &token,
+            window,
+            |this, _, event, window, cx| match event {
+                InputEvent::Change => {
+                    if this.token_error.take().is_some() {
+                        cx.notify();
+                    }
+                }
+                InputEvent::PressEnter { .. } => {
+                    if let Some(id) = this.pasting {
+                        this.connect_with_token(id, window, cx);
+                    }
+                }
+                _ => {}
+            },
+        ));
         subscriptions.push(cx.observe_in(&bardo, window, |this, _, window, cx| {
             this.relabel(window, cx)
         }));
@@ -294,6 +332,9 @@ impl NetworkAccountsPanel {
             notice: None,
             work: HashMap::new(),
             connection_notices: HashMap::new(),
+            token,
+            pasting: None,
+            token_error: None,
             _subscriptions: subscriptions,
         }
     }
@@ -316,6 +357,10 @@ impl NetworkAccountsPanel {
             self.field_errors.clear();
             self.notice = None;
             self.connection_notices.clear();
+            self.pasting = None;
+            self.token_error = None;
+            self.token
+                .update(cx, |input, cx| input.set_value("", window, cx));
         }
         self.relabel(window, cx);
     }
@@ -571,8 +616,132 @@ impl NetworkAccountsPanel {
         cx.notify();
     }
 
-    /// Starts a sign-in: opens the consent page in the system browser and
-    /// waits off the UI thread for the browser to come back.
+    /// Starts a sign-in the network's way: the consent page in the browser,
+    /// or the form for a pasted token.
+    fn start_connect(
+        &mut self,
+        id: NetworkAccountId,
+        network: Network,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match network.sign_in_method() {
+            Some(SignInMethod::PastedToken) => self.open_paste(id, network, window, cx),
+            Some(SignInMethod::Browser) | None => self.connect(id, cx),
+        }
+    }
+
+    fn open_paste(
+        &mut self,
+        id: NetworkAccountId,
+        network: Network,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let placeholder = tr(
+            self.bardo.read(cx),
+            Text::ConnectionTokenPlaceholder(network),
+        );
+        self.token.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_placeholder(placeholder, window, cx);
+        });
+        self.pasting = Some(id);
+        self.token_error = None;
+        self.connection_notices.remove(&id);
+        self.token.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn close_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pasting = None;
+        self.token_error = None;
+        self.token
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        cx.notify();
+    }
+
+    /// Checks the pasted token off the UI thread: trades it for a
+    /// long-lived one and finds the accounts it reaches.
+    fn connect_with_token(
+        &mut self,
+        id: NetworkAccountId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.work.contains_key(&id) {
+            return;
+        }
+        let pasted = self.token.read(cx).value();
+        let connect = self.bardo.update(cx, |bardo, cx| {
+            let connect = bardo.connect_with_token(id, &pasted);
+            cx.notify();
+            connect
+        });
+        let connect = match connect {
+            Ok(connect) => connect,
+            Err(ConnectionError::PastedToken(error)) => {
+                self.token_error = Some(Text::PastedTokenError(error));
+                return cx.notify();
+            }
+            Err(error) => {
+                self.close_paste(window, cx);
+                return self.connection_failed(id, &error, cx);
+            }
+        };
+        self.close_paste(window, cx);
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { connect.run() })
+                .await;
+            let outcome = bardo.update(cx, |bardo, cx| {
+                let outcome = bardo.record_token_connect(result);
+                cx.notify();
+                outcome
+            });
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .work
+                    .get(&id)
+                    .is_some_and(|(work, _)| *work == Work::Connecting)
+                {
+                    this.work.remove(&id);
+                }
+                match outcome {
+                    None => {}
+                    Some(Ok(TokenConnected::Connected(_) | TokenConnected::Choose)) => {
+                        this.connection_notices.remove(&id);
+                    }
+                    Some(Err(error)) => this.connection_failed(id, &error, cx),
+                }
+                cx.notify();
+            });
+        });
+        self.connection_notices.remove(&id);
+        self.work.insert(id, (Work::Connecting, task));
+        cx.notify();
+    }
+
+    /// Connects the account the user picked among those the token reached.
+    fn choose_account(&mut self, id: NetworkAccountId, index: usize, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.choose_account(id, index);
+            cx.notify();
+            result
+        });
+        match result {
+            Ok(_) => {
+                self.connection_notices.remove(&id);
+            }
+            Err(error) => self.connection_failed(id, &error, cx),
+        }
+        cx.notify();
+    }
+
+    /// Starts a browser sign-in: opens the consent page in the system
+    /// browser and waits off the UI thread for the browser to come back.
     fn connect(&mut self, id: NetworkAccountId, cx: &mut Context<Self>) {
         let attempt = self.bardo.update(cx, |bardo, cx| {
             let attempt = bardo.connect(id);
@@ -630,7 +799,7 @@ impl NetworkAccountsPanel {
     }
 
     /// Renews the access if due and reads the channel again.
-    fn check_connection(&mut self, id: NetworkAccountId, cx: &mut Context<Self>) {
+    fn check_connection(&mut self, id: NetworkAccountId, network: Network, cx: &mut Context<Self>) {
         let check = match self.bardo.read(cx).connection_check(id) {
             Ok(check) => check,
             Err(error) => return self.connection_failed(id, &error, cx),
@@ -648,8 +817,10 @@ impl NetworkAccountsPanel {
                 match result {
                     Ok(identity) => {
                         let bardo = this.bardo.read(cx);
-                        let text = bardo
-                            .text_with(Text::ConnectionChecked, &[("channel", &identity.name)]);
+                        let text = bardo.text_with(
+                            Text::ConnectionChecked(network),
+                            &[("channel", &identity.name)],
+                        );
                         this.connection_notices.insert(
                             id,
                             ConnectionNotice {
@@ -692,15 +863,26 @@ impl NetworkAccountsPanel {
                 match result {
                     Ok(done) => {
                         let bardo = this.bardo.read(cx);
+                        let network_name = bardo.text(Text::NetworkName(network));
                         let (tone, text) = if done.revoked {
                             (Tone::Success, bardo.text(Text::ConnectionDisconnected))
+                        } else if done.kept_for_others {
+                            (
+                                Tone::Info,
+                                bardo
+                                    .text_with(
+                                        Text::ConnectionDisconnectedKeptForOthers,
+                                        &[("network", &network_name)],
+                                    )
+                                    .into(),
+                            )
                         } else {
                             (
                                 Tone::Warning,
                                 bardo
                                     .text_with(
                                         Text::ConnectionDisconnectedNotRevoked,
-                                        &[("network", &bardo.text(Text::NetworkName(network)))],
+                                        &[("network", &network_name)],
                                     )
                                     .into(),
                             )
@@ -734,8 +916,8 @@ impl NetworkAccountsPanel {
                 self.connection_notices.remove(&id);
                 return;
             }
-            ConnectionError::ReconnectNeeded => Tone::Warning,
-            ConnectionError::SignIn(failure)
+            ConnectionError::ReconnectNeeded(_) => Tone::Warning,
+            ConnectionError::SignIn(_, failure)
                 if matches!(
                     failure.kind,
                     SignInFailureKind::LimitReached
@@ -750,7 +932,7 @@ impl NetworkAccountsPanel {
         let settings = matches!(error, ConnectionError::NoAppCredentials(_))
             || matches!(
                 error,
-                ConnectionError::SignIn(failure) if failure.kind == SignInFailureKind::ClientRejected
+                ConnectionError::SignIn(_, failure) if failure.kind == SignInFailureKind::ClientRejected
             );
         self.connection_notices.insert(
             id,
@@ -793,7 +975,13 @@ impl NetworkAccountsPanel {
             ConnectionState::Connecting => kit::status_with(
                 Tone::Info,
                 IconName::LoaderCircle,
-                tr(bardo, Text::ConnectionConnecting),
+                tr(bardo, Text::ConnectionConnecting(network)),
+                cx,
+            ),
+            ConnectionState::Choosing { .. } => kit::status_with(
+                Tone::Info,
+                IconName::ChevronsUpDown,
+                tr(bardo, Text::ConnectionChooseLabel),
                 cx,
             ),
             ConnectionState::Connected { channel } => kit::status(
@@ -819,13 +1007,16 @@ impl NetworkAccountsPanel {
         };
         let actions: Vec<AnyElement> = match &state {
             ConnectionState::Unavailable => Vec::new(),
+            ConnectionState::NotConnected if self.pasting == Some(id) => Vec::new(),
             ConnectionState::NotConnected => vec![
                 small("connect-account", Text::Connect)
                     .primary()
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.connect(id, cx)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.start_connect(id, network, window, cx)
+                    }))
                     .into_any_element(),
             ],
-            ConnectionState::Connecting => vec![
+            ConnectionState::Connecting | ConnectionState::Choosing { .. } => vec![
                 small("cancel-connect", Text::CancelConnect)
                     .ghost()
                     .on_click(
@@ -846,25 +1037,40 @@ impl NetworkAccountsPanel {
                 .loading(work == Some(Work::Checking))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     if !this.work.contains_key(&id) {
-                        this.check_connection(id, cx)
+                        this.check_connection(id, network, cx)
                     }
                 }))
                 .into_any_element(),
                 disconnect().into_any_element(),
             ],
+            ConnectionState::ReconnectNeeded { .. } if self.pasting == Some(id) => {
+                vec![disconnect().into_any_element()]
+            }
             ConnectionState::ReconnectNeeded { .. } => vec![
                 small("reconnect-account", Text::Reconnect)
                     .primary()
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.connect(id, cx)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.start_connect(id, network, window, cx)
+                    }))
                     .into_any_element(),
                 disconnect().into_any_element(),
             ],
         };
+        let choices = match &state {
+            ConnectionState::Choosing { choices } => Some(self.render_choices(id, choices, cx)),
+            _ => None,
+        };
+        let paste = (self.pasting == Some(id)
+            && matches!(
+                state,
+                ConnectionState::NotConnected | ConnectionState::ReconnectNeeded { .. }
+            ))
+        .then(|| self.render_paste(id, network, cx));
         let hint = matches!(state, ConnectionState::ReconnectNeeded { .. }).then(|| {
             div()
                 .text_xs()
                 .text_color(look(cx).tokens.text2)
-                .child(tr(bardo, Text::ConnectionReconnectHint))
+                .child(tr(bardo, Text::ConnectionReconnectHint(network)))
         });
         let notice =
             self.connection_notices.get(&id).map(|notice| {
@@ -899,9 +1105,148 @@ impl NetworkAccountsPanel {
                         .children(actions),
                 )
                 .children(hint)
+                .children(paste)
+                .children(choices)
                 .children(notice)
                 .into_any_element(),
         )
+    }
+
+    /// The form for a token pasted from the network's developer tools.
+    fn render_paste(
+        &self,
+        id: NetworkAccountId,
+        network: Network,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let tokens = look(cx).tokens;
+        let ix = network as usize;
+        let error = self.token_error.map(|error| {
+            div()
+                .text_xs()
+                .text_color(tokens.danger)
+                .child(tr(bardo, error))
+        });
+        let working = self.work.contains_key(&id);
+        kit::well(cx)
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .child(
+                div()
+                    .text_sm()
+                    .font_medium()
+                    .child(tr(bardo, Text::ConnectionTokenLabel(network))),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tokens.text2)
+                    .child(tr(bardo, Text::ConnectionTokenHelp(network))),
+            )
+            .child(Input::new(&self.token))
+            .children(error)
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        Button::new(("connect-with-token", ix))
+                            .small()
+                            .primary()
+                            .disabled(working)
+                            .label(tr(bardo, Text::Connect))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.connect_with_token(id, window, cx)
+                            })),
+                    )
+                    .children(token_tool(network).map(|url| {
+                        Button::new(("open-token-tool", ix))
+                            .small()
+                            .outline()
+                            .icon(IconName::ExternalLink)
+                            .label(tr(bardo, Text::ConnectionOpenTokenTool(network)))
+                            .on_click(move |_, _, cx| cx.open_url(url))
+                    }))
+                    .child(div().flex_1())
+                    .child(
+                        Button::new(("cancel-paste", ix))
+                            .small()
+                            .ghost()
+                            .label(tr(bardo, Text::CancelConnect))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.close_paste(window, cx)
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The accounts a pasted token reached, one row each.
+    fn render_choices(
+        &self,
+        id: NetworkAccountId,
+        choices: &[AccountChoice],
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let tokens = look(cx).tokens;
+        let network = self
+            .accounts
+            .iter()
+            .find(|account| account.id == id)
+            .map_or(Network::InstagramReels, |account| account.network);
+        let rows =
+            choices.iter().enumerate().map(|(index, choice)| {
+                h_flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .py_1p5()
+                    .px_2()
+                    .bg(tokens.sunken)
+                    .border(tokens.border_width)
+                    .border_color(tokens.border)
+                    .rounded(tokens.radius)
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(SharedString::from(choice.name.clone())),
+                            )
+                            .child(div().text_xs().text_color(tokens.text2).child(
+                                SharedString::from(bardo.text_with(
+                                    Text::ConnectionChoiceVia(network),
+                                    &[("via", &choice.via)],
+                                )),
+                            )),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("use-account-{index}")))
+                            .small()
+                            .outline()
+                            .label(tr(bardo, Text::ConnectionUseAccount))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.choose_account(id, index, cx)
+                            })),
+                    )
+                    .into_any_element()
+            });
+        v_flex()
+            .gap_1p5()
+            .child(
+                div()
+                    .text_sm()
+                    .child(tr(bardo, Text::ConnectionChoose(network))),
+            )
+            .children(rows.collect::<Vec<_>>())
+            .into_any_element()
     }
 
     fn show_error(&mut self, error: &NetworkAccountError) {

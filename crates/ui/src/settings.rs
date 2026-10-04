@@ -536,7 +536,7 @@ impl SettingsScreen {
                 div()
                     .text_xs()
                     .text_color(tokens.danger)
-                    .child(tr(bardo, Text::AppCredentialsFieldError(*error))),
+                    .child(tr(bardo, Text::AppCredentialsFieldError(network, *error))),
             )
         };
         let field = |label: Text, input: &Entity<InputState>, fields| {
@@ -601,9 +601,13 @@ impl SettingsScreen {
                     .flex_wrap()
                     .items_start()
                     .gap_3()
-                    .child(field(Text::ClientId, &row.client_id, CLIENT_ID_ERRORS))
                     .child(field(
-                        Text::ClientSecret,
+                        Text::ClientId(network),
+                        &row.client_id,
+                        CLIENT_ID_ERRORS,
+                    ))
+                    .child(field(
+                        Text::ClientSecret(network),
                         &row.client_secret,
                         CLIENT_SECRET_ERRORS,
                     )),

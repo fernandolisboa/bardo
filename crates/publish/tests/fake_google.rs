@@ -15,8 +15,8 @@ use std::time::{Duration, SystemTime};
 
 use bardo_ai::http::UreqTransport;
 use bardo_domain::{
-    AppCredentials, ConsentPages, ConsentReceiver, Network, NetworkSignIn, SignInFailureKind,
-    TokenSet,
+    AppCredentials, BrowserSignIn, ConsentPages, ConsentReceiver, Network, NetworkSignIn,
+    SignInFailureKind, TokenSet,
 };
 use bardo_publish::oauth::{ChallengeEncoding, Pkce};
 use bardo_publish::{GoogleEndpoints, LoopbackReceiver, YouTubeSignIn};
@@ -215,7 +215,7 @@ fn a_full_sign_in_refresh_and_revoke_against_a_fake_google() {
     assert_eq!(channel.name, "Arquivos do Espaço");
 
     let refreshed = youtube
-        .refresh(&credentials, tokens.refresh_token().unwrap())
+        .refresh(&credentials, &tokens, &channel)
         .map(|grant| tokens.refreshed(&grant, SystemTime::now()))
         .unwrap();
     assert_ne!(refreshed.access_token(), tokens.access_token());
@@ -266,7 +266,24 @@ fn a_refresh_google_refuses_is_reported_as_refused() {
     let address = serve(Arc::clone(&google));
     let credentials = AppCredentials::parse(Network::YouTube, CLIENT_ID, CLIENT_SECRET).unwrap();
     let failure = sign_in(&address)
-        .refresh(&credentials, "1//0gExpired-testing-client")
+        .refresh(
+            &credentials,
+            &TokenSet::granted(
+                &bardo_domain::TokenGrant {
+                    access_token: bardo_domain::SecretText::new("ya29.expired"),
+                    refresh_token: Some(bardo_domain::SecretText::new(
+                        "1//0gExpired-testing-client",
+                    )),
+                    expires_in: Duration::from_secs(1),
+                    scopes: Vec::new(),
+                },
+                SystemTime::now(),
+            ),
+            &bardo_domain::ConnectedIdentity {
+                id: "UC".into(),
+                name: "channel".into(),
+            },
+        )
         .unwrap_err();
     assert_eq!(failure.kind, SignInFailureKind::Refused);
 }

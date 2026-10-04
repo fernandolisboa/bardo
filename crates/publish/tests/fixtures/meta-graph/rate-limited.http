@@ -1,0 +1,4 @@
+HTTP/2 403 
+content-type: application/json; charset=UTF-8
+
+{"error":{"message":"(#4) Application request limit reached","type":"OAuthException","is_transient":true,"code":4,"fbtrace_id":"AFixtureTrace0002"}}

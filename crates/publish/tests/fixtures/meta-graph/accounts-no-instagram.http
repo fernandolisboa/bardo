@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"data":[{"id":"134895793791916","name":"Padaria da Esquina","access_token":"fixture-page-token-0003"}],"paging":{"cursors":{"before":"MTM0ODk1NzkzNzkxOTE2","after":"MTM0ODk1NzkzNzkxOTE2"}}}

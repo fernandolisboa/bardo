@@ -10,10 +10,12 @@ pub enum Method {
     Get,
     Post,
     Put,
+    Delete,
 }
 
-/// A request. Header values may hold keys and bodies may hold user content,
-/// so `Debug` shows only the header names and the body size.
+/// A request. Header values may hold keys, query strings tokens and
+/// secrets, and bodies user content, so `Debug` shows only the address
+/// without its query, the header names and the body size.
 pub struct HttpRequest {
     pub method: Method,
     pub url: String,
@@ -27,6 +29,16 @@ impl HttpRequest {
     pub fn get(url: impl Into<String>) -> Self {
         Self {
             method: Method::Get,
+            url: url.into(),
+            headers: Vec::new(),
+            body: None,
+        }
+    }
+
+    /// A DELETE without a body, e.g. revoking an app's permissions.
+    pub fn delete(url: impl Into<String>) -> Self {
+        Self {
+            method: Method::Delete,
             url: url.into(),
             headers: Vec::new(),
             body: None,
@@ -196,9 +208,13 @@ fn quoted(text: &str) -> String {
 impl fmt::Debug for HttpRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let names: Vec<_> = self.headers.iter().map(|(name, _)| name.as_ref()).collect();
+        let address = self
+            .url
+            .split_once('?')
+            .map_or(self.url.as_str(), |(path, _)| path);
         f.debug_struct("HttpRequest")
             .field("method", &self.method)
-            .field("url", &self.url)
+            .field("url", &address)
             .field("headers", &names)
             .field("body_bytes", &self.body.as_ref().map(Vec::len))
             .finish()
@@ -386,6 +402,13 @@ impl UreqTransport {
                 }
                 call.call()
             }
+            Method::Delete => {
+                let mut call = self.agent.delete(&request.url);
+                for (name, value) in &request.headers {
+                    call = call.header(name.as_ref(), value.as_str());
+                }
+                call.call()
+            }
             Method::Post | Method::Put => {
                 let mut call = if request.method == Method::Post {
                     self.agent.post(&request.url)
@@ -448,6 +471,16 @@ impl Transport for UreqTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_hides_the_query_headers_and_body() {
+        let request = HttpRequest::get("https://example.test/oauth?client_secret=s3cr3t")
+            .header("authorization", "Bearer t0ken");
+        let shown = format!("{request:?}");
+        assert!(shown.contains("https://example.test/oauth"));
+        assert!(!shown.contains("s3cr3t"));
+        assert!(!shown.contains("t0ken"));
+    }
 
     #[test]
     fn a_plain_form_is_url_encoded() {

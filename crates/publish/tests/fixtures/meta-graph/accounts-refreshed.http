@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"data":[{"id":"134895793791914","name":"Arquivos do Espaço","access_token":"fixture-page-token-0009","instagram_business_account":{"id":"17841405309211844","username":"arquivosdoespaco"}}],"paging":{"cursors":{"before":"MTM0ODk1NzkzNzkxOTE0","after":"MTM0ODk1NzkzNzkxOTE0"}}}
