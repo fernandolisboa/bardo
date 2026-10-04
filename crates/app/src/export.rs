@@ -1262,6 +1262,28 @@ pub(crate) mod tests {
         pub(crate) project: VideoProject,
     }
 
+    impl Setup {
+        /// Bardo closes, then opens again on the same data.
+        pub(crate) fn restart(self) -> Setup {
+            let Setup {
+                h,
+                app,
+                exports,
+                held,
+                project,
+            } = self;
+            drop(app);
+            let app = h.start_with_exports(Arc::clone(&held) as _);
+            Setup {
+                h,
+                app,
+                exports,
+                held,
+                project,
+            }
+        }
+    }
+
     /// A drawn project with YouTube and TikTok accounts, rendered for both.
     pub(crate) fn rendered() -> Setup {
         rendered_with(&[])

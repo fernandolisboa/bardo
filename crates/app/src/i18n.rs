@@ -1329,6 +1329,32 @@ pub enum Text {
     DateTimeWithZone,
     ZoneWithOffset,
     WeekdayName(u8),
+    JobWaitsUntil,
+    UploadStateDue,
+    UploadStateMissed,
+    UploadDueAt,
+    UploadDueHint,
+    UploadMissedAt,
+    UploadMissedHint,
+    UploadReelScheduleHint,
+    UploadReelStartScheduled,
+    MissedTitle,
+    MissedHint,
+    MissedDue,
+    MissedSendNow,
+    MissedNewTime,
+    MissedSave,
+    MissedCancel,
+    MissedCancelConfirm,
+    MissedCancelYes,
+    MissedKeep,
+    MissedLater,
+    MissedLaterHint,
+    MissedSent,
+    MissedRescheduled,
+    MissedCancelled,
+    MissedNotMissed,
+    MissedNotUpdated,
     ScheduleProblem(ScheduleProblem),
 }
 
@@ -2768,6 +2794,32 @@ impl Text {
             Text::ScheduleNotScheduled => "schedule.not_scheduled",
             Text::ScheduleFailed => "schedule.failed",
             Text::ScheduleNotAllowed => "schedule.not_allowed",
+            Text::JobWaitsUntil => "job.waits_until",
+            Text::UploadStateDue => "upload.state.due",
+            Text::UploadStateMissed => "upload.state.missed",
+            Text::UploadDueAt => "upload.due_at",
+            Text::UploadDueHint => "upload.due_hint",
+            Text::UploadMissedAt => "upload.missed_at",
+            Text::UploadMissedHint => "upload.missed_hint",
+            Text::UploadReelScheduleHint => "upload.reel_schedule_hint",
+            Text::UploadReelStartScheduled => "upload.reel_start_scheduled",
+            Text::MissedTitle => "missed.title",
+            Text::MissedHint => "missed.hint",
+            Text::MissedDue => "missed.due",
+            Text::MissedSendNow => "missed.send_now",
+            Text::MissedNewTime => "missed.new_time",
+            Text::MissedSave => "missed.save",
+            Text::MissedCancel => "missed.cancel",
+            Text::MissedCancelConfirm => "missed.cancel_confirm",
+            Text::MissedCancelYes => "missed.cancel_yes",
+            Text::MissedKeep => "missed.keep",
+            Text::MissedLater => "missed.later",
+            Text::MissedLaterHint => "missed.later_hint",
+            Text::MissedSent => "missed.sent",
+            Text::MissedRescheduled => "missed.rescheduled",
+            Text::MissedCancelled => "missed.cancelled",
+            Text::MissedNotMissed => "missed.not_missed",
+            Text::MissedNotUpdated => "missed.not_updated",
             Text::DateTimeFormat => "date_time.format",
             Text::TimeFormat => "date_time.time",
             Text::TimeAm => "date_time.am",
@@ -4361,6 +4413,32 @@ mod tests {
         texts.push(Text::ScheduleNotScheduled);
         texts.push(Text::ScheduleFailed);
         texts.push(Text::ScheduleNotAllowed);
+        texts.push(Text::JobWaitsUntil);
+        texts.push(Text::UploadStateDue);
+        texts.push(Text::UploadStateMissed);
+        texts.push(Text::UploadDueAt);
+        texts.push(Text::UploadDueHint);
+        texts.push(Text::UploadMissedAt);
+        texts.push(Text::UploadMissedHint);
+        texts.push(Text::UploadReelScheduleHint);
+        texts.push(Text::UploadReelStartScheduled);
+        texts.push(Text::MissedTitle);
+        texts.push(Text::MissedHint);
+        texts.push(Text::MissedDue);
+        texts.push(Text::MissedSendNow);
+        texts.push(Text::MissedNewTime);
+        texts.push(Text::MissedSave);
+        texts.push(Text::MissedCancel);
+        texts.push(Text::MissedCancelConfirm);
+        texts.push(Text::MissedCancelYes);
+        texts.push(Text::MissedKeep);
+        texts.push(Text::MissedLater);
+        texts.push(Text::MissedLaterHint);
+        texts.push(Text::MissedSent);
+        texts.push(Text::MissedRescheduled);
+        texts.push(Text::MissedCancelled);
+        texts.push(Text::MissedNotMissed);
+        texts.push(Text::MissedNotUpdated);
         texts.push(Text::DateTimeFormat);
         texts.push(Text::TimeFormat);
         texts.push(Text::TimeAm);

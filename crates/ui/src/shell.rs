@@ -12,6 +12,7 @@ use crate::editor::{EditorEvent, EditorScreen};
 use crate::jobs::JobsPanel;
 use crate::kit::Tone;
 use crate::layout;
+use crate::missed::{MissedChanged, MissedPosts};
 use crate::network_accounts::OpenNetworkSettings;
 use crate::parts::{BudgetMeter, Navigation};
 use crate::performance::PerformanceScreen;
@@ -47,6 +48,9 @@ pub struct Shell {
     /// Kept alive while closed, so the navigation's count stays current.
     jobs: Entity<JobsPanel>,
     jobs_open: bool,
+    /// Scheduled posts that missed their time, over the window until the
+    /// user decides on each or puts them off.
+    missed: Entity<MissedPosts>,
     /// This month's spend for the navigation, and the job revision it was
     /// read at.
     spend: Option<SpendSummary>,
@@ -70,6 +74,7 @@ impl Shell {
         let costs = cx.new(|cx| CostsScreen::new(bardo.clone(), window, cx));
         let settings = cx.new(|cx| SettingsScreen::new(bardo.clone(), window, cx));
         let jobs = cx.new(|cx| JobsPanel::new(bardo.clone(), cx));
+        let missed = cx.new(|cx| MissedPosts::new(bardo.clone(), window, cx));
         // The startup theme guessed the system's appearance before any
         // window existed; this window knows it.
         appearance::follow(
@@ -83,8 +88,17 @@ impl Shell {
                 if this.bardo.read(cx).jobs_revision() != this.spend_revision {
                     this.refresh_spend(cx);
                 }
+                // A job that moved may have missed its post's time.
+                this.missed.update(cx, |missed, cx| missed.jobs_moved(cx));
                 cx.notify();
             }),
+            // The Publish stage shows what the list decided.
+            cx.subscribe_in(&missed, window, |this, _, _: &MissedChanged, window, cx| {
+                this.projects
+                    .update(cx, |projects, cx| projects.reload(window, cx));
+                cx.notify();
+            }),
+            cx.observe(&missed, |_, _, cx| cx.notify()),
             // Budgets change on the costs screen.
             cx.observe(&costs, |this, _, cx| {
                 this.refresh_spend(cx);
@@ -131,6 +145,7 @@ impl Shell {
             settings,
             jobs,
             jobs_open: false,
+            missed,
             spend: None,
             spend_revision: 0,
             editor: None,
@@ -295,6 +310,15 @@ impl Render for Shell {
             Destination::Settings => self.settings.clone().into_any_element(),
         };
         let jobs = self.jobs_open.then(|| self.jobs.clone().into_any_element());
-        layout::shell(navigation, screen, jobs, cx)
+        let shell = layout::shell(navigation, screen, jobs, cx);
+        if !self.missed.read(cx).is_open() {
+            return shell;
+        }
+        div()
+            .relative()
+            .size_full()
+            .child(shell)
+            .child(self.missed.clone())
+            .into_any_element()
     }
 }

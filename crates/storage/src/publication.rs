@@ -21,7 +21,7 @@ const PUBLICATION_COLUMNS: &str = "publication.id, publication.project_id, publi
      publication.checked_at, publication.missing_since, publication.kind,
      publication.upload_status, publication.upload_failure, publication.upload_visibility,
      publication.upload_job, publication.upload_publish_at, publication.upload_issue,
-     publication.upload_network_id";
+     publication.upload_network_id, publication.upload_claimed_at";
 
 /// A publication row as SQLite returns it.
 struct PublicationRow {
@@ -45,6 +45,7 @@ struct PublicationRow {
     upload_publish_at: Option<i64>,
     upload_issue: Option<String>,
     upload_network_id: Option<String>,
+    upload_claimed_at: Option<i64>,
 }
 
 impl PublicationRow {
@@ -70,6 +71,7 @@ impl PublicationRow {
             upload_publish_at: row.get(17)?,
             upload_issue: row.get(18)?,
             upload_network_id: row.get(19)?,
+            upload_claimed_at: row.get(20)?,
         })
     }
 
@@ -101,6 +103,7 @@ impl PublicationRow {
                 )?),
                 issue: self.upload_issue,
                 network_id: self.upload_network_id,
+                claimed_at: self.upload_claimed_at.map(from_unix_millis),
             }),
             other => return Err(broken(&format!("unknown kind {other}"))),
         };
@@ -343,9 +346,9 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                                       post_id, url, posted_at, linked_at, checked_at,
                                       missing_since, kind, upload_status, upload_failure,
                                       upload_visibility, upload_job, upload_publish_at,
-                                      upload_issue, upload_network_id)
+                                      upload_issue, upload_network_id, upload_claimed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20)
+                     ?18, ?19, ?20, ?21)
              ON CONFLICT (id) DO UPDATE SET
                  account_id = excluded.account_id,
                  render_id = excluded.render_id,
@@ -359,6 +362,7 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                  upload_publish_at = excluded.upload_publish_at,
                  upload_issue = excluded.upload_issue,
                  upload_network_id = excluded.upload_network_id,
+                 upload_claimed_at = excluded.upload_claimed_at,
                  posted_at = CASE WHEN excluded.upload_status IN {SETS_POSTED_AT}
                                        AND publication.upload_status NOT IN {LIVE}
                                   THEN excluded.posted_at ELSE publication.posted_at END"
@@ -384,6 +388,7 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             upload.and_then(|upload| upload.publish_at.map(to_unix_millis)),
             upload.and_then(|upload| upload.issue.as_deref()),
             upload.and_then(|upload| upload.network_id.as_deref()),
+            upload.and_then(|upload| upload.claimed_at.map(to_unix_millis)),
         ],
     )
     .map_err(boxed)?;
@@ -454,6 +459,32 @@ impl PublicationRepository for Database {
         from: SystemTime,
     ) -> Result<bool, RepositoryError> {
         update_upload(&self.conn(), publication, Some(from))
+    }
+
+    fn claim_upload(
+        &self,
+        publication: &Publication,
+        now: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        let Some(upload) = publication.upload() else {
+            return Ok(false);
+        };
+        // One statement, so two runners racing for it cannot both win: the
+        // second finds the row claimed by then. The job claims it again on
+        // resume, keeping the first claim's time.
+        let now = to_unix_millis(now);
+        let claimed = self
+            .conn()
+            .execute(
+                "UPDATE publication
+                 SET upload_claimed_at = coalesce(upload_claimed_at, ?3)
+                 WHERE id = ?1 AND upload_job = ?2
+                   AND upload_status IN ('queued', 'uploading', 'processing')
+                   AND upload_publish_at IS NOT NULL AND upload_publish_at <= ?3",
+                params![publication.id.to_string(), upload.job.to_string(), now],
+            )
+            .map_err(boxed)?;
+        Ok(claimed > 0)
     }
 
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
@@ -824,6 +855,97 @@ mod tests {
             .unwrap();
         db.save_publication(&failed).unwrap();
         assert_eq!(db.publications(project.id).unwrap(), [failed], "replaced");
+    }
+
+    /// A Reel scheduled in the app for `time(1000)`, saved.
+    fn due_reel(db: &Database, project: &VideoProject) -> Publication {
+        let reel = Publication {
+            network: Network::InstagramReels,
+            link: None,
+            kind: PublicationKind::Uploaded(Upload::scheduled(time(1000), JobId::new())),
+            ..youtube(project, "dQw4w9WgXcQ")
+        };
+        db.save_publication(&reel).unwrap();
+        reel
+    }
+
+    fn claimed_at(db: &Database, reel: &Publication) -> Option<SystemTime> {
+        db.publication(reel.id)
+            .unwrap()
+            .unwrap()
+            .upload()
+            .unwrap()
+            .claimed_at
+    }
+
+    #[test]
+    fn a_due_upload_is_claimed_once_and_keeps_its_first_claim() {
+        let (db, _, project) = setup();
+        let reel = due_reel(&db, &project);
+        assert!(!db.claim_upload(&reel, time(999)).unwrap(), "not due yet");
+        assert_eq!(claimed_at(&db, &reel), None);
+
+        assert!(db.claim_upload(&reel, time(1000)).unwrap());
+        assert_eq!(claimed_at(&db, &reel), Some(time(1000)));
+        assert!(
+            db.claim_upload(&reel, time(1300)).unwrap(),
+            "its own job resumes"
+        );
+        assert_eq!(claimed_at(&db, &reel), Some(time(1000)), "the first claim");
+
+        // A run of another job never takes it.
+        let mut other = reel.clone();
+        other.upload_mut().unwrap().job = JobId::new();
+        assert!(!db.claim_upload(&other, time(1300)).unwrap());
+
+        // Progress saved by the run keeps the claim.
+        let mut read = db.publication(reel.id).unwrap().unwrap();
+        read.upload_mut().unwrap().start().unwrap();
+        let mut stale = read.clone();
+        stale.upload_mut().unwrap().claimed_at = None;
+        assert!(db.save_upload(&stale).unwrap());
+        assert_eq!(claimed_at(&db, &reel), Some(time(1000)));
+    }
+
+    #[test]
+    fn a_missed_upload_is_not_claimed_and_a_new_time_clears_the_claim() {
+        let (db, _, project) = setup();
+        let reel = due_reel(&db, &project);
+        assert!(db.claim_upload(&reel, time(1000)).unwrap());
+        let mut missed = db.publication(reel.id).unwrap().unwrap();
+        missed.upload_mut().unwrap().miss().unwrap();
+        assert!(db.save_upload(&missed).unwrap());
+        assert!(
+            !db.claim_upload(&missed, time(2000)).unwrap(),
+            "it waits for the user"
+        );
+        assert!(db.publication(reel.id).unwrap().unwrap().is_missed());
+
+        missed.upload_mut().unwrap().due_again(time(5000)).unwrap();
+        db.save_publication(&missed).unwrap();
+        let read = db.publication(reel.id).unwrap().unwrap();
+        assert_eq!(read.due(), Some(time(5000)));
+        assert_eq!(read.upload().unwrap().claimed_at, None);
+        assert_eq!(read, missed);
+
+        // Sent now, it has no due time, and nothing claims it.
+        let mut now = read;
+        now.upload_mut().unwrap().miss().unwrap();
+        now.upload_mut().unwrap().send_now().unwrap();
+        db.save_publication(&now).unwrap();
+        assert!(!db.claim_upload(&now, time(9000)).unwrap());
+    }
+
+    #[test]
+    fn only_an_upload_with_a_due_time_holds_a_claim() {
+        let (db, _, project) = setup();
+        let reel = due_reel(&db, &project);
+        let refused = db.conn().execute(
+            "UPDATE publication SET upload_publish_at = NULL, upload_claimed_at = 5
+             WHERE id = ?1",
+            [reel.id.to_string()],
+        );
+        assert!(refused.is_err());
     }
 
     #[test]

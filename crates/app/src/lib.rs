@@ -26,6 +26,7 @@ mod publications;
 mod render;
 mod research;
 mod scenes;
+mod scheduler;
 mod schedules;
 mod scripts;
 mod selection;
@@ -99,6 +100,7 @@ pub use render::{
 };
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
 pub use scenes::{SceneError, ScenesView};
+pub use scheduler::{MissedPost, MissedPostError};
 pub use schedules::{ScheduleError, ScheduleResult, ScheduleUpdate};
 pub use scripts::{ScriptError, ScriptView};
 pub use selection::{Step, step_selection};
@@ -433,6 +435,9 @@ impl Bardo {
         if personas.list(profile.id)?.is_empty() {
             personas.insert_all(&Persona::defaults(profile.id))?;
         }
+        // When this session opened: a due time before it passed while Bardo
+        // was closed.
+        let opened_at = SystemTime::now();
         let catalog = Catalog::load(profile.ui_language);
         let redactor = Redactor::new();
         let cost_book = CostBook {
@@ -561,7 +566,11 @@ impl Bardo {
             files: Arc::clone(&files),
             connections: connection_book.connections().clone(),
             uploaders: providers.uploaders.clone(),
+            opened_at,
         };
+        // Scheduled posts whose time passed while Bardo was closed wait for
+        // the user; their jobs must not start first.
+        crate::scheduler::mark_missed(&*publications, &*jobs, profile.id, opened_at)?;
         let jobs = JobQueue::start(
             jobs,
             profile.id,
