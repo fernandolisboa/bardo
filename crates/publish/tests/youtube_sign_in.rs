@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime};
 
 use bardo_ai::http::Method;
 use bardo_domain::{
-    AppCredentials, ConnectedIdentity, Network, NetworkSignIn, SecretText, SignInFailureKind,
-    TokenGrant, TokenSet,
+    AppCredentials, BrowserSignIn, ConnectedIdentity, Network, NetworkSignIn, SecretText,
+    SignInFailureKind, TokenGrant, TokenSet,
 };
 use bardo_publish::YouTubeSignIn;
 use bardo_publish::oauth::{ChallengeEncoding, Pkce};
@@ -38,6 +38,13 @@ fn query(url: &str) -> HashMap<String, String> {
     form_urlencoded::parse(query.as_bytes())
         .into_owned()
         .collect()
+}
+
+fn channel() -> ConnectedIdentity {
+    ConnectedIdentity {
+        id: "UCabcdefghijklmnopqrstuv".into(),
+        name: "Arquivos do Espaço".into(),
+    }
 }
 
 fn tokens(refresh: Option<&str>) -> TokenSet {
@@ -162,7 +169,11 @@ fn an_exchange_without_a_refresh_token_is_refused() {
 fn a_refresh_sends_the_refresh_token_and_keeps_no_new_one() {
     let sign_in = answers(&["token-refresh"]);
     let grant = sign_in
-        .refresh(&credentials(), "1//0gFixture-refresh-token-0001")
+        .refresh(
+            &credentials(),
+            &tokens(Some("1//0gFixture-refresh-token-0001")),
+            &channel(),
+        )
         .unwrap();
     assert_eq!(
         grant.access_token.expose(),
@@ -182,7 +193,7 @@ fn a_refresh_sends_the_refresh_token_and_keeps_no_new_one() {
 fn token_endpoint_failures_are_classified() {
     let refresh = |name: &str| {
         answers(&[name])
-            .refresh(&credentials(), "1//refresh")
+            .refresh(&credentials(), &tokens(Some("1//refresh")), &channel())
             .unwrap_err()
     };
     let refused = refresh("token-invalid-grant");
@@ -200,7 +211,7 @@ fn token_endpoint_failures_are_classified() {
         SignInFailureKind::NetworkDown
     );
     let offline = YouTubeSignIn::with_transport(Scripted::offline())
-        .refresh(&credentials(), "1//refresh")
+        .refresh(&credentials(), &tokens(Some("1//refresh")), &channel())
         .unwrap_err();
     assert_eq!(offline.kind, SignInFailureKind::Unreachable);
 }

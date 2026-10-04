@@ -12,10 +12,10 @@ use bardo_domain::{
     ContentLanguage, Country, DateOrder, Decibels, JobFailureKind, JobKind, JobState,
     KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart, Money,
     MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
-    PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError, ScheduleProblem,
-    Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage, UiTheme, Visibility,
-    VoiceCategory, VoiceFlag,
+    PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError,
+    ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind,
+    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage,
+    UiTheme, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -842,9 +842,9 @@ pub enum Text {
     AppCredentialsInfo,
     AppCredentialsName(Network),
     AppCredentialsPurpose(Network),
-    ClientId,
+    ClientId(Network),
     ClientIdPlaceholder(Network),
-    ClientSecret,
+    ClientSecret(Network),
     ClientSecretPlaceholder(Network),
     AppCredentialsNotSet,
     /// Placeholder: `{hint}`.
@@ -853,9 +853,9 @@ pub enum Text {
     SaveAppCredentials,
     ReplaceAppCredentials,
     RemoveAppCredentials,
-    AppCredentialsFieldError(AppCredentialsFieldError),
+    AppCredentialsFieldError(Network, AppCredentialsFieldError),
     ConnectionNotConnectedLabel,
-    ConnectionConnecting,
+    ConnectionConnecting(Network),
     /// Placeholder: `{channel}`.
     ConnectionConnected,
     /// Placeholder: `{channel}`.
@@ -869,23 +869,41 @@ pub enum Text {
     CheckingConnection,
     OpenNetworkSettings,
     /// Placeholder: `{channel}`.
-    ConnectionChecked,
+    ConnectionChecked(Network),
     ConnectionDisconnected,
     /// Placeholder: `{network}`.
     ConnectionDisconnectedNotRevoked,
-    ConnectionReconnectHint,
+    /// Placeholder: `{network}`.
+    ConnectionDisconnectedKeptForOthers,
+    ConnectionReconnectHint(Network),
     ConnectionNotOffered,
-    ConnectionNeedsAppCredentials,
+    ConnectionNeedsAppCredentials(Network),
     ConnectionNotConnected,
     ConnectionDenied,
     ConnectionTimedOut,
     ConnectionCancelled,
     ConnectionListenFailed,
-    ConnectionMissingScopes,
+    ConnectionMissingScopes(Network),
     ConnectionTokensTooLarge,
     ConnectionStoreFailed,
     ConnectionNotSaved,
-    SignInFailure(SignInFailureKind),
+    ConnectionNoPages,
+    ConnectionNoLinkedAccount,
+    ConnectionChoiceGone,
+    /// The pasted-token form of a network that signs in that way.
+    ConnectionTokenLabel(Network),
+    ConnectionTokenPlaceholder(Network),
+    ConnectionTokenHelp(Network),
+    ConnectionOpenTokenTool(Network),
+    PastedTokenError(PastedTokenError),
+    /// Heading over the accounts a pasted token reached.
+    ConnectionChoose(Network),
+    /// Placeholder: `{via}`.
+    ConnectionChoiceVia(Network),
+    ConnectionUseAccount,
+    /// The status of an account waiting for the user's choice.
+    ConnectionChooseLabel,
+    SignInFailure(Network, SignInFailureKind),
     NetworkAccountStillConnected,
     ConsentPageDone,
     ConsentPageFailed,
@@ -1596,11 +1614,15 @@ impl Text {
             Text::AppCredentialsPurpose(network) => {
                 return format!("app_credentials.{}.purpose", network.code()).into();
             }
-            Text::ClientId => "app_credentials.client_id",
+            Text::ClientId(network) => {
+                return format!("app_credentials.{}.client_id", network.code()).into();
+            }
             Text::ClientIdPlaceholder(network) => {
                 return format!("app_credentials.{}.client_id_placeholder", network.code()).into();
             }
-            Text::ClientSecret => "app_credentials.client_secret",
+            Text::ClientSecret(network) => {
+                return format!("app_credentials.{}.client_secret", network.code()).into();
+            }
             Text::ClientSecretPlaceholder(network) => {
                 return format!(
                     "app_credentials.{}.client_secret_placeholder",
@@ -1614,22 +1636,19 @@ impl Text {
             Text::SaveAppCredentials => "app_credentials.save",
             Text::ReplaceAppCredentials => "app_credentials.replace",
             Text::RemoveAppCredentials => "app_credentials.remove",
-            Text::AppCredentialsFieldError(error) => match error {
-                AppCredentialsFieldError::ClientIdRequired => {
-                    "app_credentials.error.client_id_required"
-                }
-                AppCredentialsFieldError::ClientIdInvalid => {
-                    "app_credentials.error.client_id_invalid"
-                }
-                AppCredentialsFieldError::ClientSecretRequired => {
-                    "app_credentials.error.client_secret_required"
-                }
-                AppCredentialsFieldError::ClientSecretInvalid => {
-                    "app_credentials.error.client_secret_invalid"
-                }
-            },
+            Text::AppCredentialsFieldError(network, error) => {
+                let error = match error {
+                    AppCredentialsFieldError::ClientIdRequired => "client_id_required",
+                    AppCredentialsFieldError::ClientIdInvalid => "client_id_invalid",
+                    AppCredentialsFieldError::ClientSecretRequired => "client_secret_required",
+                    AppCredentialsFieldError::ClientSecretInvalid => "client_secret_invalid",
+                };
+                return format!("app_credentials.{}.error.{error}", network.code()).into();
+            }
             Text::ConnectionNotConnectedLabel => "connection.not_connected",
-            Text::ConnectionConnecting => "connection.connecting",
+            Text::ConnectionConnecting(network) => {
+                return format!("connection.{}.connecting", network.code()).into();
+            }
             Text::ConnectionConnected => "connection.connected",
             Text::ConnectionReconnectNeeded => "connection.reconnect_needed",
             Text::Connect => "connection.connect",
@@ -1640,31 +1659,73 @@ impl Text {
             Text::CheckConnection => "connection.check",
             Text::CheckingConnection => "connection.checking",
             Text::OpenNetworkSettings => "connection.open_settings",
-            Text::ConnectionChecked => "connection.checked",
+            Text::ConnectionChecked(network) => {
+                return format!("connection.{}.checked", network.code()).into();
+            }
             Text::ConnectionDisconnected => "connection.disconnected",
             Text::ConnectionDisconnectedNotRevoked => "connection.disconnected_not_revoked",
-            Text::ConnectionReconnectHint => "connection.reconnect_hint",
+            Text::ConnectionDisconnectedKeptForOthers => "connection.disconnected_kept_for_others",
+            Text::ConnectionReconnectHint(network) => {
+                return format!("connection.{}.reconnect_hint", network.code()).into();
+            }
             Text::ConnectionNotOffered => "connection.error.not_offered",
-            Text::ConnectionNeedsAppCredentials => "connection.error.needs_app_credentials",
+            Text::ConnectionNeedsAppCredentials(network) => {
+                return format!("connection.{}.needs_app_credentials", network.code()).into();
+            }
             Text::ConnectionNotConnected => "connection.error.not_connected",
             Text::ConnectionDenied => "connection.error.denied",
             Text::ConnectionTimedOut => "connection.error.timed_out",
             Text::ConnectionCancelled => "connection.error.cancelled",
             Text::ConnectionListenFailed => "connection.error.listen_failed",
-            Text::ConnectionMissingScopes => "connection.error.missing_scopes",
+            Text::ConnectionMissingScopes(network) => {
+                return format!("connection.{}.missing_scopes", network.code()).into();
+            }
             Text::ConnectionTokensTooLarge => "connection.error.tokens_too_large",
             Text::ConnectionStoreFailed => "connection.error.store_failed",
             Text::ConnectionNotSaved => "connection.error.not_saved",
-            Text::SignInFailure(kind) => match kind {
-                SignInFailureKind::Refused => "connection.failure.refused",
-                SignInFailureKind::ClientRejected => "connection.failure.client_rejected",
-                SignInFailureKind::NotAllowed => "connection.failure.not_allowed",
-                SignInFailureKind::NoChannel => "connection.failure.no_channel",
-                SignInFailureKind::LimitReached => "connection.failure.limit_reached",
-                SignInFailureKind::NetworkDown => "connection.failure.network_down",
-                SignInFailureKind::Unreachable => "connection.failure.unreachable",
-                SignInFailureKind::Unexpected => "connection.failure.unexpected",
+            Text::ConnectionNoPages => "connection.error.no_pages",
+            Text::ConnectionNoLinkedAccount => "connection.error.no_linked_account",
+            Text::ConnectionChoiceGone => "connection.error.choice_gone",
+            Text::ConnectionTokenLabel(network) => {
+                return format!("connection.{}.token_label", network.code()).into();
+            }
+            Text::ConnectionTokenPlaceholder(network) => {
+                return format!("connection.{}.token_placeholder", network.code()).into();
+            }
+            Text::ConnectionTokenHelp(network) => {
+                return format!("connection.{}.token_help", network.code()).into();
+            }
+            Text::ConnectionOpenTokenTool(network) => {
+                return format!("connection.{}.open_token_tool", network.code()).into();
+            }
+            Text::PastedTokenError(error) => match error {
+                PastedTokenError::Required => "connection.error.token_required",
+                PastedTokenError::Invalid => "connection.error.token_invalid",
             },
+            Text::ConnectionChoose(network) => {
+                return format!("connection.{}.choose", network.code()).into();
+            }
+            Text::ConnectionChoiceVia(network) => {
+                return format!("connection.{}.choice_via", network.code()).into();
+            }
+            Text::ConnectionUseAccount => "connection.use_account",
+            Text::ConnectionChooseLabel => "connection.choose_label",
+            Text::SignInFailure(network, kind) => {
+                let kind = match kind {
+                    // The same everywhere.
+                    SignInFailureKind::Unreachable => {
+                        return "connection.failure.unreachable".into();
+                    }
+                    SignInFailureKind::Unexpected => return "connection.failure.unexpected".into(),
+                    SignInFailureKind::Refused => "refused",
+                    SignInFailureKind::ClientRejected => "client_rejected",
+                    SignInFailureKind::NotAllowed => "not_allowed",
+                    SignInFailureKind::NoChannel => "no_channel",
+                    SignInFailureKind::LimitReached => "limit_reached",
+                    SignInFailureKind::NetworkDown => "network_down",
+                };
+                return format!("connection.failure.{}.{kind}", network.code()).into();
+            }
             Text::NetworkAccountStillConnected => "network_account.error.still_connected",
             Text::ConsentPageDone => "consent_page.done",
             Text::ConsentPageFailed => "consent_page.failed",
@@ -3745,8 +3806,6 @@ mod tests {
             Text::AppCredentialsTitle,
             Text::AppCredentialsHint,
             Text::AppCredentialsInfo,
-            Text::ClientId,
-            Text::ClientSecret,
             Text::AppCredentialsNotSet,
             Text::AppCredentialsSaved,
             Text::AppCredentialsUnreadable,
@@ -3754,7 +3813,6 @@ mod tests {
             Text::ReplaceAppCredentials,
             Text::RemoveAppCredentials,
             Text::ConnectionNotConnectedLabel,
-            Text::ConnectionConnecting,
             Text::ConnectionConnected,
             Text::ConnectionReconnectNeeded,
             Text::Connect,
@@ -3765,21 +3823,25 @@ mod tests {
             Text::CheckConnection,
             Text::CheckingConnection,
             Text::OpenNetworkSettings,
-            Text::ConnectionChecked,
             Text::ConnectionDisconnected,
             Text::ConnectionDisconnectedNotRevoked,
-            Text::ConnectionReconnectHint,
+            Text::ConnectionDisconnectedKeptForOthers,
             Text::ConnectionNotOffered,
-            Text::ConnectionNeedsAppCredentials,
             Text::ConnectionNotConnected,
             Text::ConnectionDenied,
             Text::ConnectionTimedOut,
             Text::ConnectionCancelled,
             Text::ConnectionListenFailed,
-            Text::ConnectionMissingScopes,
             Text::ConnectionTokensTooLarge,
             Text::ConnectionStoreFailed,
             Text::ConnectionNotSaved,
+            Text::ConnectionNoPages,
+            Text::ConnectionNoLinkedAccount,
+            Text::ConnectionChoiceGone,
+            Text::PastedTokenError(PastedTokenError::Required),
+            Text::PastedTokenError(PastedTokenError::Invalid),
+            Text::ConnectionUseAccount,
+            Text::ConnectionChooseLabel,
             Text::NetworkAccountStillConnected,
             Text::ConsentPageDone,
             Text::ConsentPageFailed,
@@ -3788,24 +3850,44 @@ mod tests {
             texts.extend([
                 Text::AppCredentialsName(network),
                 Text::AppCredentialsPurpose(network),
+                Text::ClientId(network),
                 Text::ClientIdPlaceholder(network),
+                Text::ClientSecret(network),
                 Text::ClientSecretPlaceholder(network),
+                Text::ConnectionConnecting(network),
+                Text::ConnectionChecked(network),
+                Text::ConnectionReconnectHint(network),
+                Text::ConnectionNeedsAppCredentials(network),
+                Text::ConnectionMissingScopes(network),
             ]);
+            texts.extend(
+                AppCredentialsFieldError::ALL
+                    .map(|error| Text::AppCredentialsFieldError(network, error)),
+            );
+            texts.extend(
+                [
+                    SignInFailureKind::Refused,
+                    SignInFailureKind::ClientRejected,
+                    SignInFailureKind::NotAllowed,
+                    SignInFailureKind::NoChannel,
+                    SignInFailureKind::LimitReached,
+                    SignInFailureKind::NetworkDown,
+                    SignInFailureKind::Unreachable,
+                    SignInFailureKind::Unexpected,
+                ]
+                .map(|kind| Text::SignInFailure(network, kind)),
+            );
+            if network.sign_in_method() == Some(bardo_domain::SignInMethod::PastedToken) {
+                texts.extend([
+                    Text::ConnectionTokenLabel(network),
+                    Text::ConnectionTokenPlaceholder(network),
+                    Text::ConnectionTokenHelp(network),
+                    Text::ConnectionOpenTokenTool(network),
+                    Text::ConnectionChoose(network),
+                    Text::ConnectionChoiceVia(network),
+                ]);
+            }
         }
-        texts.extend(AppCredentialsFieldError::ALL.map(Text::AppCredentialsFieldError));
-        texts.extend(
-            [
-                SignInFailureKind::Refused,
-                SignInFailureKind::ClientRejected,
-                SignInFailureKind::NotAllowed,
-                SignInFailureKind::NoChannel,
-                SignInFailureKind::LimitReached,
-                SignInFailureKind::NetworkDown,
-                SignInFailureKind::Unreachable,
-                SignInFailureKind::Unexpected,
-            ]
-            .map(Text::SignInFailure),
-        );
         texts.push(Text::Details);
         texts.push(Text::NavBudgetsUsed);
         texts.extend([

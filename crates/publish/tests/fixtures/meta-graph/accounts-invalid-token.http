@@ -1,0 +1,5 @@
+HTTP/2 401 
+content-type: application/json; charset=UTF-8
+www-authenticate: OAuth "Facebook Platform" "invalid_token" "Malformed access token"
+
+{"error":{"message":"Malformed access token","type":"OAuthException","code":190,"fbtrace_id":"AqYEJIt9LWa40AegT1LwOf3"}}

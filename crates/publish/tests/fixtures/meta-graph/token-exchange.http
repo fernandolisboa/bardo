@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"access_token":"fixture-long-lived-user-token-0001","token_type":"bearer","expires_in":5183944}

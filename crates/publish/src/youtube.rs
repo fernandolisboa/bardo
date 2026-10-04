@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use bardo_ai::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
 use bardo_domain::{
-    AppCredentials, ConnectedIdentity, ConsentRequest, Network, NetworkSignIn, SecretText,
-    SignInFailure, SignInFailureKind, TokenGrant, TokenSet,
+    AppCredentials, BrowserSignIn, ConnectedIdentity, ConsentRequest, Network, NetworkSignIn,
+    SecretText, SignInFailure, SignInFailureKind, TokenGrant, TokenSet,
 };
 use serde_json::Value;
 
@@ -113,55 +113,19 @@ impl<T: Transport> NetworkSignIn for YouTubeSignIn<T> {
         SCOPES
     }
 
-    fn consent_request(&self, credentials: &AppCredentials, redirect_uri: &str) -> ConsentRequest {
-        let pkce = Pkce::generate(ChallengeEncoding::Base64Url);
-        let state = new_state();
-        let scope = SCOPES.join(" ");
-        let query = form_urlencoded::Serializer::new(String::new())
-            .extend_pairs([
-                ("client_id", credentials.client_id()),
-                ("redirect_uri", redirect_uri),
-                ("response_type", "code"),
-                ("scope", scope.as_str()),
-                ("code_challenge", pkce.challenge()),
-                ("code_challenge_method", Pkce::METHOD),
-                ("state", state.expose()),
-            ])
-            .finish();
-        ConsentRequest {
-            url: format!("{}?{query}", self.endpoints.authorize),
-            state,
-            verifier: pkce.into_verifier(),
-        }
-    }
-
-    fn exchange(
-        &self,
-        credentials: &AppCredentials,
-        code: &SecretText,
-        verifier: &SecretText,
-        redirect_uri: &str,
-    ) -> Result<TokenGrant, SignInFailure> {
-        let grant = self.token(&[
-            ("client_id", credentials.client_id()),
-            ("client_secret", credentials.client_secret()),
-            ("code", code.expose()),
-            ("code_verifier", verifier.expose()),
-            ("grant_type", "authorization_code"),
-            ("redirect_uri", redirect_uri),
-        ])?;
-        if grant.refresh_token.is_none() {
-            // Without it the connection would die with the access token.
-            return Err(unexpected("the token answer has no refresh token"));
-        }
-        Ok(grant)
+    fn browser(&self) -> Option<&dyn BrowserSignIn> {
+        Some(self)
     }
 
     fn refresh(
         &self,
         credentials: &AppCredentials,
-        refresh_token: &str,
+        tokens: &TokenSet,
+        _identity: &ConnectedIdentity,
     ) -> Result<TokenGrant, SignInFailure> {
+        let refresh_token = tokens
+            .refresh_token()
+            .ok_or_else(|| SignInFailure::new(SignInFailureKind::Refused, "no refresh token"))?;
         self.token(&[
             ("client_id", credentials.client_id()),
             ("client_secret", credentials.client_secret()),
@@ -217,6 +181,52 @@ impl<T: Transport> NetworkSignIn for YouTubeSignIn<T> {
             }),
             _ => Err(unexpected("the channel has no id or title")),
         }
+    }
+}
+
+impl<T: Transport> BrowserSignIn for YouTubeSignIn<T> {
+    fn consent_request(&self, credentials: &AppCredentials, redirect_uri: &str) -> ConsentRequest {
+        let pkce = Pkce::generate(ChallengeEncoding::Base64Url);
+        let state = new_state();
+        let scope = SCOPES.join(" ");
+        let query = form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([
+                ("client_id", credentials.client_id()),
+                ("redirect_uri", redirect_uri),
+                ("response_type", "code"),
+                ("scope", scope.as_str()),
+                ("code_challenge", pkce.challenge()),
+                ("code_challenge_method", Pkce::METHOD),
+                ("state", state.expose()),
+            ])
+            .finish();
+        ConsentRequest {
+            url: format!("{}?{query}", self.endpoints.authorize),
+            state,
+            verifier: pkce.into_verifier(),
+        }
+    }
+
+    fn exchange(
+        &self,
+        credentials: &AppCredentials,
+        code: &SecretText,
+        verifier: &SecretText,
+        redirect_uri: &str,
+    ) -> Result<TokenGrant, SignInFailure> {
+        let grant = self.token(&[
+            ("client_id", credentials.client_id()),
+            ("client_secret", credentials.client_secret()),
+            ("code", code.expose()),
+            ("code_verifier", verifier.expose()),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect_uri),
+        ])?;
+        if grant.refresh_token.is_none() {
+            // Without it the connection would die with the access token.
+            return Err(unexpected("the token answer has no refresh token"));
+        }
+        Ok(grant)
     }
 }
 

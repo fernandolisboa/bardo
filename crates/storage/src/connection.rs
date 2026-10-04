@@ -2,7 +2,7 @@
 //! in the secret store.
 
 use bardo_domain::{
-    ConnectedIdentity, ConnectionStatus, NetworkAccountId, NetworkConnection,
+    ConnectedIdentity, ConnectionStatus, Network, NetworkAccountId, NetworkConnection,
     NetworkConnectionRepository, ProfileId, RepositoryError,
 };
 use rusqlite::{OptionalExtension, Row, params};
@@ -114,6 +114,36 @@ impl NetworkConnectionRepository for Database {
             )
             .map_err(boxed)?;
         Ok(())
+    }
+
+    fn connected_on(
+        &self,
+        owner: ProfileId,
+        network: Network,
+    ) -> Result<Vec<NetworkAccountId>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT c.account_id FROM network_connection c
+                 JOIN network_account a ON a.id = c.account_id
+                 WHERE c.profile_id = ?1 AND a.network = ?2
+                 ORDER BY c.connected_at, c.account_id",
+            )
+            .map_err(boxed)?;
+        let ids = statement
+            .query_map(params![owner.to_string(), network.code()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(boxed)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(boxed)?;
+        ids.iter()
+            .map(|id| {
+                Uuid::parse_str(id)
+                    .map(NetworkAccountId::from)
+                    .map_err(boxed)
+            })
+            .collect()
     }
 }
 
@@ -229,6 +259,66 @@ mod tests {
         assert_eq!(
             NetworkConnectionRepository::get(&db, account.id).unwrap(),
             None
+        );
+    }
+
+    /// An account on `network` in a new channel of the account's owner.
+    fn another_account(db: &Database, owner: ProfileId, network: Network) -> NetworkAccount {
+        let channel = Channel::new(
+            owner,
+            ChannelDetails::validate(ChannelDraft {
+                name: format!("Channel {}", Uuid::new_v4()),
+                ..ChannelDraft::default()
+            })
+            .unwrap(),
+        );
+        bardo_domain::ChannelRepository::save(db, &channel).unwrap();
+        let details = NetworkAccountDetails::validate(
+            network,
+            NetworkAccountDraft {
+                handle: "another".into(),
+                ..NetworkAccountDraft::default()
+            },
+        )
+        .unwrap();
+        let account = NetworkAccount::new(owner, channel.id, network, details);
+        NetworkAccountRepository::save(db, &account).unwrap();
+        account
+    }
+
+    #[test]
+    fn connected_accounts_are_listed_per_network() {
+        let (db, youtube) = database_with_account();
+        let first = another_account(&db, youtube.owner, Network::InstagramReels);
+        let second = another_account(&db, youtube.owner, Network::InstagramReels);
+        let unconnected = another_account(&db, youtube.owner, Network::InstagramReels);
+        for (account, at) in [(&youtube, 0), (&second, 20), (&first, 10)] {
+            NetworkConnectionRepository::save(
+                &db,
+                &NetworkConnection {
+                    connected_at: time(at),
+                    status: if at == 20 {
+                        ConnectionStatus::ReconnectNeeded
+                    } else {
+                        ConnectionStatus::Connected
+                    },
+                    ..connection(account)
+                },
+            )
+            .unwrap();
+        }
+        let listed = |network| {
+            NetworkConnectionRepository::connected_on(&db, youtube.owner, network).unwrap()
+        };
+        assert_eq!(listed(Network::InstagramReels), [first.id, second.id]);
+        assert!(!listed(Network::InstagramReels).contains(&unconnected.id));
+        assert_eq!(listed(Network::YouTube), [youtube.id]);
+        assert_eq!(listed(Network::TikTok), []);
+        let stranger = UserProfile::new(UiLanguage::EnUs);
+        bardo_domain::ProfileRepository::save(&db, &stranger).unwrap();
+        assert_eq!(
+            NetworkConnectionRepository::connected_on(&db, stranger.id, Network::YouTube).unwrap(),
+            []
         );
     }
 }

@@ -1,0 +1,4 @@
+HTTP/2 500 
+content-type: application/json; charset=UTF-8
+
+{"error":{"message":"An unexpected error has occurred. Please retry your request later.","type":"OAuthException","is_transient":true,"code":2,"fbtrace_id":"AFixtureTrace0004"}}

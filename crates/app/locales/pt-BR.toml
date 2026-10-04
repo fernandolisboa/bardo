@@ -1549,10 +1549,8 @@ off = "Nunca"
 
 [app_credentials]
 title = "Credenciais de app"
-hint = "O Bardo entra em cada rede com um app OAuth que você registra nela, e não traz nenhum próprio. O ID e a chave secreta do cliente ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
+hint = "O Bardo entra em cada rede com um app que você registra nela, e não traz nenhum próprio. O ID e a chave secreta do app ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
 info = "Onde as credenciais ficam"
-client_id = "ID do cliente"
-client_secret = "Chave secreta do cliente"
 not_set = "Não salvas"
 saved = "Salvas, chave secreta terminada em {hint}"
 unreadable = "Não foi possível ler estas credenciais do Gerenciador de Credenciais do Windows."
@@ -1563,18 +1561,33 @@ remove = "Remover"
 [app_credentials.youtube]
 name = "YouTube · cliente OAuth do Google"
 purpose = "Um cliente do tipo App para computador no seu projeto do Google Cloud, com a YouTube Data API v3 e a YouTube Analytics API ativadas e a tela de consentimento Em produção. Em Teste, o Google encerra a conexão depois de sete dias."
+client_id = "ID do cliente"
+client_secret = "Chave secreta do cliente"
 client_id_placeholder = "…apps.googleusercontent.com"
 client_secret_placeholder = "GOCSPX-…"
 
-[app_credentials.error]
+[app_credentials.youtube.error]
 client_id_required = "Informe o ID do cliente."
 client_id_invalid = "Cole o ID de um cliente OAuth do Google. Ele termina em .apps.googleusercontent.com."
 client_secret_required = "Informe a chave secreta do cliente."
 client_secret_invalid = "Isso não parece uma chave secreta de cliente. Copie de novo do Google Cloud."
 
+[app_credentials.instagram_reels]
+name = "Instagram · app da Meta"
+purpose = "Um app do tipo Empresa na sua conta de desenvolvedor da Meta, com o caso de uso do Instagram (configuração da API com login do Facebook) e o Login do Facebook para Empresas. Sua conta do Facebook precisa de uma função no app e na Página vinculada à sua conta profissional do Instagram."
+client_id = "ID do app"
+client_secret = "Chave secreta do app"
+client_id_placeholder = "1234567890123456"
+client_secret_placeholder = "32 letras e números"
+
+[app_credentials.instagram_reels.error]
+client_id_required = "Informe o ID do app."
+client_id_invalid = "Cole o ID do app que aparece nas configurações básicas do seu app da Meta. É um número."
+client_secret_required = "Informe a chave secreta do app."
+client_secret_invalid = "Isso não parece uma chave secreta de app. Copie de novo das configurações básicas do app."
+
 [connection]
 not_connected = "Não conectada"
-connecting = "Aguardando você permitir o acesso no navegador…"
 connected = "Conectada como {channel}"
 reconnect_needed = "Reconexão necessária · {channel}"
 connect = "Conectar"
@@ -1585,33 +1598,67 @@ disconnecting = "Desconectando…"
 check = "Verificar"
 checking = "Verificando…"
 open_settings = "Abrir Configurações › Redes"
-checked = "A conexão funciona. Canal: {channel}."
 disconnected = "Desconectada. O acesso do Bardo foi revogado."
 disconnected_not_revoked = "Desconectada aqui, mas não foi possível falar com o {network} para revogar o acesso do Bardo. Você pode removê-lo nas configurações de segurança da sua conta no {network}."
+disconnected_kept_for_others = "Desconectada aqui. O acesso do Bardo no {network} não foi revogado porque outra conta no Bardo ainda usa esse acesso."
+use_account = "Conectar esta"
+choose_label = "Escolha uma conta"
+
+[connection.youtube]
+connecting = "Aguardando você permitir o acesso no navegador…"
+checked = "A conexão funciona. Canal: {channel}."
 reconnect_hint = "A rede recusou renovar o acesso: ele foi revogado ou expirou (um cliente do Google em status Teste expira depois de sete dias). Reconecte para entrar de novo."
+needs_app_credentials = "Salve o seu cliente OAuth em Configurações › Redes antes de conectar."
+missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e deixe todas as caixas marcadas: o Bardo precisa delas para enviar, agendar e ler as análises."
+
+[connection.instagram_reels]
+connecting = "Conferindo o token com a Meta…"
+checked = "A conexão funciona. Conta: {channel}."
+reconnect_hint = "A Meta recusou renovar o acesso: o token foi revogado ou expirou, ou a conta não está mais vinculada a uma Página que você gerencia. Gere um token novo e reconecte."
+needs_app_credentials = "Salve o seu app da Meta em Configurações › Redes antes de conectar."
+missing_scopes = "Faltam permissões no token. Gere de novo com instagram_basic, instagram_content_publish, instagram_manage_insights, pages_show_list e pages_read_engagement marcadas."
+token_label = "Token de acesso do usuário"
+token_placeholder = "Cole o token do Explorador da Graph API"
+token_help = "No Explorador da Graph API, escolha o seu app da Meta, selecione Obter token de acesso do usuário, marque instagram_basic, instagram_content_publish, instagram_manage_insights, pages_show_list e pages_read_engagement (além de business_management, ads_management e ads_read se a sua Página estiver num portfólio empresarial), clique em Gerar token de acesso e cole aqui. O Bardo troca por um de longa duração e nunca guarda o que você colou."
+open_token_tool = "Abrir o Explorador da Graph API"
+choose = "O token alcança várias contas do Instagram. Escolha a deste canal."
+choice_via = "Página: {via}"
 
 [connection.error]
 not_offered = "O Bardo ainda não entra nesta rede."
-needs_app_credentials = "Salve o seu cliente OAuth em Configurações › Redes antes de conectar."
 not_connected = "Esta conta não está conectada."
 denied = "O acesso não foi permitido no navegador. Conecte de novo e escolha Permitir."
 timed_out = "Nenhuma resposta voltou do navegador em cinco minutos. Conecte de novo."
 cancelled = "Conexão cancelada."
 listen_failed = "O Bardo não conseguiu esperar a resposta do navegador neste computador. Tente de novo; se continuar falhando, confira se algum firewall bloqueia o Bardo em 127.0.0.1."
-missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e deixe todas as caixas marcadas: o Bardo precisa delas para enviar, agendar e ler as análises."
 tokens_too_large = "Os tokens da rede são grandes demais para o Gerenciador de Credenciais do Windows, então não foram guardados."
 store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
 not_saved = "Não foi possível salvar a conexão. Tente de novo."
+no_pages = "O token não alcança nenhuma Página do Facebook. Gere o token com a conta do Facebook que gerencia a Página vinculada ao seu Instagram e marque pages_show_list."
+no_linked_account = "Nenhuma das suas Páginas do Facebook tem uma conta profissional do Instagram vinculada. Vincule a conta a uma Página nas configurações do Instagram e conecte de novo."
+choice_gone = "Essa escolha não está mais aberta. Conecte de novo."
+token_required = "Cole o token de acesso."
+token_invalid = "Isso não parece um token de acesso. Copie de novo do Explorador da Graph API."
 
 [connection.failure]
+unreachable = "Não foi possível falar com a rede. Confira sua conexão com a internet."
+unexpected = "A rede respondeu de um jeito que o Bardo não entende. Tente de novo."
+
+[connection.failure.youtube]
 refused = "A rede recusou a entrada. Conecte de novo."
 client_rejected = "O Google não reconhece o ID ou a chave secreta do cliente. Confira em Configurações › Redes."
 not_allowed = "O acesso foi recusado. Ative a YouTube Data API v3 e a YouTube Analytics API no seu projeto do Google Cloud."
 no_channel = "Esta conta do Google não tem canal no YouTube. Entre com a conta dona do canal."
 limit_reached = "A cota do YouTube do projeto acabou por hoje. Tente de novo depois da meia-noite no horário do Pacífico."
 network_down = "O YouTube está com falha do lado dele. Tente mais tarde."
-unreachable = "Não foi possível falar com a rede. Confira sua conexão com a internet."
-unexpected = "A rede respondeu de um jeito que o Bardo não entende. Tente de novo."
+
+[connection.failure.instagram_reels]
+refused = "A Meta recusou o token: ele expirou, foi revogado ou é de outro app. Gere um novo para o seu app e conecte de novo."
+client_rejected = "A Meta não reconhece o ID ou a chave secreta do app. Confira em Configurações › Redes."
+not_allowed = "A Meta recusou o acesso. Confira se o token tem todas as permissões e se a sua conta do Facebook tem uma função no app e na Página."
+no_channel = "A Página não está mais vinculada a uma conta profissional do Instagram. Vincule de novo nas configurações do Instagram e reconecte."
+limit_reached = "A Meta está limitando as chamadas do seu app agora. Tente de novo em alguns minutos."
+network_down = "A Meta está com falha do lado dela. Tente mais tarde."
 
 [consent_page]
 done = "O Bardo está conectado. Pode fechar esta aba."

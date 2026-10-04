@@ -10,6 +10,7 @@ pub enum Method {
     Get,
     Post,
     Put,
+    Delete,
 }
 
 /// A request. Header values may hold keys and bodies may hold user content,
@@ -27,6 +28,16 @@ impl HttpRequest {
     pub fn get(url: impl Into<String>) -> Self {
         Self {
             method: Method::Get,
+            url: url.into(),
+            headers: Vec::new(),
+            body: None,
+        }
+    }
+
+    /// A DELETE without a body, e.g. revoking an app's permissions.
+    pub fn delete(url: impl Into<String>) -> Self {
+        Self {
+            method: Method::Delete,
             url: url.into(),
             headers: Vec::new(),
             body: None,
@@ -381,6 +392,13 @@ impl UreqTransport {
         let sent = match request.method {
             Method::Get => {
                 let mut call = self.agent.get(&request.url);
+                for (name, value) in &request.headers {
+                    call = call.header(name.as_ref(), value.as_str());
+                }
+                call.call()
+            }
+            Method::Delete => {
+                let mut call = self.agent.delete(&request.url);
                 for (name, value) in &request.headers {
                     call = call.header(name.as_ref(), value.as_str());
                 }

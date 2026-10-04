@@ -1,0 +1,5 @@
+HTTP/2 400 
+content-type: application/json; charset=UTF-8
+www-authenticate: OAuth "Facebook Platform" "invalid_client" "Invalid Client ID"
+
+{"error":{"message":"Invalid Client ID","type":"OAuthException","code":101,"fbtrace_id":"AUOv3VnXxSIltVEnR8nbDUC"}}

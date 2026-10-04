@@ -100,10 +100,11 @@ pub use clip::{
     ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, StagedImage,
 };
 pub use connection::{
-    AppCredentials, AppCredentialsFieldError, ConnectedIdentity, ConnectionSecrets,
+    AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,
     ConnectionStatus, ConsentCallback, ConsentError, ConsentPages, ConsentReceiver, ConsentRequest,
-    NetworkConnection, NetworkConnectionRepository, NetworkSignIn, SecretText, SignInFailure,
-    SignInFailureKind, TokenGrant, TokenSet, TokenSetTooLarge,
+    DiscoveredAccount, NetworkConnection, NetworkConnectionRepository, NetworkSignIn,
+    PastedTokenError, PastedTokenSignIn, SecretText, SignInFailure, SignInFailureKind,
+    SignInMethod, TokenGrant, TokenSet, TokenSetTooLarge, parse_pasted_token,
 };
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
