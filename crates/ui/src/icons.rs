@@ -62,6 +62,7 @@ pub fn destination(place: Destination) -> Lucide {
         Destination::Accounts => Lucide::Link,
         Destination::Jobs => Lucide::List,
         Destination::Costs => Lucide::CircleDollarSign,
+        Destination::Guide => Lucide::BookOpen,
         Destination::Settings => Lucide::Settings,
     }
 }

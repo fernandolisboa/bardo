@@ -1198,6 +1198,7 @@ production = "Production"
 publishing = "Publishing"
 
 [nav.place]
+guide = "Guide"
 performance = "Performance"
 research = "Research"
 themes = "Themes"
@@ -1945,3 +1946,91 @@ past = "That time has already passed. Pick a later one."
 5 = "Fri"
 6 = "Sat"
 7 = "Sun"
+
+[tour]
+step_count = "{n} of {count}"
+esc_hint = "Esc closes"
+back = "Back"
+next = "Next"
+finish = "Finish"
+skip = "Skip tour"
+new = "New"
+
+[tour.offer]
+title = "Take a 2-minute tour?"
+body = "A quick look at where things are: the three pillars, your API keys, jobs, costs and where help lives. It only explains; nothing changes."
+start = "Start the tour"
+not_now = "Not now"
+never = "Don't show again"
+
+[tour.welcome]
+name = "Welcome tour"
+
+[tour.welcome.intro]
+title = "Welcome to Bardo"
+body = "In two minutes this tour shows where everything is. Use Next or the arrow keys to move, and Esc to leave at any time. Resume tour in the Guide brings you back to where you stopped."
+
+[tour.welcome.strategy]
+title = "Strategy"
+body = "Research niches, rank video ideas and see how your published videos did. This is where you decide what to make next."
+
+[tour.welcome.production]
+title = "Production"
+body = "Your video projects, from the script to the render. Personas are the narrators, and templates hold the instructions Claude writes from."
+
+[tour.welcome.publishing]
+title = "Publishing"
+body = "Your channels and their accounts on each network. Uploads, schedules and your posts' numbers start from here."
+
+[tour.welcome.settings]
+title = "Start with your keys"
+body = "Bardo works with your own AI accounts, so add your API keys in Settings first. They are kept in Windows Credential Manager, never in Bardo's database."
+
+[tour.welcome.jobs]
+title = "Jobs"
+body = "Long work, like narration, images or a render, runs as a job. Keep using Bardo meanwhile, and follow, cancel or resume each job here."
+
+[tour.welcome.costs]
+title = "Costs and budgets"
+body = "What you spent this month, and how much of your budgets is used. Set a monthly budget for each provider on the Costs screen."
+
+[tour.welcome.guide]
+title = "Guide and tours"
+body = "Come back here to take this tour again, resume one you closed, or see the keyboard shortcuts. Each screen's tour and the user guide will live here too."
+
+[guide]
+resume_tour = "Resume tour"
+shortcuts = "Keyboard shortcuts"
+reset_tours = "Reset tours"
+reset_failed = "Could not reset the tours. Try again."
+
+[shortcuts]
+title = "Keyboard shortcuts"
+close = "Close"
+
+[shortcuts.group]
+tour = "Guided tour"
+lists = "Lists"
+editor = "Editor"
+suggestions = "Cut suggestions in the editor"
+
+[shortcuts.action]
+tour_next = "Next step"
+tour_back = "Previous step"
+tour_close = "Close the tour; resume it from the Guide"
+tour_buttons = "Move between the card's buttons"
+list_move = "Select the previous or next item"
+list_accept = "Accept what the selected item waits on"
+play = "Play or pause"
+frame = "Step one frame back or forward"
+start_end = "Go to the start or the end"
+split = "Split at the playhead"
+trim = "Trim the selected clip's start or end to the playhead"
+delete = "Delete the selection"
+nudge = "Move the selected clip one place, or audio one frame"
+deselect = "Clear the selection"
+undo = "Undo"
+redo = "Redo"
+next_cut = "Next suggestion"
+accept_cut = "Accept the suggestion"
+reject_cut = "Reject the suggestion"

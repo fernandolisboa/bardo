@@ -8,6 +8,7 @@ mod appearance;
 mod channels;
 mod costs;
 mod editor;
+mod guide;
 mod icons;
 mod jobs;
 mod kit;
@@ -26,6 +27,7 @@ mod spend;
 mod templates;
 mod themes;
 mod title_bar;
+mod tour;
 
 use anyhow::Context as _;
 use bardo_app::{Bardo, Providers, Repositories};

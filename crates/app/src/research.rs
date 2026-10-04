@@ -420,6 +420,7 @@ mod tests {
         fn start(&self) -> Bardo {
             let repositories = Repositories {
                 profiles: Box::new(Arc::clone(&self.db)),
+                tours: Box::new(Arc::clone(&self.db)),
                 channels: Box::new(Arc::clone(&self.db)),
                 jobs: Arc::clone(&self.db) as Arc<dyn JobRepository>,
                 themes: Arc::clone(&self.db) as _,

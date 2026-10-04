@@ -9,7 +9,7 @@
 
 use std::rc::Rc;
 
-use bardo_app::{Bardo, Destination, Stage, StageStatus, Step, Text};
+use bardo_app::{Bardo, Destination, Pillar, Stage, StageStatus, Step, Text};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, ScrollHandle, SharedString, Window,
@@ -349,6 +349,10 @@ pub struct Navigation {
     pub current: Destination,
     /// Whether the jobs panel is open beside the screen.
     pub jobs_open: bool,
+    /// Whether the Guide's menu is open.
+    pub guide_open: bool,
+    /// The places' scroll, when a layout scrolls them; the shell keeps it.
+    pub scroll: ScrollHandle,
     /// Jobs queued or running.
     pub jobs: usize,
     /// This month's spend, formatted.
@@ -364,6 +368,7 @@ pub struct Navigation {
 
 /// A pillar and its places.
 pub struct NavGroup {
+    pub pillar: Pillar,
     pub label: SharedString,
     pub places: Vec<NavItem>,
 }
@@ -393,6 +398,7 @@ impl Navigation {
             groups: Destination::GROUPS
                 .iter()
                 .map(|(pillar, places)| NavGroup {
+                    pillar: *pillar,
                     label: tr(bardo, Text::PillarName(*pillar)),
                     places: places
                         .iter()
@@ -406,6 +412,8 @@ impl Navigation {
                 .collect(),
             current,
             jobs_open: false,
+            guide_open: false,
+            scroll: ScrollHandle::new(),
             jobs: 0,
             spent: None,
             jobs_line: tr(bardo, Text::StatusNoJobs),

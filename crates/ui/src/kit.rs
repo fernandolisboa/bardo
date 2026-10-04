@@ -4,6 +4,7 @@
 //! repaints with the theme.
 
 use bardo_app::bardo_domain::ThemeFamily;
+use bardo_app::{Side, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -11,6 +12,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, SharedString, Stateful, div, px};
 
 use crate::appearance::look;
+use crate::tour::Anchored as _;
 
 /// A state's kind; picks the chip's colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,4 +244,13 @@ pub fn field(
         )
         .child(control)
         .children(below)
+}
+
+/// `element` tagged with the component a tour step points at (issue
+/// #105): a screen's own control, where the layouts tag its parts.
+pub fn anchor(anchor: TourAnchor, element: impl IntoElement) -> Div {
+    div()
+        .relative()
+        .child(element)
+        .tour_anchor(anchor, Side::Below, None)
 }

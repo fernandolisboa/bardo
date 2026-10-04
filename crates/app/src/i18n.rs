@@ -14,7 +14,7 @@ use bardo_domain::{
     MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
     PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError,
     ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind,
-    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, UiLanguage,
+    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId, UiLanguage,
     UiTheme, Visibility, VoiceCategory, VoiceFlag,
 };
 
@@ -1412,6 +1412,35 @@ pub enum Text {
     MissedNotMissed,
     MissedNotUpdated,
     ScheduleProblem(ScheduleProblem),
+    /// A tour by name, in the Guide menu.
+    TourName(TourId),
+    /// A tour step's title, by tour and step key.
+    TourStepTitle(TourId, &'static str),
+    /// A tour step's body: at most three sentences.
+    TourStepBody(TourId, &'static str),
+    /// Placeholders: `{n}`, `{count}`.
+    TourStepCount,
+    TourEscHint,
+    TourBack,
+    TourNext,
+    TourFinish,
+    TourSkip,
+    TourNew,
+    TourOfferTitle,
+    TourOfferBody,
+    TourOfferStart,
+    TourOfferNotNow,
+    TourOfferNever,
+    GuideResumeTour,
+    GuideShortcuts,
+    GuideResetTours,
+    GuideResetFailed,
+    ShortcutsTitle,
+    ShortcutsClose,
+    /// A group of keyboard shortcuts, by key.
+    ShortcutGroup(&'static str),
+    /// What a keyboard shortcut does, by key.
+    ShortcutAction(&'static str),
 }
 
 impl Text {
@@ -1427,6 +1456,33 @@ impl Text {
                 return format!("content_language.{}", language.code()).into();
             }
             Text::CountryName(country) => return format!("country.{}", country.code()).into(),
+            Text::TourName(tour) => return format!("tour.{}.name", tour.code()).into(),
+            Text::TourStepTitle(tour, step) => {
+                return format!("tour.{}.{step}.title", tour.code()).into();
+            }
+            Text::TourStepBody(tour, step) => {
+                return format!("tour.{}.{step}.body", tour.code()).into();
+            }
+            Text::ShortcutGroup(group) => return format!("shortcuts.group.{group}").into(),
+            Text::ShortcutAction(action) => return format!("shortcuts.action.{action}").into(),
+            Text::TourStepCount => "tour.step_count",
+            Text::TourEscHint => "tour.esc_hint",
+            Text::TourBack => "tour.back",
+            Text::TourNext => "tour.next",
+            Text::TourFinish => "tour.finish",
+            Text::TourSkip => "tour.skip",
+            Text::TourNew => "tour.new",
+            Text::TourOfferTitle => "tour.offer.title",
+            Text::TourOfferBody => "tour.offer.body",
+            Text::TourOfferStart => "tour.offer.start",
+            Text::TourOfferNotNow => "tour.offer.not_now",
+            Text::TourOfferNever => "tour.offer.never",
+            Text::GuideResumeTour => "guide.resume_tour",
+            Text::GuideShortcuts => "guide.shortcuts",
+            Text::GuideResetTours => "guide.reset_tours",
+            Text::GuideResetFailed => "guide.reset_failed",
+            Text::ShortcutsTitle => "shortcuts.title",
+            Text::ShortcutsClose => "shortcuts.close",
             Text::ChannelsTitle => "channels.title",
             Text::ChannelsEmpty => "channels.empty",
             Text::ChannelsNotLoaded => "channels.not_loaded",
@@ -2519,6 +2575,7 @@ impl Text {
                 Destination::Jobs => "nav.place.jobs",
                 Destination::Costs => "nav.place.costs",
                 Destination::Settings => "nav.place.settings",
+                Destination::Guide => "nav.place.guide",
             },
             Text::RenderNoCut => "render.error.no_cut",
             Text::RenderChecking => "render.checking",
@@ -3000,6 +3057,11 @@ impl Catalog {
 
     pub fn language(&self) -> UiLanguage {
         self.language
+    }
+
+    /// Whether the resource file has a string for `text`.
+    pub fn has(&self, text: Text) -> bool {
+        self.strings.contains_key(text.key().as_ref())
     }
 
     /// The string for `text`, or its key when missing so a gap is visible
@@ -4609,6 +4671,37 @@ mod tests {
         texts.push(Text::ZoneWithOffset);
         texts.extend((1..=7).map(Text::WeekdayName));
         texts.extend(ScheduleProblem::ALL.map(Text::ScheduleProblem));
+        for tour in crate::Tour::ALL {
+            texts.push(Text::TourName(tour.id));
+            for step in tour.steps {
+                texts.push(Text::TourStepTitle(tour.id, step.key));
+                texts.push(Text::TourStepBody(tour.id, step.key));
+            }
+        }
+        for group in crate::SHORTCUTS {
+            texts.push(group.name);
+            texts.extend(group.shortcuts.iter().map(|shortcut| shortcut.action));
+        }
+        texts.extend([
+            Text::TourStepCount,
+            Text::TourEscHint,
+            Text::TourBack,
+            Text::TourNext,
+            Text::TourFinish,
+            Text::TourSkip,
+            Text::TourNew,
+            Text::TourOfferTitle,
+            Text::TourOfferBody,
+            Text::TourOfferStart,
+            Text::TourOfferNotNow,
+            Text::TourOfferNever,
+            Text::GuideResumeTour,
+            Text::GuideShortcuts,
+            Text::GuideResetTours,
+            Text::GuideResetFailed,
+            Text::ShortcutsTitle,
+            Text::ShortcutsClose,
+        ]);
         texts
     }
 

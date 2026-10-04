@@ -27,11 +27,13 @@ pub enum Destination {
     Accounts,
     Jobs,
     Costs,
+    /// Help: the tours, the shortcuts and (later) the user guide.
+    Guide,
     Settings,
 }
 
 impl Destination {
-    pub const ALL: [Destination; 11] = [
+    pub const ALL: [Destination; 12] = [
         Destination::Research,
         Destination::Themes,
         Destination::Performance,
@@ -42,6 +44,7 @@ impl Destination {
         Destination::Accounts,
         Destination::Jobs,
         Destination::Costs,
+        Destination::Guide,
         Destination::Settings,
     ];
 
@@ -70,8 +73,12 @@ impl Destination {
     ];
 
     /// The places outside the pillars, always at hand.
-    pub const PINNED: [Destination; 3] =
-        [Destination::Jobs, Destination::Costs, Destination::Settings];
+    pub const PINNED: [Destination; 4] = [
+        Destination::Jobs,
+        Destination::Costs,
+        Destination::Guide,
+        Destination::Settings,
+    ];
 
     /// Where the app opens: making videos is the daily work.
     pub const START: Destination = Destination::Projects;
@@ -111,6 +118,7 @@ mod tests {
         assert_eq!(Destination::Templates.pillar(), Some(Pillar::Production));
         assert_eq!(Destination::Accounts.pillar(), Some(Pillar::Publishing));
         assert_eq!(Destination::Costs.pillar(), None);
+        assert_eq!(Destination::Guide.pillar(), None);
         assert_eq!(
             Destination::GROUPS.map(|(pillar, _)| pillar),
             [Pillar::Strategy, Pillar::Production, Pillar::Publishing],

@@ -1,13 +1,13 @@
 //! The Studio layout (direction C of spike #52): denser than Workspace.
-//! The places as tabs along the top, with jobs and settings on the right
-//! and a status bar at the foot (jobs, the month's spend); each screen's
+//! The places as tabs along the top, with jobs, the guide and settings on
+//! the right and a status bar at the foot (jobs, the month's spend); each screen's
 //! header in one line, the project stages as compact tabs with the stage's
 //! actions beside them; scenes as table rows with the selected one in a
 //! bottom panel of three columns; sections stacked rather than tabbed.
 
 use std::rc::Rc;
 
-use bardo_app::{Destination, Stage, StageState};
+use bardo_app::{Destination, Side, Stage, StageState, TourAnchor};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, Stateful, div, px, relative};
@@ -19,6 +19,7 @@ use crate::parts::{
     Collection, CollectionKind, Figure, Header, Inspector, NavItem, Navigation, OnPick,
     ScreenParts, Sections, StageItem, Stages, Tile,
 };
+use crate::tour::Anchored as _;
 
 const TOP_BAR_HEIGHT: f32 = 44.;
 const STATUS_BAR_HEIGHT: f32 = 28.;
@@ -71,7 +72,7 @@ pub(super) fn shell(
 }
 
 /// The places as tabs, pillar after pillar, then the pinned places that
-/// are screens; jobs and settings as buttons on the right.
+/// are screens; jobs, the guide and settings as buttons on the right.
 fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
     let t = look(cx).tokens;
     let pick = nav.on_pick.clone();
@@ -97,14 +98,29 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
         if ix > 0 {
             tabs.push(separator().into_any_element());
         }
-        tabs.extend(
-            group
-                .places
-                .iter()
-                .map(|item| tab(item, item.place == nav.current).into_any_element()),
+        // A pillar's tabs together, so the tour can light them as one.
+        tabs.push(
+            h_flex()
+                .flex_none()
+                .gap_0p5()
+                .items_center()
+                .children(group.places.iter().map(|item| {
+                    tab(item, item.place == nav.current).tour_anchor(
+                        TourAnchor::NavPlace(item.place),
+                        Side::Below,
+                        Some(&nav.scroll),
+                    )
+                }))
+                .tour_anchor(
+                    TourAnchor::NavGroup(group.pillar),
+                    Side::Below,
+                    Some(&nav.scroll),
+                )
+                .into_any_element(),
         );
     }
-    // Costs is a screen; jobs open a panel and settings sit apart.
+    // Costs is a screen; jobs open a panel, the guide a menu, and settings
+    // sit apart.
     let mut buttons: Vec<AnyElement> = Vec::new();
     for item in &nav.pinned {
         match item.place {
@@ -130,15 +146,32 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
                             )
                         })
                         .on_click(move |_, window, cx| pick(place, window, cx))
+                        .tour_anchor(TourAnchor::NavPlace(place), Side::Below, None)
                         .into_any_element(),
                 );
             }
-            Destination::Settings => {
-                buttons.push(tab(item, nav.current == item.place).into_any_element());
-            }
+            // The Guide opens a menu over the screen, which stays.
+            Destination::Guide => buttons.push(
+                tab(item, nav.guide_open)
+                    .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
+                    .into_any_element(),
+            ),
+            Destination::Settings => buttons.push(
+                tab(item, nav.current == item.place)
+                    .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
+                    .into_any_element(),
+            ),
             _ => {
                 tabs.push(separator().into_any_element());
-                tabs.push(tab(item, nav.current == item.place).into_any_element());
+                tabs.push(
+                    tab(item, nav.current == item.place)
+                        .tour_anchor(
+                            TourAnchor::NavPlace(item.place),
+                            Side::Below,
+                            Some(&nav.scroll),
+                        )
+                        .into_any_element(),
+                );
             }
         }
     }
@@ -161,6 +194,7 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
                 .gap_0p5()
                 .items_center()
                 .overflow_x_scroll()
+                .track_scroll(&nav.scroll)
                 .children(tabs),
         )
         .child(
@@ -285,7 +319,10 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
     // its own under the header.
     let (stage_row, toolbar) = match stages {
         Some(stages) => (Some(stage_tabs(stages, toolbar, cx)), None),
-        None => (None, toolbar),
+        None => (
+            None,
+            toolbar.map(|toolbar| kit::anchor(TourAnchor::Toolbar, toolbar).into_any_element()),
+        ),
     };
     let mut content = content;
     if let Some(sections) = sections {
@@ -322,6 +359,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                                     .children(inspector.title)
                                     .children(inspector.body)
                                     .children(inspector.footer)
+                                    .tour_anchor(TourAnchor::Inspector, Side::Below, None)
                             }))
                             .children(content),
                     ),
@@ -353,7 +391,8 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                             .children(toolbar)
                             .children(notices)
                             .children(content),
-                    ),
+                    )
+                    .tour_anchor(TourAnchor::Content, Side::Right, None),
             )
             .when(!aside.is_empty(), |row| {
                 row.child(
@@ -454,6 +493,7 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
                 .items_center()
                 .children(header.actions),
         )
+        .tour_anchor(TourAnchor::Header, Side::Below, None)
         .into_any_element()
 }
 
@@ -498,13 +538,21 @@ fn stage_tabs(stages: Stages, toolbar: Option<AnyElement>, cx: &App) -> AnyEleme
         .items_center()
         .border_b(t.border_width)
         .border_color(t.border)
-        .child(h_flex().flex_wrap().gap_0p5().items_center().children(tabs))
+        .child(
+            h_flex()
+                .flex_wrap()
+                .gap_0p5()
+                .items_center()
+                .children(tabs)
+                .tour_anchor(TourAnchor::Stages, Side::Below, None),
+        )
         .children(toolbar.map(|toolbar| {
             div()
                 .ml_auto()
                 .flex_none()
                 .max_w(px(TOOLBAR_WIDTH))
                 .child(toolbar)
+                .tour_anchor(TourAnchor::Toolbar, Side::Below, None)
         }))
         .into_any_element()
 }
@@ -665,6 +713,7 @@ fn table(collection: Collection, after: Vec<AnyElement>, cx: &App) -> AnyElement
             })
             .children(empty)
             .children(after)
+            .tour_anchor(TourAnchor::Collection, Side::Below, None)
             .into_any_element();
     };
     let numbered = first.number.is_some();
@@ -862,6 +911,7 @@ fn table(collection: Collection, after: Vec<AnyElement>, cx: &App) -> AnyElement
                 .children(rows)
                 .children(after),
         )
+        .tour_anchor(TourAnchor::Collection, Side::Below, None)
         .into_any_element()
 }
 
@@ -933,6 +983,7 @@ fn panel(inspector: Inspector, hint: Option<gpui_kit::SharedString>, cx: &App) -
                         .child(footer)
                 })),
         )
+        .tour_anchor(TourAnchor::Inspector, Side::Above, None)
         .into_any_element()
 }
 
@@ -981,6 +1032,7 @@ fn main_with_form(
                 .children(inspector.title)
                 .children(inspector.body)
                 .children(inspector.footer)
+                .tour_anchor(TourAnchor::Inspector, Side::Left, None)
         }))
         .into_any_element()
 }
@@ -1001,6 +1053,7 @@ fn feed(collection: Collection, _cx: &App) -> AnyElement {
         })
         .when(empty, |feed| feed.children(collection.empty))
         .children(collection.cards)
+        .tour_anchor(TourAnchor::Collection, Side::Below, None)
         .into_any_element()
 }
 
@@ -1040,6 +1093,7 @@ fn list_column(collection: Collection, cx: &App) -> AnyElement {
                 .children(rows)
                 .children(collection.cards),
         )
+        .tour_anchor(TourAnchor::Collection, Side::Right, None)
         .into_any_element()
 }
 

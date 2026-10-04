@@ -327,6 +327,7 @@ mod tests {
         fn start_with_store(&self, secrets: Arc<dyn SecretStore>) -> Bardo {
             let repositories = Repositories {
                 profiles: Box::new(Arc::clone(&self.db)),
+                tours: Box::new(Arc::clone(&self.db)),
                 channels: Box::new(Arc::clone(&self.db)),
                 jobs: Arc::clone(&self.db) as _,
                 themes: Arc::clone(&self.db) as _,

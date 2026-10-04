@@ -84,6 +84,7 @@ mod text;
 mod theme;
 mod tiktok;
 mod timeline;
+mod tour;
 mod upload;
 mod voice;
 mod voice_sample;
@@ -247,6 +248,7 @@ pub use timeline::{
     TimelineRepository, VideoItem, VideoSource, frame_at, frame_time, min_length, nearest_frame,
     snap, timecode,
 };
+pub use tour::{TourId, TourProgress, TourProgressRepository, TourState};
 pub use upload::{
     InvalidUploadTransition, NetworkPost, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK,
     UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
