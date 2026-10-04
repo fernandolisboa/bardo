@@ -66,6 +66,7 @@ mod network_account;
 mod owner_metrics;
 mod performance;
 mod persona;
+mod post_insights;
 mod profile;
 mod provider_key;
 mod publication;
@@ -175,6 +176,10 @@ pub use performance::{
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
     PersonaRepository, VoiceFlag,
+};
+pub use post_insights::{
+    Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,
+    PostReading, find_media, read_insights,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{

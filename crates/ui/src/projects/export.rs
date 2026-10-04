@@ -1500,7 +1500,7 @@ impl ProjectsScreen {
         }
         section = section.children(error);
         section = section.children(metrics::post_metrics(bardo, post, "post", cx));
-        if publication.has_public_metrics() {
+        if post.is_synced() {
             let status = &view.metrics;
             section = section
                 .child(

@@ -42,13 +42,14 @@ use std::time::SystemTime;
 use bardo_domain::{
     ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver, CostRepository,
     CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository, ImageGenerator,
-    JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository, MusicPromptRepository,
-    NarrationRepository, NetworkAccountRepository, NetworkConnectionRepository, NetworkSignIn,
-    NicheResearchRepository, OwnerAnalytics, Persona, PersonaRepository, ProfileRepository,
-    ProjectFiles, PublicationRepository, Redactor, RenderRepository, RepositoryError,
-    ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
-    TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository, UiLanguage,
-    UiThemePreference, UserProfile, VideoStats, VideoUploader, VoiceLibrary, Zone,
+    InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository,
+    MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
+    NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
+    PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, Redactor,
+    RenderRepository, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
+    SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
+    TimelineRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
+    VoiceLibrary, Zone,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore};
@@ -291,6 +292,9 @@ pub struct Providers {
     /// Owner metrics per network that has them (#79): YouTube Analytics
     /// for now.
     pub analytics: Vec<Arc<dyn OwnerAnalytics>>,
+    /// Posts' numbers read through the connected account, per network
+    /// that has them (#85): Instagram insights and TikTok's video query.
+    pub post_insights: Vec<Arc<dyn InsightsReader>>,
 }
 
 impl Providers {
@@ -324,6 +328,10 @@ impl Providers {
                 Arc::new(bardo_publish::TikTokUploader::new()),
             ],
             analytics: vec![Arc::new(bardo_publish::YouTubeAnalytics::new())],
+            post_insights: vec![
+                Arc::new(bardo_publish::InstagramInsights::new()),
+                Arc::new(bardo_publish::TikTokInsights::new()),
+            ],
         }
     }
 }
@@ -549,6 +557,7 @@ impl Bardo {
             connections: connection_book.connections().clone(),
             uploaders: providers.uploaders.clone(),
             analytics: providers.analytics,
+            post_insights: providers.post_insights,
         };
         let cut_handler = CutSuggestionHandler {
             owner: profile.id,
@@ -1550,6 +1559,144 @@ pub(crate) mod testing {
         }
     }
 
+    /// Instagram or TikTok post numbers of a connected account.
+    pub(crate) struct FakeInsights {
+        network: bardo_domain::Network,
+        batch: usize,
+        /// Numbers per post id; a post left out is not the account's.
+        pub(crate) posts: Mutex<HashMap<String, bardo_domain::PostNumbers>>,
+        /// The account's media listing, in pages.
+        pub(crate) media: Mutex<Vec<bardo_domain::MediaPage>>,
+        pub(crate) failure: Mutex<Option<bardo_domain::AnalyticsError>>,
+        /// The posts of each read; the cursor of each listed page.
+        pub(crate) reads: Mutex<Vec<Vec<String>>>,
+        pub(crate) pages: Mutex<Vec<Option<String>>>,
+        /// The token each call carried.
+        pub(crate) tokens: Mutex<Vec<String>>,
+    }
+
+    impl FakeInsights {
+        pub(crate) fn instagram() -> Self {
+            Self::of(bardo_domain::Network::InstagramReels, 1)
+        }
+
+        pub(crate) fn tiktok() -> Self {
+            Self::of(bardo_domain::Network::TikTok, 20)
+        }
+
+        fn of(network: bardo_domain::Network, batch: usize) -> Self {
+            Self {
+                network,
+                batch,
+                posts: Mutex::default(),
+                media: Mutex::default(),
+                failure: Mutex::default(),
+                reads: Mutex::default(),
+                pages: Mutex::default(),
+                tokens: Mutex::default(),
+            }
+        }
+
+        /// `views` for `post`, the other numbers derived from them.
+        pub(crate) fn set(&self, post: &str, views: u64) {
+            self.set_numbers(
+                post,
+                bardo_domain::PostNumbers {
+                    views: Some(views),
+                    likes: Some(views / 10),
+                    comments: Some(views / 100),
+                    insights: bardo_domain::Insights {
+                        shares: Some(views / 50),
+                        ..bardo_domain::Insights::default()
+                    },
+                    posted_at: None,
+                },
+            );
+        }
+
+        pub(crate) fn set_numbers(&self, post: &str, numbers: bardo_domain::PostNumbers) {
+            self.posts.lock().unwrap().insert(post.to_owned(), numbers);
+        }
+
+        /// Lists `(media id, shortcode)` on one page.
+        pub(crate) fn list(&self, media: &[(&str, &str)]) {
+            self.media.lock().unwrap().push(bardo_domain::MediaPage {
+                items: media
+                    .iter()
+                    .map(|(id, code)| bardo_domain::MediaItem {
+                        id: (*id).to_owned(),
+                        permalink: Some(format!("https://www.instagram.com/reel/{code}/")),
+                        shortcode: Some((*code).to_owned()),
+                        posted_at: None,
+                    })
+                    .collect(),
+                next: None,
+            });
+        }
+
+        pub(crate) fn reads(&self) -> Vec<Vec<String>> {
+            self.reads.lock().unwrap().clone()
+        }
+
+        pub(crate) fn pages(&self) -> Vec<Option<String>> {
+            self.pages.lock().unwrap().clone()
+        }
+    }
+
+    impl bardo_domain::InsightsReader for FakeInsights {
+        fn network(&self) -> bardo_domain::Network {
+            self.network
+        }
+
+        fn batch(&self) -> usize {
+            self.batch
+        }
+
+        fn read(
+            &self,
+            token: &bardo_domain::SecretText,
+            posts: &[&str],
+        ) -> Result<Vec<(String, bardo_domain::PostNumbers)>, bardo_domain::AnalyticsError>
+        {
+            self.reads
+                .lock()
+                .unwrap()
+                .push(posts.iter().map(|post| (*post).to_owned()).collect());
+            self.tokens.lock().unwrap().push(token.expose().to_owned());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let known = self.posts.lock().unwrap();
+            Ok(posts
+                .iter()
+                .filter_map(|post| {
+                    known
+                        .get(*post)
+                        .map(|numbers| ((*post).to_owned(), *numbers))
+                })
+                .collect())
+        }
+
+        fn media_page(
+            &self,
+            token: &bardo_domain::SecretText,
+            _: &str,
+            after: Option<&str>,
+        ) -> Result<bardo_domain::MediaPage, bardo_domain::AnalyticsError> {
+            self.pages.lock().unwrap().push(after.map(str::to_owned));
+            self.tokens.lock().unwrap().push(token.expose().to_owned());
+            let page = after.map_or(0, |cursor| cursor.parse().unwrap_or(usize::MAX));
+            let media = self.media.lock().unwrap();
+            let Some(found) = media.get(page) else {
+                return Ok(bardo_domain::MediaPage::default());
+            };
+            Ok(bardo_domain::MediaPage {
+                items: found.items.clone(),
+                next: (page + 1 < media.len()).then(|| (page + 1).to_string()),
+            })
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -1573,6 +1720,7 @@ pub(crate) mod testing {
             consent: Arc::new(crate::connections::testing::NoConsent),
             uploaders: Vec::new(),
             analytics: Vec::new(),
+            post_insights: Vec::new(),
         }
     }
 }

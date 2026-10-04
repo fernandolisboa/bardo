@@ -154,6 +154,27 @@ upload** once its preset is rendered and its caption written.
 Instagram takes no publish time from Bardo yet: a Reel goes out once it is
 processed.
 
+## Numbers on the Performance screen
+
+With the account connected, every metrics sync reads the insights of the
+channel's Reels: the ones Bardo published, and posts linked with **Mark as
+posted**. No YouTube key is needed for them.
+
+- **What it reads:** views, reach, likes, comments, shares, saves,
+  interactions and, on a Reel, average and total watch time. Instagram
+  reports no revenue.
+- **Late data.** Instagram's numbers arrive up to two days after posting.
+  Until then the post says it has no numbers yet, and a number Instagram
+  leaves out shows as "—", not 0.
+- **Linked posts.** A pasted link carries a shortcode, not the id insights
+  take, so the first sync looks for the post in the account's media (the
+  newest 2,000) and keeps its id. A linked post the account doesn't have
+  shows as **Not found**.
+- **Cost.** About one request per Reel per sync, plus the media list once
+  per linked post.
+- Without a connected account, a linked post keeps only its link. When
+  the account needs to reconnect, syncs skip its posts until it does.
+
 ## If the Page needs publishing authorization
 
 Meta may ask a Page's admins to complete **Page Publishing Authorization**

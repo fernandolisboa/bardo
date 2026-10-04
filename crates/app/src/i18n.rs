@@ -1162,6 +1162,8 @@ pub enum Text {
     PublicationRemoved,
     PublicationPostedAt,
     PublicationNoMetrics,
+    PublicationConnectForMetrics,
+    PublicationReconnectForMetrics,
     PublicationFigure,
     PublicationTileViews,
     PublicationTileEngaged,
@@ -1201,6 +1203,18 @@ pub enum Text {
     MetricsHours,
     MetricsMinutes,
     MetricsPercent,
+    MetricShares,
+    MetricSaves,
+    MetricReach,
+    MetricReachHint,
+    MetricInteractions,
+    MetricInteractionsHint,
+    MetricAverageWatch,
+    MetricNotReportedHint,
+    MetricsInstagramLine,
+    MetricsTikTokLine,
+    MetricsInsightsEmpty,
+    MetricsInsightsPending,
     PerformanceInfo,
     PerformanceEmpty,
     PerformanceNoChannels,
@@ -2650,6 +2664,8 @@ impl Text {
             Text::PublicationRemoved => "publication.removed",
             Text::PublicationPostedAt => "publication.posted_at",
             Text::PublicationNoMetrics => "publication.no_metrics",
+            Text::PublicationConnectForMetrics => "publication.connect_for_metrics",
+            Text::PublicationReconnectForMetrics => "publication.reconnect_for_metrics",
             Text::PublicationFigure => "publication.figure",
             Text::PublicationTileViews => "publication.tile_views",
             Text::PublicationTileEngaged => "publication.tile_engaged",
@@ -2689,6 +2705,18 @@ impl Text {
             Text::MetricsHours => "metrics.hours",
             Text::MetricsMinutes => "metrics.minutes",
             Text::MetricsPercent => "metrics.percent",
+            Text::MetricShares => "metrics.shares",
+            Text::MetricSaves => "metrics.saves",
+            Text::MetricReach => "metrics.reach",
+            Text::MetricReachHint => "metrics.reach_hint",
+            Text::MetricInteractions => "metrics.interactions",
+            Text::MetricInteractionsHint => "metrics.interactions_hint",
+            Text::MetricAverageWatch => "metrics.average_watch",
+            Text::MetricNotReportedHint => "metrics.not_reported_hint",
+            Text::MetricsInstagramLine => "metrics.instagram_line",
+            Text::MetricsTikTokLine => "metrics.tiktok_line",
+            Text::MetricsInsightsEmpty => "metrics.insights_empty",
+            Text::MetricsInsightsPending => "metrics.insights_pending",
             Text::PerformanceOwnerNotConnected => "performance.owner_not_connected",
             Text::PerformanceOwnerReconnect => "performance.owner_reconnect",
             Text::PerformanceTileEngaged => "performance.tile_engaged",
@@ -4286,6 +4314,8 @@ mod tests {
         texts.push(Text::PublicationRemoved);
         texts.push(Text::PublicationPostedAt);
         texts.push(Text::PublicationNoMetrics);
+        texts.push(Text::PublicationConnectForMetrics);
+        texts.push(Text::PublicationReconnectForMetrics);
         texts.push(Text::PublicationFigure);
         texts.push(Text::PublicationTileViews);
         texts.push(Text::PublicationTileEngaged);
@@ -4325,6 +4355,18 @@ mod tests {
         texts.push(Text::MetricsHours);
         texts.push(Text::MetricsMinutes);
         texts.push(Text::MetricsPercent);
+        texts.push(Text::MetricShares);
+        texts.push(Text::MetricSaves);
+        texts.push(Text::MetricReach);
+        texts.push(Text::MetricReachHint);
+        texts.push(Text::MetricInteractions);
+        texts.push(Text::MetricInteractionsHint);
+        texts.push(Text::MetricAverageWatch);
+        texts.push(Text::MetricNotReportedHint);
+        texts.push(Text::MetricsInstagramLine);
+        texts.push(Text::MetricsTikTokLine);
+        texts.push(Text::MetricsInsightsEmpty);
+        texts.push(Text::MetricsInsightsPending);
         texts.push(Text::PerformanceOwnerNotConnected);
         texts.push(Text::PerformanceOwnerReconnect);
         texts.push(Text::PerformanceTileEngaged);

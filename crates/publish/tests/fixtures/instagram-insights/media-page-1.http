@@ -1,0 +1,13 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "data": [
+    { "id": "17900000000000005", "permalink": "https://www.instagram.com/reel/DEfGhIjKlMn/", "shortcode": "DEfGhIjKlMn", "timestamp": "2026-10-03T21:10:00+0000" },
+    { "id": "17900000000000004", "permalink": "https://www.instagram.com/p/DAbCdEfGhIj/", "shortcode": "DAbCdEfGhIj", "timestamp": "2026-10-02T14:30:05+0000" }
+  ],
+  "paging": {
+    "cursors": { "before": "QVFIUmZAiZA0hXa2dtbm5", "after": "QVFIUjBfMzJpZAkx0ZAzZA" },
+    "next": "https://graph.facebook.com/v25.0/17841400000000001/media?fields=id%2Cpermalink%2Cshortcode%2Ctimestamp&limit=100&after=QVFIUjBfMzJpZAkx0ZAzZA"
+  }
+}

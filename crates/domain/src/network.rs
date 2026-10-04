@@ -93,6 +93,14 @@ impl Network {
         self == Network::TikTok
     }
 
+    /// Whether the metrics sync reads the network's posts through the
+    /// connected account (#85): Instagram's media insights and TikTok's
+    /// video query. YouTube's public numbers need no account, and X and
+    /// Kick keep only the link.
+    pub fn reads_insights(self) -> bool {
+        matches!(self, Network::InstagramReels | Network::TikTok)
+    }
+
     /// The preset a render for this network uses unless the account
     /// overrides it.
     ///

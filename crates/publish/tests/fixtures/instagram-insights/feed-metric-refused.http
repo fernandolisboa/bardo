@@ -1,0 +1,4 @@
+HTTP/2 400 
+content-type: application/json; charset=UTF-8
+
+{"error":{"message":"(#100) The Media Insights API does not support the ig_reels_avg_watch_time metric for this media product type.","type":"OAuthException","code":100,"fbtrace_id":"AFixtureTrace0101"}}

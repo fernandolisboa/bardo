@@ -1,0 +1,14 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{
+  "data": [
+    { "name": "views", "period": "lifetime", "values": [{ "value": 950 }], "title": "Views", "id": "17900000000000002/insights/views/lifetime" },
+    { "name": "reach", "period": "lifetime", "values": [{ "value": 810 }], "title": "Accounts reached", "id": "17900000000000002/insights/reach/lifetime" },
+    { "name": "likes", "period": "lifetime", "values": [{ "value": 64 }], "title": "Likes", "id": "17900000000000002/insights/likes/lifetime" },
+    { "name": "comments", "period": "lifetime", "values": [{ "value": 5 }], "title": "Comments", "id": "17900000000000002/insights/comments/lifetime" },
+    { "name": "shares", "period": "lifetime", "values": [{ "value": 9 }], "title": "Shares", "id": "17900000000000002/insights/shares/lifetime" },
+    { "name": "saved", "period": "lifetime", "values": [{ "value": 11 }], "title": "Saved", "id": "17900000000000002/insights/saved/lifetime" },
+    { "name": "total_interactions", "period": "lifetime", "values": [{ "value": 89 }], "title": "Interactions", "id": "17900000000000002/insights/total_interactions/lifetime" }
+  ]
+}

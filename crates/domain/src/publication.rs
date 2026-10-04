@@ -11,7 +11,10 @@
 //! live, and then tracks it like any other post. When the channel's account
 //! is connected, a sync also reads the owner's numbers of each YouTube post
 //! it found (#79, `owner_metrics`): they ride on the same snapshot, and the
-//! retention curve is kept as last read.
+//! retention curve is kept as last read. Instagram and TikTok posts are
+//! read through their connected account (#85, `post_insights`): their
+//! views, likes and comments go on the snapshot like YouTube's, and what
+//! else the network reports in its insights beside them.
 //!
 //! Links are read here, without a network call: the post's id must be in
 //! the link itself. Short links (`vm.tiktok.com/…`) hide it, so they are
@@ -24,9 +27,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ChannelId, InvalidUploadTransition, Money, Network, NetworkAccountId, NetworkPost,
-    OwnerMetrics, ProfileId, ProviderFailure, RenderId, RepositoryError, RetentionCurve,
-    SCHEDULE_GRACE, Upload, UploadStatus, VideoProjectId, Visibility,
+    ApiKey, ChannelId, Insights, InvalidUploadTransition, Money, Network, NetworkAccountId,
+    NetworkPost, OwnerMetrics, PostNumbers, ProfileId, ProviderFailure, RenderId, RepositoryError,
+    RetentionCurve, SCHEDULE_GRACE, Upload, UploadStatus, VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -351,6 +354,10 @@ pub struct Publication {
     pub checked_at: Option<SystemTime>,
     /// Since when syncs have not found the post (removed or made private).
     pub missing_since: Option<SystemTime>,
+    /// The id the network's insights take for a linked post, where its
+    /// link carries another: an Instagram media id, found by a sync from
+    /// the shortcode. An uploaded Reel keeps its own on the upload.
+    pub insights_id: Option<String>,
 }
 
 impl Publication {
@@ -401,6 +408,34 @@ impl Publication {
             PublicationKind::Uploaded(upload) => {
                 upload.status == UploadStatus::Published && upload.visibility != Visibility::Private
             }
+        }
+    }
+
+    /// Whether a sync reads the post through its account's connection
+    /// (#85): an Instagram or TikTok post on the network, linked by hand
+    /// or published by Bardo. A TikTok draft has no post until the creator
+    /// posts it and links it. Read only while the account is connected.
+    pub fn reads_insights(&self) -> bool {
+        self.network.reads_insights()
+            && self.link.is_some()
+            && match &self.kind {
+                PublicationKind::Manual => true,
+                PublicationKind::Uploaded(upload) => upload.status == UploadStatus::Published,
+            }
+    }
+
+    /// The id the network's insights take for the post: TikTok's video id
+    /// is the link's; an Instagram post needs its media id, which a Reel
+    /// Bardo published keeps and a linked one gets from a sync. `None`
+    /// until known, or for a network without insights.
+    pub fn insights_post(&self) -> Option<&str> {
+        match self.network {
+            Network::TikTok => self.post_id(),
+            Network::InstagramReels => self
+                .upload()
+                .and_then(|upload| upload.network_id.as_deref())
+                .or(self.insights_id.as_deref()),
+            _ => None,
         }
     }
 
@@ -517,18 +552,26 @@ impl Publication {
     /// What a sync learned: the post with its statistics, or that it was
     /// not found.
     pub fn checked(&mut self, found: Option<&VideoStatistics>, at: SystemTime) {
-        self.checked_at = Some(at);
         match found {
-            Some(statistics) => {
-                self.missing_since = None;
-                if let Some(published) = statistics.published_at {
-                    self.posted_at = published;
-                }
-            }
-            None => {
-                self.missing_since.get_or_insert(at);
-            }
+            Some(statistics) => self.seen(statistics.published_at, at),
+            None => self.not_seen(at),
         }
+    }
+
+    /// A sync found the post `at`; it went up at `posted_at` when the
+    /// network says.
+    pub fn seen(&mut self, posted_at: Option<SystemTime>, at: SystemTime) {
+        self.checked_at = Some(at);
+        self.missing_since = None;
+        if let Some(posted_at) = posted_at {
+            self.posted_at = posted_at;
+        }
+    }
+
+    /// A sync did not find the post `at`: flagged, with its numbers kept.
+    pub fn not_seen(&mut self, at: SystemTime) {
+        self.checked_at = Some(at);
+        self.missing_since.get_or_insert(at);
     }
 
     /// The upload sent the whole file and the network made `video` of it:
@@ -628,6 +671,9 @@ pub struct MetricsSnapshot {
     /// The owner's numbers, when the channel's account is connected and
     /// the network had data for the post (48 to 72 hours late).
     pub owner: Option<OwnerMetrics>,
+    /// What Instagram or TikTok reports beside the counts; empty on
+    /// YouTube.
+    pub insights: Insights,
 }
 
 impl MetricsSnapshot {
@@ -646,7 +692,27 @@ impl MetricsSnapshot {
             likes: statistics.likes,
             comments: statistics.comments,
             owner: None,
+            insights: Insights::default(),
         }
+    }
+
+    /// A snapshot of what Instagram or TikTok reported, or `None` without
+    /// a view count: the network's data have not arrived (Instagram leaves
+    /// a metric out until it has it), and an empty count is not zero.
+    pub fn of_numbers(
+        publication: PublicationId,
+        numbers: &PostNumbers,
+        at: SystemTime,
+    ) -> Option<Self> {
+        Some(Self {
+            publication,
+            taken_at: at,
+            views: numbers.views?,
+            likes: numbers.likes,
+            comments: numbers.comments,
+            owner: None,
+            insights: numbers.insights,
+        })
     }
 }
 
@@ -727,7 +793,9 @@ impl MetricsSyncOnStart {
         }
     }
 
-    /// Whether a start at `now` syncs `publications`: some tracked post
+    /// Whether a start at `now` syncs `publications` (Instagram and TikTok
+    /// posts count when given: the caller leaves out those whose account
+    /// is not connected): some tracked post
     /// was never checked, the oldest check is older than the interval, or
     /// a scheduled post's publish time passed since its last check. Off
     /// never syncs.
@@ -752,7 +820,7 @@ impl MetricsSyncOnStart {
         }
         let mut checks = publications
             .iter()
-            .filter(|publication| publication.is_tracked())
+            .filter(|publication| publication.is_tracked() || publication.reads_insights())
             .map(|publication| publication.checked_at)
             .peekable();
         if checks.peek().is_none() {
@@ -793,6 +861,9 @@ pub struct MetricsTotals {
     pub views: u64,
     pub likes: Option<u64>,
     pub comments: Option<u64>,
+    /// Shares, from the posts whose network reports them (Instagram,
+    /// TikTok).
+    pub shares: Option<u64>,
     /// How many posts the totals add up.
     pub posts: usize,
     /// The owner's numbers of the posts that have them; `None` when none
@@ -819,6 +890,7 @@ impl MetricsTotals {
         self.views = self.views.saturating_add(snapshot.views);
         self.likes = sum(self.likes, snapshot.likes);
         self.comments = sum(self.comments, snapshot.comments);
+        self.shares = sum(self.shares, snapshot.insights.shares);
         self.posts += 1;
     }
 
@@ -1342,6 +1414,7 @@ mod tests {
             linked_at: at(0),
             checked_at,
             missing_since: None,
+            insights_id: None,
         }
     }
 
@@ -1436,6 +1509,7 @@ mod tests {
         assert!(!p.is_posted(), "the creator posts it in TikTok");
         assert!(!p.has_public_metrics());
         assert!(!p.is_tracked());
+        assert!(!p.reads_insights(), "no post id until it is linked");
         assert_eq!(p.due(), None);
 
         let mut manual = publication(Network::TikTok, None);
@@ -1478,7 +1552,13 @@ mod tests {
         assert_eq!(p.link, Some(reel));
         assert_eq!(p.posted_at, at(70));
         assert!(p.is_posted());
-        assert!(!p.has_public_metrics(), "no Instagram statistics yet");
+        assert!(!p.has_public_metrics(), "no public Instagram statistics");
+        assert!(p.reads_insights(), "read through the account");
+        assert_eq!(
+            p.insights_post(),
+            Some("17900000000000001"),
+            "the media id, not the shortcode"
+        );
         assert!(
             p.published(
                 NetworkPost {
@@ -1717,8 +1797,18 @@ mod tests {
         let now = at(10 * 3600);
         assert!(!six.is_due(&[], now), "nothing to sync");
         assert!(
-            !six.is_due(&[publication(Network::TikTok, None)], now),
-            "no public metrics"
+            !six.is_due(
+                &[Publication {
+                    network: Network::X,
+                    link: Some(
+                        PostLink::parse(Network::X, "https://x.com/a/status/1840000000000000001")
+                            .unwrap()
+                    ),
+                    ..publication(Network::TikTok, None)
+                }],
+                now
+            ),
+            "no metrics on X"
         );
         assert!(six.is_due(&[publication(Network::YouTube, None)], now));
         let fresh = publication(Network::YouTube, Some(at(9 * 3600)));
@@ -1765,7 +1855,112 @@ mod tests {
             likes,
             comments: Some(1),
             owner: None,
+            insights: crate::Insights::default(),
         }
+    }
+
+    #[test]
+    fn instagram_and_tiktok_posts_are_read_through_their_account() {
+        let tiktok = publication(Network::TikTok, None);
+        assert!(tiktok.reads_insights());
+        assert!(!tiktok.has_public_metrics(), "no key reads it");
+        assert_eq!(
+            tiktok.insights_post(),
+            Some("7301234567890123456"),
+            "the link carries the video id"
+        );
+
+        let mut linked_reel = publication(Network::InstagramReels, None);
+        assert!(linked_reel.reads_insights());
+        assert_eq!(
+            linked_reel.insights_post(),
+            None,
+            "a shortcode is not a media id"
+        );
+        linked_reel.insights_id = Some("17900000000000002".into());
+        assert_eq!(linked_reel.insights_post(), Some("17900000000000002"));
+
+        for network in [Network::YouTube, Network::X, Network::Kick] {
+            let link = match network {
+                Network::YouTube => "https://youtu.be/dQw4w9WgXcQ",
+                Network::X => "https://x.com/a/status/1840000000000000001",
+                _ => "https://kick.com/archives/clips/clip_01J9ABCDEF",
+            };
+            let p = Publication {
+                network,
+                link: Some(PostLink::parse(network, link).unwrap()),
+                ..publication(Network::TikTok, None)
+            };
+            assert!(!p.reads_insights(), "{network:?}");
+            assert_eq!(p.insights_post(), None);
+        }
+    }
+
+    #[test]
+    fn a_post_seen_again_clears_its_flag_and_takes_the_networks_time() {
+        let mut p = publication(Network::TikTok, None);
+        p.not_seen(at(10));
+        p.not_seen(at(20));
+        assert_eq!(p.missing_since, Some(at(10)), "since the first miss");
+        assert_eq!(p.checked_at, Some(at(20)));
+        p.seen(Some(at(5)), at(30));
+        assert_eq!(p.missing_since, None);
+        assert_eq!(p.posted_at, at(5), "TikTok's create time");
+        p.seen(None, at(40));
+        assert_eq!(p.posted_at, at(5), "kept when the network does not say");
+        assert_eq!(p.checked_at, Some(at(40)));
+    }
+
+    #[test]
+    fn a_snapshot_needs_a_reported_view_count_and_keeps_empty_as_empty() {
+        let p = PublicationId::new();
+        assert_eq!(
+            MetricsSnapshot::of_numbers(p, &PostNumbers::default(), at(0)),
+            None,
+            "no data yet is no snapshot, not zeros"
+        );
+        let numbers = PostNumbers {
+            views: Some(0),
+            likes: Some(0),
+            comments: None,
+            insights: Insights {
+                shares: Some(3),
+                saves: None,
+                ..Insights::default()
+            },
+            posted_at: None,
+        };
+        let snapshot = MetricsSnapshot::of_numbers(p, &numbers, at(9)).unwrap();
+        assert_eq!(snapshot.views, 0, "a reported zero");
+        assert_eq!(snapshot.likes, Some(0));
+        assert_eq!(snapshot.comments, None, "not reported stays empty");
+        assert_eq!(snapshot.insights.shares, Some(3));
+        assert_eq!(snapshot.insights.saves, None);
+        assert_eq!(snapshot.owner, None);
+        assert_eq!(snapshot.taken_at, at(9));
+    }
+
+    #[test]
+    fn shares_add_up_from_the_posts_that_report_them() {
+        let (a, b) = (PublicationId::new(), PublicationId::new());
+        let shared = |p, n| MetricsSnapshot {
+            insights: Insights {
+                shares: Some(n),
+                ..Insights::default()
+            },
+            ..snap(p, 0, 10, None)
+        };
+        let totals = MetricsTotals::latest(&[shared(a, 4), snap(b, 0, 5, None)]);
+        assert_eq!(totals.shares, Some(4));
+        assert_eq!(MetricsTotals::latest(&[snap(b, 0, 5, None)]).shares, None);
+    }
+
+    #[test]
+    fn a_start_counts_connected_instagram_and_tiktok_posts_as_tracked() {
+        let six = MetricsSyncOnStart::Every6Hours;
+        let now = at(10 * 3600);
+        assert!(six.is_due(&[publication(Network::TikTok, None)], now));
+        assert!(!six.is_due(&[publication(Network::InstagramReels, Some(now))], now));
     }
 
     #[test]
