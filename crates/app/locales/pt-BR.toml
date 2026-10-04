@@ -1957,6 +1957,7 @@ skip = "Pular tour"
 new = "Novo"
 learn_more = "Saiba mais"
 this_screen = "Tour desta tela"
+this_list = "Tour desta lista"
 this_stage = "Tour desta etapa"
 
 [tour.offer]

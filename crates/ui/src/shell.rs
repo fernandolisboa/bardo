@@ -332,7 +332,14 @@ impl Shell {
         self.guide.update(cx, |guide, cx| guide.moved(cx));
         match event {
             GuideEvent::OpenGuide => self.open_guide(window, cx),
-            GuideEvent::LearnMore(guide) => self.show_section(guide, cx),
+            GuideEvent::LearnMore(guide) => {
+                // From the missed posts' own tour: the list is put off, as
+                // "Decide later" does, so the guide shows.
+                if missed_open {
+                    self.missed.update(cx, |missed, cx| missed.decide_later(cx));
+                }
+                self.show_section(guide, cx);
+            }
             _ => {}
         }
         cx.notify();
@@ -369,6 +376,14 @@ impl Shell {
                 self.projects
                     .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
             }
+            TourPlace::Settings(tab) => {
+                self.settings
+                    .update(cx, |settings, cx| settings.show_tab(tab, cx));
+                self.pick(Destination::Settings, window, cx);
+            }
+            // The list's tour runs over the list: posts put off come back
+            // for it. With none missed, its cards show in the middle.
+            TourPlace::Missed => self.missed.update(cx, |missed, cx| missed.reopen(cx)),
         }
     }
 
@@ -428,14 +443,16 @@ impl Shell {
         cx.notify();
     }
 
-    /// F1. Not while the missed posts list holds the window; over the
-    /// editor the guide opens on top of it; during a tour it is the step's
-    /// "Learn more".
+    /// F1. Not while the missed posts list holds the window, unless its
+    /// tour runs; over the editor the guide opens on top of it; during a
+    /// tour it is the step's "Learn more".
     fn on_open_guide(&mut self, _: &OpenGuide, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editor.is_none() && self.missed.read(cx).is_open() {
+        let missed_open = self.editor.is_none() && self.missed.read(cx).is_open();
+        let step = self.bardo.read(cx).tour_step(missed_open);
+        // Over the list, F1 is its own tour's "Learn more" alone.
+        if missed_open && step.is_none() {
             return;
         }
-        let step = self.bardo.read(cx).tour_step(false);
         match step {
             Some(step) => {
                 if let Some(guide) = step.guide {
@@ -453,6 +470,16 @@ impl Shell {
     /// and something to show.
     fn screen_tour(&self, cx: &App) -> Option<ScreenTour> {
         let has_content = match self.screen {
+            // A Settings tab's tour is the tab's own.
+            Destination::Settings => {
+                let tab = self.settings.read(cx).tab();
+                return self
+                    .bardo
+                    .read(cx)
+                    .place_tour(TourPlace::Settings(tab), true);
+            }
+            Destination::Channels => self.channels.read(cx).has_content(),
+            Destination::Accounts => self.accounts.read(cx).has_content(cx),
             Destination::Research => self.research.read(cx).has_content(),
             Destination::Themes => self.themes.read(cx).has_content(),
             Destination::Performance => self.performance.read(cx).has_content(),
@@ -475,8 +502,8 @@ impl Shell {
     }
 
     /// Shift+F1: the tour of the stage on screen, else the screen's, when
-    /// one is offered; in the editor, the editor's. Not while the missed
-    /// posts list holds the window.
+    /// one is offered; in the editor, the editor's; over the missed posts
+    /// list, the list's.
     fn on_tour_this_screen(
         &mut self,
         _: &TourThisScreen,
@@ -495,6 +522,9 @@ impl Shell {
             return;
         }
         if self.missed.read(cx).is_open() {
+            if let Some(tour) = self.bardo.read(cx).place_tour(TourPlace::Missed, true) {
+                self.start_screen_tour(tour.tour, window, cx);
+            }
             return;
         }
         if let Some(tour) = self.stage_tour(cx).or_else(|| self.screen_tour(cx)) {

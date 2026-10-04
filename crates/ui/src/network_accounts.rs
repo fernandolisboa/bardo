@@ -17,8 +17,8 @@ use bardo_app::bardo_domain::{
     VideoCodec, Visibility,
 };
 use bardo_app::{
-    AccountChoice, Bardo, ConnectionError, ConnectionState, NetworkAccountError, Text,
-    TokenConnected,
+    AccountChoice, Bardo, ConnectionError, ConnectionState, Control, GuideRef, NetworkAccountError,
+    Text, TokenConnected, TourAnchor,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -31,11 +31,12 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, SharedString, Subscription, Task, Window,
-    div,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, ScrollHandle, SharedString, Subscription,
+    Task, Window, div,
 };
 
 use crate::appearance::look;
+use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 
@@ -222,6 +223,9 @@ pub struct NetworkAccountsPanel {
     /// The account whose paste form is open.
     pasting: Option<NetworkAccountId>,
     token_error: Option<Text>,
+    /// The scroll the panel sits in, so the tour brings its cards into
+    /// view; the screen hands it to its layout.
+    scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -335,8 +339,20 @@ impl NetworkAccountsPanel {
             token,
             pasting: None,
             token_error: None,
+            scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The scroll the panel sits in.
+    pub fn scroll(&self) -> ScrollHandle {
+        self.scroll.clone()
+    }
+
+    /// Whether the channel shown has accounts: the screen offers its tour
+    /// only then.
+    pub fn has_accounts(&self) -> bool {
+        self.channel.is_some() && !self.load_failed && !self.accounts.is_empty()
     }
 
     /// Shows the accounts of `channel` (with its content language, which
@@ -1270,16 +1286,43 @@ impl NetworkAccountsPanel {
             .iter()
             .filter_map(|account| Some((account.id, self.render_connection(account, cx)?)))
             .collect();
+        // The tour points at the first card, and at the first connection.
+        let first_connected = self
+            .accounts
+            .iter()
+            .find(|account| connections.contains_key(&account.id))
+            .map(|account| account.id);
+        let scroll = Some(&self.scroll);
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         self.accounts
             .iter()
-            .map(|account| {
+            .enumerate()
+            .map(|(index, account)| {
+                let first = index == 0;
+                let tagged = |anchor: TourAnchor, element: AnyElement| {
+                    if first {
+                        kit::anchor_in(anchor, element, scroll).into_any_element()
+                    } else {
+                        element
+                    }
+                };
                 let id = account.id;
                 let network = account.network;
                 let open = self.editing == Some(Editing::Existing(id, network));
                 let custom = !account.details.overrides().is_empty();
-                let connection = connections.remove(&id);
+                let connection = connections.remove(&id).map(|connection| {
+                    if first_connected == Some(id) {
+                        kit::anchor_in(
+                            TourAnchor::Control(Control::AccountConnection),
+                            connection,
+                            scroll,
+                        )
+                        .into_any_element()
+                    } else {
+                        connection
+                    }
+                });
                 let preset = if custom {
                     kit::status_with(
                         Tone::Accent,
@@ -1327,7 +1370,7 @@ impl NetworkAccountsPanel {
                                 ),
                         )
                 });
-                kit::card(cx)
+                let card = kit::card(cx)
                     .p_3()
                     .gap_1()
                     .when(open, |card| card.border_color(look(cx).tokens.accent_edge))
@@ -1344,7 +1387,8 @@ impl NetworkAccountsPanel {
                             ))
                             .child(preset)
                             .child(div().flex_1())
-                            .child(
+                            .child(tagged(
+                                TourAnchor::Control(Control::AccountEdit),
                                 Button::new(("edit-account", network as usize))
                                     .small()
                                     .ghost()
@@ -1353,8 +1397,9 @@ impl NetworkAccountsPanel {
                                         move |this, _: &ClickEvent, window, cx| {
                                             this.open(Editing::Existing(id, network), window, cx)
                                         },
-                                    )),
-                            )
+                                    ))
+                                    .into_any_element(),
+                            ))
                             .child({
                                 // Removing is rare: it waits in the "⋯" menu.
                                 let panel = cx.entity();
@@ -1377,12 +1422,20 @@ impl NetworkAccountsPanel {
                                     })
                             }),
                     )
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(
-                        SharedString::from(bardo.preset_summary(&account.render_preset())),
+                    .child(tagged(
+                        TourAnchor::Control(Control::AccountPreset),
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(SharedString::from(
+                                bardo.preset_summary(&account.render_preset()),
+                            ))
+                            .into_any_element(),
                     ))
                     .children(connection)
                     .children(confirm)
-                    .into_any_element()
+                    .into_any_element();
+                tagged(TourAnchor::Control(Control::AccountCard), card)
             })
             .collect()
     }
@@ -1402,7 +1455,7 @@ impl NetworkAccountsPanel {
                 .child(tr(bardo, Text::AllNetworksAdded))
                 .into_any_element();
         }
-        h_flex()
+        let buttons = h_flex()
             .flex_wrap()
             .gap_2()
             .children(free.into_iter().map(|network| {
@@ -1416,8 +1469,13 @@ impl NetworkAccountsPanel {
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                         this.open(Editing::New(network), window, cx)
                     }))
-            }))
-            .into_any_element()
+            }));
+        kit::anchor_in(
+            TourAnchor::Control(Control::AccountAdd),
+            buttons,
+            Some(&self.scroll),
+        )
+        .into_any_element()
     }
 
     fn render_notice(&self, cx: &App) -> Option<AnyElement> {
@@ -1463,12 +1521,12 @@ impl NetworkAccountsPanel {
                 .child(control)
                 .children(below)
         };
-        let section = |id: &'static str, title: Text, about: Text| {
+        let section = |id: &'static str, title: Text, about: Text, more: GuideRef| {
             h_flex()
                 .pt_2()
                 .gap_1()
                 .child(div().font_semibold().child(tr(bardo, title)))
-                .child(kit::info(id, None, tr(bardo, about)))
+                .child(guide::info(bardo, id, tr(bardo, about), more))
         };
 
         let (title, action) = match editing {
@@ -1508,6 +1566,7 @@ impl NetworkAccountsPanel {
                 "account-metadata-info",
                 Text::AccountMetadataTitle,
                 Text::AccountMetadataHint,
+                guide::refs::ACCOUNTS_METADATA,
             ))
             .child(
                 h_flex()
@@ -1538,6 +1597,7 @@ impl NetworkAccountsPanel {
                 "render-preset-info",
                 Text::RenderPresetTitle,
                 Text::RenderPresetHint,
+                guide::refs::ACCOUNTS_PRESET,
             ))
             .child(
                 h_flex()

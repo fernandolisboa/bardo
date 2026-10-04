@@ -16,8 +16,8 @@ use bardo_app::bardo_domain::{
     VideoProjectId, compose, text_length,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, DraftNote, ExportBlock, ExportError, ExportSummary, ExportTarget,
-    ExportView, PublicationError, Text, UploadState, export_job_networks,
+    Bardo, BudgetConsent, Control, DraftNote, ExportBlock, ExportError, ExportSummary,
+    ExportTarget, ExportView, PublicationError, Text, TourAnchor, UploadState, export_job_networks,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -31,10 +31,10 @@ use gpui_kit::{AnyElement, App, ClickEvent, ClipboardItem, SharedString, Window,
 use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::appearance::look;
 use crate::kit::{self, Tone};
-use crate::metrics;
 use crate::parts::{Collection, CollectionKind, Figure, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
+use crate::{guide, metrics};
 
 fn is_running(job: Option<&Job>) -> bool {
     job.is_some_and(|job| job.state().is_active())
@@ -475,6 +475,7 @@ impl ProjectsScreen {
         parts.inspector = self
             .shown_network(view)
             .map(|target| self.network_inspector(view, target, cx));
+        parts.scroll = Some(self.publish_scroll.clone());
     }
 
     fn export_figures(&self, view: &ExportView, cx: &App) -> Vec<Figure> {
@@ -542,11 +543,16 @@ impl ProjectsScreen {
             matches!(job.state(), JobState::Failed | JobState::Cancelled) && job.can_retry()
         });
         let bardo = self.bardo.read(cx);
-        let mut row = h_flex().gap_2().flex_wrap().items_center().child(kit::info(
-            "export-info",
-            None,
-            tr(bardo, Text::ExportInfo),
-        ));
+        let mut row = h_flex()
+            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .child(guide::info(
+                bardo,
+                "export-info",
+                tr(bardo, Text::ExportInfo),
+                guide::refs::UPLOADING_NETWORKS,
+            ));
         if writing {
             row = row
                 .child(Spinner::new().small())
@@ -579,7 +585,12 @@ impl ProjectsScreen {
                 } else {
                     button.primary()
                 })
-                .child(kit::info("metadata-info", None, hint.into()));
+                .child(guide::info(
+                    bardo,
+                    "metadata-info",
+                    hint.into(),
+                    guide::refs::UPLOADING_METADATA,
+                ));
         }
         if !view.exportable().is_empty() && !exporting {
             row = row.child(div().text_sm().text_color(look(cx).tokens.text2).child(
@@ -949,6 +960,9 @@ impl ProjectsScreen {
         });
         let mut body: Vec<AnyElement> = include.into_iter().collect();
         let rules = network.metadata_rules();
+        let scroll = Some(&self.publish_scroll);
+        // The tour lights the post's text as one block.
+        let metadata_from = body.len();
 
         if target.metadata.is_some() {
             let draft = self.metadata_draft(cx);
@@ -1045,7 +1059,12 @@ impl ProjectsScreen {
                                 .gap_1()
                                 .items_center()
                                 .child(field_label(tr(bardo, Text::MetadataPreview)))
-                                .child(kit::info("metadata-preview-info", None, notes.into())),
+                                .child(guide::info(
+                                    bardo,
+                                    "metadata-preview-info",
+                                    notes.into(),
+                                    guide::refs::UPLOADING_METADATA,
+                                )),
                         )
                         .child(kit::well(cx).text_xs().child(SharedString::from(preview)))
                         .into_any_element(),
@@ -1088,11 +1107,25 @@ impl ProjectsScreen {
             let bardo = self.bardo.read(cx);
             body.push(muted(cx, tr(bardo, Text::MetadataNone)));
         }
+        let metadata: Vec<AnyElement> = body.drain(metadata_from..).collect();
+        body.push(
+            kit::anchor_in(
+                TourAnchor::Control(Control::PublishMetadata),
+                v_flex().gap_4().children(metadata),
+                scroll,
+            )
+            .into_any_element(),
+        );
 
         let bardo = self.bardo.read(cx);
         if view.disclosure {
             body.push(
-                kit::notice(Tone::Warning, bardo.disclosure_text(network), cx).into_any_element(),
+                kit::anchor_in(
+                    TourAnchor::Control(Control::PublishDisclosure),
+                    kit::notice(Tone::Warning, bardo.disclosure_text(network), cx),
+                    scroll,
+                )
+                .into_any_element(),
             );
         }
 
@@ -1118,10 +1151,11 @@ impl ProjectsScreen {
                                 tr(bardo, Text::RenderLastOutdated),
                                 cx,
                             ))
-                            .child(kit::info(
+                            .child(guide::info(
+                                bardo,
                                 "export-render-outdated",
-                                None,
                                 tr(bardo, Text::ExportRenderOutdatedHint),
+                                guide::refs::EXPORTING_OUTDATED,
                             ))
                         })
                         .into_any_element(),
@@ -1151,10 +1185,11 @@ impl ProjectsScreen {
                     }
                 })
                 .when(target.last.is_some() && !target.last_current, |row| {
-                    row.child(kit::info(
+                    row.child(guide::info(
+                        bardo,
                         "export-outdated-info",
-                        None,
                         tr(bardo, Text::ExportLastOutdatedHint),
+                        guide::refs::EXPORTING_OUTDATED,
                     ))
                 })
                 .into_any_element(),
@@ -1204,8 +1239,22 @@ impl ProjectsScreen {
                 .children(last)
                 .into_any_element(),
         );
-        body.extend(self.upload_section(cx));
-        body.push(self.post_section(view, target, cx));
+        body.extend(self.upload_section(cx).map(|upload| {
+            kit::anchor_in(
+                TourAnchor::Control(Control::PublishUpload),
+                upload,
+                Some(&self.publish_scroll),
+            )
+            .into_any_element()
+        }));
+        body.push(
+            kit::anchor_in(
+                TourAnchor::Control(Control::PublishPost),
+                self.post_section(view, target, cx),
+                Some(&self.publish_scroll),
+            )
+            .into_any_element(),
+        );
 
         let bardo = self.bardo.read(cx);
         let title = h_flex()
@@ -1333,10 +1382,11 @@ impl ProjectsScreen {
             .gap_1()
             .items_center()
             .child(field_label(tr(bardo, Text::PublicationTitle)))
-            .child(kit::info(
+            .child(guide::info(
+                bardo,
                 "post-info",
-                None,
                 tr(bardo, Text::PublicationMarkHint),
+                guide::refs::UPLOADING_POST,
             ));
         let error = self
             .post_error
@@ -1520,10 +1570,11 @@ impl ProjectsScreen {
                                     })),
                             )
                         })
-                        .child(kit::info(
+                        .child(guide::info(
+                            bardo,
                             "post-sync-info",
-                            None,
                             tr(bardo, Text::MetricsSyncHint),
+                            guide::refs::PERFORMANCE_SYNC,
                         )),
                 )
                 .children(metrics::sync_notices(bardo, status, "post-sync", cx))

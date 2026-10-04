@@ -12,7 +12,8 @@ use bardo_app::bardo_domain::{
     ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
 use bardo_app::{
-    AppCredentialsStatus, Bardo, Destination, KeyState, ProviderKeyStatus, SettingsTab, Text,
+    AppCredentialsStatus, Bardo, Control, Destination, KeyState, ProviderKeyStatus, SettingsTab,
+    Text, TourAnchor, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -25,15 +26,15 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, Hsla, MouseButton, SharedString, Subscription, Task,
-    Window, div, px, rgb,
+    AnyElement, App, ClickEvent, Entity, Hsla, MouseButton, ScrollHandle, SharedString,
+    Subscription, Task, Window, div, px, rgb,
 };
 
 use crate::appearance::{self, look};
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Header, ScreenParts};
 use crate::shell::tr;
+use crate::{guide, layout};
 
 /// One theme in a light or dark picker.
 #[derive(Clone)]
@@ -144,6 +145,8 @@ pub struct SettingsScreen {
     /// What the labels and pickers were last set from; other changes to
     /// Bardo leave them, and an open picker, alone.
     labeled: Option<(UiLanguage, UiThemePreference)>,
+    /// The tab's scroll, so the tour brings its parts into view.
+    scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -261,6 +264,7 @@ impl SettingsScreen {
             metrics_error: None,
             appearance_error: None,
             labeled: None,
+            scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -512,8 +516,9 @@ impl SettingsScreen {
     fn render_credentials_card(
         &self,
         status: AppCredentialsStatus,
+        first: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let tokens = look(cx).tokens;
         let network = status.network;
@@ -535,6 +540,18 @@ impl SettingsScreen {
             KeyState::Unreadable => {
                 kit::status(Tone::Danger, tr(bardo, Text::AppCredentialsUnreadable), cx)
             }
+        };
+        // The tour shows the first card's state, and the card itself.
+        let scroll = Some(&self.scroll);
+        let state = if first {
+            kit::anchor_in(
+                TourAnchor::Control(Control::CredentialsState),
+                state,
+                scroll,
+            )
+            .into_any_element()
+        } else {
+            state.into_any_element()
         };
         let field_error = |fields: &[AppCredentialsFieldError]| {
             let error = row.field_errors.iter().find(|e| fields.contains(e))?;
@@ -575,54 +592,53 @@ impl SettingsScreen {
             .error
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
 
-        kit::card(cx)
-            .p_4()
-            .gap_3()
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w(px(240.))
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .font_semibold()
-                                    .child(tr(bardo, Text::AppCredentialsName(network))),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(tokens.text2)
-                                    .child(tr(bardo, Text::AppCredentialsPurpose(network))),
-                            ),
-                    )
-                    .child(state),
-            )
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .items_start()
-                    .gap_3()
-                    .child(field(
-                        Text::ClientId(network),
-                        &row.client_id,
-                        CLIENT_ID_ERRORS,
-                    ))
-                    .child(field(
-                        Text::ClientSecret(network),
-                        &row.client_secret,
-                        CLIENT_SECRET_ERRORS,
-                    )),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(save)
-                    .when(status.state != KeyState::NotSet, |actions| {
+        let card =
+            kit::card(cx)
+                .p_4()
+                .gap_3()
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .justify_between()
+                        .gap_3()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w(px(240.))
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .font_semibold()
+                                        .child(tr(bardo, Text::AppCredentialsName(network))),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(tokens.text2)
+                                        .child(tr(bardo, Text::AppCredentialsPurpose(network))),
+                                ),
+                        )
+                        .child(state),
+                )
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .items_start()
+                        .gap_3()
+                        .child(field(
+                            Text::ClientId(network),
+                            &row.client_id,
+                            CLIENT_ID_ERRORS,
+                        ))
+                        .child(field(
+                            Text::ClientSecret(network),
+                            &row.client_secret,
+                            CLIENT_SECRET_ERRORS,
+                        )),
+                )
+                .child(h_flex().gap_2().child(save).when(
+                    status.state != KeyState::NotSet,
+                    |actions| {
                         actions.child(
                             Button::new(("remove-credentials", network as usize))
                                 .ghost()
@@ -631,27 +647,40 @@ impl SettingsScreen {
                                     this.remove_credentials(network, cx)
                                 })),
                         )
-                    }),
-            )
-            .children(error)
+                    },
+                ))
+                .children(error);
+        if first {
+            kit::anchor_in(TourAnchor::Control(Control::CredentialsCard), card, scroll)
+                .into_any_element()
+        } else {
+            card.into_any_element()
+        }
     }
 
     fn render_networks(&self, cx: &mut Context<Self>) -> AnyElement {
         let statuses = self.bardo.read(cx).app_credentials();
         let cards: Vec<_> = statuses
             .into_iter()
-            .map(|status| self.render_credentials_card(status, cx).into_any_element())
+            .enumerate()
+            .map(|(index, status)| self.render_credentials_card(status, index == 0, cx))
             .collect();
         let bardo = self.bardo.read(cx);
         v_flex()
             .gap_3()
-            .child(
-                kit::section_heading(tr(bardo, Text::AppCredentialsTitle)).child(kit::info(
-                    "app-credentials-info",
-                    Some(tr(bardo, Text::AppCredentialsInfo)),
-                    tr(bardo, Text::AppCredentialsHint),
-                )),
-            )
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::CredentialsWhy),
+                kit::section_heading(tr(bardo, Text::AppCredentialsTitle)).child(
+                    guide::labeled_info(
+                        bardo,
+                        "app-credentials-info",
+                        Some(tr(bardo, Text::AppCredentialsInfo)),
+                        tr(bardo, Text::AppCredentialsHint),
+                        guide::refs::CREDENTIALS_KEPT,
+                    ),
+                ),
+                Some(&self.scroll),
+            ))
             .children(cards)
             .into_any_element()
     }
@@ -1314,9 +1343,12 @@ impl Render for SettingsScreen {
                 }
             }));
 
-        let mut parts = ScreenParts::new(Header::place(bardo, Destination::Settings));
+        let mut header = Header::place(bardo, Destination::Settings);
+        header.info = guide::place_info(bardo, TourPlace::Settings(self.tab), None, cx);
+        let mut parts = ScreenParts::new(header);
         parts.toolbar = Some(tabs.into_any_element());
         parts.content = vec![body];
+        parts.scroll = Some(self.scroll.clone());
         layout::screen(parts, cx)
     }
 }

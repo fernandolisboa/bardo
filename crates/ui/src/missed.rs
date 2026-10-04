@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use bardo_app::bardo_domain::{JobKind, JobState, PublicationId};
-use bardo_app::{Bardo, MissedPost, MissedPostError, Text};
+use bardo_app::{Bardo, Control, MissedPost, MissedPostError, Side, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
@@ -18,8 +18,10 @@ use gpui_kit::{
 };
 
 use crate::appearance::look;
+use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
+use crate::tour::Anchored as _;
 
 /// A missed post was sent, rescheduled or cancelled: what screens show of
 /// it changed.
@@ -129,7 +131,17 @@ impl MissedPosts {
         self.shown().next().is_some()
     }
 
-    fn decide_later(&mut self, cx: &mut Context<Self>) {
+    /// Shows the posts put off with "Decide later" again: the list's tour
+    /// runs over it.
+    pub fn reopen(&mut self, cx: &mut Context<Self>) {
+        if !self.later.is_empty() {
+            self.later.clear();
+            cx.notify();
+        }
+    }
+
+    /// Puts every post off for this session; the list closes.
+    pub fn decide_later(&mut self, cx: &mut Context<Self>) {
         self.later
             .extend(self.posts.iter().map(|post| post.publication));
         self.edit = None;
@@ -303,11 +315,20 @@ impl MissedPosts {
                     );
             }
             _ => {
+                // The tour points at the first post's buttons.
+                let tagged = |anchor: TourAnchor, button: Button| {
+                    if index == 0 {
+                        kit::anchor(anchor, button).into_any_element()
+                    } else {
+                        button.into_any_element()
+                    }
+                };
                 row = row.child(
                     h_flex()
                         .gap_2()
                         .flex_wrap()
-                        .child(
+                        .child(tagged(
+                            TourAnchor::Control(Control::MissedSend),
                             Button::new(button_id("send"))
                                 .small()
                                 .primary()
@@ -315,8 +336,9 @@ impl MissedPosts {
                                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                     this.send_now(id, cx);
                                 })),
-                        )
-                        .child(
+                        ))
+                        .child(tagged(
+                            TourAnchor::Control(Control::MissedNewTime),
                             Button::new(button_id("new-time"))
                                 .small()
                                 .outline()
@@ -324,8 +346,9 @@ impl MissedPosts {
                                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                     this.open_edit(Edit::NewTime(id), window, cx);
                                 })),
-                        )
-                        .child(
+                        ))
+                        .child(tagged(
+                            TourAnchor::Control(Control::MissedCancel),
                             Button::new(button_id("cancel"))
                                 .small()
                                 .outline()
@@ -333,7 +356,7 @@ impl MissedPosts {
                                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                     this.open_edit(Edit::Cancel(id), window, cx);
                                 })),
-                        ),
+                        )),
                 );
             }
         }
@@ -368,6 +391,7 @@ impl Render for MissedPosts {
         let bardo = self.bardo.read(cx);
         let tokens = &look(cx).tokens;
         let card = kit::card(cx)
+            .relative()
             .w(px(560.))
             .max_w_full()
             .max_h_full()
@@ -375,7 +399,15 @@ impl Render for MissedPosts {
             .gap_3()
             .border_color(tokens.accent_edge)
             .shadow_lg()
-            .child(kit::title(tr(bardo, Text::MissedTitle)))
+            .tour_anchor(TourAnchor::Control(Control::MissedList), Side::Right, None)
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .justify_between()
+                    .child(kit::title(tr(bardo, Text::MissedTitle)))
+                    .children(guide::missed_posts_tour(bardo, cx)),
+            )
             .child(
                 div()
                     .text_sm()
@@ -405,7 +437,8 @@ impl Render for MissedPosts {
                             .text_color(tokens.text2)
                             .child(tr(bardo, Text::MissedLaterHint)),
                     )
-                    .child(
+                    .child(kit::anchor(
+                        TourAnchor::Control(Control::MissedLater),
                         Button::new("missed-later")
                             .small()
                             .outline()
@@ -413,7 +446,7 @@ impl Render for MissedPosts {
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.decide_later(cx);
                             })),
-                    ),
+                    )),
             );
         // Over the whole window, which takes no clicks while it is up.
         div()

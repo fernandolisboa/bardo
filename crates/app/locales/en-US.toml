@@ -1957,6 +1957,7 @@ skip = "Skip tour"
 new = "New"
 learn_more = "Learn more"
 this_screen = "Tour this screen"
+this_list = "Tour this list"
 this_stage = "Tour this stage"
 
 [tour.offer]

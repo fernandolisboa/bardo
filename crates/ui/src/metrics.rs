@@ -823,7 +823,7 @@ fn upload_state(
                 bardo,
                 ElementId::Name(format!("{id}-upload").into()),
                 hint,
-                guide::refs::PERFORMANCE_POSTS,
+                guide::refs::UPLOAD_STATES,
             )
         }))
         .when(done, |row| {
