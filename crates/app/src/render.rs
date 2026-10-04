@@ -25,7 +25,8 @@ use bardo_domain::{
 };
 use bardo_media::MediaEngine;
 use bardo_media::ffmpeg::{
-    Encoders, FrameSize, LoudnessTarget, MediaError, Monitor, Output, RenderPlan, VideoEncoder,
+    ClipSource, Encoders, FrameSize, LoudnessTarget, MediaError, Monitor, Output, RenderPlan,
+    VideoEncoder,
 };
 use serde::{Deserialize, Serialize};
 
@@ -263,9 +264,25 @@ fn measured(loudness: bardo_media::ffmpeg::Loudness) -> MeasuredLoudness {
 }
 
 /// A stable fingerprint of a plan (FNV-1a over its JSON): equal plans,
-/// equal fingerprints, on any machine and Rust version.
+/// equal fingerprints, on any machine and Rust version. Its media go by
+/// their names in the project folder, so a data folder that moves (a
+/// backup restored, another Windows account) keeps its renders current.
 fn fingerprint(plan: &RenderPlan) -> String {
-    let bytes = serde_json::to_vec(plan).expect("a render plan serializes");
+    let name = |path: &mut PathBuf| {
+        if let Some(name) = path.file_name() {
+            *path = PathBuf::from(name);
+        }
+    };
+    let mut plan = plan.clone();
+    for clip in &mut plan.video {
+        if let ClipSource::Video(path) | ClipSource::Still(path) = &mut clip.source {
+            name(path);
+        }
+    }
+    for clip in plan.audio.iter_mut().flat_map(|track| &mut track.clips) {
+        name(&mut clip.source);
+    }
+    let bytes = serde_json::to_vec(&plan).expect("a render plan serializes");
     let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     });
@@ -1282,6 +1299,41 @@ pub(crate) mod tests {
             ..plan.clone()
         };
         assert_ne!(fingerprint(&plan), fingerprint(&other));
+    }
+
+    #[test]
+    fn a_moved_project_folder_keeps_its_fingerprint() {
+        let plan = |dir: &str, image: &str| RenderPlan {
+            video: vec![bardo_media::ffmpeg::VideoClip {
+                source: ClipSource::Still(PathBuf::from(dir).join(image)),
+                start: Duration::ZERO,
+                duration: Duration::from_secs(2),
+                framing: bardo_media::ffmpeg::Framing::Fit,
+            }],
+            audio: vec![bardo_media::ffmpeg::AudioTrack {
+                clips: vec![bardo_media::ffmpeg::AudioClip {
+                    source: PathBuf::from(dir).join("narration-1.mp3"),
+                    start: Duration::ZERO,
+                    duration: Duration::from_secs(2),
+                    at: Duration::ZERO,
+                    gain_db: 0.0,
+                    fade_in: Duration::ZERO,
+                    fade_out: Duration::ZERO,
+                    skipped: Duration::ZERO,
+                }],
+                gain_db: 0.0,
+                duck: None,
+            }],
+            captions: None,
+        };
+        assert_eq!(
+            fingerprint(&plan("/home/a/Bardo/projects/p", "scene-1.png")),
+            fingerprint(&plan("/mnt/backup/Bardo/projects/p", "scene-1.png")),
+        );
+        assert_ne!(
+            fingerprint(&plan("/home/a/Bardo/projects/p", "scene-1.png")),
+            fingerprint(&plan("/home/a/Bardo/projects/p", "scene-2.png")),
+        );
     }
 
     #[test]
