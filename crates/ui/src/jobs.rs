@@ -194,6 +194,17 @@ impl JobsPanel {
                     ))
                     .into_any_element(),
             ),
+            // A job that waits for its time (a scheduled post) says when.
+            (JobState::Queued, None) => job.run_at().map(|at| {
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(SharedString::from(bardo.text_with(
+                        Text::JobWaitsUntil,
+                        &[("when", &bardo.publish_time_text(at))],
+                    )))
+                    .into_any_element()
+            }),
             _ => None,
         };
 

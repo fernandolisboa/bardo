@@ -195,6 +195,7 @@ retry_scheduled = "A tentativa {attempt} de {max} falhou. Tentando de novo autom
 failed_after = "Parou depois de {attempts} tentativas."
 cancel = "Cancelar"
 retry = "Tentar de novo"
+waits_until = "Aguarda até {when}"
 
 [job.kind]
 render = "Render final"
@@ -234,6 +235,7 @@ provider_unavailable = "Não foi possível falar com o provedor, ou ele está co
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
 declined = "O provedor recusou este pedido pelas regras de segurança dele. Mude o que foi pedido (o prompt, o canal ou o nicho) e tente de novo."
 media = "O ffmpeg não conseguiu ler ou gravar um arquivo de mídia. Confira o arquivo indicado e tente de novo."
+missed = "O horário do post agendado passou sem ele, então nada foi postado. Escolha o que fazer na etapa Publicação do projeto."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -1717,6 +1719,12 @@ over_limit_recheck_hint = "O Instagram deixa esta conta publicar {total} posts p
 over_limit_soon_hint = "A conta atingiu o limite de publicação do Instagram. O Reel fica na fila e o Bardo tenta de novo {when}."
 issue = "O Instagram publicou o Reel com um aviso: {issue}"
 specs_title = "Requisitos do Reel"
+due_at = "Posta {when}"
+due_hint = "O Bardo posta neste horário por conta própria, então o Bardo precisa estar aberto e o computador ligado. O envio começa até 23 horas antes. Se o Bardo estiver fechado nesse horário, nada é postado e o Bardo pergunta o que fazer quando abrir."
+missed_at = "Era para {when}"
+missed_hint = "O Bardo não estava aberto no horário, então nada foi postado. Poste agora, dê um novo horário ou cancele."
+reel_schedule_hint = "O {network} não aceita horário de publicação de apps, então o próprio Bardo posta neste horário: deixe o Bardo aberto e o computador ligado. Se estiver fechado, nada é postado e o Bardo pergunta o que fazer quando abrir."
+reel_start_scheduled = "Agendar no Bardo"
 
 [upload.field]
 file = "Arquivo"
@@ -1739,6 +1747,8 @@ stopped = "Envio parado"
 failed = "Envio falhou"
 scheduled = "Agendado"
 over_limit = "Acima do limite de publicação"
+due = "Agendado no Bardo"
+missed = "Perdeu o horário"
 
 [upload.failure]
 quota = "A cota diária de envios do seu projeto do Google no YouTube acabou. Ela renova à meia-noite do horário do Pacífico; tente de novo depois."
@@ -1808,10 +1818,29 @@ pm = "PM"
 with_zone = "{when} ({zone})"
 zone = "{name}, {offset}"
 
+[missed]
+title = "Posts agendados que não saíram"
+hint = "O Bardo estava fechado ou o computador desligado no horário deles, então nada foi postado. Escolha o que fazer com cada um."
+due = "{network} · {handle} · era para {when}"
+send_now = "Postar agora"
+new_time = "Novo horário"
+save = "Salvar horário"
+cancel = "Cancelar post"
+cancel_confirm = "Cancelar este post? Nada vai para o {network}. Para postar depois, revise o envio de novo."
+cancel_yes = "Cancelar post"
+keep = "Manter"
+later = "Decidir depois"
+later_hint = "Cada um também espera na etapa Publicação do projeto."
+sent = "Postando agora."
+rescheduled = "Novo horário salvo."
+cancelled = "Post cancelado."
+not_missed = "Este post não espera mais por você: foi postado, reagendado ou cancelado."
+not_updated = "Não foi possível atualizar o post. Tente de novo."
+
 [schedule.problem]
 date = "Digite a data como DD/MM/AAAA."
 time = "Digite a hora como 18:30."
-past = "Esse horário já passou. Escolha um mais tarde: o YouTube o publicaria na hora."
+past = "Esse horário já passou. Escolha um mais tarde."
 
 [weekday]
 1 = "seg."

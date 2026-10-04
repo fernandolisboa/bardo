@@ -48,6 +48,7 @@ mod connection;
 mod cost;
 mod cut_suggestion;
 mod decision;
+mod due;
 mod edit;
 mod files;
 mod framing;
@@ -120,6 +121,7 @@ pub use decision::{
     Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,
     Questions, ScoreAnswer, YesNoAnswer,
 };
+pub use due::{DUE_GRACE, DueStep, PREPARE_AHEAD, UNPUBLISHED_LIFETIME, due_step, prepare_at};
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
 pub use files::{ProjectFileError, ProjectFiles};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};

@@ -33,6 +33,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0029_scheduled_upload.sql"),
     include_str!("../migrations/0030_owner_metrics.sql"),
     include_str!("../migrations/0031_reel_uploads.sql"),
+    include_str!("../migrations/0032_in_app_schedule.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
@@ -400,6 +401,39 @@ mod tests {
         };
         assert!(scheduled("NULL").is_err(), "a schedule needs its time");
         scheduled("5").unwrap();
+    }
+
+    #[test]
+    fn a_job_waiting_for_a_limit_keeps_its_time_apart_from_retries() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..31] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 31).unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO job (id, profile_id, kind, payload, state, progress, attempts,
+                              failure_kind, failure_detail, retry_at)
+             VALUES ('held', 'p', 'upload', '{}', 'queued', 900, 0, NULL, NULL, 7),
+                    ('backoff', 'p', 'upload', '{}', 'queued', 0, 1, 'provider_unavailable',
+                     'down', 8),
+                    ('ready', 'p', 'upload', '{}', 'queued', 0, 0, NULL, NULL, NULL);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let times = |id: &str| -> (Option<i64>, Option<i64>) {
+            conn.query_row(
+                "SELECT retry_at, run_at FROM job WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(times("held"), (None, Some(7)), "a wait is not a backoff");
+        assert_eq!(times("backoff"), (Some(8), None));
+        assert_eq!(times("ready"), (None, None));
     }
 
     #[test]

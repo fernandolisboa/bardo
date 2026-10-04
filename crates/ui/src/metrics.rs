@@ -565,6 +565,8 @@ pub fn upload_label(bardo: &Bardo, state: &UploadState) -> SharedString {
         UploadState::StillProcessing => tr(bardo, Text::UploadStateStillProcessing),
         UploadState::OverLimit { .. } => tr(bardo, Text::UploadStateOverLimit),
         UploadState::Scheduled(_) => tr(bardo, Text::UploadStateScheduled),
+        UploadState::Due(_) => tr(bardo, Text::UploadStateDue),
+        UploadState::Missed(_) => tr(bardo, Text::UploadStateMissed),
         UploadState::Published => tr(bardo, Text::UploadStatePublished),
         UploadState::Restricted => tr(bardo, Text::UploadStateRestricted),
         UploadState::Stopped => tr(bardo, Text::UploadStateStopped),
@@ -625,6 +627,8 @@ fn upload_state(
             Tone::Info,
             Some(with_network(Text::UploadScheduledHint).into()),
         ),
+        UploadState::Due(_) => (Tone::Info, Some(tr(bardo, Text::UploadDueHint))),
+        UploadState::Missed(_) => (Tone::Warning, Some(tr(bardo, Text::UploadMissedHint))),
         UploadState::Published if missing => {
             (Tone::Warning, Some(tr(bardo, Text::PublicationMissingHint)))
         }
@@ -661,6 +665,8 @@ fn upload_state(
         });
     let when = match state {
         UploadState::Scheduled(at) => Some((Text::UploadScheduledAt, *at)),
+        UploadState::Due(at) => Some((Text::UploadDueAt, *at)),
+        UploadState::Missed(at) => Some((Text::UploadMissedAt, *at)),
         UploadState::OverLimit { until, frees, .. } => Some((
             if *frees {
                 Text::UploadOverLimitAt

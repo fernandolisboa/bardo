@@ -194,6 +194,10 @@ pub struct Upload {
     /// The post's id at the network once Bardo published it, when its
     /// address does not carry it (Instagram's media id).
     pub network_id: Option<String>,
+    /// When the run that publishes it at its due time took it, for a
+    /// network Bardo publishes on at a time (`crate::due`). `None` until
+    /// then, and for every other upload.
+    pub claimed_at: Option<SystemTime>,
 }
 
 impl Upload {
@@ -206,6 +210,7 @@ impl Upload {
             job,
             issue: None,
             network_id: None,
+            claimed_at: None,
         }
     }
 
@@ -323,6 +328,69 @@ impl Upload {
         match self.status {
             UploadStatus::Scheduled => Ok(()),
             _ => Err(self.invalid(action)),
+        }
+    }
+
+    /// The run due at its time takes the scheduled upload, once: it is
+    /// still to publish (one that failed on the way is tried again, one
+    /// missed waits for the user), due by `now`, and not taken yet. Taken
+    /// already, it stays as it was (the same run resumes). The repository
+    /// applies the same rule in one statement
+    /// (`PublicationRepository::claim_upload`).
+    pub fn claim(&mut self, now: SystemTime) -> Result<(), InvalidUploadTransition> {
+        let due = self.publish_at.filter(|due| *due <= now);
+        let open = match &self.status {
+            UploadStatus::Queued | UploadStatus::Uploading | UploadStatus::Processing => true,
+            UploadStatus::Failed(failure) => *failure != UploadFailure::ScheduleMissed,
+            _ => false,
+        };
+        if !open || due.is_none() {
+            return Err(self.invalid("claim"));
+        }
+        self.claimed_at.get_or_insert(now);
+        Ok(())
+    }
+
+    /// Its due time passed without it (`crate::due`): it waits for the user
+    /// to send it now, reschedule or cancel it. One that failed on the way
+    /// and is tried again after its time is missed too.
+    pub fn miss(&mut self) -> Result<(), InvalidUploadTransition> {
+        if self.publish_at.is_none() || self.status.is_on_network() || self.is_missed() {
+            return Err(self.invalid("miss"));
+        }
+        self.status = UploadStatus::Failed(UploadFailure::ScheduleMissed);
+        Ok(())
+    }
+
+    /// The user sends a missed upload now, without a due time.
+    pub fn send_now(&mut self) -> Result<(), InvalidUploadTransition> {
+        self.require_missed("send now")?;
+        self.status = UploadStatus::Queued;
+        self.publish_at = None;
+        self.claimed_at = None;
+        Ok(())
+    }
+
+    /// The user gives a missed upload a new due time.
+    pub fn due_again(&mut self, due: SystemTime) -> Result<(), InvalidUploadTransition> {
+        self.require_missed("reschedule")?;
+        self.status = UploadStatus::Queued;
+        self.publish_at = Some(due);
+        self.claimed_at = None;
+        Ok(())
+    }
+
+    /// Whether its due time passed without it and it waits for the user.
+    pub fn is_missed(&self) -> bool {
+        self.publish_at.is_some()
+            && self.status == UploadStatus::Failed(UploadFailure::ScheduleMissed)
+    }
+
+    fn require_missed(&self, action: &'static str) -> Result<(), InvalidUploadTransition> {
+        if self.is_missed() {
+            Ok(())
+        } else {
+            Err(self.invalid(action))
         }
     }
 
@@ -801,6 +869,74 @@ mod tests {
         u.start().unwrap();
         u.sent().unwrap();
         u
+    }
+
+    #[test]
+    fn a_due_upload_is_claimed_once_and_only_from_its_due_time() {
+        let mut u = Upload::scheduled(at(100), JobId::new());
+        assert!(u.claim(at(99)).is_err(), "not due yet");
+        assert_eq!(u.claimed_at, None);
+        u.claim(at(100)).unwrap();
+        assert_eq!(u.claimed_at, Some(at(100)));
+        u.start().unwrap();
+        u.claim(at(130)).unwrap();
+        assert_eq!(u.claimed_at, Some(at(100)), "the same run resumes");
+        assert!(
+            upload(Visibility::Public).claim(at(100)).is_err(),
+            "nothing to claim without a due time"
+        );
+        let mut done = scheduled(at(100));
+        done.processed(Visibility::Public, None).unwrap();
+        assert!(done.claim(at(200)).is_err(), "published");
+        // A run that failed on the way is retried and claims it; a missed
+        // one waits for the user.
+        let mut failed = Upload::scheduled(at(100), JobId::new());
+        failed.fail(UploadFailure::ReconnectNeeded).unwrap();
+        failed.claim(at(110)).unwrap();
+        failed.miss().unwrap();
+        let mut missed = failed.clone();
+        missed.claimed_at = None;
+        assert!(missed.claim(at(120)).is_err(), "missed");
+    }
+
+    #[test]
+    fn a_missed_upload_waits_until_sent_now_or_rescheduled() {
+        let mut u = Upload::scheduled(at(100), JobId::new());
+        u.start().unwrap();
+        u.claim(at(100)).unwrap();
+        u.miss().unwrap();
+        assert!(u.is_missed());
+        assert_eq!(u.status.failure(), Some(&UploadFailure::ScheduleMissed));
+        assert_eq!(u.publish_at, Some(at(100)), "it shows when it was due");
+        assert!(u.miss().is_err(), "missed already");
+
+        let mut now = u.clone();
+        now.send_now().unwrap();
+        assert_eq!(now.status, UploadStatus::Queued);
+        assert_eq!(now.publish_at, None);
+        assert_eq!(now.claimed_at, None);
+        assert!(now.send_now().is_err(), "only a missed one");
+
+        u.due_again(at(500)).unwrap();
+        assert_eq!(u.status, UploadStatus::Queued);
+        assert_eq!(u.publish_at, Some(at(500)));
+        assert_eq!(u.claimed_at, None, "a new run claims it");
+        assert!(u.due_again(at(600)).is_err());
+    }
+
+    #[test]
+    fn only_an_upload_still_to_publish_with_a_due_time_is_missed() {
+        assert!(upload(Visibility::Public).miss().is_err(), "no due time");
+        let mut on_network = scheduled(at(100));
+        on_network
+            .processed(Visibility::Private, Some(at(100)))
+            .unwrap();
+        assert!(on_network.miss().is_err(), "scheduled on the network");
+        let mut failed = Upload::scheduled(at(100), JobId::new());
+        failed.fail(UploadFailure::ReconnectNeeded).unwrap();
+        assert!(!failed.is_missed());
+        failed.miss().unwrap();
+        assert!(failed.is_missed(), "retried after its time");
     }
 
     #[test]

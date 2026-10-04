@@ -195,6 +195,7 @@ retry_scheduled = "Attempt {attempt} of {max} failed. Retrying automatically."
 failed_after = "Stopped after {attempts} attempts."
 cancel = "Cancel"
 retry = "Retry"
+waits_until = "Waits until {when}"
 
 [job.kind]
 render = "Final render"
@@ -234,6 +235,7 @@ provider_unavailable = "Could not reach the provider, or it is having problems. 
 unexpected_answer = "The provider gave an answer Bardo does not understand."
 declined = "The provider declined this request under its safety rules. Change what was asked (the prompt, the channel or the niche) and try again."
 media = "ffmpeg could not read or write a media file. Check the file named, then retry."
+missed = "The scheduled post's time passed without it, so nothing was posted. Choose what to do on the project's Publish stage."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -1717,6 +1719,12 @@ over_limit_recheck_hint = "Instagram lets this account publish {total} posts thr
 over_limit_soon_hint = "The account reached Instagram's publishing limit. The Reel stays queued and Bardo tries again {when}."
 issue = "Instagram published the Reel with a warning: {issue}"
 specs_title = "Reel specs"
+due_at = "Posts {when}"
+due_hint = "Bardo posts it at this time itself, so Bardo must be open then and the computer on. The upload starts up to 23 hours before. If Bardo is closed at that time, nothing is posted and Bardo asks you what to do when it opens."
+missed_at = "Was due {when}"
+missed_hint = "Bardo was not open at its time, so nothing was posted. Post it now, give it a new time or cancel it."
+reel_schedule_hint = "{network} takes no publish time from apps, so Bardo posts it at this time itself: keep Bardo open then and the computer on. If it is closed, nothing is posted and Bardo asks you what to do when it opens."
+reel_start_scheduled = "Schedule in Bardo"
 
 [upload.field]
 file = "File"
@@ -1739,6 +1747,8 @@ stopped = "Upload stopped"
 failed = "Upload failed"
 scheduled = "Scheduled"
 over_limit = "Over the publishing limit"
+due = "Scheduled in Bardo"
+missed = "Missed its time"
 
 [upload.failure]
 quota = "YouTube's daily upload quota for your Google project is used up. It resets at midnight Pacific time; retry then."
@@ -1808,10 +1818,29 @@ pm = "PM"
 with_zone = "{when} ({zone})"
 zone = "{name}, {offset}"
 
+[missed]
+title = "Scheduled posts that didn't go out"
+hint = "Bardo was closed or the computer was off at their time, so nothing was posted. Choose what to do with each one."
+due = "{network} · {handle} · was due {when}"
+send_now = "Post now"
+new_time = "New time"
+save = "Save time"
+cancel = "Cancel post"
+cancel_confirm = "Cancel this post? Nothing goes to {network}. To post it later, review the upload again."
+cancel_yes = "Cancel post"
+keep = "Keep"
+later = "Decide later"
+later_hint = "Each one also waits on its project's Publish stage."
+sent = "Posting now."
+rescheduled = "New time saved."
+cancelled = "Post cancelled."
+not_missed = "This post no longer waits for you: it was posted, rescheduled or cancelled."
+not_updated = "Could not update the post. Try again."
+
 [schedule.problem]
 date = "Type the date as MM/DD/YYYY."
 time = "Type the time as 18:30 or 6:30 PM."
-past = "That time has already passed. Pick a later one: YouTube would publish it right away."
+past = "That time has already passed. Pick a later one."
 
 [weekday]
 1 = "Mon"

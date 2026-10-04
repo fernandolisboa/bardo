@@ -404,6 +404,22 @@ impl Publication {
         }
     }
 
+    /// When Bardo publishes it, on a network that takes no publish time
+    /// (`crate::due`): the in-app schedule's due time. `None` for every
+    /// other publication, a native schedule's publish time included.
+    pub fn due(&self) -> Option<SystemTime> {
+        if !self.network.schedules_in_app() {
+            return None;
+        }
+        self.upload()?.publish_at
+    }
+
+    /// Whether its due time passed without it: it waits for the user to
+    /// send it now, reschedule or cancel it.
+    pub fn is_missed(&self) -> bool {
+        self.due().is_some() && self.upload().is_some_and(Upload::is_missed)
+    }
+
     /// Whether the post waits on the network for its publish time.
     pub fn is_scheduled(&self) -> bool {
         self.upload()
@@ -930,6 +946,16 @@ pub trait PublicationRepository: Send + Sync {
         from: SystemTime,
     ) -> Result<bool, RepositoryError>;
 
+    /// Claims a scheduled upload for the run of its job at `now`, in one
+    /// step, so no two runs publish it: only the row of the same
+    /// publication and upload job, still to publish, due by `now` and not
+    /// claimed yet, takes the claim. Returns whether this call took it.
+    fn claim_upload(
+        &self,
+        publication: &Publication,
+        now: SystemTime,
+    ) -> Result<bool, RepositoryError>;
+
     /// Removes a publication and its snapshots.
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError>;
 
@@ -1001,6 +1027,14 @@ impl<T: PublicationRepository + ?Sized> PublicationRepository for Arc<T> {
         from: SystemTime,
     ) -> Result<bool, RepositoryError> {
         (**self).save_schedule(publication, from)
+    }
+
+    fn claim_upload(
+        &self,
+        publication: &Publication,
+        now: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        (**self).claim_upload(publication, now)
     }
 
     fn remove_publication(&self, id: PublicationId) -> Result<(), RepositoryError> {
@@ -1459,6 +1493,31 @@ mod tests {
         private.processed(Visibility::Private, None, at(5)).unwrap();
         assert_eq!(private.upload().unwrap().status, UploadStatus::Published);
         assert!(!private.has_public_metrics());
+    }
+
+    #[test]
+    fn only_a_network_without_its_own_schedule_has_a_due_time() {
+        let mut reel = publication(Network::InstagramReels, None);
+        reel.link = None;
+        reel.kind = PublicationKind::Uploaded(Upload::scheduled(at(1000), crate::JobId::new()));
+        assert_eq!(reel.due(), Some(at(1000)));
+        assert!(!reel.is_missed());
+        reel.upload_mut().unwrap().miss().unwrap();
+        assert!(reel.is_missed());
+
+        // YouTube publishes at its time by itself; its time passing before
+        // the upload started is a failure, not a missed due time.
+        let mut video = publication(Network::YouTube, None);
+        video.link = None;
+        video.kind = PublicationKind::Uploaded(Upload::scheduled(at(1000), crate::JobId::new()));
+        assert_eq!(video.due(), None);
+        video
+            .upload_mut()
+            .unwrap()
+            .fail(crate::UploadFailure::ScheduleMissed)
+            .unwrap();
+        assert!(!video.is_missed());
+        assert_eq!(publication(Network::InstagramReels, None).due(), None);
     }
 
     /// A YouTube upload scheduled for `at(1000)`, processed and waiting.

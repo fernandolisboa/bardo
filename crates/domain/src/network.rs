@@ -65,6 +65,14 @@ impl Network {
         self == Network::YouTube
     }
 
+    /// Whether Bardo publishes a scheduled upload itself, at its due time,
+    /// while the app is open (the in-app scheduler, ADR-0006): the network
+    /// takes no publish time, and Bardo makes the post (Instagram's
+    /// `media_publish`).
+    pub fn schedules_in_app(self) -> bool {
+        self == Network::InstagramReels
+    }
+
     /// Whether an upload declares whether the video is made for kids
     /// (YouTube's `selfDeclaredMadeForKids`).
     pub fn asks_made_for_kids(self) -> bool {

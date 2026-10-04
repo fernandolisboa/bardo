@@ -32,19 +32,26 @@
 //! Over the limit the job waits queued, holding no place in the queue,
 //! until the oldest post Bardo published in the window leaves it. A
 //! container Instagram dropped (24 hours unpublished) goes again.
+//!
+//! A Reel scheduled in its review (#82) has a due time instead: Instagram
+//! takes no publish time, so the job publishes it at that time with Bardo
+//! open (`crate::scheduler`, `bardo_domain::due_step`). It sends and
+//! processes the file ahead, no more than Instagram keeps a container,
+//! claims the publication once due and publishes it; a post whose due time
+//! passed without it waits for the user.
 
 use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, LIMIT_RECHECK, MetadataProblem,
-    Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post, Progress,
-    ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile,
-    ReelSpecProblem, Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText,
-    SignInFailureKind, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
-    UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility,
-    check_publish_time, check_reel, mp4_layout,
+    DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, LIMIT_RECHECK,
+    MetadataProblem, Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post,
+    Progress, ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository,
+    ReelFile, ReelSpecProblem, Render, RenderRepository, RepositoryError, ScheduleProblem,
+    SecretText, SignInFailureKind, Upload, UploadError, UploadErrorKind, UploadFailure,
+    UploadOutcome, UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload, VideoUploader,
+    Visibility, check_publish_time, check_reel, due_step, mp4_layout, prepare_at,
 };
 use serde::{Deserialize, Serialize};
 
@@ -252,8 +259,7 @@ pub enum UploadReviewError {
     /// The publish time cannot be used (already past).
     #[error("the publish time cannot be used: {0}")]
     Schedule(ScheduleProblem),
-    /// The network takes no publish time from Bardo (Instagram waits for
-    /// the in-app scheduler).
+    /// Neither the network nor Bardo schedules its posts.
     #[error("the network takes no publish time")]
     NoSchedule,
     /// The cover frame is past the video's end.
@@ -318,6 +324,13 @@ pub enum UploadState {
     /// On the network, private until this time, when the network makes it
     /// public.
     Scheduled(SystemTime),
+    /// Scheduled in Bardo: it publishes the post at this time (its due
+    /// time), with the app open. The upload waits until it may start, or
+    /// waits for that time once processed.
+    Due(SystemTime),
+    /// Its due time passed without it (Bardo was closed): the user sends it
+    /// now, gives it a new time or cancels it.
+    Missed(SystemTime),
     /// The network was still processing the video when Bardo stopped
     /// waiting for it: check again later.
     StillProcessing,
@@ -354,6 +367,7 @@ impl UploadState {
                 | UploadState::Retrying
                 | UploadState::Processing
                 | UploadState::OverLimit { .. }
+                | UploadState::Due(_)
         )
     }
 }
@@ -383,13 +397,7 @@ pub fn upload_state(upload: &Upload, job: Option<&Job>) -> UploadState {
             },
         };
     };
-    // Held for the publishing limit: deferred, so queued with a time and
-    // no failure.
-    let held = job
-        .checkpoint()
-        .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
-        .and_then(|checkpoint| checkpoint.held)
-        .filter(|_| job.retry_at().is_some());
+    let held = held(job);
     match job.state() {
         JobState::Running if *status == UploadStatus::Processing => UploadState::Processing,
         JobState::Running => UploadState::Uploading(job.progress()),
@@ -434,6 +442,31 @@ pub fn upload_state(upload: &Upload, job: Option<&Job>) -> UploadState {
             },
         },
     }
+}
+
+/// Why `job` waits queued for the publishing limit, if it does: deferred,
+/// so queued with a time and no failure, and the hold in its checkpoint.
+fn held(job: &Job) -> Option<Held> {
+    job.checkpoint()
+        .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
+        .and_then(|checkpoint| checkpoint.held)
+        .filter(|_| job.state() == JobState::Queued && job.run_at().is_some())
+}
+
+/// Where a publication Bardo publishes at its due time stands, when that
+/// time decides it: missed, or waiting for it (to start the upload, or to
+/// publish once processed). `None` otherwise.
+fn due_state(publication: &Publication, job: Option<&Job>) -> Option<UploadState> {
+    let due = publication.due()?;
+    if publication.is_missed() {
+        return Some(UploadState::Missed(due));
+    }
+    let job = job?;
+    let waiting = job.state() == JobState::Queued
+        && job.failure().is_none()
+        && job.run_at().is_some()
+        && held(job).is_none();
+    waiting.then_some(UploadState::Due(due))
 }
 
 /// The upload job's payload: the publication it sends, the file and what
@@ -640,6 +673,18 @@ pub(crate) struct UploadHandler {
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) connections: Connections,
     pub(crate) uploaders: Vec<Arc<dyn VideoUploader>>,
+    /// When this session of Bardo opened: a due time that passed before
+    /// it passed while Bardo was closed (`bardo_domain::due_step`).
+    pub(crate) opened_at: SystemTime,
+}
+
+/// Why a job of a scheduled upload stops when its due time passed without
+/// it: not retried, so it waits for the user.
+fn missed() -> JobFailure {
+    JobFailure::new(
+        JobFailureKind::Missed,
+        "the scheduled upload's due time passed without it",
+    )
 }
 
 /// An upload job as the adapter sees it: tokens from the connection, the
@@ -764,6 +809,26 @@ impl UploadHandler {
             .map_err(unexpected)
     }
 
+    /// Claims the scheduled upload for this job's run (`bardo_domain::due`):
+    /// false when another run has it, or it is no longer this job's to
+    /// publish (replaced, cancelled, missed).
+    fn claim(&self, id: PublicationId, job: JobId) -> Result<bool, JobFailure> {
+        let Some(publication) = self.publications.publication(id).map_err(unexpected)? else {
+            return Ok(false);
+        };
+        if publication.upload().is_none_or(|upload| upload.job != job) {
+            return Ok(false);
+        }
+        let claimed = self
+            .publications
+            .claim_upload(&publication, SystemTime::now())
+            .map_err(unexpected)?;
+        if !claimed {
+            tracing::info!("a scheduled upload was not this run's to publish");
+        }
+        Ok(claimed)
+    }
+
     /// Whether the project's render is still the one reviewed, with the
     /// same file: a render made while the upload was stopped rewrote it.
     fn render_unchanged(
@@ -801,6 +866,18 @@ impl UploadHandler {
             tracing::warn!("could not record the upload failure: {}", error.detail);
         }
         failure
+    }
+
+    /// Marks the scheduled upload missed: it waits for the user.
+    fn miss(&self, id: PublicationId, job: JobId, network: Network) -> JobFailure {
+        match self.update(id, job, |p| p.upload_mut().map_or(Ok(()), Upload::miss)) {
+            Ok(()) => tracing::info!(
+                network = network.code(),
+                "a scheduled upload missed its due time"
+            ),
+            Err(error) => tracing::warn!("could not mark the upload missed: {}", error.detail),
+        }
+        missed()
     }
 
     fn send(
@@ -931,6 +1008,20 @@ impl UploadHandler {
         Ok(())
     }
 
+    /// Leaves a processed upload queued until its due time, holding no
+    /// place in the queue, with where it got.
+    fn wait_for_due(
+        cx: &mut JobContext,
+        mut checkpoint: UploadCheckpoint,
+        due: SystemTime,
+    ) -> Result<(), JobFailure> {
+        checkpoint.held = None;
+        cx.save_checkpoint(to_json(&checkpoint), sending_progress(9, 10))
+            .map_err(unexpected)?;
+        cx.defer(due);
+        Ok(())
+    }
+
     /// The network dropped `video` before it was published: the job sends
     /// the file again, from its first byte, right away, at most
     /// [`MAX_RESTARTS`] times. The checkpoint goes first, so a job stopped
@@ -1030,6 +1121,52 @@ impl JobHandler for UploadHandler {
             return Ok(());
         }
         let network: Network = payload.network.parse().map_err(unexpected)?;
+        // A scheduled upload Bardo publishes itself (`bardo_domain::due`):
+        // what its due time allows now. Nothing goes once it is missed.
+        let due = publication.due();
+        let mut claimed = upload.claimed_at.is_some();
+        // Missed after its claim: the cut-short run may have published it,
+        // so the run only asks the network what it has, and sends nothing.
+        let mut check_only = false;
+        if let Some(due) = due {
+            if upload.is_missed() {
+                return Err(missed());
+            }
+            match due_step(due, upload.claimed_at, SystemTime::now(), self.opened_at) {
+                DueStep::Wait(at) => {
+                    cx.defer(at);
+                    return Ok(());
+                }
+                DueStep::Prepare => {}
+                DueStep::Publish => {
+                    if !self.claim(publication_id, job)? {
+                        return Ok(());
+                    }
+                    claimed = true;
+                }
+                DueStep::Missed => {
+                    let sent = cx
+                        .checkpoint()
+                        .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
+                        .is_some_and(|checkpoint| checkpoint.video.is_some());
+                    if upload.claimed_at.is_none() || !sent {
+                        return Err(self.miss(publication_id, job, network));
+                    }
+                    check_only = true;
+                }
+            }
+        }
+        // Once the due time came during the run, the run claims the upload
+        // before it goes on; false when it is not this run's any more.
+        let claim_due = |claimed: &mut bool| -> Result<bool, JobFailure> {
+            match due {
+                Some(due) if !*claimed && SystemTime::now() >= due => {
+                    *claimed = self.claim(publication_id, job)?;
+                    Ok(*claimed)
+                }
+                _ => Ok(true),
+            }
+        };
         let uploader = self
             .uploaders
             .iter()
@@ -1069,6 +1206,9 @@ impl JobHandler for UploadHandler {
             })?;
         }
 
+        if check_only && checkpoint.video.is_none() {
+            return Err(self.miss(publication_id, job, network));
+        }
         if checkpoint.video.is_none() {
             let project: VideoProjectId = id(&payload.project)?;
             if !self.render_unchanged(project, &payload)? {
@@ -1080,8 +1220,9 @@ impl JobHandler for UploadHandler {
             }
             // A new post only goes up within the publishing limit; one on
             // its way finishes, and the limit is read again before it is
-            // published.
-            if live_session(cx, &checkpoint).is_none() {
+            // published. One scheduled for later reads it then.
+            let early = due.is_some_and(|due| SystemTime::now() < due);
+            if live_session(cx, &checkpoint).is_none() && !early {
                 match self.limit_hold(uploader.as_ref(), &account, &payload) {
                     Ok(Some(held)) => return Self::hold(cx, checkpoint, held, payload.size),
                     Ok(None) => {}
@@ -1118,18 +1259,39 @@ impl JobHandler for UploadHandler {
         let link = uploader
             .link(&video)
             .map_err(|error| self.failed(publication_id, job, &error, network))?;
-        self.update(publication_id, job, |p| p.sent(link))?;
+        // Sent by an earlier run of the job, which the user queued again
+        // (a missed upload sent now or rescheduled).
+        self.update(publication_id, job, |p| {
+            if let Some(upload) = p.upload_mut()
+                && upload.status == UploadStatus::Queued
+            {
+                upload.start()?;
+            }
+            p.sent(link)
+        })?;
+        if !claim_due(&mut claimed)? {
+            return Ok(());
+        }
 
         // Wait for the network to process it, for a while: the job holds a
         // place in the queue meanwhile. Past that the video shows as still
         // processing, and the user checks again later.
         let mut polls = 0;
         loop {
-            if cx.should_stop() {
+            if cx.should_stop() || !claim_due(&mut claimed)? {
                 return Ok(());
             }
             let state = access_token(&self.connections, &account)
                 .and_then(|token| uploader.state(&token, &video));
+            // Not published by the cut-short run: the user decides.
+            if check_only
+                && matches!(
+                    state,
+                    Ok(VideoState::Processing | VideoState::Processed | VideoState::Expired)
+                )
+            {
+                return Err(self.miss(publication_id, job, network));
+            }
             let outcome = match state {
                 Ok(VideoState::Processing) => {
                     if polls >= uploader.processing_polls() || !cx.sleep(uploader.poll_delay(polls))
@@ -1139,8 +1301,15 @@ impl JobHandler for UploadHandler {
                     polls += 1;
                     continue;
                 }
-                // Instagram: processed, and Bardo makes the post.
+                // Instagram: processed, and Bardo makes the post, at its due
+                // time when it has one.
                 Ok(VideoState::Processed) => {
+                    if let Some(due) = due.filter(|due| SystemTime::now() < *due) {
+                        return Self::wait_for_due(cx, checkpoint, due);
+                    }
+                    if !claim_due(&mut claimed)? {
+                        return Ok(());
+                    }
                     match self.publish(
                         uploader.as_ref(),
                         &account,
@@ -1239,7 +1408,11 @@ impl Bardo {
     /// manual one.
     pub fn upload_state(&self, publication: &Publication) -> Option<UploadState> {
         let upload = publication.upload()?;
-        Some(upload_state(upload, self.job(upload.job).as_ref()))
+        let job = self.job(upload.job);
+        Some(
+            due_state(publication, job.as_ref())
+                .unwrap_or_else(|| upload_state(upload, job.as_ref())),
+        )
     }
 
     /// Why an upload to `network` failed, as the Publish stage says it.
@@ -1512,11 +1685,19 @@ impl Bardo {
             return Err(UploadReviewError::Changed);
         };
         if let Some(at) = choices.publish_at {
-            if !now.network.schedules_uploads() {
+            if !now.network.schedules_uploads() && !now.network.schedules_in_app() {
                 return Err(UploadReviewError::NoSchedule);
             }
             check_publish_time(at, SystemTime::now()).map_err(UploadReviewError::Schedule)?;
         }
+        // Whole milliseconds, as stored.
+        let publish_at = choices.publish_at.map(|at| from_millis(to_millis(at)));
+        // Instagram takes no publish time: Bardo publishes the Reel at it,
+        // and the upload starts no earlier than the network keeps it.
+        let starts_at = publish_at
+            .filter(|_| now.network.schedules_in_app())
+            .map(prepare_at)
+            .filter(|start| *start > SystemTime::now());
         let reel = now.is_reel();
         if reel && choices.cover >= render.duration {
             return Err(UploadReviewError::CoverPastEnd);
@@ -1542,7 +1723,9 @@ impl Bardo {
             made_for_kids: choices.made_for_kids && now.network.asks_made_for_kids(),
             synthetic: choices.synthetic,
             video: None,
-            publish_at: choices.publish_at.map(to_millis),
+            publish_at: publish_at
+                .filter(|_| now.network.schedules_uploads())
+                .map(to_millis),
             share_to_feed: !reel || choices.share_to_feed,
             cover_ms: if reel {
                 choices.cover.as_millis() as u64
@@ -1551,9 +1734,12 @@ impl Bardo {
             },
             destination: now.destination.clone(),
         };
-        let job = Job::new(self.profile.id, JobKind::Upload, to_json(&payload));
-        let upload = match choices.publish_at {
-            Some(at) => Upload::scheduled(from_millis(to_millis(at)), job.id()),
+        let job = match starts_at {
+            Some(at) => Job::scheduled(self.profile.id, JobKind::Upload, to_json(&payload), at),
+            None => Job::new(self.profile.id, JobKind::Upload, to_json(&payload)),
+        };
+        let upload = match publish_at {
+            Some(at) => Upload::scheduled(at, job.id()),
             None => Upload::queued(visibility, job.id()),
         };
         let reviewed_at = crate::publications::whole_millis(SystemTime::now());
@@ -1741,6 +1927,11 @@ pub(crate) mod testing {
         pub(crate) changes: Mutex<Vec<(String, ScheduleChange)>>,
         /// An attempt is holding.
         pub(crate) holding: AtomicBool,
+        /// Publishing takes the post, then hangs until this is cleared, as
+        /// when Bardo closes while Instagram answers.
+        pub(crate) stall_publish: AtomicBool,
+        /// A publish is hanging.
+        pub(crate) stalled: AtomicBool,
     }
 
     /// The address of the Reel the fake makes.
@@ -1838,6 +2029,14 @@ pub(crate) mod testing {
                 .lock()
                 .unwrap()
                 .push((account.to_owned(), id.to_owned()));
+            if self.stall_publish.load(Ordering::SeqCst) {
+                self.stalled.store(true, Ordering::SeqCst);
+                while self.stall_publish.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                self.stalled.store(false, Ordering::SeqCst);
+                return Err(UploadError::new(UploadErrorKind::NotReady, "no answer"));
+            }
             match self.publishes.lock().unwrap().pop_front() {
                 Some(Ok(post)) => Ok(post),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
@@ -2707,7 +2906,7 @@ pub(crate) mod tests {
 /// Reels (#81): the review's specs and choices, publishing within the
 /// limit, and a dropped container sent again.
 #[cfg(test)]
-mod reel_tests {
+pub(crate) mod reel_tests {
     use std::time::{Duration, Instant, SystemTime};
 
     use bardo_domain::{
@@ -2841,7 +3040,7 @@ mod reel_tests {
 
     /// The project rendered with metadata, its Instagram account connected
     /// and its Reel's file in fast start.
-    fn ready() -> Setup {
+    pub(crate) fn ready() -> Setup {
         let s = rendered_with(&[Network::InstagramReels]);
         generate(&s);
         write_reel(&s, &reel_file(true));
@@ -2849,7 +3048,7 @@ mod reel_tests {
         s
     }
 
-    fn review(s: &Setup) -> UploadReview {
+    pub(crate) fn review(s: &Setup) -> UploadReview {
         s.app
             .upload_review(s.project.id, Network::InstagramReels)
             .unwrap()
@@ -2860,7 +3059,7 @@ mod reel_tests {
         s.app.start_upload(&review, choices).unwrap()
     }
 
-    fn upload(s: &Setup) -> Publication {
+    pub(crate) fn upload(s: &Setup) -> Publication {
         s.app
             .publications
             .publications(s.project.id)
@@ -2870,7 +3069,7 @@ mod reel_tests {
             .unwrap()
     }
 
-    fn state(s: &Setup) -> UploadState {
+    pub(crate) fn state(s: &Setup) -> UploadState {
         s.app.upload_state(&upload(s)).unwrap()
     }
 
@@ -2968,18 +3167,17 @@ mod reel_tests {
             s.app.start_upload(&seen, seen.choices()),
             Err(UploadReviewError::Blocked(_) | UploadReviewError::Changed)
         ));
-        // Instagram takes no publish time from Bardo, nor a cover past the
-        // end.
-        let later = SystemTime::now() + Duration::from_secs(3600);
+        // Nor a due time already past, nor a cover past the end.
+        let earlier = SystemTime::now() - Duration::from_secs(60);
         assert!(matches!(
             s.app.start_upload(
                 &review,
                 UploadChoices {
-                    publish_at: Some(later),
+                    publish_at: Some(earlier),
                     ..review.choices()
                 }
             ),
-            Err(UploadReviewError::NoSchedule)
+            Err(UploadReviewError::Schedule(ScheduleProblem::Past))
         ));
         let end = review.render.as_ref().unwrap().duration;
         assert!(matches!(

@@ -386,6 +386,20 @@ impl JobQueue {
     pub(crate) fn retry(&self, id: JobId) -> Result<(), JobActionError> {
         self.shared.transition(id, Job::retry).map(drop)
     }
+
+    /// Queues a failed or cancelled job again, like `retry`, to start no
+    /// earlier than `at` (now when `None`).
+    pub(crate) fn retry_at(&self, id: JobId, at: Option<SystemTime>) -> Result<(), JobActionError> {
+        self.shared
+            .transition(id, |job| {
+                job.retry()?;
+                match at {
+                    Some(at) => job.wait_until(at),
+                    None => Ok(()),
+                }
+            })
+            .map(drop)
+    }
 }
 
 impl Drop for JobQueue {
@@ -408,7 +422,7 @@ impl Drop for JobQueue {
 }
 
 /// Scheduler thread: starts due jobs up to the limit, then sleeps until a
-/// job changes or the earliest retry is due.
+/// job changes or the earliest retry or time is due.
 fn schedule(shared: &Arc<Shared>) {
     let mut state = shared.state();
     loop {
@@ -418,11 +432,13 @@ fn schedule(shared: &Arc<Shared>) {
         let now = SystemTime::now();
         while state.workers.len() < shared.settings.max_running {
             // A job whose cancelled run is still stopping waits for it: a
-            // job never has two workers.
+            // job never has two workers. A job whose time came goes before
+            // the others, oldest time first: its time is a promise.
             let State { jobs, workers, .. } = &mut *state;
             let Some(job) = jobs
                 .iter_mut()
-                .find(|job| job.is_due(now) && !workers.contains_key(&job.id()))
+                .filter(|job| job.is_due(now) && !workers.contains_key(&job.id()))
+                .min_by_key(|job| job.run_at().map_or((1, None), |at| (0, Some(at))))
             else {
                 break;
             };
@@ -447,11 +463,13 @@ fn schedule(shared: &Arc<Shared>) {
             shared.changed();
         }
 
+        // A queued job waits for its backoff and its time, whichever is
+        // later.
         let next_retry = state
             .jobs
             .iter()
             .filter(|job| job.state() == JobState::Queued)
-            .filter_map(Job::retry_at)
+            .filter_map(|job| job.retry_at().max(job.run_at()))
             .filter(|at| *at > now)
             .min();
         state = match next_retry {
