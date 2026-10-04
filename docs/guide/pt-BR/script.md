@@ -40,7 +40,7 @@ Antes de gerar, a estimativa sob os botões diz quanto a chamada vai custar pela
 <a id="details"></a>
 ## De onde ele veio
 
-**Detalhes** lista o provedor, o modelo, o modelo de roteiro e a versão dele, os tokens usados e quando o roteiro foi gerado. **Mostrar prompt** mostra as instruções e o prompt exatamente como foram enviados. Um novo roteiro à espera de revisão tem os próprios detalhes.
+**Detalhes** lista o provedor, o modelo de IA, o modelo de roteiro e a versão dele, os tokens usados e quando o roteiro foi gerado. **Mostrar prompt** mostra as instruções e o prompt exatamente como foram enviados. Um novo roteiro à espera de revisão tem os próprios detalhes.
 
 <a id="music"></a>
 ## O prompt de música

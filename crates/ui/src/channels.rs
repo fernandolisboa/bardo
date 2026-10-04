@@ -635,6 +635,7 @@ impl Render for ChannelsScreen {
             body: vec![form],
             media: None,
             footer: None,
+            scroll: None,
         });
         layout::screen(parts, cx)
     }

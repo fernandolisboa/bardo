@@ -2118,7 +2118,7 @@ body = "Antes de gerar, o Bardo estima quanto a chamada vai custar pelas tarifas
 
 [tour.script.details]
 title = "De onde ele veio"
-body = "Detalhes diz qual modelo escreveu o roteiro, a partir de qual versão do modelo de roteiro e com quantos tokens. Mostrar prompt mostra exatamente o que foi enviado."
+body = "Detalhes diz qual modelo de IA escreveu o roteiro, a partir de qual versão do modelo de roteiro e com quantos tokens. Mostrar prompt mostra exatamente o que foi enviado."
 
 [tour.script.music]
 title = "O prompt de música"
@@ -2187,7 +2187,7 @@ body = "Cada cena usa o modelo de vídeo do canal, a menos que você escolha out
 
 [tour.clips.review]
 title = "Revise um novo clipe"
-body = "Um novo clipe espera ao lado do atual; toque-o antes de usar. Uma cena sem clipe fica com a imagem parada, e Usar a imagem parada volta para ela."
+body = "Um novo clipe espera ao lado do atual; reproduza-o antes de usar. Uma cena sem clipe fica com a imagem parada, e Usar a imagem parada volta para ela."
 
 [tour.clips.cost]
 title = "Quanto custa um clipe"

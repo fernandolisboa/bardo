@@ -25,7 +25,7 @@ As cenas aparecem em ordem, cada uma com o tempo, a imagem e como está: **A ger
 <a id="scene"></a>
 ## Uma cena
 
-A cena escolhida mostra o trecho da narração que ela cobre, a imagem e o **prompt de imagem**. **Editar prompt** muda o que o próximo desenho mostra (até 4.000 caracteres); uma cena cujo prompt você mudou ganha a marca **Editado**. **Detalhes da geração** diz qual modelo desenhou a imagem, com quantos tokens e qual versão do modelo de prompts.
+A cena escolhida mostra o trecho da narração que ela cobre, a imagem e o **prompt de imagem**. **Editar prompt** muda o que o próximo desenho mostra (até 4.000 caracteres); uma cena cujo prompt você mudou ganha a marca **Editado**. **Detalhes da geração** diz qual modelo de IA desenhou a imagem, com quantos tokens e qual versão do modelo de prompts.
 
 <a id="redraw"></a>
 ## Desenhar de novo

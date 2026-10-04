@@ -115,6 +115,8 @@ pub struct ProjectsScreen {
     /// Scrolls the Script and Narration pages, so a tour can bring their
     /// controls into view.
     page_scroll: ScrollHandle,
+    /// The scene inspector's scroll, for the Scenes and Clips tours.
+    inspector_scroll: ScrollHandle,
     /// Whether the scene grid shows only the scenes with something left.
     pending_only: bool,
     view: Option<ScriptView>,
@@ -355,6 +357,7 @@ impl ProjectsScreen {
             scene_keys: cx.focus_handle(),
             scene_scroll: ScrollHandle::new(),
             page_scroll: ScrollHandle::new(),
+            inspector_scroll: ScrollHandle::new(),
             pending_only: false,
             view: None,
             narration: None,
@@ -585,7 +588,11 @@ impl ProjectsScreen {
 
     /// The stage on screen, when a project is open.
     pub fn current_stage(&self) -> Option<Stage> {
-        self.project.map(|_| self.stage)
+        self.project?;
+        Some(
+            self.stages()
+                .map_or(self.stage, |stages| self.shown_stage(&stages)),
+        )
     }
 
     /// The stage drawn: the one picked, unless it locked since (the scenes
@@ -1050,20 +1057,23 @@ impl ProjectsScreen {
                         )
                     })
             });
-        let mut header = Header::new(kit::anchor(
-            TourAnchor::Control(Control::ProjectSwitcher),
-            h_flex()
-                .gap_1()
-                .min_w_0()
-                .items_center()
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(SharedString::from(project.title.clone())),
-                )
-                .child(switcher),
-        ));
+        let mut header = Header::new(
+            kit::anchor(
+                TourAnchor::Control(Control::ProjectSwitcher),
+                h_flex()
+                    .gap_1()
+                    .min_w_0()
+                    .items_center()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(project.title.clone())),
+                    )
+                    .child(switcher),
+            )
+            .min_w_0(),
+        );
         header.trail = vec![
             tr(bardo, Text::DestinationName(Destination::Projects)).into_any_element(),
             div()

@@ -30,7 +30,7 @@ Cada cena usa o modelo de vídeo do canal, definido em [Canais](bardo:go/channel
 <a id="review"></a>
 ## Revisar um clipe
 
-Um novo clipe espera ao lado do atual como **Novo clipe para revisar**. **Toque** primeiro, depois **Usar o novo clipe** ou **Descartar**. O clipe de uma cena mostra a duração e o modelo; **Usar a imagem parada** tira o clipe e volta à imagem. Quando a imagem da cena muda depois que o clipe foi feito, o clipe fica marcado como **Imagem mudou**.
+Um novo clipe espera ao lado do atual como **Novo clipe para revisar**. **Reproduza-o** primeiro (**Reproduzir**), depois **Usar o novo clipe** ou **Descartar**. O clipe de uma cena mostra a duração e o modelo; **Usar a imagem parada** tira o clipe e volta à imagem. Quando a imagem da cena muda depois que o clipe foi feito, o clipe fica marcado como **Imagem mudou**.
 
 <a id="cost"></a>
 ## Quanto custa um clipe

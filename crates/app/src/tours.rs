@@ -99,7 +99,7 @@ pub enum Control {
     NarrationImport,
     /// Scenes: planning them and drawing the missing images.
     ScenesPlan,
-    /// Scenes and Clips: All and Pending over the scenes.
+    /// Scenes: All and Pending over the scenes.
     ScenesFilter,
     /// Scenes: drawing a scene's image again, or the new one to review.
     SceneRedraw,
@@ -1677,8 +1677,9 @@ mod tests {
 
     #[test]
     fn a_missing_scene_passes_over_its_step() {
-        // No scene picked: the scene step goes, and drawing again lights
-        // the part that holds it.
+        // No scene picked, so no inspector: the scene step goes. A picked
+        // scene with nothing to draw again lights the inspector instead,
+        // and with no inspector either the card centres.
         let mut run = TourRun::new(&SCENES, 2, Destination::Projects);
         assert_eq!(
             run.spot(|anchor| anchor != TourAnchor::Inspector),

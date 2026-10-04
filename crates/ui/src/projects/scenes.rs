@@ -811,6 +811,7 @@ impl ProjectsScreen {
         inspector.media = Some(1 + media);
         inspector.title = Some(title);
         inspector.footer = footer;
+        inspector.scroll = Some(self.inspector_scroll.clone());
         inspector
     }
 
@@ -957,7 +958,7 @@ impl ProjectsScreen {
             && !busy
             && scene.pending().is_none())
         .then(|| {
-            kit::anchor(
+            kit::anchor_in(
                 TourAnchor::Control(Control::SceneRedraw),
                 v_flex()
                     .gap_1()
@@ -980,6 +981,7 @@ impl ProjectsScreen {
                                 })),
                         ),
                     ),
+                Some(&self.inspector_scroll),
             )
             .into_any_element()
         });
@@ -1442,24 +1444,27 @@ impl ProjectsScreen {
                 )
         });
 
+        let scroll = Some(&self.inspector_scroll);
         let review = (current.is_some() || pending.is_some()).then(|| {
-            kit::anchor(
+            kit::anchor_in(
                 TourAnchor::Control(Control::ClipReview),
                 v_flex().gap_1p5().children(current).children(pending),
+                scroll,
             )
         });
         v_flex()
             .gap_1p5()
-            .child(kit::anchor(
+            .child(kit::anchor_in(
                 TourAnchor::Control(Control::ClipMotion),
                 v_flex().gap_1p5().child(motion_label).child(motion),
+                scroll,
             ))
             .child(
                 h_flex()
                     .gap_x_2()
                     .flex_wrap()
                     .items_center()
-                    .child(kit::anchor(
+                    .child(kit::anchor_in(
                         TourAnchor::Control(Control::ClipModel),
                         h_flex()
                             .gap_x_2()
@@ -1471,11 +1476,11 @@ impl ProjectsScreen {
                                     .child(tr(bardo, Text::SceneClipModel)),
                             )
                             .child(model_menu),
+                        scroll,
                     ))
-                    .children(
-                        plan_note
-                            .map(|note| kit::anchor(TourAnchor::Control(Control::ClipCost), note)),
-                    ),
+                    .children(plan_note.map(|note| {
+                        kit::anchor_in(TourAnchor::Control(Control::ClipCost), note, scroll)
+                    })),
             )
             .children(model_gone)
             .children(state)
