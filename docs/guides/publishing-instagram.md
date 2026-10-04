@@ -95,11 +95,10 @@ last renewal.
 
 ## Day to day
 
-- **The long-lived token lasts about 60 days.** Bardo trades it for a fresh
-  one when it is within a week of expiring, whenever it next uses the
-  account (a check, an upload, a metrics sync), and reads the Page's token
-  again. Opening Bardo at least once every seven weeks keeps the account
-  connected without pasting again.
+- **The long-lived token lasts about 60 days.** Once it is within a week of
+  expiring, Bardo trades it for a fresh one, and reads the Page's token
+  again, the next time you open Bardo or select **Check**. If Bardo is not opened during that last week, the token runs out
+  and the card asks you to reconnect with a new token.
 - **Check** does that renewal if it is due and reads the account's username
   again. If the Page is now linked to another Instagram account, the card
   turns to **Reconnect needed**.

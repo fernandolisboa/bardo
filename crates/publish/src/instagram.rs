@@ -403,9 +403,10 @@ fn graph_failure(response: &HttpResponse) -> SignInFailure {
         (_, 1) if message.to_ascii_lowercase().contains("client secret") => {
             SignInFailureKind::ClientRejected
         }
-        // 3: capability; 10 and 200-299: a permission not granted.
-        (_, 3 | 10 | 200..=299) => SignInFailureKind::NotAllowed,
-        (_, 4 | 17 | 32 | 341 | 368 | 613) | (429, _) => SignInFailureKind::LimitReached,
+        // 3: capability; 10 and 200-299: a permission not granted; 368: a
+        // policy block, which waiting does not lift.
+        (_, 3 | 10 | 200..=299 | 368) => SignInFailureKind::NotAllowed,
+        (_, 4 | 17 | 32 | 341 | 613) | (429, _) => SignInFailureKind::LimitReached,
         (_, 1 | 2) | (500..=599, _) => SignInFailureKind::NetworkDown,
         (401, _) => SignInFailureKind::Refused,
         _ => SignInFailureKind::Unexpected,

@@ -60,8 +60,8 @@ pub use channels::ChannelError;
 pub use clips::{ClipsView, SceneClipView};
 pub use connections::{
     AccountChoice, AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult,
-    ConnectionCheck, ConnectionError, ConnectionState, Disconnected, Disconnection, TokenConnect,
-    TokenConnectResult, TokenConnected,
+    ConnectionCheck, ConnectionError, ConnectionRenewal, ConnectionState, Disconnected,
+    Disconnection, TokenConnect, TokenConnectResult, TokenConnected,
 };
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
