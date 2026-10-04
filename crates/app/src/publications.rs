@@ -34,7 +34,8 @@ use bardo_domain::{
     NetworkAccountId, NetworkAccountRepository, OwnerAnalytics, PostLink, PostLinkError,
     PostRetention, ProfileId, Progress, Provider, Publication, PublicationId, PublicationKind,
     PublicationRepository, ReportPeriod, RepositoryError, STATS_BATCH, SecretStore, SecretText,
-    UserProfile, VideoProjectId, VideoStats, VideoUploader, channel_history, read_owner_metrics,
+    UploadStatus, UserProfile, VideoProjectId, VideoStats, VideoUploader, channel_history,
+    read_owner_metrics,
 };
 use serde::{Deserialize, Serialize};
 
@@ -590,8 +591,9 @@ impl Bardo {
     /// from its address. Linking the same post again keeps its metrics;
     /// another post replaces the publication and its metrics. Replacing an
     /// upload needs `replace` (the user confirmed it), and waits until the
-    /// upload stops. A YouTube post is synced right away when the key is
-    /// saved.
+    /// upload stops. A TikTok draft Bardo sent to the inbox becomes the post
+    /// the creator made of it: no export and no confirmation needed. A
+    /// YouTube post is synced right away when the key is saved.
     pub fn mark_posted(
         &self,
         project: VideoProjectId,
@@ -610,12 +612,35 @@ impl Bardo {
             .into_iter()
             .find(|account| account.network == network)
             .ok_or(PublicationError::NoAccount)?;
-        let export = self
-            .exports
-            .exports(project.id)?
+        let current = self
+            .publications
+            .publications(project.id)?
             .into_iter()
-            .find(|export| export.network == network)
-            .ok_or(PublicationError::NotExported)?;
+            .find(|publication| publication.network() == network);
+        // A TikTok upload is the video the creator posts from the inbox:
+        // its render, with no export. One that reached the inbox is replaced
+        // without asking again; another (say, still processing when Bardo
+        // stopped checking) only once the user confirms.
+        let sent = current
+            .as_ref()
+            .filter(|publication| network.uploads_drafts() && publication.upload().is_some());
+        let draft = sent.filter(|publication| {
+            publication
+                .upload()
+                .is_some_and(|upload| upload.status == UploadStatus::DraftSent)
+        });
+        let render = match sent {
+            Some(sent) => sent.render,
+            None => {
+                self.exports
+                    .exports(project.id)?
+                    .into_iter()
+                    .find(|export| export.network == network)
+                    .ok_or(PublicationError::NotExported)?
+                    .render
+            }
+        };
+        let replace = replace || draft.is_some();
         let link = PostLink::parse(network, link).map_err(PublicationError::Link)?;
         let elsewhere = self
             .publications
@@ -630,11 +655,6 @@ impl Bardo {
             return Err(PublicationError::AlreadyLinked);
         }
         let now = whole_millis(SystemTime::now());
-        let current = self
-            .publications
-            .publications(project.id)?
-            .into_iter()
-            .find(|publication| publication.network() == network);
         if let Some(upload) = current.as_ref().and_then(Publication::upload) {
             if self.job_active(upload.job) {
                 return Err(PublicationError::Uploading);
@@ -656,7 +676,7 @@ impl Bardo {
                 project: project.id,
                 account: account.id,
                 network,
-                render: export.render,
+                render,
                 link: Some(link),
                 kind: PublicationKind::Manual,
                 posted_at: now,

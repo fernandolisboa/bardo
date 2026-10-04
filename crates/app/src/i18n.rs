@@ -1340,6 +1340,26 @@ pub enum Text {
     UploadMissedHint,
     UploadReelScheduleHint,
     UploadReelStartScheduled,
+    /// One TikTok spec problem, by `TikTokSpecProblem::code`.
+    UploadTikTokSpec(&'static str),
+    UploadTikTokSpecsTitle,
+    UploadDraftHint,
+    UploadDraftNotice,
+    UploadFieldDraftCaption,
+    UploadDraftAiLabel,
+    UploadDraftAiLabelHint,
+    UploadDraftIrreversible,
+    UploadDraftStart,
+    UploadDraftProcessingHint,
+    UploadStateDraftSent,
+    UploadDraftSentHint,
+    UploadDraftAiReminder,
+    UploadDraftLinkHint,
+    UploadDraftCopy,
+    UploadDraftCopied,
+    UploadDraftLimitHint,
+    UploadDraftLimitHeldHint,
+    UploadDraftLimitRecheckHint,
     MissedTitle,
     MissedHint,
     MissedDue,
@@ -2808,6 +2828,25 @@ impl Text {
             Text::UploadMissedHint => "upload.missed_hint",
             Text::UploadReelScheduleHint => "upload.reel_schedule_hint",
             Text::UploadReelStartScheduled => "upload.reel_start_scheduled",
+            Text::UploadTikTokSpec(code) => return format!("upload.tiktok_spec.{code}").into(),
+            Text::UploadTikTokSpecsTitle => "upload.tiktok_specs_title",
+            Text::UploadDraftHint => "upload.draft_hint",
+            Text::UploadDraftNotice => "upload.draft_notice",
+            Text::UploadFieldDraftCaption => "upload.field.draft_caption",
+            Text::UploadDraftAiLabel => "upload.draft_ai_label",
+            Text::UploadDraftAiLabelHint => "upload.draft_ai_label_hint",
+            Text::UploadDraftIrreversible => "upload.draft_irreversible",
+            Text::UploadDraftStart => "upload.draft_start",
+            Text::UploadDraftProcessingHint => "upload.draft_processing_hint",
+            Text::UploadStateDraftSent => "upload.state.draft_sent",
+            Text::UploadDraftSentHint => "upload.draft_sent_hint",
+            Text::UploadDraftAiReminder => "upload.draft_ai_reminder",
+            Text::UploadDraftLinkHint => "upload.draft_link_hint",
+            Text::UploadDraftCopy => "upload.draft_copy",
+            Text::UploadDraftCopied => "upload.draft_copied",
+            Text::UploadDraftLimitHint => "upload.draft_limit_hint",
+            Text::UploadDraftLimitHeldHint => "upload.draft_limit_held_hint",
+            Text::UploadDraftLimitRecheckHint => "upload.draft_limit_recheck_hint",
             Text::MissedTitle => "missed.title",
             Text::MissedHint => "missed.hint",
             Text::MissedDue => "missed.due",
@@ -4428,6 +4467,25 @@ mod tests {
         texts.push(Text::UploadMissedHint);
         texts.push(Text::UploadReelScheduleHint);
         texts.push(Text::UploadReelStartScheduled);
+        texts.extend(bardo_domain::TikTokSpecProblem::CODES.map(Text::UploadTikTokSpec));
+        texts.push(Text::UploadTikTokSpecsTitle);
+        texts.push(Text::UploadDraftHint);
+        texts.push(Text::UploadDraftNotice);
+        texts.push(Text::UploadFieldDraftCaption);
+        texts.push(Text::UploadDraftAiLabel);
+        texts.push(Text::UploadDraftAiLabelHint);
+        texts.push(Text::UploadDraftIrreversible);
+        texts.push(Text::UploadDraftStart);
+        texts.push(Text::UploadDraftProcessingHint);
+        texts.push(Text::UploadStateDraftSent);
+        texts.push(Text::UploadDraftSentHint);
+        texts.push(Text::UploadDraftAiReminder);
+        texts.push(Text::UploadDraftLinkHint);
+        texts.push(Text::UploadDraftCopy);
+        texts.push(Text::UploadDraftCopied);
+        texts.push(Text::UploadDraftLimitHint);
+        texts.push(Text::UploadDraftLimitHeldHint);
+        texts.push(Text::UploadDraftLimitRecheckHint);
         texts.push(Text::MissedTitle);
         texts.push(Text::MissedHint);
         texts.push(Text::MissedDue);

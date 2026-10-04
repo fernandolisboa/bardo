@@ -568,6 +568,7 @@ pub fn upload_label(bardo: &Bardo, state: &UploadState) -> SharedString {
         UploadState::Due(_) => tr(bardo, Text::UploadStateDue),
         UploadState::Missed(_) => tr(bardo, Text::UploadStateMissed),
         UploadState::Published => tr(bardo, Text::UploadStatePublished),
+        UploadState::DraftSent => tr(bardo, Text::UploadStateDraftSent),
         UploadState::Restricted => tr(bardo, Text::UploadStateRestricted),
         UploadState::Stopped => tr(bardo, Text::UploadStateStopped),
         UploadState::Failed { .. } => tr(bardo, Text::UploadStateFailed),
@@ -600,6 +601,8 @@ fn upload_state(
             Some(
                 with_network(if publication.network().uploads_reels() {
                     Text::UploadReelProcessingHint
+                } else if publication.network().uploads_drafts() {
+                    Text::UploadDraftProcessingHint
                 } else {
                     Text::UploadProcessingHint
                 })
@@ -615,7 +618,7 @@ fn upload_state(
             Tone::Warning,
             Some(
                 bardo
-                    .upload_over_limit_text(*until, *frees, *used, *total)
+                    .upload_over_limit_text(publication.network(), *until, *frees, *used, *total)
                     .into(),
             ),
         ),
@@ -633,6 +636,7 @@ fn upload_state(
             (Tone::Warning, Some(tr(bardo, Text::PublicationMissingHint)))
         }
         UploadState::Published => (Tone::Success, None),
+        UploadState::DraftSent => (Tone::Success, Some(tr(bardo, Text::UploadDraftSentHint))),
         UploadState::Restricted => (Tone::Warning, None),
         UploadState::Stopped => (
             Tone::Neutral,
@@ -646,7 +650,10 @@ fn upload_state(
         upload_label(bardo, state)
     };
     let chip = kit::status(tone, label, cx);
-    let done = matches!(state, UploadState::Published | UploadState::Restricted);
+    let done = matches!(
+        state,
+        UploadState::Published | UploadState::Restricted | UploadState::DraftSent
+    );
     let row = h_flex()
         .gap_2()
         .items_center()

@@ -111,7 +111,8 @@ pub use stages::{
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 pub use uploads::{
-    UploadBlock, UploadChoices, UploadReview, UploadReviewError, UploadState, upload_state,
+    DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
+    UploadState, upload_state,
 };
 
 use crate::clips::ClipHandler;
@@ -320,6 +321,7 @@ impl Providers {
             uploaders: vec![
                 Arc::new(bardo_publish::YouTubeUploader::new()),
                 Arc::new(bardo_publish::InstagramUploader::new()),
+                Arc::new(bardo_publish::TikTokUploader::new()),
             ],
             analytics: vec![Arc::new(bardo_publish::YouTubeAnalytics::new())],
         }
@@ -354,12 +356,10 @@ pub struct Bardo {
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
     uploaders: Vec<Arc<dyn VideoUploader>>,
-    /// What the Reel specs found in each render, by render and size.
-    reel_checks: std::sync::Mutex<
-        std::collections::HashMap<
-            (bardo_domain::RenderId, u64),
-            Vec<bardo_domain::ReelSpecProblem>,
-        >,
+    /// What the network's specs (a Reel's, TikTok's) found in each
+    /// render, by render and size.
+    spec_checks: std::sync::Mutex<
+        std::collections::HashMap<(bardo_domain::RenderId, u64), Vec<uploads::SpecProblem>>,
     >,
     /// The last voice listing of this session, for the voice picker.
     voice_list: Option<VoiceList>,
@@ -567,6 +567,7 @@ impl Bardo {
             files: Arc::clone(&files),
             connections: connection_book.connections().clone(),
             uploaders: providers.uploaders.clone(),
+            jobs: Arc::clone(&jobs),
             opened_at,
         };
         // Scheduled posts whose time passed while Bardo was closed wait for
@@ -622,7 +623,7 @@ impl Bardo {
             voices: providers.voices,
             clips: providers.clips,
             uploaders: providers.uploaders,
-            reel_checks: std::sync::Mutex::default(),
+            spec_checks: std::sync::Mutex::default(),
             voice_list: None,
             jobs,
             provider_keys,

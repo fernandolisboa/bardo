@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json
+
+{"data":{"status":"FAILED","fail_reason":"auth_removed","uploaded_bytes":13107200},"error":{"code":"ok","message":"","log_id":"202610041200106A2B3C4D5E6F7A8B9C0D"}}

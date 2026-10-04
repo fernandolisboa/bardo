@@ -565,6 +565,15 @@ impl Publication {
         Ok(())
     }
 
+    /// The network put the uploaded video in the creator's inbox as a
+    /// draft `at` (TikTok): no post yet, until the creator posts it and
+    /// links it.
+    pub fn drafted(&mut self, at: SystemTime) -> Result<(), InvalidUploadTransition> {
+        self.scheduled_upload("send as a draft")?.drafted()?;
+        self.posted_at = at;
+        Ok(())
+    }
+
     /// The network processed the uploaded video: it went live `at`, or,
     /// scheduled, goes live at its publish time.
     pub fn processed(
@@ -1410,6 +1419,30 @@ mod tests {
             .fail(crate::UploadFailure::Rejected("duplicate".into()))
             .unwrap();
         assert!(!failed.is_posted(), "rejected by the network");
+    }
+
+    #[test]
+    fn a_tiktok_draft_in_the_inbox_is_sent_but_not_a_post() {
+        let mut p = publication(Network::TikTok, None);
+        p.link = None;
+        p.kind = PublicationKind::Uploaded(Upload::queued(Visibility::Public, crate::JobId::new()));
+        assert!(p.drafted(at(60)).is_err(), "not sent yet");
+        p.upload_mut().unwrap().start().unwrap();
+        p.sent(None).unwrap();
+        p.drafted(at(60)).unwrap();
+        assert_eq!(p.upload().unwrap().status, UploadStatus::DraftSent);
+        assert_eq!(p.posted_at, at(60), "when it went to the inbox");
+        assert_eq!(p.link, None);
+        assert!(!p.is_posted(), "the creator posts it in TikTok");
+        assert!(!p.has_public_metrics());
+        assert!(!p.is_tracked());
+        assert_eq!(p.due(), None);
+
+        let mut manual = publication(Network::TikTok, None);
+        assert!(
+            manual.drafted(at(60)).is_err(),
+            "a linked post is no upload"
+        );
     }
 
     #[test]

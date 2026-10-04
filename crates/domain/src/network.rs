@@ -85,6 +85,14 @@ impl Network {
         self == Network::InstagramReels
     }
 
+    /// Whether an upload lands in the creator's inbox as a draft, which
+    /// they finish and post in the network's app (TikTok's upload to
+    /// inbox, ADR-0008): no caption, visibility or publish time goes with
+    /// it, and the file must meet the network's specs.
+    pub fn uploads_drafts(self) -> bool {
+        self == Network::TikTok
+    }
+
     /// The preset a render for this network uses unless the account
     /// overrides it.
     ///

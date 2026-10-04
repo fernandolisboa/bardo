@@ -1,0 +1,4 @@
+HTTP/2 403 
+content-type: application/json
+
+{"data":{},"error":{"code":"spam_risk_too_many_pending_share","message":"The user has too many pending shares.","log_id":"202610041200041A2B3C4D5E6F7A8B9C0D"}}

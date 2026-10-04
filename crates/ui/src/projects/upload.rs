@@ -21,6 +21,12 @@
 //! then and the computer on. A Reel whose due time passed without it offers
 //! "Post now", "New time" and "Cancel post", as the missed-posts list does
 //! when Bardo opens ([`crate::missed`]).
+//!
+//! A TikTok upload (#84) goes to the creator's inbox as a draft: the review
+//! shows the file, the account and the caption to paste, says the post is
+//! finished in the TikTok app, and has no visibility, time or made for kids.
+//! A file outside TikTok's specs blocks it, and so does TikTok's cap of
+//! drafts from apps in 24 hours, with when the next one may go.
 
 use std::time::SystemTime;
 
@@ -428,6 +434,8 @@ impl ProjectsScreen {
                     bardo,
                     if now.is_reel() {
                         Text::UploadReelHint
+                    } else if now.is_draft() {
+                        Text::UploadDraftHint
                     } else {
                         Text::UploadHint
                     },
@@ -580,14 +588,29 @@ impl ProjectsScreen {
             section = section.child(muted(cx, tr(bardo, Text::UploadBlocked(block))));
         }
         if block == Some(UploadBlock::Specs) && !active {
-            section = section.child(
-                v_flex()
-                    .gap_1()
-                    .child(label(tr(bardo, Text::UploadSpecsTitle)))
-                    .children(now.spec_problems.iter().map(|problem| {
-                        kit::notice(Tone::Danger, bardo.reel_spec_text(problem), cx)
-                    })),
-            );
+            section =
+                section.child(
+                    v_flex()
+                        .gap_1()
+                        .child(label(tr(
+                            bardo,
+                            if now.is_draft() {
+                                Text::UploadTikTokSpecsTitle
+                            } else {
+                                Text::UploadSpecsTitle
+                            },
+                        )))
+                        .children(now.spec_problems.iter().map(|problem| {
+                            kit::notice(Tone::Danger, bardo.spec_text(problem), cx)
+                        })),
+                );
+        }
+        if let Some(free_at) = now.drafts_free_at.filter(|_| !active) {
+            section = section.child(kit::notice(
+                Tone::Warning,
+                bardo.draft_limit_text(free_at),
+                cx,
+            ));
         }
         if let Some((publication, _)) = scheduled.or(missed) {
             section = section.children(self.schedule_editor(publication, cx));
@@ -779,6 +802,7 @@ impl ProjectsScreen {
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let reel = review.is_reel();
+        let draft = review.is_draft();
         let network = bardo.text(Text::NetworkName(review.network)).into_owned();
         let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
         let row = |name: Text, value: AnyElement| {
@@ -817,7 +841,7 @@ impl ProjectsScreen {
             ));
         }
         card = card.child(row(
-            if reel {
+            if reel || draft {
                 Text::UploadFieldAccount
             } else {
                 Text::UploadFieldChannel
@@ -835,6 +859,8 @@ impl ProjectsScreen {
                 card = card.child(row(
                     if reel {
                         Text::UploadFieldCaption
+                    } else if draft {
+                        Text::UploadFieldDraftCaption
                     } else {
                         Text::MetadataFieldDescription
                     },
@@ -844,8 +870,8 @@ impl ProjectsScreen {
                         .into_any_element(),
                 ));
             }
-            // A Reel's hashtags are in its caption.
-            if !reel {
+            // A Reel's or a TikTok's hashtags are in its caption.
+            if !reel && !draft {
                 card = card.child(row(Text::MetadataFieldTags, text(post.tags.join(", "))));
             }
         }
@@ -886,7 +912,15 @@ impl ProjectsScreen {
                 }
             }));
         let screen = cx.entity().downgrade();
-        if reel {
+        if draft {
+            // TikTok takes the video only; the rest is the creator's, in
+            // the app.
+            card = card.child(kit::notice(
+                Tone::Info,
+                tr(bardo, Text::UploadDraftNotice),
+                cx,
+            ));
+        } else if reel {
             card = card.child(self.cover_field(cx));
             card = card.child(row(
                 Text::UploadFieldWhen,
@@ -946,7 +980,7 @@ impl ProjectsScreen {
                     });
                 }
             });
-        if !reel {
+        if !reel && !draft {
             card = card.child(h_flex().gap_1().items_center().child(kids).child(kit::info(
                 "upload-kids-info",
                 None,
@@ -955,6 +989,8 @@ impl ProjectsScreen {
         }
         let (synthetic_label, synthetic_hint) = if reel {
             (Text::UploadAiLabel, Text::UploadAiLabelHint)
+        } else if draft {
+            (Text::UploadDraftAiLabel, Text::UploadDraftAiLabelHint)
         } else {
             (Text::UploadSynthetic, Text::UploadSyntheticHint)
         };
@@ -1011,6 +1047,8 @@ impl ProjectsScreen {
             Tone::Warning,
             with_network(if reel {
                 Text::UploadReelIrreversible
+            } else if draft {
+                Text::UploadDraftIrreversible
             } else {
                 Text::UploadIrreversible
             }),
@@ -1037,7 +1075,9 @@ impl ProjectsScreen {
                         .primary()
                         .label(tr(
                             bardo,
-                            if reel && scheduled {
+                            if draft {
+                                Text::UploadDraftStart
+                            } else if reel && scheduled {
                                 Text::UploadReelStartScheduled
                             } else if reel {
                                 Text::UploadReelStart

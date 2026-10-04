@@ -317,9 +317,9 @@ fn stored(n: u64) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-/// The statuses whose upload sets `posted_at`: it went live, or waits
-/// for its publish time.
-const SETS_POSTED_AT: &str = "('published', 'restricted', 'scheduled')";
+/// The statuses whose upload sets `posted_at`: it went live, waits for
+/// its publish time, or reached the creator's inbox as a draft.
+const SETS_POSTED_AT: &str = "('published', 'restricted', 'scheduled', 'draft_sent')";
 
 /// The statuses after which a later save keeps `posted_at`: it went live.
 const LIVE: &str = "('published', 'restricted')";
@@ -1151,6 +1151,28 @@ mod tests {
         let read = db.publication(cancelled.id).unwrap().unwrap();
         assert_eq!(read.upload().unwrap().visibility, Visibility::Private);
         assert_eq!(read.upload().unwrap().publish_at, None);
+    }
+
+    #[test]
+    fn a_tiktok_draft_round_trips_with_no_post_and_when_it_reached_the_inbox() {
+        let (db, _, project) = setup();
+        let mut draft = Publication {
+            network: Network::TikTok,
+            link: None,
+            kind: PublicationKind::Uploaded(Upload::queued(Visibility::Private, JobId::new())),
+            ..uploading(&project)
+        };
+        db.save_publication(&draft).unwrap();
+        draft.upload_mut().unwrap().start().unwrap();
+        draft.sent(None).unwrap();
+        assert!(db.save_upload(&draft).unwrap());
+        draft.drafted(time(900)).unwrap();
+        assert!(db.save_upload(&draft).unwrap());
+        let read = db.publication(draft.id).unwrap().unwrap();
+        assert_eq!(read.upload().unwrap().status, UploadStatus::DraftSent);
+        assert_eq!(read.link, None);
+        assert_eq!(read.posted_at, time(900), "reached the inbox");
+        assert_eq!(read, draft);
     }
 
     #[test]

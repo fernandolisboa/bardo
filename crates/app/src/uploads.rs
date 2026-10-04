@@ -39,19 +39,34 @@
 //! processes the file ahead, no more than Instagram keeps a container,
 //! claims the publication once due and publishes it; a post whose due time
 //! passed without it waits for the user.
+//!
+//! A TikTok upload (#84) goes to the creator's inbox as a draft, which they
+//! finish in the TikTok app: the review shows the file, the account and
+//! the caption to paste there, its rendered file must pass TikTok's specs,
+//! and it takes no publish time (TikTok has no scheduling field, and the
+//! creator schedules the post in the app). The file goes in chunks; a
+//! resumed upload goes on after the last chunk TikTok took. TikTok keeps
+//! at most 5 drafts from apps waiting in 24 hours, so the review refuses a
+//! sixth while Bardo's own fill the inbox, and an upload TikTok refuses
+//! for that waits queued, like a Reel over its limit. Once the draft is in
+//! the inbox the publication shows **draft sent**, with the caption to
+//! copy and, when the narration used a realistic voice, a reminder to turn
+//! on TikTok's AI-generated content label.
 
 use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind, JobState, LIMIT_RECHECK,
-    MetadataProblem, Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository, Post,
-    Progress, ProjectFiles, Publication, PublicationId, PublicationKind, PublicationRepository,
-    ReelFile, ReelSpecProblem, Render, RenderRepository, RepositoryError, ScheduleProblem,
-    SecretText, SignInFailureKind, Upload, UploadError, UploadErrorKind, UploadFailure,
-    UploadOutcome, UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload, VideoUploader,
-    Visibility, check_publish_time, check_reel, due_step, mp4_layout, prepare_at,
+    DraftRoom, DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind, JobRepository, JobState,
+    LIMIT_RECHECK, MetadataProblem, Network, NetworkAccount, NetworkAccountId,
+    NetworkAccountRepository, Post, Progress, ProjectFiles, Publication, PublicationId,
+    PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem, Render, RenderRepository,
+    RepositoryError, ScheduleProblem, SecretText, SignInFailureKind, TIKTOK_DRAFT_WINDOW,
+    TIKTOK_PENDING_DRAFTS, TikTokFile, TikTokSpecProblem, Upload, UploadError, UploadErrorKind,
+    UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload,
+    VideoUploader, Visibility, check_publish_time, check_reel, check_tiktok, draft_room, due_step,
+    mp4_layout, prepare_at, video_container,
 };
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +87,10 @@ pub enum UploadBlock {
     ReconnectNeeded,
     /// An upload of this network is running or waiting.
     Uploading,
+    /// The account's inbox holds as many drafts from Bardo as TikTok lets
+    /// wait in 24 hours: the next one goes once a place frees
+    /// (`UploadReview::drafts_free_at`).
+    DraftLimit,
     /// A render of the project is running or waiting: its files may be
     /// rewritten while they are sent.
     Rendering,
@@ -79,7 +98,8 @@ pub enum UploadBlock {
     NoRender,
     /// The cut or the preset changed since the render: render again.
     RenderOutdated,
-    /// The rendered file falls short of the network's specs (a Reel's).
+    /// The rendered file falls short of the network's specs (a Reel's,
+    /// TikTok's).
     Specs,
     /// No metadata generated yet.
     NoMetadata,
@@ -88,11 +108,12 @@ pub enum UploadBlock {
 }
 
 impl UploadBlock {
-    pub const ALL: [UploadBlock; 10] = [
+    pub const ALL: [UploadBlock; 11] = [
         UploadBlock::NotOffered,
         UploadBlock::NotConnected,
         UploadBlock::ReconnectNeeded,
         UploadBlock::Uploading,
+        UploadBlock::DraftLimit,
         UploadBlock::Rendering,
         UploadBlock::NoRender,
         UploadBlock::RenderOutdated,
@@ -107,6 +128,7 @@ impl UploadBlock {
             UploadBlock::NotConnected => "not_connected",
             UploadBlock::ReconnectNeeded => "reconnect_needed",
             UploadBlock::Uploading => "uploading",
+            UploadBlock::DraftLimit => "draft_limit",
             UploadBlock::Rendering => "rendering",
             UploadBlock::NoRender => "no_render",
             UploadBlock::RenderOutdated => "render_outdated",
@@ -115,6 +137,23 @@ impl UploadBlock {
             UploadBlock::Problems => "problems",
         }
     }
+}
+
+/// One way a rendered file falls short of what the network takes, with
+/// the network's own rules.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SpecProblem {
+    Reel(ReelSpecProblem),
+    TikTok(TikTokSpecProblem),
+}
+
+/// What a TikTok draft in the inbox needs from the creator: the caption to
+/// paste in the TikTok app (the upload takes none) and whether to turn on
+/// its AI-generated content label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftNote {
+    pub caption: String,
+    pub synthetic: bool,
 }
 
 /// What the upload review shows for one network account.
@@ -133,9 +172,13 @@ pub struct UploadReview {
     /// network takes them.
     pub post: Option<Post>,
     pub problems: Vec<MetadataProblem>,
-    /// What keeps the rendered file from being a Reel, in the order the
-    /// review lists them; empty on networks without such specs.
-    pub spec_problems: Vec<ReelSpecProblem>,
+    /// What keeps the rendered file from meeting the network's specs (a
+    /// Reel's, TikTok's), in the order the review lists them; empty on
+    /// networks without such specs.
+    pub spec_problems: Vec<SpecProblem>,
+    /// When the account's inbox has room for another draft again, while
+    /// Bardo's drafts fill it (TikTok); `None` when one may go now.
+    pub drafts_free_at: Option<SystemTime>,
     /// The account's default visibility, picked until the user changes it.
     pub visibility: Visibility,
     /// The narration was read with a realistic voice: the disclosure
@@ -174,6 +217,9 @@ impl UploadReview {
             | ConnectionState::Choosing { .. } => UploadBlock::NotConnected,
             ConnectionState::ReconnectNeeded { .. } => UploadBlock::ReconnectNeeded,
             ConnectionState::Connected { .. } if self.uploading => UploadBlock::Uploading,
+            ConnectionState::Connected { .. } if self.drafts_free_at.is_some() => {
+                UploadBlock::DraftLimit
+            }
             ConnectionState::Connected { .. } if self.rendering => UploadBlock::Rendering,
             ConnectionState::Connected { .. }
                 if self.render.is_none() || self.size.is_none_or(|size| size == 0) =>
@@ -213,6 +259,13 @@ impl UploadReview {
     /// caption, cover and feed choice) or a video with a title.
     pub fn is_reel(&self) -> bool {
         self.network.uploads_reels()
+    }
+
+    /// Whether the upload lands in the creator's inbox as a draft they
+    /// finish in the network's app (TikTok): no visibility, publish time or
+    /// made for kids, and the caption is theirs to paste.
+    pub fn is_draft(&self) -> bool {
+        self.network.uploads_drafts()
     }
 }
 
@@ -259,7 +312,8 @@ pub enum UploadReviewError {
     /// The publish time cannot be used (already past).
     #[error("the publish time cannot be used: {0}")]
     Schedule(ScheduleProblem),
-    /// Neither the network nor Bardo schedules its posts.
+    /// Neither the network nor Bardo schedules its posts (TikTok's draft
+    /// is scheduled by the creator in the TikTok app).
     #[error("the network takes no publish time")]
     NoSchedule,
     /// The cover frame is past the video's end.
@@ -334,7 +388,8 @@ pub enum UploadState {
     /// The network was still processing the video when Bardo stopped
     /// waiting for it: check again later.
     StillProcessing,
-    /// Over the network's publishing limit (Instagram's): queued until
+    /// Over the network's publishing limit (Instagram's), or TikTok's
+    /// pending drafts cap: queued until
     /// `until`, when Bardo reads the limit again; `frees` when a place
     /// frees by then, so the post goes. `used` of `total` posts in the
     /// window, when the network said.
@@ -347,6 +402,9 @@ pub enum UploadState {
     Published,
     /// Kept private by the network although more was asked.
     Restricted,
+    /// In the creator's inbox as a draft, for them to finish and post in
+    /// the network's app (TikTok).
+    DraftSent,
     /// The user stopped it; it resumes from what the network has.
     Stopped,
     Failed {
@@ -378,6 +436,7 @@ pub fn upload_state(upload: &Upload, job: Option<&Job>) -> UploadState {
     match status {
         UploadStatus::Published => return UploadState::Published,
         UploadStatus::Restricted => return UploadState::Restricted,
+        UploadStatus::DraftSent => return UploadState::DraftSent,
         UploadStatus::Scheduled => {
             if let Some(at) = upload.publish_at {
                 return UploadState::Scheduled(at);
@@ -552,6 +611,11 @@ struct UploadCheckpoint {
     /// How many times the file went again so far.
     #[serde(default, skip_serializing_if = "is_zero")]
     restarts: u32,
+    /// When the network started each session of the job in the last 24
+    /// hours, in Unix milliseconds: each TikTok init may hold a draft
+    /// against the inbox's cap from then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sessions: Vec<u64>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -561,6 +625,10 @@ fn is_zero(n: &u32) -> bool {
 /// How many times an upload goes again in a new container before it fails:
 /// a network that keeps dropping it won't take it on the next try either.
 const MAX_RESTARTS: u32 = 2;
+
+/// When an upload TikTok refused for its drafts cap tries again, when
+/// Bardo's own drafts do not fill the cap.
+const RECHECK_DRAFTS: Duration = Duration::from_secs(60 * 60);
 
 /// Why a job waits queued: the publishing limit, read again `until` (Unix
 /// milliseconds), with what the network said of it.
@@ -673,9 +741,55 @@ pub(crate) struct UploadHandler {
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) connections: Connections,
     pub(crate) uploaders: Vec<Arc<dyn VideoUploader>>,
+    /// Every job, to count the drafts an account's inbox holds.
+    pub(crate) jobs: Arc<dyn JobRepository>,
     /// When this session of Bardo opened: a due time that passed before
     /// it passed while Bardo was closed (`bardo_domain::due_step`).
     pub(crate) opened_at: SystemTime,
+}
+
+/// The upload jobs that send to `creator` (the connected identity) on
+/// `network`, from any of the profile's accounts, with where each got. Jobs
+/// that only check on a sent video are left out: their upload has its own
+/// job.
+fn creator_jobs(jobs: Vec<Job>, network: Network, creator: &str) -> Vec<(Job, UploadCheckpoint)> {
+    if creator.is_empty() {
+        return Vec::new();
+    }
+    jobs.into_iter()
+        .filter(|job| job.kind() == JobKind::Upload)
+        .filter(|job| {
+            serde_json::from_str::<UploadPayload>(job.payload()).is_ok_and(|payload| {
+                payload.network == network.code()
+                    && payload.destination == creator
+                    && payload.video.is_none()
+            })
+        })
+        .map(|job| {
+            let checkpoint = job
+                .checkpoint()
+                .and_then(|text| serde_json::from_str(text).ok())
+                .unwrap_or_default();
+            (job, checkpoint)
+        })
+        .collect()
+}
+
+/// Since when `job`'s drafts count against the inbox's cap: one from each
+/// session it started, since TikTok may hold each init's draft, and one
+/// from `now` while the job runs or waits before its first (it may start
+/// one any moment). A draft that failed after it started still counts.
+fn draft_times(job: &Job, checkpoint: &UploadCheckpoint, now: SystemTime) -> Vec<SystemTime> {
+    let mut times: Vec<SystemTime> = checkpoint
+        .sessions
+        .iter()
+        .copied()
+        .map(from_millis)
+        .collect();
+    if times.is_empty() && job.state().is_active() {
+        times.push(now);
+    }
+    times
 }
 
 /// Why a job of a scheduled upload stops when its due time passed without
@@ -744,7 +858,18 @@ impl UploadRun for JobRun<'_> {
     }
 
     fn session_started(&mut self, session: &str) -> Result<(), UploadError> {
-        self.cx.save_external_handle(session).map_err(Self::local)
+        self.cx.save_external_handle(session).map_err(Self::local)?;
+        self.checkpoint.confirmed = 0;
+        let now = SystemTime::now();
+        let window = now.checked_sub(TIKTOK_DRAFT_WINDOW).map_or(0, to_millis);
+        self.checkpoint.sessions.retain(|at| *at > window);
+        self.checkpoint.sessions.push(to_millis(now));
+        self.cx
+            .save_checkpoint(
+                to_json(&self.checkpoint),
+                sending_progress(0, self.payload.size),
+            )
+            .map_err(Self::local)
     }
 
     fn confirmed(&mut self, bytes: u64) -> Result<(), UploadError> {
@@ -755,6 +880,10 @@ impl UploadRun for JobRun<'_> {
                 sending_progress(bytes, self.payload.size),
             )
             .map_err(Self::local)
+    }
+
+    fn resumed(&self) -> u64 {
+        self.checkpoint.confirmed
     }
 
     fn should_stop(&self) -> bool {
@@ -988,6 +1117,40 @@ impl UploadHandler {
             used: Some(limit.used),
             total: Some(limit.total),
         }))
+    }
+
+    /// How long an upload TikTok refused for its pending drafts cap waits:
+    /// until a place frees in the window when Bardo's other drafts to
+    /// `creator` fill it, else an hour (drafts from other apps fill it, and
+    /// Bardo cannot tell when they leave).
+    fn drafts_hold(&self, account: &NetworkAccount, job: JobId, creator: &str) -> Held {
+        let now = SystemTime::now();
+        let jobs = match self.jobs.list(account.owner) {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                tracing::warn!("could not read the upload jobs: {error}");
+                Vec::new()
+            }
+        };
+        let sent = creator_jobs(jobs, account.network, creator)
+            .into_iter()
+            .filter(|(other, _)| other.id() != job)
+            .flat_map(|(other, checkpoint)| draft_times(&other, &checkpoint, now))
+            .collect::<Vec<_>>();
+        let (until, frees) = match draft_room(&sent, now) {
+            DraftRoom::Full { at } => (at, true),
+            DraftRoom::Room { .. } => (now + RECHECK_DRAFTS, false),
+        };
+        tracing::info!(
+            network = account.network.code(),
+            "an upload waits for the inbox's drafts cap"
+        );
+        Held {
+            until: to_millis(until),
+            frees,
+            used: Some(TIKTOK_PENDING_DRAFTS),
+            total: Some(TIKTOK_PENDING_DRAFTS),
+        }
     }
 
     /// Leaves the job queued until `held.until`, keeping where it got.
@@ -1239,6 +1402,18 @@ impl JobHandler for UploadHandler {
                 // Stopped: the session and the bytes are saved.
                 Ok(None) => return Ok(()),
                 Err(_) if cx.should_stop() => return Ok(()),
+                // TikTok holds 5 drafts from apps at most: the upload waits
+                // queued for a place, like a Reel over Instagram's limit.
+                Err(error)
+                    if error.kind == UploadErrorKind::UploadLimit && network.uploads_drafts() =>
+                {
+                    let checkpoint: UploadCheckpoint = match cx.checkpoint() {
+                        Some(text) => parse(text)?,
+                        None => UploadCheckpoint::default(),
+                    };
+                    let held = self.drafts_hold(&account, job, &payload.destination);
+                    return Self::hold(cx, checkpoint, held, payload.size);
+                }
                 // Not retryable: the publish time passed before the video
                 // went, and the user reviews the upload with a new one.
                 Err(error)
@@ -1347,6 +1522,11 @@ impl JobHandler for UploadHandler {
                 Ok(VideoState::Expired) => {
                     return self.start_over(cx, &checkpoint, &video, publication_id, job, network);
                 }
+                // TikTok: the draft waits in the creator's inbox; they post
+                // it in the app.
+                Ok(VideoState::InInbox) => {
+                    return self.update(publication_id, job, |p| p.drafted(SystemTime::now()));
+                }
                 Ok(VideoState::Ready {
                     visibility,
                     publish_at,
@@ -1439,8 +1619,66 @@ impl Bardo {
         }
     }
 
-    /// One Reel spec problem as the review lists it.
-    pub fn reel_spec_text(&self, problem: &ReelSpecProblem) -> String {
+    /// One spec problem as the review lists it, in the network's words.
+    pub fn spec_text(&self, problem: &SpecProblem) -> String {
+        match problem {
+            SpecProblem::Reel(problem) => self.reel_spec_text(problem),
+            SpecProblem::TikTok(problem) => self.tiktok_spec_text(problem),
+        }
+    }
+
+    fn tiktok_spec_text(&self, problem: &TikTokSpecProblem) -> String {
+        let text = Text::UploadTikTokSpec(problem.code());
+        match problem {
+            TikTokSpecProblem::Unreadable
+            | TikTokSpecProblem::Container
+            | TikTokSpecProblem::NoVideo => self.text(text).into_owned(),
+            TikTokSpecProblem::Codec(codec) => self.text_with(text, &[("codec", codec)]),
+            TikTokSpecProblem::FrameRate(hundredths) => {
+                self.text_with(text, &[("fps", &self.frame_rate_text(*hundredths))])
+            }
+            TikTokSpecProblem::PictureSize(width, height) => self.text_with(
+                text,
+                &[
+                    ("width", &width.to_string()),
+                    ("height", &height.to_string()),
+                ],
+            ),
+            TikTokSpecProblem::TooLong(at) => self.text_with(
+                text,
+                &[(
+                    "duration",
+                    &self.localized_decimal(&bardo_domain::format_cover_time(*at)),
+                )],
+            ),
+            TikTokSpecProblem::TooBig(bytes) => {
+                self.text_with(text, &[("size", &self.megabytes_text(*bytes))])
+            }
+        }
+    }
+
+    /// Frames per second from hundredths: whole when they are (`30`),
+    /// with two decimals in the interface's style otherwise.
+    fn frame_rate_text(&self, hundredths: u32) -> String {
+        if hundredths.is_multiple_of(100) {
+            format!("{}", hundredths / 100)
+        } else {
+            self.localized_decimal(&format!("{:.2}", f64::from(hundredths) / 100.0))
+        }
+    }
+
+    /// A file size in megabytes, as the render line shows it.
+    fn megabytes_text(&self, bytes: u64) -> String {
+        self.text_with(
+            Text::RenderSize,
+            &[(
+                "value",
+                &self.tenths(bytes as f64 / 1_000_000.0).replace('+', ""),
+            )],
+        )
+    }
+
+    fn reel_spec_text(&self, problem: &ReelSpecProblem) -> String {
         let text = Text::UploadSpec(problem.code());
         let duration =
             |at: &Duration| self.localized_decimal(&bardo_domain::format_cover_time(*at));
@@ -1451,13 +1689,7 @@ impl Bardo {
             | ReelSpecProblem::NoVideo => self.text(text).into_owned(),
             ReelSpecProblem::Codec(codec) => self.text_with(text, &[("codec", codec)]),
             ReelSpecProblem::FrameRate(hundredths) => {
-                let fps = f64::from(*hundredths) / 100.0;
-                let fps = if hundredths % 100 == 0 {
-                    format!("{}", hundredths / 100)
-                } else {
-                    self.localized_decimal(&format!("{fps:.2}"))
-                };
-                self.text_with(text, &[("fps", &fps)])
+                self.text_with(text, &[("fps", &self.frame_rate_text(*hundredths))])
             }
             ReelSpecProblem::TooWide(width) => {
                 self.text_with(text, &[("width", &width.to_string())])
@@ -1466,29 +1698,35 @@ impl Bardo {
                 self.text_with(text, &[("duration", &duration(at))])
             }
             ReelSpecProblem::TooBig(bytes) => {
-                let size = self.text_with(
-                    Text::RenderSize,
-                    &[(
-                        "value",
-                        &self.tenths(*bytes as f64 / 1_000_000.0).replace('+', ""),
-                    )],
-                );
-                self.text_with(text, &[("size", &size)])
+                self.text_with(text, &[("size", &self.megabytes_text(*bytes))])
             }
         }
     }
 
-    /// Why a Reel waits queued for Instagram's publishing limit, and when
-    /// it goes or Bardo reads the limit again (`frees`, see
+    /// Why an upload waits queued for the network's limit (Instagram's
+    /// publishing limit, TikTok's pending drafts cap), and when it goes or
+    /// Bardo reads the limit again (`frees`, see
     /// [`UploadState::OverLimit`]).
     pub fn upload_over_limit_text(
         &self,
+        network: Network,
         until: SystemTime,
         frees: bool,
         used: Option<u32>,
         total: Option<u32>,
     ) -> String {
         let when = self.publish_time_text(until);
+        if network.uploads_drafts() {
+            let total = total.unwrap_or(TIKTOK_PENDING_DRAFTS).to_string();
+            return self.text_with(
+                if frees {
+                    Text::UploadDraftLimitHeldHint
+                } else {
+                    Text::UploadDraftLimitRecheckHint
+                },
+                &[("total", &total), ("when", &when)],
+            );
+        }
         match (used, total) {
             (Some(used), Some(total)) => self.text_with(
                 if frees {
@@ -1504,6 +1742,32 @@ impl Bardo {
             ),
             _ => self.text_with(Text::UploadOverLimitSoonHint, &[("when", &when)]),
         }
+    }
+
+    /// Why the review refuses another TikTok draft now, and when it may go.
+    pub fn draft_limit_text(&self, free_at: SystemTime) -> String {
+        self.text_with(
+            Text::UploadDraftLimitHint,
+            &[
+                ("total", &TIKTOK_PENDING_DRAFTS.to_string()),
+                ("when", &self.publish_time_text(free_at)),
+            ],
+        )
+    }
+
+    /// What the creator still does with a TikTok draft in the inbox: the
+    /// caption that went with the review, and whether to turn on the AI
+    /// label. `None` for any other publication, or once its job is gone.
+    pub fn draft_note(&self, publication: &Publication) -> Option<DraftNote> {
+        let upload = publication.upload()?;
+        if upload.status != UploadStatus::DraftSent {
+            return None;
+        }
+        let (_, payload) = self.upload_job(upload.job).ok()?;
+        Some(DraftNote {
+            caption: payload.description,
+            synthetic: payload.synthetic,
+        })
     }
 
     /// The warning Instagram published the Reel with, in its words.
@@ -1573,12 +1837,20 @@ impl Bardo {
                 .unwrap_or_default(),
             _ => String::new(),
         };
+        let has_specs = network.uploads_reels() || network.uploads_drafts();
         let spec_problems = match (&target.render, size) {
             // A render on its way rewrites the file: checked once it is done.
-            (Some(render), Some(size)) if network.uploads_reels() && size > 0 && !rendering => {
-                self.reel_problems(project, render, size)
+            (Some(render), Some(size)) if has_specs && size > 0 && !rendering => {
+                self.spec_problems(project, network, render, size)
             }
             _ => Vec::new(),
+        };
+        let drafts_free_at = match network.uploads_drafts() {
+            true => match self.draft_room(network, &destination) {
+                DraftRoom::Room { .. } => None,
+                DraftRoom::Full { at } => Some(at),
+            },
+            false => None,
         };
         let stamp = format!(
             "{}|{}|{}|{}|{synthetic}|{channel}|{destination}",
@@ -1612,33 +1884,88 @@ impl Bardo {
             size,
             destination,
             spec_problems,
+            drafts_free_at,
             stamp,
         })
     }
 
-    /// What keeps `render` (of `size` bytes) from being a Reel. Read once
-    /// per render and size, a file Bardo could not read included: probing
-    /// runs ffprobe, and the review is read again whenever a job moves.
-    fn reel_problems(
+    /// The room left in `creator`'s inbox for drafts, counting Bardo's
+    /// own: those waiting or on their way now, and those started in the last
+    /// 24 hours (`bardo_domain::draft_room`).
+    fn draft_room(&self, network: Network, creator: &str) -> DraftRoom {
+        let now = SystemTime::now();
+        let sent: Vec<SystemTime> = creator_jobs(self.jobs(), network, creator)
+            .iter()
+            .flat_map(|(job, checkpoint)| draft_times(job, checkpoint, now))
+            .collect();
+        draft_room(&sent, now)
+    }
+
+    /// What keeps `render` (of `size` bytes) from meeting `network`'s
+    /// specs: a Reel's or TikTok's. Read once per render and size, a file
+    /// Bardo could not read included: probing runs ffprobe, and the review
+    /// is read again whenever a job moves. A render is of one account, so
+    /// of one network.
+    fn spec_problems(
         &self,
         project: VideoProjectId,
+        network: Network,
         render: &Render,
         size: u64,
-    ) -> Vec<ReelSpecProblem> {
+    ) -> Vec<SpecProblem> {
         let key = (render.id, size);
         let mut checked = self
-            .reel_checks
+            .spec_checks
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(problems) = checked.get(&key) {
             return problems.clone();
         }
-        let problems = match self.read_reel(project, render, size) {
-            Some(file) => check_reel(&file),
-            None => vec![ReelSpecProblem::Unreadable],
+        let problems: Vec<SpecProblem> = if network.uploads_drafts() {
+            match self.read_tiktok(project, render, size) {
+                Some(file) => check_tiktok(&file),
+                None => vec![TikTokSpecProblem::Unreadable],
+            }
+            .into_iter()
+            .map(SpecProblem::TikTok)
+            .collect()
+        } else {
+            match self.read_reel(project, render, size) {
+                Some(file) => check_reel(&file),
+                None => vec![ReelSpecProblem::Unreadable],
+            }
+            .into_iter()
+            .map(SpecProblem::Reel)
+            .collect()
         };
         checked.insert(key, problems.clone());
         problems
+    }
+
+    fn read_tiktok(
+        &self,
+        project: VideoProjectId,
+        render: &Render,
+        size: u64,
+    ) -> Option<TikTokFile> {
+        let mut file = self.files.open(project, &render.file).ok()?;
+        let container = video_container(&mut file).ok()?;
+        let info = match self.media.probe(&self.files.path(project, &render.file)) {
+            Ok(info) => info,
+            Err(error) => {
+                tracing::warn!("could not probe the render for TikTok's specs: {error}");
+                return None;
+            }
+        };
+        Some(TikTokFile {
+            container,
+            codec: info.video.as_ref().map(|video| video.codec.clone()),
+            width: info.video.as_ref().map_or(0, |video| video.width),
+            height: info.video.as_ref().map_or(0, |video| video.height),
+            fps: info.video.as_ref().map_or(0.0, |video| video.fps()),
+            duration: info.duration,
+            size,
+        })
     }
 
     fn read_reel(&self, project: VideoProjectId, render: &Render, size: u64) -> Option<ReelFile> {
@@ -1823,8 +2150,9 @@ impl Bardo {
         };
         let (old, mut payload) = self.upload_job(upload.job)?;
         // A Reel's post id is its shortcode, which only comes once Bardo
-        // publishes it: the container is the job's.
-        let video = if network.uploads_reels() {
+        // publishes it, and a TikTok draft has none: the container or the
+        // draft is the job's.
+        let video = if network.uploads_reels() || network.uploads_drafts() {
             let checkpoint = old
                 .checkpoint()
                 .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
@@ -1893,10 +2221,12 @@ pub(crate) mod testing {
     /// A network that keeps what each session received: a session it
     /// knows resumes where it stopped, as YouTube's do. As Instagram
     /// (`reels`), a processed upload waits for Bardo to publish it, within
-    /// a publishing limit.
+    /// a publishing limit. As TikTok (`drafts`), a processed upload lands
+    /// in the creator's inbox.
     #[derive(Default)]
     pub(crate) struct FakeUploader {
         pub(crate) reels: bool,
+        pub(crate) drafts: bool,
         /// Answers to publishing limit reads; when empty, there is no limit.
         pub(crate) limits: Mutex<VecDeque<Result<PublishingLimit, UploadErrorKind>>>,
         /// The account each limit read was for.
@@ -1907,6 +2237,8 @@ pub(crate) mod testing {
         pub(crate) published: Mutex<Vec<(String, String)>>,
         /// The account each upload went to.
         pub(crate) accounts: Mutex<Vec<String>>,
+        /// What each attempt said already arrived (`UploadRun::resumed`).
+        pub(crate) resumed: Mutex<Vec<u64>>,
         pub(crate) attempts: Mutex<VecDeque<Attempt>>,
         /// Answers to the processing checks; when empty, the video is ready
         /// with the visibility asked.
@@ -1945,6 +2277,13 @@ pub(crate) mod testing {
             }
         }
 
+        pub(crate) fn tiktok() -> Self {
+            Self {
+                drafts: true,
+                ..Self::default()
+            }
+        }
+
         pub(crate) fn limit(&self, limit: Result<PublishingLimit, UploadErrorKind>) {
             self.limits.lock().unwrap().push_back(limit);
         }
@@ -1978,7 +2317,9 @@ pub(crate) mod testing {
 
     impl VideoUploader for FakeUploader {
         fn network(&self) -> Network {
-            if self.reels {
+            if self.drafts {
+                Network::TikTok
+            } else if self.reels {
                 Network::InstagramReels
             } else {
                 Network::YouTube
@@ -1986,7 +2327,7 @@ pub(crate) mod testing {
         }
 
         fn link(&self, id: &str) -> Result<Option<PostLink>, UploadError> {
-            if self.reels {
+            if self.reels || self.drafts {
                 return Ok(None);
             }
             Ok(Some(
@@ -2060,6 +2401,7 @@ pub(crate) mod testing {
             }
             self.videos.lock().unwrap().push(video.clone());
             self.accounts.lock().unwrap().push(run.account().to_owned());
+            self.resumed.lock().unwrap().push(run.resumed());
             let attempt = self
                 .attempts
                 .lock()
@@ -2133,6 +2475,7 @@ pub(crate) mod testing {
                 }
                 Some(Ok(state)) => Ok(state),
                 None if self.reels => Ok(VideoState::Processed),
+                None if self.drafts => Ok(VideoState::InInbox),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
                 // As asked: a scheduled video stays private with its time.
                 None => {
@@ -2331,13 +2674,13 @@ pub(crate) mod tests {
             s.app.start_upload(&before, before.choices()),
             Err(UploadReviewError::Blocked(UploadBlock::NotConnected))
         ));
-        // TikTok has no uploader yet: export it.
+        // Nor a draft to an unconnected TikTok account.
         assert_eq!(
             s.app
                 .upload_review(s.project.id, Network::TikTok)
                 .unwrap()
                 .block(),
-            Some(UploadBlock::NotOffered)
+            Some(UploadBlock::NotConnected)
         );
         assert!(matches!(
             s.app.upload_review(s.project.id, Network::X),
@@ -3145,7 +3488,10 @@ pub(crate) mod reel_tests {
 
         let seen = review(&s);
         assert!(seen.is_reel());
-        assert_eq!(seen.spec_problems, [ReelSpecProblem::MoovNotFirst]);
+        assert_eq!(
+            seen.spec_problems,
+            [SpecProblem::Reel(ReelSpecProblem::MoovNotFirst)]
+        );
         assert_eq!(seen.block(), Some(UploadBlock::Specs));
         assert!(matches!(
             s.app.start_upload(&seen, seen.choices()),
@@ -3297,7 +3643,7 @@ pub(crate) mod reel_tests {
         assert_eq!(queued.attempts(), 0, "waiting is not a failed attempt");
         assert!(
             s.app
-                .upload_over_limit_text(until, frees, used, total)
+                .upload_over_limit_text(Network::InstagramReels, until, frees, used, total)
                 .contains("and 50 went out, some through other apps")
         );
 
@@ -3461,5 +3807,484 @@ pub(crate) mod reel_tests {
         );
         assert_eq!(s.h.reels.chunk_starts(), [0], "nothing more sent");
         assert!(s.h.reels.published.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tiktok_tests {
+    use std::time::{Duration, Instant, SystemTime};
+
+    use bardo_domain::{
+        ConnectedIdentity, ConnectionSecrets, ConnectionStatus, NetworkConnection,
+        NetworkConnectionRepository, TIKTOK_DRAFT_WINDOW, TokenGrant, TokenSet,
+    };
+    use bardo_media::ffmpeg::{AudioStream, MediaInfo, VideoStream};
+
+    use super::testing::Attempt;
+    use super::*;
+    use crate::export::tests::{Setup, rendered_with};
+    use crate::scenes::tests::{done, wait_done};
+
+    const OPEN_ID: &str = "-000OpenIdOfTheCreator";
+    const ACCESS: &str = "act.tiktok-access-token";
+    const FILE: &str = "render-tiktok.mp4";
+
+    fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut bytes = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(kind);
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    /// A small MP4 file.
+    fn tiktok_file() -> Vec<u8> {
+        [
+            mp4_box(b"ftyp", b"isom\0\0\x02\0isomavc1"),
+            mp4_box(b"mdat", b"frames frames"),
+            mp4_box(b"moov", b"index"),
+        ]
+        .concat()
+    }
+
+    /// Writes the render with what ffprobe reads of it.
+    fn write_render(s: &Setup, bytes: &[u8], frame_rate: (u32, u32)) {
+        s.h.files.write(s.project.id, FILE, bytes).unwrap();
+        s.h.media.probes.lock().unwrap().insert(
+            String::from_utf8_lossy(bytes).into_owned(),
+            MediaInfo {
+                duration: Duration::from_secs(45),
+                video: Some(VideoStream {
+                    codec: "h264".into(),
+                    width: 1080,
+                    height: 1920,
+                    frame_rate,
+                }),
+                audio: Some(AudioStream {
+                    codec: "aac".into(),
+                    sample_rate: 48_000,
+                    channels: 2,
+                }),
+            },
+        );
+    }
+
+    fn tiktok(s: &Setup) -> NetworkAccount {
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+            .unwrap()
+            .into_iter()
+            .find(|account| account.network == Network::TikTok)
+            .unwrap()
+    }
+
+    fn connect(s: &Setup) {
+        let account = tiktok(s);
+        let now = SystemTime::now();
+        let tokens = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(ACCESS),
+                refresh_token: Some(SecretText::new("rft.tiktok-refresh-token")),
+                expires_in: Duration::from_secs(24 * 60 * 60),
+                scopes: Vec::new(),
+            },
+            now,
+        );
+        s.h.connection_secrets
+            .set_tokens(s.app.profile().id, account.id, &tokens)
+            .unwrap();
+        NetworkConnectionRepository::save(
+            &*s.h.db,
+            &NetworkConnection {
+                account: account.id,
+                owner: s.app.profile().id,
+                status: ConnectionStatus::Connected,
+                identity: ConnectedIdentity {
+                    id: OPEN_ID.into(),
+                    name: "@arquivosdoespaco".into(),
+                },
+                scopes: Vec::new(),
+                expires_at: tokens.expires_at(),
+                connected_at: now,
+                refreshed_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn generate(s: &Setup) {
+        let answer = serde_json::json!({ "posts": [
+            {
+                "network": "youtube",
+                "title": "The probe nobody found",
+                "description": "In 1969 a probe went silent.",
+                "tags": ["space history", "nasa"]
+            },
+            {
+                "network": "tiktok",
+                "title": "",
+                "description": "The probe nobody found.",
+                "tags": ["#space", "nasa"]
+            }
+        ]});
+        s.h.text.answers.lock().unwrap().push(answer.to_string());
+        done(
+            &s.app,
+            s.app
+                .generate_metadata(s.project.id, crate::BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    /// The project rendered with metadata, its TikTok account connected
+    /// and its file within TikTok's specs.
+    fn ready() -> Setup {
+        let s = rendered_with(&[]);
+        generate(&s);
+        write_render(&s, &tiktok_file(), (30, 1));
+        connect(&s);
+        s
+    }
+
+    fn review(s: &Setup) -> UploadReview {
+        s.app.upload_review(s.project.id, Network::TikTok).unwrap()
+    }
+
+    fn start(s: &Setup, choices: UploadChoices) -> JobId {
+        let review = review(s);
+        s.app.start_upload(&review, choices).unwrap()
+    }
+
+    fn draft(s: &Setup) -> Publication {
+        s.app
+            .publications
+            .publications(s.project.id)
+            .unwrap()
+            .into_iter()
+            .find(|publication| publication.network() == Network::TikTok)
+            .unwrap()
+    }
+
+    fn state(s: &Setup) -> UploadState {
+        s.app.upload_state(&draft(s)).unwrap()
+    }
+
+    fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !check() {
+            assert!(Instant::now() < deadline, "never {what}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn tiktok_spec_problems_read_with_their_numbers() {
+        let s = ready();
+        let text = |problem| s.app.spec_text(&SpecProblem::TikTok(problem));
+        assert_eq!(
+            text(TikTokSpecProblem::Codec("av1".into())),
+            "Video codec av1: TikTok takes H.264, H.265, VP8 or VP9."
+        );
+        assert_eq!(
+            text(TikTokSpecProblem::FrameRate(2000)),
+            "20 frames per second: TikTok takes 23 to 60."
+        );
+        assert_eq!(
+            text(TikTokSpecProblem::PictureSize(320, 568)),
+            "320×568 pixels: TikTok takes 360 to 4096 pixels per side."
+        );
+        assert_eq!(
+            text(TikTokSpecProblem::TooLong(Duration::from_secs(612))),
+            "10:12 long: TikTok takes up to 10 minutes from apps."
+        );
+        assert!(text(TikTokSpecProblem::TooBig(4_100_000_000)).contains("4100"));
+    }
+
+    #[test]
+    fn no_draft_goes_without_a_confirmed_review_of_a_file_that_meets_the_specs() {
+        let s = rendered_with(&[]);
+        generate(&s);
+        write_render(&s, &tiktok_file(), (20, 1));
+        connect(&s);
+
+        let seen = review(&s);
+        assert!(seen.is_draft());
+        assert_eq!(
+            seen.spec_problems,
+            [SpecProblem::TikTok(TikTokSpecProblem::FrameRate(2000))]
+        );
+        assert_eq!(seen.block(), Some(UploadBlock::Specs));
+        assert!(matches!(
+            s.app.start_upload(&seen, seen.choices()),
+            Err(UploadReviewError::Blocked(UploadBlock::Specs))
+        ));
+
+        // A file within them: the review shows the account and the caption.
+        let fixed = [tiktok_file(), b"30fps".to_vec()].concat();
+        write_render(&s, &fixed, (30, 1));
+        let review = review(&s);
+        assert_eq!(review.block(), None);
+        assert_eq!(review.channel(), Some("@arquivosdoespaco"));
+        let caption = review.post.as_ref().unwrap().text.clone().unwrap();
+        assert!(caption.contains("#space"), "{caption}");
+        // Not the review of the earlier file.
+        assert!(matches!(
+            s.app.start_upload(&seen, seen.choices()),
+            Err(UploadReviewError::Blocked(_) | UploadReviewError::Changed)
+        ));
+        // TikTok takes no publish time, and Bardo schedules no drafts.
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        assert!(matches!(
+            s.app.start_upload(
+                &review,
+                UploadChoices {
+                    publish_at: Some(later),
+                    ..review.choices()
+                }
+            ),
+            Err(UploadReviewError::NoSchedule)
+        ));
+        assert!(s.h.tiktok.videos.lock().unwrap().is_empty(), "nothing sent");
+        assert!(
+            s.app
+                .publications
+                .publications(s.project.id)
+                .unwrap()
+                .is_empty()
+        );
+
+        done(
+            &s.app,
+            s.app.start_upload(&review, review.choices()).unwrap(),
+        );
+        assert_eq!(state(&s), UploadState::DraftSent);
+    }
+
+    #[test]
+    fn a_confirmed_draft_lands_in_the_inbox_with_the_caption_to_paste() {
+        let s = ready();
+        let review = review(&s);
+        let caption = review.post.as_ref().unwrap().text.clone().unwrap();
+        let before = SystemTime::now() - Duration::from_secs(1);
+        done(
+            &s.app,
+            start(
+                &s,
+                UploadChoices {
+                    synthetic: true,
+                    ..review.choices()
+                },
+            ),
+        );
+
+        let sent = s.h.tiktok.videos.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].description, caption);
+        assert_eq!(*s.h.tiktok.accounts.lock().unwrap(), [OPEN_ID]);
+        assert_eq!(*s.h.tiktok.files.lock().unwrap(), [tiktok_file()]);
+        assert!(
+            s.h.tiktok
+                .tokens
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|t| t == ACCESS)
+        );
+
+        let publication = draft(&s);
+        assert_eq!(
+            publication.upload().unwrap().status,
+            UploadStatus::DraftSent
+        );
+        assert_eq!(publication.link, None, "no post until the creator posts it");
+        assert!(publication.posted_at >= before);
+        assert_eq!(state(&s), UploadState::DraftSent);
+        assert!(!state(&s).is_active());
+        assert_eq!(
+            s.app.draft_note(&publication),
+            Some(DraftNote {
+                caption,
+                synthetic: true,
+            })
+        );
+        assert!(
+            s.h.uploader.videos.lock().unwrap().is_empty(),
+            "not YouTube"
+        );
+        assert!(s.h.reels.videos.lock().unwrap().is_empty(), "not Instagram");
+    }
+
+    #[test]
+    fn the_posted_draft_links_without_an_export() {
+        let s = ready();
+        done(&s.app, start(&s, review(&s).choices()));
+        let render = draft(&s).render;
+        assert!(
+            s.app.exports.exports(s.project.id).unwrap().is_empty(),
+            "never exported"
+        );
+
+        let link = "https://www.tiktok.com/@arquivosdoespaco/video/7301234567890123456";
+        let linked = s
+            .app
+            .mark_posted(s.project.id, Network::TikTok, link, false)
+            .unwrap();
+        assert_eq!(linked.kind, PublicationKind::Manual);
+        assert_eq!(linked.render, render, "the draft's render");
+        assert_eq!(linked.link.as_ref().unwrap().url(), link);
+        assert_eq!(s.app.draft_note(&linked), None);
+        assert_eq!(draft(&s), linked);
+    }
+
+    #[test]
+    fn a_sixth_draft_in_a_day_is_refused_at_the_review() {
+        let s = ready();
+        let first = SystemTime::now();
+        for sent in 0..TIKTOK_PENDING_DRAFTS {
+            let review = review(&s);
+            assert_eq!(review.drafts_free_at, None, "after {sent}");
+            let choices = UploadChoices {
+                replace: sent > 0,
+                ..review.choices()
+            };
+            done(&s.app, s.app.start_upload(&review, choices).unwrap());
+        }
+        assert_eq!(s.h.tiktok.files.lock().unwrap().len(), 5);
+
+        let full = review(&s);
+        assert_eq!(full.block(), Some(UploadBlock::DraftLimit));
+        let free_at = full.drafts_free_at.unwrap();
+        assert!(free_at >= first + TIKTOK_DRAFT_WINDOW - Duration::from_secs(1));
+        assert!(free_at <= SystemTime::now() + TIKTOK_DRAFT_WINDOW);
+        assert!(matches!(
+            s.app.start_upload(
+                &full,
+                UploadChoices {
+                    replace: true,
+                    ..full.choices()
+                }
+            ),
+            Err(UploadReviewError::Blocked(UploadBlock::DraftLimit))
+        ));
+        assert!(
+            s.app
+                .draft_limit_text(free_at)
+                .starts_with("TikTok takes at most 5 drafts from apps in 24 hours")
+        );
+        assert_eq!(s.h.tiktok.files.lock().unwrap().len(), 5, "no sixth");
+    }
+
+    #[test]
+    fn tiktok_refusing_more_drafts_holds_the_upload_until_it_reads_again() {
+        let s = ready();
+        s.h.tiktok
+            .will(Attempt::FailAfter(0, UploadErrorKind::UploadLimit));
+        let before = SystemTime::now();
+        let job = start(&s, review(&s).choices());
+        wait_until("held", || {
+            matches!(state(&s), UploadState::OverLimit { .. })
+        });
+
+        let UploadState::OverLimit { until, frees, .. } = state(&s) else {
+            unreachable!()
+        };
+        // No draft of Bardo's in the window: other apps filled it.
+        assert!(!frees);
+        let hour = Duration::from_secs(3600);
+        assert!(until >= before + hour - Duration::from_secs(1));
+        assert!(until <= SystemTime::now() + hour + Duration::from_secs(1));
+        let queued = s.app.jobs().into_iter().find(|j| j.id() == job).unwrap();
+        assert_eq!(queued.state(), JobState::Queued);
+        assert_eq!(queued.attempts(), 0, "waiting is not a failed attempt");
+        assert!(
+            s.app
+                .upload_over_limit_text(Network::TikTok, until, frees, None, None)
+                .starts_with("TikTok refused more drafts for now")
+        );
+
+        s.app.cancel_job(job).unwrap();
+        s.app.resume_upload(job).unwrap();
+        done(&s.app, job);
+        assert_eq!(state(&s), UploadState::DraftSent);
+    }
+
+    #[test]
+    fn each_init_counts_as_a_draft_to_the_creator_from_any_account() {
+        let s = ready();
+        let now = SystemTime::now();
+        let millis = |ago: u64| to_millis(now - Duration::from_secs(ago));
+        let job = |creator: &str, sessions: &[u64], active: bool| {
+            let payload = serde_json::json!({
+                "project": "p", "publication": "q", "account": "any", "network": "tiktok",
+                "render": "r", "file": "f", "size": 1, "title": "", "description": "",
+                "tags": [], "visibility": "private", "made_for_kids": false,
+                "synthetic": false, "destination": creator,
+            });
+            let mut job = Job::new(s.app.profile().id, JobKind::Upload, payload.to_string());
+            job.start(now).unwrap();
+            let checkpoint = UploadCheckpoint {
+                sessions: sessions.to_vec(),
+                ..UploadCheckpoint::default()
+            };
+            job.record_progress(Progress::of(0, 1), Some(to_json(&checkpoint)))
+                .unwrap();
+            if !active {
+                job.complete().unwrap();
+            }
+            job
+        };
+        let jobs = vec![
+            // Started over once: two inits, two drafts TikTok may hold.
+            job(OPEN_ID, &[millis(7_200), millis(3_000)], false),
+            // Waiting to start: counts from now.
+            job(OPEN_ID, &[], true),
+            // Another creator's, and one past the window, do not count.
+            job("-000AnotherCreator", &[millis(60)], false),
+            job(OPEN_ID, &[], false),
+        ];
+        let sent: Vec<SystemTime> = creator_jobs(jobs, Network::TikTok, OPEN_ID)
+            .iter()
+            .flat_map(|(job, checkpoint)| draft_times(job, checkpoint, now))
+            .collect();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(draft_room(&sent, now), DraftRoom::Room { left: 2 });
+        assert!(creator_jobs(Vec::new(), Network::TikTok, "").is_empty());
+    }
+
+    #[test]
+    fn a_tiktok_upload_short_of_the_inbox_links_its_post_once_confirmed() {
+        let s = ready();
+        s.h.tiktok.answer(Ok(VideoState::Failed("internal".into())));
+        wait_done(&s.app, start(&s, review(&s).choices()));
+        assert!(matches!(state(&s), UploadState::Failed { .. }));
+
+        let link = "https://www.tiktok.com/@arquivosdoespaco/video/7301234567890123456";
+        assert!(matches!(
+            s.app
+                .mark_posted(s.project.id, Network::TikTok, link, false),
+            Err(crate::PublicationError::ReplacesUpload)
+        ));
+        let linked = s
+            .app
+            .mark_posted(s.project.id, Network::TikTok, link, true)
+            .unwrap();
+        assert_eq!(linked.kind, PublicationKind::Manual);
+    }
+
+    #[test]
+    fn a_draft_resumes_from_the_bytes_tiktok_confirmed() {
+        let s = ready();
+        s.h.tiktok
+            .will(Attempt::FailAfter(2, UploadErrorKind::NetworkDown));
+        let job = wait_done(&s.app, start(&s, review(&s).choices()));
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(job.attempts(), 2, "retried by the queue");
+        assert_eq!(*s.h.tiktok.resumed.lock().unwrap(), [0, 8]);
+        let starts = s.h.tiktok.chunk_starts();
+        assert_eq!(starts[..3], [0, 4, 8]);
+        assert!(
+            starts.windows(2).all(|pair| pair[0] < pair[1]),
+            "none twice"
+        );
+        assert_eq!(*s.h.tiktok.files.lock().unwrap(), [tiktok_file()]);
+        assert_eq!(state(&s), UploadState::DraftSent);
     }
 }
