@@ -1674,7 +1674,7 @@ scheduled = "Scheduled"
 [upload.failure]
 quota = "YouTube's daily upload quota for your Google project is used up. It resets at midnight Pacific time; retry then."
 upload_limit = "The channel reached YouTube's upload limit for now. Retry later."
-reconnect = "The network refused the sign-in. Reconnect the account in Settings › Networks, then retry."
+reconnect = "The network refused the sign-in. Reconnect the account in Accounts, then retry."
 rejected = "{network} rejected the video ({reason}). Fix it and upload again."
 processing = "{network} could not process the video ({reason}). Render again and upload again."
 removed = "The video is no longer on {network}."
@@ -1683,8 +1683,8 @@ schedule_missed = "The publish time passed before the upload started, so nothing
 
 [upload.block]
 not_offered = "Bardo doesn't upload to this network yet. Export the file and post it by hand."
-not_connected = "Connect this account in Settings › Networks to upload from here."
-reconnect_needed = "The network refused this account's sign-in. Reconnect it in Settings › Networks."
+not_connected = "Connect this account in Accounts to upload from here."
+reconnect_needed = "The network refused this account's sign-in. Reconnect it in Accounts."
 uploading = "An upload to this network is running."
 rendering = "A render is running. Upload once it ends."
 no_render = "Render this account's preset first."

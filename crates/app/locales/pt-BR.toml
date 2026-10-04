@@ -1674,7 +1674,7 @@ scheduled = "Agendado"
 [upload.failure]
 quota = "A cota diária de envios do seu projeto do Google no YouTube acabou. Ela renova à meia-noite do horário do Pacífico; tente de novo depois."
 upload_limit = "O canal atingiu o limite de envios do YouTube por enquanto. Tente de novo mais tarde."
-reconnect = "A rede recusou o login. Reconecte a conta em Configurações › Redes e tente de novo."
+reconnect = "A rede recusou o login. Reconecte a conta em Contas e tente de novo."
 rejected = "O {network} rejeitou o vídeo ({reason}). Corrija e envie de novo."
 processing = "O {network} não conseguiu processar o vídeo ({reason}). Renderize e envie de novo."
 removed = "O vídeo não está mais no {network}."
@@ -1683,8 +1683,8 @@ schedule_missed = "O horário de publicação passou antes de o envio começar, 
 
 [upload.block]
 not_offered = "O Bardo ainda não envia para esta rede. Exporte o arquivo e publique manualmente."
-not_connected = "Conecte esta conta em Configurações › Redes para enviar daqui."
-reconnect_needed = "A rede recusou o login desta conta. Reconecte-a em Configurações › Redes."
+not_connected = "Conecte esta conta em Contas para enviar daqui."
+reconnect_needed = "A rede recusou o login desta conta. Reconecte-a em Contas."
 uploading = "Um envio para esta rede está em andamento."
 rendering = "Um render está em andamento. Envie quando ele terminar."
 no_render = "Renderize o preset desta conta primeiro."
