@@ -18,14 +18,35 @@ pub enum TourId {
     Themes,
     /// The Performance screen's tour.
     Performance,
+    /// The Projects screen's tour: the project, its narrator and stages.
+    Projects,
+    /// The Script stage's tour.
+    Script,
+    /// The Narration stage's tour.
+    Narration,
+    /// The Scenes stage's tour.
+    Scenes,
+    /// The Clips stage's tour.
+    Clips,
+    /// The Personas screen's tour.
+    Personas,
+    /// The Templates screen's tour.
+    Templates,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 4] = [
+    pub const ALL: [TourId; 11] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
         TourId::Performance,
+        TourId::Projects,
+        TourId::Script,
+        TourId::Narration,
+        TourId::Scenes,
+        TourId::Clips,
+        TourId::Personas,
+        TourId::Templates,
     ];
 
     pub fn code(self) -> &'static str {
@@ -34,6 +55,13 @@ impl TourId {
             TourId::Research => "research",
             TourId::Themes => "themes",
             TourId::Performance => "performance",
+            TourId::Projects => "projects",
+            TourId::Script => "script",
+            TourId::Narration => "narration",
+            TourId::Scenes => "scenes",
+            TourId::Clips => "clips",
+            TourId::Personas => "personas",
+            TourId::Templates => "templates",
         }
     }
 

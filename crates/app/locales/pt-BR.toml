@@ -1957,6 +1957,7 @@ skip = "Pular tour"
 new = "Novo"
 learn_more = "Saiba mais"
 this_screen = "Tour desta tela"
+this_stage = "Tour desta etapa"
 
 [tour.offer]
 title = "Quer um tour de 2 minutos?"
@@ -2073,6 +2074,175 @@ body = "Uma sincronização lê os números mais recentes de cada publicação v
 title = "Vincular uma publicação"
 body = "As publicações são vinculadas na etapa Publicação de um projeto: os envios feitos pelo Bardo se vinculam sozinhos, e para uma exportação você cola o link da publicação. Desvincule ali também; a publicação continua na rede."
 
+[tour.projects]
+name = "Tour dos Projetos"
+
+[tour.projects.switcher]
+title = "Seu projeto de vídeo"
+body = "O projeto em que você está trabalhando, com o menu que troca para outro projeto do canal. O seletor de canal ao lado de Projetos lista os projetos de outro canal."
+
+[tour.projects.narrator]
+title = "Quem narra"
+body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo."
+
+[tour.projects.stages]
+title = "As etapas"
+body = "Roteiro, narração, cenas, clipes, edição, render e publicação, nessa ordem. A linha sob cada etapa diz como ela está: pronta, gerando, para revisar, desatualizada ou o que ela espera."
+
+[tour.projects.unlock]
+title = "Como uma etapa se abre"
+body = "Uma etapa se abre assim que a anterior lhe dá com o que trabalhar: a narração lê o roteiro, e as cenas são cronometradas pela narração. Mude uma etapa anterior e o que foi feito a partir dela aparece como desatualizado."
+
+[tour.projects.cost]
+title = "Quanto já custou"
+body = "A linha sob o nome do projeto mostra o nicho, quando ele começou e quanto já custou, somando cada chamada paga, do roteiro aos clipes. Em Custos ficam os detalhes e os seus orçamentos."
+
+[tour.script]
+name = "Tour do Roteiro"
+
+[tour.script.write]
+title = "Gere e depois edite"
+body = "O Claude escreve o roteiro a partir do modelo de roteiro, do canal, do tema e do narrador. Depois que ele chega aqui, edite à vontade: o roteiro é seu."
+
+[tour.script.review]
+title = "Uma nova versão para revisar"
+body = "Gerar de novo escreve um novo roteiro sem mexer no seu. Ele espera ao lado do atual até você aceitá-lo ou manter o atual."
+
+[tour.script.save]
+title = "Salve suas edições"
+body = "Salvar guarda o que você digitou, e Descartar alterações volta ao roteiro salvo. Uma narração feita a partir de um roteiro anterior passa a aparecer como desatualizada."
+
+[tour.script.cost]
+title = "Quanto custa"
+body = "Antes de gerar, o Bardo estima quanto a chamada vai custar pelas tarifas do provedor. Uma chamada que passaria de um orçamento pergunta antes."
+
+[tour.script.details]
+title = "De onde ele veio"
+body = "Detalhes diz qual modelo de IA escreveu o roteiro, a partir de qual versão do modelo de roteiro e com quantos tokens. Mostrar prompt mostra exatamente o que foi enviado."
+
+[tour.script.music]
+title = "O prompt de música"
+body = "O Claude escreve um prompt para a sua ferramenta de música a partir do canal, do tema e da duração do vídeo. O Bardo não faz música: copie o prompt, faça a faixa e importe-a no editor."
+
+[tour.narration]
+name = "Tour da Narração"
+
+[tour.narration.generate]
+title = "Gere a narração"
+body = "O narrador lê o roteiro atual com a voz e os presets dele na ElevenLabs. A ElevenLabs cobra por caractere, e o ⓘ diz quantos antes de você começar."
+
+[tour.narration.play]
+title = "Ouça"
+body = "A palavra falada fica destacada enquanto a narração toca. Clique em qualquer palavra para tocar a partir dela."
+
+[tour.narration.stale]
+title = "Desatualizada"
+body = "Quando o roteiro muda depois que a narração foi feita, ela é marcada como Desatualizada. Gere de novo ou importe uma nova gravação para que os dois batam; Detalhes diz como ela foi feita."
+
+[tour.narration.import]
+title = "Importe uma gravação"
+body = "Gravou o roteiro você mesmo? Importe em MP3 ou WAV, e a ElevenLabs marca o tempo de cada palavra conforme o roteiro."
+
+[tour.scenes]
+name = "Tour das Cenas"
+
+[tour.scenes.plan]
+title = "Planeje e desenhe"
+body = "Planejar cenas divide a narração em cenas pelas frases e escreve um prompt de imagem para cada uma. Depois desenhe as imagens que faltam de uma vez; a estimativa fica sob o botão."
+
+[tour.scenes.list]
+title = "As cenas"
+body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, para revisar, com falha ou pronta. ↑ e ↓ percorrem as cenas."
+
+[tour.scenes.scene]
+title = "Uma cena"
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem. Edite o prompt para mudar o que o próximo desenho mostra."
+
+[tour.scenes.redraw]
+title = "Desenhe de novo"
+body = "Desenhar de novo faz uma nova imagem a partir do prompt. Ela espera ao lado da atual até você usá-la ou manter a atual."
+
+[tour.scenes.filter]
+title = "Todas ou pendentes"
+body = "Pendentes mostra só as cenas com algo por fazer, uma imagem para desenhar ou revisar. Todas mostra cada uma."
+
+[tour.scenes.replan]
+title = "Planeje de novo"
+body = "Quando a narração é feita de novo, as cenas ficam desatualizadas, porque os tempos delas não batem mais. Planejar de novo as substitui, e pergunta antes quando isso descartaria imagens ou clipes."
+
+[tour.clips]
+name = "Tour dos Clipes"
+
+[tour.clips.animate]
+title = "Anime as cenas"
+body = "Um clipe anima a imagem de uma cena num vídeo curto, com a duração da narração da cena, dentro do que o modelo permite. Anime de uma vez todas as cenas sem clipe, ou uma cena por vez."
+
+[tour.clips.motion]
+title = "Movimento"
+body = "Como a imagem se move: o assunto, a ação, a câmera. Vazio, ele segue o prompt de imagem."
+
+[tour.clips.model]
+title = "Modelo de vídeo"
+body = "Cada cena usa o modelo de vídeo do canal, a menos que você escolha outro para ela aqui. Os modelos mudam no visual, na duração e no preço."
+
+[tour.clips.review]
+title = "Revise um novo clipe"
+body = "Um novo clipe espera ao lado do atual; reproduza-o antes de usar. Uma cena sem clipe fica com a imagem parada, e Usar a imagem parada volta para ela."
+
+[tour.clips.cost]
+title = "Quanto custa um clipe"
+body = "Quanto vai durar o próximo clipe da cena e quanto ele custa pela tarifa do provedor, antes de você animar. O provedor cobra cada segundo."
+
+[tour.personas]
+name = "Tour das Personas"
+
+[tour.personas.library]
+title = "Seus narradores"
+body = "Personas são narradores que você reutiliza entre canais: quatro vêm com o Bardo, e você pode criar as suas. Escolha uma para editá-la."
+
+[tour.personas.voice]
+title = "A voz"
+body = "Uma persona fala com uma voz da sua conta na ElevenLabs. Escolher entre minhas vozes da ElevenLabs lista as vozes, com uma prévia gratuita de cada uma."
+
+[tour.personas.style]
+title = "Tom e estilo de roteiro"
+body = "O tom diz como o narrador soa; o estilo de roteiro, como os roteiros são escritos para ele. O Claude lê os dois quando escreve um roteiro."
+
+[tour.personas.presets]
+title = "Presets de geração"
+body = "Estabilidade, similaridade, exagero de estilo e velocidade definem como a ElevenLabs lê com esta voz. Ouvir com estes ajustes toca uma amostra curta antes de você salvar."
+
+[tour.personas.share]
+title = "Salve e compartilhe"
+body = "Salve, duplique ou exporte a persona para um arquivo, para usar em outro computador; Importar de arquivo, no topo, traz uma de volta. O pacote guarda uma referência à voz, nunca áudio ou chaves."
+
+[tour.personas.realistic]
+title = "Voz realista"
+body = "Marque quando a voz soa como uma pessoa real, como um clone. As redes pedem que esses vídeos sejam marcados como conteúdo sintético, e o Bardo lembra você na exportação."
+
+[tour.templates]
+name = "Tour dos Modelos"
+
+[tour.templates.kinds]
+title = "Tipos de modelo"
+body = "Um modelo é um prompt que o Bardo envia à IA: para o roteiro, os prompts de imagem das cenas, o prompt de música e os metadados da publicação. Escolha o tipo que quer editar."
+
+[tour.templates.versions]
+title = "Versões"
+body = "Cada vez que você salva, entra uma versão: a mais nova é a atual, e as anteriores ficam. Escolha uma para carregar o texto dela; cada geração registra a versão que usou."
+
+[tour.templates.fields]
+title = "Instruções e prompt"
+body = "As instruções são as regras fixas: papel, tom e formato. O prompt é a tarefa em si, com os dados do projeto."
+
+[tour.templates.variables]
+title = "Variáveis"
+body = "Escreva uma variável como {{nome}}, e cada geração a troca pelo valor do projeto. Só funcionam as listadas aqui."
+
+[tour.templates.save]
+title = "Salve ou recomece"
+body = "Salvar como nova versão guarda as suas mudanças como a próxima versão. Carregar o padrão do Bardo põe o texto original de volta no editor, para salvar se você quiser."
+
 [guide]
 resume_tour = "Retomar tour"
 shortcuts = "Atalhos de teclado"
@@ -2117,7 +2287,7 @@ suggestions = "Sugestões de corte no editor"
 
 [shortcuts.action]
 guide_open = "Abrir o guia na página desta tela"
-tour_screen = "Começar o tour desta tela"
+tour_screen = "Começar o tour desta tela ou etapa"
 guide_move = "Percorrer o sumário ou os resultados da busca"
 guide_pick = "Abrir a página destacada"
 guide_clear = "Limpar a busca"

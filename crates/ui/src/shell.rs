@@ -229,8 +229,10 @@ impl Shell {
         }
         if place == Destination::Guide {
             let screen_tour = self.screen_tour(cx);
-            self.guide
-                .update(cx, |guide, cx| guide.toggle_menu(screen_tour, cx));
+            let stage_tour = self.stage_tour(cx);
+            self.guide.update(cx, |guide, cx| {
+                guide.toggle_menu(screen_tour, stage_tour, cx)
+            });
             return;
         }
         // What a screen lists may have changed on another one: channels,
@@ -399,13 +401,27 @@ impl Shell {
             Destination::Research => self.research.read(cx).has_content(),
             Destination::Themes => self.themes.read(cx).has_content(),
             Destination::Performance => self.performance.read(cx).has_content(),
+            Destination::Projects => self.projects.read(cx).has_content(),
+            Destination::Personas => self.personas.read(cx).has_content(),
+            Destination::Templates => self.templates.read(cx).has_content(),
             _ => false,
         };
         self.bardo.read(cx).screen_tour(self.screen, has_content)
     }
 
-    /// Shift+F1: the screen's tour, when it offers one. Not over the
-    /// editor, nor while the missed posts list holds the window.
+    /// The tour the open project's stage on display offers: one with a
+    /// tour of its own that has made something.
+    fn stage_tour(&self, cx: &App) -> Option<ScreenTour> {
+        if self.screen != Destination::Projects {
+            return None;
+        }
+        let (stage, has_content) = self.projects.read(cx).stage_content()?;
+        self.bardo.read(cx).stage_tour(stage, has_content)
+    }
+
+    /// Shift+F1: the tour of the stage on screen, else the screen's, when
+    /// one is offered. Not over the editor, nor while the missed posts
+    /// list holds the window.
     fn on_tour_this_screen(
         &mut self,
         _: &TourThisScreen,
@@ -420,7 +436,7 @@ impl Shell {
         {
             return;
         }
-        if let Some(tour) = self.screen_tour(cx) {
+        if let Some(tour) = self.stage_tour(cx).or_else(|| self.screen_tour(cx)) {
             self.start_screen_tour(tour.tour, window, cx);
         }
     }

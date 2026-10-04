@@ -1957,6 +1957,7 @@ skip = "Skip tour"
 new = "New"
 learn_more = "Learn more"
 this_screen = "Tour this screen"
+this_stage = "Tour this stage"
 
 [tour.offer]
 title = "Take a 2-minute tour?"
@@ -2073,6 +2074,175 @@ body = "A sync reads the latest numbers of every linked post, as a job. Bardo al
 title = "Linking a post"
 body = "Posts are linked at a project's Publish stage: Bardo's uploads link themselves, and for an export you paste the post's link. Unlink a post there too; it stays on the network."
 
+[tour.projects]
+name = "Projects tour"
+
+[tour.projects.switcher]
+title = "Your video project"
+body = "The project you are working on, with the menu that switches to another project of the channel. The channel picker beside Projects lists another channel's projects."
+
+[tour.projects.narrator]
+title = "Who narrates it"
+body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only."
+
+[tour.projects.stages]
+title = "Its stages"
+body = "Script, narration, scenes, clips, edit, render and publish, in order. The line under each stage says where it stands: done, generating, to review, out of date, or what it waits for."
+
+[tour.projects.unlock]
+title = "How a stage opens"
+body = "A stage opens as soon as the one before gives it something to work on: the narration reads the script, and the scenes are timed on the narration. Change an earlier stage and what was made from it shows as out of date."
+
+[tour.projects.cost]
+title = "What it has cost"
+body = "The line under the project's name shows its niche, when it started and what it has cost so far, every paid call from the script to the clips. Costs has the details and your budgets."
+
+[tour.script]
+name = "Script tour"
+
+[tour.script.write]
+title = "Generate, then edit"
+body = "Claude writes the script from the script template, the channel, the theme and the narrator. Once it is here, edit it as you like: it is yours."
+
+[tour.script.review]
+title = "A new version to review"
+body = "Regenerate writes a new script without touching yours. It waits beside the current one until you accept it or keep the current one."
+
+[tour.script.save]
+title = "Save your edits"
+body = "Save keeps what you typed, and Discard changes goes back to the saved script. A narration made from an older script then shows as out of date."
+
+[tour.script.cost]
+title = "What it costs"
+body = "Before you generate, Bardo estimates what the call will cost at the provider's rates. A call that would go past a budget asks you first."
+
+[tour.script.details]
+title = "Where it came from"
+body = "Details tells which model wrote the script, from which template version and with how many tokens. Show prompt shows exactly what was sent."
+
+[tour.script.music]
+title = "The music prompt"
+body = "Claude writes a prompt for your own music tool from the channel, the theme and the video's length. Bardo makes no music: copy the prompt, make the track, and import it in the editor."
+
+[tour.narration]
+name = "Narration tour"
+
+[tour.narration.generate]
+title = "Generate it"
+body = "The narrator reads the current script with their ElevenLabs voice and presets. ElevenLabs bills by character, and the ⓘ says how many before you start."
+
+[tour.narration.play]
+title = "Play it"
+body = "The word being spoken is highlighted as the narration plays. Click any word to play from there."
+
+[tour.narration.stale]
+title = "Out of date"
+body = "When the script changes after the narration was made, the narration is marked Out of date. Generate it again or import a new recording so they match; Details tells how it was made."
+
+[tour.narration.import]
+title = "Import a recording"
+body = "Recorded the script yourself? Import it as MP3 or WAV, and ElevenLabs times its words against the script."
+
+[tour.scenes]
+name = "Scenes tour"
+
+[tour.scenes.plan]
+title = "Plan and draw"
+body = "Plan scenes splits the narration into scenes on its sentences and writes an image prompt for each one. Then draw the missing images in one run; the estimate is under the button."
+
+[tour.scenes.list]
+title = "The scenes"
+body = "Each scene in order, with its time, its image and where it stands: to draw, to review, failed or ready. ↑ and ↓ move through them."
+
+[tour.scenes.scene]
+title = "A scene"
+body = "The scene you picked: the narration it covers, its image and its image prompt. Edit the prompt to change what the next drawing shows."
+
+[tour.scenes.redraw]
+title = "Draw again"
+body = "Draw again makes a new image from the prompt. It waits beside the current one until you use it or keep the current one."
+
+[tour.scenes.filter]
+title = "All or pending"
+body = "Pending shows only the scenes with something left, an image to draw or to review. All shows every one."
+
+[tour.scenes.replan]
+title = "Plan again"
+body = "When the narration is made again, the scenes are marked out of date, since their times no longer match. Plan again replaces them, and asks first when that would discard images or clips."
+
+[tour.clips]
+name = "Clips tour"
+
+[tour.clips.animate]
+title = "Animate the scenes"
+body = "A clip animates a scene's image into a short video, as long as the scene is narrated, within what the model allows. Animate every scene without a clip at once, or one scene at a time."
+
+[tour.clips.motion]
+title = "Motion"
+body = "How the image moves: the subject, the action, the camera. Left empty, it follows the image prompt."
+
+[tour.clips.model]
+title = "Video model"
+body = "Each scene uses the channel's video model unless you pick another one for it here. Models differ in look, length and price."
+
+[tour.clips.review]
+title = "Review a new clip"
+body = "A new clip waits beside the current one; play it before you use it. A scene without a clip keeps its still image, and Use the still image goes back to it."
+
+[tour.clips.cost]
+title = "What a clip costs"
+body = "How long the scene's next clip will run and what it costs at the provider's rate, before you animate it. The provider bills each second."
+
+[tour.personas]
+name = "Personas tour"
+
+[tour.personas.library]
+title = "Your narrators"
+body = "Personas are narrators you reuse across channels: four come with Bardo, and you can add your own. Pick one to edit it."
+
+[tour.personas.voice]
+title = "The voice"
+body = "A persona speaks with a voice from your ElevenLabs account. Choose from my ElevenLabs voices lists them, with a free preview of each."
+
+[tour.personas.style]
+title = "Tone and script style"
+body = "Tone says how the narrator sounds; script style, how scripts are written for them. Claude reads both when it writes a script."
+
+[tour.personas.presets]
+title = "Generation presets"
+body = "Stability, similarity, style exaggeration and speed set how ElevenLabs reads with this voice. Hear it with these settings plays a short sample before you save."
+
+[tour.personas.share]
+title = "Save and share"
+body = "Save, duplicate, or export the persona to a file for another computer; Import from file at the top brings one in. A package holds a reference to the voice, never audio or keys."
+
+[tour.personas.realistic]
+title = "Realistic voice"
+body = "Tick it when the voice sounds like a real person, such as a clone. Networks ask you to label such videos as synthetic content, and Bardo reminds you at export."
+
+[tour.templates]
+name = "Templates tour"
+
+[tour.templates.kinds]
+title = "Kinds of template"
+body = "A template is a prompt Bardo sends to the AI: for the script, the scenes' image prompts, the music prompt and the post metadata. Pick the kind to edit."
+
+[tour.templates.versions]
+title = "Versions"
+body = "Every save adds a version: the newest is current, and the older ones stay. Pick one to load its text; each generation records the version it used."
+
+[tour.templates.fields]
+title = "Instructions and prompt"
+body = "The instructions are the standing rules: role, tone and format. The prompt is the task itself, with the project's facts."
+
+[tour.templates.variables]
+title = "Variables"
+body = "Write a variable as {{name}}, and each generation replaces it with the project's value. Only the ones listed here work."
+
+[tour.templates.save]
+title = "Save or start over"
+body = "Save as new version keeps your changes as the next version. Load Bardo's default puts the original text back in the editor, to save if you want it."
+
 [guide]
 resume_tour = "Resume tour"
 shortcuts = "Keyboard shortcuts"
@@ -2117,7 +2287,7 @@ suggestions = "Cut suggestions in the editor"
 
 [shortcuts.action]
 guide_open = "Open the guide at the page for this screen"
-tour_screen = "Start the tour of this screen"
+tour_screen = "Start the tour of this screen or stage"
 guide_move = "Move through the contents or the search results"
 guide_pick = "Open the highlighted page"
 guide_clear = "Clear the search"

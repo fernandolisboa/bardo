@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -99,21 +99,28 @@ Eight steps, each lighting the navigation, which every screen shows:
 
 - **User guide** (F1): opens the Guide screen;
 - **Welcome tour**, marked **New** until it is started or turned down, and again when its content changes;
-- **Tour this screen** (Shift+F1), when the current screen has a tour and something to show (below);
+- **Tour this screen**, when the current screen has a tour and something to show (below);
+- **Tour this stage**, on a project whose open stage has a tour and has made something (below);
 - **Resume tour**, when a tour was closed midway;
 - **Keyboard shortcuts**: the tour's, the lists', the editor's and the cut suggestions' keys, from `bardo_app::SHORTCUTS`;
 - **Reset tours**: every tour reads as never seen, and the welcome offer comes back.
 
-The menu takes ↑/↓, Tab, Enter and Esc; a click outside closes it.
+Shift+F1 starts the stage tour when one is offered, else the screen tour, and the menu shows the key on that row. The menu takes ↑/↓, Tab, Enter and Esc; a click outside closes it.
 
 ## Screen tours
 
-A screen with a tour of its own (Research, Themes and Performance so far) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it with **Shift+F1**. A tour never starts on its own:
+A screen with a tour of its own (Research, Themes, Performance, Projects, Personas and Templates so far) shows **Tour this screen** in its header, after the ⓘ, and the Guide menu lists it. A tour never starts on its own:
 
 - **Nothing to show, no tour**: while the screen is empty (no research results, no themes, no posts), the button and the menu row are hidden and Shift+F1 does nothing; the screen's empty state says what to do first. The guide page's **Show me** still starts the tour, and steps fall back as they say.
 - **The "new" mark**: from the first visit with content, the button and the menu row carry **New** until the tour is completed or dismissed (a tour closed midway keeps it), and again when the tour's content version rises. These rules are `app` logic (`Bardo::screen_tour`).
 - **Offer tours on new screens** (Settings › Appearance, on by default): turned off, the mark never shows; the button stays.
 - **Reset tours** brings the mark back on every screen tour.
+
+### Stage tours
+
+The Script, Narration, Scenes and Clips stages of a project have tours of their own. The project header then shows **Tour this stage** beside **Tour this screen** (the Projects tour: switcher, narrator, stages, unlocking, cost), with the same **New** mark and the same rules, where "something to show" means the stage has made something: a script, a narration, a scene plan, a clip. A stage that has made nothing offers no tour, and its empty state says what to do first. The screen says whether its stage has made something; the offer and the mark are `app` logic (`Bardo::stage_tour`); starting a stage tour from the guide opens the stage first.
+
+A step whose control is out of view scrolls the page to it; a step whose control is missing (no scene selected, no narration yet) lights the part that holds it, or is passed over when the step says so.
 
 Each ⓘ on a screen with a guide page ends with **More in the guide**, which opens the section that explains it.
 
@@ -136,7 +143,7 @@ The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says
 | Issue | Adds |
 | --- | --- |
 | #107 | The Research, Themes and Performance tours and "Tour this screen" (built) |
-| #108 | The Production tour |
+| #108 | The Projects, Personas and Templates tours, the Script, Narration, Scenes and Clips stage tours and "Tour this stage" (built) |
 | #109 | The Editing and render tour |
 | #110 | The Publishing tour (network guides in pt-BR too) |
 | #111 | Costs, Jobs and Settings tours, and full coverage |

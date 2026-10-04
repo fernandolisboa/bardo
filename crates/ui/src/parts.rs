@@ -338,6 +338,10 @@ pub struct Inspector {
     pub media: Option<usize>,
     /// Pinned at the bottom: provenance behind "Generation details".
     pub footer: Option<AnyElement>,
+    /// The scroll that holds `body` (but not a picture set apart), when the
+    /// screen tags controls in it for a tour: the layout tracks it where it
+    /// scrolls the inspector on its own, beside a grid or under a table.
+    pub scroll: Option<ScrollHandle>,
 }
 
 impl Inspector {
@@ -347,6 +351,7 @@ impl Inspector {
             body,
             media: None,
             footer: None,
+            scroll: None,
         }
     }
 }

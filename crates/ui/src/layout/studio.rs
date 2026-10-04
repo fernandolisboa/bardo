@@ -932,6 +932,7 @@ fn panel(inspector: Inspector, hint: Option<gpui_kit::SharedString>, cx: &App) -
         body,
         media,
         footer,
+        scroll,
     } = inspector;
     let mut main = Vec::new();
     let mut picture = None;
@@ -976,7 +977,13 @@ fn panel(inspector: Inspector, hint: Option<gpui_kit::SharedString>, cx: &App) -
                 .pb_3()
                 .gap_4()
                 .items_start()
-                .child(column("panel-main").flex_1().min_w_0().children(main))
+                .child(
+                    column("panel-main")
+                        .flex_1()
+                        .min_w_0()
+                        .when_some(scroll, |main, scroll| main.track_scroll(&scroll))
+                        .children(main),
+                )
                 .children(picture.map(|picture| {
                     column("panel-media")
                         .flex_1()

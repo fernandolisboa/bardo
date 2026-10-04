@@ -13,8 +13,8 @@ use bardo_app::bardo_domain::{
 use std::rc::Rc;
 
 use bardo_app::{
-    Bardo, BudgetConsent, SceneClipView, SceneError, SceneState, ScenesView, Stage, Step, Text,
-    scene_states, step_selection,
+    Bardo, BudgetConsent, Control, SceneClipView, SceneError, SceneState, ScenesView, Stage, Step,
+    Text, TourAnchor, scene_states, step_selection,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Textarea;
@@ -30,6 +30,7 @@ use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div
 
 use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::appearance::look;
+use crate::guide;
 use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::parts::{
@@ -291,24 +292,41 @@ impl ProjectsScreen {
         let pending = states.iter().filter(|state| state.is_pending()).count();
         let row = h_flex();
         let filter = (!states.is_empty()).then(|| {
-            TabBar::new("scene-filter")
-                .segmented()
-                .small()
-                .selected_index(usize::from(self.pending_only))
-                .child(Tab::new().label(SharedString::from(format!(
-                    "{} ({})",
-                    bardo.text(Text::FilterAll),
-                    states.len()
-                ))))
-                .child(Tab::new().label(SharedString::from(format!(
-                    "{} ({pending})",
-                    bardo.text(Text::FilterPending)
-                ))))
-                .on_click(cx.listener(|this, index: &usize, _, cx| {
-                    this.pending_only = *index == 1;
-                    cx.notify();
-                }))
+            kit::anchor(
+                TourAnchor::Control(Control::ScenesFilter),
+                TabBar::new("scene-filter")
+                    .segmented()
+                    .small()
+                    .selected_index(usize::from(self.pending_only))
+                    .child(Tab::new().label(SharedString::from(format!(
+                        "{} ({})",
+                        bardo.text(Text::FilterAll),
+                        states.len()
+                    ))))
+                    .child(Tab::new().label(SharedString::from(format!(
+                        "{} ({pending})",
+                        bardo.text(Text::FilterPending)
+                    ))))
+                    .on_click(cx.listener(|this, index: &usize, _, cx| {
+                        this.pending_only = *index == 1;
+                        cx.notify();
+                    })),
+            )
         });
+        // What the stage does to every scene, as one control a tour lights.
+        let control = if stage == Stage::Clips {
+            TourAnchor::Control(Control::ClipsAnimate)
+        } else {
+            TourAnchor::Control(Control::ScenesPlan)
+        };
+        let actions = kit::anchor(
+            control,
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .items_center()
+                .children(actions),
+        );
         let row = row
             .gap_2()
             .flex_wrap()
@@ -320,14 +338,15 @@ impl ProjectsScreen {
                     tr(bardo, Text::ScenesStaleTag),
                     cx,
                 ))
-                .child(kit::info(
+                .child(guide::info(
+                    bardo,
                     "scenes-stale-info",
-                    None,
                     tr(bardo, Text::ScenesStale),
+                    guide::refs::SCENES_REPLAN,
                 ))
             })
             .child(div().flex_1())
-            .children(actions);
+            .child(actions);
         // The leading action's estimate, under it.
         v_flex()
             .gap_1()
@@ -417,7 +436,8 @@ impl ProjectsScreen {
             .into_iter()
             .chain(draw_button)
             .chain(Some(
-                kit::info("scenes-info", None, hint).into_any_element(),
+                guide::info(bardo, "scenes-info", hint, guide::refs::SCENES_PLAN)
+                    .into_any_element(),
             ))
             .collect();
         (actions, estimate)
@@ -453,7 +473,13 @@ impl ProjectsScreen {
         let actions = button
             .into_iter()
             .chain(Some(
-                kit::info("clips-info", None, tr(bardo, Text::ClipsHint)).into_any_element(),
+                guide::info(
+                    bardo,
+                    "clips-info",
+                    tr(bardo, Text::ClipsHint),
+                    guide::refs::CLIPS_ANIMATE,
+                )
+                .into_any_element(),
             ))
             .collect();
         (actions, estimate)
@@ -785,6 +811,7 @@ impl ProjectsScreen {
         inspector.media = Some(1 + media);
         inspector.title = Some(title);
         inspector.footer = footer;
+        inspector.scroll = Some(self.inspector_scroll.clone());
         inspector
     }
 
@@ -823,71 +850,80 @@ impl ProjectsScreen {
 
         let picture = match scene.pending() {
             None => scene_picture(bardo, scene.image(), cx),
-            Some(pending) => v_flex()
-                .gap_2()
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_medium()
-                                .child(tr(bardo, Text::ScenePendingTitle)),
-                        )
-                        .child(kit::info(
-                            ("pending-image-info", index),
-                            None,
-                            tr(bardo, Text::ScenePendingHint),
-                        )),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_1()
-                                .child(field_label(tr(bardo, Text::SceneCurrentImage)))
-                                .child(scene_picture(bardo, scene.image(), cx)),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_1()
-                                .child(field_label(tr(bardo, Text::SceneNewImage)))
-                                .child(scene_picture(bardo, Some(pending), cx)),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Button::new(("accept-scene-image", index))
-                                .primary()
-                                .xsmall()
-                                .label(tr(bardo, Text::AcceptSceneImage))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.scene_action(window, cx, |bardo, id| {
-                                        bardo.accept_scene_image(id, index)
-                                    });
-                                })),
-                        )
-                        .child(
-                            Button::new(("reject-scene-image", index))
-                                .ghost()
-                                .xsmall()
-                                .label(tr(bardo, Text::RejectSceneImage))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.scene_action(window, cx, |bardo, id| {
-                                        bardo.reject_scene_image(id, index)
-                                    });
-                                })),
-                        ),
-                )
-                .into_any_element(),
+            // The new image to review is where drawing again leads.
+            Some(pending) => kit::anchor(
+                TourAnchor::Control(Control::SceneRedraw),
+                v_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(tr(bardo, Text::ScenePendingTitle)),
+                            )
+                            .child(guide::info(
+                                bardo,
+                                ("pending-image-info", index),
+                                tr(bardo, Text::ScenePendingHint),
+                                guide::refs::SCENES_REDRAW,
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .child(field_label(tr(bardo, Text::SceneCurrentImage)))
+                                    .child(scene_picture(bardo, scene.image(), cx)),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .child(field_label(tr(bardo, Text::SceneNewImage)))
+                                    .child(scene_picture(bardo, Some(pending), cx)),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new(("accept-scene-image", index))
+                                    .primary()
+                                    .xsmall()
+                                    .label(tr(bardo, Text::AcceptSceneImage))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, id| {
+                                                bardo.accept_scene_image(id, index)
+                                            });
+                                        },
+                                    )),
+                            )
+                            .child(
+                                Button::new(("reject-scene-image", index))
+                                    .ghost()
+                                    .xsmall()
+                                    .label(tr(bardo, Text::RejectSceneImage))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, id| {
+                                                bardo.reject_scene_image(id, index)
+                                            });
+                                        },
+                                    )),
+                            ),
+                    ),
+            )
+            .into_any_element(),
         };
 
         let prompt_label = h_flex()
@@ -917,35 +953,38 @@ impl ProjectsScreen {
                 .child(SharedString::from(scene.prompt().as_str().to_owned()))
                 .into_any_element(),
         };
-        let redraw =
-            (open.is_none() && scene.image().is_some() && !busy && scene.pending().is_none()).then(
-                || {
-                    v_flex()
-                        .gap_1()
-                        .children(redraw_estimate.and_then(|estimate| {
-                            estimate_note(bardo, estimate, Text::EstimateRedraw, cx)
-                        }))
-                        .child(
-                            h_flex().child(
-                                Button::new(("regenerate-scene-image", index))
-                                    .outline()
-                                    .small()
-                                    .label(tr(bardo, Text::RegenerateSceneImage))
-                                    .on_click(cx.listener(
-                                        move |this, _: &ClickEvent, window, cx| {
-                                            this.run_scene(
-                                                SceneAction::Redraw(index),
-                                                BudgetConsent::Ask,
-                                                window,
-                                                cx,
-                                            );
-                                        },
-                                    )),
-                            ),
-                        )
-                        .into_any_element()
-                },
-            );
+        let redraw = (open.is_none()
+            && scene.image().is_some()
+            && !busy
+            && scene.pending().is_none())
+        .then(|| {
+            kit::anchor_in(
+                TourAnchor::Control(Control::SceneRedraw),
+                v_flex()
+                    .gap_1()
+                    .children(redraw_estimate.and_then(|estimate| {
+                        estimate_note(bardo, estimate, Text::EstimateRedraw, cx)
+                    }))
+                    .child(
+                        h_flex().child(
+                            Button::new(("regenerate-scene-image", index))
+                                .outline()
+                                .small()
+                                .label(tr(bardo, Text::RegenerateSceneImage))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.run_scene(
+                                        SceneAction::Redraw(index),
+                                        BudgetConsent::Ask,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        ),
+                    ),
+                Some(&self.inspector_scroll),
+            )
+            .into_any_element()
+        });
 
         let media = usize::from(failure.is_some());
         let body = failure
@@ -1361,10 +1400,11 @@ impl ProjectsScreen {
                                 .child(tr(bardo, Text::ScenePendingClipTitle)),
                         )
                         .child(Tag::secondary().small().child(record(clip)))
-                        .child(kit::info(
+                        .child(guide::info(
+                            bardo,
                             ("pending-clip-info", index),
-                            None,
                             tr(bardo, Text::ScenePendingClipHint),
+                            guide::refs::CLIPS_REVIEW,
                         )),
                 )
                 .child(
@@ -1404,29 +1444,48 @@ impl ProjectsScreen {
                 )
         });
 
+        let scroll = Some(&self.inspector_scroll);
+        let review = (current.is_some() || pending.is_some()).then(|| {
+            kit::anchor_in(
+                TourAnchor::Control(Control::ClipReview),
+                v_flex().gap_1p5().children(current).children(pending),
+                scroll,
+            )
+        });
         v_flex()
             .gap_1p5()
-            .child(motion_label)
-            .child(motion)
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::ClipMotion),
+                v_flex().gap_1p5().child(motion_label).child(motion),
+                scroll,
+            ))
             .child(
                 h_flex()
                     .gap_x_2()
                     .flex_wrap()
                     .items_center()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .child(tr(bardo, Text::SceneClipModel)),
-                    )
-                    .child(model_menu)
-                    .children(plan_note),
+                    .child(kit::anchor_in(
+                        TourAnchor::Control(Control::ClipModel),
+                        h_flex()
+                            .gap_x_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .child(tr(bardo, Text::SceneClipModel)),
+                            )
+                            .child(model_menu),
+                        scroll,
+                    ))
+                    .children(plan_note.map(|note| {
+                        kit::anchor_in(TourAnchor::Control(Control::ClipCost), note, scroll)
+                    })),
             )
             .children(model_gone)
             .children(state)
             .children(actions)
-            .children(current)
-            .children(pending)
+            .children(review)
             .into_any_element()
     }
 }

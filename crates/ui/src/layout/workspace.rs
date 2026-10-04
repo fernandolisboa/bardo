@@ -551,6 +551,7 @@ fn main_with_inspector(
         )
         .children(inspector.map(|inspector| {
             let footer = inspector.footer;
+            let scroll = inspector.scroll;
             v_flex()
                 .w(px(INSPECTOR_WIDTH))
                 .h_full()
@@ -564,6 +565,7 @@ fn main_with_inspector(
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
+                        .when_some(scroll, |inspector, scroll| inspector.track_scroll(&scroll))
                         .p_4()
                         .gap_3()
                         .children(inspector.title)

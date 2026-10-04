@@ -9,20 +9,20 @@ use bardo_app::bardo_domain::{
 };
 use std::rc::Rc;
 
-use bardo_app::{Bardo, Destination, Text, default_template};
+use bardo_app::{Bardo, Control, Destination, Text, TourAnchor, default_template};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::{
     ActiveTheme as _, IconName, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, ClickEvent, Entity, SharedString, Window, div, px};
+use gpui_kit::{AnyElement, ClickEvent, Entity, ScrollHandle, SharedString, Window, div, px};
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
+use crate::{guide, layout};
 
 pub struct TemplatesScreen {
     bardo: Entity<Bardo>,
@@ -37,6 +37,8 @@ pub struct TemplatesScreen {
     error: Option<Text>,
     /// What the last save said.
     notice: Option<SharedString>,
+    /// Scrolls the editor, so a tour can bring its parts into view.
+    scroll: ScrollHandle,
 }
 
 impl TemplatesScreen {
@@ -53,6 +55,7 @@ impl TemplatesScreen {
             errors: Vec::new(),
             error: None,
             notice: None,
+            scroll: ScrollHandle::new(),
         };
         screen.reload(window, cx);
         screen
@@ -77,6 +80,12 @@ impl TemplatesScreen {
             }
         }
         cx.notify();
+    }
+
+    /// Whether the template has versions to show: the screen offers its
+    /// tour only then.
+    pub fn has_content(&self) -> bool {
+        !self.versions.is_empty()
     }
 
     fn load(&mut self, version: &TemplateVersion, window: &mut Window, cx: &mut Context<Self>) {
@@ -170,33 +179,37 @@ impl TemplatesScreen {
             })
             .collect();
         let bardo = self.bardo.read(cx);
-        collection.controls = TemplateKind::ALL
-            .map(|kind| {
-                Button::new(SharedString::from(format!("template-kind-{kind}")))
-                    .small()
-                    .outline()
-                    .selected(kind == self.kind)
-                    .label(tr(bardo, Text::TemplateKindName(kind)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        if this.kind != kind {
-                            this.kind = kind;
-                            this.notice = None;
-                            this.reload(window, cx);
-                        }
-                    }))
-                    .into_any_element()
-            })
-            .into_iter()
-            .chain(std::iter::once(
-                div()
-                    .w_full()
-                    .pt_1()
-                    .text_sm()
-                    .font_medium()
-                    .child(tr(bardo, Text::TemplateVersionsTitle))
-                    .into_any_element(),
-            ))
-            .collect();
+        let kinds = TemplateKind::ALL.map(|kind| {
+            Button::new(SharedString::from(format!("template-kind-{kind}")))
+                .small()
+                .outline()
+                .selected(kind == self.kind)
+                .label(tr(bardo, Text::TemplateKindName(kind)))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    if this.kind != kind {
+                        this.kind = kind;
+                        this.notice = None;
+                        this.reload(window, cx);
+                    }
+                }))
+        });
+        collection.controls = std::iter::once(
+            kit::anchor(
+                TourAnchor::Control(Control::TemplateKinds),
+                h_flex().gap_2().flex_wrap().items_center().children(kinds),
+            )
+            .into_any_element(),
+        )
+        .chain(std::iter::once(
+            div()
+                .w_full()
+                .pt_1()
+                .text_sm()
+                .font_medium()
+                .child(tr(bardo, Text::TemplateVersionsTitle))
+                .into_any_element(),
+        ))
+        .collect();
         collection
     }
 
@@ -254,6 +267,7 @@ impl TemplatesScreen {
             })
             .collect();
 
+        let scroll = Some(&self.scroll);
         v_flex()
             .gap_3()
             .child(kit::section_heading(tr(
@@ -269,23 +283,32 @@ impl TemplatesScreen {
                         &[("n", &n.to_string()), ("next", &next.to_string())],
                     )))
             }))
-            .child(
-                field(
-                    tr(bardo, Text::TemplateInstructions),
-                    tr(bardo, Text::TemplateInstructionsHint),
-                    Textarea::new(&self.instructions).into_any_element(),
-                )
-                .children(errors(TemplateField::Instructions)),
-            )
-            .child(
-                field(
-                    tr(bardo, Text::TemplatePrompt),
-                    tr(bardo, Text::TemplatePromptHint),
-                    Textarea::new(&self.prompt).into_any_element(),
-                )
-                .children(errors(TemplateField::Prompt)),
-            )
-            .child(
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::TemplateFields),
+                v_flex()
+                    .gap_3()
+                    .child(
+                        field(
+                            bardo,
+                            tr(bardo, Text::TemplateInstructions),
+                            tr(bardo, Text::TemplateInstructionsHint),
+                            Textarea::new(&self.instructions).into_any_element(),
+                        )
+                        .children(errors(TemplateField::Instructions)),
+                    )
+                    .child(
+                        field(
+                            bardo,
+                            tr(bardo, Text::TemplatePrompt),
+                            tr(bardo, Text::TemplatePromptHint),
+                            Textarea::new(&self.prompt).into_any_element(),
+                        )
+                        .children(errors(TemplateField::Prompt)),
+                    ),
+                scroll,
+            ))
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::TemplateActions),
                 h_flex()
                     .gap_2()
                     .flex_wrap()
@@ -321,7 +344,8 @@ impl TemplatesScreen {
                                 );
                             })),
                     ),
-            )
+                scroll,
+            ))
             .children(
                 self.notice
                     .clone()
@@ -331,7 +355,8 @@ impl TemplatesScreen {
                 self.error
                     .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
-            .child(
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::TemplateVariables),
                 v_flex()
                     .pt_3()
                     .mt_1()
@@ -347,20 +372,28 @@ impl TemplatesScreen {
                                     .font_medium()
                                     .child(tr(bardo, Text::TemplateVariablesTitle)),
                             )
-                            .child(kit::info(
+                            .child(guide::info(
+                                bardo,
                                 "template-variables-info",
-                                None,
                                 tr(bardo, Text::TemplateVariablesHint),
+                                guide::refs::TEMPLATES_VARIABLES,
                             )),
                     )
                     .children(variables),
-            )
+                scroll,
+            ))
     }
 }
 
-fn field(label: SharedString, hint: SharedString, input: AnyElement) -> gpui_kit::Div {
+fn field(
+    bardo: &Bardo,
+    label: SharedString,
+    hint: SharedString,
+    input: AnyElement,
+) -> gpui_kit::Div {
     let id = SharedString::from(format!("template-field-{label}"));
-    kit::field(label, Some(kit::info(id, None, hint)), input, None)
+    let info = guide::info(bardo, id, hint, guide::refs::TEMPLATES_FIELDS);
+    kit::field(label, Some(info), input, None)
 }
 
 impl Render for TemplatesScreen {
@@ -369,12 +402,24 @@ impl Render for TemplatesScreen {
         let editor = self.render_editor(cx).into_any_element();
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Templates);
-        header.info = Some(
-            kit::info("templates-info", None, tr(bardo, Text::TemplatesHint)).into_any_element(),
+        let info = guide::info(
+            bardo,
+            "templates-info",
+            tr(bardo, Text::TemplatesHint),
+            guide::refs::TEMPLATES_VERSIONS,
+        )
+        .into_any_element();
+        header.info = guide::header_info(
+            bardo,
+            Destination::Templates,
+            self.has_content(),
+            Some(info),
+            cx,
         );
         let mut parts = ScreenParts::new(header);
         parts.collection = Some(collection);
         parts.inspector = Some(Inspector::new(vec![editor]));
+        parts.scroll = Some(self.scroll.clone());
         layout::screen(parts, cx)
     }
 }

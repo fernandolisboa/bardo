@@ -13,7 +13,7 @@
 
 use bardo_domain::{TourId, UiLanguage};
 
-use crate::{Destination, SettingsTab, Stage};
+use crate::{Destination, SettingsTab, Stage, TourPlace};
 
 /// One page in both languages, embedded from `docs/guide/<language>/`.
 pub(crate) struct PageSource {
@@ -40,6 +40,13 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("niche-research"),
     page!("themes-ranking"),
     page!("performance-metrics"),
+    page!("projects"),
+    page!("script"),
+    page!("narration"),
+    page!("scenes"),
+    page!("clips"),
+    page!("personas"),
+    page!("templates"),
     page!("glossary"),
     page!("shortcuts"),
 ];
@@ -131,6 +138,15 @@ impl GuidePlace {
             GuidePlace::Screen(place) => place,
             GuidePlace::Stage(_) => Destination::Projects,
             GuidePlace::Settings(_) => Destination::Settings,
+        }
+    }
+}
+
+impl From<TourPlace> for GuidePlace {
+    fn from(place: TourPlace) -> Self {
+        match place {
+            TourPlace::Screen(screen) => GuidePlace::Screen(screen),
+            TourPlace::Stage(stage) => GuidePlace::Stage(stage),
         }
     }
 }
@@ -1019,6 +1035,7 @@ Text of the **first** part.
             [
                 GuideGroup::GettingStarted,
                 GuideGroup::Strategy,
+                GuideGroup::Production,
                 GuideGroup::Reference
             ]
         );
@@ -1032,9 +1049,20 @@ Text of the **first** part.
         assert_eq!(guide.page_at(Some(keys)).id, "api-keys");
         assert_eq!(guide.page_at(None).id, "what-bardo-is");
         assert_eq!(
+            guide.page_at(Some(GuidePlace::Stage(Stage::Script))).id,
+            "script"
+        );
+        assert_eq!(
             guide.page_at(Some(GuidePlace::Stage(Stage::Edit))).id,
+            "projects",
+            "no page for the stage yet: its screen's"
+        );
+        assert_eq!(
+            guide
+                .page_at(Some(GuidePlace::Screen(Destination::Costs)))
+                .id,
             "what-bardo-is",
-            "no page for the stage or its screen yet"
+            "no page for the screen yet"
         );
     }
 
@@ -1146,11 +1174,11 @@ Text of the **first** part.
     }
 
     #[test]
-    fn every_screen_tour_has_the_page_of_its_screen() {
+    fn every_place_tour_has_the_page_of_its_place() {
         for language in UiLanguage::ALL {
             let guide = Guide::load(language);
             for tour in Tour::ALL {
-                let Some(screen) = tour.screen else {
+                let Some(place) = tour.place else {
                     continue;
                 };
                 let page = guide
@@ -1158,7 +1186,7 @@ Text of the **first** part.
                     .iter()
                     .find(|page| page.tour == Some(tour.id))
                     .unwrap_or_else(|| panic!("{language}: no page shows {:?}", tour.id));
-                assert_eq!(page.place, Some(GuidePlace::Screen(screen)), "{}", page.id);
+                assert_eq!(page.place, Some(GuidePlace::from(place)), "{}", page.id);
                 // Every step's "Learn more" stays on the screen's page.
                 for step in tour.steps {
                     assert_eq!(step.guide.map(|guide| guide.page), Some(page.id.as_str()));

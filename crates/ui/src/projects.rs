@@ -21,10 +21,10 @@ use bardo_app::bardo_domain::{
     VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, Destination, ExportSummary, ExportView, MusicPromptView, NarrationError,
-    NarrationPlayer, NarrationView, Recording, RenderReview, RenderSummary, ScenesView,
-    ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text, UploadChoices,
-    UploadReview, opening_stage, project_stages,
+    Bardo, BudgetConsent, Control, Destination, ExportSummary, ExportView, MusicPromptView,
+    NarrationError, NarrationPlayer, NarrationView, Recording, RenderReview, RenderSummary,
+    ScenesView, ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text,
+    TourAnchor, UploadChoices, UploadReview, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -44,10 +44,10 @@ use gpui_kit::{
 
 use crate::appearance::look;
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Header, ScreenParts, Stages};
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
+use crate::{guide, layout};
 
 mod export;
 mod music;
@@ -112,6 +112,11 @@ pub struct ProjectsScreen {
     scene_keys: FocusHandle,
     /// Scrolls the scenes when a layout lists them in a scroll of their own.
     scene_scroll: ScrollHandle,
+    /// Scrolls the Script and Narration pages, so a tour can bring their
+    /// controls into view.
+    page_scroll: ScrollHandle,
+    /// The scene inspector's scroll, for the Scenes and Clips tours.
+    inspector_scroll: ScrollHandle,
     /// Whether the scene grid shows only the scenes with something left.
     pending_only: bool,
     view: Option<ScriptView>,
@@ -351,6 +356,8 @@ impl ProjectsScreen {
             selected_scene: None,
             scene_keys: cx.focus_handle(),
             scene_scroll: ScrollHandle::new(),
+            page_scroll: ScrollHandle::new(),
+            inspector_scroll: ScrollHandle::new(),
             pending_only: false,
             view: None,
             narration: None,
@@ -581,7 +588,51 @@ impl ProjectsScreen {
 
     /// The stage on screen, when a project is open.
     pub fn current_stage(&self) -> Option<Stage> {
-        self.project.map(|_| self.stage)
+        self.project?;
+        Some(
+            self.stages()
+                .map_or(self.stage, |stages| self.shown_stage(&stages)),
+        )
+    }
+
+    /// The stage drawn: the one picked, unless it locked since (the scenes
+    /// planned again), then the one the project would open on.
+    fn shown_stage(&self, stages: &[StageStatus]) -> Stage {
+        if stages
+            .iter()
+            .any(|status| status.stage == self.stage && status.state != StageState::Locked)
+        {
+            self.stage
+        } else {
+            opening_stage(stages)
+        }
+    }
+
+    /// Whether a project is open: the screen offers its tour only then.
+    pub fn has_content(&self) -> bool {
+        self.stages().is_some()
+    }
+
+    /// The stage on screen, and whether it has made something (a script,
+    /// a narration, scenes, a clip): its tour is offered only then.
+    pub fn stage_content(&self) -> Option<(Stage, bool)> {
+        let stage = self.shown_stage(&self.stages()?);
+        let plan = self.scenes.as_ref().and_then(|scenes| scenes.plan.as_ref());
+        let made = match stage {
+            Stage::Script => self.view.as_ref().is_some_and(|view| view.script.is_some()),
+            Stage::Narration => self
+                .narration
+                .as_ref()
+                .is_some_and(|view| view.narration.is_some()),
+            Stage::Scenes => plan.is_some(),
+            Stage::Clips => plan.is_some_and(|plan| {
+                plan.scenes()
+                    .iter()
+                    .any(|scene| scene.clip().is_some() || scene.pending_clip().is_some())
+            }),
+            Stage::Edit | Stage::Render | Stage::Publish => false,
+        };
+        Some((stage, made))
     }
 
     /// Shows a stage of the open project, as the editor's "Review &
@@ -1007,17 +1058,21 @@ impl ProjectsScreen {
                     })
             });
         let mut header = Header::new(
-            h_flex()
-                .gap_1()
-                .min_w_0()
-                .items_center()
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(SharedString::from(project.title.clone())),
-                )
-                .child(switcher),
+            kit::anchor(
+                TourAnchor::Control(Control::ProjectSwitcher),
+                h_flex()
+                    .gap_1()
+                    .min_w_0()
+                    .items_center()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(project.title.clone())),
+                    )
+                    .child(switcher),
+            )
+            .min_w_0(),
         );
         header.trail = vec![
             tr(bardo, Text::DestinationName(Destination::Projects)).into_any_element(),
@@ -1038,29 +1093,40 @@ impl ProjectsScreen {
             );
         }
         header.meta = Some(SharedString::from(meta));
+        header.info = guide::header_tours(
+            bardo,
+            (Destination::Projects, self.has_content()),
+            self.stage_content(),
+            None,
+            cx,
+        );
         header.actions = vec![
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(bardo, Text::ProjectNarrator)),
-                )
-                .child(
-                    div().w(px(260.)).child(
-                        Select::new(&self.narrator_select)
-                            .small()
-                            .search_placeholder(tr(bardo, Text::PersonasTitle)),
-                    ),
-                )
-                .child(kit::info(
-                    "project-narrator-info",
-                    None,
-                    tr(bardo, Text::ProjectNarratorHint),
-                ))
-                .into_any_element(),
+            kit::anchor(
+                TourAnchor::Control(Control::ProjectNarrator),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(bardo, Text::ProjectNarrator)),
+                    )
+                    .child(
+                        div().w(px(260.)).child(
+                            Select::new(&self.narrator_select)
+                                .small()
+                                .search_placeholder(tr(bardo, Text::PersonasTitle)),
+                        ),
+                    )
+                    .child(guide::info(
+                        bardo,
+                        "project-narrator-info",
+                        tr(bardo, Text::ProjectNarratorHint),
+                        guide::refs::PROJECTS_NARRATOR,
+                    )),
+            )
+            .into_any_element(),
         ];
         header
     }
@@ -1072,21 +1138,39 @@ impl ProjectsScreen {
             return Vec::new();
         };
         let job = self.render_job(cx);
+        let scroll = Some(&self.page_scroll);
+        let tagged = |anchor: TourAnchor, element: AnyElement| {
+            kit::anchor_in(anchor, element, scroll).into_any_element()
+        };
         let pending = view
             .script
             .as_ref()
             .and_then(|script| script.pending())
-            .map(|pending| self.render_pending(pending.text().as_str(), pending.generation(), cx));
-        let provenance = view.script.as_ref().map(|script| {
-            self.render_provenance(
-                script.source().generation(),
-                TemplateKind::Script,
-                PromptShown::Source,
-                cx,
-            )
-        });
-        let music = self.render_music(cx);
+            .map(|pending| self.render_pending(pending.text().as_str(), pending.generation(), cx))
+            .map(|pending| tagged(TourAnchor::Control(Control::ScriptReview), pending));
+        let provenance = view
+            .script
+            .as_ref()
+            .map(|script| {
+                self.render_provenance(
+                    script.source().generation(),
+                    TemplateKind::Script,
+                    PromptShown::Source,
+                    cx,
+                )
+            })
+            .map(|details| tagged(TourAnchor::Control(Control::ScriptDetails), details));
+        let music = self
+            .render_music(cx)
+            .map(|music| tagged(TourAnchor::Control(Control::MusicPrompt), music));
         let bardo = self.bardo.read(cx);
+        let estimate =
+            estimate_note(bardo, &view.estimate, Text::EstimateCost, cx).map(|estimate| {
+                tagged(
+                    TourAnchor::Control(Control::ScriptEstimate),
+                    estimate.into_any_element(),
+                )
+            });
         let running = self.running();
         let script = view.script.as_ref();
 
@@ -1107,44 +1191,56 @@ impl ProjectsScreen {
             });
 
         let body: AnyElement = match script {
-            None => v_flex()
-                .gap_2()
-                .child(muted(cx, tr(bardo, Text::ScriptEmpty)))
-                .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
-                .when(!running, |body| {
-                    body.child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                Button::new("generate-script")
-                                    .primary()
-                                    .label(tr(bardo, Text::GenerateScript))
-                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                        this.generate(BudgetConsent::Ask, window, cx)
-                                    })),
-                            )
-                            .child(kit::info(
-                                "generate-script-info",
-                                None,
-                                SharedString::from(bardo.text_with(
-                                    Text::GenerateScriptHint,
-                                    &[("n", &view.template.number.to_string())],
+            None => tagged(
+                TourAnchor::Control(Control::ScriptBody),
+                v_flex()
+                    .gap_2()
+                    .child(muted(cx, tr(bardo, Text::ScriptEmpty)))
+                    .children(estimate)
+                    .when(!running, |body| {
+                        body.child(
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    Button::new("generate-script")
+                                        .primary()
+                                        .label(tr(bardo, Text::GenerateScript))
+                                        .on_click(cx.listener(
+                                            |this, _: &ClickEvent, window, cx| {
+                                                this.generate(BudgetConsent::Ask, window, cx)
+                                            },
+                                        )),
+                                )
+                                .child(guide::info(
+                                    bardo,
+                                    "generate-script-info",
+                                    SharedString::from(bardo.text_with(
+                                        Text::GenerateScriptHint,
+                                        &[("n", &view.template.number.to_string())],
+                                    )),
+                                    guide::refs::SCRIPT_WRITE,
                                 )),
-                            )),
-                    )
-                })
-                .into_any_element(),
+                        )
+                    })
+                    .into_any_element(),
+            ),
             Some(script) => v_flex()
                 .gap_2()
                 .when(script.pending().is_some(), |body| {
                     body.child(div().font_medium().child(tr(bardo, Text::ScriptCurrent)))
                 })
-                .child(Textarea::new(&self.editor))
+                .child(tagged(
+                    TourAnchor::Control(Control::ScriptBody),
+                    v_flex()
+                        .child(Textarea::new(&self.editor))
+                        .into_any_element(),
+                ))
                 .children(self.field_error.map(|error| {
                     kit::notice(Tone::Danger, tr(bardo, Text::ScriptFieldError(error)), cx)
                         .text_xs()
                 }))
-                .child(
+                .child(tagged(
+                    TourAnchor::Control(Control::ScriptActions),
                     h_flex()
                         .gap_2()
                         .flex_wrap()
@@ -1178,14 +1274,16 @@ impl ProjectsScreen {
                                         this.generate(BudgetConsent::Ask, window, cx)
                                     })),
                             )
-                            .child(kit::info(
+                            .child(guide::info(
+                                bardo,
                                 "regenerate-script-info",
-                                None,
                                 tr(bardo, Text::RegenerateScriptHint),
+                                guide::refs::SCRIPT_REVIEW,
                             ))
-                        }),
-                )
-                .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
+                        })
+                        .into_any_element(),
+                ))
+                .children(estimate)
                 .into_any_element(),
         };
 
@@ -1279,10 +1377,11 @@ impl ProjectsScreen {
                             .font_medium()
                             .child(tr(bardo, Text::ScriptPendingTitle)),
                     )
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "pending-script-info",
-                        None,
                         tr(bardo, Text::ScriptPendingHint),
+                        guide::refs::SCRIPT_REVIEW,
                     )),
             )
             .child(
@@ -1453,6 +1552,12 @@ impl ProjectsScreen {
         let record = narration.map(|narration| self.render_narration_record(narration, cx));
         let bardo = self.bardo.read(cx);
         let running = self.narration_running();
+        let scroll = Some(&self.page_scroll);
+        let tagged = |anchor: TourAnchor, element: AnyElement| {
+            kit::anchor_in(anchor, element, scroll).into_any_element()
+        };
+        let player =
+            player.map(|player| tagged(TourAnchor::Control(Control::NarrationPlayer), player));
 
         let title_row = h_flex()
             .gap_2()
@@ -1464,10 +1569,11 @@ impl ProjectsScreen {
                     tr(bardo, Text::NarrationStaleTag),
                     cx,
                 ))
-                .child(kit::info(
+                .child(guide::info(
+                    bardo,
                     "narration-stale-info",
-                    None,
                     tr(bardo, Text::NarrationStale),
+                    guide::refs::NARRATION_STALE,
                 ))
             })
             .children(record);
@@ -1531,7 +1637,10 @@ impl ProjectsScreen {
         Some(
             v_flex()
                 .gap_2()
-                .child(title_row)
+                .child(tagged(
+                    TourAnchor::Control(Control::NarrationStatus),
+                    title_row.into_any_element(),
+                ))
                 .children(
                     self.narration_error
                         .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
@@ -1555,17 +1664,35 @@ impl ProjectsScreen {
                                 .gap_1()
                                 .items_center()
                                 .when(can_generate, |row| {
-                                    row.child(generate).child(kit::info(
-                                        "generate-narration-info",
-                                        None,
-                                        hint.clone(),
+                                    row.child(tagged(
+                                        TourAnchor::Control(Control::NarrationGenerate),
+                                        h_flex()
+                                            .gap_1()
+                                            .items_center()
+                                            .child(generate)
+                                            .child(guide::info(
+                                                bardo,
+                                                "generate-narration-info",
+                                                hint.clone(),
+                                                guide::refs::NARRATION_GENERATE,
+                                            ))
+                                            .into_any_element(),
                                     ))
                                 })
                                 .when(can_import, |row| {
-                                    row.child(div().w(px(8.))).child(import).child(kit::info(
-                                        "import-narration-info",
-                                        None,
-                                        tr(bardo, Text::ImportNarrationHint),
+                                    row.child(div().w(px(8.))).child(tagged(
+                                        TourAnchor::Control(Control::NarrationImport),
+                                        h_flex()
+                                            .gap_1()
+                                            .items_center()
+                                            .child(import)
+                                            .child(guide::info(
+                                                bardo,
+                                                "import-narration-info",
+                                                tr(bardo, Text::ImportNarrationHint),
+                                                guide::refs::NARRATION_IMPORT,
+                                            ))
+                                            .into_any_element(),
                                     ))
                                 }),
                         ),
@@ -1706,10 +1833,11 @@ impl ProjectsScreen {
                         clock(narration.duration)
                     ))),
             )
-            .child(kit::info(
+            .child(guide::info(
+                bardo,
                 "narration-words-info",
-                None,
                 tr(bardo, Text::NarrationWordsHint),
+                guide::refs::NARRATION_PLAY,
             ));
 
         let text = narration.text.as_str();
@@ -1899,19 +2027,16 @@ impl Render for ProjectsScreen {
             }
             return layout::screen(parts, cx);
         };
-        // A stage that locked since it was picked (the scenes planned
-        // again) gives way to the one the project would open on.
-        let current = if stages
-            .iter()
-            .any(|status| status.stage == self.stage && status.state != StageState::Locked)
-        {
-            self.stage
-        } else {
-            opening_stage(&stages)
-        };
+        let current = self.shown_stage(&stages);
         match current {
-            Stage::Script => parts.content = self.script_page(cx),
-            Stage::Narration => parts.content.extend(self.render_narration(cx)),
+            Stage::Script => {
+                parts.content = self.script_page(cx);
+                parts.scroll = Some(self.page_scroll.clone());
+            }
+            Stage::Narration => {
+                parts.content.extend(self.render_narration(cx));
+                parts.scroll = Some(self.page_scroll.clone());
+            }
             Stage::Scenes | Stage::Clips => self.scene_parts(current, &mut parts, cx),
             Stage::Render => self.render_parts(&mut parts, cx),
             Stage::Publish => self.export_parts(&mut parts, cx),

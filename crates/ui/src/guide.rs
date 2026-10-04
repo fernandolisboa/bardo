@@ -11,7 +11,8 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
 use bardo_app::{
-    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, Spot, Text, TourAnchor, TourStepView,
+    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, Spot, Stage, Text, TourAnchor,
+    TourStepView,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
@@ -108,9 +109,31 @@ pub mod refs {
     pub const PERFORMANCE_POSTS: GuideRef = at("performance-metrics", "posts");
     pub const PERFORMANCE_NUMBERS: GuideRef = at("performance-metrics", "numbers");
     pub const PERFORMANCE_SYNC: GuideRef = at("performance-metrics", "sync");
+    pub const PROJECTS_NARRATOR: GuideRef = at("projects", "narrator");
+    pub const SCRIPT_WRITE: GuideRef = at("script", "write");
+    pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
+    pub const SCRIPT_MUSIC: GuideRef = at("script", "music");
+    pub const NARRATION_GENERATE: GuideRef = at("narration", "generate");
+    pub const NARRATION_PLAY: GuideRef = at("narration", "play");
+    pub const NARRATION_STALE: GuideRef = at("narration", "stale");
+    pub const NARRATION_IMPORT: GuideRef = at("narration", "import");
+    pub const SCENES_PLAN: GuideRef = at("scenes", "plan");
+    pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
+    pub const SCENES_REPLAN: GuideRef = at("scenes", "replan");
+    pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
+    pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
+    pub const PERSONAS_LIBRARY: GuideRef = at("personas", "library");
+    pub const PERSONAS_VOICE: GuideRef = at("personas", "voice");
+    pub const PERSONAS_PRESETS: GuideRef = at("personas", "presets");
+    pub const PERSONAS_SAMPLE: GuideRef = at("personas", "sample");
+    pub const PERSONAS_SHARE: GuideRef = at("personas", "share");
+    pub const PERSONAS_REALISTIC: GuideRef = at("personas", "realistic");
+    pub const TEMPLATES_VERSIONS: GuideRef = at("templates", "versions");
+    pub const TEMPLATES_FIELDS: GuideRef = at("templates", "fields");
+    pub const TEMPLATES_VARIABLES: GuideRef = at("templates", "variables");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 9] = [
+    pub const ALL: [GuideRef; 31] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -120,6 +143,28 @@ pub mod refs {
         PERFORMANCE_POSTS,
         PERFORMANCE_NUMBERS,
         PERFORMANCE_SYNC,
+        PROJECTS_NARRATOR,
+        SCRIPT_WRITE,
+        SCRIPT_REVIEW,
+        SCRIPT_MUSIC,
+        NARRATION_GENERATE,
+        NARRATION_PLAY,
+        NARRATION_STALE,
+        NARRATION_IMPORT,
+        SCENES_PLAN,
+        SCENES_REDRAW,
+        SCENES_REPLAN,
+        CLIPS_ANIMATE,
+        CLIPS_REVIEW,
+        PERSONAS_LIBRARY,
+        PERSONAS_VOICE,
+        PERSONAS_PRESETS,
+        PERSONAS_SAMPLE,
+        PERSONAS_SHARE,
+        PERSONAS_REALISTIC,
+        TEMPLATES_VERSIONS,
+        TEMPLATES_FIELDS,
+        TEMPLATES_VARIABLES,
     ];
 }
 
@@ -133,33 +178,79 @@ pub fn header_info(
     info: Option<AnyElement>,
     cx: &App,
 ) -> Option<AnyElement> {
-    let Some(tour) = bardo.screen_tour(screen, has_content) else {
+    header_tours(bardo, (screen, has_content), None, info, cx)
+}
+
+/// [`header_info`] for the Projects screen, which also offers the tour of
+/// the stage on screen ("Tour this stage") once the stage has made
+/// something. Shift+F1 starts the stage's tour then.
+pub fn header_tours(
+    bardo: &Bardo,
+    (screen, has_content): (Destination, bool),
+    stage: Option<(Stage, bool)>,
+    info: Option<AnyElement>,
+    cx: &App,
+) -> Option<AnyElement> {
+    let screen_tour = bardo.screen_tour(screen, has_content);
+    let stage_tour = stage.and_then(|(stage, has_content)| bardo.stage_tour(stage, has_content));
+    if screen_tour.is_none() && stage_tour.is_none() {
         return info;
-    };
+    }
+    // The key goes with the tour Shift+F1 starts: the stage's, else the
+    // screen's.
+    let screen_key = stage_tour.is_none();
     Some(
         h_flex()
             .gap_1()
             .items_center()
             .children(info)
-            .child(tour_button(bardo, tour, cx))
+            .children(screen_tour.map(|tour| {
+                tour_button(
+                    bardo,
+                    "tour-this-screen",
+                    Text::TourThisScreen,
+                    tour,
+                    screen_key,
+                    cx,
+                )
+            }))
+            .children(stage_tour.map(|tour| {
+                tour_button(
+                    bardo,
+                    "tour-this-stage",
+                    Text::TourThisStage,
+                    tour,
+                    true,
+                    cx,
+                )
+            }))
             .into_any_element(),
     )
 }
 
-fn tour_button(bardo: &Bardo, tour: ScreenTour, cx: &App) -> impl IntoElement {
-    let id = tour.tour;
+fn tour_button(
+    bardo: &Bardo,
+    id: &'static str,
+    label: Text,
+    tour: ScreenTour,
+    key: bool,
+    cx: &App,
+) -> impl IntoElement {
+    let started = tour.tour;
+    let button = Button::new(id)
+        .ghost()
+        .xsmall()
+        .icon(Lucide::BookOpen)
+        .label(tr(bardo, label))
+        .on_click(move |_, window, cx| start_tour(started, window, cx));
     h_flex()
         .gap_1()
         .items_center()
-        .child(
-            Button::new("tour-this-screen")
-                .ghost()
-                .xsmall()
-                .icon(Lucide::BookOpen)
-                .label(tr(bardo, Text::TourThisScreen))
-                .tooltip("Shift+F1")
-                .on_click(move |_, window, cx| start_tour(id, window, cx)),
-        )
+        .child(if key {
+            button.tooltip("Shift+F1")
+        } else {
+            button
+        })
         .when(tour.new, |row| {
             row.child(kit::status(kit::Tone::Accent, tr(bardo, Text::TourNew), cx))
         })
@@ -188,8 +279,10 @@ pub fn info(
 enum MenuItem {
     UserGuide,
     Tour(TourId),
-    /// The current screen's tour (Shift+F1).
+    /// The current screen's tour (Shift+F1 unless the stage has one).
     ScreenTour(TourId),
+    /// The tour of the open project's stage on screen (Shift+F1).
+    StageTour(TourId),
     Resume,
     Shortcuts,
     Reset,
@@ -230,6 +323,8 @@ pub struct Guide {
     menu: Option<usize>,
     /// The tour the screen under the menu offers.
     screen_tour: Option<ScreenTour>,
+    /// The tour the project stage under the menu offers.
+    stage_tour: Option<ScreenTour>,
     shortcuts: bool,
     /// The card button the keyboard is on.
     button: Option<usize>,
@@ -250,6 +345,7 @@ impl Guide {
             shown: None,
             menu: None,
             screen_tour: None,
+            stage_tour: None,
             shortcuts: false,
             button: None,
             motion: Rc::default(),
@@ -262,13 +358,20 @@ impl Guide {
     }
 
     /// The Guide place was picked: opens or closes its menu, which offers
-    /// `screen_tour`, the tour of the screen under it.
-    pub fn toggle_menu(&mut self, screen_tour: Option<ScreenTour>, cx: &mut Context<Self>) {
+    /// `screen_tour` and `stage_tour`, the tours of the screen and the
+    /// project stage under it.
+    pub fn toggle_menu(
+        &mut self,
+        screen_tour: Option<ScreenTour>,
+        stage_tour: Option<ScreenTour>,
+        cx: &mut Context<Self>,
+    ) {
         self.menu = match self.menu {
             Some(_) => None,
             None => Some(0),
         };
         self.screen_tour = screen_tour;
+        self.stage_tour = stage_tour;
         self.problem = None;
         cx.notify();
     }
@@ -320,6 +423,7 @@ impl Guide {
         // start from their screens and their guide pages.
         let mut items = vec![MenuItem::UserGuide, MenuItem::Tour(TourId::Welcome)];
         items.extend(self.screen_tour.map(|tour| MenuItem::ScreenTour(tour.tour)));
+        items.extend(self.stage_tour.map(|tour| MenuItem::StageTour(tour.tour)));
         if bardo.resumable_tour().is_some() {
             items.push(MenuItem::Resume);
         }
@@ -331,7 +435,9 @@ impl Guide {
         self.menu = None;
         match item {
             MenuItem::UserGuide => cx.emit(GuideEvent::OpenGuide),
-            MenuItem::Tour(tour) | MenuItem::ScreenTour(tour) => cx.emit(GuideEvent::Start(tour)),
+            MenuItem::Tour(tour) | MenuItem::ScreenTour(tour) | MenuItem::StageTour(tour) => {
+                cx.emit(GuideEvent::Start(tour))
+            }
             MenuItem::Resume => cx.emit(GuideEvent::Resume),
             MenuItem::Shortcuts => self.shortcuts = true,
             MenuItem::Reset => cx.emit(GuideEvent::Reset),
@@ -647,6 +753,10 @@ impl Guide {
                         tr(bardo, Text::TourThisScreen),
                         self.screen_tour.is_some_and(|tour| tour.new),
                     ),
+                    MenuItem::StageTour(_) => (
+                        tr(bardo, Text::TourThisStage),
+                        self.stage_tour.is_some_and(|tour| tour.new),
+                    ),
                     MenuItem::Resume => (tr(bardo, Text::GuideResumeTour), false),
                     MenuItem::Shortcuts => (tr(bardo, Text::GuideShortcuts), false),
                     MenuItem::Reset => (tr(bardo, Text::GuideResetTours), false),
@@ -654,7 +764,8 @@ impl Guide {
                 // The row's key, as the shortcuts list draws keys.
                 let key = match item {
                     MenuItem::UserGuide => Some("F1"),
-                    MenuItem::ScreenTour(_) => Some("Shift+F1"),
+                    MenuItem::ScreenTour(_) if self.stage_tour.is_none() => Some("Shift+F1"),
+                    MenuItem::StageTour(_) => Some("Shift+F1"),
                     _ => None,
                 };
                 let key = key.map(|key| {
