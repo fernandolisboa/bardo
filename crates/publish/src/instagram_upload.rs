@@ -40,6 +40,7 @@ use bardo_domain::{
 use serde_json::Value;
 
 use crate::MetaEndpoints;
+use crate::text::{SHOWN_TEXT, plain};
 
 /// The window `content_publishing_limit` counts over when its answer
 /// leaves `quota_duration` out: 24 hours, as documented.
@@ -455,28 +456,6 @@ fn config_issue(value: &Value) -> Option<String> {
         .collect();
     let issues = plain(&issues.join("; "), SHOWN_TEXT);
     (!issues.is_empty()).then_some(issues)
-}
-
-/// The most of Meta's own words Bardo keeps and shows.
-const SHOWN_TEXT: usize = 500;
-
-/// Meta's text as one plain line: no control or direction-changing
-/// characters (which could make a notice read as something else), trimmed,
-/// at most `max` characters.
-fn plain(text: &str, max: usize) -> String {
-    let kept: String = text
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .filter(|c| {
-            !matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-        })
-        .collect();
-    kept.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(max)
-        .collect()
 }
 
 fn unexpected(detail: &str) -> UploadError {

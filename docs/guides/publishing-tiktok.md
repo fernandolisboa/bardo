@@ -139,9 +139,36 @@ last refresh.
   services permissions in the TikTok app's security settings.
 - A connected account must be disconnected before it can be removed.
 
+## Sending a draft
+
+1. At a project's **Publish** stage, pick the TikTok account and select
+   **Review upload**. The review shows the rendered file, the connected
+   account and the caption to paste. A file TikTok would not take is
+   listed instead, with what to change.
+2. Tick **Remind me of the AI-generated content label** when the video has
+   realistic AI content (it is ticked when the narration uses a realistic
+   voice). TikTok sets the label in its app; Bardo reminds you when the
+   draft arrives.
+3. Select **Send to TikTok inbox**. Bardo sends the file in chunks and
+   resumes from the last one TikTok confirmed if the connection drops or
+   you stop it. After an hour TikTok forgets an unfinished upload, so a
+   later resume sends the file again.
+4. When TikTok has the draft, the post shows **Draft in TikTok** with the
+   caption and a **Copy caption** button. Open TikTok's inbox in the app,
+   paste the caption, turn on the AI label if reminded, and post (or
+   schedule) it.
+5. Back in Bardo, select **Mark as posted** and paste the post's link, so
+   Bardo follows it like any other post.
+
 ## Limits to know
 
 - TikTok keeps at most 5 drafts from an app waiting in your inbox in any
-  24 hours.
+  24 hours. Bardo counts the drafts it sent and refuses a sixth in the
+  review, saying when the next may go. If TikTok still refuses one (say,
+  drafts from another app), the upload waits in the queue and Bardo tries
+  again later.
+- TikTok takes MP4, WebM or MOV in H.264, H.265, VP8 or VP9, 23 to 60
+  frames per second, 360 to 4096 pixels per side, up to 10 minutes and
+  4 GB. Bardo's presets meet these.
 - The Content Posting API has no scheduling field: you schedule the draft
   in the TikTok app when you post it.

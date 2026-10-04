@@ -340,7 +340,7 @@ fn api_failure(response: &HttpResponse, body: &Value) -> SignInFailure {
 
 /// `HTTP 200: invalid_grant: Authorization code is expired. (log_id …)`,
 /// for the log; TikTok's support asks for the `log_id`.
-fn detail(status: u16, code: &str, message: &str, log_id: &Value) -> String {
+pub(crate) fn detail(status: u16, code: &str, message: &str, log_id: &Value) -> String {
     let mut detail = format!("HTTP {status}");
     for part in [code, message] {
         if !part.is_empty() {

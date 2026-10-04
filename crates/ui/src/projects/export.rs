@@ -16,8 +16,8 @@ use bardo_app::bardo_domain::{
     VideoProjectId, compose, text_length,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView,
-    PublicationError, Text, UploadState, export_job_networks,
+    Bardo, BudgetConsent, DraftNote, ExportBlock, ExportError, ExportSummary, ExportTarget,
+    ExportView, PublicationError, Text, UploadState, export_job_networks,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -381,6 +381,13 @@ impl ProjectsScreen {
     fn copy_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         self.export_notice = Some(Text::MetadataCopied);
+        cx.notify();
+    }
+
+    /// Copies a TikTok draft's caption, to paste in the app.
+    fn copy_caption(&mut self, caption: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(caption));
+        self.export_notice = Some(Text::UploadDraftCopied);
         cx.notify();
     }
 
@@ -1269,6 +1276,42 @@ impl ProjectsScreen {
             .into_any_element()
     }
 
+    /// The caption to paste with a copy button, the reminder to turn on
+    /// TikTok's AI label when the review asked for it, and how to link the
+    /// post once it is up.
+    fn draft_note(&self, note: DraftNote, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let caption = note.caption.clone();
+        v_flex()
+            .gap_2()
+            .child(field_label(tr(bardo, Text::UploadFieldDraftCaption)))
+            .child(
+                kit::well(cx)
+                    .text_xs()
+                    .child(SharedString::from(note.caption)),
+            )
+            .child(
+                h_flex().child(
+                    Button::new("draft-copy")
+                        .small()
+                        .outline()
+                        .label(tr(bardo, Text::UploadDraftCopy))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.copy_caption(caption.clone(), cx);
+                        })),
+                ),
+            )
+            .when(note.synthetic, |column| {
+                column.child(kit::notice(
+                    Tone::Warning,
+                    tr(bardo, Text::UploadDraftAiReminder),
+                    cx,
+                ))
+            })
+            .child(muted(cx, tr(bardo, Text::UploadDraftLinkHint)))
+            .into_any_element()
+    }
+
     /// The post made of the export: the field to paste its link, or the
     /// linked post with its state, link and (on YouTube) public numbers.
     fn post_section(
@@ -1278,6 +1321,13 @@ impl ProjectsScreen {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let network = target.network;
+        // A TikTok draft in the inbox: what the creator does in the app.
+        let note = target
+            .posted
+            .as_ref()
+            .and_then(|post| self.bardo.read(cx).draft_note(&post.publication))
+            .map(|note| self.draft_note(note, cx));
+        let drafted = note.is_some();
         let bardo = self.bardo.read(cx);
         let heading = h_flex()
             .gap_1()
@@ -1355,6 +1405,7 @@ impl ProjectsScreen {
         let id = publication.id;
         section = section
             .child(metrics::post_state(bardo, post, "post", cx))
+            .children(note)
             .children(url.map(|url| {
                 let open = url.clone();
                 h_flex()
@@ -1420,8 +1471,16 @@ impl ProjectsScreen {
                     .child(
                         Button::new("post-change")
                             .xsmall()
-                            .ghost()
-                            .label(tr(bardo, Text::PublicationChange))
+                            .when(drafted, |button| button.primary())
+                            .when(!drafted, |button| button.ghost())
+                            .label(tr(
+                                bardo,
+                                if drafted {
+                                    Text::PublicationMark
+                                } else {
+                                    Text::PublicationChange
+                                },
+                            ))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.change_post(change.clone(), window, cx);
                             })),

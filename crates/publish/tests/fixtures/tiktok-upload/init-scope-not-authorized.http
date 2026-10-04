@@ -1,0 +1,4 @@
+HTTP/2 401 
+content-type: application/json
+
+{"data":{},"error":{"code":"scope_not_authorized","message":"The user did not authorize the scope required for completing this request.","log_id":"202610041200051A2B3C4D5E6F7A8B9C0D"}}

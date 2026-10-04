@@ -81,6 +81,7 @@ mod speech;
 mod template;
 mod text;
 mod theme;
+mod tiktok;
 mod timeline;
 mod upload;
 mod voice;
@@ -228,6 +229,12 @@ pub use theme::{
     Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,
     rank_themes,
+};
+pub use tiktok::{
+    ChunkPlan, ChunkPlanError, DraftRoom, TIKTOK_CHUNK, TIKTOK_DRAFT_WINDOW, TIKTOK_FPS,
+    TIKTOK_MAX_BYTES, TIKTOK_MAX_CHUNK, TIKTOK_MAX_CHUNKS, TIKTOK_MAX_DURATION,
+    TIKTOK_MAX_LAST_CHUNK, TIKTOK_MIN_CHUNK, TIKTOK_PENDING_DRAFTS, TIKTOK_SIDE, TikTokFile,
+    TikTokSpecProblem, VideoContainer, check_tiktok, draft_room, video_container,
 };
 pub use timeline::{
     AudioItem, CaptionSpan, FPS, Picture, SavedAudioItem, SavedTimeline, SavedVideoItem, Timeline,

@@ -112,6 +112,10 @@ pub enum UploadStatus {
     /// for unlisted or public: the user's API project has not passed the
     /// network's audit (YouTube's API Services audit).
     Restricted,
+    /// In the creator's inbox as a draft (TikTok's `SEND_TO_USER_INBOX`):
+    /// the creator finishes the post in the network's app, so Bardo has
+    /// nothing more to do and no post to link until they link it.
+    DraftSent,
     Failed(UploadFailure),
 }
 
@@ -126,6 +130,7 @@ impl UploadStatus {
             UploadStatus::Scheduled => "scheduled",
             UploadStatus::Published => "published",
             UploadStatus::Restricted => "restricted",
+            UploadStatus::DraftSent => "draft_sent",
             UploadStatus::Failed(_) => "failed",
         }
     }
@@ -139,6 +144,7 @@ impl UploadStatus {
             "scheduled" => UploadStatus::Scheduled,
             "published" => UploadStatus::Published,
             "restricted" => UploadStatus::Restricted,
+            "draft_sent" => UploadStatus::DraftSent,
             "failed" => UploadStatus::Failed(UploadFailure::from_code(failure.unwrap_or(""))),
             _ => return None,
         })
@@ -150,10 +156,11 @@ impl UploadStatus {
         matches!(self, UploadStatus::Published | UploadStatus::Restricted)
     }
 
-    /// Whether the network has the video, live or waiting for its publish
-    /// time: the upload job has nothing left to do.
+    /// Whether the network has the video, live, waiting for its publish
+    /// time or waiting in the creator's inbox: the upload job has nothing
+    /// left to do.
     pub fn is_on_network(&self) -> bool {
-        self.is_final() || *self == UploadStatus::Scheduled
+        self.is_final() || matches!(self, UploadStatus::Scheduled | UploadStatus::DraftSent)
     }
 
     pub fn failure(&self) -> Option<&UploadFailure> {
@@ -290,6 +297,16 @@ impl Upload {
             }
             _ => UploadStatus::Published,
         };
+        Ok(())
+    }
+
+    /// The network processed the video and put it in the creator's inbox
+    /// as a draft, for them to finish in the network's app (TikTok).
+    pub fn drafted(&mut self) -> Result<(), InvalidUploadTransition> {
+        if self.status != UploadStatus::Processing {
+            return Err(self.invalid("send as a draft"));
+        }
+        self.status = UploadStatus::DraftSent;
         Ok(())
     }
 
@@ -489,6 +506,10 @@ pub enum VideoState {
     /// The network dropped the upload before it was published (Instagram's
     /// container `EXPIRED` after 24 hours): the file goes again.
     Expired,
+    /// Processed and waiting in the creator's inbox as a draft, for them to
+    /// finish the post in the network's app (TikTok's `SEND_TO_USER_INBOX`).
+    /// Unlike `Processed`, Bardo does nothing more with it.
+    InInbox,
     /// Processed, showing as `visibility`.
     Ready {
         visibility: Visibility,
@@ -621,6 +642,13 @@ pub trait UploadRun {
 
     /// Keeps how many bytes the network confirmed.
     fn confirmed(&mut self, bytes: u64) -> Result<(), UploadError>;
+
+    /// The bytes an earlier run kept with `confirmed` for the current
+    /// session, for a network that cannot be asked what it has (TikTok):
+    /// it resumes after them. 0 when nothing was kept.
+    fn resumed(&self) -> u64 {
+        0
+    }
 
     /// True once the run should stop and leave the rest for later.
     fn should_stop(&self) -> bool;
@@ -1029,6 +1057,22 @@ mod tests {
     }
 
     #[test]
+    fn a_draft_in_the_inbox_is_done_for_bardo_but_not_a_post() {
+        let mut u = upload(Visibility::Public);
+        assert!(u.drafted().is_err(), "only once processed");
+        u.start().unwrap();
+        u.sent().unwrap();
+        u.drafted().unwrap();
+        assert_eq!(u.status, UploadStatus::DraftSent);
+        assert!(u.status.is_on_network(), "the job has nothing left to do");
+        assert!(!u.status.is_final(), "the creator has not posted it yet");
+        assert!(u.fail(UploadFailure::Removed).is_err());
+        assert!(u.start().is_err());
+        assert!(u.check_again(JobId::new()).is_err());
+        assert!(u.drafted().is_err());
+    }
+
+    #[test]
     fn statuses_and_failures_round_trip_through_their_codes() {
         let statuses = [
             UploadStatus::Queued,
@@ -1037,6 +1081,7 @@ mod tests {
             UploadStatus::Scheduled,
             UploadStatus::Published,
             UploadStatus::Restricted,
+            UploadStatus::DraftSent,
             UploadStatus::Failed(UploadFailure::QuotaExceeded),
             UploadStatus::Failed(UploadFailure::ScheduleMissed),
             UploadStatus::Failed(UploadFailure::UploadLimit),

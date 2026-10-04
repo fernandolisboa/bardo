@@ -34,6 +34,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0030_owner_metrics.sql"),
     include_str!("../migrations/0031_reel_uploads.sql"),
     include_str!("../migrations/0032_in_app_schedule.sql"),
+    include_str!("../migrations/0033_tiktok_drafts.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
@@ -320,6 +321,107 @@ mod tests {
             })
             .unwrap();
         assert_eq!(snapshots, 0, "snapshots still go with their publication");
+    }
+
+    #[test]
+    fn rebuilding_publications_for_drafts_keeps_every_upload_column() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..32] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 32).unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language,
+                 country)
+             VALUES ('c', 'p', 'Space', '', '', 'en', 'US');
+             INSERT INTO theme (id, profile_id, channel_id, niche, title, angle, status,
+                 suggested_at, position)
+             VALUES ('t', 'p', 'c', 'space', 'Probe', '', 'approved', 0, 0);
+             INSERT INTO video_project (id, profile_id, channel_id, theme_id, niche, title,
+                 created_at)
+             VALUES ('v', 'p', 'c', 't', 'space', 'Probe', 0);
+             INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                 render_id, kind, post_id, url, upload_status, upload_visibility,
+                 upload_publish_at, upload_job, posted_at, linked_at, checked_at,
+                 missing_since, upload_issue, upload_network_id, upload_claimed_at)
+             VALUES ('reel', 'v', 'instagram_reels', 'p', 'a', 'r', 'uploaded', 'C1aBcDeFgHi',
+                 'https://www.instagram.com/reel/C1aBcDeFgHi/', 'published', 'public', 5, 'j',
+                 6, 1, 7, 8, 'no audio', '17900000000000001', 4);
+             INSERT INTO metrics_snapshot (publication_id, taken_at, views)
+             VALUES ('reel', 2, 40);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        type Row = (
+            String,
+            Option<i64>,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            String,
+            String,
+            i64,
+        );
+        let row: Row = conn
+            .query_row(
+                "SELECT upload_status, upload_publish_at, posted_at, checked_at, missing_since,
+                        upload_issue, upload_network_id, upload_claimed_at
+                 FROM publication",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "published".into(),
+                Some(5),
+                6,
+                Some(7),
+                Some(8),
+                "no audio".into(),
+                "17900000000000001".into(),
+                4
+            )
+        );
+        let snapshots: i64 = conn
+            .query_row("SELECT COUNT(*) FROM metrics_snapshot", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(snapshots, 1, "the snapshots stay");
+        let draft = |id: &str, post: &str| {
+            conn.execute(
+                &format!(
+                    "INSERT INTO publication (id, project_id, network, profile_id, account_id,
+                         render_id, kind, post_id, url, upload_status, upload_visibility,
+                         upload_job, posted_at, linked_at)
+                     VALUES ('{id}', 'v', 'tiktok', 'p', 'a', 'r', 'uploaded', {post},
+                         {post}, 'draft_sent', 'private', 'j2', 1, 1)"
+                ),
+                [],
+            )
+        };
+        assert!(
+            draft("x", "'7301234567890123456'").is_err(),
+            "a draft has no post"
+        );
+        draft("d", "NULL").unwrap();
     }
 
     #[test]
