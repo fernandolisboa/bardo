@@ -579,6 +579,11 @@ impl ProjectsScreen {
         }
     }
 
+    /// The stage on screen, when a project is open.
+    pub fn current_stage(&self) -> Option<Stage> {
+        self.project.map(|_| self.stage)
+    }
+
     /// Shows a stage of the open project, as the editor's "Review &
     /// render" asks.
     pub fn show_stage(&mut self, stage: Stage, _window: &mut Window, cx: &mut Context<Self>) {

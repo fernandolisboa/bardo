@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use std::time::Duration;
 
-use crate::{Destination, Pillar, Stage, UploadBlock};
+use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
 use bardo_domain::{
     ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionStyle, ChannelFieldError,
@@ -1437,6 +1437,21 @@ pub enum Text {
     GuideResetFailed,
     ShortcutsTitle,
     ShortcutsClose,
+    /// The Guide menu's first row, and the Guide screen.
+    GuideUserGuide,
+    GuideGroupName(GuideGroup),
+    GuideSearchPlaceholder,
+    /// What the guide's keys do, behind an ⓘ.
+    GuideSearchKeys,
+    /// Placeholder: `{query}`.
+    GuideSearchEmpty,
+    GuideOnThisPage,
+    /// Starts the page's tour.
+    GuideShowMe,
+    /// Placeholder: `{place}`.
+    GuideGoTo,
+    /// A tour card's way into the guide.
+    TourLearnMore,
     /// A group of keyboard shortcuts, by key.
     ShortcutGroup(&'static str),
     /// What a keyboard shortcut does, by key.
@@ -1465,6 +1480,7 @@ impl Text {
             }
             Text::ShortcutGroup(group) => return format!("shortcuts.group.{group}").into(),
             Text::ShortcutAction(action) => return format!("shortcuts.action.{action}").into(),
+            Text::GuideGroupName(group) => return format!("guide.group.{}", group.code()).into(),
             Text::TourStepCount => "tour.step_count",
             Text::TourEscHint => "tour.esc_hint",
             Text::TourBack => "tour.back",
@@ -1483,6 +1499,14 @@ impl Text {
             Text::GuideResetFailed => "guide.reset_failed",
             Text::ShortcutsTitle => "shortcuts.title",
             Text::ShortcutsClose => "shortcuts.close",
+            Text::GuideUserGuide => "guide.user_guide",
+            Text::GuideSearchPlaceholder => "guide.search.placeholder",
+            Text::GuideSearchKeys => "guide.search.keys",
+            Text::GuideSearchEmpty => "guide.search.empty",
+            Text::GuideOnThisPage => "guide.on_this_page",
+            Text::GuideShowMe => "guide.show_me",
+            Text::GuideGoTo => "guide.go_to",
+            Text::TourLearnMore => "tour.learn_more",
             Text::ChannelsTitle => "channels.title",
             Text::ChannelsEmpty => "channels.empty",
             Text::ChannelsNotLoaded => "channels.not_loaded",
@@ -4701,7 +4725,16 @@ mod tests {
             Text::GuideResetFailed,
             Text::ShortcutsTitle,
             Text::ShortcutsClose,
+            Text::GuideUserGuide,
+            Text::GuideSearchPlaceholder,
+            Text::GuideSearchKeys,
+            Text::GuideSearchEmpty,
+            Text::GuideOnThisPage,
+            Text::GuideShowMe,
+            Text::GuideGoTo,
+            Text::TourLearnMore,
         ]);
+        texts.extend(GuideGroup::ALL.map(Text::GuideGroupName));
         texts
     }
 

@@ -27,7 +27,7 @@ pub enum Destination {
     Accounts,
     Jobs,
     Costs,
-    /// Help: the tours, the shortcuts and (later) the user guide.
+    /// Help: the tours, the shortcuts and the user guide.
     Guide,
     Settings,
 }
@@ -90,6 +90,60 @@ impl Destination {
             .find(|(_, places)| places.contains(&self))
             .map(|(pillar, _)| *pillar)
     }
+
+    /// The place's name in links (`bardo:go/research`) and the user guide.
+    pub fn code(self) -> &'static str {
+        match self {
+            Destination::Research => "research",
+            Destination::Themes => "themes",
+            Destination::Performance => "performance",
+            Destination::Projects => "projects",
+            Destination::Personas => "personas",
+            Destination::Templates => "templates",
+            Destination::Channels => "channels",
+            Destination::Accounts => "accounts",
+            Destination::Jobs => "jobs",
+            Destination::Costs => "costs",
+            Destination::Guide => "guide",
+            Destination::Settings => "settings",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|place| place.code() == code)
+    }
+}
+
+/// A tab of the Settings screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SettingsTab {
+    Keys,
+    Networks,
+    Appearance,
+    Metrics,
+}
+
+impl SettingsTab {
+    pub const ALL: [SettingsTab; 4] = [
+        SettingsTab::Keys,
+        SettingsTab::Networks,
+        SettingsTab::Appearance,
+        SettingsTab::Metrics,
+    ];
+
+    /// The tab's name in links (`bardo:go/settings/keys`).
+    pub fn code(self) -> &'static str {
+        match self {
+            SettingsTab::Keys => "keys",
+            SettingsTab::Networks => "networks",
+            SettingsTab::Appearance => "appearance",
+            SettingsTab::Metrics => "metrics",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tab| tab.code() == code)
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +161,17 @@ mod tests {
             let pinned = Destination::PINNED.iter().filter(|p| **p == place).count();
             assert_eq!(grouped + pinned, 1, "{place:?}");
         }
+    }
+
+    #[test]
+    fn codes_read_back() {
+        for place in Destination::ALL {
+            assert_eq!(Destination::from_code(place.code()), Some(place));
+        }
+        for tab in SettingsTab::ALL {
+            assert_eq!(SettingsTab::from_code(tab.code()), Some(tab));
+        }
+        assert_eq!(Destination::from_code("nowhere"), None);
     }
 
     #[test]

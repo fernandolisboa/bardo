@@ -1955,6 +1955,7 @@ next = "Próximo"
 finish = "Concluir"
 skip = "Pular tour"
 new = "Novo"
+learn_more = "Saiba mais"
 
 [tour.offer]
 title = "Quer um tour de 2 minutos?"
@@ -1996,25 +1997,48 @@ body = "Quanto você gastou neste mês e quanto dos seus orçamentos já foi usa
 
 [tour.welcome.guide]
 title = "Guia e tours"
-body = "Volte aqui para refazer este tour, retomar um que você fechou ou ver os atalhos de teclado. O tour de cada tela e o guia do usuário também vão ficar aqui."
+body = "Volte aqui para refazer este tour, retomar um que você fechou, ver os atalhos de teclado ou ler o guia do usuário. F1 abre o guia em qualquer tela."
 
 [guide]
 resume_tour = "Retomar tour"
 shortcuts = "Atalhos de teclado"
 reset_tours = "Reiniciar tours"
 reset_failed = "Não foi possível reiniciar os tours. Tente de novo."
+user_guide = "Guia do usuário"
+on_this_page = "Nesta página"
+show_me = "Mostre para mim"
+go_to = "Ir para {place}"
+
+[guide.search]
+placeholder = "Buscar no guia"
+keys = "↑ e ↓ percorrem a lista, Enter abre, Esc limpa a busca."
+empty = "Nada no guia corresponde a “{query}”."
+
+[guide.group]
+getting-started = "Primeiros passos"
+strategy = "Estratégia"
+production = "Produção"
+editing = "Edição"
+publishing = "Publicação"
+costs = "Custos e orçamentos"
+reference = "Referência"
 
 [shortcuts]
 title = "Atalhos de teclado"
 close = "Fechar"
 
 [shortcuts.group]
+guide = "Guia do usuário"
 tour = "Tour guiado"
 lists = "Listas"
 editor = "Editor"
 suggestions = "Sugestões de corte no editor"
 
 [shortcuts.action]
+guide_open = "Abrir o guia na página desta tela"
+guide_move = "Percorrer o sumário ou os resultados da busca"
+guide_pick = "Abrir a página destacada"
+guide_clear = "Limpar a busca"
 tour_next = "Próximo passo"
 tour_back = "Passo anterior"
 tour_close = "Fechar o tour; dá para retomar pelo Guia"

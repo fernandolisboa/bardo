@@ -150,9 +150,10 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
                         .into_any_element(),
                 );
             }
-            // The Guide opens a menu over the screen, which stays.
+            // The Guide opens a menu over the screen, which stays; the
+            // menu's "User guide" opens the Guide screen.
             Destination::Guide => buttons.push(
-                tab(item, nav.guide_open)
+                tab(item, nav.guide_open || nav.current == Destination::Guide)
                     .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
                     .into_any_element(),
             ),
@@ -312,6 +313,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
         aside,
         summary,
         sections,
+        scroll,
     } = parts;
     let t = &look(cx).tokens;
 
@@ -346,6 +348,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                     .min_w_0()
                     .h_full()
                     .overflow_y_scroll()
+                    .when_some(scroll, |record, scroll| record.track_scroll(&scroll))
                     .child(
                         v_flex()
                             .max_w(px(PAGE_WIDTH))
@@ -364,6 +367,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                             .children(content),
                     ),
             )
+            .when(!aside.is_empty(), |row| row.child(aside_panel(aside, cx)))
             .into_any_element(),
         collection @ Some(_) => {
             main_with_form(toolbar, notices, collection, content, inspector, cx)
@@ -383,6 +387,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                     .min_w_0()
                     .h_full()
                     .overflow_y_scroll()
+                    .when_some(scroll, |page, scroll| page.track_scroll(&scroll))
                     .child(
                         v_flex()
                             .max_w(px(PAGE_WIDTH))
@@ -394,22 +399,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                     )
                     .tour_anchor(TourAnchor::Content, Side::Right, None),
             )
-            .when(!aside.is_empty(), |row| {
-                row.child(
-                    v_flex()
-                        .id("screen-aside")
-                        .w(px(ASIDE_WIDTH))
-                        .h_full()
-                        .flex_none()
-                        .overflow_y_scroll()
-                        .p_3()
-                        .gap_3()
-                        .bg(t.surface)
-                        .border_l(t.border_width)
-                        .border_color(t.border)
-                        .children(aside),
-                )
-            })
+            .when(!aside.is_empty(), |row| row.child(aside_panel(aside, cx)))
             .into_any_element(),
     };
 
@@ -420,6 +410,24 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
         .child(header_row(header, summary, cx))
         .children(stage_row)
         .child(body)
+        .into_any_element()
+}
+
+/// Summaries beside the content, in a panel of their own.
+fn aside_panel(aside: Vec<AnyElement>, cx: &App) -> AnyElement {
+    let t = &look(cx).tokens;
+    v_flex()
+        .id("screen-aside")
+        .w(px(ASIDE_WIDTH))
+        .h_full()
+        .flex_none()
+        .overflow_y_scroll()
+        .p_3()
+        .gap_3()
+        .bg(t.surface)
+        .border_l(t.border_width)
+        .border_color(t.border)
+        .children(aside)
         .into_any_element()
 }
 
@@ -1061,7 +1069,25 @@ fn feed(collection: Collection, _cx: &App) -> AnyElement {
 fn list_column(collection: Collection, cx: &App) -> AnyElement {
     let t = look(cx).tokens;
     let empty = collection.is_empty();
-    let rows = collection.tiles.into_iter().map(|tile| list_row(tile, cx));
+    let scroll = collection.keys.as_ref().map(|keys| keys.scroll.clone());
+    let rows = collection.tiles.into_iter().flat_map(|mut tile| {
+        let heading = tile.group.take().map(|group| {
+            div()
+                .px_3()
+                .pt_2()
+                .pb_1()
+                .text_xs()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(t.text2)
+                .border_b(t.border_width)
+                .border_color(t.border)
+                .child(group.to_uppercase())
+                .into_any_element()
+        });
+        heading
+            .into_iter()
+            .chain(std::iter::once(list_row(tile, cx)))
+    });
     v_flex()
         .w(px(LIST_WIDTH))
         .h_full()
@@ -1087,6 +1113,7 @@ fn list_column(collection: Collection, cx: &App) -> AnyElement {
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
+                .when_some(scroll, |list, scroll| list.track_scroll(&scroll))
                 .when(empty, |list| {
                     list.child(div().p_3().children(collection.empty))
                 })

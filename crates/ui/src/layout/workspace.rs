@@ -166,9 +166,10 @@ fn sidebar(nav: Navigation, cx: &App) -> AnyElement {
                 .into_any_element()
         }
         _ => {
-            // The Guide opens a menu over the screen, which stays.
+            // The Guide opens a menu over the screen, which stays; the
+            // menu's "User guide" opens the Guide screen.
             let selected = match item.place {
-                Destination::Guide => nav.guide_open,
+                Destination::Guide => nav.guide_open || nav.current == Destination::Guide,
                 place => nav.current == place,
             };
             row(item, selected, None)
@@ -243,6 +244,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
         aside,
         summary,
         sections,
+        scroll,
     } = parts;
     let t = &look(cx).tokens;
     let staged = stages.is_some();
@@ -274,6 +276,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                     .min_w_0()
                     .h_full()
                     .overflow_y_scroll()
+                    .when_some(scroll, |record, scroll| record.track_scroll(&scroll))
                     .child(
                         v_flex()
                             .max_w(px(PAGE_WIDTH))
@@ -285,6 +288,22 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                             .children(content),
                     ),
             )
+            .when(!aside.is_empty(), |row| {
+                row.child(
+                    v_flex()
+                        .id("screen-aside")
+                        .w(px(ASIDE_WIDTH))
+                        .h_full()
+                        .flex_none()
+                        .overflow_y_scroll()
+                        .p_4()
+                        .gap_3()
+                        .bg(t.surface)
+                        .border_l(t.border_width)
+                        .border_color(t.border)
+                        .children(aside),
+                )
+            })
             .into_any_element(),
         collection @ Some(_) => {
             main_with_inspector(lead, notices, collection, content, inspector, cx)
@@ -297,6 +316,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .when_some(scroll, |page, scroll| page.track_scroll(&scroll))
             .px_6()
             .pb_6()
             .when(staged, |page| page.pt_4())
@@ -611,6 +631,21 @@ fn collection_body(collection: Collection, cx: &App) -> AnyElement {
 fn list_column(collection: Collection, cx: &App) -> AnyElement {
     let t = &look(cx).tokens;
     let empty = collection.is_empty();
+    let scroll = collection.keys.as_ref().map(|keys| keys.scroll.clone());
+    let rows = collection.tiles.into_iter().flat_map(|mut tile| {
+        let heading = tile.group.take().map(|group| {
+            div()
+                .px_2()
+                .pt_3()
+                .pb_1()
+                .text_xs()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(t.text2)
+                .child(group.to_uppercase())
+                .into_any_element()
+        });
+        heading.into_iter().chain(std::iter::once(row(tile, cx)))
+    });
     v_flex()
         .w(px(LIST_WIDTH))
         .h_full()
@@ -633,12 +668,13 @@ fn list_column(collection: Collection, cx: &App) -> AnyElement {
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
+                .when_some(scroll, |list, scroll| list.track_scroll(&scroll))
                 .p_2()
                 .gap_1()
                 .when(empty, |list| {
                     list.child(div().p_1().children(collection.empty))
                 })
-                .children(collection.tiles.into_iter().map(|tile| row(tile, cx)))
+                .children(rows)
                 .children(collection.cards),
         )
         .tour_anchor(TourAnchor::Collection, Side::Right, None)

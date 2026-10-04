@@ -72,6 +72,14 @@ pub enum WhenMissing {
     Center,
 }
 
+/// A section of the user guide a step's "Learn more" opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuideRef {
+    /// A page's id: its file name in `docs/guide/<language>/`.
+    pub page: &'static str,
+    pub section: &'static str,
+}
+
 /// One step: what it lights, where it goes first, what its card says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TourStep {
@@ -82,6 +90,8 @@ pub struct TourStep {
     pub place: Option<TourPlace>,
     pub side: Side,
     pub when_missing: WhenMissing,
+    /// Where the guide says more, behind the card's "Learn more".
+    pub guide: Option<GuideRef>,
 }
 
 impl TourStep {
@@ -93,6 +103,7 @@ impl TourStep {
             place: None,
             side: Side::Open,
             when_missing: WhenMissing::Center,
+            guide: None,
         }
     }
 
@@ -104,6 +115,15 @@ impl TourStep {
             place: None,
             side: Side::Open,
             when_missing: WhenMissing::Center,
+            guide: None,
+        }
+    }
+
+    /// The step's "Learn more" opens `page` at `section`.
+    const fn learn(self, page: &'static str, section: &'static str) -> Self {
+        Self {
+            guide: Some(GuideRef { page, section }),
+            ..self
         }
     }
 }
@@ -124,14 +144,20 @@ pub const WELCOME: Tour = Tour {
     id: TourId::Welcome,
     version: 1,
     steps: &[
-        TourStep::centered("intro"),
-        TourStep::at("strategy", TourAnchor::NavGroup(Pillar::Strategy)),
-        TourStep::at("production", TourAnchor::NavGroup(Pillar::Production)),
-        TourStep::at("publishing", TourAnchor::NavGroup(Pillar::Publishing)),
-        TourStep::at("settings", TourAnchor::NavPlace(Destination::Settings)),
-        TourStep::at("jobs", TourAnchor::NavPlace(Destination::Jobs)),
-        TourStep::at("costs", TourAnchor::NavPlace(Destination::Costs)),
-        TourStep::at("guide", TourAnchor::NavPlace(Destination::Guide)),
+        TourStep::centered("intro").learn("what-bardo-is", "flow"),
+        TourStep::at("strategy", TourAnchor::NavGroup(Pillar::Strategy))
+            .learn("first-video", "research"),
+        TourStep::at("production", TourAnchor::NavGroup(Pillar::Production))
+            .learn("first-video", "project"),
+        TourStep::at("publishing", TourAnchor::NavGroup(Pillar::Publishing))
+            .learn("first-video", "publish"),
+        TourStep::at("settings", TourAnchor::NavPlace(Destination::Settings))
+            .learn("api-keys", "providers"),
+        TourStep::at("jobs", TourAnchor::NavPlace(Destination::Jobs))
+            .learn("what-bardo-is", "around"),
+        TourStep::at("costs", TourAnchor::NavPlace(Destination::Costs))
+            .learn("api-keys", "budgets"),
+        TourStep::at("guide", TourAnchor::NavPlace(Destination::Guide)).learn("shortcuts", "guide"),
     ],
 };
 
@@ -200,6 +226,8 @@ pub struct TourStepView {
     pub body: Text,
     pub side: Side,
     pub anchor: Option<TourAnchor>,
+    /// Where "Learn more" leads, when the step names a guide section.
+    pub guide: Option<GuideRef>,
 }
 
 impl TourStepView {
@@ -293,6 +321,7 @@ impl TourRun {
             body: Text::TourStepBody(self.tour.id, step.key),
             side: step.side,
             anchor: step.anchor,
+            guide: step.guide,
         }
     }
 }
