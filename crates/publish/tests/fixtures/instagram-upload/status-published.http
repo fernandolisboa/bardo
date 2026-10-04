@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"id":"17895695668004550","status_code":"PUBLISHED","status":"Published: Media has been published.","video_status":{"uploading_phase":{"status":"complete","bytes_transferred":10},"processing_phase":{"status":"complete"}}}

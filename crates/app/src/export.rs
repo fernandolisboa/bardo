@@ -1264,6 +1264,11 @@ pub(crate) mod tests {
 
     /// A drawn project with YouTube and TikTok accounts, rendered for both.
     pub(crate) fn rendered() -> Setup {
+        rendered_with(&[])
+    }
+
+    /// `rendered`, with accounts on `more` networks too.
+    pub(crate) fn rendered_with(more: &[Network]) -> Setup {
         let h = Harness::new();
         let held: Arc<HeldExports> = Arc::default();
         let exports = Arc::clone(&held.inner);
@@ -1286,6 +1291,9 @@ pub(crate) mod tests {
             Network::TikTok,
             NetworkAccountDraft::default(),
         );
+        for network in more {
+            add_account(&app, &project, *network, NetworkAccountDraft::default());
+        }
         render_all(&app, project.id);
         Setup {
             h,

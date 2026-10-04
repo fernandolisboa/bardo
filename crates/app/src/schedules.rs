@@ -171,7 +171,11 @@ fn schedule_reading(state: VideoState) -> Option<ScheduleReading> {
         } => Some(ScheduleReading::Private { publish_at }),
         VideoState::Ready { published_at, .. } => Some(ScheduleReading::Live { published_at }),
         VideoState::Removed => Some(ScheduleReading::Missing),
-        VideoState::Processing | VideoState::Failed(_) | VideoState::Rejected(_) => None,
+        VideoState::Processing
+        | VideoState::Processed
+        | VideoState::Expired
+        | VideoState::Failed(_)
+        | VideoState::Rejected(_) => None,
     }
 }
 

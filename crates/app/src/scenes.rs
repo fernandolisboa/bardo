@@ -867,6 +867,8 @@ pub(crate) mod tests {
         pub(crate) speech: Arc<FakeSpeech>,
         /// YouTube uploads.
         pub(crate) uploader: Arc<crate::uploads::testing::FakeUploader>,
+        /// Instagram Reels uploads.
+        pub(crate) reels: Arc<crate::uploads::testing::FakeUploader>,
         /// App credentials and network tokens.
         pub(crate) connection_secrets: Arc<MemorySecretStore>,
         /// Owner metrics of connected accounts.
@@ -892,6 +894,7 @@ pub(crate) mod tests {
                 decisions: Arc::default(),
                 speech: Arc::default(),
                 uploader: Arc::default(),
+                reels: Arc::new(crate::uploads::testing::FakeUploader::reels()),
                 connection_secrets: Arc::default(),
                 analytics: Arc::default(),
             }
@@ -957,7 +960,10 @@ pub(crate) mod tests {
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
-                uploaders: vec![Arc::clone(&self.uploader) as _],
+                uploaders: vec![
+                    Arc::clone(&self.uploader) as _,
+                    Arc::clone(&self.reels) as _,
+                ],
                 analytics: vec![Arc::clone(&self.analytics) as _],
             };
             let mut app = Bardo::start_with(

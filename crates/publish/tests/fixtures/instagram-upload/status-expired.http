@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=UTF-8
+
+{"id":"17895695668004550","status_code":"EXPIRED","status":"Expired: Media was not published within 24 hours.","video_status":{"uploading_phase":{"status":"in_progress","bytes_transferred":4},"processing_phase":{"status":"not_started"}}}

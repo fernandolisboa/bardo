@@ -57,17 +57,21 @@ const LONG_LIVED: Duration = Duration::from_secs(60 * 24 * 60 * 60);
 /// Pages of `/me/accounts` read at most; 100 Pages each.
 const MAX_PAGE_READS: usize = 10;
 
-/// Where Meta's Graph API lives. Tests point it at a local fake server.
+/// Where Meta's Graph API and its upload host live. Tests point them at a
+/// local fake server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetaEndpoints {
     /// The Graph API's base address, version included.
     pub graph: String,
+    /// Where Reels' files go (`rupload.facebook.com`), version included.
+    pub rupload: String,
 }
 
 impl Default for MetaEndpoints {
     fn default() -> Self {
         Self {
             graph: format!("https://graph.facebook.com/{GRAPH_VERSION}"),
+            rupload: format!("https://rupload.facebook.com/ig-api-upload/{GRAPH_VERSION}"),
         }
     }
 }

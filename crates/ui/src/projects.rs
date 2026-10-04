@@ -225,6 +225,10 @@ pub struct ProjectsScreen {
     schedule_time: Entity<InputState>,
     /// Why the typed publish time cannot be used.
     schedule_problem: Option<Text>,
+    /// A Reel's cover time as the user types it, in the review.
+    upload_cover: Entity<InputState>,
+    /// Why the typed cover time cannot be used.
+    cover_problem: Option<Text>,
     /// "Change time" or "Cancel schedule" was clicked on a scheduled upload.
     schedule_edit: Option<upload::ScheduleEdit>,
     /// The change being sent to the network.
@@ -259,6 +263,7 @@ impl ProjectsScreen {
         let post_link = cx.new(|cx| InputState::new(window, cx));
         let schedule_date = cx.new(|cx| InputState::new(window, cx));
         let schedule_time = cx.new(|cx| InputState::new(window, cx));
+        let upload_cover = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -300,6 +305,12 @@ impl ProjectsScreen {
             }),
             cx.subscribe(&schedule_time, |this, _, event: &InputEvent, cx| {
                 this.schedule_typed(event, cx)
+            }),
+            cx.subscribe(&upload_cover, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && this.cover_problem.is_some() {
+                    this.cover_problem = None;
+                    cx.notify();
+                }
             }),
             cx.subscribe_in(
                 &channel_select,
@@ -399,6 +410,8 @@ impl ProjectsScreen {
             schedule_date,
             schedule_time,
             schedule_problem: None,
+            upload_cover,
+            cover_problem: None,
             schedule_edit: None,
             schedule_task: None,
             schedule_notice: None,

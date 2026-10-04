@@ -11,13 +11,20 @@
 //! in the interface language's order and the system's time zone, which the
 //! card names. A scheduled upload offers "Change time" and "Cancel schedule"
 //! until the network publishes it.
+//!
+//! A Reel (#81) is reviewed with its caption, the cover time (seconds or
+//! m:ss), "Also show in Feed" and the AI label; Instagram takes no publish
+//! time from Bardo yet, so the card has no When. A rendered file that falls
+//! short of the Reel specs blocks the review, and the section lists why.
 
 use std::time::SystemTime;
 
-use bardo_app::bardo_domain::{JobId, PublicationId, ScheduleProblem, Visibility};
+use bardo_app::bardo_domain::{
+    JobId, PublicationId, ScheduleProblem, Visibility, format_cover_time, parse_cover_time,
+};
 use bardo_app::{
-    ScheduleError, ScheduleResult, Text, UploadChoices, UploadReview, UploadReviewError,
-    UploadState,
+    ScheduleError, ScheduleResult, Text, UploadBlock, UploadChoices, UploadReview,
+    UploadReviewError, UploadState,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -36,6 +43,17 @@ use crate::shell::tr;
 
 fn label(text: SharedString) -> gpui_kit::Div {
     div().text_xs().font_semibold().child(text)
+}
+
+/// The connected channel and the account's handle, once when they are the
+/// same name (an Instagram account is its username).
+fn account_line(channel: &str, handle: &str) -> String {
+    let handle = format!("@{}", handle.trim_start_matches('@'));
+    if channel.eq_ignore_ascii_case(&handle) {
+        handle
+    } else {
+        format!("{channel} · {handle}")
+    }
 }
 
 /// What the user is doing to a scheduled upload.
@@ -94,6 +112,13 @@ impl ProjectsScreen {
             self.upload_scheduled = false;
             self.schedule_edit = None;
             self.schedule_notice = None;
+            self.cover_problem = None;
+            let cover = self
+                .bardo
+                .read(cx)
+                .localized_decimal(&format_cover_time(choices.cover));
+            self.upload_cover
+                .update(cx, |input, cx| input.set_value(cover, window, cx));
             let at = self.bardo.read(cx).default_publish_time();
             self.fill_schedule(at, window, cx);
         }
@@ -227,7 +252,17 @@ impl ProjectsScreen {
         let Some((review, mut choices)) = self.upload_draft.clone() else {
             return;
         };
-        if self.upload_scheduled {
+        if review.is_reel() {
+            let typed = self.upload_cover.read(cx).value();
+            match parse_cover_time(&typed) {
+                Some(cover) => choices.cover = cover,
+                None => {
+                    self.cover_problem = Some(Text::UploadCoverInvalid);
+                    cx.notify();
+                    return;
+                }
+            }
+        } else if self.upload_scheduled {
             match self.typed_publish_time(cx) {
                 Ok(at) => choices.publish_at = Some(at),
                 Err(problem) => {
@@ -245,6 +280,9 @@ impl ProjectsScreen {
             }
             Err(UploadReviewError::Schedule(problem)) => {
                 self.schedule_problem = Some(Text::ScheduleProblem(problem));
+            }
+            Err(UploadReviewError::CoverPastEnd) => {
+                self.cover_problem = Some(Text::UploadCoverPastEnd);
             }
             Err(error) => {
                 if matches!(
@@ -302,7 +340,18 @@ impl ProjectsScreen {
             .gap_1()
             .items_center()
             .child(label(tr(bardo, Text::UploadTitle)))
-            .child(kit::info("upload-info", None, tr(bardo, Text::UploadHint)));
+            .child(kit::info(
+                "upload-info",
+                None,
+                tr(
+                    bardo,
+                    if now.is_reel() {
+                        Text::UploadReelHint
+                    } else {
+                        Text::UploadHint
+                    },
+                ),
+            ));
         let mut section = v_flex().gap_2().child(heading);
         if let Some((review, choices)) = &self.upload_draft {
             return Some(
@@ -418,6 +467,16 @@ impl ProjectsScreen {
         section = section.child(actions);
         if let Some(block) = block.filter(|_| !active) {
             section = section.child(muted(cx, tr(bardo, Text::UploadBlocked(block))));
+        }
+        if block == Some(UploadBlock::Specs) && !active {
+            section = section.child(
+                v_flex()
+                    .gap_1()
+                    .child(label(tr(bardo, Text::UploadSpecsTitle)))
+                    .children(now.spec_problems.iter().map(|problem| {
+                        kit::notice(Tone::Danger, bardo.reel_spec_text(problem), cx)
+                    })),
+            );
         }
         if let Some((publication, _)) = scheduled {
             section = section.children(self.schedule_editor(publication, cx));
@@ -566,6 +625,7 @@ impl ProjectsScreen {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
+        let reel = review.is_reel();
         let network = bardo.text(Text::NetworkName(review.network)).into_owned();
         let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
         let row = |name: Text, value: AnyElement| {
@@ -604,11 +664,14 @@ impl ProjectsScreen {
             ));
         }
         card = card.child(row(
-            Text::UploadFieldChannel,
-            text(format!(
-                "{} · @{}",
+            if reel {
+                Text::UploadFieldAccount
+            } else {
+                Text::UploadFieldChannel
+            },
+            text(account_line(
                 review.channel().unwrap_or_default(),
-                review.handle
+                &review.handle,
             )),
         ));
         if let Some(post) = &review.post {
@@ -617,14 +680,21 @@ impl ProjectsScreen {
             }
             if let Some(description) = &post.text {
                 card = card.child(row(
-                    Text::MetadataFieldDescription,
+                    if reel {
+                        Text::UploadFieldCaption
+                    } else {
+                        Text::MetadataFieldDescription
+                    },
                     kit::well(cx)
                         .text_xs()
                         .child(SharedString::from(description.clone()))
                         .into_any_element(),
                 ));
             }
-            card = card.child(row(Text::MetadataFieldTags, text(post.tags.join(", "))));
+            // A Reel's hashtags are in its caption.
+            if !reel {
+                card = card.child(row(Text::MetadataFieldTags, text(post.tags.join(", "))));
+            }
         }
 
         let visibility = ButtonGroup::new("upload-visibility")
@@ -662,23 +732,44 @@ impl ProjectsScreen {
                     cx.notify();
                 }
             }));
-        card = card.child(row(
-            Text::UploadFieldWhen,
-            h_flex().child(when).into_any_element(),
-        ));
-        if scheduled {
-            card = card.child(self.schedule_fields(cx)).child(muted(
-                cx,
-                SharedString::from(with_network(Text::ScheduleHint)),
-            ));
+        let screen = cx.entity().downgrade();
+        if reel {
+            card = card.child(self.cover_field(cx));
+            let feed = Checkbox::new("upload-feed")
+                .label(tr(bardo, Text::UploadShareToFeed))
+                .checked(choices.share_to_feed)
+                .on_click({
+                    let screen = screen.clone();
+                    move |checked: &bool, _, cx| {
+                        let checked = *checked;
+                        let _ = screen.update(cx, |this, cx| {
+                            this.change_upload(|choices| choices.share_to_feed = checked, cx)
+                        });
+                    }
+                });
+            card = card.child(h_flex().gap_1().items_center().child(feed).child(kit::info(
+                "upload-feed-info",
+                None,
+                tr(bardo, Text::UploadShareToFeedHint),
+            )));
         } else {
             card = card.child(row(
-                Text::UploadFieldVisibility,
-                h_flex().child(visibility).into_any_element(),
+                Text::UploadFieldWhen,
+                h_flex().child(when).into_any_element(),
             ));
+            if scheduled {
+                card = card.child(self.schedule_fields(cx)).child(muted(
+                    cx,
+                    SharedString::from(with_network(Text::ScheduleHint)),
+                ));
+            } else {
+                card = card.child(row(
+                    Text::UploadFieldVisibility,
+                    h_flex().child(visibility).into_any_element(),
+                ));
+            }
         }
 
-        let screen = cx.entity().downgrade();
         let kids = Checkbox::new("upload-kids")
             .label(tr(bardo, Text::UploadMadeForKids))
             .checked(choices.made_for_kids)
@@ -691,13 +782,20 @@ impl ProjectsScreen {
                     });
                 }
             });
-        card = card.child(h_flex().gap_1().items_center().child(kids).child(kit::info(
-            "upload-kids-info",
-            None,
-            tr(bardo, Text::UploadMadeForKidsHint),
-        )));
+        if !reel {
+            card = card.child(h_flex().gap_1().items_center().child(kids).child(kit::info(
+                "upload-kids-info",
+                None,
+                tr(bardo, Text::UploadMadeForKidsHint),
+            )));
+        }
+        let (synthetic_label, synthetic_hint) = if reel {
+            (Text::UploadAiLabel, Text::UploadAiLabelHint)
+        } else {
+            (Text::UploadSynthetic, Text::UploadSyntheticHint)
+        };
         let synthetic = Checkbox::new("upload-synthetic")
-            .label(tr(bardo, Text::UploadSynthetic))
+            .label(tr(bardo, synthetic_label))
             .checked(choices.synthetic)
             .on_click({
                 let screen = screen.clone();
@@ -719,7 +817,7 @@ impl ProjectsScreen {
                         .child(kit::info(
                             "upload-synthetic-info",
                             None,
-                            tr(bardo, Text::UploadSyntheticHint),
+                            tr(bardo, synthetic_hint),
                         )),
                 )
                 .when(review.synthetic, |column| {
@@ -747,7 +845,11 @@ impl ProjectsScreen {
 
         card = card.child(kit::notice(
             Tone::Warning,
-            with_network(Text::UploadIrreversible),
+            with_network(if reel {
+                Text::UploadReelIrreversible
+            } else {
+                Text::UploadIrreversible
+            }),
             cx,
         ));
         let ready = review.replaces.is_none() || choices.replace;
@@ -771,7 +873,9 @@ impl ProjectsScreen {
                         .primary()
                         .label(tr(
                             bardo,
-                            if scheduled {
+                            if reel {
+                                Text::UploadReelStart
+                            } else if scheduled {
                                 Text::UploadStartScheduled
                             } else {
                                 Text::UploadStart
@@ -784,5 +888,33 @@ impl ProjectsScreen {
                 ),
         );
         card.into_any_element()
+    }
+
+    /// A Reel's cover time, typed, and why it cannot be used.
+    fn cover_field(&self, cx: &Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(label(tr(bardo, Text::UploadFieldCover)))
+                    .child(kit::info(
+                        "upload-cover-info",
+                        None,
+                        tr(bardo, Text::UploadCoverHint),
+                    )),
+            )
+            .child(
+                div()
+                    .w(px(110.))
+                    .child(Input::new(&self.upload_cover).small()),
+            )
+            .children(
+                self.cover_problem
+                    .map(|problem| kit::notice(Tone::Danger, tr(bardo, problem), cx)),
+            )
+            .into_any_element()
     }
 }

@@ -1261,6 +1261,7 @@ pub enum Text {
     UploadFailureRejected,
     UploadFailureProcessing,
     UploadFailureRemoved,
+    UploadFailureAccountChanged,
     UploadFailureRenderChanged,
     UploadStop,
     UploadResume,
@@ -1275,9 +1276,33 @@ pub enum Text {
     UploadStartScheduled,
     UploadStateScheduled,
     UploadScheduledAt,
+    UploadOverLimitAt,
+    UploadOverLimitRetryAt,
     UploadScheduledHint,
     UploadRestrictedScheduledHint,
     UploadFailureScheduleMissed,
+    UploadReelHint,
+    UploadFieldAccount,
+    UploadFieldCaption,
+    UploadFieldCover,
+    UploadCoverHint,
+    UploadCoverInvalid,
+    UploadCoverPastEnd,
+    UploadShareToFeed,
+    UploadShareToFeedHint,
+    UploadAiLabel,
+    UploadAiLabelHint,
+    UploadReelIrreversible,
+    UploadReelStart,
+    UploadReelProcessingHint,
+    UploadStateOverLimit,
+    UploadOverLimitHint,
+    UploadOverLimitSoonHint,
+    UploadOverLimitRecheckHint,
+    UploadIssue,
+    UploadSpecsTitle,
+    /// One Reel spec problem, by `ReelSpecProblem::code`.
+    UploadSpec(&'static str),
     ScheduleDate,
     ScheduleTime,
     ScheduleDatePlaceholder,
@@ -2682,6 +2707,7 @@ impl Text {
             Text::UploadFailureRejected => "upload.failure.rejected",
             Text::UploadFailureProcessing => "upload.failure.processing",
             Text::UploadFailureRemoved => "upload.failure.removed",
+            Text::UploadFailureAccountChanged => "upload.failure.account_changed",
             Text::UploadFailureRenderChanged => "upload.failure.render_changed",
             Text::UploadStop => "upload.stop",
             Text::UploadResume => "upload.resume",
@@ -2697,9 +2723,32 @@ impl Text {
             Text::UploadStartScheduled => "upload.start_scheduled",
             Text::UploadStateScheduled => "upload.state.scheduled",
             Text::UploadScheduledAt => "upload.scheduled_at",
+            Text::UploadOverLimitAt => "upload.over_limit_at",
+            Text::UploadOverLimitRetryAt => "upload.over_limit_retry_at",
             Text::UploadScheduledHint => "upload.scheduled_hint",
             Text::UploadRestrictedScheduledHint => "upload.restricted_scheduled_hint",
             Text::UploadFailureScheduleMissed => "upload.failure.schedule_missed",
+            Text::UploadReelHint => "upload.reel_hint",
+            Text::UploadFieldAccount => "upload.field.account",
+            Text::UploadFieldCaption => "upload.field.caption",
+            Text::UploadFieldCover => "upload.field.cover",
+            Text::UploadCoverHint => "upload.cover_hint",
+            Text::UploadCoverInvalid => "upload.cover_invalid",
+            Text::UploadCoverPastEnd => "upload.error.cover_past_end",
+            Text::UploadShareToFeed => "upload.share_to_feed",
+            Text::UploadShareToFeedHint => "upload.share_to_feed_hint",
+            Text::UploadAiLabel => "upload.ai_label",
+            Text::UploadAiLabelHint => "upload.ai_label_hint",
+            Text::UploadReelIrreversible => "upload.reel_irreversible",
+            Text::UploadReelStart => "upload.reel_start",
+            Text::UploadReelProcessingHint => "upload.reel_processing_hint",
+            Text::UploadStateOverLimit => "upload.state.over_limit",
+            Text::UploadOverLimitHint => "upload.over_limit_hint",
+            Text::UploadOverLimitSoonHint => "upload.over_limit_soon_hint",
+            Text::UploadOverLimitRecheckHint => "upload.over_limit_recheck_hint",
+            Text::UploadIssue => "upload.issue",
+            Text::UploadSpecsTitle => "upload.specs_title",
+            Text::UploadSpec(code) => return format!("upload.spec.{code}").into(),
             Text::ScheduleDate => "schedule.date",
             Text::ScheduleTime => "schedule.time",
             Text::ScheduleDatePlaceholder => "schedule.date_placeholder",
@@ -4249,6 +4298,7 @@ mod tests {
         texts.push(Text::UploadFailureRejected);
         texts.push(Text::UploadFailureProcessing);
         texts.push(Text::UploadFailureRemoved);
+        texts.push(Text::UploadFailureAccountChanged);
         texts.push(Text::UploadFailureRenderChanged);
         texts.push(Text::UploadStop);
         texts.push(Text::UploadResume);
@@ -4264,9 +4314,34 @@ mod tests {
         texts.push(Text::UploadStartScheduled);
         texts.push(Text::UploadStateScheduled);
         texts.push(Text::UploadScheduledAt);
+        texts.push(Text::UploadOverLimitAt);
+        texts.push(Text::UploadOverLimitRetryAt);
         texts.push(Text::UploadScheduledHint);
         texts.push(Text::UploadRestrictedScheduledHint);
         texts.push(Text::UploadFailureScheduleMissed);
+        texts.extend([
+            Text::UploadReelHint,
+            Text::UploadFieldAccount,
+            Text::UploadFieldCaption,
+            Text::UploadFieldCover,
+            Text::UploadCoverHint,
+            Text::UploadCoverInvalid,
+            Text::UploadCoverPastEnd,
+            Text::UploadShareToFeed,
+            Text::UploadShareToFeedHint,
+            Text::UploadAiLabel,
+            Text::UploadAiLabelHint,
+            Text::UploadReelIrreversible,
+            Text::UploadReelStart,
+            Text::UploadReelProcessingHint,
+            Text::UploadStateOverLimit,
+            Text::UploadOverLimitHint,
+            Text::UploadOverLimitSoonHint,
+            Text::UploadOverLimitRecheckHint,
+            Text::UploadIssue,
+            Text::UploadSpecsTitle,
+        ]);
+        texts.extend(bardo_domain::ReelSpecProblem::CODES.map(Text::UploadSpec));
         texts.push(Text::ScheduleDate);
         texts.push(Text::ScheduleTime);
         texts.push(Text::ScheduleDatePlaceholder);

@@ -33,9 +33,9 @@ use std::time::{Duration, SystemTime};
 
 use bardo_ai::http::{HttpRequest, HttpResponse, Method, Transport, UreqTransport};
 use bardo_domain::{
-    Network, Rfc3339, ScheduleChange, ScheduleOutcome, SecretText, UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT,
-    UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload,
-    VideoUploader, Visibility, parse_rfc3339,
+    Network, PostLink, Rfc3339, ScheduleChange, ScheduleOutcome, SecretText, UPLOAD_CHUNK,
+    UPLOAD_CHUNK_UNIT, UploadError, UploadErrorKind, UploadOutcome, UploadRun, UploadedVideo,
+    VideoState, VideoUpload, VideoUploader, Visibility, parse_rfc3339,
 };
 use serde_json::{Value, json};
 
@@ -277,6 +277,17 @@ impl<T: Transport> VideoUploader for YouTubeUploader<T> {
                 Session::Gone => session = None,
             }
         }
+    }
+
+    /// The video's watch address: YouTube makes the video as soon as the
+    /// whole file arrived.
+    fn link(&self, id: &str) -> Result<Option<PostLink>, UploadError> {
+        PostLink::parse(
+            Network::YouTube,
+            &format!("https://www.youtube.com/watch?v={id}"),
+        )
+        .map(Some)
+        .map_err(|_| unexpected(&format!("YouTube answered an unknown video id {id:?}")))
     }
 
     fn state(&self, access_token: &SecretText, id: &str) -> Result<VideoState, UploadError> {

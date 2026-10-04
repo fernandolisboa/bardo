@@ -283,6 +283,19 @@ fn renders_a_vertical_short_at_the_loudness_target() {
         ("aac", 48_000, 2)
     );
 
+    // A Reel as Instagram takes it: MP4 with its index first (fast start),
+    // H.264, 23 to 60 fps.
+    let layout = bardo_domain::mp4_layout(&mut std::fs::File::open(&destination).unwrap()).unwrap();
+    let reel = bardo_domain::ReelFile {
+        layout,
+        codec: Some(video.codec.clone()),
+        width: video.width,
+        fps: video.fps(),
+        duration: info.duration,
+        size: std::fs::metadata(&destination).unwrap().len(),
+    };
+    assert_eq!(bardo_domain::check_reel(&reel), [], "{layout:?}");
+
     let loudness = ffmpeg.measure_loudness(&destination, &()).unwrap();
     assert!(
         (loudness.integrated - TARGET.integrated).abs() <= 1.0,

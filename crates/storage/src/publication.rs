@@ -20,7 +20,8 @@ const PUBLICATION_COLUMNS: &str = "publication.id, publication.project_id, publi
      publication.post_id, publication.url, publication.posted_at, publication.linked_at,
      publication.checked_at, publication.missing_since, publication.kind,
      publication.upload_status, publication.upload_failure, publication.upload_visibility,
-     publication.upload_job, publication.upload_publish_at";
+     publication.upload_job, publication.upload_publish_at, publication.upload_issue,
+     publication.upload_network_id";
 
 /// A publication row as SQLite returns it.
 struct PublicationRow {
@@ -42,6 +43,8 @@ struct PublicationRow {
     upload_visibility: Option<String>,
     upload_job: Option<String>,
     upload_publish_at: Option<i64>,
+    upload_issue: Option<String>,
+    upload_network_id: Option<String>,
 }
 
 impl PublicationRow {
@@ -65,6 +68,8 @@ impl PublicationRow {
             upload_visibility: row.get(15)?,
             upload_job: row.get(16)?,
             upload_publish_at: row.get(17)?,
+            upload_issue: row.get(18)?,
+            upload_network_id: row.get(19)?,
         })
     }
 
@@ -94,6 +99,8 @@ impl PublicationRow {
                         .as_deref()
                         .ok_or_else(|| broken("no upload job"))?,
                 )?),
+                issue: self.upload_issue,
+                network_id: self.upload_network_id,
             }),
             other => return Err(broken(&format!("unknown kind {other}"))),
         };
@@ -335,9 +342,10 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             "INSERT INTO publication (id, project_id, network, profile_id, account_id, render_id,
                                       post_id, url, posted_at, linked_at, checked_at,
                                       missing_since, kind, upload_status, upload_failure,
-                                      upload_visibility, upload_job, upload_publish_at)
+                                      upload_visibility, upload_job, upload_publish_at,
+                                      upload_issue, upload_network_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18)
+                     ?18, ?19, ?20)
              ON CONFLICT (id) DO UPDATE SET
                  account_id = excluded.account_id,
                  render_id = excluded.render_id,
@@ -349,6 +357,8 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                  upload_visibility = excluded.upload_visibility,
                  upload_job = excluded.upload_job,
                  upload_publish_at = excluded.upload_publish_at,
+                 upload_issue = excluded.upload_issue,
+                 upload_network_id = excluded.upload_network_id,
                  posted_at = CASE WHEN excluded.upload_status IN {SETS_POSTED_AT}
                                        AND publication.upload_status NOT IN {LIVE}
                                   THEN excluded.posted_at ELSE publication.posted_at END"
@@ -372,6 +382,8 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             upload.map(|upload| upload.visibility.code()),
             upload.map(|upload| upload.job.to_string()),
             upload.and_then(|upload| upload.publish_at.map(to_unix_millis)),
+            upload.and_then(|upload| upload.issue.as_deref()),
+            upload.and_then(|upload| upload.network_id.as_deref()),
         ],
     )
     .map_err(boxed)?;
@@ -636,6 +648,8 @@ fn update_upload(
                      upload_failure = ?6,
                      upload_visibility = ?8,
                      upload_publish_at = ?9,
+                     upload_issue = ?11,
+                     upload_network_id = ?12,
                      posted_at = CASE WHEN ?5 IN {SETS_POSTED_AT}
                                            AND upload_status NOT IN {LIVE}
                                       THEN ?7 ELSE posted_at END
@@ -654,6 +668,8 @@ fn update_upload(
                 upload.visibility.code(),
                 upload.publish_at.map(to_unix_millis),
                 scheduled_at.map(to_unix_millis),
+                upload.issue.as_deref(),
+                upload.network_id.as_deref(),
             ],
         )
         .map_err(boxed)?;
@@ -783,7 +799,9 @@ mod tests {
         upload.upload_mut().unwrap().start().unwrap();
         db.save_publication(&upload).unwrap();
         upload
-            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .sent(Some(
+                PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap(),
+            ))
             .unwrap();
         db.save_publication(&upload).unwrap();
         assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
@@ -809,13 +827,54 @@ mod tests {
     }
 
     #[test]
+    fn a_published_reel_keeps_its_link_and_what_instagram_left_out() {
+        let (db, _, project) = setup();
+        let mut reel = Publication {
+            network: Network::InstagramReels,
+            ..uploading(&project)
+        };
+        db.save_publication(&reel).unwrap();
+        reel.upload_mut().unwrap().start().unwrap();
+        reel.sent(None).unwrap();
+        assert!(db.save_upload(&reel).unwrap());
+        assert_eq!(db.publication(reel.id).unwrap().unwrap().link, None);
+
+        reel.published(
+            bardo_domain::NetworkPost {
+                id: "17900000000000001".into(),
+                link: Some(
+                    PostLink::parse(
+                        Network::InstagramReels,
+                        "https://www.instagram.com/reel/C9xYz12AbCd/",
+                    )
+                    .unwrap(),
+                ),
+                issue: Some("User tags could not be added".into()),
+            },
+            time(500),
+        )
+        .unwrap();
+        assert!(db.save_upload(&reel).unwrap());
+        let read = db.publication(reel.id).unwrap().unwrap();
+        assert_eq!(read, reel);
+        assert_eq!(
+            read.upload().unwrap().issue.as_deref(),
+            Some("User tags could not be added")
+        );
+        assert_eq!(read.posted_at, time(500));
+        assert_eq!(read.post_id(), Some("C9xYz12AbCd"));
+    }
+
+    #[test]
     fn an_upload_saves_its_progress_only_while_it_is_the_publication() {
         let (db, _, project) = setup();
         let mut upload = uploading(&project);
         db.save_publication(&upload).unwrap();
         upload.upload_mut().unwrap().start().unwrap();
         upload
-            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .sent(Some(
+                PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap(),
+            ))
             .unwrap();
         assert!(db.save_upload(&upload).unwrap());
         assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
@@ -856,7 +915,9 @@ mod tests {
         };
         upload.upload_mut().unwrap().start().unwrap();
         upload
-            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .sent(Some(
+                PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap(),
+            ))
             .unwrap();
         upload
             .processed(Visibility::Private, Some(time(5_000)), time(400))
@@ -905,7 +966,9 @@ mod tests {
         assert_eq!(db.publication(upload.id).unwrap(), Some(upload.clone()));
         upload.upload_mut().unwrap().start().unwrap();
         upload
-            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap())
+            .sent(Some(
+                PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pA").unwrap(),
+            ))
             .unwrap();
         upload
             .processed(Visibility::Private, Some(time(5_000)), time(400))
@@ -939,7 +1002,9 @@ mod tests {
         };
         cancelled.upload_mut().unwrap().start().unwrap();
         cancelled
-            .sent(PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pB").unwrap())
+            .sent(Some(
+                PostLink::parse(Network::YouTube, "https://youtu.be/Xb7kQ2mN9pB").unwrap(),
+            ))
             .unwrap();
         cancelled
             .processed(Visibility::Private, Some(time(5_000)), time(400))
