@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
 use bardo_app::{
-    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, Spot, Stage, Text, TourAnchor,
+    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, Spot, Stage, Text, TourAnchor, TourPlace,
     TourStepView,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -134,9 +134,24 @@ pub mod refs {
     pub const TEMPLATES_VARIABLES: GuideRef = at("templates", "variables");
     pub const RENDER_TARGETS: GuideRef = at("render", "targets");
     pub const RENDER_LAST: GuideRef = at("render", "last");
+    pub const CHANNELS_PERSONA: GuideRef = at("channels", "persona");
+    pub const CHANNELS_DEFAULTS: GuideRef = at("channels", "defaults");
+    pub const ACCOUNTS_ONE: GuideRef = at("network-accounts", "accounts");
+    pub const ACCOUNTS_METADATA: GuideRef = at("network-accounts", "metadata");
+    pub const ACCOUNTS_PRESET: GuideRef = at("network-accounts", "preset");
+    pub const CREDENTIALS_KEPT: GuideRef = at("app-credentials", "kept");
+    pub const UPLOADING_NETWORKS: GuideRef = at("uploading", "networks");
+    pub const UPLOADING_METADATA: GuideRef = at("uploading", "metadata");
+    pub const UPLOADING_DISCLOSURE: GuideRef = at("uploading", "disclosure");
+    pub const UPLOADING_REVIEW: GuideRef = at("uploading", "review");
+    pub const UPLOAD_STATES: GuideRef = at("uploading", "states");
+    pub const UPLOADING_POST: GuideRef = at("uploading", "post");
+    pub const EXPORTING_OUTDATED: GuideRef = at("exporting", "outdated");
+    pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
+    pub const INSTAGRAM_UPLOAD: GuideRef = at("connect-instagram", "upload");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 33] = [
+    pub const ALL: [GuideRef; 48] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -170,6 +185,21 @@ pub mod refs {
         TEMPLATES_VARIABLES,
         RENDER_TARGETS,
         RENDER_LAST,
+        CHANNELS_PERSONA,
+        CHANNELS_DEFAULTS,
+        ACCOUNTS_ONE,
+        ACCOUNTS_METADATA,
+        ACCOUNTS_PRESET,
+        CREDENTIALS_KEPT,
+        UPLOADING_NETWORKS,
+        UPLOADING_METADATA,
+        UPLOADING_DISCLOSURE,
+        UPLOADING_REVIEW,
+        UPLOAD_STATES,
+        UPLOADING_POST,
+        EXPORTING_OUTDATED,
+        YOUTUBE_UPLOAD,
+        INSTAGRAM_UPLOAD,
     ];
 }
 
@@ -233,6 +263,47 @@ pub fn header_tours(
     )
 }
 
+/// A header's info slot for a place that is not a screen of its own (a
+/// Settings tab): its ⓘ, then "Tour this screen" when the place has a tour.
+pub fn place_info(
+    bardo: &Bardo,
+    place: TourPlace,
+    info: Option<AnyElement>,
+    cx: &App,
+) -> Option<AnyElement> {
+    let Some(tour) = bardo.place_tour(place, true) else {
+        return info;
+    };
+    Some(
+        h_flex()
+            .gap_1()
+            .items_center()
+            .children(info)
+            .child(tour_button(
+                bardo,
+                "tour-this-screen",
+                Text::TourThisScreen,
+                tour,
+                true,
+                cx,
+            ))
+            .into_any_element(),
+    )
+}
+
+/// The missed posts list's "Tour this list", the one tour that runs while
+/// the list is up (Shift+F1 there). Hidden while another tour waits behind
+/// the list, which Shift+F1 leaves alone too.
+pub fn missed_posts_tour(bardo: &Bardo, cx: &App) -> Option<AnyElement> {
+    if bardo.tour_step(false).is_some() {
+        return None;
+    }
+    let tour = bardo.place_tour(TourPlace::Missed, true)?;
+    Some(
+        tour_button(bardo, "tour-this-list", Text::TourThisList, tour, true, cx).into_any_element(),
+    )
+}
+
 fn tour_button(
     bardo: &Bardo,
     id: &'static str,
@@ -269,8 +340,20 @@ pub fn info(
     text: SharedString,
     section: GuideRef,
 ) -> Popover {
+    labeled_info(bardo, id, None, text, section)
+}
+
+/// [`info`] with a label beside the ⓘ ("Where credentials are kept").
+pub fn labeled_info(
+    bardo: &Bardo,
+    id: impl Into<ElementId>,
+    label: Option<SharedString>,
+    text: SharedString,
+    section: GuideRef,
+) -> Popover {
     kit::info_more(
         id,
+        label,
         text,
         tr(bardo, Text::GuideMoreInGuide),
         move |window, cx| {
@@ -423,8 +506,9 @@ impl Guide {
         }
         let missed_open = self.missed.read(cx).is_open();
         if missed_open {
-            // The missed posts come first; the tour waits behind them.
-            return None;
+            // The missed posts come first; any tour but theirs waits behind
+            // them.
+            return self.bardo.read(cx).tour_step(true).map(Layer::Tour);
         }
         let bardo = self.bardo.read(cx);
         if let Some(step) = bardo.tour_step(false) {

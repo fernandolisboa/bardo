@@ -9,19 +9,21 @@ use bardo_app::bardo_domain::{
 };
 use std::rc::Rc;
 
-use bardo_app::{Bardo, ChannelError, Destination, Text};
+use bardo_app::{Bardo, ChannelError, Control, Destination, GuideRef, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Window, div, px};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, Entity, ScrollHandle, SharedString, Subscription, Window, div, px,
+};
 
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
+use crate::{guide, layout};
 
 /// One option of a select: a domain value and its translated name.
 #[derive(Clone)]
@@ -147,6 +149,8 @@ pub struct ChannelsScreen {
     caption_style: ChoiceSelect<CaptionStyle>,
     field_errors: Vec<ChannelFieldError>,
     notice: Option<Notice>,
+    /// The form's scroll, so the tour brings its fields into view.
+    form_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -225,6 +229,7 @@ impl ChannelsScreen {
             caption_style,
             field_errors: Vec::new(),
             notice: None,
+            form_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -440,6 +445,12 @@ impl ChannelsScreen {
         cx.notify();
     }
 
+    /// Whether there are channels to show: the screen offers its tour only
+    /// then.
+    pub fn has_content(&self) -> bool {
+        !self.load_failed && !self.channels.is_empty()
+    }
+
     fn show_error(&mut self, error: &ChannelError) {
         self.field_errors = error.field_errors().to_vec();
         self.notice = error.form_message().map(Notice::Error);
@@ -504,14 +515,18 @@ impl ChannelsScreen {
             kit::field(tr(bardo, label), None, control, below)
         };
         // Explanations go behind an ⓘ beside the label.
-        let explained = |id: &'static str, label: Text, hint: Text, control: AnyElement| {
-            kit::field(
-                tr(bardo, label),
-                Some(kit::info(id, None, tr(bardo, hint))),
-                control,
-                None,
-            )
-        };
+        let explained =
+            |id: &'static str, label: Text, hint: Text, section: GuideRef, control: AnyElement| {
+                kit::field(
+                    tr(bardo, label),
+                    Some(guide::info(bardo, id, tr(bardo, hint), section)),
+                    control,
+                    None,
+                )
+            };
+        let scroll = Some(&self.form_scroll);
+        let tagged =
+            |anchor: TourAnchor, element: AnyElement| kit::anchor_in(anchor, element, scroll);
         let hint = |text: Text| {
             div()
                 .text_xs()
@@ -538,22 +553,33 @@ impl ChannelsScreen {
                     Input::new(&self.name).into_any_element(),
                     error_for(NAME_ERRORS),
                 ))
-                .child(field(
-                    Text::ChannelNiche,
-                    Input::new(&self.niche).into_any_element(),
-                    error_for(NICHE_ERRORS),
+                .child(tagged(
+                    TourAnchor::Control(Control::ChannelNiche),
+                    v_flex()
+                        .gap_4()
+                        .child(field(
+                            Text::ChannelNiche,
+                            Input::new(&self.niche).into_any_element(),
+                            error_for(NICHE_ERRORS),
+                        ))
+                        .child(field(
+                            Text::ChannelThemes,
+                            Textarea::new(&self.themes).into_any_element(),
+                            error_for(THEME_ERRORS).or_else(|| Some(hint(Text::ChannelThemesHint))),
+                        ))
+                        .into_any_element(),
                 ))
-                .child(field(
-                    Text::ChannelThemes,
-                    Textarea::new(&self.themes).into_any_element(),
-                    error_for(THEME_ERRORS).or_else(|| Some(hint(Text::ChannelThemesHint))),
+                .child(tagged(
+                    TourAnchor::Control(Control::ChannelLook),
+                    field(
+                        Text::ChannelAestheticNotes,
+                        Textarea::new(&self.aesthetic_notes).into_any_element(),
+                        error_for(AESTHETIC_NOTES_ERRORS),
+                    )
+                    .into_any_element(),
                 ))
-                .child(field(
-                    Text::ChannelAestheticNotes,
-                    Textarea::new(&self.aesthetic_notes).into_any_element(),
-                    error_for(AESTHETIC_NOTES_ERRORS),
-                ))
-                .child(
+                .child(tagged(
+                    TourAnchor::Control(Control::ChannelMarket),
                     h_flex()
                         .gap_4()
                         .child(div().flex_1().child(field(
@@ -569,27 +595,41 @@ impl ChannelsScreen {
                                     .into_any_element(),
                                 None,
                             )),
-                        ),
-                )
-                .child(explained(
-                    "channel-persona-info",
-                    Text::ChannelPersona,
-                    Text::ChannelPersonaHint,
-                    Select::new(&self.persona)
-                        .search_placeholder(tr(bardo, Text::PersonasTitle))
+                        )
                         .into_any_element(),
                 ))
-                .child(explained(
-                    "channel-clip-model-info",
-                    Text::ChannelClipModel,
-                    Text::ChannelClipModelHint,
-                    Select::new(&self.clip_model).into_any_element(),
+                .child(tagged(
+                    TourAnchor::Control(Control::ChannelPersona),
+                    explained(
+                        "channel-persona-info",
+                        Text::ChannelPersona,
+                        Text::ChannelPersonaHint,
+                        guide::refs::CHANNELS_PERSONA,
+                        Select::new(&self.persona)
+                            .search_placeholder(tr(bardo, Text::PersonasTitle))
+                            .into_any_element(),
+                    )
+                    .into_any_element(),
                 ))
-                .child(explained(
-                    "channel-caption-style-info",
-                    Text::ChannelCaptionStyle,
-                    Text::ChannelCaptionStyleHint,
-                    Select::new(&self.caption_style).into_any_element(),
+                .child(tagged(
+                    TourAnchor::Control(Control::ChannelDefaults),
+                    v_flex()
+                        .gap_4()
+                        .child(explained(
+                            "channel-clip-model-info",
+                            Text::ChannelClipModel,
+                            Text::ChannelClipModelHint,
+                            guide::refs::CHANNELS_DEFAULTS,
+                            Select::new(&self.clip_model).into_any_element(),
+                        ))
+                        .child(explained(
+                            "channel-caption-style-info",
+                            Text::ChannelCaptionStyle,
+                            Text::ChannelCaptionStyleHint,
+                            guide::refs::CHANNELS_DEFAULTS,
+                            Select::new(&self.caption_style).into_any_element(),
+                        ))
+                        .into_any_element(),
                 ))
                 .child(
                     h_flex()
@@ -614,6 +654,8 @@ impl Render for ChannelsScreen {
         let form = self.render_form(cx).into_any_element();
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Channels);
+        header.info =
+            guide::header_info(bardo, Destination::Channels, self.has_content(), None, cx);
         header.actions.push(
             Button::new("new-channel")
                 .small()
@@ -637,6 +679,7 @@ impl Render for ChannelsScreen {
             footer: None,
             scroll: None,
         });
+        parts.scroll = Some(self.form_scroll.clone());
         layout::screen(parts, cx)
     }
 }

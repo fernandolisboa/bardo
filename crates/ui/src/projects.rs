@@ -117,6 +117,8 @@ pub struct ProjectsScreen {
     page_scroll: ScrollHandle,
     /// The inspector's scroll, for the Scenes, Clips and Render tours.
     inspector_scroll: ScrollHandle,
+    /// The Publish stage's post beside the networks, for its tour.
+    publish_scroll: ScrollHandle,
     /// Whether the scene grid shows only the scenes with something left.
     pending_only: bool,
     view: Option<ScriptView>,
@@ -358,6 +360,7 @@ impl ProjectsScreen {
             scene_scroll: ScrollHandle::new(),
             page_scroll: ScrollHandle::new(),
             inspector_scroll: ScrollHandle::new(),
+            publish_scroll: ScrollHandle::new(),
             pending_only: false,
             view: None,
             narration: None,
@@ -633,8 +636,13 @@ impl ProjectsScreen {
             }),
             // A cut to review: the stage shows its figures and targets.
             Stage::Render => self.render_review.is_some(),
+            // Networks to post on: the stage shows their posts.
+            Stage::Publish => self
+                .export_view
+                .as_ref()
+                .is_some_and(|view| !view.targets.is_empty()),
             // The editor opens over the window instead of a stage page.
-            Stage::Edit | Stage::Publish => false,
+            Stage::Edit => false,
         };
         Some((stage, made))
     }

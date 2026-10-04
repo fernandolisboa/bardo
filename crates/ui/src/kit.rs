@@ -167,15 +167,19 @@ pub fn info(id: impl Into<ElementId>, label: Option<SharedString>, text: SharedS
 /// guide"); a click closes the popover and runs `on_more`.
 pub fn info_more(
     id: impl Into<ElementId>,
+    label: Option<SharedString>,
     text: SharedString,
     more: SharedString,
     on_more: impl Fn(&mut Window, &mut App) + 'static,
 ) -> Popover {
     let id = id.into();
-    let trigger = Button::new(id.clone())
+    let mut trigger = Button::new(id.clone())
         .ghost()
         .xsmall()
         .icon(IconName::Info);
+    if let Some(label) = label {
+        trigger = trigger.label(label);
+    }
     let on_more = Rc::new(on_more);
     Popover::new(id).trigger(trigger).content(move |_, _, cx| {
         let popover = cx.entity();

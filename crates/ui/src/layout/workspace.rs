@@ -257,9 +257,11 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                 .into_any_element(),
         );
     }
-    lead.extend(
-        toolbar.map(|toolbar| kit::anchor(TourAnchor::Toolbar, toolbar).into_any_element()),
-    );
+    // In the scroll like the figures, so a tour scrolled down to the
+    // inspector brings it back into view.
+    lead.extend(toolbar.map(|toolbar| {
+        kit::anchor_in(TourAnchor::Toolbar, toolbar, scroll.as_ref()).into_any_element()
+    }));
     if let Some(sections) = sections {
         let (tabs, shown) = section_tabs(sections);
         lead.push(tabs);

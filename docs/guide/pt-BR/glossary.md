@@ -100,7 +100,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Conta na rede**: o perfil de um canal numa rede, com o padrão dos posts e os ajustes de render.
 
-**Credenciais do app**: o id e o segredo do app que você registra numa rede para o Bardo postar por você. O Bardo não traz nenhum app próprio.
+**Credenciais do app**: o ID e a chave secreta do app que você registra numa rede para o Bardo postar por você. O Bardo não traz nenhum app próprio.
 
 **Conexão com a rede**: uma conta na rede com login feito pela própria rede, para o Bardo enviar vídeos e ler os números. Os logins ficam no Gerenciador de Credenciais do Windows.
 

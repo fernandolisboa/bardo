@@ -34,8 +34,8 @@ use bardo_app::bardo_domain::{
     JobId, PublicationId, ScheduleProblem, Visibility, format_cover_time, parse_cover_time,
 };
 use bardo_app::{
-    MissedPostError, ScheduleError, ScheduleResult, Text, UploadBlock, UploadChoices, UploadReview,
-    UploadReviewError, UploadState,
+    Control, MissedPostError, ScheduleError, ScheduleResult, Text, TourAnchor, UploadBlock,
+    UploadChoices, UploadReview, UploadReviewError, UploadState,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -49,6 +49,7 @@ use gpui_kit::{AnyElement, ClickEvent, SharedString, Window, div, px};
 
 use super::{ProjectsScreen, clock, muted};
 use crate::appearance::look;
+use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 
@@ -427,9 +428,9 @@ impl ProjectsScreen {
             .gap_1()
             .items_center()
             .child(label(tr(bardo, Text::UploadTitle)))
-            .child(kit::info(
+            .child(guide::info(
+                bardo,
                 "upload-info",
-                None,
                 tr(
                     bardo,
                     if now.is_reel() {
@@ -440,6 +441,7 @@ impl ProjectsScreen {
                         Text::UploadHint
                     },
                 ),
+                guide::refs::UPLOADING_REVIEW,
             ));
         let mut section = v_flex().gap_2().child(heading);
         if let Some((review, choices)) = &self.upload_draft {
@@ -912,20 +914,23 @@ impl ProjectsScreen {
                 }
             }));
         let screen = cx.entity().downgrade();
+        // The tour's scheduling step: when it goes, or the draft's notice.
+        let scroll = Some(&self.publish_scroll);
+        let timing = |element: AnyElement| {
+            kit::anchor_in(TourAnchor::Control(Control::UploadWhen), element, scroll)
+        };
         if draft {
             // TikTok takes the video only; the rest is the creator's, in
             // the app.
-            card = card.child(kit::notice(
-                Tone::Info,
-                tr(bardo, Text::UploadDraftNotice),
-                cx,
+            card = card.child(timing(
+                kit::notice(Tone::Info, tr(bardo, Text::UploadDraftNotice), cx).into_any_element(),
             ));
         } else if reel {
             card = card.child(self.cover_field(cx));
-            card = card.child(row(
+            card = card.child(timing(row(
                 Text::UploadFieldWhen,
                 h_flex().child(when).into_any_element(),
-            ));
+            )));
             if scheduled {
                 card = card.child(self.schedule_fields(cx)).child(kit::notice(
                     Tone::Info,
@@ -945,16 +950,23 @@ impl ProjectsScreen {
                         });
                     }
                 });
-            card = card.child(h_flex().gap_1().items_center().child(feed).child(kit::info(
-                "upload-feed-info",
-                None,
-                tr(bardo, Text::UploadShareToFeedHint),
-            )));
+            card = card.child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(feed)
+                    .child(guide::info(
+                        bardo,
+                        "upload-feed-info",
+                        tr(bardo, Text::UploadShareToFeedHint),
+                        guide::refs::INSTAGRAM_UPLOAD,
+                    )),
+            );
         } else {
-            card = card.child(row(
+            card = card.child(timing(row(
                 Text::UploadFieldWhen,
                 h_flex().child(when).into_any_element(),
-            ));
+            )));
             if scheduled {
                 card = card.child(self.schedule_fields(cx)).child(muted(
                     cx,
@@ -981,11 +993,18 @@ impl ProjectsScreen {
                 }
             });
         if !reel && !draft {
-            card = card.child(h_flex().gap_1().items_center().child(kids).child(kit::info(
-                "upload-kids-info",
-                None,
-                tr(bardo, Text::UploadMadeForKidsHint),
-            )));
+            card = card.child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(kids)
+                    .child(guide::info(
+                        bardo,
+                        "upload-kids-info",
+                        tr(bardo, Text::UploadMadeForKidsHint),
+                        guide::refs::YOUTUBE_UPLOAD,
+                    )),
+            );
         }
         let (synthetic_label, synthetic_hint) = if reel {
             (Text::UploadAiLabel, Text::UploadAiLabelHint)
@@ -1014,10 +1033,11 @@ impl ProjectsScreen {
                         .gap_1()
                         .items_center()
                         .child(synthetic)
-                        .child(kit::info(
+                        .child(guide::info(
+                            bardo,
                             "upload-synthetic-info",
-                            None,
                             tr(bardo, synthetic_hint),
+                            guide::refs::UPLOADING_DISCLOSURE,
                         )),
                 )
                 .when(review.synthetic, |column| {
@@ -1106,10 +1126,11 @@ impl ProjectsScreen {
                     .gap_1()
                     .items_center()
                     .child(label(tr(bardo, Text::UploadFieldCover)))
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "upload-cover-info",
-                        None,
                         tr(bardo, Text::UploadCoverHint),
+                        guide::refs::INSTAGRAM_UPLOAD,
                     )),
             )
             .child(

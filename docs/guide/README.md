@@ -19,13 +19,22 @@ The guide Bardo shows on its Guide screen (F1), in two languages. O guia que o B
 | [Templates](en-US/templates.md) | [Modelos](pt-BR/templates.md) |
 | [The editor](en-US/editor.md) | [O editor](pt-BR/editor.md) |
 | [Review and render](en-US/render.md) | [Revisão e render](pt-BR/render.md) |
+| [Channels](en-US/channels.md) | [Canais](pt-BR/channels.md) |
+| [Network accounts](en-US/network-accounts.md) | [Contas de rede](pt-BR/network-accounts.md) |
+| [Network app credentials](en-US/app-credentials.md) | [Credenciais de app das redes](pt-BR/app-credentials.md) |
+| [Connecting YouTube](en-US/connect-youtube.md) | [Conectar o YouTube](pt-BR/connect-youtube.md) |
+| [Connecting Instagram](en-US/connect-instagram.md) | [Conectar o Instagram](pt-BR/connect-instagram.md) |
+| [Connecting TikTok](en-US/connect-tiktok.md) | [Conectar o TikTok](pt-BR/connect-tiktok.md) |
+| [Uploading and scheduling](en-US/uploading.md) | [Envio e agendamento](pt-BR/uploading.md) |
+| [Exporting](en-US/exporting.md) | [Exportação](pt-BR/exporting.md) |
+| [Missed posts](en-US/missed-posts.md) | [Posts perdidos](pt-BR/missed-posts.md) |
 | [Glossary](en-US/glossary.md) | [Glossário](pt-BR/glossary.md) |
 | [Keyboard shortcuts](en-US/shortcuts.md) | [Atalhos de teclado](pt-BR/shortcuts.md) |
 
 ## Writing a page
 
 - One Markdown file per page, with the same file name in `en-US/` and `pt-BR/`. en-US sets the structure; pt-BR is written in natural Portuguese, not word for word.
-- Front matter: `id` (the file name), `title`, `group` (`getting-started`, `strategy`, `production`, `editing`, `publishing`, `costs` or `reference`), the `place` the page explains, if any (`research`, `projects/script`, `settings/keys`), and the `tour` that shows it, if any (`welcome`, `research`, `themes`, `performance`, `projects`, `script`, `narration`, `scenes`, `clips`, `personas`, `templates`, `editor`, `render`).
+- Front matter: `id` (the file name), `title`, `group` (`getting-started`, `strategy`, `production`, `editing`, `publishing`, `costs` or `reference`), the `place` the page explains, if any (`research`, `projects/script`, `settings/networks`), and the `tour` that shows it, if any (`welcome`, `research`, `themes`, `performance`, `projects`, `script`, `narration`, `scenes`, `clips`, `personas`, `templates`, `editor`, `render`, `channels`, `accounts`, `networks`, `publish`, `missed`).
 - A `# Title` equal to the front matter's title, an optional introduction, then sections: each `## Heading` right after an `<a id="section-id"></a>` line. Both languages have the same sections, in the same order, with the same ids.
 - Links: another page as `page.md#section` (the app also reads `bardo:guide/page#section`, but only the first works on GitHub), a section of this page as `#section`, a place in Bardo as `bardo:go/<place>`, a tour as `bardo:tour/<tour>`. Anything else must be an `https://` address.
 - Add a new page to `GUIDE_PAGES` in `crates/app/src/guide.rs`, which embeds it in the app. The tests in that file fail on a missing translation, a different section or a broken link.

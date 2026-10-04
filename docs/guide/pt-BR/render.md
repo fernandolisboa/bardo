@@ -27,7 +27,7 @@ Um número em âmbar merece uma olhada: uma mixagem sem som, ou legendas desliga
 <a id="targets"></a>
 ## Redes e presets
 
-Cada conta de rede do canal é um destino, listado com o identificador, o preset, a situação e o último arquivo. Cada rede parte do próprio preset:
+Cada conta de rede do canal é um destino, listado com o @, o preset, a situação e o último arquivo. Cada rede parte do próprio preset:
 
 | Rede | Quadro | Tamanho | Bitrate | Duração máxima |
 | --- | --- | --- | --- | --- |

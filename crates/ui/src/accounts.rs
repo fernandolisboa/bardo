@@ -8,13 +8,13 @@ use bardo_app::bardo_domain::{Channel, ChannelId};
 use bardo_app::{Bardo, Destination, Text};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::*;
-use gpui_kit::{ClickEvent, Entity, EventEmitter, SharedString, Subscription, Window, div};
+use gpui_kit::{App, ClickEvent, Entity, EventEmitter, SharedString, Subscription, Window, div};
 
 use crate::kit::{self, Tone};
-use crate::layout;
 use crate::network_accounts::{NetworkAccountsPanel, OpenNetworkSettings};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
 use crate::shell::tr;
+use crate::{guide, layout};
 
 pub struct AccountsScreen {
     bardo: Entity<Bardo>,
@@ -76,6 +76,12 @@ impl AccountsScreen {
         cx.notify();
     }
 
+    /// Whether the channel shown has network accounts: the screen offers
+    /// its tour only then.
+    pub fn has_content(&self, cx: &App) -> bool {
+        self.panel.read(cx).has_accounts()
+    }
+
     fn collection(&self, cx: &mut Context<Self>) -> Collection {
         let mut collection = Collection::new(CollectionKind::List, "accounts-channels");
         collection.tiles = self
@@ -118,9 +124,19 @@ impl Render for AccountsScreen {
         let collection = self.collection(cx);
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Accounts);
-        header.info = Some(
-            kit::info("accounts-info", None, tr(bardo, Text::ChannelAccountsHint))
-                .into_any_element(),
+        let info = guide::info(
+            bardo,
+            "accounts-info",
+            tr(bardo, Text::ChannelAccountsHint),
+            guide::refs::ACCOUNTS_ONE,
+        )
+        .into_any_element();
+        header.info = guide::header_info(
+            bardo,
+            Destination::Accounts,
+            self.has_content(cx),
+            Some(info),
+            cx,
         );
         let mut parts = ScreenParts::new(header);
         parts.collection = Some(collection);
@@ -128,6 +144,7 @@ impl Render for AccountsScreen {
             .channel
             .is_some()
             .then(|| Inspector::new(vec![self.panel.clone().into_any_element()]));
+        parts.scroll = Some(self.panel.read(cx).scroll());
         layout::screen(parts, cx)
     }
 }
