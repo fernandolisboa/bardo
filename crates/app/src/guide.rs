@@ -49,6 +49,15 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("templates"),
     page!("editor"),
     page!("render"),
+    page!("channels"),
+    page!("network-accounts"),
+    page!("app-credentials"),
+    page!("connect-youtube"),
+    page!("connect-instagram"),
+    page!("connect-tiktok"),
+    page!("uploading"),
+    page!("exporting"),
+    page!("missed-posts"),
     page!("glossary"),
     page!("shortcuts"),
 ];
@@ -144,11 +153,15 @@ impl GuidePlace {
     }
 }
 
-impl From<TourPlace> for GuidePlace {
-    fn from(place: TourPlace) -> Self {
+impl GuidePlace {
+    /// The place a tour of `place` runs on; `None` for the missed posts
+    /// list, which is no place to go to.
+    pub fn of_tour(place: TourPlace) -> Option<Self> {
         match place {
-            TourPlace::Screen(screen) => GuidePlace::Screen(screen),
-            TourPlace::Stage(stage) => GuidePlace::Stage(stage),
+            TourPlace::Screen(screen) => Some(GuidePlace::Screen(screen)),
+            TourPlace::Stage(stage) => Some(GuidePlace::Stage(stage)),
+            TourPlace::Settings(tab) => Some(GuidePlace::Settings(tab)),
+            TourPlace::Missed => None,
         }
     }
 }
@@ -1039,6 +1052,7 @@ Text of the **first** part.
                 GuideGroup::Strategy,
                 GuideGroup::Production,
                 GuideGroup::Editing,
+                GuideGroup::Publishing,
                 GuideGroup::Reference
             ]
         );
@@ -1061,8 +1075,20 @@ Text of the **first** part.
         );
         assert_eq!(
             guide.page_at(Some(GuidePlace::Stage(Stage::Publish))).id,
-            "projects",
-            "no page for the stage yet: its screen's"
+            "uploading"
+        );
+        assert_eq!(
+            guide
+                .page_at(Some(GuidePlace::Settings(SettingsTab::Networks)))
+                .id,
+            "app-credentials"
+        );
+        assert_eq!(
+            guide
+                .page_at(Some(GuidePlace::Settings(SettingsTab::Metrics)))
+                .id,
+            "what-bardo-is",
+            "no page for the tab yet"
         );
         assert_eq!(
             guide
@@ -1159,6 +1185,34 @@ Text of the **first** part.
     }
 
     #[test]
+    fn no_markdown_file_points_at_the_old_network_guides() {
+        // The network setup guides moved from `docs/guides/` into the user
+        // guide (issue #110).
+        fn markdown(folder: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(folder).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    markdown(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "md") {
+                    found.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        assert!(!root.join("docs/guides").exists(), "docs/guides/ is gone");
+        let mut files = vec![root.join("README.md")];
+        markdown(&root.join("docs"), &mut files);
+        markdown(&root.join("crates"), &mut files);
+        let old = ["docs/guides/", "guides/publishing-"];
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            for old in old {
+                assert!(!text.contains(old), "{} names {old}", file.display());
+            }
+        }
+    }
+
+    #[test]
     fn every_tour_step_guide_section_exists() {
         let (en_us, _) = both();
         for tour in Tour::ALL {
@@ -1189,11 +1243,15 @@ Text of the **first** part.
                     continue;
                 };
                 // A place's page shows its first tour (the editor's has two
-                // parts); "Show me" starts it.
+                // parts); "Show me" starts it. The missed posts list is no
+                // place: its page names its tour alone.
                 let page = guide
                     .pages()
                     .iter()
-                    .find(|page| page.place == Some(GuidePlace::from(place)))
+                    .find(|page| match GuidePlace::of_tour(place) {
+                        Some(place) => page.place == Some(place),
+                        None => page.place.is_none() && page.tour == Some(tour.id),
+                    })
                     .unwrap_or_else(|| panic!("{language}: no page explains {:?}", tour.id));
                 assert_eq!(
                     page.tour,

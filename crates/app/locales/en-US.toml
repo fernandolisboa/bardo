@@ -1377,7 +1377,7 @@ reminder = "Synthetic voice: label this video as altered or synthetic content."
 notice = "The narrator's voice is flagged as a clone or a realistic synthetic voice. When you post, label each video as altered or synthetic content; each network's metadata file says where."
 
 [export]
-info = "Publishing prepares each network's post for you to upload by hand. Claude writes the title, description and tags from the script and the account's defaults; you edit them within each network's limits. Export writes one folder per network with the rendered file and a metadata.txt to copy from. Automatic upload and scheduling come later."
+info = "Publishing prepares each network's post. Claude writes the title, description and tags from the script and the account's defaults; you edit them within each network's limits. Export writes one folder per network with the rendered file and a metadata.txt to post by hand; a connected YouTube, Instagram or TikTok account uploads from here after you review it."
 chosen = "{n} of {total} chosen"
 targets = "Networks"
 include = "Export for this network"
@@ -2315,6 +2315,141 @@ body = "Render asks once more, since it replaces each network's last file. One j
 [tour.render.last]
 title = "The last file"
 body = "Where the network's last file stands: rendered from this cut, out of date since the cut or preset changed, or not rendered yet. Show in folder opens it."
+
+[tour.channels]
+name = "Channels tour"
+
+[tour.channels.list]
+title = "Your channels"
+body = "Each channel is one niche for one market. Pick a channel to edit it, or start one with New channel; research, ideas, projects and network accounts all belong to a channel."
+
+[tour.channels.niche]
+title = "Niche and themes"
+body = "The niche says what the channel is about, and the themes list the subjects it comes back to, one per line. Research and theme ideas start from them."
+
+[tour.channels.look]
+title = "Aesthetic notes"
+body = "How the channel's videos should look and feel: style, palette, mood. Ideas and scripts take these notes along, so every video keeps the channel's look."
+
+[tour.channels.market]
+title = "Language and country"
+body = "The language scripts and narration are written in, and the country whose audience the channel aims at. Research reads trends and competition for that country."
+
+[tour.channels.persona]
+title = "Default persona"
+body = "Who narrates the channel's videos unless a project picks someone else. Personas live on their own screen, and one can narrate several channels."
+
+[tour.channels.defaults]
+title = "Video model and captions"
+body = "The model that animates the channel's scene images into clips, and the look of the captions in its new projects. Any scene can pick another model, and any project other captions."
+
+[tour.channels.accounts]
+title = "Network accounts"
+body = "Next, give the channel its accounts on Accounts: one per network, with its handle, metadata defaults and render preset."
+
+[tour.accounts]
+name = "Accounts tour"
+
+[tour.accounts.channel]
+title = "Pick the channel"
+body = "Network accounts belong to a channel. Pick one here to see its accounts beside it."
+
+[tour.accounts.accounts]
+title = "One account per network"
+body = "Each network the channel posts to has one account, with the handle it posts as. Renders, exports and uploads for that network use it."
+
+[tour.accounts.metadata]
+title = "Metadata defaults"
+body = "Edit opens the account's defaults: the language, visibility, tags and footer every post on this network starts from. Claude writes each post's metadata on top of them."
+
+[tour.accounts.preset]
+title = "Render preset"
+body = "Each network renders in its own preset: frame, size, codec, bitrate, length limit and loudness. Keep the network's default, or change any of them under Edit."
+
+[tour.accounts.connect]
+title = "Connect the account"
+body = "YouTube and TikTok accounts connect in your browser, Instagram with a token you paste, so Bardo can upload and read their numbers. The card says where it stands: not connected, waiting for the browser, connected as the account, or reconnect needed."
+
+[tour.accounts.add]
+title = "Add a network"
+body = "Add an account for each network still free. Connecting one needs that network's app credentials, saved once in Settings › Networks."
+
+[tour.networks]
+name = "Networks tour"
+
+[tour.networks.tab]
+title = "Networks"
+body = "This tab keeps the apps Bardo signs in to each network with: a Google OAuth client for YouTube, a Meta app for Instagram, a TikTok for Developers app for TikTok."
+
+[tour.networks.why]
+title = "Your own apps"
+body = "Bardo ships no app of its own: you register one on each network, so its quota, consent screen and any review are yours. The guide walks through each one."
+
+[tour.networks.card]
+title = "The app's ID and secret"
+body = "Paste the ID (TikTok calls it the client key) and the secret from the network's developer site, and save. Replace them here when you make a new secret."
+
+[tour.networks.kept]
+title = "Where they are kept"
+body = "Saved credentials go to Windows Credential Manager under your Windows account, never to Bardo's database or logs. The card shows only the secret's last four characters."
+
+[tour.networks.connect]
+title = "Then connect"
+body = "With the app saved, connect each channel's account on Accounts."
+
+[tour.publish]
+name = "Publish tour"
+
+[tour.publish.networks]
+title = "One post per network"
+body = "Each network account of the channel gets its own post from its rendered file. Tick the networks to export, and pick one to see its post beside the list."
+
+[tour.publish.metadata]
+title = "Metadata and its limits"
+body = "Write metadata has Claude write each network's title, description and tags from the script and the account's defaults. Edit them here: the counters show each network's limits, and a post over them can't go."
+
+[tour.publish.disclosure]
+title = "Synthetic content"
+body = "When the narrator's voice is a realistic synthetic one, each network asks you to say so. Bardo reminds you here and ticks the disclosure in the upload review."
+
+[tour.publish.upload]
+title = "The upload review"
+body = "Review upload shows exactly what goes to YouTube, Instagram or TikTok: the file, the account, the text and your choices. Nothing is sent until you confirm it."
+
+[tour.publish.schedule]
+title = "When it goes"
+body = "YouTube takes a publish time and publishes by itself. Instagram is posted by Bardo at its time, so keep Bardo open then; TikTok gets a draft in its inbox that you finish and schedule in the TikTok app."
+
+[tour.publish.export]
+title = "Export"
+body = "Export writes one folder per network with the rendered file and its metadata, for posting by hand, on any of the five networks."
+
+[tour.publish.post]
+title = "The post"
+body = "Once it is up, paste the post's link with Mark as posted, or let the upload link it for you. Bardo then follows its numbers on Performance."
+
+[tour.missed]
+name = "Missed posts tour"
+
+[tour.missed.list]
+title = "Missed posts"
+body = "These posts had a time Bardo was to post them at, and Bardo was closed or the computer off then, so nothing went. Nothing happens to them until you choose."
+
+[tour.missed.send]
+title = "Post now"
+body = "Posts it right away, as it was reviewed."
+
+[tour.missed.new-time]
+title = "New time"
+body = "Gives it a later time. Keep Bardo open then, or it waits here again."
+
+[tour.missed.cancel]
+title = "Cancel post"
+body = "Nothing goes to the network. To post it later, review the upload again at the project's Publish stage."
+
+[tour.missed.later]
+title = "Decide later"
+body = "Closes the list for now. Each post also waits on its project's Publish stage, with the same three choices."
 
 [guide]
 back_to_editor = "Back to the editor"

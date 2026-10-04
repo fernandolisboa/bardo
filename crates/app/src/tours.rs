@@ -14,7 +14,9 @@
 //! something to show until the tour is completed or dismissed, and again
 //! when the tour's content changes; a screen tour never starts on its own.
 //! A stage of a video project has its own tour too (issue #108), behind
-//! "Tour this stage", under the same rules.
+//! "Tour this stage", under the same rules. So does a Settings tab
+//! (issue #110, Networks), and the missed posts list carries its own: the
+//! one tour that runs over the list, which every other tour waits behind.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -23,7 +25,7 @@ use bardo_domain::{
     ProfileId, TourId, TourProgress, TourProgressRepository, TourState, UserProfile,
 };
 
-use crate::{AppError, Bardo, Destination, Pillar, Stage, Text};
+use crate::{AppError, Bardo, Destination, Pillar, SettingsTab, Stage, Text};
 
 /// A component a tour step can point at. The layouts tag the places and
 /// parts they draw, wherever they draw them; screens tag their own
@@ -160,6 +162,55 @@ pub enum Control {
     RenderChecks,
     /// Render: the picked target's last file.
     RenderLast,
+    /// Channels: the niche and its themes.
+    ChannelNiche,
+    /// Channels: the aesthetic notes.
+    ChannelLook,
+    /// Channels: the language and the country.
+    ChannelMarket,
+    /// Channels: the default persona.
+    ChannelPersona,
+    /// Channels: the video model and the caption style.
+    ChannelDefaults,
+    /// Accounts: the first network account's name, handle and preset mark.
+    AccountCard,
+    /// Accounts: the first network account's Edit, which opens its
+    /// metadata defaults and render preset.
+    AccountEdit,
+    /// Accounts: the first network account's render preset line.
+    AccountPreset,
+    /// Accounts: the first connection's state and its buttons.
+    AccountConnection,
+    /// Accounts: the buttons that add the networks still free.
+    AccountAdd,
+    /// Settings › Networks: where the credentials are kept, and why.
+    CredentialsWhy,
+    /// Settings › Networks: the first network's app credentials.
+    CredentialsCard,
+    /// Settings › Networks: whether the first network's are saved.
+    CredentialsState,
+    /// Publish: the picked network's title, description and tags, or the
+    /// line saying they are not written yet.
+    PublishMetadata,
+    /// Publish: the synthetic-content disclosure reminder.
+    PublishDisclosure,
+    /// Publish: the picked network's upload, or its review.
+    PublishUpload,
+    /// Publish: when the reviewed upload goes (or, for a TikTok draft,
+    /// that it waits in the inbox).
+    UploadWhen,
+    /// Publish: the picked network's post, to mark as posted and link.
+    PublishPost,
+    /// Missed posts: the list.
+    MissedList,
+    /// Missed posts: the first post's Send now.
+    MissedSend,
+    /// Missed posts: the first post's New time.
+    MissedNewTime,
+    /// Missed posts: the first post's Cancel.
+    MissedCancel,
+    /// Missed posts: Decide later.
+    MissedLater,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -168,6 +219,10 @@ pub enum TourPlace {
     Screen(Destination),
     /// A stage of the open video project.
     Stage(Stage),
+    /// A tab of the Settings screen.
+    Settings(SettingsTab),
+    /// The missed posts list, over the window while it holds posts.
+    Missed,
 }
 
 /// Where a step's card goes beside its lit component. A side without
@@ -681,9 +736,176 @@ pub const RENDER: Tour = {
     }
 };
 
+/// Channels: the list, a channel's niche and themes, its look, its market,
+/// its narrator, its video model and captions, and its network accounts.
+pub const CHANNELS: Tour = {
+    const AT: Destination = Destination::Channels;
+    const PAGE: &str = "channels";
+    const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Channels,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),
+            on(AT, "niche", control(Control::ChannelNiche))
+                .missing(FORM)
+                .learn(PAGE, "niche"),
+            on(AT, "look", control(Control::ChannelLook))
+                .missing(FORM)
+                .learn(PAGE, "look"),
+            on(AT, "market", control(Control::ChannelMarket))
+                .missing(FORM)
+                .learn(PAGE, "market"),
+            on(AT, "persona", control(Control::ChannelPersona))
+                .missing(FORM)
+                .learn(PAGE, "persona"),
+            on(AT, "defaults", control(Control::ChannelDefaults))
+                .missing(FORM)
+                .learn(PAGE, "defaults"),
+            on(AT, "accounts", TourAnchor::NavPlace(Destination::Accounts)).learn(PAGE, "accounts"),
+        ],
+    }
+};
+
+/// Accounts: the channel, its network accounts, their metadata defaults
+/// and render presets, connecting one and its states, and adding more.
+pub const ACCOUNTS: Tour = {
+    const AT: Destination = Destination::Accounts;
+    const PAGE: &str = "network-accounts";
+    const PANEL: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Accounts,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "channel", TourAnchor::Collection).learn(PAGE, "channel"),
+            on(AT, "accounts", control(Control::AccountCard))
+                .missing(PANEL)
+                .learn(PAGE, "accounts"),
+            on(AT, "metadata", control(Control::AccountEdit))
+                .missing(PANEL)
+                .learn(PAGE, "metadata"),
+            on(AT, "preset", control(Control::AccountPreset))
+                .missing(PANEL)
+                .learn(PAGE, "preset"),
+            // X and Kick export only: nothing to connect.
+            on(AT, "connect", control(Control::AccountConnection))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "connect"),
+            // Every network added already.
+            on(AT, "add", control(Control::AccountAdd))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "add"),
+        ],
+    }
+};
+
+/// Settings › Networks: the app credentials each network signs in with,
+/// why Bardo ships none, where they are kept, and connecting after.
+pub const NETWORKS: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Networks);
+    const PAGE: &str = "app-credentials";
+    const CARDS: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Networks,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("tab", TourAnchor::Toolbar)
+                .on(AT)
+                .learn(PAGE, "networks"),
+            TourStep::at("why", control(Control::CredentialsWhy))
+                .on(AT)
+                .missing(CARDS)
+                .learn(PAGE, "why"),
+            TourStep::at("card", control(Control::CredentialsCard))
+                .on(AT)
+                .missing(CARDS)
+                .learn(PAGE, "save"),
+            TourStep::at("kept", control(Control::CredentialsState))
+                .on(AT)
+                .missing(CARDS)
+                .learn(PAGE, "kept"),
+            TourStep::at("connect", TourAnchor::NavPlace(Destination::Accounts))
+                .on(AT)
+                .learn(PAGE, "connect"),
+        ],
+    }
+};
+
+/// Publish: the networks, each one's metadata and limits, the synthetic
+/// content disclosure, the upload review, scheduling, export, and the post.
+/// Its steps only explain: nothing is uploaded, exported or linked.
+pub const PUBLISH: Tour = {
+    const AT: Stage = Stage::Publish;
+    const PAGE: &str = "uploading";
+    const NETWORK: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Publish,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "networks", TourAnchor::Collection).learn(PAGE, "networks"),
+            at_stage(AT, "metadata", control(Control::PublishMetadata))
+                .missing(NETWORK)
+                .learn(PAGE, "metadata"),
+            // No realistic voice: the review's disclosure stands in.
+            at_stage(AT, "disclosure", control(Control::PublishDisclosure))
+                .missing(WhenMissing::LightPart(control(Control::PublishUpload)))
+                .learn(PAGE, "disclosure"),
+            // X and Kick: exported only, so the card says it in the middle.
+            at_stage(AT, "upload", control(Control::PublishUpload)).learn(PAGE, "review"),
+            // The review closed: the upload stands in.
+            at_stage(AT, "schedule", control(Control::UploadWhen))
+                .missing(WhenMissing::LightPart(control(Control::PublishUpload)))
+                .learn(PAGE, "schedule"),
+            at_stage(AT, "export", TourAnchor::Toolbar).learn(PAGE, "export"),
+            at_stage(AT, "post", control(Control::PublishPost))
+                .missing(NETWORK)
+                .learn(PAGE, "post"),
+        ],
+    }
+};
+
+/// The missed posts list: why a post is missed, sending it now, giving it
+/// a new time, cancelling it, and deciding later. It runs over the list;
+/// started with the list closed, its cards show in the middle.
+pub const MISSED: Tour = {
+    const AT: TourPlace = TourPlace::Missed;
+    const PAGE: &str = "missed-posts";
+    const LIST: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::MissedList));
+    Tour {
+        id: TourId::Missed,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("list", control(Control::MissedList))
+                .on(AT)
+                .learn(PAGE, "why"),
+            TourStep::at("send", control(Control::MissedSend))
+                .on(AT)
+                .missing(LIST)
+                .learn(PAGE, "send"),
+            TourStep::at("new-time", control(Control::MissedNewTime))
+                .on(AT)
+                .missing(LIST)
+                .learn(PAGE, "new-time"),
+            TourStep::at("cancel", control(Control::MissedCancel))
+                .on(AT)
+                .missing(LIST)
+                .learn(PAGE, "cancel"),
+            TourStep::at("later", control(Control::MissedLater))
+                .on(AT)
+                .missing(LIST)
+                .learn(PAGE, "later"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 14] = [
+    pub const ALL: [&'static Tour; 19] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -698,6 +920,11 @@ impl Tour {
         &EDITOR,
         &EDITOR_MORE,
         &RENDER,
+        &CHANNELS,
+        &ACCOUNTS,
+        &NETWORKS,
+        &PUBLISH,
+        &MISSED,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -716,6 +943,11 @@ impl Tour {
             TourId::Editor => &EDITOR,
             TourId::EditorMore => &EDITOR_MORE,
             TourId::Render => &RENDER,
+            TourId::Channels => &CHANNELS,
+            TourId::Accounts => &ACCOUNTS,
+            TourId::Networks => &NETWORKS,
+            TourId::Publish => &PUBLISH,
+            TourId::Missed => &MISSED,
         }
     }
 
@@ -735,6 +967,12 @@ impl Tour {
     /// The tour of `screen`, if it has one.
     pub fn of_screen(screen: Destination) -> Option<&'static Tour> {
         Self::of(TourPlace::Screen(screen))
+    }
+
+    /// Whether it runs over the missed posts list, which every other tour
+    /// waits behind.
+    pub fn over_missed_posts(&self) -> bool {
+        self.place == Some(TourPlace::Missed)
     }
 
     pub fn len(&self) -> usize {
@@ -1058,7 +1296,7 @@ impl Bardo {
         from: Destination,
         missed_posts_open: bool,
     ) -> Result<TourMove, TourError> {
-        if missed_posts_open {
+        if missed_posts_open && !tour.over_missed_posts() {
             return Err(TourError::MissedPostsOpen);
         }
         let book = &mut self.tours;
@@ -1071,12 +1309,13 @@ impl Bardo {
     }
 
     /// The step on screen; `None` without a tour, or while the missed
-    /// posts list is open (the tour waits behind it).
+    /// posts list is open (the tour waits behind it), unless the tour is
+    /// the list's own.
     pub fn tour_step(&self, missed_posts_open: bool) -> Option<TourStepView> {
-        if missed_posts_open {
-            return None;
-        }
-        self.tours.run.map(|run| run.view())
+        self.tours
+            .run
+            .filter(|run| !missed_posts_open || run.tour.over_missed_posts())
+            .map(|run| run.view())
     }
 
     /// What lights up for the step on screen, given the anchors on screen.
@@ -1179,9 +1418,11 @@ impl Bardo {
         self.place_tour(TourPlace::Stage(stage), has_content)
     }
 
-    /// A place with several tours (the editor's two parts) offers the first
-    /// one the user has not completed nor dismissed, else the first again.
-    fn place_tour(&self, place: TourPlace, has_content: bool) -> Option<ScreenTour> {
+    /// The tour `place` offers (a Settings tab's, the missed posts list's),
+    /// under the same rules as a screen's. A place with several tours (the
+    /// editor's two parts) offers the first one the user has not completed
+    /// nor dismissed, else the first again.
+    pub fn place_tour(&self, place: TourPlace, has_content: bool) -> Option<ScreenTour> {
         if !has_content {
             return None;
         }
@@ -1730,6 +1971,8 @@ mod tests {
             (Destination::Projects, TourId::Projects),
             (Destination::Personas, TourId::Personas),
             (Destination::Templates, TourId::Templates),
+            (Destination::Channels, TourId::Channels),
+            (Destination::Accounts, TourId::Accounts),
         ];
         for (screen, tour) in screens {
             assert_eq!(Tour::of_screen(screen).map(|t| t.id), Some(tour));
@@ -1741,12 +1984,25 @@ mod tests {
             (Stage::Clips, TourId::Clips),
             (Stage::Edit, TourId::Editor),
             (Stage::Render, TourId::Render),
+            (Stage::Publish, TourId::Publish),
         ];
         for (stage, tour) in stages {
             assert_eq!(Tour::of(TourPlace::Stage(stage)).map(|t| t.id), Some(tour));
         }
         assert_eq!(Tour::of_screen(Destination::Costs), None, "not yet");
-        assert_eq!(Tour::of(TourPlace::Stage(Stage::Publish)), None, "not yet");
+        assert_eq!(
+            Tour::of(TourPlace::Settings(SettingsTab::Networks)).map(|t| t.id),
+            Some(TourId::Networks)
+        );
+        assert_eq!(
+            Tour::of(TourPlace::Settings(SettingsTab::Keys)),
+            None,
+            "not yet"
+        );
+        assert_eq!(
+            Tour::of(TourPlace::Missed).map(|t| t.id),
+            Some(TourId::Missed)
+        );
         let editor: Vec<_> = Tour::at(TourPlace::Stage(Stage::Edit))
             .map(|tour| tour.id)
             .collect();
@@ -1790,7 +2046,7 @@ mod tests {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
         assert_eq!(app.stage_tour(Stage::Script, false), None, "no script yet");
-        assert_eq!(app.stage_tour(Stage::Publish, true), None, "no tour yet");
+        assert_eq!(app.stage_tour(Stage::Edit, false), None, "no cut yet");
         assert_eq!(
             app.stage_tour(Stage::Scenes, true),
             Some(ScreenTour {
@@ -2004,6 +2260,94 @@ mod tests {
         assert_eq!(mark(&app, Destination::Themes), Some(false));
         app.reset_tours().unwrap();
         assert_eq!(mark(&app, Destination::Themes), Some(true));
+    }
+
+    #[test]
+    fn the_missed_posts_list_runs_its_own_tour_and_holds_the_others() {
+        let mut app = start(&FakeProgress::default());
+        assert_eq!(
+            app.start_tour(TourId::Publish, Destination::Projects, true),
+            Err(TourError::MissedPostsOpen),
+            "the others wait behind the list"
+        );
+        assert_eq!(
+            app.start_tour(TourId::Missed, Destination::Projects, true),
+            Ok(TourMove::Show(Some(TourPlace::Missed)))
+        );
+        assert_eq!(
+            app.tour_step(true).map(|step| step.tour),
+            Some(TourId::Missed)
+        );
+        app.tour_next();
+        assert_eq!(at(&app), 2);
+        assert_eq!(
+            app.tour_step(false).map(|step| step.number),
+            Some(2),
+            "and without it"
+        );
+    }
+
+    #[test]
+    fn the_missed_posts_tour_offers_itself_while_the_list_is_up() {
+        let mut app = start(&FakeProgress::default());
+        assert_eq!(app.place_tour(TourPlace::Missed, false), None, "no list");
+        assert_eq!(
+            app.place_tour(TourPlace::Missed, true),
+            Some(ScreenTour {
+                tour: TourId::Missed,
+                new: true
+            })
+        );
+        app.start_tour(TourId::Missed, Destination::Projects, true)
+            .unwrap();
+        while app.tour_next() != TourMove::Finished {}
+        assert_eq!(
+            app.place_tour(TourPlace::Missed, true).map(|tour| tour.new),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_missed_post_step_without_its_buttons_lights_the_list() {
+        // The first post is being given a new time: its buttons are gone.
+        let run = TourRun::new(&MISSED, 1, Destination::Projects);
+        assert_eq!(
+            run.spot(|anchor| anchor == control(Control::MissedList)),
+            Spot::Lit(control(Control::MissedList))
+        );
+        assert_eq!(run.spot(|_| false), Spot::Center, "the list is closed");
+    }
+
+    #[test]
+    fn the_networks_tab_offers_its_tour_and_opens_the_tab() {
+        let mut app = start(&FakeProgress::default());
+        let networks = TourPlace::Settings(SettingsTab::Networks);
+        assert_eq!(
+            app.place_tour(networks, true).map(|tour| tour.tour),
+            Some(TourId::Networks)
+        );
+        assert_eq!(
+            app.place_tour(TourPlace::Settings(SettingsTab::Appearance), true),
+            None
+        );
+        assert_eq!(
+            app.start_tour(TourId::Networks, Destination::Projects, false),
+            Ok(TourMove::Show(Some(networks)))
+        );
+    }
+
+    #[test]
+    fn the_publish_tour_falls_back_where_a_network_does_not_upload() {
+        let mut run = TourRun::new(&PUBLISH, 2, Destination::Projects);
+        let upload = control(Control::PublishUpload);
+        // No realistic voice: the upload, where the review asks.
+        assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
+        // X or Kick: nothing to upload, so the card says it in the middle.
+        run.next();
+        assert_eq!(run.spot(|_| false), Spot::Center);
+        // The review is closed: its "When" row gives way to the upload.
+        run.next();
+        assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
     }
 
     #[test]

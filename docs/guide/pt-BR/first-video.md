@@ -57,8 +57,8 @@ O Bardo não faz música. No projeto, ele escreve um prompt de música para a su
 
 Na etapa [Publicação](bardo:go/projects/publish), o Claude escreve o título, a descrição e as tags de cada rede, e você edita dentro dos limites de cada uma. Depois, uma de duas:
 
-- **Exportar** uma pasta por rede com o arquivo e um texto para copiar, e postar à mão; cole de volta o link do post para o Bardo acompanhar os números.
-- **Enviar** para o YouTube, o Instagram Reels ou o TikTok (como rascunho que você termina no app do TikTok), depois de conectar a conta em [Configurações › Redes](bardo:go/settings/networks). Todo envio passa antes por uma revisão.
+- **Exportar** uma pasta por rede com o arquivo e um texto para copiar, e postar à mão; cole de volta o link do post para o Bardo acompanhar os números. Veja [Exportação](exporting.md).
+- **Enviar** para o YouTube, o Instagram Reels ou o TikTok (como rascunho que você termina no app do TikTok), depois de conectar a conta do canal em [Contas](bardo:go/accounts), com o seu próprio app salvo em [Configurações › Redes](app-credentials.md). Todo envio passa antes por uma revisão, e os do YouTube e do Instagram podem ser agendados. Veja [Envio e agendamento](uploading.md).
 
 <a id="after"></a>
 ## 9. Veja como foi

@@ -39,10 +39,20 @@ pub enum TourId {
     EditorMore,
     /// The Render stage's tour.
     Render,
+    /// The Channels screen's tour.
+    Channels,
+    /// The Accounts screen's tour: network accounts and connecting them.
+    Accounts,
+    /// The tour of Settings › Networks: the networks' app credentials.
+    Networks,
+    /// The Publish stage's tour.
+    Publish,
+    /// The missed posts list's tour.
+    Missed,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 14] = [
+    pub const ALL: [TourId; 19] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -57,6 +67,11 @@ impl TourId {
         TourId::Editor,
         TourId::EditorMore,
         TourId::Render,
+        TourId::Channels,
+        TourId::Accounts,
+        TourId::Networks,
+        TourId::Publish,
+        TourId::Missed,
     ];
 
     pub fn code(self) -> &'static str {
@@ -75,6 +90,11 @@ impl TourId {
             TourId::Editor => "editor",
             TourId::EditorMore => "editor-more",
             TourId::Render => "render",
+            TourId::Channels => "channels",
+            TourId::Accounts => "accounts",
+            TourId::Networks => "networks",
+            TourId::Publish => "publish",
+            TourId::Missed => "missed",
         }
     }
 

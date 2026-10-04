@@ -57,8 +57,8 @@ Bardo does not make music. In the project it writes a music prompt for your own 
 
 At the [Publish](bardo:go/projects/publish) stage Claude writes each network's title, description and tags, which you edit within each network's limits. Then either:
 
-- **Export** a folder per network with the file and a text file to copy from, and post by hand; paste the post's link back so Bardo can follow its numbers.
-- **Upload** to YouTube, Instagram Reels or TikTok (as a draft you finish in the TikTok app), once the account is connected in [Settings › Networks](bardo:go/settings/networks). Every upload shows a review first.
+- **Export** a folder per network with the file and a text file to copy from, and post by hand; paste the post's link back so Bardo can follow its numbers. See [Exporting](exporting.md).
+- **Upload** to YouTube, Instagram Reels or TikTok (as a draft you finish in the TikTok app), once the channel's account is connected on [Accounts](bardo:go/accounts) with your own app saved in [Settings › Networks](app-credentials.md). Every upload shows a review first, and YouTube and Instagram uploads can be scheduled. See [Uploading and scheduling](uploading.md).
 
 <a id="after"></a>
 ## 9. See how it did

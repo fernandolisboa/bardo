@@ -1377,7 +1377,7 @@ reminder = "Voz sintética: marque este vídeo como conteúdo alterado ou sinté
 notice = "A voz do narrador está marcada como clone ou voz sintética realista. Ao postar, marque cada vídeo como conteúdo alterado ou sintético; o arquivo de metadados de cada rede diz onde."
 
 [export]
-info = "A publicação prepara o post de cada rede para você subir à mão. O Claude escreve título, descrição e tags a partir do roteiro e dos padrões da conta; você edita dentro dos limites de cada rede. Exportar grava uma pasta por rede com o arquivo renderizado e um metadata.txt para copiar. Upload e agendamento automáticos vêm depois."
+info = "A publicação prepara o post de cada rede. O Claude escreve título, descrição e tags a partir do roteiro e dos padrões da conta; você edita dentro dos limites de cada rede. Exportar grava uma pasta por rede com o arquivo renderizado e um metadata.txt para postar à mão; uma conta conectada do YouTube, do Instagram ou do TikTok envia daqui depois que você revisa."
 chosen = "{n} de {total} escolhidas"
 targets = "Redes"
 include = "Exportar para esta rede"
@@ -2315,6 +2315,141 @@ body = "Renderizar pergunta mais uma vez, porque substitui o último arquivo de 
 [tour.render.last]
 title = "O último arquivo"
 body = "Como está o último arquivo da rede: renderizado deste corte, desatualizado porque o corte ou o preset mudou, ou ainda não renderizado. Mostrar na pasta abre o arquivo."
+
+[tour.channels]
+name = "Tour dos canais"
+
+[tour.channels.list]
+title = "Seus canais"
+body = "Cada canal é um nicho para um mercado. Escolha um canal para editá-lo, ou crie um em Novo canal; pesquisas, ideias, projetos e contas de rede pertencem sempre a um canal."
+
+[tour.channels.niche]
+title = "Nicho e temas"
+body = "O nicho diz do que o canal trata, e os temas listam os assuntos a que ele volta, um por linha. A pesquisa e as ideias de temas partem deles."
+
+[tour.channels.look]
+title = "Notas de estética"
+body = "Como os vídeos do canal devem parecer: estilo, paleta, clima. Ideias e roteiros levam essas notas junto, para todo vídeo manter a cara do canal."
+
+[tour.channels.market]
+title = "Idioma e país"
+body = "O idioma em que roteiros e narração são escritos, e o país cujo público o canal quer alcançar. A pesquisa lê tendências e concorrência desse país."
+
+[tour.channels.persona]
+title = "Persona padrão"
+body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra pessoa. As personas ficam numa tela própria, e uma pode narrar vários canais."
+
+[tour.channels.defaults]
+title = "Modelo de vídeo e legendas"
+body = "O modelo que anima as imagens das cenas do canal em clipes, e o visual das legendas nos projetos novos. Qualquer cena pode escolher outro modelo, e qualquer projeto outras legendas."
+
+[tour.channels.accounts]
+title = "Contas de rede"
+body = "Depois, dê ao canal suas contas em Contas: uma por rede, com o identificador, os padrões de metadados e o preset de render."
+
+[tour.accounts]
+name = "Tour das contas"
+
+[tour.accounts.channel]
+title = "Escolha o canal"
+body = "As contas de rede pertencem a um canal. Escolha um aqui para ver as contas dele ao lado."
+
+[tour.accounts.accounts]
+title = "Uma conta por rede"
+body = "Cada rede em que o canal publica tem uma conta, com o identificador com que ele publica. Renders, exportações e envios para essa rede usam essa conta."
+
+[tour.accounts.metadata]
+title = "Padrões de metadados"
+body = "Editar abre os padrões da conta: o idioma, a visibilidade, as tags e o rodapé de que cada post nessa rede parte. O Claude escreve os metadados de cada post sobre eles."
+
+[tour.accounts.preset]
+title = "Preset de render"
+body = "Cada rede renderiza no próprio preset: quadro, tamanho, codec, bitrate, duração máxima e loudness. Mantenha o padrão da rede, ou mude qualquer um deles em Editar."
+
+[tour.accounts.connect]
+title = "Conecte a conta"
+body = "Contas do YouTube e do TikTok se conectam pelo navegador, e a do Instagram com um token que você cola, para o Bardo enviar vídeos e ler os números. O cartão mostra a situação: não conectada, esperando o navegador, conectada como a conta, ou reconexão necessária."
+
+[tour.accounts.add]
+title = "Adicione uma rede"
+body = "Adicione uma conta para cada rede ainda livre. Conectar uma pede as credenciais do app dessa rede, salvas uma vez em Configurações › Redes."
+
+[tour.networks]
+name = "Tour das redes"
+
+[tour.networks.tab]
+title = "Redes"
+body = "Esta aba guarda os apps com que o Bardo entra em cada rede: um cliente OAuth do Google para o YouTube, um app da Meta para o Instagram, um app do TikTok for Developers para o TikTok."
+
+[tour.networks.why]
+title = "Seus próprios apps"
+body = "O Bardo não traz app próprio: você registra um em cada rede, então a cota, a tela de consentimento e qualquer revisão são suas. O guia mostra cada um, passo a passo."
+
+[tour.networks.card]
+title = "O ID e o segredo do app"
+body = "Cole o ID (o TikTok chama de client key) e o segredo do site de desenvolvedores da rede, e salve. Substitua-os aqui quando criar um segredo novo."
+
+[tour.networks.kept]
+title = "Onde ficam guardados"
+body = "As credenciais salvas vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados ou os logs do Bardo. O cartão mostra só os quatro últimos caracteres do segredo."
+
+[tour.networks.connect]
+title = "Depois, conecte"
+body = "Com o app salvo, conecte a conta de cada canal em Contas."
+
+[tour.publish]
+name = "Tour da publicação"
+
+[tour.publish.networks]
+title = "Um post por rede"
+body = "Cada conta de rede do canal ganha seu próprio post, a partir do arquivo renderizado. Marque as redes a exportar e escolha uma para ver o post ao lado da lista."
+
+[tour.publish.metadata]
+title = "Metadados e limites"
+body = "Escrever metadados faz o Claude escrever o título, a descrição e as tags de cada rede a partir do roteiro e dos padrões da conta. Edite aqui: os contadores mostram os limites de cada rede, e um post acima deles não vai."
+
+[tour.publish.disclosure]
+title = "Conteúdo sintético"
+body = "Quando a voz do narrador é sintética e realista, cada rede pede que você declare isso. O Bardo lembra você aqui e marca a declaração na revisão do envio."
+
+[tour.publish.upload]
+title = "A revisão do envio"
+body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram ou o TikTok: o arquivo, a conta, o texto e suas escolhas. Nada é enviado até você confirmar."
+
+[tour.publish.schedule]
+title = "Quando vai ao ar"
+body = "O YouTube aceita um horário de publicação e publica sozinho. O Instagram é publicado pelo Bardo no horário, então deixe o Bardo aberto; o TikTok recebe um rascunho na caixa de entrada, que você termina e agenda no app do TikTok."
+
+[tour.publish.export]
+title = "Exportar"
+body = "Exportar grava uma pasta por rede com o arquivo renderizado e os metadados, para publicar à mão, em qualquer uma das cinco redes."
+
+[tour.publish.post]
+title = "O post"
+body = "Quando ele estiver no ar, cole o link do post em Marcar como publicado, ou deixe o envio vincular por você. O Bardo então acompanha os números em Desempenho."
+
+[tour.missed]
+name = "Tour dos posts perdidos"
+
+[tour.missed.list]
+title = "Posts perdidos"
+body = "Estes posts tinham um horário em que o Bardo ia publicá-los, e o Bardo estava fechado ou o computador desligado, então nada foi. Nada acontece com eles até você escolher."
+
+[tour.missed.send]
+title = "Postar agora"
+body = "Posta na hora, como foi revisado."
+
+[tour.missed.new-time]
+title = "Novo horário"
+body = "Dá a ele um horário mais tarde. Deixe o Bardo aberto nessa hora, ou ele volta a esperar aqui."
+
+[tour.missed.cancel]
+title = "Cancelar post"
+body = "Nada vai para a rede. Para publicar depois, revise o envio de novo na etapa Publicação do projeto."
+
+[tour.missed.later]
+title = "Decidir depois"
+body = "Fecha a lista por enquanto. Cada post também espera na etapa Publicação do projeto, com as mesmas três escolhas."
 
 [guide]
 back_to_editor = "Voltar ao editor"
