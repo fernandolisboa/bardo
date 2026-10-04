@@ -17,8 +17,9 @@
 //!   - Bardo was open but could not start it within [`DUE_GRACE`] of its
 //!     due time (the PC slept, the queue was busy);
 //!   - a run claimed it and Bardo closed before it was done, and opened
-//!     again more than [`DUE_GRACE`] after the claim. Opened sooner, the run
-//!     resumes where it stopped.
+//!     again more than [`DUE_GRACE`] after the claim, and the network does
+//!     not have it published (the run asks before it says so). Opened
+//!     sooner, the run resumes where it stopped.
 
 use std::time::{Duration, SystemTime};
 

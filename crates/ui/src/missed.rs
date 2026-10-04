@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use bardo_app::bardo_domain::PublicationId;
+use bardo_app::bardo_domain::{JobKind, JobState, PublicationId};
 use bardo_app::{Bardo, MissedPost, MissedPostError, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -39,8 +39,9 @@ pub struct MissedPosts {
     posts: Vec<MissedPost>,
     /// Put off with "Decide later" in this session.
     later: HashSet<PublicationId>,
-    /// The job revision the list was read at.
-    revision: u64,
+    /// How many upload jobs had failed when the list was read: a post is
+    /// missed while Bardo is open by its job failing.
+    failed_uploads: usize,
     edit: Option<Edit>,
     date: Entity<InputState>,
     time: Entity<InputState>,
@@ -52,6 +53,14 @@ pub struct MissedPosts {
 }
 
 impl EventEmitter<MissedChanged> for MissedPosts {}
+
+fn failed_uploads(bardo: &Bardo) -> usize {
+    bardo
+        .jobs()
+        .iter()
+        .filter(|job| job.kind() == JobKind::Upload && job.state() == JobState::Failed)
+        .count()
+}
 
 impl MissedPosts {
     pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -71,7 +80,7 @@ impl MissedPosts {
             bardo,
             posts: Vec::new(),
             later: HashSet::new(),
-            revision: 0,
+            failed_uploads: 0,
             edit: None,
             date,
             time,
@@ -86,7 +95,7 @@ impl MissedPosts {
     /// Reads the list again; a post missed since shows it again.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         let bardo = self.bardo.read(cx);
-        self.revision = bardo.jobs_revision();
+        self.failed_uploads = failed_uploads(bardo);
         self.posts = bardo.missed_posts().unwrap_or_else(|error| {
             tracing::warn!("could not read the missed posts: {error}");
             Vec::new()
@@ -100,9 +109,10 @@ impl MissedPosts {
         cx.notify();
     }
 
-    /// Reads the list again when a job moved: a post may have been missed.
+    /// Reads the list again when an upload job failed: its post may have
+    /// been missed.
     pub fn jobs_moved(&mut self, cx: &mut Context<Self>) {
-        if self.bardo.read(cx).jobs_revision() != self.revision {
+        if failed_uploads(self.bardo.read(cx)) != self.failed_uploads {
             self.reload(cx);
         }
     }

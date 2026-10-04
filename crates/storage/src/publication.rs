@@ -479,7 +479,9 @@ impl PublicationRepository for Database {
                 "UPDATE publication
                  SET upload_claimed_at = coalesce(upload_claimed_at, ?3)
                  WHERE id = ?1 AND upload_job = ?2
-                   AND upload_status IN ('queued', 'uploading', 'processing')
+                   AND (upload_status IN ('queued', 'uploading', 'processing')
+                        OR (upload_status = 'failed'
+                            AND coalesce(upload_failure, '') <> 'schedule_missed'))
                    AND upload_publish_at IS NOT NULL AND upload_publish_at <= ?3",
                 params![publication.id.to_string(), upload.job.to_string(), now],
             )
@@ -934,6 +936,18 @@ mod tests {
         now.upload_mut().unwrap().send_now().unwrap();
         db.save_publication(&now).unwrap();
         assert!(!db.claim_upload(&now, time(9000)).unwrap());
+    }
+
+    #[test]
+    fn an_upload_that_failed_on_the_way_is_claimed_when_tried_again() {
+        let (db, _, project) = setup();
+        let mut reel = due_reel(&db, &project);
+        reel.upload_mut()
+            .unwrap()
+            .fail(bardo_domain::UploadFailure::ReconnectNeeded)
+            .unwrap();
+        assert!(db.save_upload(&reel).unwrap());
+        assert!(db.claim_upload(&reel, time(1000)).unwrap());
     }
 
     #[test]

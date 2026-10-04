@@ -868,6 +868,18 @@ impl UploadHandler {
         failure
     }
 
+    /// Marks the scheduled upload missed: it waits for the user.
+    fn miss(&self, id: PublicationId, job: JobId, network: Network) -> JobFailure {
+        match self.update(id, job, |p| p.upload_mut().map_or(Ok(()), Upload::miss)) {
+            Ok(()) => tracing::info!(
+                network = network.code(),
+                "a scheduled upload missed its due time"
+            ),
+            Err(error) => tracing::warn!("could not mark the upload missed: {}", error.detail),
+        }
+        missed()
+    }
+
     fn send(
         &self,
         cx: &mut JobContext,
@@ -1113,6 +1125,9 @@ impl JobHandler for UploadHandler {
         // what its due time allows now. Nothing goes once it is missed.
         let due = publication.due();
         let mut claimed = upload.claimed_at.is_some();
+        // Missed after its claim: the cut-short run may have published it,
+        // so the run only asks the network what it has, and sends nothing.
+        let mut check_only = false;
         if let Some(due) = due {
             if upload.is_missed() {
                 return Err(missed());
@@ -1130,14 +1145,14 @@ impl JobHandler for UploadHandler {
                     claimed = true;
                 }
                 DueStep::Missed => {
-                    self.update(publication_id, job, |p| {
-                        p.upload_mut().map_or(Ok(()), Upload::miss)
-                    })?;
-                    tracing::info!(
-                        network = network.code(),
-                        "a scheduled upload missed its due time"
-                    );
-                    return Err(missed());
+                    let sent = cx
+                        .checkpoint()
+                        .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
+                        .is_some_and(|checkpoint| checkpoint.video.is_some());
+                    if upload.claimed_at.is_none() || !sent {
+                        return Err(self.miss(publication_id, job, network));
+                    }
+                    check_only = true;
                 }
             }
         }
@@ -1191,6 +1206,9 @@ impl JobHandler for UploadHandler {
             })?;
         }
 
+        if check_only && checkpoint.video.is_none() {
+            return Err(self.miss(publication_id, job, network));
+        }
         if checkpoint.video.is_none() {
             let project: VideoProjectId = id(&payload.project)?;
             if !self.render_unchanged(project, &payload)? {
@@ -1265,6 +1283,15 @@ impl JobHandler for UploadHandler {
             }
             let state = access_token(&self.connections, &account)
                 .and_then(|token| uploader.state(&token, &video));
+            // Not published by the cut-short run: the user decides.
+            if check_only
+                && matches!(
+                    state,
+                    Ok(VideoState::Processing | VideoState::Processed | VideoState::Expired)
+                )
+            {
+                return Err(self.miss(publication_id, job, network));
+            }
             let outcome = match state {
                 Ok(VideoState::Processing) => {
                     if polls >= uploader.processing_polls() || !cx.sleep(uploader.poll_delay(polls))

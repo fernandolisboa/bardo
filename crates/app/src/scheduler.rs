@@ -101,7 +101,11 @@ pub(crate) fn mark_missed(
             // resumed.
             continue;
         };
-        if due_step(due, upload.claimed_at, opened_at, opened_at) != DueStep::Missed {
+        // A run cut short after its claim may have published it: its job
+        // asks the network first (`UploadHandler`).
+        if upload.claimed_at.is_some()
+            || due_step(due, upload.claimed_at, opened_at, opened_at) != DueStep::Missed
+        {
             continue;
         }
         if upload.miss().is_err() {
@@ -164,10 +168,11 @@ impl Bardo {
     /// Sends a missed post now: its job resumes from what the network
     /// already has.
     pub fn send_missed_now(&self, id: PublicationId) -> Result<(), MissedPostError> {
-        let mut publication = self.missed(id)?;
+        let missed = self.missed(id)?;
+        let mut publication = missed.clone();
         let upload = publication.upload_mut().ok_or(MissedPostError::NotMissed)?;
         upload.send_now().map_err(|_| MissedPostError::NotMissed)?;
-        self.requeue_missed(publication, None)
+        self.requeue_missed(&missed, publication, None)
     }
 
     /// Gives a missed post a new due time, which must be ahead.
@@ -178,19 +183,21 @@ impl Bardo {
     ) -> Result<(), MissedPostError> {
         check_publish_time(due, SystemTime::now()).map_err(MissedPostError::Schedule)?;
         let due = crate::publications::whole_millis(due);
-        let mut publication = self.missed(id)?;
+        let missed = self.missed(id)?;
+        let mut publication = missed.clone();
         let upload = publication.upload_mut().ok_or(MissedPostError::NotMissed)?;
         upload
             .due_again(due)
             .map_err(|_| MissedPostError::NotMissed)?;
         let starts_at = Some(prepare_at(due)).filter(|at| *at > SystemTime::now());
-        self.requeue_missed(publication, starts_at)
+        self.requeue_missed(&missed, publication, starts_at)
     }
 
     /// Saves the post queued again and queues its job for `starts_at`. A
-    /// job that cannot be queued leaves the post missed.
+    /// job that cannot be queued leaves the post `missed`, as it was.
     fn requeue_missed(
         &self,
+        missed: &Publication,
         publication: Publication,
         starts_at: Option<SystemTime>,
     ) -> Result<(), MissedPostError> {
@@ -199,11 +206,7 @@ impl Bardo {
         };
         self.publications.save_publication(&publication)?;
         if let Err(error) = self.jobs.retry_at(job, starts_at) {
-            let mut back = publication;
-            if let Some(upload) = back.upload_mut()
-                && upload.miss().is_ok()
-                && let Err(error) = self.publications.save_publication(&back)
-            {
+            if let Err(error) = self.publications.save_publication(missed) {
                 tracing::warn!("could not mark the post missed again: {error}");
             }
             return Err(error.into());
@@ -229,7 +232,9 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
 
-    use bardo_domain::{Job, JobFailureKind, JobId, JobState, VideoState, Visibility};
+    use bardo_domain::{
+        Job, JobFailureKind, JobId, JobState, UploadErrorKind, VideoState, Visibility,
+    };
 
     use super::*;
     use crate::export::tests::Setup;
@@ -414,25 +419,52 @@ mod tests {
     }
 
     /// A Reel due now whose run claimed it and is publishing when Bardo
-    /// closes; Instagram took the post.
-    fn closed_while_publishing() -> (Setup, JobId) {
+    /// closes; whether Instagram took the post (`published`) is what it
+    /// answers next about the container.
+    fn closed_while_publishing(published: bool) -> (Setup, JobId) {
         let s = ready();
         s.h.reels.stall_publish.store(true, Ordering::SeqCst);
         let id = schedule(&s, SystemTime::now() + Duration::from_millis(300));
         wait_until("publishing", || s.h.reels.stalled.load(Ordering::SeqCst));
         assert!(upload(&s).upload().unwrap().claimed_at.is_some());
-        // The container is published: that is what Instagram answers next.
-        s.h.reels.answer(Ok(VideoState::Ready {
-            visibility: Visibility::Public,
-            publish_at: None,
-            published_at: None,
-        }));
+        if published {
+            s.h.reels.answer(Ok(VideoState::Ready {
+                visibility: Visibility::Public,
+                publish_at: None,
+                published_at: None,
+            }));
+        }
         (s, id)
+    }
+
+    /// Bardo stays closed past the grace after the claim.
+    fn opened_long_after_the_claim(s: &Setup) {
+        let mut publication = upload(s);
+        let upload_ = publication.upload_mut().unwrap();
+        upload_.publish_at = Some(whole_millis(SystemTime::now() - 30 * MINUTE));
+        upload_.claimed_at = Some(whole_millis(SystemTime::now() - 29 * MINUTE));
+        s.app.publications.save_publication(&publication).unwrap();
+    }
+
+    #[test]
+    fn a_reel_that_failed_at_its_due_time_goes_when_retried() {
+        let s = ready();
+        s.h.reels.publish_answer(Err(UploadErrorKind::SignedOut));
+        let id = schedule(&s, SystemTime::now() + Duration::from_millis(300));
+        let failed = wait_done(&s.app, id);
+        assert_eq!(failed.state(), JobState::Failed);
+        assert!(matches!(state(&s), UploadState::Failed { .. }));
+
+        s.app.resume_upload(id).unwrap();
+        done(&s.app, id);
+        assert_eq!(state(&s), UploadState::Published);
+        assert_eq!(s.h.reels.published.lock().unwrap().len(), 2);
+        assert_eq!(s.h.reels.files.lock().unwrap().len(), 1, "sent once");
     }
 
     #[test]
     fn a_due_reel_runs_exactly_once_when_bardo_restarts_during_it() {
-        let (s, id) = closed_while_publishing();
+        let (s, id) = closed_while_publishing(true);
         let s = s.restart();
         s.h.reels.stall_publish.store(false, Ordering::SeqCst);
         done(&s.app, id);
@@ -447,25 +479,49 @@ mod tests {
     }
 
     #[test]
-    fn a_run_cut_short_long_before_bardo_opens_again_waits_for_the_user() {
-        let (s, id) = closed_while_publishing();
-        // Bardo stays closed past the grace after the claim.
-        let mut publication = upload(&s);
-        let upload_ = publication.upload_mut().unwrap();
-        upload_.publish_at = Some(whole_millis(SystemTime::now() - 30 * MINUTE));
-        upload_.claimed_at = Some(whole_millis(SystemTime::now() - 29 * MINUTE));
-        s.app.publications.save_publication(&publication).unwrap();
+    fn a_run_cut_short_long_before_bardo_opens_again_records_what_instagram_published() {
+        let (s, id) = closed_while_publishing(true);
+        opened_long_after_the_claim(&s);
         let s = s.restart();
         s.h.reels.stall_publish.store(false, Ordering::SeqCst);
-        assert_eq!(s.app.missed_posts().unwrap().len(), 1);
-        assert_eq!(job(&s, id).state(), JobState::Cancelled);
-        std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(s.h.reels.published.lock().unwrap().len(), 1, "no more");
-
-        // Sent now, its run finds what Instagram already has.
-        s.app.send_missed_now(upload(&s).id).unwrap();
         done(&s.app, id);
         assert_eq!(state(&s), UploadState::Published);
         assert_eq!(s.h.reels.published.lock().unwrap().len(), 1, "not twice");
+        assert!(s.app.missed_posts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_run_cut_short_long_before_bardo_opens_again_waits_for_the_user() {
+        let (s, id) = closed_while_publishing(false);
+        opened_long_after_the_claim(&s);
+        let s = s.restart();
+        s.h.reels.stall_publish.store(false, Ordering::SeqCst);
+        let ended = wait_done(&s.app, id);
+        assert_eq!(ended.failure().unwrap().kind, JobFailureKind::Missed);
+        assert_eq!(s.app.missed_posts().unwrap().len(), 1);
+        assert_eq!(s.h.reels.published.lock().unwrap().len(), 1, "no more");
+
+        // Sent now, it goes once more.
+        s.app.send_missed_now(upload(&s).id).unwrap();
+        done(&s.app, id);
+        assert_eq!(state(&s), UploadState::Published);
+        assert_eq!(s.h.reels.published.lock().unwrap().len(), 2);
+        assert_eq!(s.h.reels.files.lock().unwrap().len(), 1, "sent once");
+    }
+
+    #[test]
+    fn a_missed_post_whose_job_cannot_be_queued_stays_missed() {
+        let (s, id, due) = missed_while_closed();
+        // Its job cannot be queued again (it ended as done).
+        let mut ended = job(&s, id);
+        ended.retry().unwrap();
+        ended.start(SystemTime::now()).unwrap();
+        ended.complete().unwrap();
+        bardo_domain::JobRepository::save(&*s.h.db, &ended).unwrap();
+        let s = s.restart();
+        let publication = upload(&s).id;
+        assert!(s.app.send_missed_now(publication).is_err());
+        assert_eq!(state(&s), UploadState::Missed(due));
+        assert_eq!(s.app.missed_posts().unwrap().len(), 1);
     }
 }

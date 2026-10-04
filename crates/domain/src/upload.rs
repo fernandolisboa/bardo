@@ -332,20 +332,23 @@ impl Upload {
     }
 
     /// The run due at its time takes the scheduled upload, once: it is
-    /// still to publish, due by `now`, and not taken yet. Taken already, it
-    /// stays as it was (the same run resumes).
+    /// still to publish (one that failed on the way is tried again, one
+    /// missed waits for the user), due by `now`, and not taken yet. Taken
+    /// already, it stays as it was (the same run resumes). The repository
+    /// applies the same rule in one statement
+    /// (`PublicationRepository::claim_upload`).
     pub fn claim(&mut self, now: SystemTime) -> Result<(), InvalidUploadTransition> {
         let due = self.publish_at.filter(|due| *due <= now);
-        match (&self.status, due) {
-            (
-                UploadStatus::Queued | UploadStatus::Uploading | UploadStatus::Processing,
-                Some(_),
-            ) => {
-                self.claimed_at.get_or_insert(now);
-                Ok(())
-            }
-            _ => Err(self.invalid("claim")),
+        let open = match &self.status {
+            UploadStatus::Queued | UploadStatus::Uploading | UploadStatus::Processing => true,
+            UploadStatus::Failed(failure) => *failure != UploadFailure::ScheduleMissed,
+            _ => false,
+        };
+        if !open || due.is_none() {
+            return Err(self.invalid("claim"));
         }
+        self.claimed_at.get_or_insert(now);
+        Ok(())
     }
 
     /// Its due time passed without it (`crate::due`): it waits for the user
@@ -885,6 +888,15 @@ mod tests {
         let mut done = scheduled(at(100));
         done.processed(Visibility::Public, None).unwrap();
         assert!(done.claim(at(200)).is_err(), "published");
+        // A run that failed on the way is retried and claims it; a missed
+        // one waits for the user.
+        let mut failed = Upload::scheduled(at(100), JobId::new());
+        failed.fail(UploadFailure::ReconnectNeeded).unwrap();
+        failed.claim(at(110)).unwrap();
+        failed.miss().unwrap();
+        let mut missed = failed.clone();
+        missed.claimed_at = None;
+        assert!(missed.claim(at(120)).is_err(), "missed");
     }
 
     #[test]
