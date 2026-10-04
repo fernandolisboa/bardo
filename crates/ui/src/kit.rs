@@ -144,27 +144,10 @@ pub fn well(cx: &App) -> Div {
 }
 
 /// An ⓘ button whose popover holds the how-it-works or billing text, so
-/// the screen keeps at most one sentence of explanation.
-pub fn info(id: impl Into<ElementId>, label: Option<SharedString>, text: SharedString) -> Popover {
-    let id = id.into();
-    let mut trigger = Button::new(id.clone())
-        .ghost()
-        .xsmall()
-        .icon(IconName::Info);
-    if let Some(label) = label {
-        trigger = trigger.label(label);
-    }
-    Popover::new(id).trigger(trigger).content(move |_, _, cx| {
-        div()
-            .max_w(px(360.))
-            .text_sm()
-            .text_color(look(cx).tokens.text)
-            .child(text.clone())
-    })
-}
-
-/// [`info`] whose popover ends with a link (the guide's "More in the
-/// guide"); a click closes the popover and runs `on_more`.
+/// the screen keeps at most one sentence of explanation, and ends with a
+/// link (the guide's "More in the guide"); a click closes the popover and
+/// runs `on_more`. Every ⓘ has that link (issue #111): screens draw one
+/// with `guide::info`, which names the guide section.
 pub fn info_more(
     id: impl Into<ElementId>,
     label: Option<SharedString>,

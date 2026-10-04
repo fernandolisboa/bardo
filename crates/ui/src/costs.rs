@@ -7,7 +7,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{BudgetLevel, Meter, Month, Provider};
-use bardo_app::{Bardo, CostsView, Destination, ProviderSpend, RateRow, SpendRow, Text};
+use bardo_app::{
+    Bardo, Control, CostsView, Destination, ProviderSpend, RateRow, SpendRow, Text, TourAnchor,
+};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::progress::Progress;
@@ -16,11 +18,12 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
-    relative,
+    AnyElement, App, ClickEvent, Entity, ScrollHandle, SharedString, Subscription, Task, Window,
+    div, px, relative,
 };
 
 use crate::appearance::look;
+use crate::guide;
 use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::layout;
@@ -76,6 +79,8 @@ pub struct CostsScreen {
     new_price: Entity<InputState>,
     add_error: Option<Text>,
     revision: u64,
+    /// The page's scroll, so a tour brings what it lights into view.
+    scroll: ScrollHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -121,6 +126,7 @@ impl CostsScreen {
             new_price,
             add_error: None,
             revision,
+            scroll: ScrollHandle::new(),
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -330,7 +336,7 @@ impl CostsScreen {
         let bardo = self.bardo.read(cx);
         let current = bardo.current_month();
         let month = self.month;
-        h_flex()
+        let switch = h_flex()
             .gap_1()
             .items_center()
             .child(
@@ -361,8 +367,8 @@ impl CostsScreen {
                             this.show_month(month.next(), cx)
                         })),
                 )
-            }))
-            .into_any_element()
+            }));
+        kit::anchor(TourAnchor::Control(Control::CostsMonth), switch).into_any_element()
     }
 
     /// The month in three figures: what was spent, the budgets in alert and
@@ -511,12 +517,13 @@ impl CostsScreen {
                             .child(SharedString::from(model)),
                     )
                     .children(add_price)
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "unpriced-info",
-                        None,
                         SharedString::from(
                             bardo.text_with(Text::CostsUnpriced, &[("models", &models)]),
                         ),
+                        guide::refs::COSTS_RATES,
                     ))
                     .into_any_element()
             }
@@ -567,7 +574,7 @@ impl CostsScreen {
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let heading = |text: Text| tr(bardo, text);
-        kit::card(cx)
+        let table = kit::card(cx)
             .overflow_hidden()
             .child(
                 columns(
@@ -576,10 +583,11 @@ impl CostsScreen {
                     div().child(heading(Text::CostsColumnSpent)),
                     div().child(heading(Text::CostsColumnBudget)),
                     div().child(heading(Text::CostsColumnState)),
-                    h_flex().child(kit::info(
+                    h_flex().child(guide::info(
+                        bardo,
                         "costs-providers-info",
-                        None,
                         tr(bardo, Text::CostsProvidersHint),
+                        guide::refs::COSTS_BUDGETS,
                     )),
                 )
                 .py_2()
@@ -587,8 +595,13 @@ impl CostsScreen {
                 .font_semibold()
                 .text_color(t.text2),
             )
-            .children(rows)
-            .into_any_element()
+            .children(rows);
+        kit::anchor_in(
+            TourAnchor::Control(Control::CostsBudgets),
+            table,
+            Some(&self.scroll),
+        )
+        .into_any_element()
     }
 
     fn budget_row(&self, spend: &ProviderSpend, cx: &mut Context<Self>) -> AnyElement {
@@ -814,19 +827,27 @@ impl CostsScreen {
                     bardo.money(row.amount),
                 ))
         });
+        // The aside scrolls apart from the page in Studio, so the tour does
+        // not scroll to these: they lead it.
         vec![
-            kit::card(cx)
-                .p_3()
-                .gap_1()
-                .child(section_title(cx, tr(bardo, Text::CostsChannelsTitle)))
-                .children(channels)
-                .into_any_element(),
-            kit::card(cx)
-                .p_3()
-                .gap_1()
-                .child(section_title(cx, tr(bardo, Text::CostsVideosTitle)))
-                .children(videos)
-                .into_any_element(),
+            kit::anchor(
+                TourAnchor::Control(Control::CostsChannels),
+                kit::card(cx)
+                    .p_3()
+                    .gap_1()
+                    .child(section_title(cx, tr(bardo, Text::CostsChannelsTitle)))
+                    .children(channels),
+            )
+            .into_any_element(),
+            kit::anchor(
+                TourAnchor::Control(Control::CostsVideos),
+                kit::card(cx)
+                    .p_3()
+                    .gap_1()
+                    .child(section_title(cx, tr(bardo, Text::CostsVideosTitle)))
+                    .children(videos),
+            )
+            .into_any_element(),
         ]
     }
 
@@ -839,17 +860,27 @@ impl CostsScreen {
             .map(|(ix, row)| self.render_rate(ix, row, cx))
             .collect();
         let bardo = self.bardo.read(cx);
-        v_flex()
+        let rates = v_flex()
             .gap_2()
             .child(
                 h_flex()
                     .gap_1()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child(kit::info("rates-info", None, tr(bardo, Text::RatesHint))),
+                    .child(guide::info(
+                        bardo,
+                        "rates-info",
+                        tr(bardo, Text::RatesHint),
+                        guide::refs::COSTS_RATES,
+                    )),
             )
             .child(kit::card(cx).children(rows))
-            .child(self.render_add_rate(cx))
+            .child(self.render_add_rate(cx));
+        kit::anchor_in(
+            TourAnchor::Control(Control::CostsRates),
+            rates,
+            Some(&self.scroll),
+        )
     }
 
     fn render_rate(&self, ix: usize, row: &RateRow, cx: &mut Context<Self>) -> AnyElement {
@@ -1186,8 +1217,21 @@ impl Render for CostsScreen {
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Costs);
         header.trail = vec![tr(bardo, Text::CostsOverview).into_any_element()];
-        header.info =
-            Some(kit::info("costs-info", None, tr(bardo, Text::CostsHint)).into_any_element());
+        let info = guide::info(
+            bardo,
+            "costs-info",
+            tr(bardo, Text::CostsHint),
+            guide::refs::COSTS_MONTH,
+        );
+        // Costs always shows its providers and rates, so its tour is always
+        // offered.
+        header.info = guide::header_info(
+            bardo,
+            Destination::Costs,
+            true,
+            Some(info.into_any_element()),
+            cx,
+        );
         header.actions = vec![month];
         let mut parts = ScreenParts::new(header);
         parts.summary = summary;
@@ -1218,6 +1262,7 @@ impl Render for CostsScreen {
                 }))
                 .collect();
         parts.aside = aside;
+        parts.scroll = Some(self.scroll.clone());
         layout::screen(parts, cx)
     }
 }

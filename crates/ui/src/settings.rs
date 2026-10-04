@@ -685,7 +685,15 @@ impl SettingsScreen {
             .into_any_element()
     }
 
-    fn render_card(&self, status: ProviderKeyStatus, cx: &mut Context<Self>) -> impl IntoElement {
+    /// A provider's card. The tour lights the first card and its state
+    /// (`first`), and the first Test key (`first_test`).
+    fn render_card(
+        &self,
+        status: ProviderKeyStatus,
+        first: bool,
+        first_test: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let tokens = look(cx).tokens;
         let provider = status.provider;
@@ -706,6 +714,12 @@ impl SettingsScreen {
                 cx,
             ),
             KeyState::Unreadable => kit::status(Tone::Danger, tr(bardo, Text::KeyUnreadable), cx),
+        };
+        let scroll = Some(&self.scroll);
+        let state = if first {
+            kit::anchor_in(TourAnchor::Control(Control::KeyState), state, scroll).into_any_element()
+        } else {
+            state.into_any_element()
         };
 
         let check = status.last_check.filter(|_| !testing).map(|check| {
@@ -756,7 +770,7 @@ impl SettingsScreen {
             save.primary()
         };
 
-        kit::card(cx)
+        let card = kit::card(cx)
             .p_4()
             .gap_2()
             .child(
@@ -787,17 +801,24 @@ impl SettingsScreen {
                     .child(save)
                     // Hidden, not disabled, until there is a key to act on.
                     .when(saved, |actions| {
-                        actions.child(
-                            Button::new(("test-key", provider as usize))
-                                .outline()
-                                .label(tr(bardo, test_label))
-                                .loading(testing)
-                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                    if this.rows[&provider].testing.is_none() {
-                                        this.test(provider, cx)
-                                    }
-                                })),
-                        )
+                        let test = Button::new(("test-key", provider as usize))
+                            .outline()
+                            .label(tr(bardo, test_label))
+                            .loading(testing)
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                if this.rows[&provider].testing.is_none() {
+                                    this.test(provider, cx)
+                                }
+                            }));
+                        if first_test {
+                            actions.child(kit::anchor_in(
+                                TourAnchor::Control(Control::KeyTest),
+                                test,
+                                scroll,
+                            ))
+                        } else {
+                            actions.child(test)
+                        }
                     })
                     .when(status.state != KeyState::NotSet, |actions| {
                         actions.child(
@@ -811,25 +832,42 @@ impl SettingsScreen {
                     }),
             )
             .children(error)
-            .children(check)
+            .children(check);
+        if first {
+            kit::anchor_in(TourAnchor::Control(Control::KeyCard), card, scroll).into_any_element()
+        } else {
+            card.into_any_element()
+        }
     }
 
     fn render_keys(&self, cx: &mut Context<Self>) -> AnyElement {
         let statuses = self.bardo.read(cx).provider_keys();
+        let first_saved = statuses
+            .iter()
+            .position(|status| matches!(status.state, KeyState::Saved { .. }));
         let cards: Vec<_> = statuses
             .into_iter()
-            .map(|status| self.render_card(status, cx).into_any_element())
+            .enumerate()
+            .map(|(index, status)| {
+                self.render_card(status, index == 0, Some(index) == first_saved, cx)
+            })
             .collect();
         let bardo = self.bardo.read(cx);
         v_flex()
             .gap_3()
-            .child(
-                kit::section_heading(tr(bardo, Text::ProviderKeysTitle)).child(kit::info(
-                    "provider-keys-info",
-                    Some(tr(bardo, Text::ProviderKeysInfo)),
-                    tr(bardo, Text::ProviderKeysHint),
-                )),
-            )
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::KeysKept),
+                kit::section_heading(tr(bardo, Text::ProviderKeysTitle)).child(
+                    guide::labeled_info(
+                        bardo,
+                        "provider-keys-info",
+                        Some(tr(bardo, Text::ProviderKeysInfo)),
+                        tr(bardo, Text::ProviderKeysHint),
+                        guide::refs::KEYS_KEPT,
+                    ),
+                ),
+                Some(&self.scroll),
+            ))
             .children(cards)
             .into_any_element()
     }
@@ -954,37 +992,56 @@ impl SettingsScreen {
                 }
             }));
 
-        v_flex()
-            .gap_3()
-            .children(
-                self.appearance_error
-                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
-            )
-            .child(
-                kit::section_heading(tr(bardo, Text::AppearanceLayout)).child(kit::info(
-                    "layout-info",
-                    None,
-                    tr(bardo, Text::AppearanceLayoutHint),
-                )),
-            )
-            .child(
+        // Each part the tour lights, in the page's scroll.
+        let scroll = Some(&self.scroll);
+        let part = |anchor: TourAnchor, children: Vec<AnyElement>| {
+            kit::anchor_in(anchor, v_flex().gap_3().children(children), scroll)
+        };
+        let layout_part = part(
+            TourAnchor::Control(Control::AppearanceLayout),
+            vec![
+                kit::section_heading(tr(bardo, Text::AppearanceLayout))
+                    .child(guide::info(
+                        bardo,
+                        "layout-info",
+                        tr(bardo, Text::AppearanceLayoutHint),
+                        guide::refs::SETTINGS_LAYOUT,
+                    ))
+                    .into_any_element(),
                 h_flex()
                     .flex_wrap()
                     .items_stretch()
                     .gap_3()
-                    .children(layouts),
-            )
-            .child(div().h_2())
-            .child(kit::section_heading(tr(bardo, Text::AppearanceTheme)))
-            .child(follow)
-            .child(always)
-            .child(h_flex().flex_wrap().gap_3().children(cards))
-            .child(div().h_2())
-            .child(kit::section_heading(tr(bardo, Text::UiLanguageLabel)))
-            .child(h_flex().child(language_switch))
-            .child(div().h_2())
-            .child(kit::section_heading(tr(bardo, Text::ToursSettingTitle)))
-            .child(
+                    .children(layouts)
+                    .into_any_element(),
+            ],
+        );
+        let follow_part = part(
+            TourAnchor::Control(Control::AppearanceFollow),
+            vec![follow.into_any_element()],
+        );
+        let theme_part = part(
+            TourAnchor::Control(Control::AppearanceTheme),
+            vec![
+                always.into_any_element(),
+                h_flex()
+                    .flex_wrap()
+                    .gap_3()
+                    .children(cards)
+                    .into_any_element(),
+            ],
+        );
+        let language_part = part(
+            TourAnchor::Control(Control::AppearanceLanguage),
+            vec![
+                kit::section_heading(tr(bardo, Text::UiLanguageLabel)).into_any_element(),
+                h_flex().child(language_switch).into_any_element(),
+            ],
+        );
+        let tours_part = part(
+            TourAnchor::Control(Control::AppearanceTours),
+            vec![
+                kit::section_heading(tr(bardo, Text::ToursSettingTitle)).into_any_element(),
                 h_flex()
                     .gap_1()
                     .items_center()
@@ -996,12 +1053,31 @@ impl SettingsScreen {
                                 this.set_offer_tours(*checked, cx);
                             })),
                     )
-                    .child(kit::info(
+                    .child(guide::info(
+                        bardo,
                         "offer-screen-tours-info",
-                        None,
                         tr(bardo, Text::ToursSettingHint),
-                    )),
+                        guide::refs::SETTINGS_TOURS,
+                    ))
+                    .into_any_element(),
+            ],
+        );
+
+        v_flex()
+            .gap_3()
+            .children(
+                self.appearance_error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
+            .child(layout_part)
+            .child(div().h_2())
+            .child(kit::section_heading(tr(bardo, Text::AppearanceTheme)))
+            .child(follow_part)
+            .child(theme_part)
+            .child(div().h_2())
+            .child(language_part)
+            .child(div().h_2())
+            .child(tours_part)
             .into_any_element()
     }
 
@@ -1013,24 +1089,29 @@ impl SettingsScreen {
                 self.metrics_error
                     .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
-            .child(kit::field(
-                tr(bardo, Text::MetricsSettingLabel),
-                Some(kit::info(
-                    "metrics-sync-info",
-                    None,
-                    tr(bardo, Text::MetricsSettingHint),
-                )),
-                div()
-                    .w(px(280.))
-                    .child(Select::new(&self.metrics_sync).small())
-                    .into_any_element(),
-                Some(
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::MetricsSync),
+                kit::field(
+                    tr(bardo, Text::MetricsSettingLabel),
+                    Some(guide::info(
+                        bardo,
+                        "metrics-sync-info",
+                        tr(bardo, Text::MetricsSettingHint),
+                        guide::refs::METRICS_ON_START,
+                    )),
                     div()
-                        .text_xs()
-                        .text_color(look(cx).tokens.text2)
-                        .child(tr(bardo, Text::MetricsSyncHint))
+                        .w(px(280.))
+                        .child(Select::new(&self.metrics_sync).small())
                         .into_any_element(),
+                    Some(
+                        div()
+                            .text_xs()
+                            .text_color(look(cx).tokens.text2)
+                            .child(tr(bardo, Text::MetricsSyncHint))
+                            .into_any_element(),
+                    ),
                 ),
+                Some(&self.scroll),
             ))
             .into_any_element()
     }

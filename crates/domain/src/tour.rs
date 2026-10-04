@@ -49,10 +49,20 @@ pub enum TourId {
     Publish,
     /// The missed posts list's tour.
     Missed,
+    /// The Costs screen's tour: the month, budgets and rates.
+    Costs,
+    /// The Jobs panel's tour.
+    Jobs,
+    /// The tour of Settings › API keys.
+    Keys,
+    /// The tour of Settings › Appearance.
+    Appearance,
+    /// The tour of Settings › Metrics: when metrics sync by themselves.
+    MetricsSync,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 19] = [
+    pub const ALL: [TourId; 24] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -72,6 +82,11 @@ impl TourId {
         TourId::Networks,
         TourId::Publish,
         TourId::Missed,
+        TourId::Costs,
+        TourId::Jobs,
+        TourId::Keys,
+        TourId::Appearance,
+        TourId::MetricsSync,
     ];
 
     pub fn code(self) -> &'static str {
@@ -95,6 +110,11 @@ impl TourId {
             TourId::Networks => "networks",
             TourId::Publish => "publish",
             TourId::Missed => "missed",
+            TourId::Costs => "costs",
+            TourId::Jobs => "jobs",
+            TourId::Keys => "keys",
+            TourId::Appearance => "appearance",
+            TourId::MetricsSync => "metrics-sync",
         }
     }
 

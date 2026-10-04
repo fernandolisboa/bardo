@@ -17,6 +17,8 @@
 //! "Tour this stage", under the same rules. So does a Settings tab
 //! (issue #110, Networks), and the missed posts list carries its own: the
 //! one tour that runs over the list, which every other tour waits behind.
+//! Since issue #111 every place has one: Costs, the Jobs panel and each
+//! Settings tab included.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -211,6 +213,45 @@ pub enum Control {
     MissedCancel,
     /// Missed posts: Decide later.
     MissedLater,
+    /// Costs: the month shown and the arrows that change it.
+    CostsMonth,
+    /// Costs: each paid provider's month against its budget.
+    CostsBudgets,
+    /// Costs: the rate table that prices each model.
+    CostsRates,
+    /// Costs: spend by channel.
+    CostsChannels,
+    /// Costs: the videos that cost the most.
+    CostsVideos,
+    /// Jobs: the panel and its groups.
+    JobsPanel,
+    /// Jobs: the first job's progress bar.
+    JobProgress,
+    /// Jobs: the first Cancel.
+    JobCancel,
+    /// Jobs: the first Retry.
+    JobRetry,
+    /// Settings › API keys: where the keys are kept.
+    KeysKept,
+    /// Settings › API keys: the first provider's card.
+    KeyCard,
+    /// Settings › API keys: whether the first provider's key is saved, by
+    /// its last characters.
+    KeyState,
+    /// Settings › API keys: the first Test key.
+    KeyTest,
+    /// Settings › Appearance: the layouts.
+    AppearanceLayout,
+    /// Settings › Appearance: the interface themes.
+    AppearanceTheme,
+    /// Settings › Appearance: following Windows' light or dark mode.
+    AppearanceFollow,
+    /// Settings › Appearance: the interface language.
+    AppearanceLanguage,
+    /// Settings › Appearance: "Offer tours on new screens".
+    AppearanceTours,
+    /// Settings › Metrics: when metrics sync on start.
+    MetricsSync,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -353,10 +394,8 @@ pub const WELCOME: Tour = Tour {
             .learn("first-video", "publish"),
         TourStep::at("settings", TourAnchor::NavPlace(Destination::Settings))
             .learn("api-keys", "providers"),
-        TourStep::at("jobs", TourAnchor::NavPlace(Destination::Jobs))
-            .learn("what-bardo-is", "around"),
-        TourStep::at("costs", TourAnchor::NavPlace(Destination::Costs))
-            .learn("api-keys", "budgets"),
+        TourStep::at("jobs", TourAnchor::NavPlace(Destination::Jobs)).learn("jobs", "panel"),
+        TourStep::at("costs", TourAnchor::NavPlace(Destination::Costs)).learn("costs", "budgets"),
         TourStep::at("guide", TourAnchor::NavPlace(Destination::Guide)).learn("shortcuts", "guide"),
     ],
 };
@@ -903,9 +942,160 @@ pub const MISSED: Tour = {
     }
 };
 
+/// Costs: the month, what it spent, the budgets and their alerts, the
+/// rates and the models without one, and where the money went.
+pub const COSTS: Tour = {
+    const AT: Destination = Destination::Costs;
+    const PAGE: &str = "costs";
+    // The tab not shown (Workspace shows one at a time): its figure up top.
+    const FIGURE: WhenMissing = WhenMissing::LightPart(TourAnchor::Summary);
+    Tour {
+        id: TourId::Costs,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "month", control(Control::CostsMonth)).learn(PAGE, "month"),
+            on(AT, "spent", TourAnchor::Summary).learn(PAGE, "spent"),
+            on(AT, "budgets", control(Control::CostsBudgets))
+                .missing(FIGURE)
+                .learn(PAGE, "budgets"),
+            on(AT, "rates", control(Control::CostsRates))
+                .missing(FIGURE)
+                .learn(PAGE, "rates"),
+            // A month with no spend: the card says it in the middle.
+            on(AT, "channels", control(Control::CostsChannels)).learn(PAGE, "channels"),
+            on(AT, "videos", control(Control::CostsVideos))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "videos"),
+        ],
+    }
+};
+
+/// Jobs: the panel beside any screen, a job's progress, cancelling,
+/// retrying, and picking up after Bardo closes. Its steps only explain:
+/// nothing is cancelled or retried.
+pub const JOBS: Tour = {
+    const AT: Destination = Destination::Jobs;
+    const PAGE: &str = "jobs";
+    const PANEL: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::JobsPanel));
+    Tour {
+        id: TourId::Jobs,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "panel", control(Control::JobsPanel)).learn(PAGE, "panel"),
+            on(AT, "progress", control(Control::JobProgress))
+                .missing(PANEL)
+                .learn(PAGE, "progress"),
+            on(AT, "cancel", control(Control::JobCancel))
+                .missing(PANEL)
+                .learn(PAGE, "cancel"),
+            on(AT, "retry", control(Control::JobRetry))
+                .missing(PANEL)
+                .learn(PAGE, "retry"),
+            on(AT, "restart", control(Control::JobsPanel)).learn(PAGE, "restart"),
+        ],
+    }
+};
+
+/// Settings › API keys: one key per provider, testing it, where it is
+/// kept, and what of it shows.
+pub const KEYS: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Keys);
+    const PAGE: &str = "api-keys";
+    const CARD: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::KeyCard));
+    Tour {
+        id: TourId::Keys,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("tab", TourAnchor::Toolbar)
+                .on(AT)
+                .learn(PAGE, "providers"),
+            TourStep::at("card", control(Control::KeyCard))
+                .on(AT)
+                .missing(WhenMissing::LightPart(TourAnchor::Content))
+                .learn(PAGE, "providers"),
+            TourStep::at("test", control(Control::KeyTest))
+                .on(AT)
+                .missing(CARD)
+                .learn(PAGE, "testing"),
+            TourStep::at("kept", control(Control::KeysKept))
+                .on(AT)
+                .missing(CARD)
+                .learn(PAGE, "where-kept"),
+            TourStep::at("masked", control(Control::KeyState))
+                .on(AT)
+                .missing(CARD)
+                .learn(PAGE, "masked"),
+        ],
+    }
+};
+
+/// Settings › Appearance: the layout, the theme or following Windows, the
+/// interface language, and the "new" mark on screens' tours.
+pub const APPEARANCE: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Appearance);
+    const PAGE: &str = "settings";
+    const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Appearance,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("tab", TourAnchor::Toolbar)
+                .on(AT)
+                .learn(PAGE, "tabs"),
+            TourStep::at("layout", control(Control::AppearanceLayout))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "layout"),
+            TourStep::at("theme", control(Control::AppearanceTheme))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "theme"),
+            TourStep::at("follow", control(Control::AppearanceFollow))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "follow"),
+            TourStep::at("language", control(Control::AppearanceLanguage))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "language"),
+            TourStep::at("tours", control(Control::AppearanceTours))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "tours"),
+        ],
+    }
+};
+
+/// Settings › Metrics: syncing on start, and where the numbers show.
+pub const METRICS_SYNC: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Metrics);
+    const PAGE: &str = "metrics-sync";
+    Tour {
+        id: TourId::MetricsSync,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("tab", TourAnchor::Toolbar)
+                .on(AT)
+                .learn(PAGE, "what"),
+            TourStep::at("on-start", control(Control::MetricsSync))
+                .on(AT)
+                .missing(WhenMissing::LightPart(TourAnchor::Content))
+                .learn(PAGE, "on-start"),
+            TourStep::at("where", TourAnchor::NavPlace(Destination::Performance))
+                .on(AT)
+                .learn(PAGE, "where"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 19] = [
+    pub const ALL: [&'static Tour; 24] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -925,6 +1115,11 @@ impl Tour {
         &NETWORKS,
         &PUBLISH,
         &MISSED,
+        &COSTS,
+        &JOBS,
+        &KEYS,
+        &APPEARANCE,
+        &METRICS_SYNC,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -948,6 +1143,11 @@ impl Tour {
             TourId::Networks => &NETWORKS,
             TourId::Publish => &PUBLISH,
             TourId::Missed => &MISSED,
+            TourId::Costs => &COSTS,
+            TourId::Jobs => &JOBS,
+            TourId::Keys => &KEYS,
+            TourId::Appearance => &APPEARANCE,
+            TourId::MetricsSync => &METRICS_SYNC,
         }
     }
 
@@ -1973,6 +2173,8 @@ mod tests {
             (Destination::Templates, TourId::Templates),
             (Destination::Channels, TourId::Channels),
             (Destination::Accounts, TourId::Accounts),
+            (Destination::Costs, TourId::Costs),
+            (Destination::Jobs, TourId::Jobs),
         ];
         for (screen, tour) in screens {
             assert_eq!(Tour::of_screen(screen).map(|t| t.id), Some(tour));
@@ -1989,16 +2191,15 @@ mod tests {
         for (stage, tour) in stages {
             assert_eq!(Tour::of(TourPlace::Stage(stage)).map(|t| t.id), Some(tour));
         }
-        assert_eq!(Tour::of_screen(Destination::Costs), None, "not yet");
-        assert_eq!(
-            Tour::of(TourPlace::Settings(SettingsTab::Networks)).map(|t| t.id),
-            Some(TourId::Networks)
-        );
-        assert_eq!(
-            Tour::of(TourPlace::Settings(SettingsTab::Keys)),
-            None,
-            "not yet"
-        );
+        let tabs = [
+            (SettingsTab::Keys, TourId::Keys),
+            (SettingsTab::Networks, TourId::Networks),
+            (SettingsTab::Appearance, TourId::Appearance),
+            (SettingsTab::Metrics, TourId::MetricsSync),
+        ];
+        for (tab, tour) in tabs {
+            assert_eq!(Tour::of(TourPlace::Settings(tab)).map(|t| t.id), Some(tour));
+        }
         assert_eq!(
             Tour::of(TourPlace::Missed).map(|t| t.id),
             Some(TourId::Missed)
@@ -2164,7 +2365,8 @@ mod tests {
     fn a_screen_with_nothing_to_show_offers_no_tour() {
         let app = start(&FakeProgress::default());
         assert_eq!(app.screen_tour(Destination::Research, false), None);
-        assert_eq!(app.screen_tour(Destination::Costs, true), None, "no tour");
+        assert_eq!(app.screen_tour(Destination::Jobs, false), None, "no jobs");
+        assert_eq!(app.screen_tour(Destination::Guide, true), None, "no tour");
     }
 
     #[test]
@@ -2327,10 +2529,6 @@ mod tests {
             Some(TourId::Networks)
         );
         assert_eq!(
-            app.place_tour(TourPlace::Settings(SettingsTab::Appearance), true),
-            None
-        );
-        assert_eq!(
             app.start_tour(TourId::Networks, Destination::Projects, false),
             Ok(TourMove::Show(Some(networks)))
         );
@@ -2348,6 +2546,64 @@ mod tests {
         // The review is closed: its "When" row gives way to the upload.
         run.next();
         assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
+    }
+
+    #[test]
+    fn every_settings_tab_offers_its_own_tour() {
+        let app = start(&FakeProgress::default());
+        for tab in SettingsTab::ALL {
+            let offered = app
+                .place_tour(TourPlace::Settings(tab), true)
+                .unwrap_or_else(|| panic!("{tab:?} offers no tour"));
+            assert_eq!(
+                Tour::get(offered.tour).place,
+                Some(TourPlace::Settings(tab))
+            );
+            assert!(offered.new);
+        }
+    }
+
+    #[test]
+    fn the_costs_tour_lights_the_figure_of_a_tab_not_shown() {
+        // Workspace shows the budgets or the rates, one at a time.
+        let mut run = TourRun::new(&COSTS, 2, Destination::Projects);
+        let shown = |anchor| anchor == TourAnchor::Summary;
+        assert_eq!(run.spot(shown), Spot::Lit(TourAnchor::Summary));
+        run.next();
+        assert_eq!(run.spot(shown), Spot::Lit(TourAnchor::Summary));
+        // A month without spend: no channels, no videos.
+        run.next();
+        assert_eq!(run.spot(shown), Spot::Center);
+        run.next();
+        assert_eq!(run.spot(shown), Spot::Skip);
+        assert_eq!(run.step_over(), None, "the last step: done");
+    }
+
+    #[test]
+    fn the_jobs_tour_lights_the_panel_without_jobs_to_show() {
+        let mut app = start(&FakeProgress::default());
+        assert_eq!(
+            app.start_tour(TourId::Jobs, Destination::Themes, false),
+            Ok(TourMove::Show(Some(TourPlace::Screen(Destination::Jobs))))
+        );
+        let panel = control(Control::JobsPanel);
+        let only_the_panel = |anchor| anchor == panel;
+        for _ in 0..JOBS.len() {
+            assert_eq!(app.tour_spot(only_the_panel), Some(Spot::Lit(panel)));
+            app.tour_next();
+        }
+        assert_eq!(app.tour_step(false), None, "finished");
+    }
+
+    #[test]
+    fn the_keys_tour_lights_the_first_card_before_any_key_is_saved() {
+        let mut run = TourRun::new(&KEYS, 2, Destination::Projects);
+        let card = control(Control::KeyCard);
+        // No key saved: no Test key to light.
+        assert_eq!(run.spot(|anchor| anchor == card), Spot::Lit(card));
+        run.next();
+        run.next();
+        assert_eq!(run.spot(|anchor| anchor == card), Spot::Lit(card));
     }
 
     #[test]

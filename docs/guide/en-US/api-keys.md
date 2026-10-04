@@ -3,11 +3,12 @@ id: api-keys
 title: Your API keys
 group: getting-started
 place: settings/keys
+tour: keys
 ---
 
 # Your API keys
 
-Bardo has no AI of its own and no account to sign up for. It works with your accounts at each provider, through API keys you create there and save once in [Settings › API keys](bardo:go/settings/keys). You pay each provider directly, at its own prices.
+Bardo has no AI of its own and no account to sign up for. It works with your accounts at each provider, through API keys you create there and save once in [Settings › API keys](bardo:go/settings/keys). You pay each provider directly, at its own prices. [Show me the tab](bardo:tour/keys).
 
 <a id="providers"></a>
 ## Which provider does what
@@ -24,9 +25,14 @@ You do not need every key on day one. A screen that needs a missing key says so.
 <a id="where-kept"></a>
 ## Where your keys are kept
 
-Keys are kept in Windows Credential Manager, under your Windows account, never in Bardo's database. Wherever text leaves the app (logs, error messages, the screen) a key is masked, and Settings shows only its last characters.
+Keys are kept in Windows Credential Manager, under your Windows account, never in Bardo's database. See [Where your data and keys live](data-and-keys.md#credentials).
 
 Removing a key in Settings deletes it from Credential Manager. To stop a key for good, also revoke it in the provider's own dashboard.
+
+<a id="masked"></a>
+## What Bardo shows of a key
+
+Once saved, a key never shows again: its card says **Key saved, ending in** its last four characters, so you can tell which key it is. Wherever text leaves the app (the log, error messages, the screen) a saved key is masked, even inside a provider's own message. To change a key, paste the new one and **Replace key**.
 
 <a id="testing"></a>
 ## Testing a key
@@ -38,4 +44,4 @@ Removing a key in Settings deletes it from Credential Manager. To stop a key for
 
 Every generation records what it cost, as the provider reported it, or estimated from the provider's published rate. [Costs](bardo:go/costs) shows what you spent this month, by provider, by channel and by video.
 
-Set a monthly **budget** per provider on the Costs screen. At 80% the navigation warns you, and once a budget is reached, each new job for that provider asks before it starts. Nothing is ever cut off midway.
+Set a monthly **budget** per provider on the Costs screen. From 80% a generation's estimate warns you, and once a budget is reached, each new job for that provider asks before it starts. Nothing is ever cut off midway. See [Costs and budgets](costs.md#budgets).

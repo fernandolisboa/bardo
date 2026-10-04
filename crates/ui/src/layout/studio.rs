@@ -13,10 +13,11 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, Stateful, div, px, relative};
 
 use crate::appearance::look;
+use crate::guide;
 use crate::icons;
 use crate::kit;
 use crate::parts::{
-    Collection, CollectionKind, Figure, Header, Inspector, NavItem, Navigation, OnPick,
+    Collection, CollectionKind, Figure, Header, Inspector, KeysHint, NavItem, Navigation, OnPick,
     ScreenParts, Sections, StageItem, Stages, Tile,
 };
 use crate::tour::Anchored as _;
@@ -930,7 +931,7 @@ fn table(collection: Collection, after: Vec<AnyElement>, cx: &App) -> AnyElement
 
 /// The selected item in three columns: its properties, its picture (or
 /// what to review), and its provenance.
-fn panel(inspector: Inspector, hint: Option<gpui_kit::SharedString>, cx: &App) -> AnyElement {
+fn panel(inspector: Inspector, hint: Option<KeysHint>, cx: &App) -> AnyElement {
     let t = &look(cx).tokens;
     let Inspector {
         title,
@@ -972,7 +973,7 @@ fn panel(inspector: Inspector, hint: Option<gpui_kit::SharedString>, cx: &App) -
                 .gap_2()
                 .items_center()
                 .child(div().flex_1().min_w_0().children(title))
-                .children(hint.map(|hint| kit::info("table-keys", None, hint))),
+                .children(hint.map(|hint| guide::keys_info("table-keys", hint))),
         )
         .child(
             h_flex()

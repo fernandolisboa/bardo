@@ -1958,6 +1958,7 @@ new = "New"
 learn_more = "Learn more"
 this_screen = "Tour this screen"
 this_list = "Tour this list"
+this_panel = "Tour this panel"
 this_stage = "Tour this stage"
 
 [tour.offer]
@@ -2451,6 +2452,122 @@ body = "Nothing goes to the network. To post it later, review the upload again a
 [tour.missed.later]
 title = "Decide later"
 body = "Closes the list for now. Each post also waits on its project's Publish stage, with the same three choices."
+
+
+[tour.costs]
+name = "Costs tour"
+
+[tour.costs.month]
+title = "The month"
+body = "Costs shows one month at a time, this one first. The arrows go back a month and forward again; months follow UTC, the way providers bill."
+
+[tour.costs.spent]
+title = "What the month spent"
+body = "What the month spent across your providers, how many budgets are near or past their limit, and how many models ran without a price."
+
+[tour.costs.budgets]
+title = "Budgets"
+body = "Set a monthly budget per paid provider. From 80% a generation's estimate warns you; once a budget would be reached, Bardo asks before starting, and never cuts off a job midway."
+
+[tour.costs.rates]
+title = "Rates"
+body = "When a provider doesn't say what a call cost, Bardo prices it from the rates: change one, restore Bardo's own, or add a model. A model with no rate counts as nothing until you add one."
+
+[tour.costs.channels]
+title = "Spend by channel"
+body = "What each channel's videos cost this month. A month with no spend says so here."
+
+[tour.costs.videos]
+title = "The most expensive videos"
+body = "The video projects that cost the most this month, with their channel."
+
+[tour.jobs]
+name = "Jobs tour"
+
+[tour.jobs.panel]
+title = "The Jobs panel"
+body = "Long work runs as a job while you keep working. This panel opens beside any screen and groups the jobs: running, queued, failed and finished."
+
+[tour.jobs.progress]
+title = "Progress"
+body = "A running job shows its progress. Its screen shows the result when it finishes, so there is no need to watch here."
+
+[tour.jobs.cancel]
+title = "Cancel"
+body = "Cancel stops a running or queued job and keeps what it made for a retry. Calls a provider already answered are paid."
+
+[tour.jobs.retry]
+title = "Retry"
+body = "A passing failure, like a timeout, is retried by itself up to four times. A lasting one stops the job: fix what it says, then Retry goes on from where it stopped."
+
+[tour.jobs.restart]
+title = "Closing Bardo mid-job"
+body = "Close Bardo whenever you like: next time it opens, each job picks up from its last saved point, and work a provider already did is not paid twice."
+
+[tour.keys]
+name = "API keys tour"
+
+[tour.keys.tab]
+title = "API keys"
+body = "Bardo works with your own account at each AI provider, one key per provider. You pay each one directly, at its own prices."
+
+[tour.keys.card]
+title = "One key per provider"
+body = "Each card says what the provider does for you. Paste the key you created on its site and save; a screen that needs a missing key says so."
+
+[tour.keys.test]
+title = "Test key"
+body = "Once a key is saved, Test key makes the cheapest call that needs it and says whether it works, or what is wrong: a rejected key, a missing permission or a used-up quota."
+
+[tour.keys.kept]
+title = "Where keys are kept"
+body = "Keys go to Windows Credential Manager under your Windows account, never to Bardo's database or logs."
+
+[tour.keys.masked]
+title = "Only the last characters"
+body = "A saved key never shows again: the card shows its last four characters, and anywhere text leaves Bardo the key is masked. Replace key swaps it for a new one."
+
+[tour.appearance]
+name = "Appearance tour"
+
+[tour.appearance.tab]
+title = "Appearance"
+body = "How Bardo looks and speaks, saved for your profile as soon as you change it."
+
+[tour.appearance.layout]
+title = "Layout"
+body = "Workspace has a sidebar by pillar and cards; Studio is denser, with top tabs and tables. Every screen does the same things in both, and switching keeps your place."
+
+[tour.appearance.theme]
+title = "Themes"
+body = "Ten themes: light, dark, high contrast and terminal. Each card says the text contrast it meets."
+
+[tour.appearance.follow]
+title = "Follow Windows"
+body = "Switches between a light and a dark theme of your choice when Windows switches modes. Always the same theme keeps the one you click."
+
+[tour.appearance.language]
+title = "Interface language"
+body = "Bardo's own words, this guide included, in English or Portuguese. What Claude writes follows each channel's language instead."
+
+[tour.appearance.tours]
+title = "Tours on new screens"
+body = "Marks a screen's Tour this screen as New until you take or skip its tour. Tours never start on their own."
+
+[tour.metrics-sync]
+name = "Metrics tour"
+
+[tour.metrics-sync.tab]
+title = "Metrics"
+body = "Bardo reads your posts' numbers from each network as a sync: YouTube's public numbers with your Data API key, the rest through connected accounts."
+
+[tour.metrics-sync.on-start]
+title = "Sync on start"
+body = "When Bardo opens, it syncs if the oldest check is older than this, or never. Sync now on Performance always works."
+
+[tour.metrics-sync.where]
+title = "Where they show"
+body = "The numbers show on Performance, and each post's first week feeds the ranking of new ideas."
 
 [guide]
 back_to_editor = "Back to the editor"

@@ -25,6 +25,7 @@ use gpui_kit::{
 };
 
 use crate::appearance::look;
+use crate::guide;
 use crate::kit;
 use crate::layout;
 use crate::parts::{Collection, CollectionKeys, CollectionKind, Header, ScreenParts, Tile};
@@ -359,7 +360,11 @@ impl GuideScreen {
             focus: self.keys.clone(),
             on_step,
             on_enter: Some(on_enter),
-            hint: Some(tr(bardo, Text::GuideSearchKeys)),
+            hint: Some(guide::keys_hint(
+                bardo,
+                Text::GuideSearchKeys,
+                guide::refs::SHORTCUTS_GUIDE,
+            )),
             scroll: self.list_scroll.clone(),
         });
 

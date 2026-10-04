@@ -58,6 +58,12 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("uploading"),
     page!("exporting"),
     page!("missed-posts"),
+    page!("costs"),
+    page!("metrics-sync"),
+    page!("jobs"),
+    page!("settings"),
+    page!("data-and-keys"),
+    page!("troubleshooting"),
     page!("glossary"),
     page!("shortcuts"),
 ];
@@ -149,6 +155,26 @@ impl GuidePlace {
             GuidePlace::Screen(place) => place,
             GuidePlace::Stage(_) => Destination::Projects,
             GuidePlace::Settings(_) => Destination::Settings,
+        }
+    }
+
+    /// The places the guide must explain, each with a page and a tour of
+    /// its own: every place [`GuidePlace::all`] lists but the Settings
+    /// screen, which always shows one of its tabs (they carry its pages and
+    /// tours).
+    pub fn covered() -> Vec<GuidePlace> {
+        Self::all()
+            .into_iter()
+            .filter(|place| *place != GuidePlace::Screen(Destination::Settings))
+            .collect()
+    }
+
+    /// Where a tour of this place runs.
+    pub fn tour_place(self) -> TourPlace {
+        match self {
+            GuidePlace::Screen(screen) => TourPlace::Screen(screen),
+            GuidePlace::Stage(stage) => TourPlace::Stage(stage),
+            GuidePlace::Settings(tab) => TourPlace::Settings(tab),
         }
     }
 
@@ -1051,6 +1077,7 @@ Text of the **first** part.
                 GuideGroup::Production,
                 GuideGroup::Editing,
                 GuideGroup::Publishing,
+                GuideGroup::Costs,
                 GuideGroup::Reference
             ]
         );
@@ -1085,15 +1112,25 @@ Text of the **first** part.
             guide
                 .page_at(Some(GuidePlace::Settings(SettingsTab::Metrics)))
                 .id,
-            "what-bardo-is",
-            "no page for the tab yet"
+            "metrics-sync"
+        );
+        assert_eq!(
+            guide
+                .page_at(Some(GuidePlace::Settings(SettingsTab::Appearance)))
+                .id,
+            "settings"
         );
         assert_eq!(
             guide
                 .page_at(Some(GuidePlace::Screen(Destination::Costs)))
                 .id,
-            "what-bardo-is",
-            "no page for the screen yet"
+            "costs"
+        );
+        assert_eq!(
+            guide
+                .page_at(Some(GuidePlace::Screen(Destination::Jobs)))
+                .id,
+            "jobs"
         );
     }
 
@@ -1299,33 +1336,57 @@ Text of the **first** part.
         }
     }
 
-    /// Which places have a page and a tour. It reports and does not fail
-    /// yet; it turns strict once every place has both.
-    #[test]
-    fn coverage_report() {
-        let guide = Guide::load(UiLanguage::EnUs);
-        let mut lines = Vec::new();
-        // The places F1 opens a page for: not the Jobs panel, a panel
-        // beside the screen.
-        let reached = |place: &GuidePlace| !matches!(place, GuidePlace::Screen(Destination::Jobs));
-        for place in GuidePlace::all().into_iter().filter(reached) {
-            let page = guide
-                .pages()
-                .iter()
-                .find(|page| page.place == Some(place))
-                .map(|page| page.id.as_str());
-            let tour = guide
-                .pages()
-                .iter()
-                .find(|page| page.place == Some(place))
-                .and_then(|page| page.tour);
-            lines.push(format!(
-                "{:<24} page: {:<12} tour: {}",
-                place.code(),
-                page.unwrap_or("-"),
-                tour.map_or("-", TourId::code)
-            ));
+    /// What `places` lack: a page that explains each one, and a tour of
+    /// it.
+    fn coverage_gaps(
+        pages: &[GuidePage],
+        places: &[GuidePlace],
+        tour_of: impl Fn(TourPlace) -> Option<&'static Tour>,
+    ) -> Vec<String> {
+        let mut gaps = Vec::new();
+        for place in places {
+            if !pages.iter().any(|page| page.place == Some(*place)) {
+                gaps.push(format!("{}: no page", place.code()));
+            }
+            if tour_of(place.tour_place()).is_none() {
+                gaps.push(format!("{}: no tour", place.code()));
+            }
         }
-        println!("Guide coverage:\n{}", lines.join("\n"));
+        gaps
+    }
+
+    #[test]
+    fn every_place_has_a_page_and_a_tour_in_both_languages() {
+        let places = GuidePlace::covered();
+        // Every screen but the Guide and Settings (its tabs stand in), every
+        // stage with the editor, every Settings tab.
+        assert_eq!(
+            places.len(),
+            Destination::ALL.len() - 2 + Stage::ALL.len() + SettingsTab::ALL.len()
+        );
+        assert!(places.contains(&GuidePlace::Stage(Stage::Edit)));
+        assert!(places.contains(&GuidePlace::Screen(Destination::Jobs)));
+        for language in UiLanguage::ALL {
+            let guide = Guide::load(language);
+            let gaps = coverage_gaps(guide.pages(), &places, Tour::of);
+            assert!(gaps.is_empty(), "{language}: {gaps:#?}");
+        }
+    }
+
+    #[test]
+    fn the_coverage_check_catches_a_place_without_a_page_or_a_tour() {
+        let costs = GuidePlace::Screen(Destination::Costs);
+        let jobs = GuidePlace::Screen(Destination::Jobs);
+        let mut page = sample("costs", &["one"], "");
+        page.place = Some(costs);
+        let pages = [page];
+        assert_eq!(
+            coverage_gaps(&pages, &[costs, jobs], Tour::of),
+            ["jobs: no page"]
+        );
+        assert_eq!(
+            coverage_gaps(&pages, &[costs], |_| None),
+            ["costs: no tour"]
+        );
     }
 }

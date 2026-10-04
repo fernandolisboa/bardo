@@ -3,11 +3,12 @@ id: api-keys
 title: Suas chaves de API
 group: getting-started
 place: settings/keys
+tour: keys
 ---
 
 # Suas chaves de API
 
-O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas contas em cada provedor, por meio de chaves de API que você cria lá e salva uma única vez em [Configurações › Chaves de API](bardo:go/settings/keys). Você paga cada provedor diretamente, pelos preços dele.
+O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas contas em cada provedor, por meio de chaves de API que você cria lá e salva uma única vez em [Configurações › Chaves de API](bardo:go/settings/keys). Você paga cada provedor diretamente, pelos preços dele. [Mostre a aba](bardo:tour/keys).
 
 <a id="providers"></a>
 ## O que cada provedor faz
@@ -24,9 +25,14 @@ Você não precisa de todas as chaves no primeiro dia. Uma tela que depende de u
 <a id="where-kept"></a>
 ## Onde as chaves ficam
 
-As chaves ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados do Bardo. Sempre que um texto sai do app (logs, mensagens de erro, a tela), a chave aparece mascarada, e as Configurações mostram só os últimos caracteres.
+As chaves ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados do Bardo. Veja [Onde ficam seus dados e chaves](data-and-keys.md#credentials).
 
 Remover uma chave nas Configurações apaga ela do Gerenciador de Credenciais. Para desativar a chave de vez, revogue também no painel do próprio provedor.
+
+<a id="masked"></a>
+## O que o Bardo mostra de uma chave
+
+Depois de salva, uma chave nunca mais aparece: o cartão dela diz **Chave salva, terminada em** e os quatro últimos caracteres, para você saber qual chave é. Sempre que um texto sai do app (o log, mensagens de erro, a tela), uma chave salva aparece mascarada, até dentro da mensagem do próprio provedor. Para trocar uma chave, cole a nova e use **Trocar chave**.
 
 <a id="testing"></a>
 ## Testar uma chave
@@ -38,4 +44,4 @@ Remover uma chave nas Configurações apaga ela do Gerenciador de Credenciais. P
 
 Cada geração registra quanto custou, pelo valor que o provedor informou ou estimado pela tabela de preços dele. Em [Custos](bardo:go/costs) você vê quanto gastou no mês, por provedor, por canal e por vídeo.
 
-Defina um **orçamento** mensal para cada provedor na tela Custos. Aos 80% a navegação avisa, e quando um orçamento é atingido, cada tarefa nova desse provedor pergunta antes de começar. Nada é interrompido no meio.
+Defina um **orçamento** mensal para cada provedor na tela Custos. A partir de 80% a estimativa de uma geração avisa, e quando um orçamento é atingido, cada tarefa nova desse provedor pergunta antes de começar. Nada é interrompido no meio. Veja [Custos e orçamentos](costs.md#budgets).
