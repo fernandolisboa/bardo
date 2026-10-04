@@ -127,9 +127,11 @@ last refresh.
 - **Check** renews the access if it is close to expiring and reads the
   display name again.
 - **Reconnect needed** means TikTok refused to renew the access: you
-  removed Bardo from the account's authorized apps, the refresh token went
-  a year unused, the client secret changed, or the sandbox no longer lists
-  the account as a target user. Select **Reconnect**.
+  removed Bardo from the account's authorized apps, or the refresh token
+  went a year unused. Select **Reconnect**. A client key or secret TikTok
+  no longer accepts (say, after resetting the secret) shows "TikTok doesn't
+  recognize the client key or secret" instead: save the new one in
+  **Settings › Networks**.
 - **Disconnect** revokes Bardo's access at TikTok and forgets the tokens.
   Revoking needs the app's credentials: if they were removed from
   **Settings › Networks**, or TikTok cannot be reached, Bardo still forgets

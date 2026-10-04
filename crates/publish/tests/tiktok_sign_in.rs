@@ -407,15 +407,15 @@ fn revoking_needs_the_app_credentials_and_a_reachable_tiktok() {
         .revoke(Some(&credentials()), &tokens(Some("rft.r")))
         .unwrap_err();
     assert_eq!(down.kind, SignInFailureKind::NetworkDown);
+    let refused = answers(&["token-invalid-client"])
+        .revoke(Some(&credentials()), &tokens(Some("rft.r")))
+        .unwrap_err();
+    assert_eq!(refused.kind, SignInFailureKind::ClientRejected);
 }
 
 #[test]
 fn no_failure_quotes_a_secret() {
-    let sign_in = answers(&[
-        "token-invalid-client",
-        "token-refresh-invalid-grant",
-        "revoke-invalid-token",
-    ]);
+    let sign_in = answers(&["token-invalid-client", "token-refresh-invalid-grant"]);
     let failures = [
         sign_in
             .exchange(

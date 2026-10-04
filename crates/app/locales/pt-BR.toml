@@ -1617,6 +1617,7 @@ open_settings = "Abrir Configurações › Redes"
 disconnected = "Desconectada. O acesso do Bardo foi revogado."
 disconnected_not_revoked = "Desconectada aqui, mas não foi possível falar com o {network} para revogar o acesso do Bardo. Você pode removê-lo nas configurações de segurança da sua conta no {network}."
 disconnected_kept_for_others = "Desconectada aqui. O acesso do Bardo no {network} não foi revogado porque outra conta no Bardo ainda usa esse acesso."
+disconnected_credentials_refused = "Desconectada aqui, mas o acesso do Bardo no {network} não foi revogado: revogar exige as credenciais do seu app, que não estão em Configurações › Redes ou não são mais aceitas. Você pode remover o Bardo nas configurações de segurança da sua conta no {network}."
 use_account = "Conectar esta"
 choose_label = "Escolha uma conta"
 
@@ -1630,7 +1631,7 @@ missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e deixe 
 [connection.tiktok]
 connecting = "Aguardando você autorizar o Bardo no navegador…"
 checked = "A conexão funciona. Conta: {channel}."
-reconnect_hint = "O TikTok recusou renovar o acesso: ele foi revogado, o token de renovação venceu depois de um ano sem uso ou o client secret mudou. Reconecte para entrar de novo."
+reconnect_hint = "O TikTok recusou renovar o acesso: ele foi revogado ou o token de renovação venceu depois de um ano sem uso. Reconecte para entrar de novo."
 needs_app_credentials = "Salve o seu app do TikTok em Configurações › Redes antes de conectar."
 missing_scopes = "Nem todas as permissões foram dadas. Conecte de novo e permita todas: o Bardo precisa delas para ler a sua conta, enviar rascunhos e ler os números dos seus vídeos."
 

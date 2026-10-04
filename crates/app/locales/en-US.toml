@@ -1617,6 +1617,7 @@ open_settings = "Open Settings › Networks"
 disconnected = "Disconnected. Bardo's access was revoked."
 disconnected_not_revoked = "Disconnected here, but {network} couldn't be reached to revoke Bardo's access. You can remove it from your account's security settings on {network}."
 disconnected_kept_for_others = "Disconnected here. Bardo's access on {network} wasn't revoked because another account in Bardo still uses it."
+disconnected_credentials_refused = "Disconnected here, but Bardo's access on {network} wasn't revoked: revoking needs your app's credentials, which are missing from Settings › Networks or no longer accepted. You can remove Bardo from your account's security settings on {network}."
 use_account = "Connect this one"
 choose_label = "Choose an account"
 
@@ -1630,7 +1631,7 @@ missing_scopes = "Not every permission was allowed. Connect again and leave ever
 [connection.tiktok]
 connecting = "Waiting for you to authorize Bardo in the browser…"
 checked = "The connection works. Account: {channel}."
-reconnect_hint = "TikTok refused to renew access: it was revoked, the refresh token ran out after a year unused, or the client secret changed. Reconnect to sign in again."
+reconnect_hint = "TikTok refused to renew access: it was revoked, or the refresh token ran out after a year unused. Reconnect to sign in again."
 needs_app_credentials = "Save your TikTok app in Settings › Networks before connecting."
 missing_scopes = "Not every permission was allowed. Connect again and allow them all: Bardo needs them to read your account, send drafts and read your videos' numbers."
 

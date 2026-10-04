@@ -172,6 +172,9 @@ pub struct Disconnected {
     /// Revoking was skipped because the network revokes app-wide and
     /// another account of this profile on the network is still connected.
     pub kept_for_others: bool,
+    /// Revoking failed on the app credentials: removed from Settings, or
+    /// no longer accepted by a network that revokes with them (TikTok).
+    pub credentials_refused: bool,
 }
 
 /// Everything that touches tokens, shared with background work: it reads
@@ -410,6 +413,7 @@ impl Connections {
             .tokens(self.owner, account.id)
             .map_err(|error| self.store_failure("read tokens", error))?;
         let kept_for_others = sign_in.revokes_app_wide() && self.shares_access(account)?;
+        let mut credentials_refused = false;
         let revoked = match &tokens {
             Some(_) if kept_for_others => false,
             Some(tokens) => {
@@ -421,6 +425,7 @@ impl Connections {
                 match sign_in.revoke(credentials.as_ref(), tokens) {
                     Ok(()) => true,
                     Err(failure) => {
+                        credentials_refused = failure.kind == SignInFailureKind::ClientRejected;
                         let _ = self.sign_in_failure(account.network, failure);
                         false
                     }
@@ -436,11 +441,13 @@ impl Connections {
             network = account.network.code(),
             revoked,
             kept_for_others,
+            credentials_refused,
             "disconnected network account"
         );
         Ok(Disconnected {
             revoked,
             kept_for_others,
+            credentials_refused,
         })
     }
 }
@@ -2366,7 +2373,8 @@ mod tests {
             disconnected,
             Disconnected {
                 revoked: true,
-                kept_for_others: false
+                kept_for_others: false,
+                credentials_refused: false
             }
         );
         assert_eq!(
@@ -2409,7 +2417,8 @@ mod tests {
             disconnected,
             Disconnected {
                 revoked: false,
-                kept_for_others: false
+                kept_for_others: false,
+                credentials_refused: false
             }
         );
         assert_eq!(harness.tokens(&app, &account), None);
@@ -2945,7 +2954,8 @@ mod tests {
             done,
             Disconnected {
                 revoked: false,
-                kept_for_others: true
+                kept_for_others: true,
+                credentials_refused: false
             }
         );
         assert_eq!(harness.tokens(&app, &first), None);
@@ -2963,7 +2973,8 @@ mod tests {
             done,
             Disconnected {
                 revoked: true,
-                kept_for_others: false
+                kept_for_others: false,
+                credentials_refused: false
             }
         );
         assert!(
@@ -3008,6 +3019,7 @@ mod tests {
             crate::Catalog::load(bardo_domain::UiLanguage::EnUs).get(Text::ConsentPageDone)
         );
     }
+
     #[test]
     fn tiktok_connects_in_the_browser_at_its_callback_path() {
         let harness = Harness::new();
@@ -3034,11 +3046,11 @@ mod tests {
         assert!(harness.sign_in.calls().is_empty(), "YouTube was not asked");
         let state = harness.state(&account).unwrap();
         assert_eq!(state.identity.id, "723f24d7-open-id");
-        assert!(
-            app.redactor()
-                .redact(&format!("{TIKTOK_KEY} {TIKTOK_SECRET}"))
-                .contains("[redacted]")
-        );
+        let masked = app
+            .redactor()
+            .redact(&format!("{TIKTOK_KEY} {TIKTOK_SECRET}"));
+        assert!(!masked.contains(TIKTOK_KEY), "{masked}");
+        assert!(!masked.contains(TIKTOK_SECRET), "{masked}");
     }
 
     #[test]
@@ -3108,7 +3120,14 @@ mod tests {
             "revoking needs the app credentials",
         ));
         let disconnected = app.disconnection(account.id).unwrap().run().unwrap();
-        assert!(!disconnected.revoked);
+        assert_eq!(
+            disconnected,
+            Disconnected {
+                revoked: false,
+                kept_for_others: false,
+                credentials_refused: true
+            }
+        );
         assert_eq!(harness.tiktok.revoked_with.lock().unwrap()[1], None);
         assert_eq!(harness.tokens(&app, &account), None);
         assert_eq!(harness.state(&account), None);
