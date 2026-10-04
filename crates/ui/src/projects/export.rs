@@ -847,12 +847,16 @@ impl ProjectsScreen {
                 Some(_) if upload.is_some() => {
                     metrics::upload_label(bardo, upload.as_ref().expect("checked"))
                 }
-                Some(post) => match post.latest() {
-                    Some(latest) => SharedString::from(bardo.text_with(
+                Some(post) => match (post.engaged_views(), post.latest()) {
+                    (Some(engaged), _) => SharedString::from(bardo.text_with(
+                        Text::PublicationTileEngaged,
+                        &[("views", &bardo.compact_count(engaged))],
+                    )),
+                    (None, Some(latest)) => SharedString::from(bardo.text_with(
                         Text::PublicationTileViews,
                         &[("views", &bardo.compact_count(latest.views))],
                     )),
-                    None => tr(bardo, Text::PublicationPosted),
+                    (None, None) => tr(bardo, Text::PublicationPosted),
                 },
                 None => tr(bardo, last_state(target)),
             });

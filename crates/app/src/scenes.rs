@@ -869,6 +869,8 @@ pub(crate) mod tests {
         pub(crate) uploader: Arc<crate::uploads::testing::FakeUploader>,
         /// App credentials and network tokens.
         pub(crate) connection_secrets: Arc<MemorySecretStore>,
+        /// Owner metrics of connected accounts.
+        pub(crate) analytics: Arc<crate::testing::FakeAnalytics>,
     }
 
     impl Harness {
@@ -891,6 +893,7 @@ pub(crate) mod tests {
                 speech: Arc::default(),
                 uploader: Arc::default(),
                 connection_secrets: Arc::default(),
+                analytics: Arc::default(),
             }
         }
 
@@ -955,6 +958,7 @@ pub(crate) mod tests {
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: vec![Arc::clone(&self.uploader) as _],
+                analytics: vec![Arc::clone(&self.analytics) as _],
             };
             let mut app = Bardo::start_with(
                 repositories,

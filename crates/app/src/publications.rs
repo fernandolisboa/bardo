@@ -15,6 +15,14 @@
 //! connection instead, records when it went live (or that the network kept
 //! it private), and from then on tracks it like any other post. A sync of
 //! scheduled uploads alone needs no Data API key.
+//!
+//! When the channel's account is connected, the sync also reads the
+//! owner's numbers of each post it found (#79): YouTube Analytics through
+//! the account's own token, a report and a retention curve per post. They
+//! go on the same snapshot; a channel outside the Partner Program reads as
+//! not monetized after its first refused money report. Nothing the owner
+//! reads can fail the sync: an account that cannot be read keeps its public
+//! numbers, and an unconnected one is never asked.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,14 +30,15 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, ChannelId, ChannelPoint, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Network, NetworkAccountRepository,
-    PostLink, PostLinkError, ProfileId, Progress, Provider, Publication, PublicationId,
-    PublicationKind, PublicationRepository, RepositoryError, STATS_BATCH, SecretStore, UserProfile,
-    VideoProjectId, VideoStats, VideoUploader, channel_history,
+    MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Monetization, Network, NetworkAccount,
+    NetworkAccountId, NetworkAccountRepository, OwnerAnalytics, PostLink, PostLinkError,
+    PostRetention, ProfileId, Progress, Provider, Publication, PublicationId, PublicationKind,
+    PublicationRepository, ReportPeriod, RepositoryError, STATS_BATCH, SecretStore, SecretText,
+    UserProfile, VideoProjectId, VideoStats, VideoUploader, channel_history, read_owner_metrics,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::connections::Connections;
+use crate::connections::{ConnectionError, Connections};
 use crate::jobs::{JobContext, JobHandler};
 use crate::scenes::{id, parse, to_json, unexpected};
 use crate::schedules::read_schedule;
@@ -123,6 +132,8 @@ pub struct PublishedPost {
     pub publication: Publication,
     /// Oldest first; empty until a sync found the post.
     pub history: Vec<MetricsSnapshot>,
+    /// The retention curve as last read, for a connected channel's post.
+    pub retention: Option<PostRetention>,
 }
 
 impl PublishedPost {
@@ -138,6 +149,32 @@ impl PublishedPost {
         };
         Some(before.views_to(last))
     }
+
+    /// The latest snapshot that has the owner's numbers, which may be
+    /// older than the latest one when the network's data had not arrived.
+    pub fn latest_owner(&self) -> Option<&MetricsSnapshot> {
+        self.history.iter().rev().find(|s| s.owner.is_some())
+    }
+
+    /// The engaged views screens lead with, from the latest owner's
+    /// numbers; `None` leaves the public views in the lead.
+    pub fn engaged_views(&self) -> Option<u64> {
+        self.latest_owner()
+            .and_then(|snapshot| snapshot.owner)
+            .map(|owner| owner.engaged_views)
+    }
+}
+
+/// Whether a channel's owner numbers can be read: its YouTube account and
+/// that account's connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerAccess {
+    /// The channel has no YouTube account.
+    NoAccount,
+    NotConnected,
+    Connected,
+    /// The network refused a refresh: syncs keep the public numbers only.
+    ReconnectNeeded,
 }
 
 /// Where metrics syncing stands, for the screens that show metrics.
@@ -188,6 +225,8 @@ pub struct ChannelMetricsView {
     /// The totals over time, oldest first.
     pub history: Vec<ChannelPoint>,
     pub status: MetricsStatus,
+    /// Whether the owner numbers of its YouTube posts can be read.
+    pub owner_access: OwnerAccess,
 }
 
 /// `time` as storage keeps it, so what `mark_posted` returns equals what
@@ -225,6 +264,18 @@ pub(crate) struct MetricsSyncHandler {
     pub(crate) accounts: Arc<dyn NetworkAccountRepository>,
     pub(crate) connections: Connections,
     pub(crate) uploaders: Vec<Arc<dyn VideoUploader>>,
+    pub(crate) analytics: Vec<Arc<dyn OwnerAnalytics>>,
+}
+
+/// How one sync reads an account's owner numbers.
+enum OwnerAccount {
+    /// To read, and what this sync learned of the channel's money.
+    Reading {
+        account: NetworkAccount,
+        monetization: Monetization,
+    },
+    /// Not connected, or something stopped its reads for this sync.
+    Off,
 }
 
 impl MetricsSyncHandler {
@@ -242,6 +293,100 @@ impl MetricsSyncHandler {
             )
         })
     }
+
+    /// The account's owner reads for this sync, until its token is
+    /// refused or missing.
+    fn owner_account(&self, account: NetworkAccountId) -> OwnerAccount {
+        let account = match self.accounts.get(account) {
+            Ok(Some(account)) => account,
+            Ok(None) => return OwnerAccount::Off,
+            Err(error) => {
+                tracing::warn!("could not read the account for owner metrics: {error}");
+                return OwnerAccount::Off;
+            }
+        };
+        OwnerAccount::Reading {
+            account,
+            monetization: Monetization::Unknown,
+        }
+    }
+
+    /// The account's token, renewed when it is close to expiring: a long
+    /// sync can outlast the one it started with.
+    fn owner_token(&self, account: &NetworkAccount) -> Option<SecretText> {
+        match self.connections.access_token(account) {
+            Ok(tokens) => Some(SecretText::new(tokens.access_token())),
+            Err(ConnectionError::NotConnected) => None,
+            Err(error) => {
+                tracing::warn!("owner metrics skipped, no sign-in: {error}");
+                None
+            }
+        }
+    }
+
+    /// Adds the owner's numbers to the snapshots of `posts` whose account
+    /// is connected, and gathers their retention curves. Returns false
+    /// when asked to stop.
+    fn read_owner(
+        &self,
+        posts: &[Publication],
+        snapshots: &mut [MetricsSnapshot],
+        curves: &mut Vec<PostRetention>,
+        accounts: &mut HashMap<NetworkAccountId, OwnerAccount>,
+        cx: &JobContext,
+    ) -> bool {
+        for snapshot in snapshots {
+            let Some(post) = posts.iter().find(|post| post.id == snapshot.publication) else {
+                continue;
+            };
+            let (Some(video), Some(analytics)) = (
+                post.post_id(),
+                self.analytics
+                    .iter()
+                    .find(|analytics| analytics.network() == post.network()),
+            ) else {
+                continue;
+            };
+            if cx.should_stop() {
+                return false;
+            }
+            let account = accounts
+                .entry(post.account)
+                .or_insert_with(|| self.owner_account(post.account));
+            let OwnerAccount::Reading {
+                account: network_account,
+                monetization,
+            } = account
+            else {
+                continue;
+            };
+            let Some(token) = self.owner_token(network_account) else {
+                *account = OwnerAccount::Off;
+                continue;
+            };
+            let period = ReportPeriod::for_post(post.posted_at, snapshot.taken_at);
+            match read_owner_metrics(&**analytics, &token, video, &period, monetization) {
+                Ok(reading) => {
+                    snapshot.owner = reading.metrics;
+                    if !reading.retention.is_empty() {
+                        curves.push(PostRetention {
+                            publication: post.id,
+                            read_at: snapshot.taken_at,
+                            curve: reading.retention,
+                        });
+                    }
+                }
+                Err(error) if error.stops_the_account() => {
+                    tracing::warn!("owner metrics stopped for this sync: {error}");
+                    *account = OwnerAccount::Off;
+                }
+                // Not the channel's video, or a report it could not read:
+                // the post keeps its public numbers.
+                Err(error) => tracing::warn!("could not read a post's owner metrics: {error}"),
+            }
+        }
+        true
+    }
 }
 
 impl JobHandler for MetricsSyncHandler {
@@ -257,6 +402,7 @@ impl JobHandler for MetricsSyncHandler {
             return Ok(());
         }
         let mut key = None;
+        let mut owners: HashMap<NetworkAccountId, OwnerAccount> = HashMap::new();
         let taken_at = match checkpoint.taken_at {
             Some(millis) => SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis),
             None => whole_millis(SystemTime::now()),
@@ -334,6 +480,7 @@ impl JobHandler for MetricsSyncHandler {
                 public.clear();
             }
             let mut snapshots = Vec::new();
+            let mut curves = Vec::new();
             if !public.is_empty() {
                 let key = match &key {
                     Some(key) => key,
@@ -352,6 +499,10 @@ impl JobHandler for MetricsSyncHandler {
                         snapshots.push(MetricsSnapshot::of(post.id, statistics, taken_at));
                     }
                 }
+                // Read after the statistics, which set when the post went up.
+                if !self.read_owner(&public, &mut snapshots, &mut curves, &mut owners, cx) {
+                    return Ok(());
+                }
             }
             // A post that went live is in both lists; its statistics read
             // is the later word.
@@ -360,6 +511,11 @@ impl JobHandler for MetricsSyncHandler {
             if !checked.is_empty() {
                 self.publications
                     .save_sync(&checked, &snapshots)
+                    .map_err(unexpected)?;
+            }
+            if !curves.is_empty() {
+                self.publications
+                    .save_retention(&curves)
                     .map_err(unexpected)?;
             }
             checkpoint.batches += 1;
@@ -417,6 +573,7 @@ impl Bardo {
             .map(|publication| {
                 Ok(PublishedPost {
                     history: self.publications.snapshots(publication.id)?,
+                    retention: self.publications.retention(publication.id)?,
                     publication,
                 })
             })
@@ -650,7 +807,9 @@ impl Bardo {
         let projects = self.themes.projects(channel.id)?;
         let publications = self.publications.channel_publications(channel.id)?;
         let snapshots = self.publications.channel_snapshots(channel.id)?;
+        let mut curves = self.publications.channel_retention(channel.id)?;
         let status = self.metrics_status(&publications);
+        let owner_access = self.owner_access(channel.id)?;
         let mut histories: HashMap<PublicationId, Vec<MetricsSnapshot>> = HashMap::new();
         for snapshot in &snapshots {
             histories
@@ -664,6 +823,10 @@ impl Bardo {
             .filter(Publication::is_posted)
             .map(|publication| {
                 let history = histories.remove(&publication.id).unwrap_or_default();
+                let retention = curves
+                    .iter()
+                    .position(|curve| curve.publication == publication.id)
+                    .map(|ix| curves.swap_remove(ix));
                 ChannelPost {
                     project: publication.project,
                     project_title: projects
@@ -674,6 +837,7 @@ impl Bardo {
                     post: PublishedPost {
                         publication,
                         history,
+                        retention,
                     },
                 }
             })
@@ -684,6 +848,28 @@ impl Bardo {
             totals: MetricsTotals::latest(&snapshots),
             history: channel_history(&snapshots),
             status,
+            owner_access,
+        })
+    }
+
+    /// Whether the channel's YouTube posts get the owner's numbers.
+    fn owner_access(&self, channel: ChannelId) -> Result<OwnerAccess, MetricsError> {
+        let Some(account) = self
+            .network_accounts
+            .list(channel)?
+            .into_iter()
+            .find(|account| account.network == Network::YouTube)
+        else {
+            return Ok(OwnerAccess::NoAccount);
+        };
+        Ok(match self.connection_state(&account) {
+            Ok(crate::ConnectionState::Connected { .. }) => OwnerAccess::Connected,
+            Ok(crate::ConnectionState::ReconnectNeeded { .. }) => OwnerAccess::ReconnectNeeded,
+            Ok(_) => OwnerAccess::NotConnected,
+            Err(error) => {
+                tracing::warn!("could not read the connection: {error}");
+                OwnerAccess::NotConnected
+            }
         })
     }
 }
@@ -1112,5 +1298,187 @@ mod tests {
             s.app.channel_metrics(ChannelId::new()),
             Err(MetricsError::ChannelNotFound)
         ));
+    }
+
+    /// A project exported for YouTube and TikTok, its YouTube post linked
+    /// and the key saved, with the channel's YouTube account connected.
+    fn connected() -> Setup {
+        let mut s = exported();
+        with_key(&mut s);
+        crate::uploads::tests::connect(&s);
+        s.h.stats.set("dQw4w9WgXcQ", 50_000, Some(900));
+        s
+    }
+
+    fn link_and_sync(s: &Setup) {
+        s.app
+            .mark_posted(s.project.id, Network::YouTube, SHORT, false)
+            .unwrap();
+        done(&s.app, sync_jobs(&s.app).pop().unwrap().id());
+    }
+
+    #[test]
+    fn a_connected_channel_reads_the_owners_numbers_with_its_own_token() {
+        let s = connected();
+        s.h.analytics.set("dQw4w9WgXcQ", 48_000);
+        link_and_sync(&s);
+
+        let post = posted(&s, Network::YouTube).unwrap();
+        let latest = post.latest().unwrap();
+        assert_eq!(latest.views, 50_000, "public views as before");
+        let owner = latest.owner.expect("owner numbers on the snapshot");
+        assert_eq!(owner.views, 48_000);
+        assert_eq!(owner.engaged_views, 33_600);
+        assert_eq!(post.engaged_views(), Some(33_600));
+        let money = owner.money().expect("monetized");
+        assert_eq!(money.revenue, bardo_domain::Money::from_micros(96_000_000));
+        assert_eq!(owner.rpm(), Some(bardo_domain::Money::from_cents(200)));
+        assert_eq!(post.latest_owner(), Some(latest));
+        let retention = post.retention.as_ref().expect("a retention curve");
+        assert_eq!(retention.curve.points().len(), 100);
+        assert_eq!(retention.read_at, latest.taken_at);
+
+        assert_eq!(
+            s.h.analytics.calls(),
+            [("dQw4w9WgXcQ".to_owned(), true)],
+            "one report with money"
+        );
+        assert!(
+            s.h.analytics
+                .tokens
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|token| token == crate::uploads::tests::ACCESS)
+        );
+
+        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        assert_eq!(view.owner_access, OwnerAccess::Connected);
+        let totals = view.totals.owner.unwrap();
+        assert_eq!(totals.engaged_views, 33_600);
+        assert_eq!(
+            totals.revenue,
+            Some(bardo_domain::Money::from_micros(96_000_000))
+        );
+        assert!(view.posts[0].post.retention.is_some());
+    }
+
+    #[test]
+    fn a_channel_outside_the_partner_program_reads_not_monetized() {
+        let s = connected();
+        s.h.analytics.set("dQw4w9WgXcQ", 1_000);
+        s.h.analytics.not_monetized.store(true, Ordering::SeqCst);
+        link_and_sync(&s);
+
+        let owner = posted(&s, Network::YouTube)
+            .unwrap()
+            .latest()
+            .unwrap()
+            .owner
+            .unwrap();
+        assert_eq!(owner.earnings, bardo_domain::Earnings::NotMonetized);
+        assert_eq!(owner.rpm(), None);
+        assert_eq!(owner.views, 1_000, "the rest is read");
+        assert_eq!(
+            s.h.analytics.calls(),
+            [
+                ("dQw4w9WgXcQ".to_owned(), true),
+                ("dQw4w9WgXcQ".to_owned(), false)
+            ]
+        );
+        let job = s.app.latest_sync_job().unwrap();
+        assert_eq!(job.state(), JobState::Done);
+    }
+
+    #[test]
+    fn an_unconnected_channel_keeps_exactly_its_public_metrics() {
+        let mut s = exported();
+        with_key(&mut s);
+        s.h.stats.set("dQw4w9WgXcQ", 1_200, Some(80));
+        s.h.analytics.set("dQw4w9WgXcQ", 9_999);
+        link_and_sync(&s);
+
+        assert!(s.h.analytics.calls().is_empty(), "never asked");
+        let post = posted(&s, Network::YouTube).unwrap();
+        let latest = *post.latest().unwrap();
+        assert_eq!(
+            latest,
+            MetricsSnapshot {
+                publication: post.publication.id,
+                taken_at: latest.taken_at,
+                views: 1_200,
+                likes: Some(80),
+                comments: Some(12),
+                owner: None,
+            }
+        );
+        assert_eq!(post.engaged_views(), None, "the public views lead");
+        assert_eq!(post.retention, None);
+        let view = s.app.channel_metrics(s.project.channel).unwrap();
+        assert_eq!(view.owner_access, OwnerAccess::NotConnected);
+        assert_eq!(view.totals.owner, None);
+    }
+
+    #[test]
+    fn a_post_without_data_yet_keeps_its_public_numbers_only() {
+        let s = connected();
+        // No report for the video: the network's data have not arrived.
+        link_and_sync(&s);
+        let post = posted(&s, Network::YouTube).unwrap();
+        assert_eq!(post.latest().unwrap().owner, None);
+        assert_eq!(post.latest().unwrap().views, 50_000);
+        assert_eq!(post.retention, None);
+        assert!(s.h.analytics.curves.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_owner_read_that_fails_never_fails_the_sync() {
+        let s = connected();
+        s.h.analytics.set("dQw4w9WgXcQ", 1_000);
+        *s.h.analytics.failure.lock().unwrap() = Some(bardo_domain::AnalyticsError::new(
+            bardo_domain::AnalyticsErrorKind::LimitReached,
+            "quotaExceeded",
+        ));
+        link_and_sync(&s);
+        assert_eq!(s.app.latest_sync_job().unwrap().state(), JobState::Done);
+        let latest = *posted(&s, Network::YouTube).unwrap().latest().unwrap();
+        assert_eq!((latest.views, latest.owner), (50_000, None));
+    }
+
+    #[test]
+    fn a_channel_that_needs_to_reconnect_is_not_read() {
+        let s = connected();
+        s.h.analytics.set("dQw4w9WgXcQ", 1_000);
+        let account = s
+            .app
+            .network_accounts
+            .list(s.project.channel)
+            .unwrap()
+            .into_iter()
+            .find(|account| account.network == Network::YouTube)
+            .unwrap();
+        let mut state = bardo_domain::NetworkConnectionRepository::get(&*s.h.db, account.id)
+            .unwrap()
+            .unwrap();
+        state.status = bardo_domain::ConnectionStatus::ReconnectNeeded;
+        bardo_domain::NetworkConnectionRepository::save(&*s.h.db, &state).unwrap();
+
+        link_and_sync(&s);
+        assert!(s.h.analytics.calls().is_empty());
+        assert_eq!(
+            posted(&s, Network::YouTube)
+                .unwrap()
+                .latest()
+                .unwrap()
+                .owner,
+            None
+        );
+        assert_eq!(
+            s.app
+                .channel_metrics(s.project.channel)
+                .unwrap()
+                .owner_access,
+            OwnerAccess::ReconnectNeeded
+        );
     }
 }

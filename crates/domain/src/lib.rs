@@ -62,6 +62,7 @@ mod music_prompt;
 mod narration;
 mod network;
 mod network_account;
+mod owner_metrics;
 mod performance;
 mod persona;
 mod profile;
@@ -157,6 +158,11 @@ pub use network_account::{
     MetadataDefaults, NetworkAccount, NetworkAccountDetails, NetworkAccountDraft,
     NetworkAccountFieldError, NetworkAccountId, NetworkAccountRepository,
 };
+pub use owner_metrics::{
+    AnalyticsError, AnalyticsErrorKind, Earnings, Monetization, MoneyReport, OwnerAnalytics,
+    OwnerMetrics, OwnerReading, ReportPeriod, RetentionCurve, RetentionPoint, Share, VideoReport,
+    dollars, read_owner_metrics, rpm, whole,
+};
 pub use performance::{
     EvidenceScope, FIRST_WEEK, FIRST_WEEK_LATEST_SYNC, FIRST_WEEK_MIN_AGE, FirstWeek,
     PastPerformance, PerformanceEvidence, PerformanceReason, PublishedVideo, Standing, first_week,
@@ -171,10 +177,10 @@ pub use provider_key::{
     ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,
 };
 pub use publication::{
-    ChannelPoint, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, PostLink, PostLinkError,
-    Publication, PublicationId, PublicationKind, PublicationRepository, STATS_BATCH,
-    ScheduleReading, UnknownMetricsSync, VideoStatistics, VideoStats, channel_history,
-    latest_of_each, sync_quota_units,
+    ChannelPoint, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, OwnerTotals, PostLink,
+    PostLinkError, PostRetention, Publication, PublicationId, PublicationKind,
+    PublicationRepository, STATS_BATCH, ScheduleReading, UnknownMetricsSync, VideoStatistics,
+    VideoStats, channel_history, latest_of_each, sync_quota_units,
 };
 pub use redaction::Redactor;
 pub use render::{

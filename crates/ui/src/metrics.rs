@@ -1,9 +1,12 @@
-//! Pieces that show a post's public numbers (#29): its figures, its views
-//! over time as bars, its syncs as a list, and where syncing stands. The
+//! Pieces that show a post's numbers (#29): its figures, its views over
+//! time as bars, its syncs as a list, and where syncing stands. With the
+//! channel's account connected (#79) the owner's numbers join them: engaged
+//! views lead, then watch time, average view, money (or "not monetized")
+//! and the retention curve, with how late YouTube Analytics runs. The
 //! Publish stage and the Performance screen share them; what they show
 //! comes from `bardo_app`.
 
-use bardo_app::bardo_domain::JobState;
+use bardo_app::bardo_domain::{JobState, OwnerMetrics, PostRetention};
 use bardo_app::{Bardo, MetricsStatus, PublishedPost, Text, UploadState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -19,6 +22,9 @@ const MAX_BARS: usize = 30;
 
 /// The most syncs a history list shows.
 const MAX_ROWS: usize = 8;
+
+/// The most bars a retention curve draws, of the report's hundred.
+const RETENTION_BARS: usize = 50;
 
 /// A count in a few characters: `12.3K`.
 pub fn count(bardo: &Bardo, n: u64) -> SharedString {
@@ -74,12 +80,37 @@ pub fn bars(
 
 /// A figure in a row of them: its label over its value.
 fn stat(label: SharedString, value: AnyElement, cx: &App) -> Div {
+    stat_with(label, None, value, cx)
+}
+
+/// A figure whose label has what it means behind an ⓘ.
+fn stat_with(
+    label: SharedString,
+    hint: Option<(ElementId, SharedString)>,
+    value: AnyElement,
+    cx: &App,
+) -> Div {
     let t = look(cx).tokens;
     v_flex()
         .gap_0p5()
         .min_w(px(72.))
-        .child(div().text_xs().text_color(t.text2).child(label))
+        .child(
+            h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(div().text_xs().text_color(t.text2).child(label))
+                .children(hint.map(|(id, hint)| kit::info(id, None, hint))),
+        )
         .child(value)
+}
+
+fn hint_id(id: &str, suffix: &str) -> ElementId {
+    ElementId::Name(format!("{id}-{suffix}").into())
+}
+
+/// Values beside each other in a wrapping row.
+fn stat_row(stats: Vec<Div>) -> Div {
+    h_flex().gap_6().flex_wrap().items_start().children(stats)
 }
 
 fn figure_value(text: SharedString, cx: &App) -> AnyElement {
@@ -111,35 +142,58 @@ fn hidden(bardo: &Bardo, id: ElementId, cx: &App) -> AnyElement {
 }
 
 /// The post's latest views, likes and comments, the views' change since
-/// the sync before, and its views over time. Nothing before a sync found
-/// it.
+/// the sync before, and its views over time; engaged views first and the
+/// owner's numbers under them when there are some. Nothing before a sync
+/// found it.
 pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Option<Div> {
     let latest = post.latest()?;
+    // The latest owner's numbers, and when they were read.
+    let owned = post
+        .latest_owner()
+        .and_then(|snapshot| Some((snapshot.owner?, snapshot.taken_at)));
     let optional = |value: Option<u64>, suffix: &str| match value {
         Some(n) => figure_value(count(bardo, n), cx),
-        None => hidden(bardo, ElementId::Name(format!("{id}-{suffix}").into()), cx),
+        None => hidden(bardo, hint_id(id, suffix), cx),
     };
-    let views = stat(
+    let mut stats = Vec::new();
+    // With engaged views first, the change line names the views it counts.
+    let engaged = owned.is_some();
+    if let Some((owner, _)) = &owned {
+        stats.push(stat_with(
+            tr(bardo, Text::MetricEngagedViews),
+            Some((
+                hint_id(id, "engaged"),
+                tr(bardo, Text::MetricEngagedViewsHint),
+            )),
+            figure_value(count(bardo, owner.engaged_views), cx),
+            cx,
+        ));
+    }
+    stats.push(stat(
         tr(bardo, Text::MetricViews),
         figure_value(count(bardo, latest.views), cx),
         cx,
-    );
-    let likes = stat(
+    ));
+    stats.push(stat(
         tr(bardo, Text::MetricLikes),
         optional(latest.likes, "likes"),
         cx,
-    );
-    let comments = stat(
+    ));
+    stats.push(stat(
         tr(bardo, Text::MetricComments),
         optional(latest.comments, "comments"),
         cx,
-    );
+    ));
     let change_line = post.views_change().map(|n| {
         div()
             .text_xs()
             .text_color(look(cx).tokens.text2)
             .child(SharedString::from(bardo.text_with(
-                Text::MetricsChange,
+                if engaged {
+                    Text::MetricsViewsChange
+                } else {
+                    Text::MetricsChange
+                },
                 &[("change", &change(bardo, n))],
             )))
     });
@@ -147,15 +201,7 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
     Some(
         v_flex()
             .gap_2()
-            .child(
-                h_flex()
-                    .gap_6()
-                    .flex_wrap()
-                    .items_start()
-                    .child(views)
-                    .child(likes)
-                    .child(comments),
-            )
+            .child(stat_row(stats))
             .children(change_line)
             .when(views_over_time.len() > 1, |numbers| {
                 numbers.child(bars(
@@ -165,7 +211,169 @@ pub fn post_numbers(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
                     18.,
                     cx,
                 ))
-            }),
+            })
+            .children(owned.map(|(owner, read_at)| owner_numbers(bardo, &owner, read_at, id, cx))),
+    )
+}
+
+/// The owner's numbers read at `read_at`: watch time, the average view, money
+/// or "not monetized", and when YouTube Analytics was read and how late
+/// it runs.
+fn owner_numbers(
+    bardo: &Bardo,
+    owner: &OwnerMetrics,
+    read_at: std::time::SystemTime,
+    id: &str,
+    cx: &App,
+) -> Div {
+    let t = look(cx).tokens;
+    let watch = stat_row(vec![
+        stat(
+            tr(bardo, Text::MetricWatchTime),
+            figure_value(bardo.watch_time(owner.minutes_watched).into(), cx),
+            cx,
+        ),
+        stat(
+            tr(bardo, Text::MetricAverageView),
+            figure_value(bardo.clock(owner.average_view_seconds).into(), cx),
+            cx,
+        ),
+        stat(
+            tr(bardo, Text::MetricAverageViewed),
+            figure_value(bardo.percent(owner.average_view_share).into(), cx),
+            cx,
+        ),
+    ]);
+    v_flex()
+        .gap_2()
+        .pt_2()
+        .border_t(t.border_width)
+        .border_color(t.border)
+        .child(watch)
+        .child(money(bardo, owner, id, cx))
+        .child(
+            div()
+                .text_xs()
+                .text_color(t.text2)
+                .child(SharedString::from(bardo.text_with(
+                    Text::MetricsOwnerLine,
+                    &[("when", &bardo.time_ago(read_at))],
+                ))),
+        )
+}
+
+/// Revenue, RPM, CPM and playback-based CPM; "not monetized" outside the
+/// Partner Program.
+fn money(bardo: &Bardo, owner: &OwnerMetrics, id: &str, cx: &App) -> Div {
+    let Some(money) = owner.money() else {
+        return stat_row(vec![stat_with(
+            tr(bardo, Text::MetricRevenue),
+            Some((
+                hint_id(id, "unpaid"),
+                tr(bardo, Text::MetricNotMonetizedHint),
+            )),
+            div()
+                .text_sm()
+                .text_color(look(cx).tokens.text2)
+                .child(tr(bardo, Text::MetricNotMonetized))
+                .into_any_element(),
+            cx,
+        )]);
+    };
+    let amount = |amount| figure_value(bardo.money(amount).into(), cx);
+    let rpm = owner
+        .rpm()
+        .map_or_else(|| figure_value("—".into(), cx), amount);
+    stat_row(vec![
+        stat(tr(bardo, Text::MetricRevenue), amount(money.revenue), cx),
+        stat_with(
+            tr(bardo, Text::MetricRpm),
+            Some((hint_id(id, "rpm"), tr(bardo, Text::MetricRpmHint))),
+            rpm,
+            cx,
+        ),
+        stat_with(
+            tr(bardo, Text::MetricCpm),
+            Some((hint_id(id, "cpm"), tr(bardo, Text::MetricCpmHint))),
+            amount(money.cpm),
+            cx,
+        ),
+        stat_with(
+            tr(bardo, Text::MetricPlaybackCpm),
+            Some((
+                hint_id(id, "playback-cpm"),
+                tr(bardo, Text::MetricPlaybackCpmHint),
+            )),
+            amount(money.playback_cpm),
+            cx,
+        ),
+    ])
+}
+
+/// The post's retention curve as bars from zero, the tallest point at the
+/// top, with the share still watching at the end.
+pub fn retention(bardo: &Bardo, retention: &PostRetention, id: &str, cx: &App) -> Option<Div> {
+    let points = retention.curve.thinned(RETENTION_BARS);
+    if points.is_empty() {
+        return None;
+    }
+    let t = look(cx).tokens;
+    let high = points
+        .iter()
+        .map(|point| point.watch.ten_thousandths())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let height = 56.;
+    let chart = h_flex()
+        .id(hint_id(id, "retention-bars"))
+        .h(px(height))
+        .w_full()
+        .items_end()
+        .gap(px(1.))
+        .children(points.iter().map(|point| {
+            let share = point.watch.ten_thousandths() as f32 / high as f32;
+            div()
+                .flex_1()
+                .h(px((height * share).max(1.)))
+                .rounded_t(t.radius.min(px(1.)))
+                .bg(t.accent_edge)
+        }));
+    let end = retention.curve.at_end().map(|share| {
+        bardo.text_with(
+            Text::MetricsRetentionEnd,
+            &[("percent", &bardo.percent(share))],
+        )
+    });
+    Some(
+        v_flex()
+            .gap_1()
+            .max_w(px(420.))
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(tr(bardo, Text::MetricsRetention)),
+                    )
+                    .child(kit::info(
+                        hint_id(id, "retention"),
+                        None,
+                        tr(bardo, Text::MetricsRetentionHint),
+                    )),
+            )
+            .child(chart)
+            .child(
+                h_flex()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(t.text2)
+                    .child(tr(bardo, Text::MetricsRetentionStart))
+                    .children(end.map(SharedString::from)),
+            ),
     )
 }
 
@@ -494,8 +702,15 @@ pub fn post_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
                 .into_any_element(),
         ];
     }
-    post_numbers(bardo, post, id, cx)
+    let mut shown: Vec<AnyElement> = post_numbers(bardo, post, id, cx)
         .into_iter()
         .map(IntoElement::into_any_element)
-        .collect()
+        .collect();
+    shown.extend(
+        post.retention
+            .as_ref()
+            .and_then(|curve| retention(bardo, curve, id, cx))
+            .map(IntoElement::into_any_element),
+    );
+    shown
 }

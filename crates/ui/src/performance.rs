@@ -1,7 +1,9 @@
 //! Performance screen (#29): a channel's linked posts and how they
 //! perform. The figures add up the latest public numbers of its YouTube
-//! posts, the chart follows the channel's views over the syncs, and the
-//! picked post shows its own numbers and history. Syncing runs as a job
+//! posts, led by engaged views, watch time and revenue when the channel's
+//! account is connected (#79); the chart follows the channel's views over
+//! the syncs, and the picked post shows its own numbers, retention and
+//! history. Syncing runs as a job
 //! in `bardo_app`; this view polls the job revision and re-reads when it
 //! moves.
 
@@ -9,7 +11,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{Channel, ChannelId, Job, PublicationId};
-use bardo_app::{Bardo, ChannelMetricsView, ChannelPost, Destination, Text};
+use bardo_app::{Bardo, ChannelMetricsView, ChannelPost, Destination, OwnerAccess, Text};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -226,12 +228,49 @@ impl PerformanceScreen {
             Text::PerformanceTracked,
             &[("n", &view.status.tracked.to_string())],
         )));
+        // With the owner's numbers, they lead; likes and comments stay on
+        // each post.
+        if let Some(owner) = totals.owner {
+            let mut figures = vec![
+                Figure::new(
+                    tr(bardo, Text::MetricEngagedViews),
+                    metrics::count(bardo, owner.engaged_views),
+                ),
+                views,
+                Figure::new(
+                    tr(bardo, Text::MetricWatchTime),
+                    bardo.watch_time(owner.minutes_watched),
+                ),
+            ];
+            figures.extend(
+                owner.revenue.map(|revenue| {
+                    Figure::new(tr(bardo, Text::MetricRevenue), bardo.money(revenue))
+                }),
+            );
+            figures.push(posts);
+            return figures;
+        }
         vec![
             views,
             Figure::new(tr(bardo, Text::MetricLikes), some(totals.likes)),
             Figure::new(tr(bardo, Text::MetricComments), some(totals.comments)),
             posts,
         ]
+    }
+
+    /// Why the owner's numbers are missing, while the channel has YouTube
+    /// posts: its account is not connected, or needs to reconnect.
+    fn owner_notice(&self, view: &ChannelMetricsView, cx: &App) -> Option<AnyElement> {
+        if view.status.tracked == 0 {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let (tone, text) = match view.owner_access {
+            OwnerAccess::NotConnected => (Tone::Info, Text::PerformanceOwnerNotConnected),
+            OwnerAccess::ReconnectNeeded => (Tone::Warning, Text::PerformanceOwnerReconnect),
+            OwnerAccess::NoAccount | OwnerAccess::Connected => return None,
+        };
+        Some(kit::notice(tone, tr(bardo, text), cx).into_any_element())
     }
 
     /// Where syncing stands and "Sync now".
@@ -276,16 +315,25 @@ impl PerformanceScreen {
             tile.selected = shown == Some(id);
             tile.title = Some(SharedString::from(post.project_title.clone()));
             let network = bardo.text(Text::NetworkName(publication.network()));
-            tile.text = Some(SharedString::from(match post.post.latest() {
-                Some(latest) => bardo.text_with(
-                    Text::PerformanceTile,
-                    &[
-                        ("network", &network),
-                        ("views", &bardo.compact_count(latest.views)),
-                    ],
-                ),
-                None => network.into_owned(),
-            }));
+            tile.text = Some(SharedString::from(
+                match (post.post.engaged_views(), post.post.latest()) {
+                    (Some(engaged), _) => bardo.text_with(
+                        Text::PerformanceTileEngaged,
+                        &[
+                            ("network", &network),
+                            ("views", &bardo.compact_count(engaged)),
+                        ],
+                    ),
+                    (None, Some(latest)) => bardo.text_with(
+                        Text::PerformanceTile,
+                        &[
+                            ("network", &network),
+                            ("views", &bardo.compact_count(latest.views)),
+                        ],
+                    ),
+                    (None, None) => network.into_owned(),
+                },
+            ));
             tile.time = Some(SharedString::from(bardo.time_ago(publication.posted_at)));
             if publication.missing_since.is_some() {
                 tile.status = Some(
@@ -442,6 +490,7 @@ impl Render for PerformanceScreen {
             "performance-sync",
             cx,
         ));
+        parts.notices.extend(self.owner_notice(&view, cx));
         parts.summary = self.figures(&view, cx);
         parts.toolbar = Some(self.toolbar(&view, cx));
         parts.collection = Some(self.collection(&view, cx));

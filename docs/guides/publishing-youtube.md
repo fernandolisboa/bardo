@@ -171,12 +171,49 @@ reported the same way. It is not a failure. To publish publicly from Bardo, requ
 for your project; it changes the result, not anything in Bardo. Until
 then, you can make a video public yourself in YouTube Studio.
 
+## Owner metrics
+
+Once the channel's YouTube account is connected, every metrics sync also
+reads the owner's numbers of each YouTube post it finds, linked by hand or
+uploaded, from the YouTube Analytics API: engaged views, views, watch time,
+the average view (length and percentage), the audience retention curve
+and, for a channel in the YouTube Partner Program, estimated revenue, CPM
+and playback-based CPM. RPM is worked out by Bardo as revenue per 1,000
+views. The public views, likes and comments still come from the YouTube
+Data API key, so the sync needs the key as before.
+
+- **No new permission.** The two `yt-analytics` scopes are among the four
+  Bardo asks for at connection, and a connection missing any of them is
+  refused, so a channel connected before owner metrics existed reads them
+  without reconnecting.
+- **Engaged views lead.** YouTube's views now count every start of a video
+  (Shorts since March 2025, every format since August 2026); engaged views
+  keep the earlier meaning, so they are the headline number on the post
+  and on Strategy › Performance.
+- **Not monetized.** A channel outside the Partner Program gets a refusal
+  for revenue reports. Bardo shows **Not monetized** in their place and
+  reads everything else.
+- **Two or three days late.** YouTube Analytics data arrive 48 to 72 hours
+  after the fact; the post says so under its owner numbers. A new video
+  shows only its public numbers until its first analytics arrive.
+- **Reconnect needed.** While the account needs to reconnect, syncs keep
+  reading the public numbers, and Strategy › Performance asks you to
+  reconnect. A channel that was never connected keeps exactly the public
+  numbers it had.
+- Theme ranking's past performance keeps reading the public views: owner
+  numbers trail by days and a channel's older posts may have none.
+
 ## Quota
 
 Uploads draw on a separate bucket of 100 uploads per day per project; other
 calls share 10,000 units per day. Connecting, checking and reading a
 scheduled video back cost 1 unit each; changing or cancelling a schedule
 costs 51 (a read, then the update).
+YouTube Analytics has its own quota, apart from the Data API's: each sync
+asks it for two reports per post of a connected channel (the numbers and
+the retention curve), one unit each, plus one more per sync for a channel
+that is not monetized (its first revenue report is refused, then read
+again without revenue).
 When the quota runs out, Bardo says so and the counter resets at midnight
 Pacific time. An upload that hits the daily upload quota stops at once
 instead of retrying; select **Retry** after the reset.

@@ -1,9 +1,10 @@
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelId, JobId, MetricsSnapshot, Network, NetworkAccountId, PostLink, ProfileId, Publication,
-    PublicationId, PublicationKind, PublicationRepository, RenderId, RepositoryError, Upload,
-    UploadStatus, VideoProjectId, Visibility,
+    ChannelId, Earnings, JobId, MetricsSnapshot, Money, MoneyReport, Network, NetworkAccountId,
+    OwnerMetrics, PostLink, PostRetention, ProfileId, Publication, PublicationId, PublicationKind,
+    PublicationRepository, RenderId, RepositoryError, RetentionCurve, RetentionPoint, Share,
+    Upload, UploadStatus, VideoProjectId, Visibility,
 };
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
@@ -133,11 +134,113 @@ fn query_publications(
     rows.into_iter().map(PublicationRow::publication).collect()
 }
 
+/// The snapshot columns `read_snapshot` reads, in order.
+const SNAPSHOT_COLUMNS: &str = "s.publication_id, s.taken_at, s.views, s.likes, s.comments,
+     s.owner_views, s.engaged_views, s.minutes_watched, s.average_view_seconds,
+     s.average_view_share, s.revenue_micros, s.cpm_micros, s.playback_cpm_micros, s.monetized";
+
+/// A snapshot row as SQLite returns it.
+struct SnapshotRow {
+    publication: String,
+    taken_at: i64,
+    counts: [Option<i64>; 3],
+    /// Owner views, engaged views, minutes, seconds, share.
+    owner: [Option<i64>; 5],
+    /// Revenue, CPM, playback-based CPM.
+    money: [Option<i64>; 3],
+    monetized: Option<i64>,
+}
+
+impl SnapshotRow {
+    fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            publication: row.get(0)?,
+            taken_at: row.get(1)?,
+            counts: [row.get(2)?, row.get(3)?, row.get(4)?],
+            owner: [
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+            ],
+            money: [row.get(10)?, row.get(11)?, row.get(12)?],
+            monetized: row.get(13)?,
+        })
+    }
+
+    fn snapshot(self) -> Result<MetricsSnapshot, RepositoryError> {
+        let count = |n: i64| u64::try_from(n).unwrap_or(0);
+        let [views, likes, comments] = self.counts;
+        let owner = match (self.owner, self.monetized) {
+            (
+                [
+                    Some(views),
+                    Some(engaged),
+                    Some(minutes),
+                    Some(seconds),
+                    Some(share),
+                ],
+                Some(m),
+            ) => {
+                let earnings = match (m, self.money) {
+                    (1, [Some(revenue), Some(cpm), Some(playback)]) => {
+                        let money = |n: i64| Money::from_micros(count(n));
+                        Earnings::Monetized(MoneyReport {
+                            revenue: money(revenue),
+                            cpm: money(cpm),
+                            playback_cpm: money(playback),
+                        })
+                    }
+                    _ => Earnings::NotMonetized,
+                };
+                Some(OwnerMetrics {
+                    views: count(views),
+                    engaged_views: count(engaged),
+                    minutes_watched: count(minutes),
+                    average_view_seconds: count(seconds),
+                    average_view_share: Share::from_ten_thousandths(
+                        u32::try_from(share).unwrap_or(0),
+                    ),
+                    earnings,
+                })
+            }
+            _ => None,
+        };
+        Ok(MetricsSnapshot {
+            publication: PublicationId::from(uuid(&self.publication)?),
+            taken_at: from_unix_millis(self.taken_at),
+            views: count(views.unwrap_or(0)),
+            likes: likes.map(count),
+            comments: comments.map(count),
+            owner,
+        })
+    }
+}
+
 fn query_snapshots(
     conn: &Connection,
     sql: &str,
     param: String,
 ) -> Result<Vec<MetricsSnapshot>, RepositoryError> {
+    let rows = conn
+        .prepare(sql)
+        .and_then(|mut statement| {
+            statement
+                .query_map([param], SnapshotRow::read)?
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .map_err(boxed)?;
+    rows.into_iter().map(SnapshotRow::snapshot).collect()
+}
+
+/// Retention points of one or more publications, gathered into a curve
+/// each.
+fn query_retention(
+    conn: &Connection,
+    sql: &str,
+    param: String,
+) -> Result<Vec<PostRetention>, RepositoryError> {
     let rows = conn
         .prepare(sql)
         .and_then(|mut statement| {
@@ -148,24 +251,55 @@ fn query_snapshots(
                         row.get::<_, i64>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, Option<i64>>(3)?,
-                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, i64>(4)?,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()
         })
         .map_err(boxed)?;
-    let count = |n: i64| u64::try_from(n).unwrap_or(0);
-    rows.into_iter()
-        .map(|(publication, taken_at, views, likes, comments)| {
-            Ok(MetricsSnapshot {
-                publication: PublicationId::from(uuid(&publication)?),
-                taken_at: from_unix_millis(taken_at),
-                views: count(views),
-                likes: likes.map(count),
-                comments: comments.map(count),
-            })
+    let share = |n: i64| Share::from_ten_thousandths(u32::try_from(n).unwrap_or(0));
+    let mut curves: Vec<(PublicationId, SystemTime, Vec<RetentionPoint>)> = Vec::new();
+    for (publication, elapsed, watch, relative, read_at) in rows {
+        let publication = PublicationId::from(uuid(&publication)?);
+        let point = RetentionPoint {
+            elapsed: share(elapsed),
+            watch: share(watch),
+            relative: relative.map(share),
+        };
+        match curves.last_mut() {
+            Some((id, _, points)) if *id == publication => points.push(point),
+            _ => curves.push((publication, from_unix_millis(read_at), vec![point])),
+        }
+    }
+    Ok(curves
+        .into_iter()
+        .map(|(publication, read_at, points)| PostRetention {
+            publication,
+            read_at,
+            curve: RetentionCurve::of(points),
         })
-        .collect()
+        .collect())
+}
+
+/// A snapshot's owner columns, in `SNAPSHOT_COLUMNS` order from
+/// `owner_views`.
+fn owner_columns(owner: Option<&OwnerMetrics>) -> [Option<i64>; 9] {
+    let Some(owner) = owner else {
+        return [None; 9];
+    };
+    let money = owner.money();
+    let micros = |pick: fn(&MoneyReport) -> Money| money.map(|m| stored(pick(m).micros()));
+    [
+        Some(stored(owner.views)),
+        Some(stored(owner.engaged_views)),
+        Some(stored(owner.minutes_watched)),
+        Some(stored(owner.average_view_seconds)),
+        Some(i64::from(owner.average_view_share.ten_thousandths())),
+        micros(|m| m.revenue),
+        micros(|m| m.cpm),
+        micros(|m| m.playback_cpm),
+        Some(i64::from(money.is_some())),
+    ]
 }
 
 /// Counts beyond SQLite's integers are not real view counts; they clamp.
@@ -340,19 +474,52 @@ impl PublicationRepository for Database {
             .map_err(boxed)?;
         }
         for snapshot in snapshots {
+            let [
+                owner_views,
+                engaged,
+                minutes,
+                seconds,
+                share,
+                revenue,
+                cpm,
+                playback,
+                monetized,
+            ] = owner_columns(snapshot.owner.as_ref());
             tx.execute(
-                "INSERT INTO metrics_snapshot (publication_id, taken_at, views, likes, comments)
-                 SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM publication WHERE id = ?1)
+                "INSERT INTO metrics_snapshot (publication_id, taken_at, views, likes, comments,
+                     owner_views, engaged_views, minutes_watched, average_view_seconds,
+                     average_view_share, revenue_micros, cpm_micros, playback_cpm_micros,
+                     monetized)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+                 WHERE EXISTS (SELECT 1 FROM publication WHERE id = ?1)
                  ON CONFLICT (publication_id, taken_at) DO UPDATE SET
                      views = excluded.views,
                      likes = excluded.likes,
-                     comments = excluded.comments",
+                     comments = excluded.comments,
+                     owner_views = excluded.owner_views,
+                     engaged_views = excluded.engaged_views,
+                     minutes_watched = excluded.minutes_watched,
+                     average_view_seconds = excluded.average_view_seconds,
+                     average_view_share = excluded.average_view_share,
+                     revenue_micros = excluded.revenue_micros,
+                     cpm_micros = excluded.cpm_micros,
+                     playback_cpm_micros = excluded.playback_cpm_micros,
+                     monetized = excluded.monetized",
                 params![
                     snapshot.publication.to_string(),
                     to_unix_millis(snapshot.taken_at),
                     stored(snapshot.views),
                     snapshot.likes.map(stored),
                     snapshot.comments.map(stored),
+                    owner_views,
+                    engaged,
+                    minutes,
+                    seconds,
+                    share,
+                    revenue,
+                    cpm,
+                    playback,
+                    monetized,
                 ],
             )
             .map_err(boxed)?;
@@ -366,8 +533,10 @@ impl PublicationRepository for Database {
     ) -> Result<Vec<MetricsSnapshot>, RepositoryError> {
         query_snapshots(
             &self.conn(),
-            "SELECT publication_id, taken_at, views, likes, comments FROM metrics_snapshot
-             WHERE publication_id = ?1 ORDER BY taken_at",
+            &format!(
+                "SELECT {SNAPSHOT_COLUMNS} FROM metrics_snapshot s
+                 WHERE s.publication_id = ?1 ORDER BY s.taken_at"
+            ),
             publication.to_string(),
         )
     }
@@ -378,12 +547,69 @@ impl PublicationRepository for Database {
     ) -> Result<Vec<MetricsSnapshot>, RepositoryError> {
         query_snapshots(
             &self.conn(),
-            "SELECT s.publication_id, s.taken_at, s.views, s.likes, s.comments
-             FROM metrics_snapshot s
-             JOIN publication p ON p.id = s.publication_id
+            &format!(
+                "SELECT {SNAPSHOT_COLUMNS}
+                 FROM metrics_snapshot s
+                 JOIN publication p ON p.id = s.publication_id
+                 JOIN video_project v ON v.id = p.project_id
+                 WHERE v.channel_id = ?1
+                 ORDER BY s.taken_at"
+            ),
+            channel.to_string(),
+        )
+    }
+
+    fn save_retention(&self, curves: &[PostRetention]) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        for retention in curves {
+            let publication = retention.publication.to_string();
+            tx.execute(
+                "DELETE FROM retention_point WHERE publication_id = ?1",
+                [&publication],
+            )
+            .map_err(boxed)?;
+            for point in retention.curve.points() {
+                tx.execute(
+                    "INSERT INTO retention_point (publication_id, elapsed, watch, relative, read_at)
+                     SELECT ?1, ?2, ?3, ?4, ?5
+                     WHERE EXISTS (SELECT 1 FROM publication WHERE id = ?1)",
+                    params![
+                        publication,
+                        i64::from(point.elapsed.ten_thousandths()),
+                        i64::from(point.watch.ten_thousandths()),
+                        point.relative.map(|r| i64::from(r.ten_thousandths())),
+                        to_unix_millis(retention.read_at),
+                    ],
+                )
+                .map_err(boxed)?;
+            }
+        }
+        tx.commit().map_err(boxed)
+    }
+
+    fn retention(
+        &self,
+        publication: PublicationId,
+    ) -> Result<Option<PostRetention>, RepositoryError> {
+        Ok(query_retention(
+            &self.conn(),
+            "SELECT publication_id, elapsed, watch, relative, read_at FROM retention_point
+             WHERE publication_id = ?1 ORDER BY elapsed",
+            publication.to_string(),
+        )?
+        .pop())
+    }
+
+    fn channel_retention(&self, channel: ChannelId) -> Result<Vec<PostRetention>, RepositoryError> {
+        query_retention(
+            &self.conn(),
+            "SELECT r.publication_id, r.elapsed, r.watch, r.relative, r.read_at
+             FROM retention_point r
+             JOIN publication p ON p.id = r.publication_id
              JOIN video_project v ON v.id = p.project_id
              WHERE v.channel_id = ?1
-             ORDER BY s.taken_at",
+             ORDER BY r.publication_id, r.elapsed",
             channel.to_string(),
         )
     }
@@ -513,6 +739,7 @@ mod tests {
             views,
             likes: Some(views / 10),
             comments: None,
+            owner: None,
         }
     }
 
@@ -795,6 +1022,152 @@ mod tests {
 
         db.remove_publication(yt.id).unwrap();
         assert_eq!(db.snapshots(yt.id).unwrap(), []);
+    }
+
+    fn owner(engaged: u64, money: Option<MoneyReport>) -> OwnerMetrics {
+        OwnerMetrics {
+            views: engaged + 100,
+            engaged_views: engaged,
+            minutes_watched: engaged / 3,
+            average_view_seconds: 42,
+            average_view_share: Share::from_ten_thousandths(6_123),
+            earnings: money.map_or(Earnings::NotMonetized, Earnings::Monetized),
+        }
+    }
+
+    #[test]
+    fn owner_numbers_ride_on_the_snapshot_monetized_or_not() {
+        let (db, channel, project) = setup();
+        let yt = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&yt).unwrap();
+        let money = MoneyReport {
+            revenue: Money::from_micros(61_873_000),
+            cpm: Money::from_micros(7_412_000),
+            playback_cpm: Money::from_micros(5_880_000),
+        };
+        let public = snapshot(&yt, 100, 50);
+        let paid = MetricsSnapshot {
+            owner: Some(owner(900, Some(money))),
+            ..snapshot(&yt, 200, 1_000)
+        };
+        let unpaid = MetricsSnapshot {
+            owner: Some(owner(950, None)),
+            ..snapshot(&yt, 300, 1_100)
+        };
+        db.save_sync(&[], &[public, paid, unpaid]).unwrap();
+        assert_eq!(db.snapshots(yt.id).unwrap(), [public, paid, unpaid]);
+        assert_eq!(
+            db.channel_snapshots(channel.id).unwrap(),
+            [public, paid, unpaid]
+        );
+
+        // A resumed sync writes the same moment again, owner numbers too.
+        let again = MetricsSnapshot {
+            owner: None,
+            ..paid
+        };
+        db.save_sync(&[], &[again]).unwrap();
+        assert_eq!(db.snapshots(yt.id).unwrap()[1], again);
+    }
+
+    #[test]
+    fn half_an_owner_row_is_refused() {
+        let (db, _, project) = setup();
+        let yt = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&yt).unwrap();
+        let conn = db.conn();
+        let insert = |columns: &str, values: &str| {
+            conn.execute(
+                &format!(
+                    "INSERT INTO metrics_snapshot (publication_id, taken_at, views{columns})
+                     VALUES ('{}', 1, 5{values})",
+                    yt.id
+                ),
+                [],
+            )
+        };
+        assert!(
+            insert(", engaged_views", ", 3").is_err(),
+            "no monetized flag"
+        );
+        assert!(
+            insert(
+                ", owner_views, engaged_views, minutes_watched, average_view_seconds, \
+                 average_view_share, monetized",
+                ", 1, 1, 1, 1, 1, 1"
+            )
+            .is_err(),
+            "monetized without money"
+        );
+        assert!(
+            insert(
+                ", owner_views, engaged_views, minutes_watched, average_view_seconds, \
+                 average_view_share, monetized",
+                ", 1, 1, 1, 1, 1, 0"
+            )
+            .is_ok()
+        );
+    }
+
+    fn curve(watch: &[u32]) -> RetentionCurve {
+        RetentionCurve::of(
+            watch
+                .iter()
+                .enumerate()
+                .map(|(ix, watch)| RetentionPoint {
+                    elapsed: Share::from_ten_thousandths((ix as u32 + 1) * 100),
+                    watch: Share::from_ten_thousandths(*watch),
+                    relative: (ix % 2 == 0).then_some(Share::from_ten_thousandths(5_000)),
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_retention_curve_is_replaced_by_the_next_one_and_goes_with_its_post() {
+        let (db, channel, project) = setup();
+        let yt = youtube(&project, "dQw4w9WgXcQ");
+        db.save_publication(&yt).unwrap();
+        let second = youtube(
+            &super::tests::project(&db, &channel, "Second"),
+            "aaaaaaaaaaa",
+        );
+        db.save_publication(&second).unwrap();
+        assert_eq!(db.retention(yt.id).unwrap(), None);
+
+        let first = PostRetention {
+            publication: yt.id,
+            read_at: time(100),
+            curve: curve(&[12_000, 9_000, 8_000]),
+        };
+        db.save_retention(std::slice::from_ref(&first)).unwrap();
+        assert_eq!(db.retention(yt.id).unwrap(), Some(first));
+
+        let next = PostRetention {
+            publication: yt.id,
+            read_at: time(200),
+            curve: curve(&[11_000, 7_000]),
+        };
+        let other = PostRetention {
+            publication: second.id,
+            read_at: time(200),
+            curve: curve(&[10_000]),
+        };
+        db.save_retention(&[next.clone(), other.clone()]).unwrap();
+        assert_eq!(db.retention(yt.id).unwrap(), Some(next.clone()));
+        let mut both = db.channel_retention(channel.id).unwrap();
+        both.sort_by_key(|r| r.curve.points().len());
+        assert_eq!(both, [other, next]);
+
+        db.remove_publication(yt.id).unwrap();
+        assert_eq!(db.retention(yt.id).unwrap(), None);
+        db.save_retention(&[PostRetention {
+            publication: yt.id,
+            read_at: time(300),
+            curve: curve(&[1]),
+        }])
+        .unwrap();
+        assert_eq!(db.retention(yt.id).unwrap(), None, "removed meanwhile");
     }
 
     #[test]

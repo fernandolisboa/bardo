@@ -43,11 +43,11 @@ use bardo_domain::{
     CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository, ImageGenerator,
     JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository, MusicPromptRepository,
     NarrationRepository, NetworkAccountRepository, NetworkConnectionRepository, NetworkSignIn,
-    NicheResearchRepository, Persona, PersonaRepository, ProfileRepository, ProjectFiles,
-    PublicationRepository, Redactor, RenderRepository, RepositoryError, ScenePlanRepository,
-    ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository,
-    TextGenerator, ThemeRepository, TimelineRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VideoUploader, VoiceLibrary, Zone,
+    NicheResearchRepository, OwnerAnalytics, Persona, PersonaRepository, ProfileRepository,
+    ProjectFiles, PublicationRepository, Redactor, RenderRepository, RepositoryError,
+    ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner, SpeechSynthesizer,
+    TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository, UiLanguage,
+    UiThemePreference, UserProfile, VideoStats, VideoUploader, VoiceLibrary, Zone,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore};
@@ -89,7 +89,8 @@ pub use persona_package::PackageError;
 pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus, persona_package_folder};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use publications::{
-    ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, PublicationError, PublishedPost,
+    ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, OwnerAccess, PublicationError,
+    PublishedPost,
 };
 pub use render::{
     CheckFound, RenderChecks, RenderError, RenderReview, RenderSummary, RenderTarget,
@@ -282,6 +283,9 @@ pub struct Providers {
     pub consent: Arc<dyn ConsentReceiver>,
     /// Upload per network that has one (ADR-0008): YouTube for now.
     pub uploaders: Vec<Arc<dyn VideoUploader>>,
+    /// Owner metrics per network that has them (#79): YouTube Analytics
+    /// for now.
+    pub analytics: Vec<Arc<dyn OwnerAnalytics>>,
 }
 
 impl Providers {
@@ -306,6 +310,7 @@ impl Providers {
             sign_ins: vec![Arc::new(bardo_publish::YouTubeSignIn::new())],
             consent: Arc::new(bardo_publish::LoopbackReceiver),
             uploaders: vec![Arc::new(bardo_publish::YouTubeUploader::new())],
+            analytics: vec![Arc::new(bardo_publish::YouTubeAnalytics::new())],
         }
     }
 }
@@ -522,6 +527,7 @@ impl Bardo {
             accounts: Arc::clone(&network_accounts),
             connections: connection_book.connections().clone(),
             uploaders: providers.uploaders.clone(),
+            analytics: providers.analytics,
         };
         let cut_handler = CutSuggestionHandler {
             owner: profile.id,
@@ -693,6 +699,21 @@ impl Bardo {
     /// A 0–100 score as a fraction, e.g. `0.82`, `0,82`.
     pub fn score(&self, score: bardo_domain::Score) -> String {
         self.catalog.score(score)
+    }
+
+    /// A share as a percentage to the tenth, e.g. `71.6%`, `71,6%`.
+    pub fn percent(&self, share: bardo_domain::Share) -> String {
+        self.catalog.percent(share)
+    }
+
+    /// Minutes watched, e.g. `45 min`, `1.2K h`.
+    pub fn watch_time(&self, minutes: u64) -> String {
+        self.catalog.watch_time(minutes)
+    }
+
+    /// A length on a clock, e.g. `0:34`, `1:02:09`.
+    pub fn clock(&self, seconds: u64) -> String {
+        self.catalog.clock(seconds)
     }
 
     /// An amount to the cent, e.g. `$1,234.56`, `US$ 0,05`.
@@ -1410,6 +1431,98 @@ pub(crate) mod testing {
         }
     }
 
+    /// Answers owner reports from what a test set per video, and keeps
+    /// every call.
+    #[derive(Default)]
+    pub(crate) struct FakeAnalytics {
+        pub(crate) reports: Mutex<HashMap<String, bardo_domain::VideoReport>>,
+        /// Money reports answer 403.
+        pub(crate) not_monetized: std::sync::atomic::AtomicBool,
+        pub(crate) failure: Mutex<Option<bardo_domain::AnalyticsError>>,
+        /// (video, money asked) per report; video per curve.
+        pub(crate) calls: Mutex<Vec<(String, bool)>>,
+        pub(crate) curves: Mutex<Vec<String>>,
+        /// The token each call carried.
+        pub(crate) tokens: Mutex<Vec<String>>,
+    }
+
+    impl FakeAnalytics {
+        /// `views` for `video`, the other numbers derived from them.
+        pub(crate) fn set(&self, video: &str, views: u64) {
+            self.reports.lock().unwrap().insert(
+                video.to_owned(),
+                bardo_domain::VideoReport {
+                    views,
+                    engaged_views: views * 7 / 10,
+                    minutes_watched: views / 4,
+                    average_view_seconds: 33,
+                    average_view_share: bardo_domain::Share::of_percent(62.5),
+                    money: None,
+                },
+            );
+        }
+
+        pub(crate) fn calls(&self) -> Vec<(String, bool)> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl bardo_domain::OwnerAnalytics for FakeAnalytics {
+        fn network(&self) -> bardo_domain::Network {
+            bardo_domain::Network::YouTube
+        }
+
+        fn video_report(
+            &self,
+            token: &bardo_domain::SecretText,
+            video: &str,
+            _: &bardo_domain::ReportPeriod,
+            money: bool,
+        ) -> Result<Option<bardo_domain::VideoReport>, bardo_domain::AnalyticsError> {
+            self.calls.lock().unwrap().push((video.to_owned(), money));
+            self.tokens.lock().unwrap().push(token.expose().to_owned());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            if money && self.not_monetized.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(bardo_domain::AnalyticsError::new(
+                    bardo_domain::AnalyticsErrorKind::Forbidden,
+                    "HTTP 403: forbidden",
+                ));
+            }
+            Ok(self
+                .reports
+                .lock()
+                .unwrap()
+                .get(video)
+                .map(|report| bardo_domain::VideoReport {
+                    money: money.then(|| bardo_domain::MoneyReport {
+                        revenue: Money::from_micros(report.views * 2_000),
+                        cpm: Money::from_cents(410),
+                        playback_cpm: Money::from_cents(380),
+                    }),
+                    ..*report
+                }))
+        }
+
+        fn retention(
+            &self,
+            _: &bardo_domain::SecretText,
+            video: &str,
+            _: &bardo_domain::ReportPeriod,
+        ) -> Result<Vec<bardo_domain::RetentionPoint>, bardo_domain::AnalyticsError> {
+            self.curves.lock().unwrap().push(video.to_owned());
+            let share = bardo_domain::Share::from_ten_thousandths;
+            Ok((1..=100)
+                .map(|i| bardo_domain::RetentionPoint {
+                    elapsed: share(i * 100),
+                    watch: share(11_000 - i * 80),
+                    relative: Some(share(5_500)),
+                })
+                .collect())
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -1432,6 +1545,7 @@ pub(crate) mod testing {
             sign_ins: Vec::new(),
             consent: Arc::new(crate::connections::testing::NoConsent),
             uploaders: Vec::new(),
+            analytics: Vec::new(),
         }
     }
 }

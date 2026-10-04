@@ -398,6 +398,7 @@ mod tests {
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
+                analytics: Vec::new(),
             };
             Bardo::start_with(
                 Repositories::shared(Arc::clone(&self.db), Arc::clone(&self.secrets) as _),
