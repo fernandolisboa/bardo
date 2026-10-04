@@ -17,13 +17,15 @@ The guide Bardo shows on its Guide screen (F1), in two languages. O guia que o B
 | [Clips](en-US/clips.md) | [Clipes](pt-BR/clips.md) |
 | [Personas](en-US/personas.md) | [Personas](pt-BR/personas.md) |
 | [Templates](en-US/templates.md) | [Modelos](pt-BR/templates.md) |
+| [The editor](en-US/editor.md) | [O editor](pt-BR/editor.md) |
+| [Review and render](en-US/render.md) | [Revisão e render](pt-BR/render.md) |
 | [Glossary](en-US/glossary.md) | [Glossário](pt-BR/glossary.md) |
 | [Keyboard shortcuts](en-US/shortcuts.md) | [Atalhos de teclado](pt-BR/shortcuts.md) |
 
 ## Writing a page
 
 - One Markdown file per page, with the same file name in `en-US/` and `pt-BR/`. en-US sets the structure; pt-BR is written in natural Portuguese, not word for word.
-- Front matter: `id` (the file name), `title`, `group` (`getting-started`, `strategy`, `production`, `editing`, `publishing`, `costs` or `reference`), the `place` the page explains, if any (`research`, `projects/script`, `settings/keys`), and the `tour` that shows it, if any (`welcome`, `research`, `themes`, `performance`, `projects`, `script`, `narration`, `scenes`, `clips`, `personas`, `templates`).
+- Front matter: `id` (the file name), `title`, `group` (`getting-started`, `strategy`, `production`, `editing`, `publishing`, `costs` or `reference`), the `place` the page explains, if any (`research`, `projects/script`, `settings/keys`), and the `tour` that shows it, if any (`welcome`, `research`, `themes`, `performance`, `projects`, `script`, `narration`, `scenes`, `clips`, `personas`, `templates`, `editor`, `render`).
 - A `# Title` equal to the front matter's title, an optional introduction, then sections: each `## Heading` right after an `<a id="section-id"></a>` line. Both languages have the same sections, in the same order, with the same ids.
 - Links: another page as `page.md#section` (the app also reads `bardo:guide/page#section`, but only the first works on GitHub), a section of this page as `#section`, a place in Bardo as `bardo:go/<place>`, a tour as `bardo:tour/<tour>`. Anything else must be an `https://` address.
 - Add a new page to `GUIDE_PAGES` in `crates/app/src/guide.rs`, which embeds it in the app. The tests in that file fail on a missing translation, a different section or a broken link.

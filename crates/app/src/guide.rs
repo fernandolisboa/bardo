@@ -47,6 +47,8 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("clips"),
     page!("personas"),
     page!("templates"),
+    page!("editor"),
+    page!("render"),
     page!("glossary"),
     page!("shortcuts"),
 ];
@@ -1036,6 +1038,7 @@ Text of the **first** part.
                 GuideGroup::GettingStarted,
                 GuideGroup::Strategy,
                 GuideGroup::Production,
+                GuideGroup::Editing,
                 GuideGroup::Reference
             ]
         );
@@ -1054,6 +1057,10 @@ Text of the **first** part.
         );
         assert_eq!(
             guide.page_at(Some(GuidePlace::Stage(Stage::Edit))).id,
+            "editor"
+        );
+        assert_eq!(
+            guide.page_at(Some(GuidePlace::Stage(Stage::Publish))).id,
             "projects",
             "no page for the stage yet: its screen's"
         );
@@ -1181,12 +1188,19 @@ Text of the **first** part.
                 let Some(place) = tour.place else {
                     continue;
                 };
+                // A place's page shows its first tour (the editor's has two
+                // parts); "Show me" starts it.
                 let page = guide
                     .pages()
                     .iter()
-                    .find(|page| page.tour == Some(tour.id))
-                    .unwrap_or_else(|| panic!("{language}: no page shows {:?}", tour.id));
-                assert_eq!(page.place, Some(GuidePlace::from(place)), "{}", page.id);
+                    .find(|page| page.place == Some(GuidePlace::from(place)))
+                    .unwrap_or_else(|| panic!("{language}: no page explains {:?}", tour.id));
+                assert_eq!(
+                    page.tour,
+                    Tour::of(place).map(|first| first.id),
+                    "{}",
+                    page.id
+                );
                 // Every step's "Learn more" stays on the screen's page.
                 for step in tour.steps {
                     assert_eq!(step.guide.map(|guide| guide.page), Some(page.id.as_str()));
@@ -1235,14 +1249,9 @@ Text of the **first** part.
     fn coverage_report() {
         let guide = Guide::load(UiLanguage::EnUs);
         let mut lines = Vec::new();
-        // The places F1 opens a page for: not the Jobs panel, nor the
-        // editor, where F1 does nothing.
-        let reached = |place: &GuidePlace| {
-            !matches!(
-                place,
-                GuidePlace::Screen(Destination::Jobs) | GuidePlace::Stage(Stage::Edit)
-            )
-        };
+        // The places F1 opens a page for: not the Jobs panel, a panel
+        // beside the screen.
+        let reached = |place: &GuidePlace| !matches!(place, GuidePlace::Screen(Destination::Jobs));
         for place in GuidePlace::all().into_iter().filter(reached) {
             let page = guide
                 .pages()

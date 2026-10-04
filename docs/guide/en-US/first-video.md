@@ -43,14 +43,14 @@ When a script or a narration changes, what was made from it shows as out of date
 <a id="editor"></a>
 ## 6. Edit
 
-The **Edit** stage opens the editor with a rough cut already laid out from the scenes and the narration. Split, trim, move and delete clips; cuts snap to the narration's words. Mix the narration with music and sound effects, edit the captions, and choose the frame shape (16:9 or 9:16). Cut suggestions mark good places to cut; accepting one is just an edit, and you can undo it.
+The **Edit** stage opens the editor with a rough cut already laid out from the scenes and the narration. Split, trim, move and delete clips; cuts snap to the narration's words. Mix the narration with music and sound effects, edit the captions, and choose the frame shape (16:9 or 9:16). Cut suggestions mark good places to cut; accepting one is just an edit, and you can undo it. [The editor](editor.md) explains each part.
 
 Bardo does not make music. In the project it writes a music prompt for your own music tool; import the track you make in the editor's Media tab.
 
 <a id="render"></a>
 ## 7. Review and render
 
-**Review & render** shows the cut, the mix loudness, the captions and, for each of the channel's network accounts, its format and any problems found (too long for the network, captions off, a mix far too quiet). Choose the networks and confirm: the render runs as a job, and you can keep working meanwhile.
+**Review & render** shows the cut, the mix loudness, the captions and, for each of the channel's network accounts, its format and any problems found (too long for the network, captions off, a mix far too quiet). Choose the networks and confirm: the render runs as a job, and you can keep working meanwhile. More in [Review and render](render.md).
 
 <a id="publish"></a>
 ## 8. Publish

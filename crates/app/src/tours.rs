@@ -47,6 +47,9 @@ pub enum TourAnchor {
     Inspector,
     /// What a page shows when it is not a collection.
     Content,
+    /// The page's figures (the Render stage's length, frame, loudness and
+    /// captions).
+    Summary,
     /// One of a screen's own controls, tagged by the screen.
     Control(Control),
 }
@@ -131,6 +134,32 @@ pub enum Control {
     TemplateVariables,
     /// Templates: Save as new version, Discard and Load Bardo's default.
     TemplateActions,
+    /// Editor: the preview and its transport.
+    EditorPreview,
+    /// Editor: the tracks, their headers and the playhead.
+    EditorTracks,
+    /// Editor: the Select and Split tools.
+    EditorTools,
+    /// Editor: Snap to words.
+    EditorSnap,
+    /// Editor: undo and redo.
+    EditorUndo,
+    /// Editor: the audio tracks' headers, with level, mute and solo.
+    EditorMix,
+    /// Editor: Duck music under narration.
+    EditorDuck,
+    /// Editor: showing the captions, and their track.
+    EditorCaptions,
+    /// Editor: the 16:9 and 9:16 switch over the preview.
+    EditorAspect,
+    /// Editor: AI cut suggestions.
+    EditorSuggestions,
+    /// Editor: Review & render.
+    EditorRender,
+    /// Render: the picked target's checks.
+    RenderChecks,
+    /// Render: the picked target's last file.
+    RenderLast,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -581,9 +610,80 @@ pub const TEMPLATES: Tour = {
     }
 };
 
+/// The editor, part one: the preview and playback, the tracks, cutting,
+/// snapping and undo. Starting it pauses playback; its steps only explain,
+/// so the cut and its undo history stay as they were.
+pub const EDITOR: Tour = {
+    const AT: Stage = Stage::Edit;
+    const PAGE: &str = "editor";
+    Tour {
+        id: TourId::Editor,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "preview", control(Control::EditorPreview)).learn(PAGE, "preview"),
+            at_stage(AT, "tracks", control(Control::EditorTracks)).learn(PAGE, "timeline"),
+            at_stage(AT, "tools", control(Control::EditorTools)).learn(PAGE, "cuts"),
+            at_stage(AT, "snap", control(Control::EditorSnap)).learn(PAGE, "snapping"),
+            at_stage(AT, "undo", control(Control::EditorUndo)).learn(PAGE, "undo"),
+        ],
+    }
+};
+
+/// The editor, part two: the mix, captions, framing, cut suggestions and
+/// leaving to render. Offered once part one is completed or dismissed.
+pub const EDITOR_MORE: Tour = {
+    const AT: Stage = Stage::Edit;
+    const PAGE: &str = "editor";
+    Tour {
+        id: TourId::EditorMore,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "mix", control(Control::EditorMix)).learn(PAGE, "mix"),
+            at_stage(AT, "duck", control(Control::EditorDuck)).learn(PAGE, "ducking"),
+            at_stage(AT, "captions", control(Control::EditorCaptions)).learn(PAGE, "captions"),
+            at_stage(AT, "framing", control(Control::EditorAspect)).learn(PAGE, "framing"),
+            at_stage(AT, "suggestions", control(Control::EditorSuggestions))
+                .learn(PAGE, "suggestions"),
+            // Hidden while the cut is empty.
+            at_stage(AT, "render", control(Control::EditorRender))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "render"),
+        ],
+    }
+};
+
+/// Render: the review's figures, the targets, what blocks and what warns,
+/// rendering, and the last file.
+pub const RENDER: Tour = {
+    const AT: Stage = Stage::Render;
+    const PAGE: &str = "render";
+    const TARGET: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Render,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "review", TourAnchor::Summary)
+                .missing(WhenMissing::LightPart(TourAnchor::Header))
+                .learn(PAGE, "review"),
+            at_stage(AT, "targets", TourAnchor::Collection).learn(PAGE, "targets"),
+            // Still checking: the target's state stands in for them.
+            at_stage(AT, "gates", control(Control::RenderChecks))
+                .missing(TARGET)
+                .learn(PAGE, "gates"),
+            at_stage(AT, "render", TourAnchor::Toolbar).learn(PAGE, "render"),
+            at_stage(AT, "last", control(Control::RenderLast))
+                .missing(TARGET)
+                .learn(PAGE, "last"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 11] = [
+    pub const ALL: [&'static Tour; 14] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -595,6 +695,9 @@ impl Tour {
         &CLIPS,
         &PERSONAS,
         &TEMPLATES,
+        &EDITOR,
+        &EDITOR_MORE,
+        &RENDER,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -610,13 +713,23 @@ impl Tour {
             TourId::Clips => &CLIPS,
             TourId::Personas => &PERSONAS,
             TourId::Templates => &TEMPLATES,
+            TourId::Editor => &EDITOR,
+            TourId::EditorMore => &EDITOR_MORE,
+            TourId::Render => &RENDER,
         }
     }
 
     /// The tour of `place` (a screen, or a stage of a project), if it has
-    /// one.
+    /// one; the first, for a place with several parts (the editor).
     pub fn of(place: TourPlace) -> Option<&'static Tour> {
-        Self::ALL.into_iter().find(|tour| tour.place == Some(place))
+        Self::at(place).next()
+    }
+
+    /// Every tour of `place`, in order.
+    pub fn at(place: TourPlace) -> impl Iterator<Item = &'static Tour> {
+        Self::ALL
+            .into_iter()
+            .filter(move |tour| tour.place == Some(place))
     }
 
     /// The tour of `screen`, if it has one.
@@ -1044,15 +1157,25 @@ impl Bardo {
         self.place_tour(TourPlace::Stage(stage), has_content)
     }
 
+    /// A place with several tours (the editor's two parts) offers the first
+    /// one the user has not completed nor dismissed, else the first again.
     fn place_tour(&self, place: TourPlace, has_content: bool) -> Option<ScreenTour> {
-        let tour = Tour::of(place).filter(|_| has_content)?;
-        let done = self.tours.progress.get(&tour.id).is_some_and(|progress| {
+        if !has_content {
+            return None;
+        }
+        let first = Tour::of(place)?;
+        let open = Tour::at(place).find(|tour| !self.tour_done(tour));
+        Some(ScreenTour {
+            tour: open.unwrap_or(first).id,
+            new: self.profile.offer_screen_tours && open.is_some(),
+        })
+    }
+
+    /// Whether `tour`, at its current content, was completed or dismissed.
+    fn tour_done(&self, tour: &Tour) -> bool {
+        self.tours.progress.get(&tour.id).is_some_and(|progress| {
             progress.version >= tour.version
                 && matches!(progress.state, TourState::Completed | TourState::Dismissed)
-        });
-        Some(ScreenTour {
-            tour: tour.id,
-            new: self.profile.offer_screen_tours && !done,
         })
     }
 
@@ -1594,12 +1717,18 @@ mod tests {
             (Stage::Narration, TourId::Narration),
             (Stage::Scenes, TourId::Scenes),
             (Stage::Clips, TourId::Clips),
+            (Stage::Edit, TourId::Editor),
+            (Stage::Render, TourId::Render),
         ];
         for (stage, tour) in stages {
             assert_eq!(Tour::of(TourPlace::Stage(stage)).map(|t| t.id), Some(tour));
         }
         assert_eq!(Tour::of_screen(Destination::Costs), None, "not yet");
-        assert_eq!(Tour::of(TourPlace::Stage(Stage::Render)), None, "not yet");
+        assert_eq!(Tour::of(TourPlace::Stage(Stage::Publish)), None, "not yet");
+        let editor: Vec<_> = Tour::at(TourPlace::Stage(Stage::Edit))
+            .map(|tour| tour.id)
+            .collect();
+        assert_eq!(editor, [TourId::Editor, TourId::EditorMore], "in two parts");
         for tour in Tour::ALL {
             assert_eq!(Tour::get(tour.id), tour);
         }
@@ -1639,7 +1768,7 @@ mod tests {
         let progress = FakeProgress::default();
         let mut app = start(&progress);
         assert_eq!(app.stage_tour(Stage::Script, false), None, "no script yet");
-        assert_eq!(app.stage_tour(Stage::Render, true), None, "no tour yet");
+        assert_eq!(app.stage_tour(Stage::Publish, true), None, "no tour yet");
         assert_eq!(
             app.stage_tour(Stage::Scenes, true),
             Some(ScreenTour {
@@ -1659,6 +1788,48 @@ mod tests {
             app.stage_tour(Stage::Clips, true).map(|tour| tour.new),
             Some(true),
             "each stage keeps its own"
+        );
+    }
+
+    #[test]
+    fn the_editor_offers_its_second_part_once_the_first_is_done() {
+        let progress = FakeProgress::default();
+        let mut app = start(&progress);
+        let offered = |app: &Bardo| app.stage_tour(Stage::Edit, true);
+        assert_eq!(app.stage_tour(Stage::Edit, false), None, "no cut yet");
+        assert_eq!(
+            offered(&app),
+            Some(ScreenTour {
+                tour: TourId::Editor,
+                new: true
+            })
+        );
+        // Closed midway: part one is still the one offered.
+        app.start_tour(TourId::Editor, Destination::Projects, false)
+            .unwrap();
+        app.tour_close();
+        assert_eq!(offered(&app).map(|tour| tour.tour), Some(TourId::Editor));
+        app.start_tour(TourId::Editor, Destination::Projects, false)
+            .unwrap();
+        while app.tour_next() != TourMove::Finished {}
+        assert_eq!(
+            offered(&app),
+            Some(ScreenTour {
+                tour: TourId::EditorMore,
+                new: true
+            }),
+            "part two, still new"
+        );
+        app.start_tour(TourId::EditorMore, Destination::Projects, false)
+            .unwrap();
+        app.tour_skip();
+        assert_eq!(
+            offered(&app),
+            Some(ScreenTour {
+                tour: TourId::Editor,
+                new: false
+            }),
+            "both done: part one again, without the mark"
         );
     }
 

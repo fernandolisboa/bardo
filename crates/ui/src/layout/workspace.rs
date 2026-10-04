@@ -252,7 +252,10 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
     // the one shown.
     let mut lead: Vec<AnyElement> = Vec::new();
     if !summary.is_empty() {
-        lead.push(figures(summary, cx));
+        lead.push(
+            kit::anchor_in(TourAnchor::Summary, figures(summary, cx), scroll.as_ref())
+                .into_any_element(),
+        );
     }
     lead.extend(
         toolbar.map(|toolbar| kit::anchor(TourAnchor::Toolbar, toolbar).into_any_element()),

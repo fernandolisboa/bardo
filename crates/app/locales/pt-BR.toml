@@ -2243,7 +2243,81 @@ body = "Escreva uma variável como {{nome}}, e cada geração a troca pelo valor
 title = "Salve ou recomece"
 body = "Salvar como nova versão guarda as suas mudanças como a próxima versão. Carregar o padrão do Bardo põe o texto original de volta no editor, para salvar se você quiser."
 
+[tour.editor]
+name = "Tour do editor"
+
+[tour.editor.preview]
+title = "Prévia e reprodução"
+body = "A prévia toca o corte a partir de cópias leves das suas mídias, então começa na hora; o render usa os arquivos completos. Espaço toca e pausa, e ← e → andam um quadro. Começar este tour pausou a reprodução."
+
+[tour.editor.tracks]
+title = "A linha do tempo"
+body = "O corte corre da esquerda para a direita em cinco faixas: legendas, vídeo, narração, música e efeitos sonoros. Clique para mover o cursor de reprodução, e clique num item para selecioná-lo e vê-lo no inspetor. Ctrl e a roda do mouse dão zoom."
+
+[tour.editor.tools]
+title = "Cortar"
+body = "Dividir (S) corta no cursor de reprodução. Arraste a ponta de um item, ou aperte [ ou ], para apará-lo; arraste um clipe entre outros dois para reordená-lo; Delete remove a seleção. A faixa de vídeo fecha os vãos, e o áudio deixa silêncio."
+
+[tour.editor.snap]
+title = "Encaixar nas palavras"
+body = "Cortes, aparas e bordas de legenda caem entre as palavras da narração, então um corte nunca come uma palavra. Segure Alt enquanto arrasta para posicionar livremente."
+
+[tour.editor.undo]
+title = "Desfazer e refazer"
+body = "Ctrl+Z desfaz qualquer edição e Ctrl+Y refaz, e o corte se salva sozinho enquanto você edita. A parte 2 do tour, no mesmo botão, mostra a mixagem, as legendas, o enquadramento, as sugestões de corte e o render."
+
+[tour.editor-more]
+name = "Tour do editor, parte 2"
+
+[tour.editor-more.mix]
+title = "A mixagem"
+body = "Clique no cabeçalho de uma faixa de áudio para ajustar o volume, ou use M e S para deixá-la muda ou tocar só ela. Selecione um trecho de áudio para dar entrada ou saída gradual."
+
+[tour.editor-more.duck]
+title = "Atenuação"
+body = "A atenuação abaixa a música enquanto a narração fala e a devolve nas pausas. Escolha a faixa de música para definir o quanto ela abaixa."
+
+[tour.editor-more.captions]
+title = "Legendas"
+body = "As legendas seguem as palavras da narração. Selecione uma para editar o texto, o tempo e o estilo no inspetor; esta chave desliga todas."
+
+[tour.editor-more.framing]
+title = "16:9 ou 9:16"
+body = "O formato do quadro do corte inteiro. Em 9:16, o clipe selecionado mostra a janela de recorte sobre a imagem: arraste-a para escolher o que fica à vista, ou escolha Ajustar ou Preencher no inspetor."
+
+[tour.editor-more.suggestions]
+title = "Sugestões de corte"
+body = "O Bardo pontua os pontos onde uma frase termina, o narrador pausa ou a cena muda, e diz por quê. Aceite (A) ou rejeite (R) cada um na linha do tempo ou na lista que toma o lugar do inspetor; nada muda até você aceitar."
+
+[tour.editor-more.render]
+title = "Revisar e renderizar"
+body = "Com o corte pronto, Revisar e renderizar leva você à etapa Render: as verificações, um arquivo por conta de rede e o render em si."
+
+[tour.render]
+name = "Tour do Render"
+
+[tour.render.review]
+title = "A revisão"
+body = "Confira o corte como ele vai sair antes de renderizar: duração, formato do quadro, loudness da mixagem e legendas. Um número em âmbar merece uma olhada."
+
+[tour.render.targets]
+title = "Um arquivo por rede"
+body = "Cada conta de rede do canal ganha o próprio arquivo, no preset dela: quadro, tamanho, codec, bitrate, duração máxima e loudness. Marque as que vão renderizar; as que ainda não têm arquivo ou estão desatualizadas já vêm marcadas."
+
+[tour.render.gates]
+title = "O que bloqueia e o que avisa"
+body = "Uma verificação marcada Bloqueia deixa a rede fora do render até você corrigir, como um corte mais longo do que a rede aceita. Um aviso deixa renderizar, e a confirmação conta os avisos que ficam."
+
+[tour.render.render]
+title = "Renderizar"
+body = "Renderizar pergunta mais uma vez, porque substitui o último arquivo de cada rede. Depois um único job renderiza todas em segundo plano, com o progresso aqui; cancele e retome depois se precisar."
+
+[tour.render.last]
+title = "O último arquivo"
+body = "Como está o último arquivo da rede: renderizado deste corte, desatualizado porque o corte ou o preset mudou, ou ainda não renderizado. Mostrar na pasta abre o arquivo."
+
 [guide]
+back_to_editor = "Voltar ao editor"
 resume_tour = "Retomar tour"
 shortcuts = "Atalhos de teclado"
 reset_tours = "Reiniciar tours"
@@ -2307,6 +2381,8 @@ nudge = "Mover o clipe selecionado uma posição, ou o áudio um quadro"
 deselect = "Limpar a seleção"
 undo = "Desfazer"
 redo = "Refazer"
+editor_guide = "Abrir o guia sobre o editor; fechá-lo volta ao editor"
+editor_tour = "Começar o tour do editor"
 next_cut = "Próxima sugestão"
 accept_cut = "Aceitar a sugestão"
 reject_cut = "Rejeitar a sugestão"

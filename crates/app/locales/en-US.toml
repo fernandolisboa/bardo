@@ -2243,7 +2243,81 @@ body = "Write a variable as {{name}}, and each generation replaces it with the p
 title = "Save or start over"
 body = "Save as new version keeps your changes as the next version. Load Bardo's default puts the original text back in the editor, to save if you want it."
 
+[tour.editor]
+name = "Editor tour"
+
+[tour.editor.preview]
+title = "Preview and playback"
+body = "The preview plays the cut from light copies of your media, so it starts at once; the render uses the full files. Space plays and pauses, and ← and → step one frame. Starting this tour paused playback."
+
+[tour.editor.tracks]
+title = "The timeline"
+body = "The cut runs left to right on five tracks: captions, video, narration, music and sound effects. Click to move the playhead, and click an item to select it and see it in the inspector. Ctrl and the scroll wheel zoom."
+
+[tour.editor.tools]
+title = "Cutting"
+body = "Split (S) cuts at the playhead. Drag an item's end, or press [ or ], to trim it; drag a clip between two others to reorder it; Delete removes the selection. The video track closes its gaps, while audio leaves silence."
+
+[tour.editor.snap]
+title = "Snap to words"
+body = "Cuts, trims and caption edges land between the narration's words, so a cut never clips one. Hold Alt while you drag to place freely."
+
+[tour.editor.undo]
+title = "Undo and redo"
+body = "Ctrl+Z undoes any edit and Ctrl+Y redoes it, and the cut saves itself as you go. Part 2 of the tour, from the same button, covers the mix, captions, framing, cut suggestions and rendering."
+
+[tour.editor-more]
+name = "Editor tour, part 2"
+
+[tour.editor-more.mix]
+title = "The mix"
+body = "Click an audio track's header to set its level, or use M and S to mute it or play it solo. Select an audio piece to fade it in or out."
+
+[tour.editor-more.duck]
+title = "Ducking"
+body = "Ducking lowers the music while the narration speaks and brings it back in the pauses. Pick the music track to set how deep it goes."
+
+[tour.editor-more.captions]
+title = "Captions"
+body = "Captions follow the narration's words. Select one to edit its text, timing and style in the inspector; this switch turns them all off."
+
+[tour.editor-more.framing]
+title = "16:9 or 9:16"
+body = "The frame shape of the whole cut. In 9:16, the selected clip shows its crop window over the picture: drag it to choose what stays in view, or pick Fit or Fill in the inspector."
+
+[tour.editor-more.suggestions]
+title = "Cut suggestions"
+body = "Bardo scores points where a sentence ends, the narrator pauses or the scene changes, and says why. Accept (A) or reject (R) each one on the timeline or in the list that takes the inspector's place; nothing changes until you accept."
+
+[tour.editor-more.render]
+title = "Review and render"
+body = "When the cut is ready, Review & render takes it to the Render stage: its checks, one file per network account, and the render itself."
+
+[tour.render]
+name = "Render tour"
+
+[tour.render.review]
+title = "The review"
+body = "Check the cut as it will come out before anything renders: its length, frame shape, mix loudness and captions. A figure in amber deserves a look."
+
+[tour.render.targets]
+title = "One file per network"
+body = "Each network account of the channel gets its own file, in its preset: frame, size, codec, bitrate, length limit and loudness. Tick the ones to render; those not rendered yet or out of date come ticked."
+
+[tour.render.gates]
+title = "What blocks and what warns"
+body = "A check marked Blocks keeps that network out of the render until you fix it, like a cut longer than the network takes. A warning lets it render, and the confirmation counts the warnings left."
+
+[tour.render.render]
+title = "Render"
+body = "Render asks once more, since it replaces each network's last file. One job then renders them all in the background, with its progress here; cancel it and resume later if you need to."
+
+[tour.render.last]
+title = "The last file"
+body = "Where the network's last file stands: rendered from this cut, out of date since the cut or preset changed, or not rendered yet. Show in folder opens it."
+
 [guide]
+back_to_editor = "Back to the editor"
 resume_tour = "Resume tour"
 shortcuts = "Keyboard shortcuts"
 reset_tours = "Reset tours"
@@ -2307,6 +2381,8 @@ nudge = "Move the selected clip one place, or audio one frame"
 deselect = "Clear the selection"
 undo = "Undo"
 redo = "Redo"
+editor_guide = "Open the guide over the editor; closing it returns to the editor"
+editor_tour = "Start the editor's tour"
 next_cut = "Next suggestion"
 accept_cut = "Accept the suggestion"
 reject_cut = "Reject the suggestion"

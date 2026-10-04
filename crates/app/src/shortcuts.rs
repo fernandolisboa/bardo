@@ -65,6 +65,8 @@ pub const SHORTCUTS: &[ShortcutGroup] = &[
             shortcut(&["Esc"], "deselect"),
             shortcut(&["Ctrl+Z"], "undo"),
             shortcut(&["Ctrl+Y", "Ctrl+Shift+Z"], "redo"),
+            shortcut(&["F1"], "editor_guide"),
+            shortcut(&["Shift+F1"], "editor_tour"),
         ],
     },
     ShortcutGroup {

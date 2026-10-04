@@ -32,10 +32,17 @@ pub enum TourId {
     Personas,
     /// The Templates screen's tour.
     Templates,
+    /// The editor's tour: playback, the tracks and cutting.
+    Editor,
+    /// The editor's second tour: the mix, captions, framing, cut
+    /// suggestions and leaving to render.
+    EditorMore,
+    /// The Render stage's tour.
+    Render,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 11] = [
+    pub const ALL: [TourId; 14] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -47,6 +54,9 @@ impl TourId {
         TourId::Clips,
         TourId::Personas,
         TourId::Templates,
+        TourId::Editor,
+        TourId::EditorMore,
+        TourId::Render,
     ];
 
     pub fn code(self) -> &'static str {
@@ -62,6 +72,9 @@ impl TourId {
             TourId::Clips => "clips",
             TourId::Personas => "personas",
             TourId::Templates => "templates",
+            TourId::Editor => "editor",
+            TourId::EditorMore => "editor-more",
+            TourId::Render => "render",
         }
     }
 

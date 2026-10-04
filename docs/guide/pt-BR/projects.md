@@ -23,7 +23,7 @@ O narrador é a persona que lê a narração do vídeo, e o tom e o estilo de ro
 <a id="stages"></a>
 ## As etapas
 
-As etapas ficam no topo, em ordem: [Roteiro](script.md), [Narração](narration.md), [Cenas](scenes.md), [Clipes](clips.md), Edição, Render e Publicação. Escolha uma para abri-la; Edição abre o editor. A linha sob cada etapa diz como ela está:
+As etapas ficam no topo, em ordem: [Roteiro](script.md), [Narração](narration.md), [Cenas](scenes.md), [Clipes](clips.md), [Edição](editor.md), [Render](render.md) e Publicação. Escolha uma para abri-la; Edição abre o editor. A linha sob cada etapa diz como ela está:
 
 - Quando está pronta, o que ela tem: as palavras do roteiro, a duração da narração, as imagens ou clipes feitos.
 - **Gerando…** enquanto uma tarefa dela roda. Acompanhe em [Tarefas](bardo:go/jobs).
