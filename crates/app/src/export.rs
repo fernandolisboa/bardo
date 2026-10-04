@@ -514,7 +514,7 @@ impl MetadataHandler {
                 model: &generated.model,
                 purpose: CostPurpose::Metadata,
                 usage: generated.usage.into(),
-                job,
+                job: Some(job),
                 reported: None,
             },
             project,

@@ -487,6 +487,8 @@ pub enum CostPurpose {
     Metadata,
     /// The decision engine scoring cut points in the editor.
     CutSuggestions,
+    /// A short sentence read to hear a persona's voice and presets.
+    VoiceSample,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -494,7 +496,7 @@ pub enum CostPurpose {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 11] = [
+    pub const ALL: [CostPurpose; 12] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -506,6 +508,7 @@ impl CostPurpose {
         CostPurpose::MusicPrompt,
         CostPurpose::Metadata,
         CostPurpose::CutSuggestions,
+        CostPurpose::VoiceSample,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -522,6 +525,7 @@ impl CostPurpose {
             CostPurpose::MusicPrompt => "music_prompt",
             CostPurpose::Metadata => "metadata",
             CostPurpose::CutSuggestions => "cut_suggestions",
+            CostPurpose::VoiceSample => "voice_sample",
         }
     }
 }

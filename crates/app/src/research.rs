@@ -440,6 +440,7 @@ mod tests {
                 export_files: Arc::new(bardo_storage::MemoryExportFiles::default()),
                 costs: Arc::clone(&self.db) as _,
                 files: Arc::new(bardo_storage::MemoryProjectFiles::default()),
+                voice_samples: Arc::new(bardo_storage::MemoryVoiceSamples::default()),
                 research: Arc::clone(&self.db) as _,
                 secrets: Arc::clone(&self.secrets) as _,
                 connection_secrets: Arc::new(MemorySecretStore::default()),

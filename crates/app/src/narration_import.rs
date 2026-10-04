@@ -257,7 +257,7 @@ impl NarrationImportHandler {
                 model: &aligned.model,
                 purpose: CostPurpose::NarrationAlignment,
                 usage: Metered::audio_seconds(billed_seconds(info.duration)),
-                job,
+                job: Some(job),
                 reported: None,
             },
             project,

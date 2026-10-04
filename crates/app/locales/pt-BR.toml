@@ -662,7 +662,7 @@ name = "Nome"
 name_placeholder = "ex.: Narrador Documental Calmo"
 voice = "Voz"
 voice_none = "Nenhuma voz escolhida ainda."
-voice_hint = "A voz fica na sua conta ElevenLabs. O Bardo guarda só uma referência a ela, nunca áudio nem chaves."
+voice_hint = "A voz fica na sua conta ElevenLabs. A persona guarda só uma referência a ela, nunca áudio nem chaves; as amostras que você ouve ficam só neste computador, para tocar de novo de graça."
 tone = "Tom"
 tone_placeholder = "Como o narrador soa: ex.: sóbrio, ponderado, sem exageros."
 script_style = "Estilo de roteiro"
@@ -743,6 +743,28 @@ missing_key = "Salve sua chave da ElevenLabs em Configurações para escolher um
 available = "Está nas suas vozes da ElevenLabs."
 missing = "Não está nas suas vozes da ElevenLabs: a narração com ela falharia. Escolha outra voz ou adicione esta na ElevenLabs."
 selected = "Selecionada"
+
+[voices.preview]
+play = "Ouvir a prévia da ElevenLabs"
+stop = "Parar a prévia"
+none = "A ElevenLabs não tem prévia desta voz. Escolha a voz e ouça uma amostra com seus ajustes."
+note = "Prévia da ElevenLabs de {voice}: grátis, e ignora os ajustes desta persona."
+
+[voices.sample]
+title = "Ouvir com estes ajustes"
+hint = "Lê a frase com a voz escolhida e os ajustes como estão agora, salvos ou não. Cada combinação nova é uma chamada curta e paga à ElevenLabs, registrada em Custos; uma combinação que você já ouviu toca de novo de graça."
+sentence = "Olá, eu sou a voz deste canal. É assim que eu soo com estes ajustes."
+play = "Ouvir amostra"
+stop = "Parar"
+reading = "Lendo a amostra com a ElevenLabs…"
+free = "Você já ouviu esta combinação, então tocou de graça."
+billed = "A ElevenLabs cobrou {n} caracteres por esta amostra; está em Custos."
+no_voice = "Escolha uma voz para ouvir uma amostra."
+missing_key = "Salve sua chave da ElevenLabs em Configurações para ouvir amostras com seus ajustes."
+too_long = "Use no máximo 250 caracteres na amostra."
+failed = "Não foi possível obter a amostra da ElevenLabs."
+not_kept = "Não foi possível salvar a amostra neste computador. Verifique o espaço livre e tente de novo."
+cannot_play = "Não foi possível tocar a amostra. Verifique se há uma saída de som conectada."
 
 [voices.category]
 cloned = "Seu clone"

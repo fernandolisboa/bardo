@@ -237,6 +237,8 @@ fn first_guess(purpose: CostPurpose) -> Metered {
         CostPurpose::Metadata => tokens(2_500, 1_200),
         // A stretch of script and two questions per point in it.
         CostPurpose::CutSuggestions => tokens(4_000, 0),
+        // The default sample sentence.
+        CostPurpose::VoiceSample => Metered::characters(80),
     }
 }
 
@@ -255,7 +257,9 @@ pub(crate) struct PaidCall<'a> {
     pub(crate) model: &'a str,
     pub(crate) purpose: CostPurpose,
     pub(crate) usage: Metered,
-    pub(crate) job: JobId,
+    /// The job that made the call; `None` for a call made from a screen
+    /// (a voice sample).
+    pub(crate) job: Option<JobId>,
     /// What the provider said it charges, when it says; the rate table
     /// prices the call otherwise.
     pub(crate) reported: Option<Money>,
@@ -296,7 +300,7 @@ impl CostBook {
                 ),
                 channel,
                 project,
-                job: Some(call.job),
+                job: call.job,
                 at: SystemTime::now(),
             })
         });

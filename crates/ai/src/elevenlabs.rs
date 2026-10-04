@@ -2,8 +2,12 @@
 //!
 //! Voices (`GET /v2/voices`): every voice the account can use, its own
 //! clones and designed voices included, page by page. Only what a persona
-//! needs to point at a voice is kept: id, name, category, description and
-//! labels; samples and settings are dropped.
+//! needs to point at a voice is kept: id, name, category, description,
+//! labels and the link to its stock preview; samples and settings are
+//! dropped.
+//!
+//! Stock previews (`preview_url`): a public MP3 ElevenLabs hosts for most
+//! voices. Downloading one is free and sends no key.
 //!
 //! Narration (`POST /v1/text-to-speech/{voice_id}/with-timestamps`): the
 //! text read aloud as MP3, with the time each character is spoken, in one
@@ -19,7 +23,7 @@ use std::time::Duration;
 use bardo_domain::{
     AlignedSpeech, Alignment, AlignmentRequest, ApiKey, CharTiming, Provider, ProviderFailure,
     ProviderFailureKind, Speech, SpeechAligner, SpeechRequest, SpeechSynthesizer, Voice,
-    VoiceCategory, VoiceLibrary, VoiceRef,
+    VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -104,7 +108,20 @@ fn voice(entry: &Value) -> Option<Voice> {
             .trim()
             .to_owned(),
         labels,
+        preview_url: entry["preview_url"]
+            .as_str()
+            .map(str::trim)
+            .filter(|url| is_https(url))
+            .map(str::to_owned),
     })
+}
+
+/// Only HTTPS links are followed; anything else is dropped.
+fn is_https(url: &str) -> bool {
+    (9..=2048).contains(&url.len())
+        && url
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
 }
 
 /// Lists ElevenLabs voices over HTTPS.
@@ -183,6 +200,65 @@ impl<T: Transport> VoiceLibrary for ElevenLabsVoices<T> {
         }
         Voice::sort_for_picker(&mut voices);
         Ok(voices)
+    }
+}
+
+/// The largest stock preview downloaded; they are a few seconds long.
+pub const MAX_PREVIEW_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Downloads stock previews over HTTPS, redirects included.
+pub struct ElevenLabsPreviews<T = UreqTransport> {
+    transport: T,
+}
+
+impl ElevenLabsPreviews {
+    /// A preview is small; the picker waits for it.
+    pub const TIMEOUT: Duration = Duration::from_secs(20);
+
+    pub fn new() -> Self {
+        Self::with_transport(
+            UreqTransport::https_only(Self::TIMEOUT).with_max_body(MAX_PREVIEW_BYTES),
+        )
+    }
+}
+
+impl Default for ElevenLabsPreviews {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsPreviews<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self { transport }
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> VoicePreviews for ElevenLabsPreviews<T> {
+    fn download(&self, url: &str) -> Result<Vec<u8>, ProviderFailure> {
+        if !is_https(url) {
+            return Err(unexpected("the preview link is not an HTTPS link"));
+        }
+        // A public link: no key goes with it.
+        let response = self
+            .transport
+            .send_for_bytes(&HttpRequest::get(url), MAX_PREVIEW_BYTES)
+            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        match response.status {
+            200..=299 if response.bytes.is_empty() => Err(unexpected("the preview is empty")),
+            200..=299 => Ok(response.bytes),
+            403 | 404 | 410 => Err(unexpected(
+                "ElevenLabs no longer has this preview; list the voices again",
+            )),
+            status => Err(ProviderFailure::new(
+                ProviderFailureKind::ProviderDown,
+                format!("the preview download failed (HTTP {status})"),
+            )),
+        }
     }
 }
 

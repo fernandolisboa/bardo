@@ -334,6 +334,10 @@ impl UreqTransport {
     }
 
     fn with_redirects(timeout: Duration, follow: bool) -> Self {
+        Self::configured(timeout, follow, false)
+    }
+
+    fn configured(timeout: Duration, follow: bool, https_only: bool) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
             .root_certs(ureq::tls::RootCerts::PlatformVerifier)
             .build();
@@ -341,6 +345,7 @@ impl UreqTransport {
             .http_status_as_error(false)
             .timeout_global(Some(timeout))
             .tls_config(tls)
+            .https_only(https_only)
             .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")));
         if !follow {
             config = config.max_redirects(0);
@@ -349,6 +354,12 @@ impl UreqTransport {
             agent: config.build().new_agent(),
             max_body_bytes: Self::MAX_BODY_BYTES,
         }
+    }
+
+    /// For public links (voice previews): follows redirects, but only to
+    /// HTTPS, so a link checked as HTTPS stays HTTPS to the end.
+    pub fn https_only(timeout: Duration) -> Self {
+        Self::configured(timeout, true, true)
     }
 
     /// `for_uploads` against a local server: plain HTTP, no proxy.
@@ -471,6 +482,17 @@ impl Transport for UreqTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_https_only_transport_refuses_plain_http_at_any_hop() {
+        // Checked before connecting, on the first link and on each
+        // redirect alike: nothing listens here.
+        let transport = UreqTransport::https_only(Duration::from_secs(1));
+        let error = transport
+            .send_for_bytes(&HttpRequest::get("http://127.0.0.1:9/preview.mp3"), 1024)
+            .unwrap_err();
+        assert!(error.0.contains("https only"), "{}", error.0);
+    }
 
     #[test]
     fn debug_hides_the_query_headers_and_body() {

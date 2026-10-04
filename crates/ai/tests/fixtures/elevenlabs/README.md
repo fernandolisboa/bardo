@@ -1,7 +1,8 @@
 # ElevenLabs fixtures
 
 Raw HTTP responses (status line, headers, body) that the voice list,
-narration and alignment tests replay instead of calling `GET /v2/voices`,
+stock preview, narration and alignment tests replay instead of calling
+`GET /v2/voices`, a voice's `preview_url`,
 `POST /v1/text-to-speech/{voice_id}/with-timestamps` and
 `POST /v1/forced-alignment`. Noise headers (cookies, dates, trace ids)
 were dropped.
@@ -18,7 +19,8 @@ real key):
 
 - `voices-page-1.http`: a default voice, a cloned voice and an entry with an
   unusable id; more pages follow.
-- `voices-page-2.http`: the last page, repeating one voice from page 1.
+- `voices-page-2.http`: the last page, repeating one voice from page 1,
+  with a plain HTTP preview link (dropped).
 - `voices-missing-permission.http`, `voices-rate-limited.http`.
 - `tts-hello.http`: "Hello, world. It is 1969." with character timings of
   the text as sent and of the normalized text, and a `character-cost`
@@ -31,8 +33,13 @@ real key):
   and word timings and a `loss` score; Bardo reads only the characters.
 - `alignment-rate-limited.http`.
 
-Synthetic, for edge cases: `alignment-no-timings.http` (an empty
-character list), `voices-not-json.http`,
+- `preview-gone.http`: the storage host's answer for a preview that no
+  longer exists (404, an XML error).
+
+Synthetic, for edge cases: `preview-ok.http` (a text body standing in
+for MP3 bytes), `preview-down.http`, `preview-empty.http`,
+`alignment-no-timings.http` (an empty character list),
+`voices-not-json.http`,
 `tts-normalized-only.http` (no timings of the text as sent, no cost
 header), `tts-no-audio.http`, `tts-misaligned.http` (timing lists of
 different lengths).

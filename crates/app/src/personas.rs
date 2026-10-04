@@ -499,6 +499,7 @@ mod tests {
             category,
             description: String::new(),
             labels: vec![],
+            preview_url: None,
         }
     }
 

@@ -22,7 +22,7 @@ VideoProject *──0..1 Persona      (per-video override)
 - A channel has a default persona; each video can override it.
 - Each network account can override the channel's metadata defaults and render presets.
 - **No login system.** Ownership is by local user profile so more profiles can be added later without a data migration.
-- **Voices stay with the provider.** A persona holds a voice reference (e.g. ElevenLabs voice id), never voice samples or credentials.
+- **Voices stay with the provider.** A persona holds a voice reference (e.g. ElevenLabs voice id), never voice samples or credentials. Short clips played on the Personas screen to hear a voice (the provider's stock preview, or a sentence read with the persona's presets) are a size-bounded cache of the machine, kept outside the profile and never exported with a persona.
 - **Cloned voices follow provider rules.** Cloning a voice requires the voice owner's verification in the provider's flow. When a publication uses a realistic synthetic voice of a real person, the YouTube upload sets `containsSyntheticMedia` and other networks' equivalent disclosure where available.
 - **Sharing** is export/import of a persona package file (tone, style, presets, voice reference). The recipient needs the voice shared with them on the provider side; Bardo runs no server.
 
