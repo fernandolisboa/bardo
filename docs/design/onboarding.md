@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -124,6 +124,18 @@ A step whose control is out of view scrolls the page to it; a step whose control
 
 Each ⓘ on a screen with a guide page ends with **More in the guide**, which opens the section that explains it.
 
+### The editor and the Render stage
+
+The editor covers the whole window, so it carries its tours itself: **Editor tour** in its top bar (Shift+F1), with the **New** mark, once the cut has something in it. Its controls are tagged by the editor (the preview, the tracks, the tools, Snap to words, undo, the audio headers, ducking, captions, the 16:9 and 9:16 switch, cut suggestions, Review & render).
+
+- It comes in two parts, so neither runs past seven steps: playback, the tracks, cutting, snapping and undo; then the mix, ducking, captions, framing, cut suggestions and leaving to render. The button starts the first part the user has neither completed nor dismissed (and the first again once both are), with the part's name as its label.
+- Over the editor, the Guide shows the tour's cards alone: no first-run offer, menu or shortcuts card, and the missed posts list (not drawn over the editor) does not hold a tour back.
+- Over the editor the Guide menu, with Resume tour, is out of reach, so the editor's button (and Shift+F1) takes a tour closed midway back to the step it closed on (`Bardo::continue_tour`).
+- Every step holds the editor: playback pauses when a step or the guide shows, and nothing else changes; a test walks both parts and checks the cut, its undo history and the selection.
+- F1 in the editor opens the Guide screen over it, at the editor's page, under a bar with **Back to the editor**, which returns to the editor as it was. A tour card's **Learn more** does the same. A guide link to another place, or another tour (the welcome tour included), closes the editor first.
+
+The Render stage has a tour like the other stages ("something to show" is a cut to review): the figures (a new part anchor, tagged where each layout draws them), the targets, the picked target's checks, the toolbar and its last file.
+
 ## The Guide screen
 
 The user guide inside the app, built from the same screen parts as every other screen, so each layout places it like the rest:
@@ -132,7 +144,7 @@ The user guide inside the app, built from the same screen parts as every other s
 - **Content**: the page, rendered from Markdown. Links to other pages and sections open them and scroll to the section; `bardo:go/` links go to a place; `bardo:tour/` links start a tour; web links open in the browser.
 - **Aside**: "On this page" with a link to each section, **Show me** when the page has a tour, and **Go to <place>** when it explains one.
 
-Keys: F1 from any screen (not over the editor) opens the page for the current screen, project stage or Settings tab, else the first page, with the search box focused. ↑/↓ move through the contents or the results, Enter opens the highlighted result, Esc clears the search. During a tour, F1 is the step's **Learn more**.
+Keys: F1 from any screen (over the editor too, see above) opens the page for the current screen, project stage or Settings tab, else the first page, with the search box focused. ↑/↓ move through the contents or the results, Enter opens the highlighted result, Esc clears the search. During a tour, F1 is the step's **Learn more**.
 
 Tour cards whose step names a guide section show **Learn more**: it closes the tour (Resume tour brings it back) and opens that section.
 
@@ -144,7 +156,7 @@ The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says
 | --- | --- |
 | #107 | The Research, Themes and Performance tours and "Tour this screen" (built) |
 | #108 | The Projects, Personas and Templates tours, the Script, Narration, Scenes and Clips stage tours and "Tour this stage" (built) |
-| #109 | The Editing and render tour |
+| #109 | The editor's tour, the Render stage tour and the guide over the editor (built) |
 | #110 | The Publishing tour (network guides in pt-BR too) |
 | #111 | Costs, Jobs and Settings tours, and full coverage |
 | #112 | The documentation site on GitHub Pages |

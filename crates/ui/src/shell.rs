@@ -5,14 +5,15 @@ use bardo_app::{
     Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SpendSummary, Stage, Text, TourMove,
     TourPlace,
 };
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Window, div,
+    AnyElement, App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Window, div, px,
 };
 
 use crate::accounts::AccountsScreen;
-use crate::appearance;
+use crate::appearance::{self, look};
 use crate::channels::ChannelsScreen;
 use crate::costs::CostsScreen;
 use crate::editor::{EditorEvent, EditorScreen};
@@ -75,6 +76,9 @@ pub struct Shell {
     spend_revision: u64,
     /// The editor, open over the whole window in place of the screens.
     editor: Option<(Entity<EditorScreen>, Subscription)>,
+    /// The Guide screen shows over the open editor (F1, a tour card's
+    /// "Learn more"); closing it goes back to the editor as it was.
+    guide_over_editor: bool,
     /// Keeps the window's keys reaching the shell (F1) when nothing inside
     /// it has the keyboard.
     focus: FocusHandle,
@@ -203,6 +207,7 @@ impl Shell {
             spend: None,
             spend_revision: 0,
             editor: None,
+            guide_over_editor: false,
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         };
@@ -275,9 +280,17 @@ impl Shell {
     /// Runs what the user asked of the Guide, and opens the place the
     /// tour's step is on.
     fn guide_event(&mut self, event: GuideEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let missed_open = self.missed.read(cx).is_open();
+        // The missed posts are not drawn over the editor, so they hold
+        // nothing back there.
+        let missed_open = self.editor.is_none() && self.missed.read(cx).is_open();
         let from = self.screen;
+        // In the editor, Resume tour is out of reach: its tours go back to
+        // the step they closed on.
+        let in_editor = self.editor.is_some();
         let moved = self.bardo.update(cx, |bardo, _| match event {
+            GuideEvent::Start(tour @ (TourId::Editor | TourId::EditorMore)) if in_editor => {
+                bardo.continue_tour(tour, from, missed_open).ok()
+            }
             GuideEvent::Start(tour) => bardo.start_tour(tour, from, missed_open).ok(),
             GuideEvent::Resume => bardo.resume_tour(from, missed_open).ok(),
             GuideEvent::Next => Some(bardo.tour_next()),
@@ -308,14 +321,9 @@ impl Shell {
             }
         }
         match moved {
-            Some(TourMove::Show(Some(TourPlace::Screen(place)))) => {
-                self.pick(place, window, cx);
-            }
-            Some(TourMove::Show(Some(TourPlace::Stage(stage)))) => {
-                self.pick(Destination::Projects, window, cx);
-                self.projects
-                    .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
-            }
+            Some(TourMove::Show(Some(place))) => self.show_tour_place(place, window, cx),
+            // A tour of no one place (the welcome) shows over the screens.
+            Some(TourMove::Show(None)) if self.editor.is_some() => self.close_editor(window, cx),
             Some(TourMove::Left(origin)) if origin != self.screen => {
                 self.show(origin, window, cx);
             }
@@ -328,6 +336,40 @@ impl Shell {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Opens the place a tour's step is on. The editor's steps show over
+    /// the editor, which holds still under them (opening it on the open
+    /// project when it is closed); any other place sits under the editor,
+    /// which closes first.
+    fn show_tour_place(&mut self, place: TourPlace, window: &mut Window, cx: &mut Context<Self>) {
+        if place == TourPlace::Stage(Stage::Edit) {
+            self.guide_over_editor = false;
+            match &self.editor {
+                Some((editor, _)) => editor.update(cx, |editor, cx| {
+                    editor.hold_for_tour(cx);
+                    // From the guide over it, the keyboard was in the
+                    // guide's search box: the card gives it back here.
+                    editor.focus(window, cx);
+                }),
+                None => {
+                    self.pick(Destination::Projects, window, cx);
+                    self.projects.update(cx, |projects, cx| {
+                        projects.show_stage(Stage::Edit, window, cx)
+                    });
+                }
+            }
+            return;
+        }
+        self.close_editor(window, cx);
+        match place {
+            TourPlace::Screen(place) => self.pick(place, window, cx),
+            TourPlace::Stage(stage) => {
+                self.pick(Destination::Projects, window, cx);
+                self.projects
+                    .update(cx, |projects, cx| projects.show_stage(stage, window, cx));
+            }
+        }
     }
 
     /// Shows `place`; unlike a pick in the navigation, the Guide shows its
@@ -361,6 +403,19 @@ impl Shell {
     /// where the user is (staying on the open page when already there),
     /// with the keyboard in its search box.
     fn open_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editor.is_some() {
+            if self.guide_over_editor {
+                self.guide_screen
+                    .update(cx, |screen, cx| screen.focus_search(window, cx));
+            } else {
+                self.cover_editor(cx);
+                let place = Some(GuidePlace::Stage(Stage::Edit));
+                self.guide_screen
+                    .update(cx, |screen, cx| screen.open_at(place, window, cx));
+            }
+            cx.notify();
+            return;
+        }
         if self.screen == Destination::Guide {
             self.guide_screen
                 .update(cx, |screen, cx| screen.focus_search(window, cx));
@@ -373,11 +428,11 @@ impl Shell {
         cx.notify();
     }
 
-    /// F1. Not over the editor (the guide does not sit over it), nor while
-    /// the missed posts list holds the window; during a tour it is the
-    /// step's "Learn more".
+    /// F1. Not while the missed posts list holds the window; over the
+    /// editor the guide opens on top of it; during a tour it is the step's
+    /// "Learn more".
     fn on_open_guide(&mut self, _: &OpenGuide, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editor.is_some() || self.missed.read(cx).is_open() {
+        if self.editor.is_none() && self.missed.read(cx).is_open() {
             return;
         }
         let step = self.bardo.read(cx).tour_step(false);
@@ -420,20 +475,26 @@ impl Shell {
     }
 
     /// Shift+F1: the tour of the stage on screen, else the screen's, when
-    /// one is offered. Not over the editor, nor while the missed posts
-    /// list holds the window.
+    /// one is offered; in the editor, the editor's. Not while the missed
+    /// posts list holds the window.
     fn on_tour_this_screen(
         &mut self,
         _: &TourThisScreen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Not over the editor or the missed posts, nor mid-tour: a running
-        // tour keeps its step.
-        if self.editor.is_some()
-            || self.missed.read(cx).is_open()
-            || self.bardo.read(cx).tour_step(false).is_some()
-        {
+        // Not mid-tour: a running tour keeps its step.
+        if self.bardo.read(cx).tour_step(false).is_some() {
+            return;
+        }
+        if let Some((editor, _)) = &self.editor {
+            let has_content = editor.read(cx).has_content();
+            if let Some(tour) = self.bardo.read(cx).stage_tour(Stage::Edit, has_content) {
+                self.start_screen_tour(tour.tour, window, cx);
+            }
+            return;
+        }
+        if self.missed.read(cx).is_open() {
             return;
         }
         if let Some(tour) = self.stage_tour(cx).or_else(|| self.screen_tour(cx)) {
@@ -454,16 +515,38 @@ impl Shell {
         cx.notify();
     }
 
-    /// The Guide screen at `section`.
+    /// The Guide screen at `section`, over the editor when it is open.
     fn show_section(&mut self, section: GuideRef, cx: &mut Context<Self>) {
         self.guide_screen.update(cx, |screen, cx| {
             screen.open(section.page, Some(section.section), cx);
         });
-        self.screen = Destination::Guide;
+        if self.editor.is_some() {
+            self.cover_editor(cx);
+        } else {
+            self.screen = Destination::Guide;
+        }
     }
 
-    /// A guide link or "Go to …": opens the place.
+    /// The guide goes over the editor, which is no longer drawn: playback
+    /// pauses rather than play on unseen.
+    fn cover_editor(&mut self, cx: &mut Context<Self>) {
+        self.guide_over_editor = true;
+        if let Some((editor, _)) = &self.editor {
+            editor.update(cx, |editor, cx| editor.hold_for_tour(cx));
+        }
+    }
+
+    /// A guide link or "Go to …": opens the place. From the guide over the
+    /// editor, the editor itself is back where it was; any other place
+    /// closes it.
     fn go(&mut self, place: GuidePlace, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editor.is_some() {
+            if place == GuidePlace::Stage(Stage::Edit) {
+                self.back_to_editor(window, cx);
+                return;
+            }
+            self.close_editor(window, cx);
+        }
         match place {
             GuidePlace::Screen(place) => self.show(place, window, cx),
             GuidePlace::Stage(stage) => {
@@ -488,34 +571,48 @@ impl Shell {
         let bardo = self.bardo.clone();
         let editor = cx.new(|cx| EditorScreen::new(bardo, project, window, cx));
         let subscription =
-            cx.subscribe_in(
-                &editor,
-                window,
-                |this, editor, event, window, cx| match event {
-                    EditorEvent::Close => {
-                        editor.update(cx, |editor, cx| editor.release(window, cx));
-                        this.editor = None;
-                        // The editor may have queued jobs or removed old proxies.
-                        this.projects
-                            .update(cx, |projects, cx| projects.reload(window, cx));
-                        cx.notify();
-                    }
-                    EditorEvent::Render => {
-                        editor.update(cx, |editor, cx| editor.release(window, cx));
-                        this.editor = None;
-                        this.projects.update(cx, |projects, cx| {
-                            projects.reload(window, cx);
-                            projects.show_stage(Stage::Render, window, cx);
-                        });
-                        cx.notify();
-                    }
-                    EditorEvent::ToggleJobs => {
-                        this.jobs_open = !this.jobs_open;
-                        cx.notify();
-                    }
-                },
-            );
+            cx.subscribe_in(&editor, window, |this, _, event, window, cx| match event {
+                EditorEvent::Close => this.close_editor(window, cx),
+                EditorEvent::Render => {
+                    this.close_editor(window, cx);
+                    this.projects.update(cx, |projects, cx| {
+                        projects.show_stage(Stage::Render, window, cx)
+                    });
+                }
+                EditorEvent::ToggleJobs => {
+                    this.jobs_open = !this.jobs_open;
+                    cx.notify();
+                }
+            });
         self.editor = Some((editor, subscription));
+        self.guide_over_editor = false;
+        self.guide
+            .update(cx, |guide, cx| guide.set_over_editor(true, cx));
+        cx.notify();
+    }
+
+    /// Back to the projects screen: the editor lets go of its preview.
+    fn close_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((editor, _)) = self.editor.take() else {
+            return;
+        };
+        editor.update(cx, |editor, cx| editor.release(window, cx));
+        self.guide_over_editor = false;
+        self.guide
+            .update(cx, |guide, cx| guide.set_over_editor(false, cx));
+        // The editor may have queued jobs or removed old proxies.
+        self.projects
+            .update(cx, |projects, cx| projects.reload(window, cx));
+        cx.notify();
+    }
+
+    /// Closes the guide over the editor: the editor is as it was, with the
+    /// keyboard.
+    fn back_to_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.guide_over_editor = false;
+        if let Some((editor, _)) = &self.editor {
+            editor.update(cx, |editor, cx| editor.focus(window, cx));
+        }
         cx.notify();
     }
 
@@ -579,11 +676,15 @@ impl Render for Shell {
         }
         let name = tr(self.bardo.read(cx), Text::AppName);
         let (colors, content) = match &self.editor {
+            Some(_) if self.guide_over_editor => (
+                title_bar::Colors::interface(cx),
+                self.render_guide_over_editor(cx),
+            ),
             Some((editor, _)) => (title_bar::Colors::editor(), self.render_editor(editor)),
             None => (title_bar::Colors::interface(cx), self.render_screens(cx)),
         };
-        // The Guide sits over the screens, not over the editor.
-        let guide = self.editor.is_none().then(|| self.guide.clone());
+        // Over the editor, the Guide shows the editor's tours alone.
+        let guide = self.guide.clone();
         v_flex()
             .size_full()
             .track_focus(&self.focus)
@@ -597,7 +698,7 @@ impl Render for Shell {
                     .min_h_0()
                     .w_full()
                     .child(content)
-                    .children(guide),
+                    .child(guide),
             )
     }
 }
@@ -610,6 +711,38 @@ impl Shell {
             .items_start()
             .child(div().flex_1().h_full().min_w_0().child(editor.clone()))
             .when(self.jobs_open, |row| row.child(self.jobs.clone()))
+            .into_any_element()
+    }
+
+    /// The Guide screen over the editor, under a bar that goes back to it.
+    fn render_guide_over_editor(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = look(cx).tokens;
+        let back = Button::new("guide-back-to-editor")
+            .ghost()
+            .small()
+            .icon(IconName::ChevronLeft)
+            .label(tr(self.bardo.read(cx), Text::GuideBackToEditor))
+            .on_click(cx.listener(|this, _, window, cx| this.back_to_editor(window, cx)));
+        v_flex()
+            .size_full()
+            .bg(t.app)
+            .child(
+                h_flex()
+                    .h(px(40.))
+                    .flex_none()
+                    .px_3()
+                    .items_center()
+                    .border_b(t.border_width)
+                    .border_color(t.border)
+                    .child(back),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(self.guide_screen.clone()),
+            )
             .into_any_element()
     }
 

@@ -47,4 +47,4 @@ The navigation groups the screens by pillar. Jobs, Costs, Guide and Settings are
 
 - **Layouts**: Workspace (a sidebar by pillar, cards with details beside them) or Studio (top tabs, denser tables). Choose one in [Settings › Appearance](bardo:go/settings/appearance); every screen does the same things in both.
 - **Jobs**: long work, like a narration, images or a render, runs as a job. Keep working meanwhile, and follow, cancel or resume each job from Jobs.
-- **Guide**: the [welcome tour](bardo:tour/welcome), this user guide (F1 from any screen but the editor) and the [keyboard shortcuts](shortcuts.md).
+- **Guide**: the [welcome tour](bardo:tour/welcome), this user guide (F1 from any screen, the editor included) and the [keyboard shortcuts](shortcuts.md).

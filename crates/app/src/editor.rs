@@ -865,6 +865,13 @@ impl Editor {
         }
     }
 
+    /// A tour step shows over the editor: playback pauses, so the preview
+    /// holds still under the card. Nothing else changes; the cut, the
+    /// selection and the undo history stay as they are.
+    pub fn hold_for_tour(&mut self) {
+        self.pause();
+    }
+
     /// The last frame's time: where playing to the end leaves the playhead.
     fn last_frame(&self) -> Duration {
         frame_time(frame_at(self.view.duration()).saturating_sub(1))
@@ -2814,6 +2821,69 @@ mod tests {
         app.edit(&mut editor, EditAction::Redo).unwrap();
         assert_eq!(editor.view().timeline, edited);
         assert!(!editor.can_redo());
+    }
+
+    /// The tours never reach the editor but through what the shell does on
+    /// each step shown (`hold_for_tour`), so the walk does just that: what
+    /// the test pins is that every move of both tours, with that hold, keeps
+    /// the cut, its history and the selection.
+    #[test]
+    fn the_editor_tours_pause_playback_and_leave_the_cut_and_its_history_alone() {
+        use crate::{Destination, Stage, TourMove, TourPlace};
+        use bardo_domain::TourId;
+
+        let h = Harness::new();
+        let mut app = h.start();
+        let (project, mut editor) = opened(&h, &app);
+        // Something to undo and something to redo.
+        editor.select(Some(ItemRef::video(0)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        app.edit(&mut editor, EditAction::Reorder { from: 0, to: 1 })
+            .unwrap();
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        editor.select(Some(ItemRef::video(1)));
+        editor.play().unwrap();
+        let timeline = editor.view().timeline.clone();
+        let history = editor.history.clone();
+        let selection = editor.selection();
+
+        // As the editor screen runs them: every step holds the editor, and
+        // the user walks forward, back, closes, resumes and finishes.
+        let show = |moved: TourMove, editor: &mut Editor| {
+            assert_eq!(moved, TourMove::Show(Some(TourPlace::Stage(Stage::Edit))));
+            editor.hold_for_tour();
+            assert!(!editor.is_playing(), "starting the tour paused playback");
+        };
+        for tour in [TourId::Editor, TourId::EditorMore] {
+            let first = app.start_tour(tour, Destination::Projects, false).unwrap();
+            show(first, &mut editor);
+            show(app.tour_next(), &mut editor);
+            show(app.tour_back(), &mut editor);
+            assert_eq!(app.tour_close(), TourMove::Closed);
+            show(
+                app.resume_tour(Destination::Projects, false).unwrap(),
+                &mut editor,
+            );
+            loop {
+                match app.tour_next() {
+                    TourMove::Finished => break,
+                    moved => show(moved, &mut editor),
+                }
+            }
+        }
+        app.start_tour(TourId::Editor, Destination::Projects, false)
+            .unwrap();
+        assert_eq!(app.tour_skip(), TourMove::Left(Destination::Projects));
+
+        assert_eq!(editor.view().timeline, timeline);
+        assert_eq!(editor.history, history);
+        assert_eq!(editor.selection(), selection);
+        assert!(editor.can_undo() && editor.can_redo());
+        assert_eq!(
+            app.open_editor(project.id).unwrap().view().timeline,
+            timeline,
+            "the saved cut too"
+        );
     }
 
     #[test]

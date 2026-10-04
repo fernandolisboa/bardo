@@ -52,6 +52,8 @@ As teclas têm o nome que aparece impresso no teclado. O menu do Guia também li
 | Esc | Limpa a seleção |
 | Ctrl+Z | Desfaz |
 | Ctrl+Y ou Ctrl+Shift+Z | Refaz |
+| F1 | Abre o guia sobre o editor; Voltar ao editor volta a ele |
+| Shift+F1 | Começa o tour do editor |
 
 <a id="suggestions"></a>
 ## Sugestões de corte no editor

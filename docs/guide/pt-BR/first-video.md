@@ -43,14 +43,14 @@ Quando um roteiro ou uma narração muda, o que foi feito a partir deles aparece
 <a id="editor"></a>
 ## 6. Edite
 
-A etapa **Edição** abre o editor com um primeiro corte já montado a partir das cenas e da narração. Divida, apare, mova e apague clipes; os cortes se encaixam nas palavras da narração. Mixe a narração com música e efeitos sonoros, edite as legendas e escolha o formato do quadro (16:9 ou 9:16). As sugestões de corte marcam bons pontos para cortar; aceitar uma é só mais uma edição, e dá para desfazer.
+A etapa **Edição** abre o editor com um primeiro corte já montado a partir das cenas e da narração. Divida, apare, mova e apague clipes; os cortes se encaixam nas palavras da narração. Mixe a narração com música e efeitos sonoros, edite as legendas e escolha o formato do quadro (16:9 ou 9:16). As sugestões de corte marcam bons pontos para cortar; aceitar uma é só mais uma edição, e dá para desfazer. [O editor](editor.md) explica cada parte.
 
 O Bardo não faz música. No projeto, ele escreve um prompt de música para a sua ferramenta; importe a faixa que você fizer na aba Mídia do editor.
 
 <a id="render"></a>
 ## 7. Revise e renderize
 
-**Revisar e renderizar** mostra o corte, o volume da mixagem, as legendas e, para cada conta do canal nas redes, o formato e os problemas encontrados (longo demais para a rede, legendas desligadas, mixagem baixa demais). Escolha as redes e confirme: o render roda como tarefa, e você continua trabalhando enquanto isso.
+**Revisar e renderizar** mostra o corte, o volume da mixagem, as legendas e, para cada conta do canal nas redes, o formato e os problemas encontrados (longo demais para a rede, legendas desligadas, mixagem baixa demais). Escolha as redes e confirme: o render roda como tarefa, e você continua trabalhando enquanto isso. Mais em [Revisão e render](render.md).
 
 <a id="publish"></a>
 ## 8. Publique

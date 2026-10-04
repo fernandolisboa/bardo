@@ -47,4 +47,4 @@ A navegação agrupa as telas por pilar. Tarefas, Custos, Guia e Configurações
 
 - **Layouts**: Workspace (barra lateral por pilar, cartões com os detalhes ao lado) ou Studio (abas no topo, tabelas mais densas). Escolha em [Configurações › Aparência](bardo:go/settings/appearance); as telas fazem as mesmas coisas nos dois.
 - **Tarefas**: trabalho longo, como uma narração, imagens ou um render, roda como tarefa. Continue trabalhando enquanto isso, e acompanhe, cancele ou retome cada tarefa em Tarefas.
-- **Guia**: o [tour de boas-vindas](bardo:tour/welcome), este guia do usuário (F1 em qualquer tela, menos no editor) e os [atalhos de teclado](shortcuts.md).
+- **Guia**: o [tour de boas-vindas](bardo:tour/welcome), este guia do usuário (F1 em qualquer tela, inclusive no editor) e os [atalhos de teclado](shortcuts.md).

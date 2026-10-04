@@ -1459,6 +1459,8 @@ pub enum Text {
     TourThisStage,
     /// An ⓘ's link to the guide section that says more.
     GuideMoreInGuide,
+    /// Over the editor, the guide's way back to it.
+    GuideBackToEditor,
     /// The Appearance tab's tour settings.
     ToursSettingTitle,
     ToursSettingOffer,
@@ -1522,6 +1524,7 @@ impl Text {
             Text::TourThisScreen => "tour.this_screen",
             Text::TourThisStage => "tour.this_stage",
             Text::GuideMoreInGuide => "guide.more",
+            Text::GuideBackToEditor => "guide.back_to_editor",
             Text::ToursSettingTitle => "tours_setting.title",
             Text::ToursSettingOffer => "tours_setting.offer",
             Text::ToursSettingHint => "tours_setting.hint",
@@ -4755,6 +4758,7 @@ mod tests {
             Text::TourThisScreen,
             Text::TourThisStage,
             Text::GuideMoreInGuide,
+            Text::GuideBackToEditor,
             Text::ToursSettingTitle,
             Text::ToursSettingOffer,
             Text::ToursSettingHint,

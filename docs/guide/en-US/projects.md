@@ -23,7 +23,7 @@ The narrator is the persona that reads the video's narration, and its tone and s
 <a id="stages"></a>
 ## The stages
 
-The stages run across the top, in order: [Script](script.md), [Narration](narration.md), [Scenes](scenes.md), [Clips](clips.md), Edit, Render and Publish. Pick one to open it; Edit opens the editor. The line under each stage says where it stands:
+The stages run across the top, in order: [Script](script.md), [Narration](narration.md), [Scenes](scenes.md), [Clips](clips.md), [Edit](editor.md), [Render](render.md) and Publish. Pick one to open it; Edit opens the editor. The line under each stage says where it stands:
 
 - Once done, what it holds: the script's words, the narration's length, the images or clips made.
 - **Generating…** while one of its jobs runs. Follow it in [Jobs](bardo:go/jobs).

@@ -443,6 +443,7 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
         trail.push(crumb);
         trail.push(div().child("›").into_any_element());
     }
+    let summed = !summary.is_empty();
     let briefs = summary.into_iter().map(|figure| brief(figure, cx));
     h_flex()
         .flex_none()
@@ -487,11 +488,15 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
         // No `min_w_0`: the automatic minimum keeps the widest brief whole.
         .child(
             h_flex()
+                .relative()
                 .flex_1()
                 .gap_2()
                 .items_center()
                 .flex_wrap()
-                .children(briefs),
+                .children(briefs)
+                .when(summed, |figures| {
+                    figures.tour_anchor(TourAnchor::Summary, Side::Below, None)
+                }),
         )
         .child(
             h_flex()

@@ -115,7 +115,7 @@ pub struct ProjectsScreen {
     /// Scrolls the Script and Narration pages, so a tour can bring their
     /// controls into view.
     page_scroll: ScrollHandle,
-    /// The scene inspector's scroll, for the Scenes and Clips tours.
+    /// The inspector's scroll, for the Scenes, Clips and Render tours.
     inspector_scroll: ScrollHandle,
     /// Whether the scene grid shows only the scenes with something left.
     pending_only: bool,
@@ -614,7 +614,8 @@ impl ProjectsScreen {
     }
 
     /// The stage on screen, and whether it has made something (a script,
-    /// a narration, scenes, a clip): its tour is offered only then.
+    /// a narration, scenes, a clip, a cut to review): its tour is offered
+    /// only then.
     pub fn stage_content(&self) -> Option<(Stage, bool)> {
         let stage = self.shown_stage(&self.stages()?);
         let plan = self.scenes.as_ref().and_then(|scenes| scenes.plan.as_ref());
@@ -630,7 +631,10 @@ impl ProjectsScreen {
                     .iter()
                     .any(|scene| scene.clip().is_some() || scene.pending_clip().is_some())
             }),
-            Stage::Edit | Stage::Render | Stage::Publish => false,
+            // A cut to review: the stage shows its figures and targets.
+            Stage::Render => self.render_review.is_some(),
+            // The editor opens over the window instead of a stage page.
+            Stage::Edit | Stage::Publish => false,
         };
         Some((stage, made))
     }

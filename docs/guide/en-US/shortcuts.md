@@ -52,6 +52,8 @@ Keys are named as they are printed on the keyboard. The Guide menu lists them to
 | Esc | Clear the selection |
 | Ctrl+Z | Undo |
 | Ctrl+Y or Ctrl+Shift+Z | Redo |
+| F1 | Opens the guide over the editor; Back to the editor returns to it |
+| Shift+F1 | Starts the editor's tour |
 
 <a id="suggestions"></a>
 ## Cut suggestions in the editor
