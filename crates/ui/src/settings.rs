@@ -777,9 +777,13 @@ impl SettingsScreen {
             .child(
                 h_flex()
                     .justify_between()
+                    .items_start()
                     .gap_3()
                     .child(
+                        // Shrinks so the description wraps beside the state.
                         v_flex()
+                            .flex_1()
+                            .min_w_0()
                             .gap_0p5()
                             .child(
                                 div()
@@ -793,7 +797,7 @@ impl SettingsScreen {
                                     .child(tr(bardo, Text::ProviderPurpose(provider))),
                             ),
                     )
-                    .child(state),
+                    .child(div().flex_none().child(state)),
             )
             .child(
                 h_flex()
