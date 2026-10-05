@@ -4180,7 +4180,12 @@ mod tiktok_tests {
         assert_eq!(linked.render, render, "the draft's render");
         assert_eq!(linked.link.as_ref().unwrap().url(), link);
         assert_eq!(s.app.draft_note(&linked), None);
-        assert_eq!(draft(&s), linked);
+        // The metrics sync the link queues may have checked it meanwhile.
+        let read = draft(&s);
+        assert_eq!(
+            (read.id, read.kind, read.render, read.link),
+            (linked.id, linked.kind, linked.render, linked.link)
+        );
     }
 
     #[test]
