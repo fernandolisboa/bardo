@@ -236,7 +236,10 @@ mod windows {
 
     impl AgentTask for TaskScheduler {
         fn is_registered(&self) -> Result<bool, AgentTaskError> {
-            Ok(self.schtasks(&["/Query", "/TN", &self.name])?.status.success())
+            Ok(self
+                .schtasks(&["/Query", "/TN", &self.name])?
+                .status
+                .success())
         }
 
         fn register(&self, program: &Path) -> Result<(), AgentTaskError> {
@@ -287,7 +290,9 @@ mod tests {
         assert!(definition.contains("<LogonTrigger>"));
         assert!(definition.contains("<LogonType>InteractiveToken</LogonType>"));
         assert!(definition.contains("<RunLevel>LeastPrivilege</RunLevel>"));
-        assert!(definition.contains("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"));
+        assert!(
+            definition.contains("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>")
+        );
         assert!(definition.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
         assert!(definition.contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"));
         assert!(definition.contains("<WakeToRun>false</WakeToRun>"));

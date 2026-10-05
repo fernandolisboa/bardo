@@ -58,6 +58,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("uploading"),
     page!("exporting"),
     page!("missed-posts"),
+    page!("background-agent"),
     page!("costs"),
     page!("metrics-sync"),
     page!("jobs"),

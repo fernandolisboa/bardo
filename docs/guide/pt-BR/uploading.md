@@ -69,7 +69,7 @@ Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o re
 | Processando | A rede tem o arquivo e está trabalhando nele |
 | Ainda processando | O Bardo parou de esperar pela rede; **Verificar de novo** mais tarde |
 | Agendado | No YouTube, privado até o horário de publicação |
-| Agendado no Bardo | Instagram: o Bardo posta no horário, com o Bardo aberto |
+| Agendado no Bardo | Instagram: o Bardo posta no horário, com o Bardo aberto ou o [agente em segundo plano](background-agent.md) ligado |
 | Perdeu o horário | O Bardo estava fechado no horário; veja [Posts perdidos](missed-posts.md) |
 | Acima do limite de publicação | Na fila até a rede aceitar mais posts |
 | Enviado | Na rede, com o link |
@@ -83,7 +83,7 @@ Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o re
 Cada rede agenda do seu jeito:
 
 - O **YouTube** aceita um horário de publicação. Na revisão, escolha **Agendar** e digite a data e a hora, lidas no fuso horário do seu computador: o Bardo envia o vídeo como privado e o YouTube o torna público nesse horário sozinho, mesmo com o Bardo e o computador desligados. Até lá, **Mudar horário** e **Cancelar agendamento** mudam isso no YouTube. Mais em [Agendar no YouTube](connect-youtube.md#schedule).
-- O **Instagram** não aceita horário de publicação de apps. Com **Agendar**, o Bardo envia o arquivo antes e publica o Reel ele mesmo nesse horário, então deixe o Bardo aberto e o computador ligado. Se estiver fechado, nada é postado e o Bardo pergunta o que fazer quando abrir: veja [Posts perdidos](missed-posts.md).
+- O **Instagram** não aceita horário de publicação de apps. Com **Agendar**, o Bardo envia o arquivo antes e publica o Reel ele mesmo nesse horário, então deixe o Bardo aberto e o computador ligado, ou ligue o [agente em segundo plano](background-agent.md), que envia com o Bardo fechado. Se nenhum dos dois estiver rodando, nada é postado e o Bardo pergunta o que fazer quando abrir: veja [Posts perdidos](missed-posts.md).
 - O **TikTok** recebe um rascunho na sua caixa de entrada, nunca um post. Você cola a legenda, escolhe quem pode assistir e posta ou agenda no app do TikTok. O Bardo não agenda rascunhos.
 
 Um horário que já passou é recusado quando você confirma.

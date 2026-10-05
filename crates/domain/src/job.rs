@@ -805,7 +805,12 @@ pub trait JobRepository: Send + Sync {
     /// Takes the job for this runner until `until`, unless another
     /// runner's lease on it is live at `now`. True when this runner holds
     /// it now.
-    fn lease(&self, _id: JobId, _now: SystemTime, _until: SystemTime) -> Result<bool, RepositoryError> {
+    fn lease(
+        &self,
+        _id: JobId,
+        _now: SystemTime,
+        _until: SystemTime,
+    ) -> Result<bool, RepositoryError> {
         Ok(true)
     }
 

@@ -252,6 +252,10 @@ pub enum Control {
     AppearanceTours,
     /// Settings › Metrics: when metrics sync on start.
     MetricsSync,
+    /// Settings › Publishing: "Publish while Bardo is closed".
+    AgentSwitch,
+    /// Settings › Publishing: whether the agent is running.
+    AgentStatus,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1093,9 +1097,38 @@ pub const METRICS_SYNC: Tour = {
     }
 };
 
+/// Settings › Publishing: the background agent, what it sends and when it
+/// can.
+pub const BACKGROUND_AGENT: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Publishing);
+    const PAGE: &str = "background-agent";
+    const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::BackgroundAgent,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("tab", TourAnchor::Toolbar)
+                .on(AT)
+                .learn(PAGE, "what"),
+            TourStep::at("switch", control(Control::AgentSwitch))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "turn-on"),
+            TourStep::at("status", control(Control::AgentStatus))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "status"),
+            TourStep::at("limits", TourAnchor::Content)
+                .on(AT)
+                .learn(PAGE, "limits"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 24] = [
+    pub const ALL: [&'static Tour; 25] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -1120,6 +1153,7 @@ impl Tour {
         &KEYS,
         &APPEARANCE,
         &METRICS_SYNC,
+        &BACKGROUND_AGENT,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -1148,6 +1182,7 @@ impl Tour {
             TourId::Keys => &KEYS,
             TourId::Appearance => &APPEARANCE,
             TourId::MetricsSync => &METRICS_SYNC,
+            TourId::BackgroundAgent => &BACKGROUND_AGENT,
         }
     }
 
@@ -2196,6 +2231,7 @@ mod tests {
             (SettingsTab::Networks, TourId::Networks),
             (SettingsTab::Appearance, TourId::Appearance),
             (SettingsTab::Metrics, TourId::MetricsSync),
+            (SettingsTab::Publishing, TourId::BackgroundAgent),
         ];
         for (tab, tour) in tabs {
             assert_eq!(Tour::of(TourPlace::Settings(tab)).map(|t| t.id), Some(tour));

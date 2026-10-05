@@ -2573,6 +2573,25 @@ body = "Quando o Bardo abre, ele sincroniza se a verificação mais antiga passo
 title = "Onde aparecem"
 body = "Os números aparecem em Desempenho, e a primeira semana de cada post alimenta o ranqueamento de novas ideias."
 
+[tour.background-agent]
+name = "Tour do agente em segundo plano"
+
+[tour.background-agent.tab]
+title = "Publicação"
+body = "O próprio Bardo posta os Reels do Instagram no horário marcado. Aqui você escolhe se isso também acontece com o Bardo fechado."
+
+[tour.background-agent.switch]
+title = "Publicar com o Bardo fechado"
+body = "Ligado, um agente leve inicia quando você se conecta ao Windows e envia os Reels agendados em segundo plano. Desligado, ele é removido."
+
+[tour.background-agent.status]
+title = "Está rodando?"
+body = "Aqui aparece se o agente está rodando agora. Se estiver ligado mas parado, inicie por aqui ou conecte-se de novo ao Windows."
+
+[tour.background-agent.limits]
+title = "Do que ele precisa"
+body = "O computador precisa estar ligado e você conectado. Com o Bardo aberto, o próprio Bardo envia os posts e o agente espera."
+
 [guide]
 back_to_editor = "Voltar ao editor"
 resume_tour = "Retomar tour"
@@ -2651,6 +2670,7 @@ explanation = "Instala um agente leve que envia os posts agendados em segundo pl
 switch = "Publicar com o Bardo fechado"
 sends = "Ele envia o que o Bardo posta num horário marcado: Reels do Instagram. O YouTube publica sozinho os vídeos agendados, e os rascunhos do TikTok são postados pelo app do TikTok."
 limits = "O computador precisa estar ligado e você conectado ao Windows; o agente não acorda um computador em suspensão. Com o Bardo aberto, o próprio Bardo envia."
+hint = "O Windows inicia o agente quando você se conecta e confere a cada 15 minutos. Ele usa os mesmos dados, contas e chaves do Bardo."
 start_now = "Iniciar agora"
 working = "Configurando o agente…"
 

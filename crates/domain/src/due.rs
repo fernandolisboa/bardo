@@ -1,6 +1,7 @@
 //! The in-app scheduler's rules (ADR-0006, PRD story 87): when Bardo
 //! publishes a scheduled post on a network that takes no publish time
-//! (Instagram), from its job queue, while the app is open.
+//! (Instagram), from its job queue, while the app or the background agent
+//! runs.
 //!
 //! - A scheduled publication has a **due time**, when Bardo publishes it.
 //!   Its upload may run ahead, but only so far ahead that what the network
@@ -10,10 +11,10 @@
 //! - The run that publishes it **claims** it first, at or after the due
 //!   time, once. The claim is kept with the publication, so a restart tells
 //!   a run under way from one that never started, and a second runner (the
-//!   background agent, later) never publishes it again.
+//!   background agent) never publishes it again.
 //! - A publication is **missed**, and goes only once the user sends it now,
 //!   reschedules or cancels it, when:
-//!   - its due time passed while Bardo was closed and no run claimed it;
+//!   - its due time passed while no runner was up and no run claimed it;
 //!   - Bardo was open but could not start it within [`DUE_GRACE`] of its
 //!     due time (the PC slept, the queue was busy);
 //!   - a run claimed it and Bardo closed before it was done, and opened

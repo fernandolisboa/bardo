@@ -7,7 +7,7 @@ tour: missed
 
 # Posts perdidos
 
-O Instagram não aceita horário de publicação de apps, então um Reel agendado no Bardo é postado pelo próprio Bardo no horário dele ([Agendamento](uploading.md#schedule)). Se o Bardo estiver fechado ou o computador desligado nesse horário, nada é postado, e nada é postado depois sem você. Na próxima vez que o Bardo abrir, a lista **Posts agendados que não saíram** aparece sobre a janela para você decidir cada um. [Mostre a lista para mim](bardo:tour/missed).
+O Instagram não aceita horário de publicação de apps, então um Reel agendado no Bardo é postado pelo próprio Bardo no horário dele ([Agendamento](uploading.md#schedule)). Se o Bardo estiver fechado (e o [agente em segundo plano](background-agent.md) desligado ou parado) ou o computador desligado nesse horário, nada é postado, e nada é postado depois sem você. Na próxima vez que o Bardo abrir, a lista **Posts agendados que não saíram** aparece sobre a janela para você decidir cada um. [Mostre a lista para mim](bardo:tour/missed).
 
 <a id="why"></a>
 ## Por que um post é perdido
@@ -24,7 +24,7 @@ Vídeos do YouTube nunca são perdidos: o YouTube publica sozinho. Rascunhos do 
 <a id="new-time"></a>
 ## Novo horário
 
-**Novo horário** pede uma data e uma hora mais tarde, lidas no fuso horário do seu computador, e **Salvar horário** guarda. Deixe o Bardo aberto nesse horário, senão o post é perdido de novo.
+**Novo horário** pede uma data e uma hora mais tarde, lidas no fuso horário do seu computador, e **Salvar horário** guarda. Deixe o Bardo aberto nesse horário, ou o agente em segundo plano ligado, senão o post é perdido de novo.
 
 <a id="cancel"></a>
 ## Cancelar post

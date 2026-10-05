@@ -91,6 +91,7 @@ mod upload;
 mod voice;
 mod voice_sample;
 
+pub use agent_task::{AgentTask, AgentTaskError};
 pub use appearance::{
     LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,
     UnknownUiThemePreference,
@@ -206,15 +207,14 @@ pub use render::{
     CutFacts, Gate, GateLevel, LOUDNESS_GAIN_WARNING, LOUDNESS_TOLERANCE, MeasuredLoudness, Render,
     RenderId, RenderRepository, SILENCE, TRUE_PEAK_CEILING, cut_gates, output_gates,
 };
-pub use agent_task::{AgentTask, AgentTaskError};
 pub use repository::RepositoryError;
-pub use runner::{
-    JOB_LEASE, JobHeldElsewhere, RUNNER_ALIVE, RUNNER_TICK, RunnerRole, RunnerSeen,
-    UnknownRunnerRole, running_since,
-};
 pub use research::{
     MarketData, MarketSample, Niche, NicheResearch, NicheResearchRepository, NicheScores,
     NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,
+};
+pub use runner::{
+    JOB_LEASE, JobHeldElsewhere, RUNNER_ALIVE, RUNNER_TICK, RunnerRole, RunnerSeen,
+    UnknownRunnerRole, running_since,
 };
 pub use scene::{
     MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneClip,

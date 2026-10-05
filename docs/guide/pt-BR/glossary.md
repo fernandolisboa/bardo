@@ -114,9 +114,11 @@ As palavras que o Bardo usa, em termos simples.
 
 **Aviso de conteúdo sintético**: o selo que as redes pedem em vídeos com uma voz de IA realista. O Bardo liga o aviso quando a narração usou uma persona marcada como voz realista.
 
-**Horário de publicação**: quando o próprio Bardo publica um post agendado no Instagram. O Bardo precisa estar aberto nessa hora.
+**Horário de publicação**: quando o próprio Bardo publica um post agendado no Instagram. O Bardo precisa estar aberto nessa hora, ou o agente em segundo plano rodando.
 
-**Post perdido**: um post agendado cujo horário passou com o Bardo fechado. O Bardo lista o post quando abre, e você escolhe o que fazer.
+**Agente em segundo plano**: uma parte opcional do Bardo que o Windows inicia quando você se conecta, para enviar os posts no horário de publicação com o Bardo fechado. Liga e desliga em Configurações › Publicação.
+
+**Post perdido**: um post agendado cujo horário passou sem o Bardo nem o agente em segundo plano rodando. O Bardo lista o post quando abre, e você escolhe o que fazer.
 
 <a id="numbers"></a>
 ## Números, tarefas e dinheiro

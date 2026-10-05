@@ -97,7 +97,7 @@ Na etapa Publicação, uma conta conectada do Instagram Reels oferece **Revisar 
 
 Na revisão, **Quando** oferece **Assim que processar** ou **Agendar**. O Instagram não aceita horário de publicação de apps, então com **Agendar** o Bardo manda o arquivo antes e publica o Reel ele mesmo na data e hora que você digitar (lidas no fuso horário do seu computador, que a revisão mostra). O post mostra **Agendado no Bardo** com o horário em que vai sair, e **Agendar no Bardo** confirma a revisão.
 
-Deixe o Bardo aberto nesse horário e o computador ligado. Se o Bardo estiver fechado ou o computador desligado, nada é postado: na próxima vez que o Bardo abrir, ele mostra o post entre os [posts perdidos](missed-posts.md), para você postar agora, dar um novo horário ou cancelar. Um horário que já passou é recusado quando você confirma.
+Deixe o Bardo aberto nesse horário e o computador ligado, ou ligue o [agente em segundo plano](background-agent.md), que envia com o Bardo fechado enquanto você estiver conectado ao Windows. Se nenhum dos dois estiver rodando ou o computador estiver desligado, nada é postado: na próxima vez que o Bardo abrir, ele mostra o post entre os [posts perdidos](missed-posts.md), para você postar agora, dar um novo horário ou cancelar. Um horário que já passou é recusado quando você confirma.
 
 <a id="metrics"></a>
 ## Números na tela Desempenho

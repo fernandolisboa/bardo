@@ -748,6 +748,7 @@ fn upload_state(
         .into_owned();
     let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
     let missing = publication.missing_since.is_some();
+    let agent_on = bardo.background_agent_on();
     let (tone, hint): (Tone, Option<SharedString>) = match state {
         UploadState::Waiting | UploadState::Uploading(_) => (Tone::Info, None),
         UploadState::Retrying => (
@@ -788,8 +789,28 @@ fn upload_state(
             Tone::Info,
             Some(with_network(Text::UploadScheduledHint).into()),
         ),
-        UploadState::Due(_) => (Tone::Info, Some(tr(bardo, Text::UploadDueHint))),
-        UploadState::Missed(_) => (Tone::Warning, Some(tr(bardo, Text::UploadMissedHint))),
+        UploadState::Due(_) => (
+            Tone::Info,
+            Some(tr(
+                bardo,
+                if agent_on {
+                    Text::UploadDueHintAgent
+                } else {
+                    Text::UploadDueHint
+                },
+            )),
+        ),
+        UploadState::Missed(_) => (
+            Tone::Warning,
+            Some(tr(
+                bardo,
+                if agent_on {
+                    Text::UploadMissedHintAgent
+                } else {
+                    Text::UploadMissedHint
+                },
+            )),
+        ),
         UploadState::Published if missing => (
             Tone::Warning,
             Some(missing_hint(bardo, publication.network())),

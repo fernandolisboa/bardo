@@ -158,7 +158,12 @@ impl JobRepository for Database {
         row.map(JobRow::into_job).transpose()
     }
 
-    fn lease(&self, id: JobId, now: SystemTime, until: SystemTime) -> Result<bool, RepositoryError> {
+    fn lease(
+        &self,
+        id: JobId,
+        now: SystemTime,
+        until: SystemTime,
+    ) -> Result<bool, RepositoryError> {
         // One statement, so two runners racing for a job cannot both win.
         let leased = self
             .conn()
@@ -185,7 +190,11 @@ impl JobRepository for Database {
         let mut lost = Vec::new();
         for id in ids {
             let renewed = statement
-                .execute(params![id.to_string(), self.runner(), to_unix_millis(until)])
+                .execute(params![
+                    id.to_string(),
+                    self.runner(),
+                    to_unix_millis(until)
+                ])
                 .map_err(boxed)?;
             if renewed == 0 {
                 lost.push(*id);
@@ -453,13 +462,20 @@ mod tests {
         let mut saved = job(owner);
         JobRepository::save(&app, &saved).unwrap();
         let now = SystemTime::now();
-        assert!(agent.lease(saved.id(), now, now + Duration::from_secs(60)).unwrap());
+        assert!(
+            agent
+                .lease(saved.id(), now, now + Duration::from_secs(60))
+                .unwrap()
+        );
 
         saved.cancel().unwrap();
         let refused = JobRepository::save(&app, &saved).unwrap_err();
         assert!(refused.is_held_elsewhere());
         assert_eq!(
-            JobRepository::job(&app, saved.id()).unwrap().unwrap().state(),
+            JobRepository::job(&app, saved.id())
+                .unwrap()
+                .unwrap()
+                .state(),
             JobState::Queued
         );
         // The holder saves as usual, and once it lets go so does the app.
@@ -490,7 +506,9 @@ mod tests {
             }]
         );
         assert!(db.runners(at(6_000)).unwrap().is_empty(), "not seen since");
-        agent.heartbeat(RunnerRole::Agent, at(0), at(9_000)).unwrap();
+        agent
+            .heartbeat(RunnerRole::Agent, at(0), at(9_000))
+            .unwrap();
         assert_eq!(db.runners(at(6_000)).unwrap()[0].seen_at, at(9_000));
         assert_eq!(agent.runners(at(0)).unwrap()[0].role, RunnerRole::App);
 

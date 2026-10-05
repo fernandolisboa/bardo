@@ -1006,8 +1006,13 @@ mod tests {
         db.save_publication(&reel).unwrap();
         let now = SystemTime::now();
         assert!(
-            bardo_domain::JobRepository::lease(&agent, job.id(), now, now + Duration::from_secs(60))
-                .unwrap()
+            bardo_domain::JobRepository::lease(
+                &agent,
+                job.id(),
+                now,
+                now + Duration::from_secs(60)
+            )
+            .unwrap()
         );
 
         assert!(!db.claim_upload(&reel, time(1000)).unwrap(), "the agent's");

@@ -749,11 +749,11 @@ fn reconcile(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
     let mut jobs = Vec::with_capacity(stored.len());
     for mut job in stored {
         let id = job.id();
-        if state.workers.contains_key(&id) {
-            if let Some(ours) = state.jobs.iter().find(|ours| ours.id() == id) {
-                jobs.push(ours.clone());
-                continue;
-            }
+        if state.workers.contains_key(&id)
+            && let Some(ours) = state.jobs.iter().find(|ours| ours.id() == id)
+        {
+            jobs.push(ours.clone());
+            continue;
         }
         if !shared.runner.takes(&job) {
             continue;

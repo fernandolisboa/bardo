@@ -32,7 +32,10 @@ const RENEW_CONNECTIONS_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The agent's job runner: it takes the uploads of scheduled posts still to
 /// go, and starts paused while the app is up.
-pub(crate) fn runner(publications: Arc<dyn PublicationRepository>, others: &[RunnerSeen]) -> Runner {
+pub(crate) fn runner(
+    publications: Arc<dyn PublicationRepository>,
+    others: &[RunnerSeen],
+) -> Runner {
     Runner {
         role: RunnerRole::Agent,
         scope: Some(Arc::new(move |job: &Job| {
@@ -116,7 +119,9 @@ pub struct AgentWork {
 enum AgentStep {
     Nothing,
     /// Registers the task for `program`, and starts it.
-    SetUp { program: PathBuf },
+    SetUp {
+        program: PathBuf,
+    },
     Remove,
     /// Removes the task only if it is there (Bardo opening with the agent
     /// off).
@@ -248,6 +253,11 @@ impl Bardo {
         }
     }
 
+    /// Whether the user turned the background agent on, running or not.
+    pub fn background_agent_on(&self) -> bool {
+        self.profile.background_agent
+    }
+
     /// Turns the background agent on or off and remembers it; the returned
     /// work sets up or removes its task with the system. When setting it up
     /// fails, call `background_agent_not_set_up`.
@@ -327,11 +337,11 @@ mod tests {
     };
 
     use super::*;
+    use crate::UploadChoices;
     use crate::export::tests::Setup;
     use crate::publications::whole_millis;
     use crate::scenes::tests::Harness;
     use crate::uploads::reel_tests::{ready, review};
-    use crate::UploadChoices;
 
     const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -364,13 +374,12 @@ mod tests {
     /// Moves the Reel's due time to `due` and lets its job start now, as
     /// if two days went by while Bardo was closed.
     fn due_soon(h: &Harness, job: JobId, due: SystemTime) {
-        let mut reel = h
-            .db
-            .all_publications(profile(h).id)
-            .unwrap()
-            .into_iter()
-            .find(|publication| publication.network() == Network::InstagramReels)
-            .unwrap();
+        let mut reel =
+            h.db.all_publications(profile(h).id)
+                .unwrap()
+                .into_iter()
+                .find(|publication| publication.network() == Network::InstagramReels)
+                .unwrap();
         reel.upload_mut().unwrap().publish_at = Some(whole_millis(due));
         assert!(h.db.save_upload(&reel).unwrap());
         let mut stored = JobRepository::job(&*h.db, job).unwrap().unwrap();

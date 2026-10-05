@@ -1265,7 +1265,9 @@ pub(crate) mod tests {
     impl Setup {
         /// Bardo closes, leaving its data and fakes.
         pub(crate) fn close(self) -> (Harness, VideoProject) {
-            let Setup { h, app, project, .. } = self;
+            let Setup {
+                h, app, project, ..
+            } = self;
             drop(app);
             (h, project)
         }

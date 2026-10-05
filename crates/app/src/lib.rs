@@ -46,16 +46,17 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AgentTask, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver, CostRepository,
-    CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository, ImageGenerator,
-    InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository,
-    MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
+    AgentTask, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver,
+    CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository,
+    ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData,
+    MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
-    Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository, SecretStore,
-    SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
-    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone, running_since,
+    Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
+    SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator,
+    ThemeRepository, TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference,
+    UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
+    running_since,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{

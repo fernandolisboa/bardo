@@ -2573,6 +2573,25 @@ body = "When Bardo opens, it syncs if the oldest check is older than this, or ne
 title = "Where they show"
 body = "The numbers show on Performance, and each post's first week feeds the ranking of new ideas."
 
+[tour.background-agent]
+name = "Background agent tour"
+
+[tour.background-agent.tab]
+title = "Publishing"
+body = "Bardo posts Instagram Reels at their time itself. Here you choose whether that also happens while Bardo is closed."
+
+[tour.background-agent.switch]
+title = "Publish while Bardo is closed"
+body = "Turned on, a lightweight agent starts when you sign in to Windows and sends scheduled Reels in the background. Turned off, it is removed."
+
+[tour.background-agent.status]
+title = "Is it running?"
+body = "This says whether the agent is running now. If it is on but not running, start it here or sign in to Windows again."
+
+[tour.background-agent.limits]
+title = "What it needs"
+body = "The computer must be on and you signed in. While Bardo is open, Bardo sends the posts itself and the agent waits."
+
 [guide]
 back_to_editor = "Back to the editor"
 resume_tour = "Resume tour"
@@ -2651,6 +2670,7 @@ explanation = "Installs a lightweight agent that sends scheduled posts in the ba
 switch = "Publish while Bardo is closed"
 sends = "It sends what Bardo posts at a due time: Instagram Reels. YouTube publishes scheduled videos by itself, and TikTok drafts are posted from the TikTok app."
 limits = "The computer must be on and you signed in to Windows; the agent does not wake a sleeping computer. While Bardo is open, Bardo sends them itself."
+hint = "Windows starts it when you sign in and checks on it every 15 minutes. It uses Bardo's own data, accounts and keys."
 start_now = "Start now"
 working = "Setting up the agent…"
 
