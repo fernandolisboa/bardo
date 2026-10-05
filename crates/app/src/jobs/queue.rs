@@ -4,17 +4,23 @@
 //!
 //! The UI never waits on a job. It reads snapshots (`jobs`) and watches
 //! `revision` to know when to read again.
+//!
+//! The app and the background agent each run a queue over the same
+//! database (`bardo_domain::runner`). A queue leases a job before it runs
+//! it, renews its leases, says it is up and reads what the other runner
+//! changed every tick, and leaves a job another runner holds alone.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    InvalidJobTransition, Job, JobFailure, JobId, JobKind, JobRepository, JobState, ProfileId,
-    Progress, Redactor, RepositoryError, RetryPolicy,
+    InvalidJobTransition, JOB_LEASE, Job, JobFailure, JobId, JobKind, JobRepository, JobState,
+    ProfileId, Progress, RUNNER_ALIVE, RUNNER_TICK, Redactor, RepositoryError, RetryPolicy,
+    RunnerRole, RunnerSeen,
 };
 
 /// Runs one kind of job. Handlers run on a worker thread, read their payload
@@ -30,6 +36,11 @@ pub struct JobSettings {
     /// Jobs running at the same time; the rest wait in the queue.
     pub max_running: usize,
     pub retry: RetryPolicy,
+    /// How long a lease on a running job holds without being renewed.
+    pub lease: Duration,
+    /// How often the queue renews its leases, says it is up and reads what
+    /// another runner changed. Well under `lease`.
+    pub tick: Duration,
 }
 
 impl Default for JobSettings {
@@ -37,15 +48,53 @@ impl Default for JobSettings {
         Self {
             max_running: 2,
             retry: RetryPolicy::default(),
+            lease: JOB_LEASE,
+            tick: RUNNER_TICK,
         }
     }
 }
+
+/// Which jobs a runner takes.
+pub(crate) type JobScope = Arc<dyn Fn(&Job) -> bool + Send + Sync>;
+
+/// The process a queue runs in, and the jobs it takes.
+#[derive(Clone)]
+pub(crate) struct Runner {
+    pub(crate) role: RunnerRole,
+    /// Every job of the profile when `None`.
+    pub(crate) scope: Option<JobScope>,
+    /// Whether the queue starts paused (`JobQueue::pause`).
+    pub(crate) paused: bool,
+}
+
+impl Runner {
+    /// Bardo's window: every job.
+    pub(crate) fn app() -> Self {
+        Self {
+            role: RunnerRole::App,
+            scope: None,
+            paused: false,
+        }
+    }
+
+    fn takes(&self, job: &Job) -> bool {
+        self.scope.as_ref().is_none_or(|scope| scope(job))
+    }
+}
+
+/// How long a closing queue waits for its stopped handlers to return, so
+/// the next runner finds their jobs free at once.
+const CLOSING_WAIT: Duration = Duration::from_secs(2);
 
 /// Why a cancel or retry did not happen.
 #[derive(Debug, thiserror::Error)]
 pub enum JobActionError {
     #[error("job not found")]
     NotFound,
+    /// The other Bardo process (the app or the background agent) runs it
+    /// now.
+    #[error("the job runs in another Bardo process")]
+    Elsewhere,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]
@@ -179,12 +228,21 @@ impl JobContext {
 }
 
 struct State {
-    /// Every job of the profile, oldest first; the source of truth while
-    /// the app runs, written through to the repository.
+    /// Every job of the profile this runner takes, oldest first, written
+    /// through to the repository and read again from it every tick (another
+    /// runner may have changed it).
     jobs: Vec<Job>,
     /// Stop signals of jobs whose worker thread has not finished.
     workers: HashMap<JobId, Arc<StopSignal>>,
+    /// Jobs another runner's live lease held when last read.
+    elsewhere: HashSet<JobId>,
+    /// The other runners up when last read.
+    others: Vec<RunnerSeen>,
+    /// Starts no job while true; running ones go on.
+    paused: bool,
     closing: bool,
+    /// When the queue next renews, says it is up and reads storage.
+    next_tick: Instant,
 }
 
 impl State {
@@ -195,6 +253,10 @@ impl State {
 
 struct Shared {
     repository: Arc<dyn JobRepository>,
+    owner: ProfileId,
+    runner: Runner,
+    /// When this queue started.
+    started_at: SystemTime,
     handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
     settings: JobSettings,
     /// Failure details are stored and shown, so known keys are masked first.
@@ -256,11 +318,14 @@ impl Shared {
     /// until `deferred`.
     fn finish(&self, id: JobId, result: Result<(), JobFailure>, deferred: Option<SystemTime>) {
         let mut state = self.state();
+        state.workers.remove(&id);
         if state.closing {
-            // The job stays running in storage and resumes on next start.
+            // The job stays running in storage, and its handler is done
+            // with it: the next runner resumes it at once.
+            let _ = self.repository.release(id);
+            self.wake.notify_all();
             return;
         }
-        state.workers.remove(&id);
         let retry = self.settings.retry;
         if let Some(job) = state.job_mut(id) {
             let ended = match result {
@@ -275,10 +340,13 @@ impl Shared {
             };
             if ended.is_ok() {
                 // If this save fails, the job runs again from its last
-                // checkpoint after a restart; nothing is lost.
+                // checkpoint after a restart; nothing is lost. Refused when
+                // another runner took the job meanwhile: its copy wins on
+                // the next tick.
                 let _ = self.repository.save(job);
             }
         }
+        let _ = self.repository.release(id);
         self.changed();
         self.wake.notify_all();
     }
@@ -291,10 +359,19 @@ impl Shared {
         apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
     ) -> Result<JobState, JobActionError> {
         let mut state = self.state();
+        let running_here = state.workers.contains_key(&id);
         let job = state.job_mut(id).ok_or(JobActionError::NotFound)?;
+        if !running_here && let Ok(Some(stored)) = self.repository.job(id) {
+            // Another runner may have moved it on since the last tick.
+            *job = stored;
+        }
         let mut updated = job.clone();
         apply(&mut updated)?;
-        self.repository.save(&updated)?;
+        match self.repository.save(&updated) {
+            Ok(()) => {}
+            Err(error) if error.is_held_elsewhere() => return Err(JobActionError::Elsewhere),
+            Err(error) => return Err(error.into()),
+        }
         *job = updated;
         let new_state = job.state();
         if new_state == JobState::Cancelled
@@ -320,24 +397,48 @@ impl JobQueue {
     pub(crate) fn start(
         repository: Arc<dyn JobRepository>,
         owner: ProfileId,
+        runner: Runner,
         handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
         settings: JobSettings,
         redactor: Redactor,
     ) -> Result<Self, RepositoryError> {
-        let mut jobs = repository.list(owner)?;
-        for job in jobs.iter_mut().filter(|j| j.state() == JobState::Running) {
-            job.interrupt().expect("a running job can be interrupted");
-            repository.save(job)?;
+        let now = SystemTime::now();
+        repository.heartbeat(runner.role, now, now)?;
+        let others = repository.runners(now.checked_sub(RUNNER_ALIVE).unwrap_or(now))?;
+        let elsewhere = repository.held_elsewhere(owner, now)?;
+        let mut jobs: Vec<Job> = repository
+            .list(owner)?
+            .into_iter()
+            .filter(|job| runner.takes(job))
+            .collect();
+        // Jobs a closed app (or a dead runner) left running.
+        for job in jobs
+            .iter_mut()
+            .filter(|job| job.state() == JobState::Running && !elsewhere.contains(&job.id()))
+        {
+            if repository.lease(job.id(), now, now + settings.lease)? {
+                job.interrupt().expect("a running job can be interrupted");
+                repository.save(job)?;
+                repository.release(job.id())?;
+            }
         }
+        let paused = runner.paused;
         let shared = Arc::new(Shared {
             repository,
+            owner,
+            runner,
+            started_at: now,
             handlers,
             settings,
             redactor,
             state: Mutex::new(State {
                 jobs,
                 workers: HashMap::new(),
+                elsewhere,
+                others,
+                paused,
                 closing: false,
+                next_tick: Instant::now() + settings.tick,
             }),
             wake: Condvar::new(),
             revision: AtomicU64::new(0),
@@ -362,6 +463,32 @@ impl JobQueue {
 
     pub(crate) fn settings(&self) -> JobSettings {
         self.shared.settings
+    }
+
+    /// The other runners (the app, the background agent) up as of the last
+    /// tick.
+    pub(crate) fn others(&self) -> Vec<RunnerSeen> {
+        self.shared.state().others.clone()
+    }
+
+    /// Stops starting jobs while `paused`; running ones go on.
+    pub(crate) fn pause(&self, paused: bool) {
+        let mut state = self.shared.state();
+        if state.paused != paused {
+            state.paused = paused;
+            self.shared.wake.notify_all();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_paused(&self) -> bool {
+        self.shared.state().paused
+    }
+
+    /// Whether the job runs in another runner's process as of the last
+    /// tick.
+    pub(crate) fn held_elsewhere(&self, id: JobId) -> bool {
+        self.shared.state().elsewhere.contains(&id)
     }
 
     /// Grows whenever any job changes, progress included.
@@ -418,49 +545,45 @@ impl Drop for JobQueue {
         if let Some(scheduler) = self.scheduler.take() {
             let _ = scheduler.join();
         }
+        // Stopped handlers give up their leases as they return (`finish`):
+        // wait for them a little, so the next runner resumes their jobs at
+        // once. One still busy keeps its lease until it runs out.
+        let deadline = Instant::now() + CLOSING_WAIT;
+        let mut state = self.shared.state();
+        while !state.workers.is_empty() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            state = self
+                .shared
+                .wake
+                .wait_timeout(state, left)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
+        }
+        drop(state);
+        let _ = self.shared.repository.leave();
     }
 }
 
-/// Scheduler thread: starts due jobs up to the limit, then sleeps until a
-/// job changes or the earliest retry or time is due.
+/// Scheduler thread: every tick renews leases, says the runner is up and
+/// reads storage again; in between it starts due jobs up to the limit, then
+/// sleeps until a job changes, the earliest retry or time is due, or the
+/// next tick.
 fn schedule(shared: &Arc<Shared>) {
     let mut state = shared.state();
     loop {
         if state.closing {
             return;
         }
+        if Instant::now() >= state.next_tick {
+            tick(shared, &mut state);
+            state.next_tick = Instant::now() + shared.settings.tick;
+        }
         let now = SystemTime::now();
-        while state.workers.len() < shared.settings.max_running {
-            // A job whose cancelled run is still stopping waits for it: a
-            // job never has two workers. A job whose time came goes before
-            // the others, oldest time first: its time is a promise.
-            let State { jobs, workers, .. } = &mut *state;
-            let Some(job) = jobs
-                .iter_mut()
-                .filter(|job| job.is_due(now) && !workers.contains_key(&job.id()))
-                .min_by_key(|job| job.run_at().map_or((1, None), |at| (0, Some(at))))
-            else {
-                break;
-            };
-            job.start(now).expect("a due job starts");
-            // A failed save leaves the job queued in storage; it runs now
-            // and, after a restart, again.
-            let _ = shared.repository.save(job);
-            let job = job.clone();
-            let stop = Arc::new(StopSignal::default());
-            state.workers.insert(job.id(), Arc::clone(&stop));
-            if let Err(error) = spawn_worker(shared, &job, stop) {
-                state.workers.remove(&job.id());
-                if let Some(job) = state.job_mut(job.id()) {
-                    let failure = shared.redacted(
-                        job.id(),
-                        JobFailure::unexpected(format!("could not start: {error}")),
-                    );
-                    let _ = job.fail_attempt(failure, now, &shared.settings.retry);
-                    let _ = shared.repository.save(job);
-                }
-            }
-            shared.changed();
+        if !state.paused {
+            start_due(shared, &mut state, now);
         }
 
         // A queued job waits for its backoff and its time, whichever is
@@ -471,21 +594,198 @@ fn schedule(shared: &Arc<Shared>) {
             .filter(|job| job.state() == JobState::Queued)
             .filter_map(|job| job.retry_at().max(job.run_at()))
             .filter(|at| *at > now)
-            .min();
-        state = match next_retry {
-            Some(at) => {
-                let wait = at.duration_since(now).unwrap_or_default();
-                shared
-                    .wake
-                    .wait_timeout(state, wait)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .0
-            }
-            None => shared
-                .wake
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            .min()
+            .map(|at| at.duration_since(now).unwrap_or_default());
+        let next_tick = state.next_tick.saturating_duration_since(Instant::now());
+        let wait = next_retry.map_or(next_tick, |retry| retry.min(next_tick));
+        state = shared
+            .wake
+            .wait_timeout(state, wait)
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .0;
+    }
+}
+
+/// Starts due jobs up to the limit, each once this runner leases it.
+fn start_due(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: SystemTime) {
+    let repository = &shared.repository;
+    let mut tried = HashSet::new();
+    while state.workers.len() < shared.settings.max_running {
+        // A job whose cancelled run is still stopping waits for it: a job
+        // never has two workers. A job whose time came goes before the
+        // others, oldest time first: its time is a promise.
+        let State {
+            jobs,
+            workers,
+            elsewhere,
+            ..
+        } = &mut **state;
+        let Some(index) = jobs
+            .iter()
+            .enumerate()
+            .filter(|(_, job)| {
+                job.is_due(now)
+                    && !workers.contains_key(&job.id())
+                    && !elsewhere.contains(&job.id())
+                    && !tried.contains(&job.id())
+            })
+            .min_by_key(|(_, job)| job.run_at().map_or((1, None), |at| (0, Some(at))))
+            .map(|(index, _)| index)
+        else {
+            break;
         };
+        let id = jobs[index].id();
+        tried.insert(id);
+        match repository.lease(id, now, now + shared.settings.lease) {
+            Ok(true) => {}
+            Ok(false) => {
+                elsewhere.insert(id);
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(job = %id, "could not lease a job: {error}");
+                continue;
+            }
+        }
+        // What another runner did with it since this copy was read.
+        match repository.job(id) {
+            Ok(Some(stored)) => jobs[index] = stored,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(job = %id, "could not read a leased job: {error}");
+                let _ = repository.release(id);
+                continue;
+            }
+        }
+        let job = &mut jobs[index];
+        if job.state() == JobState::Running {
+            // Left running by a runner that is gone.
+            job.interrupt().expect("a running job can be interrupted");
+            let _ = repository.save(job);
+        }
+        if !job.is_due(now) {
+            let _ = repository.release(id);
+            shared.changed();
+            continue;
+        }
+        job.start(now).expect("a due job starts");
+        // A failed save leaves the job queued in storage; it runs now
+        // and, after a restart, again.
+        let _ = repository.save(job);
+        let job = job.clone();
+        let stop = Arc::new(StopSignal::default());
+        state.workers.insert(id, Arc::clone(&stop));
+        if let Err(error) = spawn_worker(shared, &job, stop) {
+            state.workers.remove(&id);
+            if let Some(job) = state.job_mut(id) {
+                let failure = shared.redacted(
+                    id,
+                    JobFailure::unexpected(format!("could not start: {error}")),
+                );
+                let _ = job.fail_attempt(failure, now, &shared.settings.retry);
+                let _ = repository.save(job);
+            }
+            let _ = repository.release(id);
+        }
+        shared.changed();
+    }
+}
+
+/// Renews this runner's leases, says it is up, and reads the jobs and the
+/// other runners again.
+fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
+    let repository = &shared.repository;
+    let now = SystemTime::now();
+    if let Err(error) = repository.heartbeat(shared.runner.role, shared.started_at, now) {
+        tracing::warn!("could not say the job runner is up: {error}");
+    }
+    match repository.runners(now.checked_sub(RUNNER_ALIVE).unwrap_or(now)) {
+        Ok(others) => {
+            // The app shows whether the agent runs: a view watching the
+            // revision reads it again when one comes or goes.
+            let roles = |seen: &[RunnerSeen]| seen.iter().map(|r| r.role).collect::<HashSet<_>>();
+            if roles(&others) != roles(&state.others) {
+                shared.changed();
+            }
+            state.others = others;
+        }
+        Err(error) => tracing::warn!("could not read the other job runners: {error}"),
+    }
+    let running: Vec<JobId> = state.workers.keys().copied().collect();
+    if !running.is_empty() {
+        match repository.renew(&running, now + shared.settings.lease) {
+            Ok(lost) => {
+                for id in lost {
+                    // Another runner took it (this process slept past its
+                    // lease): this run stops, and that one's goes on.
+                    tracing::warn!(job = %id, "lost the lease on a running job");
+                    if let Some(stop) = state.workers.get(&id) {
+                        stop.stop();
+                    }
+                }
+            }
+            Err(error) => tracing::warn!("could not renew job leases: {error}"),
+        }
+    }
+    reconcile(shared, state, now);
+}
+
+/// Reads the runner's jobs from storage again: another runner may have
+/// queued, run, finished or cancelled any of them. Jobs running here keep
+/// their copy (it has the live progress). A job left running by a runner
+/// that is gone is queued again.
+fn reconcile(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: SystemTime) {
+    let repository = &shared.repository;
+    let (stored, held) = match (
+        repository.list(shared.owner),
+        repository.held_elsewhere(shared.owner, now),
+    ) {
+        (Ok(stored), Ok(held)) => (stored, held),
+        (Err(error), _) | (_, Err(error)) => {
+            tracing::warn!("could not read the jobs again: {error}");
+            return;
+        }
+    };
+    let mut jobs = Vec::with_capacity(stored.len());
+    for mut job in stored {
+        let id = job.id();
+        if state.workers.contains_key(&id) {
+            if let Some(ours) = state.jobs.iter().find(|ours| ours.id() == id) {
+                jobs.push(ours.clone());
+                continue;
+            }
+        }
+        if !shared.runner.takes(&job) {
+            continue;
+        }
+        if job.state() == JobState::Running
+            && !held.contains(&id)
+            && repository
+                .lease(id, now, now + shared.settings.lease)
+                .unwrap_or(false)
+        {
+            if let Ok(Some(stored)) = repository.job(id) {
+                job = stored;
+            }
+            if job.state() == JobState::Running {
+                job.interrupt().expect("a running job can be interrupted");
+                let _ = repository.save(&job);
+            }
+            let _ = repository.release(id);
+        }
+        jobs.push(job);
+    }
+    // A job running here that storage lost stays until its run ends.
+    for ours in &state.jobs {
+        if state.workers.contains_key(&ours.id()) && !jobs.iter().any(|j| j.id() == ours.id()) {
+            jobs.push(ours.clone());
+        }
+    }
+    let changed = jobs != state.jobs || held != state.elsewhere;
+    state.jobs = jobs;
+    state.elsewhere = held;
+    if changed {
+        shared.changed();
     }
 }
 

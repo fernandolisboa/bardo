@@ -1263,6 +1263,13 @@ pub(crate) mod tests {
     }
 
     impl Setup {
+        /// Bardo closes, leaving its data and fakes.
+        pub(crate) fn close(self) -> (Harness, VideoProject) {
+            let Setup { h, app, project, .. } = self;
+            drop(app);
+            (h, project)
+        }
+
         /// Bardo closes, then opens again on the same data.
         pub(crate) fn restart(self) -> Setup {
             let Setup {

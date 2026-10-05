@@ -1,7 +1,8 @@
-//! SQLite persistence and migrations, and the secret store for provider
-//! keys, network app credentials and OAuth tokens (Windows Credential
-//! Manager).
+//! SQLite persistence and migrations, the secret store for provider keys,
+//! network app credentials and OAuth tokens (Windows Credential Manager),
+//! and the background agent's task (Windows Task Scheduler).
 
+mod agent_task;
 mod channel;
 mod connection;
 mod cost;
@@ -29,12 +30,17 @@ mod tour;
 mod voice_samples;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::RepositoryError;
 use rusqlite::Connection;
 
+#[cfg(windows)]
+pub use agent_task::TaskScheduler;
+pub use agent_task::{
+    AGENT_ARGUMENT, MemoryAgentTask, platform_agent_task, task_definition, task_name,
+};
 pub use export_files::{LocalExportFiles, MemoryExportFiles, default_exports_dir};
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
 pub use migrations::{BrokenReferences, MigrationError};
@@ -62,8 +68,14 @@ pub enum StorageError {
 }
 
 /// The app's database: one SQLite file per installation, migrated on open.
+///
+/// Each handle is one **runner** (`bardo_domain::runner`): the app and the
+/// background agent open the file in their own processes, and the leases
+/// on jobs and the claims on scheduled posts this handle takes are its own.
 pub struct Database {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
+    /// This runner's id in job leases and presence.
+    runner: String,
 }
 
 impl Database {
@@ -76,6 +88,9 @@ impl Database {
             })?;
         }
         let conn = Connection::open(path)?;
+        // Another process (the background agent) may be writing: wait for
+        // its lock instead of failing at once.
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         Self::init(conn)
     }
@@ -88,8 +103,23 @@ impl Database {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         migrations::run(&mut conn)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
+            runner: uuid::Uuid::new_v4().to_string(),
         })
+    }
+
+    /// The same database seen by another runner, as a second process would
+    /// open it, with its own leases. For tests of the app and the agent
+    /// together on one in-memory database.
+    pub fn other_runner(&self) -> Self {
+        Self {
+            conn: Arc::clone(&self.conn),
+            runner: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+
+    pub(crate) fn runner(&self) -> &str {
+        &self.runner
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
@@ -100,6 +130,9 @@ impl Database {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
+
+/// How long a statement waits for another process's write lock.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Wraps an adapter error for the domain's repository ports.
 pub(crate) fn boxed(error: impl std::error::Error + Send + Sync + 'static) -> RepositoryError {

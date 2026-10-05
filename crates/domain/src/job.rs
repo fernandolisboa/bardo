@@ -4,13 +4,14 @@
 //! This module holds the job state machine. Running the work, threads and
 //! timing belong to the queue in `app`; time comes in as arguments.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use uuid::Uuid;
 
-use crate::{ProfileId, ProviderFailureKind, RepositoryError};
+use crate::{ProfileId, ProviderFailureKind, RepositoryError, RunnerRole, RunnerSeen};
 
 /// Identifies a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -788,8 +789,65 @@ pub trait JobRepository: Send + Sync {
     /// The owner's jobs, oldest first.
     fn list(&self, owner: ProfileId) -> Result<Vec<Job>, RepositoryError>;
 
-    /// Inserts or updates the job.
+    /// Inserts or updates the job. An adapter shared by several runners
+    /// refuses (`JobHeldElsewhere`) a job another runner's live lease holds.
     fn save(&self, job: &Job) -> Result<(), RepositoryError>;
+
+    // Runners (`crate::runner`). The defaults suit an adapter only one
+    // runner uses: every lease is its own, and no other runner exists.
+
+    /// The stored job, fresher than a copy another runner may have changed.
+    /// `None` when the adapter has no fresher copy than the caller's.
+    fn job(&self, _id: JobId) -> Result<Option<Job>, RepositoryError> {
+        Ok(None)
+    }
+
+    /// Takes the job for this runner until `until`, unless another
+    /// runner's lease on it is live at `now`. True when this runner holds
+    /// it now.
+    fn lease(&self, _id: JobId, _now: SystemTime, _until: SystemTime) -> Result<bool, RepositoryError> {
+        Ok(true)
+    }
+
+    /// Extends this runner's leases on `ids` until `until`, and returns the
+    /// ones it no longer holds (another runner took them).
+    fn renew(&self, _ids: &[JobId], _until: SystemTime) -> Result<Vec<JobId>, RepositoryError> {
+        Ok(Vec::new())
+    }
+
+    /// Gives up this runner's lease on the job, if it holds one.
+    fn release(&self, _id: JobId) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+
+    /// The owner's jobs another runner's live lease holds at `now`.
+    fn held_elsewhere(
+        &self,
+        _owner: ProfileId,
+        _now: SystemTime,
+    ) -> Result<HashSet<JobId>, RepositoryError> {
+        Ok(HashSet::new())
+    }
+
+    /// Says this runner is up, as `role`, since `started_at`.
+    fn heartbeat(
+        &self,
+        _role: RunnerRole,
+        _started_at: SystemTime,
+        _now: SystemTime,
+    ) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+
+    /// The other runners seen since `since`.
+    fn runners(&self, _since: SystemTime) -> Result<Vec<RunnerSeen>, RepositoryError> {
+        Ok(Vec::new())
+    }
+
+    /// This runner stops: its presence goes.
+    fn leave(&self) -> Result<(), RepositoryError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

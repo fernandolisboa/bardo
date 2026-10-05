@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 
 /// Ordered schema migrations. Append only: never edit a released migration.
 const MIGRATIONS: &[&str] = &[
@@ -38,6 +38,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0034_post_insights.sql"),
     include_str!("../migrations/0035_tour_progress.sql"),
     include_str!("../migrations/0036_offer_screen_tours.sql"),
+    include_str!("../migrations/0037_background_agent.sql"),
 ];
 
 /// A migration left rows whose foreign keys point nowhere.
@@ -61,7 +62,14 @@ pub(crate) fn run(conn: &mut Connection) -> Result<(), MigrationError> {
     conn.pragma_update(None, "foreign_keys", false)?;
     let result = (|| {
         for (index, sql) in MIGRATIONS.iter().enumerate().skip(applied) {
-            let tx = conn.transaction()?;
+            // The background agent may open the same file at the same
+            // time: the write lock comes first and the version is read again
+            // under it, so each migration runs once.
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if usize::try_from(now).unwrap_or(0) > index {
+                continue;
+            }
             tx.execute_batch(sql)?;
             let broken = {
                 let mut check = tx.prepare("PRAGMA foreign_key_check")?;

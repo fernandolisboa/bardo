@@ -733,6 +733,15 @@ pub(crate) fn access_token(
     }
 }
 
+/// The publication an upload job sends, read from its payload.
+pub(crate) fn job_publication(job: &Job) -> Option<PublicationId> {
+    if job.kind() != JobKind::Upload {
+        return None;
+    }
+    let payload: UploadPayload = serde_json::from_str(job.payload()).ok()?;
+    id(&payload.publication).ok()
+}
+
 /// Runs uploads.
 pub(crate) struct UploadHandler {
     pub(crate) publications: Arc<dyn PublicationRepository>,

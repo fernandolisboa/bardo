@@ -10,7 +10,7 @@ use std::sync::Arc;
 use bardo_domain::{Job, JobId, JobKind, JobState};
 
 pub use countdown::TestJob;
-pub(crate) use queue::JobQueue;
+pub(crate) use queue::{JobQueue, Runner};
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 
 use crate::clips::ClipHandler;
@@ -96,7 +96,10 @@ pub(crate) fn built_in_handlers(
 impl JobActionError {
     /// What the jobs panel says when cancel or retry did not happen.
     pub fn message(&self) -> Text {
-        Text::JobNotUpdated
+        match self {
+            JobActionError::Elsewhere => Text::JobRunsElsewhere,
+            _ => Text::JobNotUpdated,
+        }
     }
 }
 
@@ -157,6 +160,13 @@ impl Bardo {
 
     pub fn job_settings(&self) -> JobSettings {
         self.jobs.settings()
+    }
+
+    /// Whether the other Bardo process (the background agent, from the
+    /// app) runs the job now; it shows the progress of its last
+    /// checkpoint, and cancel and retry wait until it ends.
+    pub fn job_runs_elsewhere(&self, id: JobId) -> bool {
+        self.jobs.held_elsewhere(id)
     }
 
     pub fn start_test_job(&self, job: TestJob) -> Result<JobId, AppError> {
@@ -232,6 +242,7 @@ mod tests {
                 first_delay: Duration::from_millis(40),
                 max_delay: Duration::from_secs(1),
             },
+            ..JobSettings::default()
         }
     }
 
@@ -254,6 +265,7 @@ mod tests {
         JobQueue::start(
             Arc::clone(db) as Arc<dyn JobRepository>,
             owner,
+            Runner::app(),
             handlers,
             settings,
             Redactor::new(),
@@ -529,6 +541,7 @@ mod tests {
         let q = JobQueue::start(
             Arc::clone(&db) as Arc<dyn JobRepository>,
             owner,
+            Runner::app(),
             handlers(|_, _| {
                 Err(JobFailure::new(
                     JobFailureKind::Simulated,
@@ -883,6 +896,214 @@ mod tests {
         assert!(matches!(q.retry(id), Err(JobActionError::NotAllowed(_))));
     }
 
+    // Two runners (the app and the background agent) on one database.
+
+    /// The same database as a second process opens it.
+    fn second_runner(db: &Arc<Database>) -> Arc<Database> {
+        Arc::new(db.other_runner())
+    }
+
+    fn agent_queue(
+        db: &Arc<Database>,
+        owner: ProfileId,
+        handlers: HashMap<JobKind, Arc<dyn JobHandler>>,
+        settings: JobSettings,
+    ) -> JobQueue {
+        JobQueue::start(
+            Arc::clone(db) as Arc<dyn JobRepository>,
+            owner,
+            Runner {
+                role: bardo_domain::RunnerRole::Agent,
+                scope: None,
+                paused: false,
+            },
+            handlers,
+            settings,
+            Redactor::new(),
+        )
+        .unwrap()
+    }
+
+    /// Quick ticks and short leases, so runners see each other soon.
+    fn shared_settings() -> JobSettings {
+        JobSettings {
+            lease: Duration::from_millis(400),
+            tick: Duration::from_millis(20),
+            ..settings()
+        }
+    }
+
+    #[test]
+    fn two_runners_on_one_database_run_each_job_once() {
+        let (db, owner) = memory_db();
+        let ids: Vec<JobId> = (0..24)
+            .map(|_| {
+                let job = Job::new(owner, JobKind::Countdown, "{}");
+                JobRepository::save(&*db, &job).unwrap();
+                job.id()
+            })
+            .collect();
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&runs);
+        let run: Arc<RunFn> = Arc::new(move |_: &str, cx: &mut JobContext| {
+            seen.lock().unwrap().push(cx.id());
+            std::thread::sleep(Duration::from_millis(3));
+            Ok(())
+        });
+        let app = queue(&db, owner, shared_handlers(&run), shared_settings());
+        let agent_db = second_runner(&db);
+        let agent = agent_queue(&agent_db, owner, shared_handlers(&run), shared_settings());
+
+        for id in &ids {
+            wait_for(|| app.jobs(), *id, |j| j.state() == JobState::Done);
+            wait_for(|| agent.jobs(), *id, |j| j.state() == JobState::Done);
+        }
+        let runs = runs.lock().unwrap();
+        for id in &ids {
+            assert_eq!(runs.iter().filter(|run| *run == id).count(), 1, "{id}");
+        }
+        assert_eq!(runs.len(), ids.len());
+    }
+
+    #[test]
+    fn a_job_the_other_runner_runs_is_left_to_it() {
+        let (db, owner) = memory_db();
+        let release = Arc::new(AtomicBool::new(false));
+        let go = Arc::clone(&release);
+        let agent_db = second_runner(&db);
+        let agent = agent_queue(
+            &agent_db,
+            owner,
+            handlers(move |_, cx| {
+                cx.save_checkpoint("half", Progress::from_permille(500))
+                    .unwrap();
+                while !go.load(Ordering::SeqCst) && cx.sleep(Duration::from_millis(2)) {}
+                Ok(())
+            }),
+            shared_settings(),
+        );
+        let id = enqueue(&agent, owner);
+        wait_for(|| agent.jobs(), id, |j| j.checkpoint() == Some("half"));
+
+        let ran_in_app = Arc::new(AtomicBool::new(false));
+        let ran = Arc::clone(&ran_in_app);
+        let app = queue(
+            &db,
+            owner,
+            handlers(move |_, _| {
+                ran.store(true, Ordering::SeqCst);
+                Ok(())
+            }),
+            shared_settings(),
+        );
+        // The app sees it running elsewhere, at its last checkpoint.
+        let shown = wait_for(|| app.jobs(), id, |j| j.state() == JobState::Running);
+        assert_eq!(shown.progress(), Progress::from_permille(500));
+        assert!(app.held_elsewhere(id));
+        assert!(matches!(app.cancel(id), Err(JobActionError::Elsewhere)));
+        assert_eq!(app.others()[0].role, bardo_domain::RunnerRole::Agent);
+
+        release.store(true, Ordering::SeqCst);
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Done);
+        assert!(!app.held_elsewhere(id));
+        assert!(!ran_in_app.load(Ordering::SeqCst), "never ran in the app");
+    }
+
+    #[test]
+    fn a_job_left_running_by_a_runner_that_died_resumes_in_the_other() {
+        let (db, owner) = memory_db();
+        // The agent's run never returns, as in a process that hung or was
+        // killed: it stops renewing once its queue is gone.
+        let unstick = Arc::new(AtomicBool::new(false));
+        let stuck = Arc::clone(&unstick);
+        let agent_db = second_runner(&db);
+        let agent = agent_queue(
+            &agent_db,
+            owner,
+            handlers(move |_, cx| {
+                cx.save_checkpoint("step-1", Progress::from_permille(300))
+                    .unwrap();
+                while !stuck.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Ok(())
+            }),
+            shared_settings(),
+        );
+        let id = enqueue(&agent, owner);
+        wait_for(|| agent.jobs(), id, |j| j.checkpoint() == Some("step-1"));
+
+        let resumed_from = Arc::new(Mutex::new(None::<String>));
+        let seen = Arc::clone(&resumed_from);
+        let app = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                *seen.lock().unwrap() = cx.checkpoint().map(str::to_owned);
+                Ok(())
+            }),
+            shared_settings(),
+        );
+        assert!(
+            wait_for(|| app.jobs(), id, |j| j.state() == JobState::Running).state()
+                == JobState::Running
+        );
+        drop(agent);
+        let done = wait_for(|| app.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(resumed_from.lock().unwrap().as_deref(), Some("step-1"));
+        assert_eq!(done.attempts(), 1, "the cut attempt does not count");
+        unstick.store(true, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn a_paused_runner_starts_nothing_until_resumed() {
+        let (db, owner) = memory_db();
+        let agent = JobQueue::start(
+            Arc::clone(&db) as Arc<dyn JobRepository>,
+            owner,
+            Runner {
+                role: bardo_domain::RunnerRole::Agent,
+                scope: None,
+                paused: true,
+            },
+            handlers(|_, _| Ok(())),
+            shared_settings(),
+            Redactor::new(),
+        )
+        .unwrap();
+        let id = enqueue(&agent, owner);
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(stored(&db, owner, id).state(), JobState::Queued);
+        agent.pause(false);
+        wait_for(|| agent.jobs(), id, |j| j.state() == JobState::Done);
+    }
+
+    #[test]
+    fn a_runner_takes_only_the_jobs_in_its_scope() {
+        let (db, owner) = memory_db();
+        let mine = Job::new(owner, JobKind::Countdown, "mine");
+        let other = Job::new(owner, JobKind::Countdown, "other");
+        JobRepository::save(&*db, &mine).unwrap();
+        JobRepository::save(&*db, &other).unwrap();
+        let agent = JobQueue::start(
+            Arc::clone(&db) as Arc<dyn JobRepository>,
+            owner,
+            Runner {
+                role: bardo_domain::RunnerRole::Agent,
+                scope: Some(Arc::new(|job: &Job| job.payload() == "mine")),
+                paused: false,
+            },
+            handlers(|_, _| Ok(())),
+            shared_settings(),
+            Redactor::new(),
+        )
+        .unwrap();
+        wait_for(|| agent.jobs(), mine.id(), |j| j.state() == JobState::Done);
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(agent.jobs().iter().all(|job| job.id() != other.id()));
+        assert_eq!(stored(&db, owner, other.id()).state(), JobState::Queued);
+    }
+
     #[test]
     fn a_failed_save_changes_nothing() {
         struct Broken;
@@ -898,6 +1119,7 @@ mod tests {
         let q = JobQueue::start(
             Arc::new(Broken),
             ProfileId::new(),
+            Runner::app(),
             handlers(|_, _| Ok(())),
             settings(),
             Redactor::new(),
@@ -924,6 +1146,7 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(db)),
             tours: Box::new(Arc::clone(db)),
+            agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
             themes: Arc::clone(db) as _,

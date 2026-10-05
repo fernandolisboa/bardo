@@ -39,6 +39,7 @@ macro_rules! uuid_id {
     };
 }
 
+mod agent_task;
 mod appearance;
 mod budget;
 mod caption;
@@ -75,6 +76,7 @@ mod reel;
 mod render;
 mod repository;
 mod research;
+mod runner;
 mod scene;
 mod schedule;
 mod script;
@@ -204,7 +206,12 @@ pub use render::{
     CutFacts, Gate, GateLevel, LOUDNESS_GAIN_WARNING, LOUDNESS_TOLERANCE, MeasuredLoudness, Render,
     RenderId, RenderRepository, SILENCE, TRUE_PEAK_CEILING, cut_gates, output_gates,
 };
+pub use agent_task::{AgentTask, AgentTaskError};
 pub use repository::RepositoryError;
+pub use runner::{
+    JOB_LEASE, JobHeldElsewhere, RUNNER_ALIVE, RUNNER_TICK, RunnerRole, RunnerSeen,
+    UnknownRunnerRole, running_since,
+};
 pub use research::{
     MarketData, MarketSample, Niche, NicheResearch, NicheResearchRepository, NicheScores,
     NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,

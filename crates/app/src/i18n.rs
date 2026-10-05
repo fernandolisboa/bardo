@@ -1373,6 +1373,29 @@ pub enum Text {
     UploadMissedAt,
     UploadMissedHint,
     UploadReelScheduleHint,
+    /// `UploadDueHint` while the background agent is on.
+    UploadDueHintAgent,
+    /// `UploadReelScheduleHint` while the background agent is on.
+    /// Placeholder: `{network}`.
+    UploadReelScheduleHintAgent,
+    /// `UploadMissedHint` while the background agent is on.
+    UploadMissedHintAgent,
+    JobRunsElsewhere,
+    SettingsPublishingTab,
+    AgentTitle,
+    AgentQuestion,
+    AgentExplanation,
+    AgentSwitch,
+    AgentSends,
+    AgentLimits,
+    AgentStatusOff,
+    AgentStatusRunning,
+    AgentStatusNotRunning,
+    AgentStartNow,
+    AgentWorking,
+    AgentNotSetUp,
+    AgentNotRemoved,
+    AgentNotSaved,
     UploadReelStartScheduled,
     /// One TikTok spec problem, by `TikTokSpecProblem::code`.
     UploadTikTokSpec(&'static str),
@@ -3001,6 +3024,25 @@ impl Text {
             Text::UploadMissedAt => "upload.missed_at",
             Text::UploadMissedHint => "upload.missed_hint",
             Text::UploadReelScheduleHint => "upload.reel_schedule_hint",
+            Text::UploadDueHintAgent => "upload.due_hint_agent",
+            Text::UploadReelScheduleHintAgent => "upload.reel_schedule_hint_agent",
+            Text::UploadMissedHintAgent => "upload.missed_hint_agent",
+            Text::JobRunsElsewhere => "job.error.runs_elsewhere",
+            Text::SettingsPublishingTab => "settings.publishing_tab",
+            Text::AgentTitle => "agent.title",
+            Text::AgentQuestion => "agent.question",
+            Text::AgentExplanation => "agent.explanation",
+            Text::AgentSwitch => "agent.switch",
+            Text::AgentSends => "agent.sends",
+            Text::AgentLimits => "agent.limits",
+            Text::AgentStatusOff => "agent.status.off",
+            Text::AgentStatusRunning => "agent.status.running",
+            Text::AgentStatusNotRunning => "agent.status.not_running",
+            Text::AgentStartNow => "agent.start_now",
+            Text::AgentWorking => "agent.working",
+            Text::AgentNotSetUp => "agent.error.not_set_up",
+            Text::AgentNotRemoved => "agent.error.not_removed",
+            Text::AgentNotSaved => "agent.error.not_saved",
             Text::UploadReelStartScheduled => "upload.reel_start_scheduled",
             Text::UploadTikTokSpec(code) => return format!("upload.tiktok_spec.{code}").into(),
             Text::UploadTikTokSpecsTitle => "upload.tiktok_specs_title",
@@ -4677,6 +4719,27 @@ mod tests {
         texts.push(Text::UploadMissedAt);
         texts.push(Text::UploadMissedHint);
         texts.push(Text::UploadReelScheduleHint);
+        texts.extend([
+            Text::UploadDueHintAgent,
+            Text::UploadReelScheduleHintAgent,
+            Text::UploadMissedHintAgent,
+            Text::JobRunsElsewhere,
+            Text::SettingsPublishingTab,
+            Text::AgentTitle,
+            Text::AgentQuestion,
+            Text::AgentExplanation,
+            Text::AgentSwitch,
+            Text::AgentSends,
+            Text::AgentLimits,
+            Text::AgentStatusOff,
+            Text::AgentStatusRunning,
+            Text::AgentStatusNotRunning,
+            Text::AgentStartNow,
+            Text::AgentWorking,
+            Text::AgentNotSetUp,
+            Text::AgentNotRemoved,
+            Text::AgentNotSaved,
+        ]);
         texts.push(Text::UploadReelStartScheduled);
         texts.extend(bardo_domain::TikTokSpecProblem::CODES.map(Text::UploadTikTokSpec));
         texts.push(Text::UploadTikTokSpecsTitle);

@@ -519,7 +519,9 @@ impl PublicationRepository for Database {
         };
         // One statement, so two runners racing for it cannot both win: the
         // second finds the row claimed by then. The job claims it again on
-        // resume, keeping the first claim's time.
+        // resume, keeping the first claim's time. While another runner (the
+        // app or the background agent) holds the lease on its job, that
+        // runner's run is the one that publishes it.
         let now = to_unix_millis(now);
         let claimed = self
             .conn()
@@ -530,8 +532,18 @@ impl PublicationRepository for Database {
                    AND (upload_status IN ('queued', 'uploading', 'processing')
                         OR (upload_status = 'failed'
                             AND coalesce(upload_failure, '') <> 'schedule_missed'))
-                   AND upload_publish_at IS NOT NULL AND upload_publish_at <= ?3",
-                params![publication.id.to_string(), upload.job.to_string(), now],
+                   AND upload_publish_at IS NOT NULL AND upload_publish_at <= ?3
+                   AND NOT EXISTS (
+                       SELECT 1 FROM job
+                       WHERE job.id = ?2 AND job.leased_by IS NOT NULL
+                         AND job.leased_by <> ?4 AND job.leased_until > ?5)",
+                params![
+                    publication.id.to_string(),
+                    upload.job.to_string(),
+                    now,
+                    self.runner(),
+                    to_unix_millis(SystemTime::now()),
+                ],
             )
             .map_err(boxed)?;
         Ok(claimed > 0)
@@ -981,6 +993,26 @@ mod tests {
         stale.upload_mut().unwrap().claimed_at = None;
         assert!(db.save_upload(&stale).unwrap());
         assert_eq!(claimed_at(&db, &reel), Some(time(1000)));
+    }
+
+    #[test]
+    fn a_due_upload_is_not_claimed_while_another_runner_holds_its_job() {
+        let (db, _, project) = setup();
+        let agent = db.other_runner();
+        let job = bardo_domain::Job::new(project.owner, bardo_domain::JobKind::Upload, "{}");
+        bardo_domain::JobRepository::save(&db, &job).unwrap();
+        let mut reel = due_reel(&db, &project);
+        reel.upload_mut().unwrap().job = job.id();
+        db.save_publication(&reel).unwrap();
+        let now = SystemTime::now();
+        assert!(
+            bardo_domain::JobRepository::lease(&agent, job.id(), now, now + Duration::from_secs(60))
+                .unwrap()
+        );
+
+        assert!(!db.claim_upload(&reel, time(1000)).unwrap(), "the agent's");
+        assert_eq!(claimed_at(&db, &reel), None);
+        assert!(agent.claim_upload(&reel, time(1000)).unwrap());
     }
 
     #[test]

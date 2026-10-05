@@ -13,7 +13,7 @@ impl ProfileRepository for Database {
             .conn()
             .query_row(
                 "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
-                        offer_screen_tours
+                        offer_screen_tours, background_agent
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -26,14 +26,23 @@ impl ProfileRepository for Database {
                         row.get::<_, String>(4)?,
                         row.get::<_, i64>(5)?,
                         row.get::<_, bool>(6)?,
+                        row.get::<_, bool>(7)?,
                     ))
                 },
             )
             .optional()
             .map_err(boxed)?;
 
-        let Some((id, ui_language, ui_theme, ui_layout, metrics_sync, cut_floor, screen_tours)) =
-            row
+        let Some((
+            id,
+            ui_language,
+            ui_theme,
+            ui_layout,
+            metrics_sync,
+            cut_floor,
+            screen_tours,
+            background_agent,
+        )) = row
         else {
             return Ok(None);
         };
@@ -45,6 +54,7 @@ impl ProfileRepository for Database {
             metrics_sync: MetricsSyncOnStart::from_code_or_default(&metrics_sync),
             cut_suggestion_floor: Score::new(u8::try_from(cut_floor).map_err(boxed)?),
             offer_screen_tours: screen_tours,
+            background_agent,
         }))
     }
 
@@ -52,15 +62,17 @@ impl ProfileRepository for Database {
         self.conn()
             .execute(
                 "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
-                                           cut_suggestion_floor, offer_screen_tours)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                                           cut_suggestion_floor, offer_screen_tours,
+                                           background_agent)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
                      ui_layout = excluded.ui_layout,
                      metrics_sync = excluded.metrics_sync,
                      cut_suggestion_floor = excluded.cut_suggestion_floor,
-                     offer_screen_tours = excluded.offer_screen_tours",
+                     offer_screen_tours = excluded.offer_screen_tours,
+                     background_agent = excluded.background_agent",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -69,6 +81,7 @@ impl ProfileRepository for Database {
                     profile.metrics_sync.code(),
                     profile.cut_suggestion_floor.value(),
                     profile.offer_screen_tours,
+                    profile.background_agent,
                 ],
             )
             .map_err(boxed)?;
@@ -110,6 +123,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM user_profile", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn the_background_agent_is_off_until_turned_on() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert!(!db.load_default().unwrap().unwrap().background_agent);
+
+        profile.background_agent = true;
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
     }
 
     #[test]
