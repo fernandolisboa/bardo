@@ -579,6 +579,12 @@ impl Guide {
         Self { language, pages }
     }
 
+    /// A guide of other pages, for tests.
+    #[cfg(test)]
+    pub(crate) fn from_pages(language: UiLanguage, pages: Vec<GuidePage>) -> Self {
+        Self { language, pages }
+    }
+
     pub fn language(&self) -> UiLanguage {
         self.language
     }
@@ -719,8 +725,7 @@ fn snippet(text: &str, at: Option<usize>) -> String {
 
 /// What is wrong between the two languages' pages: a page or section
 /// missing from one, or a different group, place or tour.
-#[cfg(test)]
-fn sync_problems(en_us: &[GuidePage], pt_br: &[GuidePage]) -> Vec<String> {
+pub(crate) fn sync_problems(en_us: &[GuidePage], pt_br: &[GuidePage]) -> Vec<String> {
     let mut problems = Vec::new();
     for page in en_us {
         let Some(other) = pt_br.iter().find(|other| other.id == page.id) else {
@@ -755,8 +760,7 @@ fn sync_problems(en_us: &[GuidePage], pt_br: &[GuidePage]) -> Vec<String> {
 
 /// Every link in `pages` that leads nowhere: an unknown page, section,
 /// tour or place, or a web address that is not https.
-#[cfg(test)]
-fn link_problems(pages: &[GuidePage]) -> Vec<String> {
+pub(crate) fn link_problems(pages: &[GuidePage]) -> Vec<String> {
     let mut problems = Vec::new();
     for page in pages {
         for url in page.links() {

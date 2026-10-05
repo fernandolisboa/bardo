@@ -1,6 +1,6 @@
 # Bardo user guide
 
-The guide Bardo shows on its Guide screen (F1), in two languages. O guia que o Bardo mostra na tela Guia (F1), em dois idiomas.
+The guide Bardo shows on its Guide screen (F1), in two languages, also published at [fernandolisboa.github.io/bardo](https://fernandolisboa.github.io/bardo/). O guia que o Bardo mostra na tela Guia (F1), em dois idiomas, também publicado em [fernandolisboa.github.io/bardo](https://fernandolisboa.github.io/bardo/).
 
 | English | Português |
 | --- | --- |
@@ -45,3 +45,16 @@ The guide Bardo shows on its Guide screen (F1), in two languages. O guia que o B
 - Links: another page as `page.md#section` (the app also reads `bardo:guide/page#section`, but only the first works on GitHub), a section of this page as `#section`, a place in Bardo as `bardo:go/<place>`, a tour as `bardo:tour/<tour>`. Anything else must be an `https://` address.
 - Add a new page to `GUIDE_PAGES` in `crates/app/src/guide.rs`, which embeds it in the app. The tests in that file fail on a missing translation, a different section or a broken link.
 - Every place (each screen, project stage, Settings tab and the Jobs panel) has a page whose `place` is it, and a tour. A new place without both fails the coverage test in the same file.
+
+## The website
+
+The `Guide site` workflow builds the site from these files on every pull request that touches them, and publishes it from main. To build it locally, with [mdBook](https://rust-lang.github.io/mdBook/) at the version the workflow pins:
+
+```sh
+cargo run -p bardo-app --example guide_site -- target/guide-site
+mdbook build target/guide-site/en-US
+mdbook build target/guide-site/pt-BR
+# open target/guide-site/site/index.html
+```
+
+The sidebar is the Guide screen's contents, `bardo:go/` links lead to the page that explains the place, and `bardo:tour/` links keep their text with an "in the app" note. A broken link fails the build.

@@ -1,7 +1,7 @@
 # Onboarding: guided tours, the Guide and the user guide
 
 - Status: Approved 2026-10-04 (#105 to #112)
-- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages), #110 (Channels, Accounts, Settings › Networks, Publish stage and missed posts tours, Publishing pages with the network setup guides in both languages), #111 (Costs, Jobs panel and Settings tab tours, the reference pages, and full coverage)
+- Built so far: #105 (tour engine, welcome tour, Guide menu, keyboard shortcuts), #106 (Guide screen, Getting started and Reference pages, `docs/guide/`), #107 (Research, Themes and Performance tours, "Tour this screen", Strategy pages), #108 (Projects, Personas and Templates tours, Script, Narration, Scenes and Clips stage tours, "Tour this stage", Production pages), #109 (the editor's tour in two parts, the Render stage tour, the guide over the editor, Editing pages), #110 (Channels, Accounts, Settings › Networks, Publish stage and missed posts tours, Publishing pages with the network setup guides in both languages), #111 (Costs, Jobs panel and Settings tab tours, the reference pages, and full coverage), #112 (the guide website on GitHub Pages)
 
 Bardo teaches itself in three ways, all from the same place in the navigation, **Guide**:
 
@@ -177,6 +177,17 @@ The pages live in `docs/guide/<language>/<page>.md`; `docs/guide/README.md` says
 | #109 | The editor's tour, the Render stage tour and the guide over the editor (built) |
 | #110 | The Publishing tours (network guides in pt-BR too) (built) |
 | #111 | Costs, Jobs and Settings tours, and full coverage (built) |
-| #112 | The documentation site on GitHub Pages |
+| #112 | The documentation site on GitHub Pages (built) |
 
 The user guide has one source, `docs/guide/<language>/`, read by the Guide screen and published as the site, so the app and the site never drift apart.
+
+## The guide website
+
+The site is one mdBook book per language, at `/en-US/` and `/pt-BR/`; the root sends a visitor to the book in their browser's language. `bardo_app::guide_site` writes the books' sources from the embedded pages (run by `cargo run -p bardo-app --example guide_site`), so the site reads the pages exactly as the Guide screen does:
+
+- The sidebar is the Guide screen's contents: the groups, named as in the app, then their pages in the app's order.
+- Every page starts with a link to the same page in the other language.
+- Links between pages and sections stay links. `bardo:go/<place>` links to the page that explains the place (plain text on that page itself); `bardo:tour/<tour>` keeps its text with an "in the app" note, since tours only run in Bardo.
+- A broken link or a page missing in one language fails the build, with the same checks as the app's tests.
+
+The `Guide site` workflow builds it on every pull request and push to main that touches the guide, and deploys main to GitHub Pages. mdBook's version is pinned in the workflow, with the release's checksum.
