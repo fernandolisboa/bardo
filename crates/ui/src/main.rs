@@ -1,4 +1,5 @@
-//! Bardo desktop entry point: opens the main window over `bardo_app::Bardo`.
+//! Bardo desktop entry point: opens the main window over `bardo_app::Bardo`,
+//! or, with `--agent`, runs the background publishing agent without one.
 
 // No console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -40,7 +41,8 @@ use gpui_kit::{
 
 use crate::shell::Shell;
 
-fn main() -> anyhow::Result<()> {
+/// Bardo's local storage, as both the app and the agent open it.
+fn repositories() -> anyhow::Result<Repositories> {
     let db_path = bardo_storage::default_database_path()?;
     let db = Database::open(&db_path)
         .with_context(|| format!("opening the database at {}", db_path.display()))?;
@@ -50,19 +52,36 @@ fn main() -> anyhow::Result<()> {
     let exports = bardo_storage::LocalExportFiles::new(bardo_storage::default_exports_dir());
     let voice_samples =
         bardo_storage::LocalVoiceSamples::new(bardo_storage::default_voice_samples_dir()?);
+    Ok(Repositories::local(
+        db,
+        secrets,
+        connection_secrets,
+        Box::new(files),
+        Box::new(exports),
+        Box::new(voice_samples),
+    ))
+}
+
+/// The background agent: sends scheduled posts until the user turns it
+/// off. It exits at once when it is off, or another agent runs.
+fn run_agent() -> anyhow::Result<()> {
+    let Some(agent) = Bardo::start_agent(repositories()?, Providers::live())? else {
+        return Ok(());
+    };
+    if let Some(log_path) = bardo_app::logging::agent_log_path() {
+        let _ = bardo_app::logging::init(&log_path, agent.redactor());
+    }
+    tracing::info!("the background agent starts");
+    agent.run_agent();
+    Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|arg| arg == bardo_storage::AGENT_ARGUMENT) {
+        return run_agent();
+    }
     let locale = sys_locale::get_locale();
-    let bardo = Bardo::start(
-        Repositories::local(
-            db,
-            secrets,
-            connection_secrets,
-            Box::new(files),
-            Box::new(exports),
-            Box::new(voice_samples),
-        ),
-        Providers::live(),
-        locale.as_deref(),
-    )?;
+    let bardo = Bardo::start(repositories()?, Providers::live(), locale.as_deref())?;
     // Started after the app so the saved keys are already masked. Without a
     // log file Bardo still runs; it only loses its diagnostics.
     if let Some(log_path) = bardo_app::logging::default_log_path() {
@@ -74,6 +93,14 @@ fn main() -> anyhow::Result<()> {
     // Connections close to expiring are renewed off the UI thread.
     let renewal = bardo.connection_renewal();
     std::thread::spawn(move || renewal.run());
+    // The background agent's task follows the setting: set up again when
+    // it is on and not running, removed when it is off but left over.
+    let upkeep = bardo.agent_upkeep();
+    std::thread::spawn(move || {
+        if let Err(error) = upkeep.run() {
+            tracing::warn!("{error}");
+        }
+    });
 
     // The bundled icons (gpui-kit's default set and Bardo's extra ones);
     // without them icons draw nothing.

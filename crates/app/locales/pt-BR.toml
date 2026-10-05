@@ -11,6 +11,7 @@ ui_language = "Idioma da interface"
 title = "Configurações"
 keys_tab = "Chaves de API"
 appearance_tab = "Aparência"
+publishing_tab = "Publicação"
 
 [language]
 en-US = "English (US)"
@@ -240,6 +241,7 @@ missed = "O horário do post agendado passou sem ele, então nada foi postado. E
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
 not_started = "Não foi possível iniciar a tarefa. Tente de novo."
+runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
 
 [provider_keys]
 title = "Chaves de provedor"
@@ -1808,6 +1810,9 @@ draft_copied = "Copiado. Cole no TikTok."
 draft_limit_hint = "O TikTok aceita no máximo {total} rascunhos de apps em 24 horas, e o Bardo enviou {total} a esta conta. O próximo pode sair {when}."
 draft_limit_held_hint = "O TikTok aceita no máximo {total} rascunhos de apps em 24 horas. O vídeo fica na fila e sai {when}."
 draft_limit_recheck_hint = "O TikTok recusou mais rascunhos por enquanto, talvez alguns enviados por outros apps. O vídeo fica na fila e o Bardo tenta de novo {when}."
+due_hint_agent = "O Bardo posta neste horário por conta própria: o agente em segundo plano envia enquanto você estiver conectado ao Windows, mesmo com o Bardo fechado. O computador precisa estar ligado. Se nada estiver rodando nesse horário, nada é postado e o Bardo pergunta o que fazer quando abrir."
+reel_schedule_hint_agent = "O {network} não aceita horário de publicação vindo de apps, então o Bardo posta neste horário por conta própria: o agente em segundo plano envia enquanto você estiver conectado ao Windows, mesmo com o Bardo fechado, desde que o computador esteja ligado. Se nada estiver rodando nesse horário, nada é postado e o Bardo pergunta o que fazer quando abrir."
+missed_hint_agent = "Nem o Bardo nem o agente em segundo plano estavam rodando no horário (o computador estava desligado, dormindo ou sem ninguém conectado), então nada foi postado. Poste agora, escolha um novo horário ou cancele."
 
 [upload.field]
 file = "Arquivo"
@@ -2568,6 +2573,25 @@ body = "Quando o Bardo abre, ele sincroniza se a verificação mais antiga passo
 title = "Onde aparecem"
 body = "Os números aparecem em Desempenho, e a primeira semana de cada post alimenta o ranqueamento de novas ideias."
 
+[tour.background-agent]
+name = "Tour do agente em segundo plano"
+
+[tour.background-agent.tab]
+title = "Publicação"
+body = "O próprio Bardo posta os Reels do Instagram no horário marcado. Aqui você escolhe se isso também acontece com o Bardo fechado."
+
+[tour.background-agent.switch]
+title = "Publicar com o Bardo fechado"
+body = "Ligado, um agente leve inicia quando você se conecta ao Windows e envia os Reels agendados em segundo plano. Desligado, ele é removido."
+
+[tour.background-agent.status]
+title = "Está rodando?"
+body = "Aqui aparece se o agente está rodando agora. Se estiver ligado mas parado, inicie por aqui ou conecte-se de novo ao Windows."
+
+[tour.background-agent.limits]
+title = "Do que ele precisa"
+body = "O computador precisa estar ligado e você conectado. Com o Bardo aberto, o próprio Bardo envia os posts e o agente espera."
+
 [guide]
 back_to_editor = "Voltar ao editor"
 resume_tour = "Retomar tour"
@@ -2638,3 +2662,24 @@ editor_tour = "Começar o tour do editor"
 next_cut = "Próxima sugestão"
 accept_cut = "Aceitar a sugestão"
 reject_cut = "Rejeitar a sugestão"
+
+[agent]
+title = "Agente em segundo plano"
+question = "Publicar mesmo com o Bardo fechado?"
+explanation = "Instala um agente leve que envia os posts agendados em segundo plano enquanto você estiver conectado ao Windows. Dá para desligar aqui a qualquer momento, e desligar remove o agente."
+switch = "Publicar com o Bardo fechado"
+sends = "Ele envia o que o Bardo posta num horário marcado: Reels do Instagram. O YouTube publica sozinho os vídeos agendados, e os rascunhos do TikTok são postados pelo app do TikTok."
+limits = "O computador precisa estar ligado e você conectado ao Windows; o agente não acorda um computador em suspensão. Com o Bardo aberto, o próprio Bardo envia."
+hint = "O Windows inicia o agente quando você se conecta e confere a cada 15 minutos. Ele usa os mesmos dados, contas e chaves do Bardo."
+start_now = "Iniciar agora"
+working = "Configurando o agente…"
+
+[agent.status]
+off = "Desligado. Os Reels agendados só saem com o Bardo aberto."
+running = "Rodando. Os Reels agendados saem mesmo com o Bardo fechado."
+not_running = "Ligado, mas não está rodando agora. O Windows inicia o agente na próxima vez que você se conectar, ou inicie agora."
+
+[agent.error]
+not_set_up = "O Windows não deixou o Bardo configurar o agente, então ele continua desligado. Tente de novo."
+not_removed = "O agente está desligado e para sozinho, mas o Windows não deixou o Bardo removê-lo. O Bardo tenta de novo na próxima vez que abrir."
+not_saved = "Não foi possível salvar a configuração. Tente de novo."

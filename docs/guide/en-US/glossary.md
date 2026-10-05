@@ -114,9 +114,11 @@ The words Bardo uses, in plain terms.
 
 **Synthetic-content disclosure**: the label networks ask for on videos with a realistic AI voice. Bardo turns it on when the narration used a persona marked as a realistic voice.
 
-**Due time**: when Bardo itself publishes a scheduled Instagram post. Bardo has to be open then.
+**Due time**: when Bardo itself publishes a scheduled Instagram post. Bardo has to be open then, or the background agent running.
 
-**Missed post**: a scheduled post whose time passed while Bardo was closed. Bardo lists it when it opens, and you choose what to do.
+**Background agent**: an optional part of Bardo that Windows starts when you sign in, to send posts at their due time while Bardo is closed. Turned on and off in Settings › Publishing.
+
+**Missed post**: a scheduled post whose time passed while neither Bardo nor the background agent was running. Bardo lists it when it opens, and you choose what to do.
 
 <a id="numbers"></a>
 ## Numbers, jobs and money

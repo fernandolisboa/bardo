@@ -851,6 +851,8 @@ pub(crate) mod tests {
 
     pub(crate) struct Harness {
         pub(crate) db: Arc<Database>,
+        /// Where the background agent is registered.
+        pub(crate) agent_task: Arc<bardo_storage::MemoryAgentTask>,
         pub(crate) files: Arc<MemoryProjectFiles>,
         pub(crate) text: Arc<FakeTextGenerator>,
         pub(crate) images: Arc<FakeImages>,
@@ -885,6 +887,7 @@ pub(crate) mod tests {
             let files: Arc<MemoryProjectFiles> = Arc::default();
             Self {
                 db: Arc::new(Database::open_in_memory().unwrap()),
+                agent_task: Arc::default(),
                 media: Arc::new(crate::editor::testing::FakeMedia::writing_to(Arc::clone(
                     &files,
                 ))),
@@ -910,7 +913,7 @@ pub(crate) mod tests {
 
         pub(crate) fn start(&self) -> Bardo {
             self.start_from(Repositories::shared_with_files(
-                Arc::clone(&self.db),
+                self.process_db(),
                 Arc::clone(&self.secrets) as _,
                 Arc::clone(&self.files) as _,
             ))
@@ -924,7 +927,7 @@ pub(crate) mod tests {
             self.start_from(Repositories {
                 export_files,
                 ..Repositories::shared_with_files(
-                    Arc::clone(&self.db),
+                    self.process_db(),
                     Arc::clone(&self.secrets) as _,
                     Arc::clone(&self.files) as _,
                 )
@@ -939,19 +942,76 @@ pub(crate) mod tests {
             self.start_from(Repositories {
                 timelines,
                 ..Repositories::shared_with_files(
-                    Arc::clone(&self.db),
+                    self.process_db(),
                     Arc::clone(&self.secrets) as _,
                     Arc::clone(&self.files) as _,
                 )
             })
         }
 
+        /// The background agent over the same data, as its own process
+        /// opens it, if it starts.
+        pub(crate) fn start_agent(&self) -> Option<Bardo> {
+            let repositories = Repositories {
+                connection_secrets: Arc::clone(&self.connection_secrets) as _,
+                agent_task: Arc::clone(&self.agent_task) as _,
+                ..Repositories::shared_with_files(
+                    self.process_db(),
+                    Arc::clone(&self.secrets) as _,
+                    Arc::clone(&self.files) as _,
+                )
+            };
+            Bardo::start_agent_with(repositories, self.providers(), Self::job_settings()).unwrap()
+        }
+
+        /// The database as a new process opens it: the same data, under a
+        /// job runner of its own, so a restart cannot run on as the closed
+        /// app's runner.
+        fn process_db(&self) -> Arc<Database> {
+            Arc::new(self.db.other_runner())
+        }
+
+        /// Quick retries, and a quick tick so the app and the agent see
+        /// each other's changes soon.
+        fn job_settings() -> JobSettings {
+            JobSettings {
+                retry: bardo_domain::RetryPolicy {
+                    max_attempts: 2,
+                    first_delay: Duration::from_millis(20),
+                    max_delay: Duration::from_millis(20),
+                },
+                lease: Duration::from_secs(2),
+                tick: Duration::from_millis(50),
+                ..JobSettings::default()
+            }
+        }
+
         fn start_from(&self, repositories: Repositories) -> Bardo {
             let repositories = Repositories {
                 connection_secrets: Arc::clone(&self.connection_secrets) as _,
+                agent_task: Arc::clone(&self.agent_task) as _,
                 ..repositories
             };
-            let providers = Providers {
+            let mut app = Bardo::start_with(
+                repositories,
+                self.providers(),
+                Some("en-US"),
+                Self::job_settings(),
+            )
+            .unwrap();
+            for (provider, key) in [
+                (Provider::Claude, CLAUDE_KEY),
+                (Provider::ElevenLabs, ELEVENLABS_KEY),
+                (Provider::Gemini, GEMINI_KEY),
+                (Provider::Higgsfield, HIGGSFIELD_KEY),
+            ] {
+                app.save_provider_key(provider, key).unwrap();
+            }
+            app
+        }
+
+        fn providers(&self) -> Providers {
+            Providers {
                 key_checker: Arc::new(FakeKeyChecker::default()),
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::clone(&self.stats) as _,
@@ -979,30 +1039,7 @@ pub(crate) mod tests {
                     Arc::clone(&self.instagram_insights) as _,
                     Arc::clone(&self.tiktok_insights) as _,
                 ],
-            };
-            let mut app = Bardo::start_with(
-                repositories,
-                providers,
-                Some("en-US"),
-                JobSettings {
-                    retry: bardo_domain::RetryPolicy {
-                        max_attempts: 2,
-                        first_delay: Duration::from_millis(20),
-                        max_delay: Duration::from_millis(20),
-                    },
-                    ..JobSettings::default()
-                },
-            )
-            .unwrap();
-            for (provider, key) in [
-                (Provider::Claude, CLAUDE_KEY),
-                (Provider::ElevenLabs, ELEVENLABS_KEY),
-                (Provider::Gemini, GEMINI_KEY),
-                (Provider::Higgsfield, HIGGSFIELD_KEY),
-            ] {
-                app.save_provider_key(provider, key).unwrap();
             }
-            app
         }
 
         pub(crate) fn answer(&self, text: String) {

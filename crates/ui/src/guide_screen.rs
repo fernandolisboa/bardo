@@ -559,6 +559,7 @@ fn place_name(bardo: &Bardo, place: GuidePlace) -> String {
             Some(match tab {
                 SettingsTab::Keys => Text::SettingsKeysTab,
                 SettingsTab::Networks => Text::SettingsNetworksTab,
+                SettingsTab::Publishing => Text::SettingsPublishingTab,
                 SettingsTab::Appearance => Text::SettingsAppearanceTab,
                 SettingsTab::Metrics => Text::MetricsSettingsTab,
             }),

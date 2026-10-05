@@ -1,6 +1,6 @@
 [package]
 name = "bardo-storage"
-description = "SQLite persistence, migrations and secrets access."
+description = "SQLite persistence, migrations, secrets access and the background agent's task."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -157,11 +157,12 @@ pub mod refs {
     pub const SETTINGS_LAYOUT: GuideRef = at("settings", "layout");
     pub const SETTINGS_TOURS: GuideRef = at("settings", "tours");
     pub const METRICS_ON_START: GuideRef = at("metrics-sync", "on-start");
+    pub const AGENT_ON: GuideRef = at("background-agent", "turn-on");
     pub const SHORTCUTS_LISTS: GuideRef = at("shortcuts", "lists");
     pub const SHORTCUTS_GUIDE: GuideRef = at("shortcuts", "guide");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 58] = [
+    pub const ALL: [GuideRef; 59] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -218,6 +219,7 @@ pub mod refs {
         SETTINGS_LAYOUT,
         SETTINGS_TOURS,
         METRICS_ON_START,
+        AGENT_ON,
         SHORTCUTS_LISTS,
         SHORTCUTS_GUIDE,
     ];

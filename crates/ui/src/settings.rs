@@ -1,6 +1,7 @@
 //! Settings screen. The API keys tab has one card per provider to save,
 //! replace, test and remove its key; the Networks tab keeps the OAuth app
-//! credentials Bardo signs in to networks with; the Appearance tab picks the layout,
+//! credentials Bardo signs in to networks with; the Publishing tab turns the
+//! background agent on and off; the Appearance tab picks the layout,
 //! the theme and the interface language; the Metrics tab picks when a
 //! start syncs public post numbers. Rules, storage and the test call live in
 //! `bardo_app`; this file maps clicks to use cases and results to text.
@@ -12,8 +13,8 @@ use bardo_app::bardo_domain::{
     ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
 use bardo_app::{
-    AppCredentialsStatus, Bardo, Control, Destination, KeyState, ProviderKeyStatus, SettingsTab,
-    Text, TourAnchor, TourPlace,
+    AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, KeyState, ProviderKeyStatus,
+    SettingsTab, Text, TourAnchor, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -22,7 +23,8 @@ use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{
-    Icon, IconName, IndexPath, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+    Disableable as _, Icon, IconName, IndexPath, Selectable as _, Sizable as _, StyledExt as _,
+    h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -142,6 +144,11 @@ pub struct SettingsScreen {
     metrics_error: Option<Text>,
     /// Why the last theme or language change was not saved.
     appearance_error: Option<Text>,
+    /// Why the background agent did not turn on or off.
+    agent_error: Option<Text>,
+    /// The agent's task changing with the system; dropping it stops waiting
+    /// for the result.
+    agent_work: Option<Task<()>>,
     /// What the labels and pickers were last set from; other changes to
     /// Bardo leave them, and an open picker, alone.
     labeled: Option<(UiLanguage, UiThemePreference)>,
@@ -263,6 +270,8 @@ impl SettingsScreen {
             metrics_sync,
             metrics_error: None,
             appearance_error: None,
+            agent_error: None,
+            agent_work: None,
             labeled: None,
             scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -398,6 +407,66 @@ impl SettingsScreen {
             result
         });
         self.appearance_error = result.err().map(|_| Text::ToursSettingNotSaved);
+        cx.notify();
+    }
+
+    /// Turns the background agent on or off: the choice is saved at once,
+    /// and the system's task changes on a background thread.
+    fn set_background_agent(&mut self, on: bool, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.set_background_agent(on);
+            cx.notify();
+            result
+        });
+        match result {
+            Ok(work) => self.run_agent_work(work, cx),
+            Err(error) => {
+                self.agent_error = Some(error.message());
+                cx.notify();
+            }
+        }
+    }
+
+    /// Starts the agent that is on but not running.
+    fn start_background_agent(&mut self, cx: &mut Context<Self>) {
+        let work = self.bardo.read(cx).start_background_agent();
+        self.run_agent_work(work, cx);
+    }
+
+    fn run_agent_work(&mut self, work: bardo_app::AgentWork, cx: &mut Context<Self>) {
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { work.run() })
+                .await;
+            let error = match result {
+                Ok(()) => None,
+                Err(error) => {
+                    tracing::warn!("{error}");
+                    let message = error.message();
+                    // An agent Windows did not set up stays off.
+                    if matches!(error, bardo_app::AgentError::NotSetUp(_)) {
+                        let undone = bardo.update(cx, |bardo, cx| {
+                            let undone = bardo.background_agent_not_set_up();
+                            cx.notify();
+                            undone
+                        });
+                        if let Err(error) = undone {
+                            tracing::warn!("{error}");
+                        }
+                    }
+                    Some(message)
+                }
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.agent_work = None;
+                this.agent_error = error;
+                cx.notify();
+            });
+        });
+        self.agent_error = None;
+        self.agent_work = Some(task);
         cx.notify();
     }
 
@@ -1084,6 +1153,97 @@ impl SettingsScreen {
             .into_any_element()
     }
 
+    fn render_publishing(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let t = look(cx).tokens;
+        let scroll = Some(&self.scroll);
+        let working = self.agent_work.is_some();
+        let status = bardo.background_agent();
+        let (tone, label) = match status {
+            AgentStatus::Off => (Tone::Neutral, Text::AgentStatusOff),
+            AgentStatus::Running => (Tone::Success, Text::AgentStatusRunning),
+            AgentStatus::NotRunning => (Tone::Warning, Text::AgentStatusNotRunning),
+        };
+        let switch = kit::anchor_in(
+            TourAnchor::Control(Control::AgentSwitch),
+            v_flex()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .child(tr(bardo, Text::AgentQuestion)),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(t.text2)
+                        .child(tr(bardo, Text::AgentExplanation)),
+                )
+                .child(
+                    h_flex()
+                        .pt_1()
+                        .gap_1()
+                        .items_center()
+                        .child(
+                            Checkbox::new("background-agent")
+                                .label(tr(bardo, Text::AgentSwitch))
+                                .checked(status != AgentStatus::Off)
+                                .disabled(working)
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.set_background_agent(*checked, cx);
+                                })),
+                        )
+                        .child(guide::info(
+                            bardo,
+                            "background-agent-info",
+                            tr(bardo, Text::AgentHint),
+                            guide::refs::AGENT_ON,
+                        )),
+                ),
+            scroll,
+        );
+        let state = if working {
+            kit::notice(Tone::Info, tr(bardo, Text::AgentWorking), cx)
+        } else {
+            kit::notice(tone, tr(bardo, label), cx)
+        };
+        let status_part = kit::anchor_in(
+            TourAnchor::Control(Control::AgentStatus),
+            h_flex()
+                .flex_wrap()
+                .gap_3()
+                .items_center()
+                .child(state)
+                .when(status == AgentStatus::NotRunning && !working, |row| {
+                    row.child(
+                        Button::new("start-background-agent")
+                            .small()
+                            .label(tr(bardo, Text::AgentStartNow))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.start_background_agent(cx);
+                            })),
+                    )
+                }),
+            scroll,
+        );
+        let note = |text: Text| div().text_xs().text_color(t.text2).child(tr(bardo, text));
+        v_flex()
+            .max_w(px(720.))
+            .gap_3()
+            .children(
+                self.agent_error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+            )
+            .child(kit::section_heading(tr(bardo, Text::AgentTitle)))
+            .child(switch)
+            .child(status_part)
+            .child(div().h_1())
+            .child(note(Text::AgentSends))
+            .child(note(Text::AgentLimits))
+            .into_any_element()
+    }
+
     fn render_metrics(&self, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         v_flex()
@@ -1404,6 +1564,7 @@ impl Render for SettingsScreen {
         let body = match self.tab {
             SettingsTab::Keys => self.render_keys(cx),
             SettingsTab::Networks => self.render_networks(cx),
+            SettingsTab::Publishing => self.render_publishing(cx),
             SettingsTab::Appearance => self.render_appearance(cx),
             SettingsTab::Metrics => self.render_metrics(cx),
         };
@@ -1418,6 +1579,7 @@ impl Render for SettingsScreen {
             )
             .child(Tab::new().label(tr(bardo, Text::SettingsKeysTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsNetworksTab)))
+            .child(Tab::new().label(tr(bardo, Text::SettingsPublishingTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {

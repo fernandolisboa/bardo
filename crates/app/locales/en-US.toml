@@ -11,6 +11,7 @@ ui_language = "Interface language"
 title = "Settings"
 keys_tab = "API keys"
 appearance_tab = "Appearance"
+publishing_tab = "Publishing"
 
 [language]
 en-US = "English (US)"
@@ -240,6 +241,7 @@ missed = "The scheduled post's time passed without it, so nothing was posted. Ch
 [job.error]
 not_updated = "Could not update the job. Try again."
 not_started = "Could not start the job. Try again."
+runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
 
 [provider_keys]
 title = "Provider keys"
@@ -1808,6 +1810,9 @@ draft_copied = "Copied. Paste it in TikTok."
 draft_limit_hint = "TikTok takes at most {total} drafts from apps in 24 hours, and Bardo sent {total} to this account. The next one can go {when}."
 draft_limit_held_hint = "TikTok takes at most {total} drafts from apps in 24 hours. The video stays queued and goes out {when}."
 draft_limit_recheck_hint = "TikTok refused more drafts for now, some maybe sent by other apps. The video stays queued and Bardo tries again {when}."
+due_hint_agent = "Bardo posts it at this time itself: the background agent sends it while you are signed in to Windows, even with Bardo closed. The computer must be on. If nothing runs at that time, nothing is posted and Bardo asks you what to do when it opens."
+reel_schedule_hint_agent = "{network} takes no publish time from apps, so Bardo posts it at this time itself: the background agent sends it while you are signed in to Windows, even with Bardo closed, as long as the computer is on. If nothing runs then, nothing is posted and Bardo asks you what to do when it opens."
+missed_hint_agent = "Neither Bardo nor the background agent was running at its time (the computer was off, asleep or signed out), so nothing was posted. Post it now, give it a new time or cancel it."
 
 [upload.field]
 file = "File"
@@ -2568,6 +2573,25 @@ body = "When Bardo opens, it syncs if the oldest check is older than this, or ne
 title = "Where they show"
 body = "The numbers show on Performance, and each post's first week feeds the ranking of new ideas."
 
+[tour.background-agent]
+name = "Background agent tour"
+
+[tour.background-agent.tab]
+title = "Publishing"
+body = "Bardo posts Instagram Reels at their time itself. Here you choose whether that also happens while Bardo is closed."
+
+[tour.background-agent.switch]
+title = "Publish while Bardo is closed"
+body = "Turned on, a lightweight agent starts when you sign in to Windows and sends scheduled Reels in the background. Turned off, it is removed."
+
+[tour.background-agent.status]
+title = "Is it running?"
+body = "This says whether the agent is running now. If it is on but not running, start it here or sign in to Windows again."
+
+[tour.background-agent.limits]
+title = "What it needs"
+body = "The computer must be on and you signed in. While Bardo is open, Bardo sends the posts itself and the agent waits."
+
 [guide]
 back_to_editor = "Back to the editor"
 resume_tour = "Resume tour"
@@ -2638,3 +2662,24 @@ editor_tour = "Start the editor's tour"
 next_cut = "Next suggestion"
 accept_cut = "Accept the suggestion"
 reject_cut = "Reject the suggestion"
+
+[agent]
+title = "Background agent"
+question = "Publish even when Bardo is closed?"
+explanation = "Installs a lightweight agent that sends scheduled posts in the background while you are signed in to Windows. You can turn it off here at any time, which removes it."
+switch = "Publish while Bardo is closed"
+sends = "It sends what Bardo posts at a due time: Instagram Reels. YouTube publishes scheduled videos by itself, and TikTok drafts are posted from the TikTok app."
+limits = "The computer must be on and you signed in to Windows; the agent does not wake a sleeping computer. While Bardo is open, Bardo sends them itself."
+hint = "Windows starts it when you sign in and checks on it every 15 minutes. It uses Bardo's own data, accounts and keys."
+start_now = "Start now"
+working = "Setting up the agent…"
+
+[agent.status]
+off = "Off. Scheduled Reels go out only while Bardo is open."
+running = "Running. Scheduled Reels go out even when Bardo is closed."
+not_running = "On, but not running right now. Windows starts it the next time you sign in, or start it now."
+
+[agent.error]
+not_set_up = "Windows did not let Bardo set up the agent, so it stays off. Try again."
+not_removed = "The agent is off and stops by itself, but Windows did not let Bardo remove it. Bardo tries again the next time it opens."
+not_saved = "Couldn't save the setting. Try again."

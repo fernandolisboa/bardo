@@ -95,7 +95,7 @@ At the Publish stage, a connected Instagram Reels account offers **Review upload
 
 In the review, **When** offers **Once processed** or **Schedule**. Instagram takes no publish time from apps, so with **Schedule** Bardo sends the file ahead and publishes the Reel itself at the date and time you type (read in your computer's time zone, which the review names). The post shows **Scheduled in Bardo** with the time it posts, and **Schedule in Bardo** confirms the review.
 
-Keep Bardo open at that time and the computer on. If Bardo is closed or the computer is off then, nothing is posted: the next time Bardo opens, it lists the post among the [missed posts](missed-posts.md), for you to post it now, give it a new time or cancel it. A time that has already passed is refused when you confirm.
+Keep Bardo open at that time and the computer on, or turn on the [background agent](background-agent.md), which sends it with Bardo closed while you are signed in to Windows. If neither runs or the computer is off then, nothing is posted: the next time Bardo opens, it lists the post among the [missed posts](missed-posts.md), for you to post it now, give it a new time or cancel it. A time that has already passed is refused when you confirm.
 
 <a id="metrics"></a>
 ## Numbers on the Performance screen
