@@ -759,13 +759,14 @@ impl Guide {
         }
         // Long labels (Portuguese in a monospace theme) wrap the trailing
         // buttons to a line of their own, still on the right, rather than
-        // past the card's edge.
+        // past the card's edge. `ml_auto` alone keeps them right: adding
+        // `justify_between` counts the free space twice and pushes them
+        // out of the card when the row does not wrap.
         h_flex()
             .flex_wrap()
             .gap_x_2()
             .gap_y_1()
             .items_center()
-            .justify_between()
             .child(h_flex().gap_1().children(lead))
             .child(h_flex().ml_auto().gap_1().children(trail))
             .into_any_element()
