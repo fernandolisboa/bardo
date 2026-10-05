@@ -519,9 +519,9 @@ impl PublicationRepository for Database {
         };
         // One statement, so two runners racing for it cannot both win: the
         // second finds the row claimed by then. The job claims it again on
-        // resume, keeping the first claim's time. While another runner (the
-        // app or the background agent) holds the lease on its job, that
-        // runner's run is the one that publishes it.
+        // resume, keeping the first claim's time. Only the runner (the app or
+        // the background agent) holding a live lease on its job claims it,
+        // so a run that lost its lease never publishes it.
         let now = to_unix_millis(now);
         let claimed = self
             .conn()
@@ -533,10 +533,10 @@ impl PublicationRepository for Database {
                         OR (upload_status = 'failed'
                             AND coalesce(upload_failure, '') <> 'schedule_missed'))
                    AND upload_publish_at IS NOT NULL AND upload_publish_at <= ?3
-                   AND NOT EXISTS (
+                   AND EXISTS (
                        SELECT 1 FROM job
-                       WHERE job.id = ?2 AND job.leased_by IS NOT NULL
-                         AND job.leased_by <> ?4 AND job.leased_until > ?5)",
+                       WHERE job.id = ?2 AND job.leased_by = ?4
+                         AND job.leased_until > ?5)",
                 params![
                     publication.id.to_string(),
                     upload.job.to_string(),
@@ -945,12 +945,20 @@ mod tests {
         assert_eq!(db.publications(project.id).unwrap(), [failed], "replaced");
     }
 
-    /// A Reel scheduled in the app for `time(1000)`, saved.
+    /// A Reel scheduled in the app for `time(1000)`, saved, with its upload
+    /// job leased by `db`'s runner.
     fn due_reel(db: &Database, project: &VideoProject) -> Publication {
+        let job = bardo_domain::Job::new(project.owner, bardo_domain::JobKind::Upload, "{}");
+        bardo_domain::JobRepository::save(db, &job).unwrap();
+        let now = SystemTime::now();
+        assert!(
+            bardo_domain::JobRepository::lease(db, job.id(), now, now + Duration::from_secs(60))
+                .unwrap()
+        );
         let reel = Publication {
             network: Network::InstagramReels,
             link: None,
-            kind: PublicationKind::Uploaded(Upload::scheduled(time(1000), JobId::new())),
+            kind: PublicationKind::Uploaded(Upload::scheduled(time(1000), job.id())),
             ..youtube(project, "dQw4w9WgXcQ")
         };
         db.save_publication(&reel).unwrap();
@@ -996,27 +1004,24 @@ mod tests {
     }
 
     #[test]
-    fn a_due_upload_is_not_claimed_while_another_runner_holds_its_job() {
+    fn only_the_runner_holding_its_job_claims_a_due_upload() {
         let (db, _, project) = setup();
         let agent = db.other_runner();
-        let job = bardo_domain::Job::new(project.owner, bardo_domain::JobKind::Upload, "{}");
-        bardo_domain::JobRepository::save(&db, &job).unwrap();
-        let mut reel = due_reel(&db, &project);
-        reel.upload_mut().unwrap().job = job.id();
-        db.save_publication(&reel).unwrap();
+        let reel = due_reel(&db, &project);
+        let job = reel.upload().unwrap().job;
+        assert!(!agent.claim_upload(&reel, time(1000)).unwrap(), "the app's");
+        assert_eq!(claimed_at(&db, &reel), None);
+
+        // The app's lease runs out or is given back: the agent takes the
+        // job, and the app can no longer claim the post.
+        bardo_domain::JobRepository::release(&db, job).unwrap();
+        assert!(!db.claim_upload(&reel, time(1000)).unwrap(), "no lease");
         let now = SystemTime::now();
         assert!(
-            bardo_domain::JobRepository::lease(
-                &agent,
-                job.id(),
-                now,
-                now + Duration::from_secs(60)
-            )
-            .unwrap()
+            bardo_domain::JobRepository::lease(&agent, job, now, now + Duration::from_secs(60))
+                .unwrap()
         );
-
         assert!(!db.claim_upload(&reel, time(1000)).unwrap(), "the agent's");
-        assert_eq!(claimed_at(&db, &reel), None);
         assert!(agent.claim_upload(&reel, time(1000)).unwrap());
     }
 

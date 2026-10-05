@@ -238,6 +238,13 @@ struct State {
     elsewhere: HashSet<JobId>,
     /// The other runners up when last read.
     others: Vec<RunnerSeen>,
+    /// Running jobs whose lease this runner lost: their workers are told
+    /// to stop, and whatever their handlers return is not saved, since the
+    /// job is another runner's now.
+    lost: HashSet<JobId>,
+    /// When this runner last renewed its leases. Past one lease after it
+    /// (renewing keeps failing), every running job is given up.
+    renewed_at: SystemTime,
     /// Starts no job while true; running ones go on.
     paused: bool,
     closing: bool,
@@ -288,7 +295,7 @@ impl Shared {
 
     /// Applies a handler report to its job. Reports for a job that is no
     /// longer running (cancelled meanwhile) are dropped, and nothing is
-    /// written once the app is closing.
+    /// written once the app is closing or the job's lease was lost.
     fn update_running(
         &self,
         id: JobId,
@@ -296,7 +303,7 @@ impl Shared {
         persist: bool,
     ) -> Result<(), RepositoryError> {
         let mut state = self.state();
-        if state.closing {
+        if state.closing || state.lost.contains(&id) {
             return Ok(());
         }
         let Some(job) = state.job_mut(id) else {
@@ -319,6 +326,13 @@ impl Shared {
     fn finish(&self, id: JobId, result: Result<(), JobFailure>, deferred: Option<SystemTime>) {
         let mut state = self.state();
         state.workers.remove(&id);
+        if state.lost.remove(&id) {
+            // Another runner has the job: its copy is read on the next
+            // tick, and this run's end is not saved over it.
+            self.changed();
+            self.wake.notify_all();
+            return;
+        }
         if state.closing {
             // The job stays running in storage, and its handler is done
             // with it: the next runner resumes it at once.
@@ -436,6 +450,8 @@ impl JobQueue {
                 workers: HashMap::new(),
                 elsewhere,
                 others,
+                lost: HashSet::new(),
+                renewed_at: now,
                 paused,
                 closing: false,
                 next_tick: Instant::now() + settings.tick,
@@ -711,21 +727,34 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
         }
         Err(error) => tracing::warn!("could not read the other job runners: {error}"),
     }
-    let running: Vec<JobId> = state.workers.keys().copied().collect();
-    if !running.is_empty() {
-        match repository.renew(&running, now + shared.settings.lease) {
-            Ok(lost) => {
-                for id in lost {
-                    // Another runner took it (this process slept past its
-                    // lease): this run stops, and that one's goes on.
-                    tracing::warn!(job = %id, "lost the lease on a running job");
-                    if let Some(stop) = state.workers.get(&id) {
-                        stop.stop();
-                    }
-                }
-            }
-            Err(error) => tracing::warn!("could not renew job leases: {error}"),
+    let running: Vec<JobId> = state
+        .workers
+        .keys()
+        .filter(|id| !state.lost.contains(id))
+        .copied()
+        .collect();
+    let lost = match repository.renew(&running, now + shared.settings.lease) {
+        Ok(lost) => {
+            state.renewed_at = now;
+            lost
         }
+        Err(error) => {
+            tracing::warn!("could not renew job leases: {error}");
+            // Past its lease another runner may take any of them.
+            let expired = now
+                .duration_since(state.renewed_at)
+                .is_ok_and(|since| since >= shared.settings.lease);
+            if expired { running } else { Vec::new() }
+        }
+    };
+    for id in lost {
+        // Another runner took it, or may (this process slept past its
+        // lease): this run stops, and that one's goes on.
+        tracing::warn!(job = %id, "lost the lease on a running job");
+        if let Some(stop) = state.workers.get(&id) {
+            stop.stop();
+        }
+        state.lost.insert(id);
     }
     reconcile(shared, state, now);
 }

@@ -1056,6 +1056,57 @@ mod tests {
     }
 
     #[test]
+    fn a_run_whose_lease_another_runner_took_is_not_saved_as_done() {
+        let (db, owner) = memory_db();
+        // Leases run out between ticks, as when the computer sleeps.
+        let settings = JobSettings {
+            lease: Duration::from_millis(120),
+            tick: Duration::from_millis(400),
+            ..settings()
+        };
+        let runs = Arc::new(AtomicU32::new(0));
+        let counted = Arc::clone(&runs);
+        let app = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                // The first run goes on until stopped and then returns as a
+                // handler does when stopped: as if it ended well.
+                if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+                    cx.save_checkpoint("half", Progress::from_permille(500))
+                        .unwrap();
+                    until_stopped(cx);
+                }
+                Ok(())
+            }),
+            settings,
+        );
+        let id = enqueue(&app, owner);
+        wait_for(|| app.jobs(), id, |j| j.checkpoint() == Some("half"));
+
+        // The other runner takes the expired lease and queues the job again,
+        // as it does with a job whose runner looks gone.
+        let other = second_runner(&db);
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let now = SystemTime::now();
+            if JobRepository::lease(&*other, id, now, now + Duration::from_secs(60)).unwrap() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the lease never ran out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut job = JobRepository::job(&*other, id).unwrap().unwrap();
+        job.interrupt().unwrap();
+        JobRepository::save(&*other, &job).unwrap();
+        JobRepository::release(&*other, id).unwrap();
+
+        // The cut run's end is not saved over it: the job runs again.
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
     fn a_paused_runner_starts_nothing_until_resumed() {
         let (db, owner) = memory_db();
         let agent = JobQueue::start(

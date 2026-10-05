@@ -1296,7 +1296,6 @@ impl JobHandler for UploadHandler {
         // A scheduled upload Bardo publishes itself (`bardo_domain::due`):
         // what its due time allows now. Nothing goes once it is missed.
         let due = publication.due();
-        let mut claimed = upload.claimed_at.is_some();
         // Missed after its claim: the cut-short run may have published it,
         // so the run only asks the network what it has, and sends nothing.
         let mut check_only = false;
@@ -1314,7 +1313,6 @@ impl JobHandler for UploadHandler {
                     if !self.claim(publication_id, job)? {
                         return Ok(());
                     }
-                    claimed = true;
                 }
                 DueStep::Missed => {
                     let sent = cx
@@ -1328,14 +1326,13 @@ impl JobHandler for UploadHandler {
                 }
             }
         }
-        // Once the due time came during the run, the run claims the upload
-        // before it goes on; false when it is not this run's any more.
-        let claim_due = |claimed: &mut bool| -> Result<bool, JobFailure> {
+        // Once the due time came, the run claims the upload before each
+        // step; false when it is not this run's any more. Claimed every
+        // time, not once: a run whose job another runner took meanwhile
+        // (its lease ran out) stops before it publishes.
+        let claim_due = || -> Result<bool, JobFailure> {
             match due {
-                Some(due) if !*claimed && SystemTime::now() >= due => {
-                    *claimed = self.claim(publication_id, job)?;
-                    Ok(*claimed)
-                }
+                Some(due) if SystemTime::now() >= due => self.claim(publication_id, job),
                 _ => Ok(true),
             }
         };
@@ -1453,7 +1450,7 @@ impl JobHandler for UploadHandler {
             }
             p.sent(link)
         })?;
-        if !claim_due(&mut claimed)? {
+        if !claim_due()? {
             return Ok(());
         }
 
@@ -1462,7 +1459,7 @@ impl JobHandler for UploadHandler {
         // processing, and the user checks again later.
         let mut polls = 0;
         loop {
-            if cx.should_stop() || !claim_due(&mut claimed)? {
+            if cx.should_stop() || !claim_due()? {
                 return Ok(());
             }
             let state = access_token(&self.connections, &account)
@@ -1491,7 +1488,7 @@ impl JobHandler for UploadHandler {
                     if let Some(due) = due.filter(|due| SystemTime::now() < *due) {
                         return Self::wait_for_due(cx, checkpoint, due);
                     }
-                    if !claim_due(&mut claimed)? {
+                    if !claim_due()? {
                         return Ok(());
                     }
                     match self.publish(

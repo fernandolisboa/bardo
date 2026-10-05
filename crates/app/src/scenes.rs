@@ -913,7 +913,7 @@ pub(crate) mod tests {
 
         pub(crate) fn start(&self) -> Bardo {
             self.start_from(Repositories::shared_with_files(
-                Arc::clone(&self.db),
+                self.process_db(),
                 Arc::clone(&self.secrets) as _,
                 Arc::clone(&self.files) as _,
             ))
@@ -927,7 +927,7 @@ pub(crate) mod tests {
             self.start_from(Repositories {
                 export_files,
                 ..Repositories::shared_with_files(
-                    Arc::clone(&self.db),
+                    self.process_db(),
                     Arc::clone(&self.secrets) as _,
                     Arc::clone(&self.files) as _,
                 )
@@ -942,7 +942,7 @@ pub(crate) mod tests {
             self.start_from(Repositories {
                 timelines,
                 ..Repositories::shared_with_files(
-                    Arc::clone(&self.db),
+                    self.process_db(),
                     Arc::clone(&self.secrets) as _,
                     Arc::clone(&self.files) as _,
                 )
@@ -956,12 +956,19 @@ pub(crate) mod tests {
                 connection_secrets: Arc::clone(&self.connection_secrets) as _,
                 agent_task: Arc::clone(&self.agent_task) as _,
                 ..Repositories::shared_with_files(
-                    Arc::new(self.db.other_runner()),
+                    self.process_db(),
                     Arc::clone(&self.secrets) as _,
                     Arc::clone(&self.files) as _,
                 )
             };
             Bardo::start_agent_with(repositories, self.providers(), Self::job_settings()).unwrap()
+        }
+
+        /// The database as a new process opens it: the same data, under a
+        /// job runner of its own, so a restart cannot run on as the closed
+        /// app's runner.
+        fn process_db(&self) -> Arc<Database> {
+            Arc::new(self.db.other_runner())
         }
 
         /// Quick retries, and a quick tick so the app and the agent see

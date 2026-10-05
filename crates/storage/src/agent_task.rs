@@ -265,8 +265,9 @@ mod windows {
         }
 
         fn remove(&self) -> Result<(), AgentTaskError> {
-            // Ends a running agent first; one not running is fine.
-            let _ = self.schtasks(&["/End", "/TN", &self.name]);
+            // A running agent is not ended here: it sees the setting off
+            // within a few seconds and stops by itself, after giving back
+            // the jobs it runs, rather than being cut off mid-upload.
             self.run(&["/Delete", "/TN", &self.name, "/F"])
         }
     }

@@ -83,7 +83,7 @@ pub(crate) fn mark_missed(
     let mut stored = jobs.list(owner)?;
     // A job the other process (the background agent) runs is its own: it
     // publishes the post or marks it missed itself.
-    let held = jobs.held_elsewhere(owner, opened_at)?;
+    let held = jobs.held_elsewhere(owner, SystemTime::now())?;
     let mut marked = 0;
     for mut publication in publications.all_publications(owner)? {
         let Some(due) = publication.due() else {
