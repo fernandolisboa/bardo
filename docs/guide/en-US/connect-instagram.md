@@ -21,10 +21,10 @@ To link the account to a Page: in Instagram, open **Settings › Accounts Center
 <a id="app"></a>
 ## 1. Create the Meta app
 
-1. In **My Apps**, select **Create app**.
-2. Use case: **Manage messaging & content on Instagram** (the Instagram use case). App type, if asked: **Business**. Do not set the app type to Native or Desktop: Facebook Login for Business needs a web login.
+1. Open [Create app](https://developers.facebook.com/apps/creation/) (or **My Apps › Create app**). In **App details**, give it a name (for example `Bardo`; Meta refuses names with "Instagram" or "FB") and your contact email.
+2. Use case: **Manage messaging & content on Instagram** (the Instagram use case). A use case can't be removed once added. In **Business**, connecting a business portfolio is optional. App type, if asked: **Business**. Finish with **Go to dashboard**. Do not set the app type to Native or Desktop: Facebook Login for Business needs a web login.
 3. In the use case's settings, open **API setup with Facebook login** and add **Facebook Login for Business** if it is not there yet.
-4. In **App settings › Basic**, copy the **App ID** (a number) and the **App secret** (select **Show**).
+4. In **App settings › Basic** (from the app dashboard's menu), copy the **App ID** (a number) and the **App secret** (select **Show**; Meta may ask for your Facebook password).
 
 The app stays in **Development** mode with **Standard Access**: that serves every account whose Facebook user has a role on the app, which is you. No App Review and no Business Verification are needed for your own accounts.
 

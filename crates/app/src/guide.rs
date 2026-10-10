@@ -11,7 +11,7 @@
 //! (`page.md#section`), a section of the same page (`#section`), a place
 //! in Bardo (`bardo:go/<place>`), a tour (`bardo:tour/<tour>`), or the web.
 
-use bardo_domain::{TourId, UiLanguage};
+use bardo_domain::{Network, Provider, TourId, UiLanguage};
 
 use crate::{Destination, SettingsTab, Stage, TourPlace};
 
@@ -36,6 +36,7 @@ macro_rules! page {
 pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("what-bardo-is"),
     page!("api-keys"),
+    page!("get-api-keys"),
     page!("first-video"),
     page!("niche-research"),
     page!("themes-ranking"),
@@ -759,6 +760,90 @@ pub(crate) fn sync_problems(en_us: &[GuidePage], pt_br: &[GuidePage]) -> Vec<Str
     problems
 }
 
+/// What a setup screen in Settings walks through (issue #129): getting an
+/// API key, or registering a network's app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SetupTarget {
+    Key(Provider),
+    App(Network),
+}
+
+impl SetupTarget {
+    /// Every key and every network app the Settings tabs ask for.
+    pub fn all() -> Vec<SetupTarget> {
+        Provider::ALL
+            .into_iter()
+            .map(SetupTarget::Key)
+            .chain(Network::sign_in_networks().map(SetupTarget::App))
+            .collect()
+    }
+
+    /// The tab whose card it fills in.
+    pub fn tab(self) -> SettingsTab {
+        match self {
+            SetupTarget::Key(_) => SettingsTab::Keys,
+            SetupTarget::App(_) => SettingsTab::Networks,
+        }
+    }
+
+    /// The guide page that walks through it, and the sections of that page
+    /// the setup screen shows, in order. The guide is the one source of the
+    /// steps; the screen adds the card's fields after them.
+    pub fn steps(self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            SetupTarget::Key(provider) => (
+                "get-api-keys",
+                match provider {
+                    Provider::Claude => &["claude"],
+                    Provider::ElevenLabs => &["elevenlabs"],
+                    Provider::Gemini => &["gemini"],
+                    Provider::Higgsfield => &["higgsfield"],
+                    Provider::TypeSafe => &["typesafe"],
+                    Provider::YouTubeData => &["youtube-data"],
+                },
+            ),
+            SetupTarget::App(network) => match network {
+                Network::YouTube => (
+                    "connect-youtube",
+                    &["need", "project", "consent", "client", "save"],
+                ),
+                Network::InstagramReels => ("connect-instagram", &["need", "app", "save"]),
+                Network::TikTok => (
+                    "connect-tiktok",
+                    &["need", "register", "products", "sandbox", "review", "save"],
+                ),
+                // No app to register: these networks are exported by hand.
+                Network::X | Network::Kick => ("app-credentials", &["networks"]),
+            },
+        }
+    }
+}
+
+/// The steps a setup screen shows, in the guide's language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupSteps {
+    /// The page they come from, for its other links.
+    pub page: String,
+    pub sections: Vec<GuideSection>,
+}
+
+impl Guide {
+    /// The steps for `target`, or `None` if the guide lost a section (a
+    /// test keeps that from shipping).
+    pub fn setup(&self, target: SetupTarget) -> Option<SetupSteps> {
+        let (page, sections) = target.steps();
+        let found = self.page(page)?;
+        let sections = sections
+            .iter()
+            .map(|id| found.section(id).cloned())
+            .collect::<Option<Vec<_>>>()?;
+        Some(SetupSteps {
+            page: page.to_owned(),
+            sections,
+        })
+    }
+}
+
 /// Every link in `pages` that leads nowhere: an unknown page, section,
 /// tour or place, or a web address that is not https.
 pub(crate) fn link_problems(pages: &[GuidePage]) -> Vec<String> {
@@ -1272,6 +1357,65 @@ Text of the **first** part.
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_key_and_network_app_has_its_setup_steps_in_both_languages() {
+        let targets = SetupTarget::all();
+        assert_eq!(
+            targets.len(),
+            Provider::ALL.len() + Network::sign_in_networks().count()
+        );
+        for language in UiLanguage::ALL {
+            let guide = Guide::load(language);
+            for target in &targets {
+                let steps = guide
+                    .setup(*target)
+                    .unwrap_or_else(|| panic!("{language}: no setup steps for {target:?}"));
+                assert!(!steps.sections.is_empty(), "{target:?}");
+                for section in &steps.sections {
+                    assert!(
+                        !section.body.is_empty(),
+                        "{language} {target:?}: {}",
+                        section.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn setup_steps_link_only_to_the_web_and_settings() {
+        // The setup screen opens web links in the browser and Settings
+        // places in place; anything else would lead nowhere from there.
+        for language in UiLanguage::ALL {
+            let guide = Guide::load(language);
+            for target in SetupTarget::all() {
+                let steps = guide.setup(target).unwrap();
+                let mut web = 0;
+                for section in &steps.sections {
+                    for url in links_in(&section.body) {
+                        match GuideLink::parse(&url, &steps.page) {
+                            Some(GuideLink::External(_)) => web += 1,
+                            Some(GuideLink::Go(GuidePlace::Settings(_))) => {}
+                            other => panic!("{language} {target:?}: {url} leads to {other:?}"),
+                        }
+                    }
+                }
+                assert!(web > 0, "{language} {target:?}: no link to the provider");
+            }
+        }
+    }
+
+    #[test]
+    fn a_setup_with_a_missing_section_has_no_steps() {
+        let guide = Guide::from_pages(
+            UiLanguage::EnUs,
+            vec![sample("get-api-keys", &["claude"], "")],
+        );
+        assert!(guide.setup(SetupTarget::Key(Provider::Claude)).is_some());
+        assert_eq!(guide.setup(SetupTarget::Key(Provider::Gemini)), None);
+        assert_eq!(guide.setup(SetupTarget::App(Network::YouTube)), None);
     }
 
     #[test]

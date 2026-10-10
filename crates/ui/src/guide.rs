@@ -83,7 +83,8 @@ pub fn start_tour(tour: TourId, window: &mut Window, cx: &mut App) {
     }
 }
 
-fn open_section(section: GuideRef, window: &mut Window, cx: &mut App) {
+/// Opens the Guide screen at `section`, as an ⓘ's "More in the guide" does.
+pub fn open_section(section: GuideRef, window: &mut Window, cx: &mut App) {
     if let Some(open) = cx
         .try_global::<GuideHooks>()
         .map(|hooks| hooks.section.clone())
@@ -149,6 +150,7 @@ pub mod refs {
     pub const EXPORTING_OUTDATED: GuideRef = at("exporting", "outdated");
     pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
     pub const INSTAGRAM_UPLOAD: GuideRef = at("connect-instagram", "upload");
+    pub const INSTAGRAM_TOKEN: GuideRef = at("connect-instagram", "token");
     pub const COSTS_MONTH: GuideRef = at("costs", "month");
     pub const COSTS_BUDGETS: GuideRef = at("costs", "budgets");
     pub const COSTS_RATES: GuideRef = at("costs", "rates");
@@ -162,7 +164,7 @@ pub mod refs {
     pub const SHORTCUTS_GUIDE: GuideRef = at("shortcuts", "guide");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 59] = [
+    pub const ALL: [GuideRef; 60] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -211,6 +213,7 @@ pub mod refs {
         EXPORTING_OUTDATED,
         YOUTUBE_UPLOAD,
         INSTAGRAM_UPLOAD,
+        INSTAGRAM_TOKEN,
         COSTS_MONTH,
         COSTS_BUDGETS,
         COSTS_RATES,

@@ -92,6 +92,7 @@ pub use export::{
 };
 pub use guide::{
     Guide, GuideGroup, GuideHit, GuideLink, GuidePage, GuidePageError, GuidePlace, GuideSection,
+    SetupSteps, SetupTarget,
 };
 pub use guide_site::{SiteFile, SiteOptions, guide_site};
 pub use i18n::{Catalog, Text};

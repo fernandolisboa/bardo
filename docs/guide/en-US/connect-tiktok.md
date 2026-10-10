@@ -14,12 +14,12 @@ Bardo sends TikTok videos to your inbox as **drafts**: you finish the caption, c
 ## What you need
 
 - The TikTok account you post from.
-- A [TikTok for Developers](https://developers.tiktok.com/) account (sign up with any email; it does not have to be the posting account).
+- A [TikTok for Developers](https://developers.tiktok.com/) account ([sign up](https://developers.tiktok.com/signup) with any email; it does not have to be the posting account).
 
 <a id="register"></a>
 ## 1. Register the app
 
-1. In TikTok for Developers, open your profile menu › **Manage apps** and select **Connect an app**. Register it under your individual account (or an organization if you have one).
+1. Open [Manage apps](https://developers.tiktok.com/apps) (your profile menu › **Manage apps**) and select **Connect an app**. Choose your individual account as the app's owner (or an organization if you have one) and select **Confirm**.
 2. Fill in **Basic information**: an **App icon** (1024 × 1024 px), an **App name** (for example `Bardo`), a **Category** and a **Description**; the description shows on TikTok's authorization page. TikTok also asks for a **Terms of Service URL**, a **Privacy Policy URL** and, for **Desktop**, a website; any pages you control will do while the app stays in its sandbox.
 3. Under **Platforms**, select **Desktop**.
 

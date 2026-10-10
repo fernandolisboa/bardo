@@ -21,10 +21,10 @@ Para vincular a conta a uma Página: no Instagram, abra **Configurações › Ce
 <a id="app"></a>
 ## 1. Crie o app da Meta
 
-1. Em **Meus apps**, escolha **Criar app**.
-2. Caso de uso: **Gerenciar mensagens e conteúdo no Instagram** (o caso de uso do Instagram). Tipo de app, se for pedido: **Empresa**. Não use o tipo Nativo ou Computador: o Login do Facebook para Empresas precisa de um login web.
+1. Abra [Criar app](https://developers.facebook.com/apps/creation/) (ou **Meus apps › Criar app**). Em **Detalhes do app**, dê um nome (por exemplo `Bardo`; a Meta recusa nomes com "Instagram" ou "FB") e o seu e-mail de contato.
+2. Caso de uso: **Gerenciar mensagens e conteúdo no Instagram** (o caso de uso do Instagram). Um caso de uso não pode ser removido depois de adicionado. Em **Empresa**, conectar um portfólio empresarial é opcional. Tipo de app, se for pedido: **Empresa**. Termine com **Ir para o painel**. Não use o tipo Nativo ou Computador: o Login do Facebook para Empresas precisa de um login web.
 3. Nas configurações do caso de uso, abra **Configuração da API com login do Facebook** e adicione o **Login do Facebook para Empresas** se ele ainda não estiver lá.
-4. Em **Configurações do app › Básico**, copie o **ID do app** (um número) e a **Chave secreta do app** (escolha **Mostrar**).
+4. Em **Configurações do app › Básico** (no menu do painel do app), copie o **ID do app** (um número) e a **Chave secreta do app** (escolha **Mostrar**; a Meta pode pedir a senha do Facebook).
 
 O app fica no modo **Desenvolvimento** com **Acesso padrão**: isso atende toda conta cujo usuário do Facebook tem uma função no app, que é você. Nenhuma Análise do app nem Verificação da empresa é necessária para as suas próprias contas.
 
