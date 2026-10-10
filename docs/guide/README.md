@@ -6,6 +6,7 @@ The guide Bardo shows on its Guide screen (F1), in two languages, also published
 | --- | --- |
 | [What Bardo is](en-US/what-bardo-is.md) | [O que é o Bardo](pt-BR/what-bardo-is.md) |
 | [Your API keys](en-US/api-keys.md) | [Suas chaves de API](pt-BR/api-keys.md) |
+| [Getting each API key](en-US/get-api-keys.md) | [Como obter cada chave de API](pt-BR/get-api-keys.md) |
 | [Your first video](en-US/first-video.md) | [Seu primeiro vídeo](pt-BR/first-video.md) |
 | [Niche research](en-US/niche-research.md) | [Pesquisa de nichos](pt-BR/niche-research.md) |
 | [Themes and ranking](en-US/themes-ranking.md) | [Temas e ranqueamento](pt-BR/themes-ranking.md) |

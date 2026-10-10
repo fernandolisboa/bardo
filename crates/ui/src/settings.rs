@@ -3,8 +3,11 @@
 //! credentials Bardo signs in to networks with; the Publishing tab turns the
 //! background agent on and off; the Appearance tab picks the layout,
 //! the theme and the interface language; the Metrics tab picks when a
-//! start syncs public post numbers. Rules, storage and the test call live in
-//! `bardo_app`; this file maps clicks to use cases and results to text.
+//! start syncs public post numbers. Each key and app card opens a setup
+//! screen in its tab (issue #129): the guide's steps for getting it, with
+//! links to the provider's pages, then the card itself. Rules, storage and
+//! the test call live in `bardo_app`; this file maps clicks to use cases and
+//! results to text.
 
 use std::collections::HashMap;
 
@@ -13,8 +16,8 @@ use bardo_app::bardo_domain::{
     ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
 use bardo_app::{
-    AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, KeyState, ProviderKeyStatus,
-    SettingsTab, Text, TourAnchor, TourPlace,
+    AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, GuideLink, GuidePlace,
+    GuideRef, KeyState, ProviderKeyStatus, SettingsTab, SetupTarget, Text, TourAnchor, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -22,17 +25,19 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::text::{TextView, TextViewStyle};
 use gpui_kit::component::{
     Disableable as _, Icon, IconName, IndexPath, Selectable as _, Sizable as _, StyledExt as _,
     h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, Hsla, MouseButton, ScrollHandle, SharedString,
-    Subscription, Task, Window, div, px, rgb,
+    AnyElement, App, ClickEvent, ElementId, Entity, Hsla, MouseButton, ScrollHandle, SharedString,
+    Subscription, Task, Window, div, point, px, rems, rgb,
 };
 
 use crate::appearance::{self, look};
+use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::parts::{Header, ScreenParts};
 use crate::shell::tr;
@@ -133,6 +138,8 @@ struct CredentialsRow {
 pub struct SettingsScreen {
     bardo: Entity<Bardo>,
     tab: SettingsTab,
+    /// The setup screen open over its tab's cards.
+    setup: Option<SetupTarget>,
     rows: HashMap<Provider, KeyRow>,
     credentials: HashMap<Network, CredentialsRow>,
     /// The light and dark slots of "follow Windows".
@@ -263,6 +270,7 @@ impl SettingsScreen {
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
+            setup: None,
             rows,
             credentials,
             light_theme,
@@ -295,15 +303,42 @@ impl SettingsScreen {
         self.tab
     }
 
+    /// The tab's cards, with no setup screen over them.
     pub fn show_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.tab = tab;
+        self.setup = None;
         cx.notify();
     }
 
     /// Opens the Networks tab, where a connection's app credentials live.
     pub fn show_networks(&mut self, cx: &mut Context<Self>) {
-        self.tab = SettingsTab::Networks;
+        self.show_tab(SettingsTab::Networks, cx);
+    }
+
+    /// Opens the setup screen for a key or a network's app, at its top.
+    pub fn open_setup(&mut self, target: SetupTarget, cx: &mut Context<Self>) {
+        self.tab = target.tab();
+        self.setup = Some(target);
+        self.scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
+    }
+
+    /// Back from a setup screen to its tab's cards.
+    fn close_setup(&mut self, cx: &mut Context<Self>) {
+        self.setup = None;
+        self.scroll.set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    }
+
+    /// Follows a link in a setup screen's steps: the web opens in the
+    /// browser, a Settings tab opens here. A guide test keeps other links
+    /// out of the steps.
+    fn follow_setup_link(&mut self, url: &str, page: &str, cx: &mut Context<Self>) {
+        match GuideLink::parse(url, page) {
+            Some(GuideLink::External(url)) => cx.open_url(&url),
+            Some(GuideLink::Go(GuidePlace::Settings(tab))) => self.show_tab(tab, cx),
+            _ => tracing::warn!(url, page, "a setup link leads nowhere"),
+        }
     }
 
     /// Placeholders and theme names follow the interface language.
@@ -582,15 +617,26 @@ impl SettingsScreen {
         cx.notify();
     }
 
+    /// A network's app card. The tour lights the first card's parts
+    /// (`first`); on the setup screen (`in_setup`) the card has no Step by
+    /// step, since its steps are right above it.
     fn render_credentials_card(
         &self,
         status: AppCredentialsStatus,
         first: bool,
+        in_setup: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let network = status.network;
+        let steps = (!in_setup).then(|| {
+            self.setup_button(
+                ("credentials-setup", network as usize),
+                SetupTarget::App(network),
+                cx,
+            )
+        });
         let bardo = self.bardo.read(cx);
         let tokens = look(cx).tokens;
-        let network = status.network;
         let row = &self.credentials[&network];
         let saved = matches!(status.state, KeyState::Saved { .. });
 
@@ -685,7 +731,20 @@ impl SettingsScreen {
                                         .text_xs()
                                         .text_color(tokens.text2)
                                         .child(tr(bardo, Text::AppCredentialsPurpose(network))),
-                                ),
+                                )
+                                .children(steps.map(|steps| {
+                                    // Its own width, at the start of the line.
+                                    h_flex().ml(px(-6.)).child(if first {
+                                        kit::anchor_in(
+                                            TourAnchor::Control(Control::CredentialsSetup),
+                                            steps,
+                                            scroll,
+                                        )
+                                        .into_any_element()
+                                    } else {
+                                        steps.into_any_element()
+                                    })
+                                })),
                         )
                         .child(state),
                 )
@@ -732,7 +791,7 @@ impl SettingsScreen {
         let cards: Vec<_> = statuses
             .into_iter()
             .enumerate()
-            .map(|(index, status)| self.render_credentials_card(status, index == 0, cx))
+            .map(|(index, status)| self.render_credentials_card(status, index == 0, false, cx))
             .collect();
         let bardo = self.bardo.read(cx);
         v_flex()
@@ -756,17 +815,26 @@ impl SettingsScreen {
 
     /// A provider's card. The tour lights the first card (`first`), and the
     /// state and Test key of the first card with a saved key
-    /// (`first_saved`).
+    /// (`first_saved`). On the setup screen (`in_setup`) the card has no
+    /// Step by step, since its steps are right above it.
     fn render_card(
         &self,
         status: ProviderKeyStatus,
         first: bool,
         first_saved: bool,
+        in_setup: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let provider = status.provider;
+        let steps = (!in_setup).then(|| {
+            self.setup_button(
+                ("key-setup", provider as usize),
+                SetupTarget::Key(provider),
+                cx,
+            )
+        });
         let bardo = self.bardo.read(cx);
         let tokens = look(cx).tokens;
-        let provider = status.provider;
         let row = &self.rows[&provider];
         let testing = row.testing.is_some();
         let saved = matches!(status.state, KeyState::Saved { .. });
@@ -860,7 +928,20 @@ impl SettingsScreen {
                                     .text_xs()
                                     .text_color(tokens.text2)
                                     .child(tr(bardo, Text::ProviderPurpose(provider))),
-                            ),
+                            )
+                            .children(steps.map(|steps| {
+                                // Its own width, at the start of the line.
+                                h_flex().ml(px(-6.)).child(if first {
+                                    kit::anchor_in(
+                                        TourAnchor::Control(Control::KeySetup),
+                                        steps,
+                                        scroll,
+                                    )
+                                    .into_any_element()
+                                } else {
+                                    steps.into_any_element()
+                                })
+                            })),
                     )
                     .child(state),
             )
@@ -919,7 +1000,7 @@ impl SettingsScreen {
             .into_iter()
             .enumerate()
             .map(|(index, status)| {
-                self.render_card(status, index == 0, Some(index) == first_saved, cx)
+                self.render_card(status, index == 0, Some(index) == first_saved, false, cx)
             })
             .collect();
         let bardo = self.bardo.read(cx);
@@ -939,6 +1020,139 @@ impl SettingsScreen {
                 Some(&self.scroll),
             ))
             .children(cards)
+            .into_any_element()
+    }
+
+    fn render_tab(&self, tab: SettingsTab, cx: &mut Context<Self>) -> AnyElement {
+        match tab {
+            SettingsTab::Keys => self.render_keys(cx),
+            SettingsTab::Networks => self.render_networks(cx),
+            SettingsTab::Publishing => self.render_publishing(cx),
+            SettingsTab::Appearance => self.render_appearance(cx),
+            SettingsTab::Metrics => self.render_metrics(cx),
+        }
+    }
+
+    /// A card's Step by step, which opens its setup screen.
+    fn setup_button(
+        &self,
+        id: impl Into<ElementId>,
+        target: SetupTarget,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        Button::new(id)
+            .ghost()
+            .xsmall()
+            .icon(Lucide::BookOpen)
+            .label(tr(self.bardo.read(cx), Text::SetupStepByStep))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.open_setup(target, cx)))
+    }
+
+    /// The setup screen: back to the tab, the guide's steps for getting
+    /// the key or registering the app, and the card to paste into.
+    fn render_setup(&self, target: SetupTarget, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let tokens = look(cx).tokens;
+        let language = bardo.ui_language();
+        let (page, section_ids) = target.steps();
+        let (name, tab_name) = match target {
+            SetupTarget::Key(provider) => (
+                tr(bardo, Text::ProviderName(provider)),
+                tr(bardo, Text::SettingsKeysTab),
+            ),
+            SetupTarget::App(network) => (
+                tr(bardo, Text::AppCredentialsName(network)),
+                tr(bardo, Text::SettingsNetworksTab),
+            ),
+        };
+        let steps = bardo.guide().setup(target);
+        let back = Button::new("setup-back")
+            .ghost()
+            .small()
+            .icon(IconName::ChevronLeft)
+            .label(SharedString::from(
+                bardo.text_with(Text::SetupBack, &[("tab", &tab_name)]),
+            ))
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_setup(cx)));
+        let first_section = section_ids.first().copied();
+        let in_guide = first_section.map(|section| {
+            Button::new("setup-in-guide")
+                .ghost()
+                .small()
+                .icon(Lucide::BookOpen)
+                .label(tr(bardo, Text::SetupOpenInGuide))
+                .on_click(move |_, window, cx| {
+                    guide::open_section(GuideRef { page, section }, window, cx)
+                })
+        });
+        let this = cx.entity().downgrade();
+        let sections = steps.map(|steps| steps.sections).unwrap_or_default();
+        // One section is the key's own: its heading would repeat the title.
+        let headed = sections.len() > 1;
+        let sections = sections.into_iter().map(|section| {
+            let this = this.clone();
+            let body = TextView::markdown(
+                ElementId::Name(format!("setup-{language}-{page}-{}", section.id).into()),
+                section.body,
+            )
+            .selectable(true)
+            .style(TextViewStyle::default().paragraph_gap(rems(0.75)))
+            .on_link_click(move |url, _, _, cx| {
+                let url = url.to_string();
+                let _ = this.update(cx, |this, cx| this.follow_setup_link(&url, page, cx));
+            });
+            v_flex()
+                .w_full()
+                .gap_1p5()
+                .when(headed, |column| {
+                    column.child(div().font_semibold().child(section.title))
+                })
+                // List items are indented but wrap at the full width; the
+                // padding keeps their line ends from being cut off.
+                .child(div().w_full().pr_6().child(body))
+        });
+        let card = match target {
+            SetupTarget::Key(provider) => self
+                .bardo
+                .read(cx)
+                .provider_keys()
+                .into_iter()
+                .find(|status| status.provider == provider)
+                .map(|status| self.render_card(status, false, false, true, cx)),
+            SetupTarget::App(network) => self
+                .bardo
+                .read(cx)
+                .app_credentials()
+                .into_iter()
+                .find(|status| status.network == network)
+                .map(|status| self.render_credentials_card(status, false, true, cx)),
+        };
+        let bardo = self.bardo.read(cx);
+        v_flex()
+            .w_full()
+            .max_w(px(820.))
+            .gap_4()
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(back)
+                    .child(div().flex_1())
+                    .children(in_guide),
+            )
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .text_color(tokens.text)
+                    .child(SharedString::from(
+                        bardo.text_with(Text::SetupTitle, &[("name", &name)]),
+                    )),
+            )
+            .child(v_flex().w_full().gap_4().text_sm().children(sections))
+            .child(kit::section_heading(tr(bardo, Text::SetupPasteHere)))
+            .children(card)
             .into_any_element()
     }
 
@@ -1561,12 +1775,9 @@ fn outcome_tone(outcome: KeyCheckOutcome) -> Tone {
 
 impl Render for SettingsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = match self.tab {
-            SettingsTab::Keys => self.render_keys(cx),
-            SettingsTab::Networks => self.render_networks(cx),
-            SettingsTab::Publishing => self.render_publishing(cx),
-            SettingsTab::Appearance => self.render_appearance(cx),
-            SettingsTab::Metrics => self.render_metrics(cx),
+        let body = match (self.tab, self.setup) {
+            (tab, Some(target)) if target.tab() == tab => self.render_setup(target, cx),
+            (tab, _) => self.render_tab(tab, cx),
         };
         let bardo = self.bardo.read(cx);
         let tabs = TabBar::new("settings-tabs")
@@ -1584,8 +1795,7 @@ impl Render for SettingsScreen {
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {
                 if let Some(tab) = SettingsTab::ALL.get(*index) {
-                    this.tab = *tab;
-                    cx.notify();
+                    this.show_tab(*tab, cx);
                 }
             }));
 

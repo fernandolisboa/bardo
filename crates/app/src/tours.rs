@@ -189,6 +189,8 @@ pub enum Control {
     CredentialsWhy,
     /// Settings › Networks: the first network's app credentials.
     CredentialsCard,
+    /// Settings › Networks: the first card's Step by step.
+    CredentialsSetup,
     /// Settings › Networks: whether the first network's are saved.
     CredentialsState,
     /// Publish: the picked network's title, description and tags, or the
@@ -235,6 +237,8 @@ pub enum Control {
     KeysKept,
     /// Settings › API keys: the first provider's card.
     KeyCard,
+    /// Settings › API keys: the first card's Step by step.
+    KeySetup,
     /// Settings › API keys: whether the first provider's key is saved, by
     /// its last characters.
     KeyState,
@@ -852,7 +856,7 @@ pub const NETWORKS: Tour = {
     const CARDS: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Networks,
-        version: 1,
+        version: 2,
         place: Some(AT),
         steps: &[
             TourStep::at("tab", TourAnchor::Toolbar)
@@ -866,6 +870,10 @@ pub const NETWORKS: Tour = {
                 .on(AT)
                 .missing(CARDS)
                 .learn(PAGE, "save"),
+            TourStep::at("setup", control(Control::CredentialsSetup))
+                .on(AT)
+                .missing(CARDS)
+                .learn(PAGE, "step-by-step"),
             TourStep::at("kept", control(Control::CredentialsState))
                 .on(AT)
                 .missing(CARDS)
@@ -1010,7 +1018,7 @@ pub const KEYS: Tour = {
     const CARD: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::KeyCard));
     Tour {
         id: TourId::Keys,
-        version: 1,
+        version: 2,
         place: Some(AT),
         steps: &[
             TourStep::at("tab", TourAnchor::Toolbar)
@@ -1020,6 +1028,10 @@ pub const KEYS: Tour = {
                 .on(AT)
                 .missing(WhenMissing::LightPart(TourAnchor::Content))
                 .learn(PAGE, "providers"),
+            TourStep::at("setup", control(Control::KeySetup))
+                .on(AT)
+                .missing(CARD)
+                .learn(PAGE, "step-by-step"),
             TourStep::at("test", control(Control::KeyTest))
                 .on(AT)
                 .missing(CARD)

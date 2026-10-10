@@ -255,6 +255,14 @@ pub enum Text {
     StartFailingTestJob,
     SettingsTitle,
     ProviderKeysTitle,
+    /// A card's button to its setup screen.
+    SetupStepByStep,
+    /// Placeholder: `{name}`, the provider or the network's app.
+    SetupTitle,
+    /// Placeholder: `{tab}`.
+    SetupBack,
+    SetupPasteHere,
+    SetupOpenInGuide,
     ProviderKeysHint,
     ProviderName(Provider),
     ProviderPurpose(Provider),
@@ -1830,6 +1838,11 @@ impl Text {
             Text::StartFailingTestJob => "jobs.test.start_failing",
             Text::SettingsTitle => "settings.title",
             Text::ProviderKeysTitle => "provider_keys.title",
+            Text::SetupStepByStep => "setup.step_by_step",
+            Text::SetupTitle => "setup.title",
+            Text::SetupBack => "setup.back",
+            Text::SetupPasteHere => "setup.paste_here",
+            Text::SetupOpenInGuide => "setup.open_in_guide",
             Text::ProviderKeysHint => "provider_keys.hint",
             Text::ProviderName(provider) => {
                 return format!("provider.{}.name", provider.code()).into();
@@ -3620,6 +3633,11 @@ mod tests {
             Text::SettingsTitle,
             Text::ProviderKeysTitle,
             Text::ProviderKeysHint,
+            Text::SetupStepByStep,
+            Text::SetupTitle,
+            Text::SetupBack,
+            Text::SetupPasteHere,
+            Text::SetupOpenInGuide,
             Text::KeyNotSet,
             Text::KeySaved,
             Text::KeyUnreadable,
@@ -4907,6 +4925,10 @@ mod tests {
                 text.contains("Invalid API key") && !text.contains('{'),
                 "{text}"
             );
+            let text = catalog.format(Text::SetupTitle, &[("name", "Claude")]);
+            assert!(text.contains("Claude") && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::SetupBack, &[("tab", "API keys")]);
+            assert!(text.contains("API keys") && !text.contains('{'), "{text}");
         }
     }
 

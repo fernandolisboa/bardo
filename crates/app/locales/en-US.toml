@@ -243,6 +243,13 @@ not_updated = "Could not update the job. Try again."
 not_started = "Could not start the job. Try again."
 runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
 
+[setup]
+step_by_step = "Step by step"
+title = "{name}: step by step"
+back = "Back to {tab}"
+paste_here = "Paste it here"
+open_in_guide = "Open in the guide"
+
 [provider_keys]
 title = "Provider keys"
 hint = "Bardo calls each provider with your own key. Keys are kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
@@ -267,13 +274,13 @@ placeholder = "sk-ant-…"
 
 [provider.elevenlabs]
 name = "ElevenLabs"
-purpose = "Narration and your voices. The key needs voice read access."
+purpose = "Narration and your voices. The key needs Text to Speech, Voices (read) and Forced Alignment."
 placeholder = "Your ElevenLabs API key"
 
 [provider.gemini]
 name = "Gemini"
 purpose = "Images (Nano Banana) and video clips (Veo, Gemini Omni Flash), from Google AI Studio."
-placeholder = "AIza…"
+placeholder = "Your Gemini API key"
 
 [provider.higgsfield]
 name = "Higgsfield"
@@ -2396,6 +2403,10 @@ body = "Bardo ships no app of its own: you register one on each network, so its 
 title = "The app's ID and secret"
 body = "Paste the ID (TikTok calls it the client key) and the secret from the network's developer site, and save. Replace them here when you make a new secret."
 
+[tour.networks.setup]
+title = "Step by step"
+body = "Not sure where to start? Step by step opens a screen with each step on the network's developer site, a link straight to each page, and the fields to paste into at the end."
+
 [tour.networks.kept]
 title = "Where they are kept"
 body = "Saved credentials go to Windows Credential Manager under your Windows account, never to Bardo's database or logs. The card shows only the secret's last four characters."
@@ -2518,6 +2529,10 @@ body = "Bardo works with your own account at each AI provider, one key per provi
 [tour.keys.card]
 title = "One key per provider"
 body = "Each card says what the provider does for you. Paste the key you created on its site and save; a screen that needs a missing key says so."
+
+[tour.keys.setup]
+title = "Step by step"
+body = "Don't have a key yet? Step by step opens a screen that walks you through the provider's site, with a link straight to each page, and ends with this card's field to paste the key into."
 
 [tour.keys.test]
 title = "Test key"

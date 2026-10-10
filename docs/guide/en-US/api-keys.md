@@ -22,6 +22,13 @@ Bardo has no AI of its own and no account to sign up for. It works with your acc
 
 You do not need every key on day one. A screen that needs a missing key says so. Clips are optional: a scene without a clip keeps its still image.
 
+<a id="step-by-step"></a>
+## Step by step for each key
+
+Each card's **Step by step** opens a screen that walks you through getting that provider's key: where to sign up, which page creates the key (with a link straight to it), what to tick, and what the key looks like. The last step is the card's own field, so you paste, save and test the key without leaving that screen. **Back** returns to the tab.
+
+The same steps are in [Getting each API key](get-api-keys.md).
+
 <a id="where-kept"></a>
 ## Where your keys are kept
 

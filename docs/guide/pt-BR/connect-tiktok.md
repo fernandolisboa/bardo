@@ -14,14 +14,14 @@ O Bardo manda os vídeos do TikTok para a sua caixa de entrada como **rascunhos*
 ## Do que você precisa
 
 - A conta do TikTok de onde você posta.
-- Uma conta no [TikTok for Developers](https://developers.tiktok.com/) (cadastre-se com qualquer e-mail; não precisa ser a conta que posta).
+- Uma conta no [TikTok for Developers](https://developers.tiktok.com/) ([cadastre-se](https://developers.tiktok.com/signup) com qualquer e-mail; não precisa ser a conta que posta).
 
 O site do TikTok for Developers é em inglês, então os nomes de menus e campos abaixo ficam em inglês.
 
 <a id="register"></a>
 ## 1. Registre o app
 
-1. No TikTok for Developers, abra o menu do seu perfil › **Manage apps** e escolha **Connect an app**. Registre o app na sua conta individual (ou numa organização, se você tiver uma).
+1. Abra [Manage apps](https://developers.tiktok.com/apps) (menu do seu perfil › **Manage apps**) e escolha **Connect an app**. Escolha a sua conta individual como dona do app (ou uma organização, se você tiver uma) e confirme com **Confirm**.
 2. Preencha as **Basic information**: um **App icon** (1024 × 1024 px), um **App name** (por exemplo `Bardo`), uma **Category** e uma **Description**; a descrição aparece na página de autorização do TikTok. O TikTok também pede uma **Terms of Service URL**, uma **Privacy Policy URL** e, para **Desktop**, um site; quaisquer páginas que você controle servem enquanto o app fica no sandbox.
 3. Em **Platforms**, escolha **Desktop**.
 

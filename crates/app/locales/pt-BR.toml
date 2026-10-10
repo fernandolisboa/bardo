@@ -243,6 +243,13 @@ not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
 not_started = "Não foi possível iniciar a tarefa. Tente de novo."
 runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
 
+[setup]
+step_by_step = "Passo a passo"
+title = "{name}: passo a passo"
+back = "Voltar para {tab}"
+paste_here = "Cole aqui"
+open_in_guide = "Abrir no guia"
+
 [provider_keys]
 title = "Chaves de provedor"
 hint = "O Bardo chama cada provedor com a sua própria chave. As chaves ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
@@ -267,13 +274,13 @@ placeholder = "sk-ant-…"
 
 [provider.elevenlabs]
 name = "ElevenLabs"
-purpose = "Narração e as suas vozes. A chave precisa de acesso de leitura de vozes."
+purpose = "Narração e as suas vozes. A chave precisa de Text to Speech, Voices (leitura) e Forced Alignment."
 placeholder = "Sua chave de API da ElevenLabs"
 
 [provider.gemini]
 name = "Gemini"
 purpose = "Imagens (Nano Banana) e clipes de vídeo (Veo, Gemini Omni Flash), pelo Google AI Studio."
-placeholder = "AIza…"
+placeholder = "Sua chave de API do Gemini"
 
 [provider.higgsfield]
 name = "Higgsfield"
@@ -2396,6 +2403,10 @@ body = "O Bardo não traz app próprio: você registra um em cada rede, então a
 title = "O ID e a chave secreta do app"
 body = "Cole o ID (o TikTok chama de client key) e a chave secreta do site de desenvolvedores da rede, e salve. Troque-os aqui quando criar uma chave secreta nova."
 
+[tour.networks.setup]
+title = "Passo a passo"
+body = "Não sabe por onde começar? Passo a passo abre uma tela com cada etapa no site de desenvolvedores da rede, um link direto para cada página e, no fim, os campos onde colar."
+
 [tour.networks.kept]
 title = "Onde ficam guardados"
 body = "As credenciais salvas vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados ou os logs do Bardo. O cartão mostra só os quatro últimos caracteres da chave secreta."
@@ -2518,6 +2529,10 @@ body = "O Bardo trabalha com a sua própria conta em cada provedor de IA, uma ch
 [tour.keys.card]
 title = "Uma chave por provedor"
 body = "Cada cartão diz o que o provedor faz por você. Cole a chave que você criou no site dele e salve; uma tela que precisa de uma chave que falta avisa."
+
+[tour.keys.setup]
+title = "Passo a passo"
+body = "Ainda não tem a chave? Passo a passo abre uma tela que guia você pelo site do provedor, com um link direto para cada página, e termina no campo deste cartão para colar a chave."
 
 [tour.keys.test]
 title = "Testar chave"

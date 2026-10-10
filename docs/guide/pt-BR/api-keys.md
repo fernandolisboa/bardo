@@ -22,6 +22,13 @@ O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas cont
 
 Você não precisa de todas as chaves no primeiro dia. Uma tela que depende de uma chave que falta avisa. Clipes são opcionais: uma cena sem clipe fica com a imagem parada.
 
+<a id="step-by-step"></a>
+## Passo a passo de cada chave
+
+O **Passo a passo** de cada cartão abre uma tela que guia você até a chave daquele provedor: onde criar a conta, qual página gera a chave (com um link direto para ela), o que marcar e como a chave se parece. O último passo é o próprio campo do cartão, então você cola, salva e testa a chave sem sair dessa tela. **Voltar** leva de volta à aba.
+
+Os mesmos passos estão em [Como obter cada chave de API](get-api-keys.md).
+
 <a id="where-kept"></a>
 ## Onde as chaves ficam
 
