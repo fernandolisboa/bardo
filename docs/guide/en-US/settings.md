@@ -32,7 +32,7 @@ The layout decides where every screen places its parts; the screens do the same 
 
 Switching keeps the screen and the selection you are on, and a tour running at the time goes on in the new layout.
 
-Bardo's window goes down to 960 × 600, half of a Full HD screen at 100 % scale, so two windows fit side by side. In a window too narrow for one line, Studio's tabs go onto a second line, a pillar at a time, and every tab stays whole.
+Bardo's window goes down to 640 × 600, half of a laptop screen at 150 % scale, so it fits beside another window. In a narrow window the screens make room rather than cut anything: Workspace's sidebar becomes a column of icons (point at one for its name), the columns beside a screen narrow and the summaries beside it go under it, the Jobs panel opens over the screen rather than beside it, and Studio's tabs go onto more lines, a pillar at a time, every tab whole. The editor works at any width, but its picture has the most room in a wide window.
 
 <a id="follow"></a>
 ## Following Windows

@@ -32,7 +32,7 @@ O layout decide onde cada tela coloca as suas partes; as telas fazem as mesmas c
 
 Trocar mantém a tela e a seleção em que você está, e um tour em andamento continua no novo layout.
 
-A janela do Bardo vai até 960 × 600, metade de uma tela Full HD em escala de 100 %, para caberem duas janelas lado a lado. Numa janela estreita demais para uma linha, as abas do Studio passam para uma segunda linha, um pilar de cada vez, e toda aba fica inteira.
+A janela do Bardo vai até 640 × 600, metade de uma tela de notebook em escala de 150 %, para caber ao lado de outra janela. Numa janela estreita as telas abrem espaço em vez de cortar algo: a barra lateral do Workspace vira uma coluna de ícones (aponte para um para ver o nome), as colunas ao lado da tela estreitam e os resumos ao lado dela passam para baixo, o painel Tarefas abre por cima da tela em vez de ao lado, e as abas do Studio passam para mais linhas, um pilar de cada vez, toda aba inteira. O editor funciona em qualquer largura, mas a imagem tem mais espaço numa janela larga.
 
 <a id="follow"></a>
 ## Seguir o Windows

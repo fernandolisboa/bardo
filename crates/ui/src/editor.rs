@@ -52,6 +52,16 @@ use crate::tour::Anchored as _;
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
+/// The narrowest editor with its side columns at full width: below it they
+/// narrow, so the preview keeps some room, and the top bar leaves out the
+/// way here and the length (issue #153).
+const COMPACT_BELOW: f32 = 960.;
+/// The bin, on the left.
+const BIN_WIDTH: f32 = 260.;
+const COMPACT_BIN_WIDTH: f32 = 200.;
+/// The inspector or the cut suggestions, on the right.
+const SIDE_WIDTH: f32 = 320.;
+const COMPACT_SIDE_WIDTH: f32 = 260.;
 /// What one click of a level's − or + changes.
 const GAIN_STEP: Decibels = Decibels::from_tenths(5);
 const DUCK_STEP: Decibels = Decibels::from_tenths(10);
@@ -613,6 +623,27 @@ impl EditorScreen {
     }
 }
 
+/// Whether the editor is narrower than [`COMPACT_BELOW`].
+fn compact(cx: &App) -> bool {
+    crate::layout::room(cx).screen(0.) < COMPACT_BELOW
+}
+
+fn bin_width(cx: &App) -> f32 {
+    if compact(cx) {
+        COMPACT_BIN_WIDTH
+    } else {
+        BIN_WIDTH
+    }
+}
+
+fn side_width(cx: &App) -> f32 {
+    if compact(cx) {
+        COMPACT_SIDE_WIDTH
+    } else {
+        SIDE_WIDTH
+    }
+}
+
 fn color(ink: EditorColor) -> Hsla {
     appearance::editor_color(ink)
 }
@@ -819,9 +850,10 @@ impl EditorScreen {
             .border_b_1()
             .border_color(color(HAIRLINE))
             .child(back)
-            .children(breadcrumb)
+            .when(!compact(cx), |bar| {
+                bar.children(breadcrumb).children(status)
+            })
             .child(div().flex_1())
-            .children(status)
             .children(tour)
             .child(jobs)
             .child(
@@ -943,7 +975,7 @@ impl EditorScreen {
                 .collect()
         });
         v_flex()
-            .w(px(260.))
+            .w(px(bin_width(cx)))
             .flex_none()
             .h_full()
             .bg(color(PANEL))
@@ -1112,7 +1144,7 @@ impl EditorScreen {
                 .child(tr(bardo, Text::EditorMediaEmpty))
         });
         v_flex()
-            .w(px(260.))
+            .w(px(bin_width(cx)))
             .flex_none()
             .h_full()
             .bg(color(PANEL))
@@ -1151,6 +1183,7 @@ impl EditorScreen {
         let has_cut = editor.is_some_and(|editor| editor.view().timeline.is_some());
         let aspects = h_flex()
             .relative()
+            .flex_wrap()
             .gap_0p5()
             .p_0p5()
             .rounded(px(4.))
@@ -1175,9 +1208,12 @@ impl EditorScreen {
                 Side::Below,
                 None,
             );
+        // On a narrow preview the header and the transport wrap.
         let header = h_flex()
-            .h(px(36.))
+            .min_h(px(36.))
+            .flex_wrap()
             .px_3()
+            .py_1()
             .gap_2()
             .items_center()
             .border_b_1()
@@ -1251,8 +1287,10 @@ impl EditorScreen {
         let playhead = editor.map_or(Duration::ZERO, Editor::playhead);
         let duration = editor.map_or(Duration::ZERO, |editor| editor.view().duration());
         let transport = h_flex()
-            .h(px(44.))
+            .min_h(px(44.))
+            .flex_wrap()
             .px_3()
+            .py_1()
             .gap_1()
             .items_center()
             .justify_center()
@@ -1779,7 +1817,7 @@ impl EditorScreen {
             }
         };
         v_flex()
-            .w(px(320.))
+            .w(px(side_width(cx)))
             .flex_none()
             .h_full()
             .bg(color(PANEL))

@@ -856,7 +856,9 @@ impl PersonasScreen {
                         .gap_0p5()
                         .child(
                             h_flex()
-                                .gap_2()
+                                .flex_wrap()
+                                .gap_x_2()
+                                .items_baseline()
                                 .child(
                                     div()
                                         .font_medium()
@@ -888,11 +890,13 @@ impl PersonasScreen {
             Text::ChooseVoice
         };
         let buttons = h_flex()
+            .flex_wrap()
             .gap_2()
             .child(
                 Button::new("toggle-voices")
                     .small()
                     .outline()
+                    .max_w_full()
                     .label(tr(bardo, toggle))
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_picker(cx))),
             )
@@ -929,6 +933,7 @@ impl PersonasScreen {
             .items_center()
             .child(
                 Checkbox::new("persona-realistic-voice")
+                    .min_w_0()
                     .checked(self.realistic_voice)
                     .label(tr(bardo, Text::PersonaRealisticVoice))
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {

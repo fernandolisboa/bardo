@@ -96,8 +96,18 @@ pub fn status_with(
         .when(outlined, |chip| {
             chip.border(look.tokens.border_width).border_color(ink)
         })
-        .child(icon.into().size(px(13.)).text_color(ink))
-        .child(div().whitespace_nowrap().child(label.into()))
+        // In a column narrower than the chip, its label ends in "…"
+        // rather than run past the column's edge.
+        .max_w_full()
+        .child(icon.into().size(px(13.)).text_color(ink).flex_none())
+        .child(
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(label.into()),
+        )
 }
 
 /// A message after an action (saved, failed, exported to …): icon and

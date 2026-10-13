@@ -27,7 +27,7 @@ use gpui_kit::{
 
 use super::timeline::PIN_ROW;
 use super::tokens::*;
-use super::{EditorScreen, color, icon, label, tool_button};
+use super::{EditorScreen, color, icon, label, side_width, tool_button};
 use crate::appearance::EditorColor;
 use crate::shell::tr;
 use crate::spend::{budget_question, estimate_line, near_line};
@@ -817,7 +817,7 @@ impl EditorScreen {
             .then(|| label(tr(bardo, Text::CutsEmpty), TEXT_3));
 
         v_flex()
-            .w(px(320.))
+            .w(px(side_width(cx)))
             .flex_none()
             .h_full()
             .bg(color(PANEL))

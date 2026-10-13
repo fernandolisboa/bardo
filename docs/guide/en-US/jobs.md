@@ -13,7 +13,7 @@ Long work runs as a **job**: research, a script, a narration, images, clips, a r
 <a id="panel"></a>
 ## The Jobs panel
 
-**Jobs** in the navigation opens a panel beside whatever screen you are on, and closes it again; the line beside it says how many jobs are running or waiting. The panel groups the jobs as **Running**, **Queued**, **Failed** and **Finished**, each card with what the job does and where it stands. A job that waits for its time, like a scheduled post, says when it goes.
+**Jobs** in the navigation opens a panel beside whatever screen you are on (over its right side, in a narrow window), and closes it again; the line beside it says how many jobs are running or waiting. The panel groups the jobs as **Running**, **Queued**, **Failed** and **Finished**, each card with what the job does and where it stands. A job that waits for its time, like a scheduled post, says when it goes.
 
 <a id="progress"></a>
 ## Progress
