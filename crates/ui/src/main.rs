@@ -79,7 +79,7 @@ fn run_agent() -> anyhow::Result<()> {
 }
 
 /// The smallest the main window goes, in logical pixels.
-const MIN_WIDTH: f32 = 960.;
+const MIN_WIDTH: f32 = 640.;
 const MIN_HEIGHT: f32 = 600.;
 
 /// The argument the uninstaller runs `bardo` with.

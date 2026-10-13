@@ -22,6 +22,8 @@ use crate::parts::{
 };
 use crate::tour::Anchored as _;
 
+use super::Room;
+
 const TOP_BAR_HEIGHT: f32 = 44.;
 const TAB_HEIGHT: f32 = 28.;
 const STATUS_BAR_HEIGHT: f32 = 28.;
@@ -36,6 +38,13 @@ const PAGE_WIDTH: f32 = 980.;
 const PANEL_HEIGHT: f32 = 256.;
 /// Its last column: provenance.
 const PANEL_SIDE_WIDTH: f32 = 240.;
+/// The narrowest screen with the side columns at full width (every screen
+/// holds in a 960-pixel window): below it the list, the form and the
+/// panel's last column narrow, and the aside goes under the content.
+const COMPACT_BELOW: f32 = 960.;
+const COMPACT_LIST_WIDTH: f32 = 220.;
+const COMPACT_FORM_WIDTH: f32 = 280.;
+const COMPACT_PANEL_SIDE_WIDTH: f32 = 200.;
 /// Its middle column: the picture, or the current and new one.
 const PANEL_MEDIA_WIDTH: f32 = 420.;
 /// The widest the stage's actions get beside the stage tabs.
@@ -47,6 +56,48 @@ const NUMBER_WIDTH: f32 = 24.;
 const TIME_WIDTH: f32 = 84.;
 const FACT_WIDTH: f32 = 112.;
 
+/// How the layout fits the room it has (issue #153).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fit {
+    /// The jobs panel over the screen rather than beside it.
+    jobs_over: bool,
+    /// The side columns narrowed, the aside under the content.
+    compact: bool,
+}
+
+impl Fit {
+    fn of(room: Room) -> Self {
+        Self {
+            jobs_over: room.jobs_over(0.),
+            compact: room.screen(0.) < COMPACT_BELOW,
+        }
+    }
+
+    fn list(self) -> f32 {
+        if self.compact {
+            COMPACT_LIST_WIDTH
+        } else {
+            LIST_WIDTH
+        }
+    }
+
+    fn form(self) -> f32 {
+        if self.compact {
+            COMPACT_FORM_WIDTH
+        } else {
+            FORM_WIDTH
+        }
+    }
+
+    fn panel_side(self) -> f32 {
+        if self.compact {
+            COMPACT_PANEL_SIDE_WIDTH
+        } else {
+            PANEL_SIDE_WIDTH
+        }
+    }
+}
+
 pub(super) fn shell(
     navigation: Navigation,
     screen: AnyElement,
@@ -54,6 +105,8 @@ pub(super) fn shell(
     cx: &App,
 ) -> AnyElement {
     let t = &look(cx).tokens;
+    let fit = Fit::of(super::room(cx));
+    let (area, beside) = super::screen_area(screen, jobs, fit.jobs_over);
     let status = status_bar(&navigation, cx);
     v_flex()
         .size_full()
@@ -66,8 +119,8 @@ pub(super) fn shell(
                 .min_h_0()
                 .w_full()
                 .items_start()
-                .child(div().flex_1().h_full().min_w_0().child(screen))
-                .children(jobs),
+                .child(area)
+                .children(beside),
         )
         .child(status)
         .into_any_element()
@@ -254,10 +307,12 @@ fn status_bar(nav: &Navigation, cx: &App) -> AnyElement {
             budgets.tone.ink(cx)
         };
         h_flex()
+            .min_w_0()
             .gap_1p5()
             .items_center()
             .child(
                 div()
+                    .flex_none()
                     .w(px(60.))
                     .h(px(4.))
                     .rounded(t.radius)
@@ -270,8 +325,10 @@ fn status_bar(nav: &Navigation, cx: &App) -> AnyElement {
                             .w(relative(budgets.percent.min(100) as f32 / 100.)),
                     ),
             )
-            .child(budgets.line.clone())
+            .child(div().min_w_0().truncate().child(budgets.line.clone()))
     });
+    // In a narrow window the jobs' and the budgets' lines end in "…"; the
+    // month's spend stays whole.
     h_flex()
         .flex_none()
         .w_full()
@@ -287,19 +344,21 @@ fn status_bar(nav: &Navigation, cx: &App) -> AnyElement {
         .child(
             h_flex()
                 .id("status-jobs")
+                .min_w_0()
                 .gap_1p5()
                 .items_center()
                 .cursor_pointer()
                 .hover(|item| item.text_color(t.text))
                 .when(nav.jobs > 0, |item| item.text_color(t.text))
                 .child(Icon::new(icons::destination(Destination::Jobs)).size(px(13.)))
-                .child(nav.jobs_line.clone())
+                .child(div().min_w_0().truncate().child(nav.jobs_line.clone()))
                 .on_click(move |_, window, cx| pick(Destination::Jobs, window, cx)),
         )
         .child(div().flex_1())
         .children(budgets)
         .children(nav.spent_line.clone().map(|line| {
             div()
+                .flex_none()
                 .font_family(cx.theme().mono_font_family.clone())
                 .text_color(t.text)
                 .child(line)
@@ -322,6 +381,7 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
         scroll,
     } = parts;
     let t = &look(cx).tokens;
+    let fit = Fit::of(super::room(cx));
 
     // With stages, the toolbar sits beside them; otherwise on a row of
     // its own under the header.
@@ -336,17 +396,23 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
     if let Some(sections) = sections {
         content.extend(stacked(sections, cx));
     }
+    // In a narrow screen the aside goes under the content, in its column.
+    let (aside, aside_under) = if fit.compact && !aside.is_empty() {
+        (Vec::new(), Some(aside_under(aside, cx)))
+    } else {
+        (aside, None)
+    };
 
     let body = match collection {
         Some(collection) if collection.kind == CollectionKind::Grid => {
-            table_with_panel(toolbar, notices, collection, content, inspector, cx)
+            table_with_panel(fit, toolbar, notices, collection, content, inspector, cx)
         }
         Some(collection) if collection.kind == CollectionKind::List => h_flex()
             .flex_1()
             .min_h_0()
             .w_full()
             .items_start()
-            .child(list_column(collection, cx))
+            .child(list_column(collection, fit.list(), cx))
             .child(
                 v_flex()
                     .id("screen-record")
@@ -370,16 +436,17 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                                     .children(inspector.footer)
                                     .tour_anchor(TourAnchor::Inspector, Side::Below, None)
                             }))
-                            .children(content),
+                            .children(content)
+                            .children(aside_under),
                     ),
             )
             .when(!aside.is_empty(), |row| row.child(aside_panel(aside, cx)))
             .into_any_element(),
         collection @ Some(_) => {
-            main_with_form(toolbar, notices, collection, content, inspector, cx)
+            main_with_form(fit, toolbar, notices, collection, content, inspector, cx)
         }
         None if inspector.is_some() => {
-            main_with_form(toolbar, notices, None, content, inspector, cx)
+            main_with_form(fit, toolbar, notices, None, content, inspector, cx)
         }
         None => h_flex()
             .flex_1()
@@ -401,7 +468,8 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
                             .gap_3()
                             .children(toolbar)
                             .children(notices)
-                            .children(content),
+                            .children(content)
+                            .children(aside_under),
                     )
                     .tour_anchor(TourAnchor::Content, Side::Right, None),
             )
@@ -416,6 +484,19 @@ pub(super) fn screen(parts: ScreenParts, cx: &App) -> AnyElement {
         .child(header_row(header, summary, cx))
         .children(stage_row)
         .child(body)
+        .into_any_element()
+}
+
+/// The aside's parts under the content, in a narrow screen.
+fn aside_under(aside: Vec<AnyElement>, cx: &App) -> AnyElement {
+    let t = &look(cx).tokens;
+    v_flex()
+        .id("screen-aside")
+        .pt_3()
+        .gap_3()
+        .border_t(t.border_width)
+        .border_color(t.border)
+        .children(aside)
         .into_any_element()
 }
 
@@ -687,6 +768,7 @@ fn stacked(sections: Sections, cx: &App) -> Vec<AnyElement> {
 
 /// A table of the items over the selected one's panel.
 fn table_with_panel(
+    fit: Fit,
     toolbar: Option<AnyElement>,
     notices: Vec<AnyElement>,
     collection: Collection,
@@ -712,7 +794,7 @@ fn table_with_panel(
             )
         })
         .child(table(collection, content, cx))
-        .children(inspector.map(|inspector| panel(inspector, hint, cx)))
+        .children(inspector.map(|inspector| panel(inspector, hint, fit.panel_side(), cx)))
         .into_any_element()
 }
 
@@ -948,7 +1030,7 @@ fn table(collection: Collection, after: Vec<AnyElement>, cx: &App) -> AnyElement
 
 /// The selected item in three columns: its properties, its picture (or
 /// what to review), and its provenance.
-fn panel(inspector: Inspector, hint: Option<KeysHint>, cx: &App) -> AnyElement {
+fn panel(inspector: Inspector, hint: Option<KeysHint>, side: f32, cx: &App) -> AnyElement {
     let t = &look(cx).tokens;
     let Inspector {
         title,
@@ -1014,12 +1096,9 @@ fn panel(inspector: Inspector, hint: Option<KeysHint>, cx: &App) -> AnyElement {
                         .max_w(px(PANEL_MEDIA_WIDTH))
                         .child(picture)
                 }))
-                .children(footer.map(|footer| {
-                    column("panel-side")
-                        .w(px(PANEL_SIDE_WIDTH))
-                        .flex_none()
-                        .child(footer)
-                })),
+                .children(
+                    footer.map(|footer| column("panel-side").w(px(side)).flex_none().child(footer)),
+                ),
         )
         .tour_anchor(TourAnchor::Inspector, Side::Above, None)
         .into_any_element()
@@ -1027,6 +1106,7 @@ fn panel(inspector: Inspector, hint: Option<KeysHint>, cx: &App) -> AnyElement {
 
 /// A feed (or a page) with the form that drives it on the right.
 fn main_with_form(
+    fit: Fit,
     toolbar: Option<AnyElement>,
     notices: Vec<AnyElement>,
     collection: Option<Collection>,
@@ -1058,7 +1138,7 @@ fn main_with_form(
         .children(inspector.map(|inspector| {
             v_flex()
                 .id("inspector")
-                .w(px(FORM_WIDTH))
+                .w(px(fit.form()))
                 .h_full()
                 .flex_none()
                 .overflow_y_scroll()
@@ -1096,7 +1176,7 @@ fn feed(collection: Collection, _cx: &App) -> AnyElement {
 }
 
 /// A list of records in a narrow column, a dense row each.
-fn list_column(collection: Collection, cx: &App) -> AnyElement {
+fn list_column(collection: Collection, width: f32, cx: &App) -> AnyElement {
     let t = look(cx).tokens;
     let empty = collection.is_empty();
     let scroll = collection.keys.as_ref().map(|keys| keys.scroll.clone());
@@ -1119,7 +1199,7 @@ fn list_column(collection: Collection, cx: &App) -> AnyElement {
             .chain(std::iter::once(list_row(tile, cx)))
     });
     v_flex()
-        .w(px(LIST_WIDTH))
+        .w(px(width))
         .h_full()
         .flex_none()
         .bg(t.surface)
@@ -1215,4 +1295,40 @@ fn selection_bar(color: Hsla) -> Div {
         .bottom_0()
         .w(px(3.))
         .bg(color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fit(window: f32, jobs_open: bool) -> Fit {
+        Fit::of(Room { window, jobs_open })
+    }
+
+    #[test]
+    fn nothing_changes_from_the_old_minimum_up() {
+        for window in [960., 1260.] {
+            let fit = fit(window, false);
+            assert!(!fit.compact, "{window}");
+            assert_eq!(fit.list(), LIST_WIDTH);
+            assert_eq!(fit.form(), FORM_WIDTH);
+            assert_eq!(fit.panel_side(), PANEL_SIDE_WIDTH);
+        }
+    }
+
+    #[test]
+    fn a_laptop_snap_half_narrows_the_side_columns() {
+        let half = fit(640., false);
+        assert!(half.compact);
+        assert_eq!(half.list(), COMPACT_LIST_WIDTH);
+        assert_eq!(half.form(), COMPACT_FORM_WIDTH);
+        assert_eq!(half.panel_side(), COMPACT_PANEL_SIDE_WIDTH);
+    }
+
+    #[test]
+    fn the_jobs_panel_lies_over_the_screen_in_a_narrow_window() {
+        assert!(!fit(1260., true).jobs_over);
+        assert!(fit(960., true).jobs_over);
+        assert!(fit(1260., true).compact);
+    }
 }

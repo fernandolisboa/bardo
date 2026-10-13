@@ -555,8 +555,9 @@ impl EditorScreen {
                 Side::Above,
                 None,
             );
+        // In a narrow window the tools wrap to a second row.
         h_flex()
-            .h(px(36.))
+            .min_h(px(36.))
             .flex_none()
             .items_center()
             .bg(color(PANEL))
@@ -572,7 +573,10 @@ impl EditorScreen {
             .child(
                 h_flex()
                     .flex_1()
+                    .min_w_0()
+                    .flex_wrap()
                     .px_2()
+                    .py_1()
                     .gap_1()
                     .items_center()
                     .child(

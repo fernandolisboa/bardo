@@ -381,7 +381,7 @@ impl Render for JobsPanel {
         // The panel sits at the window's right edge: its card goes left.
         v_flex()
             .relative()
-            .w(px(360.))
+            .w(px(crate::layout::JOBS_WIDTH))
             .h_full()
             .bg(look(cx).tokens.surface)
             .border_l_1()

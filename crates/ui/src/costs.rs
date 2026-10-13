@@ -574,28 +574,32 @@ impl CostsScreen {
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let heading = |text: Text| tr(bardo, text);
-        let table = kit::card(cx)
-            .overflow_hidden()
-            .child(
-                columns(
-                    div().child(heading(Text::CostsColumnProvider)),
-                    div().child(heading(Text::CostsColumnUsage)),
-                    div().child(heading(Text::CostsColumnSpent)),
-                    div().child(heading(Text::CostsColumnBudget)),
-                    div().child(heading(Text::CostsColumnState)),
-                    h_flex().child(guide::info(
-                        bardo,
-                        "costs-providers-info",
-                        tr(bardo, Text::CostsProvidersHint),
-                        guide::refs::COSTS_BUDGETS,
-                    )),
+        // In a narrow window the table scrolls sideways rather than cut its
+        // last columns (issue #153).
+        let table = kit::card(cx).id("costs-budgets").overflow_x_scroll().child(
+            v_flex()
+                .min_w(px(BUDGETS_TABLE_MIN_WIDTH))
+                .child(
+                    columns(
+                        div().child(heading(Text::CostsColumnProvider)),
+                        div().child(heading(Text::CostsColumnUsage)),
+                        div().child(heading(Text::CostsColumnSpent)),
+                        div().child(heading(Text::CostsColumnBudget)),
+                        div().child(heading(Text::CostsColumnState)),
+                        h_flex().child(guide::info(
+                            bardo,
+                            "costs-providers-info",
+                            tr(bardo, Text::CostsProvidersHint),
+                            guide::refs::COSTS_BUDGETS,
+                        )),
+                    )
+                    .py_2()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(t.text2),
                 )
-                .py_2()
-                .text_xs()
-                .font_semibold()
-                .text_color(t.text2),
-            )
-            .children(rows);
+                .children(rows),
+        );
         kit::anchor_in(
             TourAnchor::Control(Control::CostsBudgets),
             table,
@@ -1102,6 +1106,11 @@ impl CostsScreen {
     }
 }
 
+/// The budgets table's state column: the longest state chip whole.
+const STATE_WIDTH: f32 = 152.;
+/// The budgets table's columns side by side, with their gaps and padding.
+const BUDGETS_TABLE_MIN_WIDTH: f32 = 682.;
+
 /// A line of the budgets table: provider, usage, spent, budget, state and
 /// actions, each in its column.
 fn columns(
@@ -1134,7 +1143,7 @@ fn columns(
                 .justify_end()
                 .child(budget),
         )
-        .child(div().w(px(120.)).flex_none().child(state))
+        .child(div().w(px(STATE_WIDTH)).flex_none().child(state))
         .child(
             div()
                 .w(px(84.))

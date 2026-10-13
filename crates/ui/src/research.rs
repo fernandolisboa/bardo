@@ -376,6 +376,7 @@ impl ResearchScreen {
                         .child(
                             Button::new("refresh-research")
                                 .outline()
+                                .max_w_full()
                                 .label(refresh_label)
                                 .on_click(
                                     cx.listener(|this, _: &ClickEvent, _, cx| this.run(true, cx)),

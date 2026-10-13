@@ -716,6 +716,14 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The tour's anchors are recorded afresh as this frame prepaints.
         crate::tour::begin_frame(window, cx);
+        // The screens draw after the shell, fitted to the window.
+        layout::set_room(
+            layout::Room {
+                window: window.viewport_size().width.into(),
+                jobs_open: self.jobs_open,
+            },
+            cx,
+        );
         // Keys go to the root alone while nothing on screen has the keyboard
         // (nothing focused yet, or the focused button was on a screen that
         // is gone), which would miss the shell's F1. Everything Bardo draws,
@@ -735,7 +743,10 @@ impl Render for Shell {
                 title_bar::Colors::interface(cx),
                 self.render_guide_over_editor(cx),
             ),
-            Some((editor, _)) => (title_bar::Colors::editor(cx), self.render_editor(editor)),
+            Some((editor, _)) => (
+                title_bar::Colors::editor(cx),
+                self.render_editor(editor, window),
+            ),
             None => (title_bar::Colors::interface(cx), self.render_screens(cx)),
         };
         // Over the editor, the Guide shows the editor's tours alone.
@@ -759,13 +770,21 @@ impl Render for Shell {
 }
 
 impl Shell {
-    /// The editor over the whole window, the jobs panel beside it when open.
-    fn render_editor(&self, editor: &Entity<EditorScreen>) -> AnyElement {
+    /// The editor over the whole window, the jobs panel beside it when open
+    /// (over it when the window is narrow).
+    fn render_editor(&self, editor: &Entity<EditorScreen>, window: &Window) -> AnyElement {
+        let room = layout::Room {
+            window: window.viewport_size().width.into(),
+            jobs_open: self.jobs_open,
+        };
+        let jobs = self.jobs_open.then(|| self.jobs.clone().into_any_element());
+        let (area, beside) =
+            layout::screen_area(editor.clone().into_any_element(), jobs, room.jobs_over(0.));
         h_flex()
             .size_full()
             .items_start()
-            .child(div().flex_1().h_full().min_w_0().child(editor.clone()))
-            .when(self.jobs_open, |row| row.child(self.jobs.clone()))
+            .child(area)
+            .children(beside)
             .into_any_element()
     }
 

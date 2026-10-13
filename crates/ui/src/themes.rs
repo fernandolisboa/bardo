@@ -22,7 +22,7 @@ use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div,
+    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
 };
 
 use crate::kit::{self, Tone};
@@ -33,6 +33,9 @@ use crate::{guide, layout};
 
 /// How often the screen checks the job queue for changes.
 const POLL_EVERY: Duration = Duration::from_millis(100);
+/// The narrowest an idea's title gets beside its tags; narrower, the tags go
+/// under it.
+const IDEA_TITLE_MIN_WIDTH: f32 = 200.;
 
 /// One option of a select.
 #[derive(Clone)]
@@ -645,12 +648,18 @@ impl ThemesScreen {
                     ))))
             }));
 
+        // In a narrow card the tags go under the title rather than squeeze
+        // it to a word per line.
         let header = h_flex()
-            .gap_3()
+            .flex_wrap()
+            .gap_x_3()
+            .gap_y_1()
             .justify_between()
             .items_start()
             .child(
                 h_flex()
+                    .flex_grow(1.)
+                    .flex_basis(px(IDEA_TITLE_MIN_WIDTH))
                     .gap_2()
                     .min_w_0()
                     .items_start()
