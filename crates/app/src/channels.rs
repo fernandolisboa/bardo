@@ -134,6 +134,7 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(db)),
             tours: Box::new(Arc::clone(db)),
+            agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Box::new(Arc::clone(db)),
             jobs: Arc::clone(db) as _,
             themes: Arc::clone(db) as _,
@@ -349,6 +350,7 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(Arc::clone(&db)),
             tours: Box::new(Arc::clone(&db)),
+            agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Box::new(Broken),
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,

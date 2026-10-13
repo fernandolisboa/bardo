@@ -39,6 +39,7 @@ macro_rules! uuid_id {
     };
 }
 
+mod agent_task;
 mod appearance;
 mod budget;
 mod caption;
@@ -75,6 +76,7 @@ mod reel;
 mod render;
 mod repository;
 mod research;
+mod runner;
 mod scene;
 mod schedule;
 mod script;
@@ -89,6 +91,7 @@ mod upload;
 mod voice;
 mod voice_sample;
 
+pub use agent_task::{AgentTask, AgentTaskError};
 pub use appearance::{
     LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,
     UnknownUiThemePreference,
@@ -208,6 +211,10 @@ pub use repository::RepositoryError;
 pub use research::{
     MarketData, MarketSample, Niche, NicheResearch, NicheResearchRepository, NicheScores,
     NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,
+};
+pub use runner::{
+    JOB_LEASE, JobHeldElsewhere, RUNNER_ALIVE, RUNNER_TICK, RunnerRole, RunnerSeen,
+    UnknownRunnerRole, running_since,
 };
 pub use scene::{
     MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneClip,

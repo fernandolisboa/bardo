@@ -18,9 +18,13 @@ bardo-storage.workspace = true
 anyhow.workspace = true
 gpui-kit.workspace = true
 tracing.workspace = true
-# Preview frames become RenderImages (ADR-0007).
-image = { version = "0.25", default-features = false }
+# Preview frames become RenderImages (ADR-0007); the X11 window icon is a PNG.
+image = { version = "0.25", default-features = false, features = ["png"] }
 sys-locale = "0.3"
+
+# Embeds the window and taskbar icon in bardo.exe on Windows (issue #131).
+[build-dependencies]
+embed-resource = "3"
 
 # For examples/preview_probe.rs, a frame-to-screen measurement (issue #18).
 [dev-dependencies]

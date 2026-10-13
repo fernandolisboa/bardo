@@ -13,8 +13,10 @@
 //! slept) is marked missed by its job the same way.
 //!
 //! The due time and the claim live in SQLite with the publication, and a
-//! claim is taken in one statement, so a background agent (after the MVP)
-//! can read and claim due publications without publishing one twice.
+//! claim is taken in one statement by the runner that holds the upload
+//! job's lease, so the background agent (`crate::agent`) sends the same
+//! posts while Bardo is closed without publishing one twice. While the
+//! agent runs, Bardo counts as open since the agent started.
 
 use std::time::SystemTime;
 
@@ -79,6 +81,9 @@ pub(crate) fn mark_missed(
     opened_at: SystemTime,
 ) -> Result<usize, RepositoryError> {
     let mut stored = jobs.list(owner)?;
+    // A job the other process (the background agent) runs is its own: it
+    // publishes the post or marks it missed itself.
+    let held = jobs.held_elsewhere(owner, SystemTime::now())?;
     let mut marked = 0;
     for mut publication in publications.all_publications(owner)? {
         let Some(due) = publication.due() else {
@@ -91,6 +96,9 @@ pub(crate) fn mark_missed(
             upload.status,
             UploadStatus::Queued | UploadStatus::Uploading | UploadStatus::Processing
         ) {
+            continue;
+        }
+        if held.contains(&upload.job) {
             continue;
         }
         let Some(job) = stored
@@ -116,7 +124,12 @@ pub(crate) fn mark_missed(
             continue;
         }
         job.cancel().expect("an active job can be cancelled");
-        jobs.save(job)?;
+        match jobs.save(job) {
+            // Taken by the agent meanwhile: its run finds the post missed
+            // and stops.
+            Err(error) if error.is_held_elsewhere() => {}
+            result => result?,
+        }
         marked += 1;
     }
     if marked > 0 {

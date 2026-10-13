@@ -119,14 +119,17 @@ impl Destination {
 pub enum SettingsTab {
     Keys,
     Networks,
+    /// Publishing while Bardo is closed: the background agent.
+    Publishing,
     Appearance,
     Metrics,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 4] = [
+    pub const ALL: [SettingsTab; 5] = [
         SettingsTab::Keys,
         SettingsTab::Networks,
+        SettingsTab::Publishing,
         SettingsTab::Appearance,
         SettingsTab::Metrics,
     ];
@@ -136,6 +139,7 @@ impl SettingsTab {
         match self {
             SettingsTab::Keys => "keys",
             SettingsTab::Networks => "networks",
+            SettingsTab::Publishing => "publishing",
             SettingsTab::Appearance => "appearance",
             SettingsTab::Metrics => "metrics",
         }

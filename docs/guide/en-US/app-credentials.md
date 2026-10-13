@@ -32,6 +32,11 @@ Setting an app up takes a few minutes per network, once:
 - [Connecting Instagram](connect-instagram.md)
 - [Connecting TikTok](connect-tiktok.md)
 
+<a id="step-by-step"></a>
+## Step by step for each app
+
+Each card's **Step by step** opens a screen with that network's setup: each step on the network's developer site, with a link straight to the page it happens on, and the card's fields at the end to paste the ID and secret into and save. **Back** returns to the tab. The steps are the first sections of the network's guide.
+
 <a id="save"></a>
 ## Saving an app
 

@@ -97,6 +97,9 @@ pub struct UserProfile {
     /// Whether a screen's "Tour this screen" button is marked new until its
     /// tour is completed or dismissed.
     pub offer_screen_tours: bool,
+    /// Whether the background agent publishes scheduled posts while Bardo
+    /// is closed (ADR-0006). Off until the user turns it on.
+    pub background_agent: bool,
 }
 
 impl UserProfile {
@@ -109,6 +112,7 @@ impl UserProfile {
             metrics_sync: MetricsSyncOnStart::default(),
             cut_suggestion_floor: DEFAULT_CUT_FLOOR,
             offer_screen_tours: true,
+            background_agent: false,
         }
     }
 }

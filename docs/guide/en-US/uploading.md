@@ -69,7 +69,7 @@ Confirming starts the upload as a job, with its progress here and in Jobs. If th
 | Processing | The network has the file and is working on it |
 | Still processing | Bardo stopped waiting for the network; **Check again** later |
 | Scheduled | On YouTube, private until its publish time |
-| Scheduled in Bardo | Instagram: Bardo posts it at its time, with Bardo open |
+| Scheduled in Bardo | Instagram: Bardo posts it at its time, with Bardo open or the [background agent](background-agent.md) on |
 | Missed its time | Bardo was closed at that time; see [Missed posts](missed-posts.md) |
 | Over the publishing limit | Queued until the network takes more posts |
 | Uploaded | On the network, with its link |
@@ -83,7 +83,7 @@ Confirming starts the upload as a job, with its progress here and in Jobs. If th
 Each network schedules in its own way:
 
 - **YouTube** takes a publish time. In the review, choose **Schedule** and type the date and time, read in your computer's time zone: Bardo uploads the video as private and YouTube makes it public at that time by itself, even with Bardo and your computer off. Until then, **Change time** and **Cancel schedule** change it on YouTube. More in [Scheduling on YouTube](connect-youtube.md#schedule).
-- **Instagram** takes no publish time from apps. With **Schedule**, Bardo sends the file ahead and publishes the Reel itself at that time, so keep Bardo open then and the computer on. If it is closed, nothing is posted and Bardo asks what to do when it opens: see [Missed posts](missed-posts.md).
+- **Instagram** takes no publish time from apps. With **Schedule**, Bardo sends the file ahead and publishes the Reel itself at that time, so keep Bardo open then and the computer on, or turn on the [background agent](background-agent.md), which sends it with Bardo closed. If neither runs, nothing is posted and Bardo asks what to do when it opens: see [Missed posts](missed-posts.md).
 - **TikTok** gets a draft in your inbox, never a post. You paste the caption, choose who can watch, and post or schedule it in the TikTok app. Bardo doesn't schedule drafts.
 
 A time that has already passed is refused when you confirm.

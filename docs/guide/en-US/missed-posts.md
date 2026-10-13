@@ -7,7 +7,7 @@ tour: missed
 
 # Missed posts
 
-Instagram takes no publish time from apps, so a Reel scheduled in Bardo is posted by Bardo itself at its time ([Scheduling](uploading.md#schedule)). When Bardo is closed or the computer is off at that time, nothing is posted, and nothing is posted later without you either. The next time Bardo opens, the list **Scheduled posts that didn't go out** comes up over the window for you to decide on each one. [Show me the list](bardo:tour/missed).
+Instagram takes no publish time from apps, so a Reel scheduled in Bardo is posted by Bardo itself at its time ([Scheduling](uploading.md#schedule)). When Bardo is closed (and the [background agent](background-agent.md) is off or not running) or the computer is off at that time, nothing is posted, and nothing is posted later without you either. The next time Bardo opens, the list **Scheduled posts that didn't go out** comes up over the window for you to decide on each one. [Show me the list](bardo:tour/missed).
 
 <a id="why"></a>
 ## Why a post is missed
@@ -24,7 +24,7 @@ YouTube videos are never missed: YouTube publishes them by itself. TikTok drafts
 <a id="new-time"></a>
 ## New time
 
-**New time** asks for a later date and time, read in your computer's time zone, and **Save time** keeps it. Keep Bardo open at that time, or the post is missed again.
+**New time** asks for a later date and time, read in your computer's time zone, and **Save time** keeps it. Keep Bardo open at that time, or the background agent on, or the post is missed again.
 
 <a id="cancel"></a>
 ## Cancel post

@@ -17,35 +17,35 @@ Bardo signs in to YouTube with an OAuth client you register in your own Google C
 <a id="project"></a>
 ## 1. Create a project and enable the APIs
 
-1. In the Google Cloud console, create a project (for example `bardo`).
-2. Open **APIs & Services › Library** and enable:
-   - **YouTube Data API v3** (uploads, scheduling, the connected channel);
-   - **YouTube Analytics API** (views, watch time and revenue reports).
+1. In the Google Cloud console, [create a project](https://console.cloud.google.com/projectcreate) (for example `bardo`), or pick the one you already use for the YouTube Data API key.
+2. With that project selected, open each API's page in **APIs & Services › Library** and select **Enable**:
+   - [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com) (uploads, scheduling, the connected channel);
+   - [YouTube Analytics API](https://console.cloud.google.com/apis/library/youtubeanalytics.googleapis.com) (views, watch time and revenue reports).
 
 Without them, connecting fails with "Access was refused. Enable YouTube Data API v3 and YouTube Analytics API…".
 
 <a id="consent"></a>
 ## 2. Configure the consent screen
 
-Open **Google Auth Platform**:
+Open [Google Auth Platform](https://console.cloud.google.com/auth/overview). A project that has none yet shows **Get started**, which asks for the app's name, your support email, the audience (**External**) and a contact email in one go; then check each page below.
 
-1. **Branding**: give the app a name (for example `Bardo`) and your support email.
-2. **Audience**: choose **External**. While the app is in **Testing**, add your own Google account under **Test users**.
-3. **Data Access**: add these scopes (Bardo asks for all four at once, since a desktop app cannot add scopes later):
+1. [Branding](https://console.cloud.google.com/auth/branding): give the app a name (for example `Bardo`) and your support email.
+2. [Audience](https://console.cloud.google.com/auth/audience): choose **External**. While the app is in **Testing**, add your own Google account under **Test users**.
+3. [Data Access](https://console.cloud.google.com/auth/scopes): select **Add or remove scopes** and add these (paste them under **Manually add scopes**) (Bardo asks for all four at once, since a desktop app cannot add scopes later):
    - `https://www.googleapis.com/auth/youtube.upload`
    - `https://www.googleapis.com/auth/youtube`
    - `https://www.googleapis.com/auth/yt-analytics.readonly`
    - `https://www.googleapis.com/auth/yt-analytics-monetary.readonly`
-4. Back in **Audience**, select **Publish app** to move it **In production**.
+4. Back in [Audience](https://console.cloud.google.com/auth/audience), select **Publish app** to move it **In production**.
 
 Why production: Google ends every authorization made to an app in **Testing** seven days after consent, refresh token included. Bardo would then show **Reconnect needed** every week. An app **In production** that only you use does not need Google's verification; Google shows an "unverified app" screen at consent, where you continue through **Advanced › Go to (app name)**. Unverified apps are capped at 100 users in total, which a personal setup never reaches.
 
 <a id="client"></a>
 ## 3. Create the OAuth client
 
-1. In **Google Auth Platform › Clients**, select **Create client**.
+1. Open [Google Auth Platform › Clients](https://console.cloud.google.com/auth/clients/create) to create a client.
 2. Application type: **Desktop app**. Name it (for example `Bardo desktop`).
-3. Copy the **Client ID** (ends in `.apps.googleusercontent.com`) and the **Client secret** (starts with `GOCSPX-`).
+3. Select **Create**, then copy the **Client ID** and the **Client secret** right away: Google shows the secret in full only when the client is created, and afterwards only its last four characters. The ID ends in `.apps.googleusercontent.com`; the secret usually starts with `GOCSPX-`. If you lose the secret, add a new one to the client and save that in Bardo.
 
 A desktop client needs no redirect address: Bardo listens once on `127.0.0.1` on a random port while you consent, and Google allows any loopback port for desktop clients.
 

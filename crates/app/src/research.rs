@@ -421,6 +421,7 @@ mod tests {
             let repositories = Repositories {
                 profiles: Box::new(Arc::clone(&self.db)),
                 tours: Box::new(Arc::clone(&self.db)),
+                agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
                 channels: Box::new(Arc::clone(&self.db)),
                 jobs: Arc::clone(&self.db) as Arc<dyn JobRepository>,
                 themes: Arc::clone(&self.db) as _,

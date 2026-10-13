@@ -934,7 +934,11 @@ impl ProjectsScreen {
             if scheduled {
                 card = card.child(self.schedule_fields(cx)).child(kit::notice(
                     Tone::Info,
-                    with_network(Text::UploadReelScheduleHint),
+                    with_network(if bardo.background_agent_on() {
+                        Text::UploadReelScheduleHintAgent
+                    } else {
+                        Text::UploadReelScheduleHint
+                    }),
                     cx,
                 ));
             }

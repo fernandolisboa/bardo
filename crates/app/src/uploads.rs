@@ -733,6 +733,15 @@ pub(crate) fn access_token(
     }
 }
 
+/// The publication an upload job sends, read from its payload.
+pub(crate) fn job_publication(job: &Job) -> Option<PublicationId> {
+    if job.kind() != JobKind::Upload {
+        return None;
+    }
+    let payload: UploadPayload = serde_json::from_str(job.payload()).ok()?;
+    id(&payload.publication).ok()
+}
+
 /// Runs uploads.
 pub(crate) struct UploadHandler {
     pub(crate) publications: Arc<dyn PublicationRepository>,
@@ -1287,7 +1296,6 @@ impl JobHandler for UploadHandler {
         // A scheduled upload Bardo publishes itself (`bardo_domain::due`):
         // what its due time allows now. Nothing goes once it is missed.
         let due = publication.due();
-        let mut claimed = upload.claimed_at.is_some();
         // Missed after its claim: the cut-short run may have published it,
         // so the run only asks the network what it has, and sends nothing.
         let mut check_only = false;
@@ -1305,7 +1313,6 @@ impl JobHandler for UploadHandler {
                     if !self.claim(publication_id, job)? {
                         return Ok(());
                     }
-                    claimed = true;
                 }
                 DueStep::Missed => {
                     let sent = cx
@@ -1319,14 +1326,13 @@ impl JobHandler for UploadHandler {
                 }
             }
         }
-        // Once the due time came during the run, the run claims the upload
-        // before it goes on; false when it is not this run's any more.
-        let claim_due = |claimed: &mut bool| -> Result<bool, JobFailure> {
+        // Once the due time came, the run claims the upload before each
+        // step; false when it is not this run's any more. Claimed every
+        // time, not once: a run whose job another runner took meanwhile
+        // (its lease ran out) stops before it publishes.
+        let claim_due = || -> Result<bool, JobFailure> {
             match due {
-                Some(due) if !*claimed && SystemTime::now() >= due => {
-                    *claimed = self.claim(publication_id, job)?;
-                    Ok(*claimed)
-                }
+                Some(due) if SystemTime::now() >= due => self.claim(publication_id, job),
                 _ => Ok(true),
             }
         };
@@ -1444,7 +1450,7 @@ impl JobHandler for UploadHandler {
             }
             p.sent(link)
         })?;
-        if !claim_due(&mut claimed)? {
+        if !claim_due()? {
             return Ok(());
         }
 
@@ -1453,7 +1459,7 @@ impl JobHandler for UploadHandler {
         // processing, and the user checks again later.
         let mut polls = 0;
         loop {
-            if cx.should_stop() || !claim_due(&mut claimed)? {
+            if cx.should_stop() || !claim_due()? {
                 return Ok(());
             }
             let state = access_token(&self.connections, &account)
@@ -1482,7 +1488,7 @@ impl JobHandler for UploadHandler {
                     if let Some(due) = due.filter(|due| SystemTime::now() < *due) {
                         return Self::wait_for_due(cx, checkpoint, due);
                     }
-                    if !claim_due(&mut claimed)? {
+                    if !claim_due()? {
                         return Ok(());
                     }
                     match self.publish(
@@ -4174,7 +4180,12 @@ mod tiktok_tests {
         assert_eq!(linked.render, render, "the draft's render");
         assert_eq!(linked.link.as_ref().unwrap().url(), link);
         assert_eq!(s.app.draft_note(&linked), None);
-        assert_eq!(draft(&s), linked);
+        // The metrics sync the link queues may have checked it meanwhile.
+        let read = draft(&s);
+        assert_eq!(
+            (read.id, read.kind, read.render, read.link),
+            (linked.id, linked.kind, linked.render, linked.link)
+        );
     }
 
     #[test]

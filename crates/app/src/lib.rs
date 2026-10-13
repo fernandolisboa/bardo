@@ -1,6 +1,7 @@
 //! Application state and use cases. The UI talks to Bardo only through this
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
+mod agent;
 mod appearance;
 mod channels;
 mod clips;
@@ -10,6 +11,7 @@ mod cut_suggestions;
 mod editor;
 mod export;
 mod guide;
+mod guide_site;
 pub mod i18n;
 mod jobs;
 pub mod logging;
@@ -44,22 +46,24 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver, CostRepository,
-    CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository, ImageGenerator,
-    InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData, MediaAssetRepository,
-    MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
+    AgentTask, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver,
+    CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository,
+    ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData,
+    MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
-    PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, Redactor,
-    RenderRepository, RepositoryError, ScenePlanRepository, ScriptRepository, SecretStore,
-    SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository,
-    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
+    PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
+    Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
+    SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator,
+    ThemeRepository, TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference,
+    UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
+    running_since,
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{
     Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore, MemoryVoiceSamples,
 };
 
+pub use agent::{AgentError, AgentStatus, AgentWork};
 pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
@@ -88,7 +92,9 @@ pub use export::{
 };
 pub use guide::{
     Guide, GuideGroup, GuideHit, GuideLink, GuidePage, GuidePageError, GuidePlace, GuideSection,
+    SetupSteps, SetupTarget,
 };
+pub use guide_site::{SiteFile, SiteOptions, guide_site};
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
@@ -213,6 +219,9 @@ pub struct Repositories {
     pub connection_secrets: Arc<dyn ConnectionSecrets>,
     /// How far the profile got in each guided tour.
     pub tours: Box<dyn TourProgressRepository>,
+    /// Where the background agent is registered with the system (Task
+    /// Scheduler on Windows).
+    pub agent_task: Arc<dyn AgentTask>,
 }
 
 impl Repositories {
@@ -232,6 +241,7 @@ impl Repositories {
             export_files: Arc::from(export_files),
             voice_samples: Arc::from(voice_samples),
             connection_secrets: Arc::from(connection_secrets),
+            agent_task: Arc::from(bardo_storage::platform_agent_task()),
             ..Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
         }
     }
@@ -276,6 +286,7 @@ impl Repositories {
             voice_samples: Arc::new(MemoryVoiceSamples::default()),
             secrets,
             connection_secrets: Arc::new(MemorySecretStore::default()),
+            agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
         }
     }
 }
@@ -416,6 +427,12 @@ pub struct Bardo {
     /// Read once at start: a zone changed while Bardo runs applies after a
     /// restart.
     zone: Zone,
+    /// Which process this is: Bardo's window or the background agent.
+    role: RunnerRole,
+    /// Where the background agent is registered with the system.
+    agent_task: Arc<dyn AgentTask>,
+    /// The program the agent's task runs: this one.
+    agent_program: std::path::PathBuf,
 }
 
 impl Bardo {
@@ -442,6 +459,24 @@ impl Bardo {
         providers: Providers,
         system_locale: Option<&str>,
         job_settings: JobSettings,
+    ) -> Result<Self, AppError> {
+        Self::open(
+            repositories,
+            providers,
+            system_locale,
+            job_settings,
+            RunnerRole::App,
+        )
+    }
+
+    /// Opens Bardo as `role`. The background agent (`agent`) opens the
+    /// profile the app made and runs only scheduled uploads.
+    fn open(
+        repositories: Repositories,
+        providers: Providers,
+        system_locale: Option<&str>,
+        job_settings: JobSettings,
+        role: RunnerRole,
     ) -> Result<Self, AppError> {
         let Repositories {
             profiles,
@@ -470,6 +505,7 @@ impl Bardo {
             secrets,
             connection_secrets,
             tours,
+            agent_task,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -479,12 +515,15 @@ impl Bardo {
                 profile
             }
         };
-        if personas.list(profile.id)?.is_empty() {
+        if role == RunnerRole::App && personas.list(profile.id)?.is_empty() {
             personas.insert_all(&Persona::defaults(profile.id))?;
         }
         // When this session opened: a due time before it passed while Bardo
-        // was closed.
-        let opened_at = SystemTime::now();
+        // was closed. The other process (the app or the agent) still up
+        // counts as open since it started.
+        let now = SystemTime::now();
+        let others = jobs.runners(now.checked_sub(RUNNER_ALIVE).unwrap_or(now))?;
+        let opened_at = running_since(now, &others);
         let catalog = Catalog::load(profile.ui_language);
         let guide = Guide::load(profile.ui_language);
         let tours = TourBook::load(profile.id, tours);
@@ -622,9 +661,14 @@ impl Bardo {
         // Scheduled posts whose time passed while Bardo was closed wait for
         // the user; their jobs must not start first.
         crate::scheduler::mark_missed(&*publications, &*jobs, profile.id, opened_at)?;
+        let runner = match role {
+            RunnerRole::App => crate::jobs::Runner::app(),
+            RunnerRole::Agent => crate::agent::runner(Arc::clone(&publications), &others),
+        };
         let jobs = JobQueue::start(
             jobs,
             profile.id,
+            runner,
             crate::jobs::built_in_handlers(crate::jobs::BuiltInHandlers {
                 research: research_handler,
                 themes: theme_handler,
@@ -686,6 +730,9 @@ impl Bardo {
             catalog,
             guide,
             zone: Zone::new(jiff::tz::TimeZone::system()),
+            role,
+            agent_task,
+            agent_program: std::env::current_exe().unwrap_or_default(),
         })
     }
 
@@ -1855,6 +1902,7 @@ mod tests {
         let repositories = Repositories {
             profiles: Box::new(profiles.clone()),
             tours: Box::new(Arc::clone(&db)),
+            agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             channels: Box::new(Arc::clone(&db)),
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,

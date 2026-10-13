@@ -719,13 +719,12 @@ impl Render for Shell {
                 }
             });
         }
-        let name = tr(self.bardo.read(cx), Text::AppName);
         let (colors, content) = match &self.editor {
             Some(_) if self.guide_over_editor => (
                 title_bar::Colors::interface(cx),
                 self.render_guide_over_editor(cx),
             ),
-            Some((editor, _)) => (title_bar::Colors::editor(), self.render_editor(editor)),
+            Some((editor, _)) => (title_bar::Colors::editor(cx), self.render_editor(editor)),
             None => (title_bar::Colors::interface(cx), self.render_screens(cx)),
         };
         // Over the editor, the Guide shows the editor's tours alone.
@@ -735,7 +734,7 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_open_guide))
             .on_action(cx.listener(Self::on_tour_this_screen))
-            .child(TitleBar::new(name, colors))
+            .child(TitleBar::new(colors))
             .child(
                 div()
                     .relative()

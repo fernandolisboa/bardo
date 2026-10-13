@@ -4,11 +4,13 @@ Native Windows desktop app to create and operate faceless ("dark") channels acro
 
 AI-assisted, not automatic: AI speeds up research, scripting, media generation and cut suggestions; the user decides, adjusts and finalizes. Single-user and offline-first: everything runs on the user's machine and secrets stay local.
 
+- User guide: [fernandolisboa.github.io/bardo](https://fernandolisboa.github.io/bardo/) (English and Portuguese; source in [`docs/guide/`](docs/guide/))
 - Domain vocabulary: [`docs/CONTEXT.md`](docs/CONTEXT.md)
 - Architecture decisions: [`docs/adr/`](docs/adr/)
 - Specs: [`docs/spec/`](docs/spec/)
 - PRD: [`docs/prd/`](docs/prd/)
 - Design handoffs: [`docs/design/`](docs/design/)
+- Brand (mark, wordmark, app icon): [`assets/brand/`](assets/brand/)
 - Spikes: [`docs/spikes/`](docs/spikes/)
 
 ## Development

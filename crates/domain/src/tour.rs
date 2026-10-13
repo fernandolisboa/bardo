@@ -59,10 +59,12 @@ pub enum TourId {
     Appearance,
     /// The tour of Settings › Metrics: when metrics sync by themselves.
     MetricsSync,
+    /// The tour of Settings › Publishing: the background agent.
+    BackgroundAgent,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 24] = [
+    pub const ALL: [TourId; 25] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -87,6 +89,7 @@ impl TourId {
         TourId::Keys,
         TourId::Appearance,
         TourId::MetricsSync,
+        TourId::BackgroundAgent,
     ];
 
     pub fn code(self) -> &'static str {
@@ -115,6 +118,7 @@ impl TourId {
             TourId::Keys => "keys",
             TourId::Appearance => "appearance",
             TourId::MetricsSync => "metrics-sync",
+            TourId::BackgroundAgent => "background-agent",
         }
     }
 

@@ -83,7 +83,8 @@ pub fn start_tour(tour: TourId, window: &mut Window, cx: &mut App) {
     }
 }
 
-fn open_section(section: GuideRef, window: &mut Window, cx: &mut App) {
+/// Opens the Guide screen at `section`, as an ⓘ's "More in the guide" does.
+pub fn open_section(section: GuideRef, window: &mut Window, cx: &mut App) {
     if let Some(open) = cx
         .try_global::<GuideHooks>()
         .map(|hooks| hooks.section.clone())
@@ -149,6 +150,7 @@ pub mod refs {
     pub const EXPORTING_OUTDATED: GuideRef = at("exporting", "outdated");
     pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
     pub const INSTAGRAM_UPLOAD: GuideRef = at("connect-instagram", "upload");
+    pub const INSTAGRAM_TOKEN: GuideRef = at("connect-instagram", "token");
     pub const COSTS_MONTH: GuideRef = at("costs", "month");
     pub const COSTS_BUDGETS: GuideRef = at("costs", "budgets");
     pub const COSTS_RATES: GuideRef = at("costs", "rates");
@@ -157,11 +159,12 @@ pub mod refs {
     pub const SETTINGS_LAYOUT: GuideRef = at("settings", "layout");
     pub const SETTINGS_TOURS: GuideRef = at("settings", "tours");
     pub const METRICS_ON_START: GuideRef = at("metrics-sync", "on-start");
+    pub const AGENT_ON: GuideRef = at("background-agent", "turn-on");
     pub const SHORTCUTS_LISTS: GuideRef = at("shortcuts", "lists");
     pub const SHORTCUTS_GUIDE: GuideRef = at("shortcuts", "guide");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 58] = [
+    pub const ALL: [GuideRef; 60] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -210,6 +213,7 @@ pub mod refs {
         EXPORTING_OUTDATED,
         YOUTUBE_UPLOAD,
         INSTAGRAM_UPLOAD,
+        INSTAGRAM_TOKEN,
         COSTS_MONTH,
         COSTS_BUDGETS,
         COSTS_RATES,
@@ -218,6 +222,7 @@ pub mod refs {
         SETTINGS_LAYOUT,
         SETTINGS_TOURS,
         METRICS_ON_START,
+        AGENT_ON,
         SHORTCUTS_LISTS,
         SHORTCUTS_GUIDE,
     ];
@@ -757,13 +762,14 @@ impl Guide {
         }
         // Long labels (Portuguese in a monospace theme) wrap the trailing
         // buttons to a line of their own, still on the right, rather than
-        // past the card's edge.
+        // past the card's edge. `ml_auto` alone keeps them right: adding
+        // `justify_between` counts the free space twice and pushes them
+        // out of the card when the row does not wrap.
         h_flex()
             .flex_wrap()
             .gap_x_2()
             .gap_y_1()
             .items_center()
-            .justify_between()
             .child(h_flex().gap_1().children(lead))
             .child(h_flex().ml_auto().gap_1().children(trail))
             .into_any_element()

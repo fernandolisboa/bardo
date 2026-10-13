@@ -15,6 +15,7 @@ tour: appearance
 
 - **API keys**: one key per AI provider, kept in Windows Credential Manager. See [Your API keys](api-keys.md).
 - **Networks**: the apps Bardo signs in to YouTube, Instagram and TikTok with. See [Network app credentials](app-credentials.md).
+- **Publishing**: whether scheduled Reels go out while Bardo is closed. See [Publishing while Bardo is closed](background-agent.md).
 - **Appearance**: the layout, the theme, the interface language and the guided tours, below.
 - **Metrics**: when your posts' numbers sync by themselves. See [Syncing metrics](metrics-sync.md).
 

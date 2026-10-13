@@ -255,6 +255,14 @@ pub enum Text {
     StartFailingTestJob,
     SettingsTitle,
     ProviderKeysTitle,
+    /// A card's button to its setup screen.
+    SetupStepByStep,
+    /// Placeholder: `{name}`, the provider or the network's app.
+    SetupTitle,
+    /// Placeholder: `{tab}`.
+    SetupBack,
+    SetupPasteHere,
+    SetupOpenInGuide,
     ProviderKeysHint,
     ProviderName(Provider),
     ProviderPurpose(Provider),
@@ -1373,6 +1381,30 @@ pub enum Text {
     UploadMissedAt,
     UploadMissedHint,
     UploadReelScheduleHint,
+    /// `UploadDueHint` while the background agent is on.
+    UploadDueHintAgent,
+    /// `UploadReelScheduleHint` while the background agent is on.
+    /// Placeholder: `{network}`.
+    UploadReelScheduleHintAgent,
+    /// `UploadMissedHint` while the background agent is on.
+    UploadMissedHintAgent,
+    JobRunsElsewhere,
+    SettingsPublishingTab,
+    AgentTitle,
+    AgentQuestion,
+    AgentExplanation,
+    AgentSwitch,
+    AgentSends,
+    AgentLimits,
+    AgentHint,
+    AgentStatusOff,
+    AgentStatusRunning,
+    AgentStatusNotRunning,
+    AgentStartNow,
+    AgentWorking,
+    AgentNotSetUp,
+    AgentNotRemoved,
+    AgentNotSaved,
     UploadReelStartScheduled,
     /// One TikTok spec problem, by `TikTokSpecProblem::code`.
     UploadTikTokSpec(&'static str),
@@ -1806,6 +1838,11 @@ impl Text {
             Text::StartFailingTestJob => "jobs.test.start_failing",
             Text::SettingsTitle => "settings.title",
             Text::ProviderKeysTitle => "provider_keys.title",
+            Text::SetupStepByStep => "setup.step_by_step",
+            Text::SetupTitle => "setup.title",
+            Text::SetupBack => "setup.back",
+            Text::SetupPasteHere => "setup.paste_here",
+            Text::SetupOpenInGuide => "setup.open_in_guide",
             Text::ProviderKeysHint => "provider_keys.hint",
             Text::ProviderName(provider) => {
                 return format!("provider.{}.name", provider.code()).into();
@@ -3001,6 +3038,26 @@ impl Text {
             Text::UploadMissedAt => "upload.missed_at",
             Text::UploadMissedHint => "upload.missed_hint",
             Text::UploadReelScheduleHint => "upload.reel_schedule_hint",
+            Text::UploadDueHintAgent => "upload.due_hint_agent",
+            Text::UploadReelScheduleHintAgent => "upload.reel_schedule_hint_agent",
+            Text::UploadMissedHintAgent => "upload.missed_hint_agent",
+            Text::JobRunsElsewhere => "job.error.runs_elsewhere",
+            Text::SettingsPublishingTab => "settings.publishing_tab",
+            Text::AgentTitle => "agent.title",
+            Text::AgentQuestion => "agent.question",
+            Text::AgentExplanation => "agent.explanation",
+            Text::AgentSwitch => "agent.switch",
+            Text::AgentSends => "agent.sends",
+            Text::AgentLimits => "agent.limits",
+            Text::AgentHint => "agent.hint",
+            Text::AgentStatusOff => "agent.status.off",
+            Text::AgentStatusRunning => "agent.status.running",
+            Text::AgentStatusNotRunning => "agent.status.not_running",
+            Text::AgentStartNow => "agent.start_now",
+            Text::AgentWorking => "agent.working",
+            Text::AgentNotSetUp => "agent.error.not_set_up",
+            Text::AgentNotRemoved => "agent.error.not_removed",
+            Text::AgentNotSaved => "agent.error.not_saved",
             Text::UploadReelStartScheduled => "upload.reel_start_scheduled",
             Text::UploadTikTokSpec(code) => return format!("upload.tiktok_spec.{code}").into(),
             Text::UploadTikTokSpecsTitle => "upload.tiktok_specs_title",
@@ -3576,6 +3633,11 @@ mod tests {
             Text::SettingsTitle,
             Text::ProviderKeysTitle,
             Text::ProviderKeysHint,
+            Text::SetupStepByStep,
+            Text::SetupTitle,
+            Text::SetupBack,
+            Text::SetupPasteHere,
+            Text::SetupOpenInGuide,
             Text::KeyNotSet,
             Text::KeySaved,
             Text::KeyUnreadable,
@@ -4677,6 +4739,28 @@ mod tests {
         texts.push(Text::UploadMissedAt);
         texts.push(Text::UploadMissedHint);
         texts.push(Text::UploadReelScheduleHint);
+        texts.extend([
+            Text::UploadDueHintAgent,
+            Text::UploadReelScheduleHintAgent,
+            Text::UploadMissedHintAgent,
+            Text::JobRunsElsewhere,
+            Text::SettingsPublishingTab,
+            Text::AgentTitle,
+            Text::AgentQuestion,
+            Text::AgentExplanation,
+            Text::AgentSwitch,
+            Text::AgentSends,
+            Text::AgentLimits,
+            Text::AgentHint,
+            Text::AgentStatusOff,
+            Text::AgentStatusRunning,
+            Text::AgentStatusNotRunning,
+            Text::AgentStartNow,
+            Text::AgentWorking,
+            Text::AgentNotSetUp,
+            Text::AgentNotRemoved,
+            Text::AgentNotSaved,
+        ]);
         texts.push(Text::UploadReelStartScheduled);
         texts.extend(bardo_domain::TikTokSpecProblem::CODES.map(Text::UploadTikTokSpec));
         texts.push(Text::UploadTikTokSpecsTitle);
@@ -4841,6 +4925,10 @@ mod tests {
                 text.contains("Invalid API key") && !text.contains('{'),
                 "{text}"
             );
+            let text = catalog.format(Text::SetupTitle, &[("name", "Claude")]);
+            assert!(text.contains("Claude") && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::SetupBack, &[("tab", "API keys")]);
+            assert!(text.contains("API keys") && !text.contains('{'), "{text}");
         }
     }
 

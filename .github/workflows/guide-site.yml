@@ -1,0 +1,93 @@
+name: Guide site
+
+# The user guide website (issue #112): mdBook books made from docs/guide/,
+# the same pages the app embeds, deployed to GitHub Pages from main.
+# Pull requests build it too, so a broken link fails before it merges.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/guide/**
+      - crates/app/src/guide.rs
+      - crates/app/src/guide_site.rs
+      - crates/app/examples/guide_site.rs
+      - crates/app/locales/**
+      - .github/workflows/guide-site.yml
+  pull_request:
+    paths:
+      - docs/guide/**
+      - crates/app/src/guide.rs
+      - crates/app/src/guide_site.rs
+      - crates/app/examples/guide_site.rs
+      - crates/app/locales/**
+      - .github/workflows/guide-site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guide-site-${{ github.ref }}
+  # Never cancel a deployment halfway; a newer pull request push may.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned: a new mdBook can change the generated site.
+  MDBOOK_VERSION: 0.5.4
+  MDBOOK_SHA256: 3f28de05dafca9d0f2eab99c662116b0e37b89b1d96a08f8f430b9eeae958cd7
+
+jobs:
+  build:
+    name: Build the guide site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: ALSA headers (bardo-app plays audio through ALSA on Linux)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install mdBook ${{ env.MDBOOK_VERSION }}
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/mdbook.tar.gz" \
+            "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${MDBOOK_SHA256}  $RUNNER_TEMP/mdbook.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/mdbook"
+          tar -xzf "$RUNNER_TEMP/mdbook.tar.gz" -C "$RUNNER_TEMP/mdbook"
+          echo "$RUNNER_TEMP/mdbook" >> "$GITHUB_PATH"
+      - name: Write the books from docs/guide (fails on a broken link)
+        env:
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: >
+          cargo run --locked -p bardo-app --example guide_site --
+          target/guide-site
+          --base-path "/$REPOSITORY_NAME"
+          --repository "$REPOSITORY_URL"
+      - name: Build the books
+        run: |
+          for book in target/guide-site/*/book.toml; do
+            mdbook build "$(dirname "$book")"
+          done
+          # GitHub Pages answers a missing address with the root 404.html.
+          cp target/guide-site/site/en-US/404.html target/guide-site/site/404.html
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: target/guide-site/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

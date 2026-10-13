@@ -37,6 +37,7 @@ use gpui_kit::{
 
 use crate::appearance::look;
 use crate::guide;
+use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 
@@ -165,6 +166,14 @@ pub struct OpenNetworkSettings;
 fn token_tool(network: Network) -> Option<&'static str> {
     match network {
         Network::InstagramReels => Some("https://developers.facebook.com/tools/explorer/"),
+        _ => None,
+    }
+}
+
+/// The guide section that walks through getting a pasted token.
+fn token_steps(network: Network) -> Option<GuideRef> {
+    match network {
+        Network::InstagramReels => Some(guide::refs::INSTAGRAM_TOKEN),
         _ => None,
     }
 }
@@ -1195,6 +1204,14 @@ impl NetworkAccountsPanel {
                             .icon(IconName::ExternalLink)
                             .label(tr(bardo, Text::ConnectionOpenTokenTool(network)))
                             .on_click(move |_, _, cx| cx.open_url(url))
+                    }))
+                    .children(token_steps(network).map(|steps| {
+                        Button::new(("token-steps", ix))
+                            .small()
+                            .ghost()
+                            .icon(Lucide::BookOpen)
+                            .label(tr(bardo, Text::SetupStepByStep))
+                            .on_click(move |_, window, cx| guide::open_section(steps, window, cx))
                     }))
                     .child(div().flex_1())
                     .child(

@@ -15,6 +15,7 @@ tour: appearance
 
 - **Chaves de API**: uma chave por provedor de IA, guardada no Gerenciador de Credenciais do Windows. Veja [Suas chaves de API](api-keys.md).
 - **Redes**: os apps com que o Bardo entra no YouTube, no Instagram e no TikTok. Veja [Credenciais de app das redes](app-credentials.md).
+- **Publicação**: se os Reels agendados saem com o Bardo fechado. Veja [Publicar com o Bardo fechado](background-agent.md).
 - **Aparência**: o layout, o tema, o idioma da interface e os tours guiados, abaixo.
 - **Métricas**: quando os números dos seus posts sincronizam sozinhos. Veja [Sincronizar métricas](metrics-sync.md).
 

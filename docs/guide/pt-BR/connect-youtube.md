@@ -17,26 +17,26 @@ O Bardo entra no YouTube com um cliente OAuth que você registra no seu próprio
 <a id="project"></a>
 ## 1. Crie um projeto e ative as APIs
 
-1. No console do Google Cloud, crie um projeto (por exemplo `bardo`).
-2. Abra **APIs e serviços › Biblioteca** e ative:
-   - **YouTube Data API v3** (envios, agendamento, o canal conectado);
-   - **YouTube Analytics API** (relatórios de visualizações, tempo de exibição e receita).
+1. No console do Google Cloud, [crie um projeto](https://console.cloud.google.com/projectcreate) (por exemplo `bardo`), ou escolha o que você já usa para a chave da YouTube Data API.
+2. Com esse projeto selecionado, abra a página de cada API em **APIs e serviços › Biblioteca** e escolha **Ativar**:
+   - [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com) (envios, agendamento, o canal conectado);
+   - [YouTube Analytics API](https://console.cloud.google.com/apis/library/youtubeanalytics.googleapis.com) (relatórios de visualizações, tempo de exibição e receita).
 
 Sem elas, conectar falha com "O acesso foi recusado. Ative a YouTube Data API v3 e a YouTube Analytics API…".
 
 <a id="consent"></a>
 ## 2. Configure a tela de consentimento
 
-Abra a **Google Auth Platform**:
+Abra a [Google Auth Platform](https://console.cloud.google.com/auth/overview). Um projeto que ainda não tem nada mostra **Primeiros passos** (*Get started*), que pede de uma vez o nome do app, o seu e-mail de suporte, o público-alvo (**Externo**) e um e-mail de contato; depois confira cada página abaixo.
 
-1. **Branding**: dê um nome ao app (por exemplo `Bardo`) e o seu e-mail de suporte.
-2. **Público-alvo**: escolha **Externo**. Enquanto o app estiver em **Teste**, adicione a sua própria conta do Google em **Usuários de teste**.
-3. **Acesso a dados**: adicione estes escopos (o Bardo pede os quatro de uma vez, porque um app para computador não consegue adicionar escopos depois):
+1. [Branding](https://console.cloud.google.com/auth/branding): dê um nome ao app (por exemplo `Bardo`) e o seu e-mail de suporte.
+2. [Público-alvo](https://console.cloud.google.com/auth/audience): escolha **Externo**. Enquanto o app estiver em **Teste**, adicione a sua própria conta do Google em **Usuários de teste**.
+3. [Acesso a dados](https://console.cloud.google.com/auth/scopes): escolha **Adicionar ou remover escopos** e adicione estes (cole em **Adicionar escopos manualmente**) (o Bardo pede os quatro de uma vez, porque um app para computador não consegue adicionar escopos depois):
    - `https://www.googleapis.com/auth/youtube.upload`
    - `https://www.googleapis.com/auth/youtube`
    - `https://www.googleapis.com/auth/yt-analytics.readonly`
    - `https://www.googleapis.com/auth/yt-analytics-monetary.readonly`
-4. De volta em **Público-alvo**, escolha **Publicar app** para passá-lo para **Em produção**.
+4. De volta em [Público-alvo](https://console.cloud.google.com/auth/audience), escolha **Publicar app** para passá-lo para **Em produção**.
 
 Por que produção: o Google encerra toda autorização dada a um app em **Teste** sete dias depois do consentimento, token de renovação incluído. O Bardo mostraria **Reconexão necessária** toda semana. Um app **Em produção** usado só por você não precisa da verificação do Google; o Google mostra uma tela de "app não verificado" no consentimento, em que você continua por **Avançado › Acessar (nome do app)**. Apps não verificados têm limite de 100 usuários no total, que um uso pessoal nunca atinge.
 
@@ -45,9 +45,9 @@ Os nomes dos menus podem aparecer em inglês, conforme o idioma do seu console: 
 <a id="client"></a>
 ## 3. Crie o cliente OAuth
 
-1. Em **Google Auth Platform › Clientes**, escolha **Criar cliente**.
+1. Abra [Google Auth Platform › Clientes](https://console.cloud.google.com/auth/clients/create) para criar um cliente.
 2. Tipo de aplicativo: **App para computador**. Dê um nome (por exemplo `Bardo desktop`).
-3. Copie o **ID do cliente** (termina em `.apps.googleusercontent.com`) e a **Chave secreta do cliente** (começa com `GOCSPX-`).
+3. Escolha **Criar** e copie na hora o **ID do cliente** e a **Chave secreta do cliente**: o Google mostra a chave secreta inteira só quando o cliente é criado e, depois, apenas os quatro últimos caracteres. O ID termina em `.apps.googleusercontent.com`; a chave secreta normalmente começa com `GOCSPX-`. Se você perder a chave secreta, adicione uma nova ao cliente e salve essa no Bardo.
 
 Um cliente para computador não precisa de endereço de redirecionamento: o Bardo escuta uma vez em `127.0.0.1`, numa porta aleatória, enquanto você dá o consentimento, e o Google aceita qualquer porta de loopback em clientes para computador.
 
