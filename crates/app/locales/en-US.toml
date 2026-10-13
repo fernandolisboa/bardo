@@ -250,6 +250,10 @@ title = "{name}: step by step"
 back = "Back to {tab}"
 paste_here = "Paste it here"
 open_in_guide = "Open in the guide"
+audits = "Audits and reviews"
+audit_title = "{network}: audits and reviews"
+copy_block = "Copy for the form"
+copied = "Copied. Paste it into the form."
 
 [provider_keys]
 title = "Provider keys"
@@ -1769,7 +1773,8 @@ retrying_hint = "The connection or {network} failed on the way. Bardo tries agai
 processing_hint = "{network} has the file and is processing it. Bardo checks on it for about an hour."
 still_processing_hint = "{network} was still processing the video when Bardo stopped checking. Check again later."
 stopped_hint = "Resume to send the rest. What {network} already has is not sent again."
-restricted_hint = "Kept private by YouTube: your Google project has not passed the YouTube API audit."
+restricted_hint = "YouTube kept this video private."
+restricted_causes = "Possible causes"
 stop = "Stop"
 resume = "Resume"
 retry = "Retry"
@@ -1780,7 +1785,7 @@ scheduled_at = "Goes public {when}"
 over_limit_at = "Goes out {when}"
 over_limit_retry_at = "Tries again {when}"
 scheduled_hint = "Private on {network} until then. {network} publishes it by itself, even with Bardo and your computer off."
-restricted_scheduled_hint = "YouTube kept it private at its publish time: your Google project has not passed the YouTube API audit."
+restricted_scheduled_hint = "YouTube kept this video private at its publish time."
 reel_hint = "Bardo sends the rendered file to the connected Instagram account with this caption, then publishes the Reel once Instagram has processed it. Nothing is sent until you confirm the review."
 cover_hint = "The frame the cover shows, as seconds or m:ss from the start."
 cover_invalid = "Type the cover time as seconds or m:ss, within the video."
@@ -2407,6 +2412,10 @@ body = "Paste the ID (TikTok calls it the client key) and the secret from the ne
 [tour.networks.setup]
 title = "Step by step"
 body = "Not sure where to start? Step by step opens a screen with each step on the network's developer site, a link straight to each page, and the fields to paste into at the end."
+
+[tour.networks.audits]
+title = "Audits and reviews"
+body = "Each network can review your app, for more quota or more accounts. With your own app, most of it does not apply. Audits and reviews opens a screen that says when it does, what the network asks and what Bardo already gives you for it."
 
 [tour.networks.kept]
 title = "Where they are kept"

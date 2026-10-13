@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
 use bardo_app::{
-    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, Spot, Stage, Text, TourAnchor, TourPlace,
-    TourStepView,
+    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, SetupTarget, Spot, Stage, Text,
+    TourAnchor, TourPlace, TourStepView,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
@@ -64,11 +64,13 @@ pub enum GuideEvent {
 }
 
 /// What a screen's own controls ask of the Guide: start the screen's tour
-/// ("Tour this screen"), or open the guide at a section (an ⓘ's "More in
-/// the guide"). The shell sets them, so a screen needs no handle on it.
+/// ("Tour this screen"), open the guide at a section (an ⓘ's "More in
+/// the guide"), or open a setup screen in Settings (a post's "Step by
+/// step"). The shell sets them, so a screen needs no handle on it.
 pub struct GuideHooks {
     pub tour: OnPick<TourId>,
     pub section: OnPick<GuideRef>,
+    pub setup: OnPick<SetupTarget>,
 }
 
 impl Global for GuideHooks {}
@@ -90,6 +92,17 @@ pub fn open_section(section: GuideRef, window: &mut Window, cx: &mut App) {
         .map(|hooks| hooks.section.clone())
     {
         open(section, window, cx);
+    }
+}
+
+/// Opens Settings at the setup screen for `target`, as a card's Step by
+/// step does.
+pub fn open_setup(target: SetupTarget, window: &mut Window, cx: &mut App) {
+    if let Some(open) = cx
+        .try_global::<GuideHooks>()
+        .map(|hooks| hooks.setup.clone())
+    {
+        open(target, window, cx);
     }
 }
 
@@ -146,6 +159,7 @@ pub mod refs {
     pub const UPLOADING_DISCLOSURE: GuideRef = at("uploading", "disclosure");
     pub const UPLOADING_REVIEW: GuideRef = at("uploading", "review");
     pub const UPLOAD_STATES: GuideRef = at("uploading", "states");
+    pub const YOUTUBE_KEPT_PRIVATE: GuideRef = at("platform-audits", "youtube-private");
     pub const UPLOADING_POST: GuideRef = at("uploading", "post");
     pub const EXPORTING_OUTDATED: GuideRef = at("exporting", "outdated");
     pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
@@ -164,7 +178,7 @@ pub mod refs {
     pub const SHORTCUTS_GUIDE: GuideRef = at("shortcuts", "guide");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 60] = [
+    pub const ALL: [GuideRef; 61] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -209,6 +223,7 @@ pub mod refs {
         UPLOADING_DISCLOSURE,
         UPLOADING_REVIEW,
         UPLOAD_STATES,
+        YOUTUBE_KEPT_PRIVATE,
         UPLOADING_POST,
         EXPORTING_OUTDATED,
         YOUTUBE_UPLOAD,

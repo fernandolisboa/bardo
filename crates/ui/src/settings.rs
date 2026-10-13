@@ -34,8 +34,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, Entity, Hsla, MouseButton, ScrollHandle, SharedString,
-    Subscription, Task, Window, div, point, px, rems, rgb,
+    AnyElement, App, ClickEvent, ClipboardItem, ElementId, Entity, Hsla, MouseButton, ScrollHandle,
+    SharedString, Subscription, Task, Window, div, point, px, rems, rgb,
 };
 
 use crate::appearance::{self, look};
@@ -173,6 +173,8 @@ pub struct SettingsScreen {
     tab: SettingsTab,
     /// The setup screen open over its tab's cards.
     setup: Option<SetupTarget>,
+    /// The setup screen's block was copied.
+    copied: bool,
     rows: HashMap<Provider, KeyRow>,
     credentials: HashMap<Network, CredentialsRow>,
     /// The light and dark slots of "follow Windows".
@@ -307,6 +309,7 @@ impl SettingsScreen {
             bardo,
             tab: SettingsTab::Keys,
             setup: None,
+            copied: false,
             rows,
             credentials,
             light_theme,
@@ -345,6 +348,7 @@ impl SettingsScreen {
     pub fn show_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.tab = tab;
         self.setup = None;
+        self.copied = false;
         cx.notify();
     }
 
@@ -357,6 +361,7 @@ impl SettingsScreen {
     pub fn open_setup(&mut self, target: SetupTarget, cx: &mut Context<Self>) {
         self.tab = target.tab();
         self.setup = Some(target);
+        self.copied = false;
         self.scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
@@ -364,7 +369,15 @@ impl SettingsScreen {
     /// Back from a setup screen to its tab's cards.
     fn close_setup(&mut self, cx: &mut Context<Self>) {
         self.setup = None;
+        self.copied = false;
         self.scroll.set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    }
+
+    /// Copies the setup screen's block, to paste into the network's form.
+    fn copy_block(&mut self, text: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.copied = true;
         cx.notify();
     }
 
@@ -673,6 +686,16 @@ impl SettingsScreen {
                 cx,
             )
         });
+        let audits = (!in_setup).then(|| {
+            Button::new(("credentials-audits", network as usize))
+                .ghost()
+                .xsmall()
+                .icon(Lucide::ShieldCheck)
+                .label(tr(self.bardo.read(cx), Text::SetupAudits))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.open_setup(SetupTarget::Audit(network), cx)
+                }))
+        });
         let bardo = self.bardo.read(cx);
         let tokens = look(cx).tokens;
         let row = &self.credentials[&network];
@@ -770,19 +793,34 @@ impl SettingsScreen {
                                         .text_color(tokens.text2)
                                         .child(tr(bardo, Text::AppCredentialsPurpose(network))),
                                 )
-                                .children(steps.map(|steps| {
-                                    // Its own width, at the start of the line.
-                                    h_flex().ml(px(-6.)).child(if first {
-                                        kit::anchor_in(
-                                            TourAnchor::Control(Control::CredentialsSetup),
-                                            steps,
-                                            scroll,
-                                        )
-                                        .into_any_element()
-                                    } else {
-                                        steps.into_any_element()
-                                    })
-                                })),
+                                .when(!in_setup, |column| {
+                                    // Each its own width, at the start of
+                                    // the line.
+                                    let lit = |anchor, button: Option<Button>| {
+                                        button.map(|button| {
+                                            if first {
+                                                kit::anchor_in(anchor, button, scroll)
+                                                    .into_any_element()
+                                            } else {
+                                                button.into_any_element()
+                                            }
+                                        })
+                                    };
+                                    column.child(
+                                        h_flex()
+                                            .flex_wrap()
+                                            .ml(px(-6.))
+                                            .gap_1()
+                                            .children(lit(
+                                                TourAnchor::Control(Control::CredentialsSetup),
+                                                steps,
+                                            ))
+                                            .children(lit(
+                                                TourAnchor::Control(Control::CredentialsAudits),
+                                                audits,
+                                            )),
+                                    )
+                                }),
                         )
                         .child(state),
                 )
@@ -1098,13 +1136,26 @@ impl SettingsScreen {
         let tokens = look(cx).tokens;
         let language = bardo.ui_language();
         let (page, section_ids) = target.steps();
-        let (name, tab_name) = match target {
+        let (title, tab_name) = match target {
             SetupTarget::Key(provider) => (
-                tr(bardo, Text::ProviderName(provider)),
+                bardo.text_with(
+                    Text::SetupTitle,
+                    &[("name", &bardo.text(Text::ProviderName(provider)))],
+                ),
                 tr(bardo, Text::SettingsKeysTab),
             ),
             SetupTarget::App(network) => (
-                tr(bardo, Text::AppCredentialsName(network)),
+                bardo.text_with(
+                    Text::SetupTitle,
+                    &[("name", &bardo.text(Text::AppCredentialsName(network)))],
+                ),
+                tr(bardo, Text::SettingsNetworksTab),
+            ),
+            SetupTarget::Audit(network) => (
+                bardo.text_with(
+                    Text::SetupAuditTitle,
+                    &[("network", &bardo.text(Text::NetworkName(network)))],
+                ),
                 tr(bardo, Text::SettingsNetworksTab),
             ),
         };
@@ -1129,6 +1180,27 @@ impl SettingsScreen {
                 })
         });
         let this = cx.entity().downgrade();
+        let copy = steps
+            .as_ref()
+            .and_then(|steps| steps.copy_block())
+            .map(|block| {
+                let copy = Button::new("setup-copy")
+                    .small()
+                    .outline()
+                    .icon(Lucide::Copy)
+                    .label(tr(bardo, Text::SetupCopyBlock))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.copy_block(block.clone(), cx)
+                    }));
+                h_flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_3()
+                    .child(copy)
+                    .when(self.copied, |row| {
+                        row.child(kit::notice(Tone::Success, tr(bardo, Text::SetupCopied), cx))
+                    })
+            });
         let sections = steps.map(|steps| steps.sections).unwrap_or_default();
         // One section is the key's own: its heading would repeat the title.
         let headed = sections.len() > 1;
@@ -1152,7 +1224,7 @@ impl SettingsScreen {
                 })
                 // List items are indented but wrap at the full width; the
                 // padding keeps their line ends from being cut off.
-                .child(div().w_full().pr_6().child(body))
+                .child(div().w_full().pr_10().child(body))
         });
         let card = match target {
             SetupTarget::Key(provider) => self
@@ -1169,6 +1241,8 @@ impl SettingsScreen {
                 .into_iter()
                 .find(|status| status.network == network)
                 .map(|status| self.render_credentials_card(status, false, true, cx)),
+            // Nothing to paste: the audit happens on the network's site.
+            SetupTarget::Audit(_) => None,
         };
         let bardo = self.bardo.read(cx);
         v_flex()
@@ -1189,12 +1263,13 @@ impl SettingsScreen {
                     .text_lg()
                     .font_semibold()
                     .text_color(tokens.text)
-                    .child(SharedString::from(
-                        bardo.text_with(Text::SetupTitle, &[("name", &name)]),
-                    )),
+                    .child(SharedString::from(title)),
             )
             .child(v_flex().w_full().gap_4().text_sm().children(sections))
-            .child(kit::section_heading(tr(bardo, Text::SetupPasteHere)))
+            .children(copy)
+            .when(target.has_card(), |screen| {
+                screen.child(kit::section_heading(tr(bardo, Text::SetupPasteHere)))
+            })
             .children(card)
             .into_any_element()
     }

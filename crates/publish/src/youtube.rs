@@ -25,7 +25,8 @@ pub const SCOPE_ANALYTICS: &str = "https://www.googleapis.com/auth/yt-analytics.
 /// Revenue and CPM reports (answered only for Partner Program channels).
 pub const SCOPE_MONETARY: &str = "https://www.googleapis.com/auth/yt-analytics-monetary.readonly";
 
-const SCOPES: &[&str] = &[SCOPE_UPLOAD, SCOPE_MANAGE, SCOPE_ANALYTICS, SCOPE_MONETARY];
+/// Every scope a connection asks for, at once.
+pub const SCOPES: &[&str] = &[SCOPE_UPLOAD, SCOPE_MANAGE, SCOPE_ANALYTICS, SCOPE_MONETARY];
 
 /// Where Google's endpoints live. Tests point them at a local fake server.
 #[derive(Debug, Clone, PartialEq, Eq)]

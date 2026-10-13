@@ -10,7 +10,8 @@
 //! comes from `bardo_app`.
 
 use bardo_app::bardo_domain::{Insights, JobState, Network, OwnerMetrics, PostRetention};
-use bardo_app::{Bardo, MetricsStatus, OwnerAccess, PublishedPost, Text, UploadState};
+use bardo_app::{Bardo, MetricsStatus, OwnerAccess, PublishedPost, SetupTarget, Text, UploadState};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -19,6 +20,7 @@ use gpui_kit::{AnyElement, App, Div, ElementId, SharedString, Stateful, div, px}
 
 use crate::appearance::look;
 use crate::guide;
+use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
 
@@ -898,7 +900,9 @@ fn upload_state(
         } else {
             Text::UploadRestrictedHint
         };
-        column = column.child(kit::notice(Tone::Warning, tr(bardo, hint), cx));
+        column = column
+            .child(kit::notice(Tone::Warning, tr(bardo, hint), cx))
+            .child(kept_private_help(bardo, id));
     }
     if let Some(issue) = publication
         .upload()
@@ -918,6 +922,33 @@ fn upload_state(
         ));
     }
     column
+}
+
+/// Under a video YouTube kept private: the guide's list of causes, and
+/// the audit's steps in Settings.
+fn kept_private_help(bardo: &Bardo, id: &str) -> Div {
+    let causes = Button::new(ElementId::Name(format!("{id}-kept-private-causes").into()))
+        .ghost()
+        .xsmall()
+        .icon(Lucide::Info)
+        .label(tr(bardo, Text::UploadRestrictedCauses))
+        .on_click(|_, window, cx| {
+            guide::open_section(guide::refs::YOUTUBE_KEPT_PRIVATE, window, cx)
+        });
+    let steps = Button::new(ElementId::Name(format!("{id}-kept-private-steps").into()))
+        .ghost()
+        .xsmall()
+        .icon(Lucide::BookOpen)
+        .label(tr(bardo, Text::SetupStepByStep))
+        .on_click(|_, window, cx| {
+            guide::open_setup(SetupTarget::Audit(Network::YouTube), window, cx)
+        });
+    h_flex()
+        .flex_wrap()
+        .gap_1()
+        .ml(px(-6.))
+        .child(causes)
+        .child(steps)
 }
 
 /// A line in muted text naming the post's network.

@@ -57,6 +57,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("connect-youtube"),
     page!("connect-instagram"),
     page!("connect-tiktok"),
+    page!("platform-audits"),
     page!("uploading"),
     page!("exporting"),
     page!("missed-posts"),
@@ -762,30 +763,40 @@ pub(crate) fn sync_problems(en_us: &[GuidePage], pt_br: &[GuidePage]) -> Vec<Str
     problems
 }
 
-/// What a setup screen in Settings walks through (issue #129): getting an
-/// API key, or registering a network's app.
+/// What a setup screen in Settings walks through: getting an API key, or
+/// registering a network's app (issue #129), or the network's audits and
+/// reviews of that app (issue #141).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SetupTarget {
     Key(Provider),
     App(Network),
+    Audit(Network),
 }
 
 impl SetupTarget {
-    /// Every key and every network app the Settings tabs ask for.
+    /// Every key and every network app the Settings tabs ask for, then the
+    /// audits of those apps.
     pub fn all() -> Vec<SetupTarget> {
         Provider::ALL
             .into_iter()
             .map(SetupTarget::Key)
             .chain(Network::sign_in_networks().map(SetupTarget::App))
+            .chain(Network::sign_in_networks().map(SetupTarget::Audit))
             .collect()
     }
 
-    /// The tab whose card it fills in.
+    /// The tab it opens on: the one with its card.
     pub fn tab(self) -> SettingsTab {
         match self {
             SetupTarget::Key(_) => SettingsTab::Keys,
-            SetupTarget::App(_) => SettingsTab::Networks,
+            SetupTarget::App(_) | SetupTarget::Audit(_) => SettingsTab::Networks,
         }
+    }
+
+    /// Whether the screen ends with a card to paste into. An audit happens
+    /// on the network's site alone.
+    pub fn has_card(self) -> bool {
+        !matches!(self, SetupTarget::Audit(_))
     }
 
     /// The guide page that walks through it, and the sections of that page
@@ -817,6 +828,24 @@ impl SetupTarget {
                 // No app to register: these networks are exported by hand.
                 Network::X | Network::Kick => ("app-credentials", &["networks"]),
             },
+            SetupTarget::Audit(network) => (
+                "platform-audits",
+                match network {
+                    Network::YouTube => &[
+                        "youtube-need",
+                        "youtube-private",
+                        "youtube-asks",
+                        "youtube-form",
+                        "youtube-after",
+                    ],
+                    Network::InstagramReels => {
+                        &["instagram-need", "instagram-asks", "instagram-after"]
+                    }
+                    Network::TikTok => &["tiktok-need", "tiktok-asks", "tiktok-after"],
+                    // No app, so nothing to audit.
+                    Network::X | Network::Kick => &["summary"],
+                },
+            ),
         }
     }
 }
@@ -827,6 +856,34 @@ pub struct SetupSteps {
     /// The page they come from, for its other links.
     pub page: String,
     pub sections: Vec<GuideSection>,
+}
+
+impl SetupSteps {
+    /// The text of the steps' first fenced code block, which the screen
+    /// offers to copy: what a form on the network's site asks for (the
+    /// YouTube audit's API use).
+    pub fn copy_block(&self) -> Option<String> {
+        self.sections
+            .iter()
+            .find_map(|section| first_code_block(&section.body))
+    }
+}
+
+/// The lines between the first ```` ``` ```` fence of `markdown` and the
+/// one closing it.
+fn first_code_block(markdown: &str) -> Option<String> {
+    let mut lines = markdown.lines();
+    let fence = lines.find(|line| line.trim_start().starts_with("```"))?;
+    let indent = fence.len() - fence.trim_start().len();
+    let mut block = Vec::new();
+    for line in lines {
+        if line.trim_start().starts_with("```") {
+            return Some(block.join("\n"));
+        }
+        // A block inside a list item is indented with it.
+        block.push(line.get(indent..).unwrap_or(line.trim_start()));
+    }
+    None
 }
 
 impl Guide {
@@ -1366,7 +1423,7 @@ Text of the **first** part.
         let targets = SetupTarget::all();
         assert_eq!(
             targets.len(),
-            Provider::ALL.len() + Network::sign_in_networks().count()
+            Provider::ALL.len() + 2 * Network::sign_in_networks().count()
         );
         for language in UiLanguage::ALL {
             let guide = Guide::load(language);
@@ -1407,6 +1464,70 @@ Text of the **first** part.
                 assert!(web > 0, "{language} {target:?}: no link to the provider");
             }
         }
+    }
+
+    #[test]
+    fn every_audit_opens_on_the_networks_tab_with_no_card() {
+        for network in Network::sign_in_networks() {
+            let audit = SetupTarget::Audit(network);
+            assert_eq!(audit.tab(), SettingsTab::Networks);
+            assert!(!audit.has_card());
+            assert!(SetupTarget::App(network).has_card());
+        }
+        assert!(SetupTarget::Key(Provider::Claude).has_card());
+    }
+
+    #[test]
+    fn the_youtube_audit_copies_every_scope_bardo_asks_for() {
+        // The block is pasted into Google's form, which is read in English:
+        // both languages carry the same one.
+        let blocks: Vec<String> = UiLanguage::ALL
+            .into_iter()
+            .map(|language| {
+                Guide::load(language)
+                    .setup(SetupTarget::Audit(Network::YouTube))
+                    .and_then(|steps| steps.copy_block())
+                    .unwrap_or_else(|| panic!("{language}: no block to copy"))
+            })
+            .collect();
+        assert!(blocks.windows(2).all(|pair| pair[0] == pair[1]));
+        for scope in bardo_publish::youtube::SCOPES {
+            assert!(blocks[0].contains(scope), "{scope} missing");
+        }
+        for method in [
+            "videos.insert",
+            "videos.update",
+            "videos.list",
+            "channels.list",
+        ] {
+            assert!(blocks[0].contains(method), "{method} missing");
+        }
+        assert!(!blocks[0].contains("```"));
+    }
+
+    #[test]
+    fn a_code_block_is_read_without_its_fences_or_list_indent() {
+        let steps = SetupSteps {
+            page: "p".into(),
+            sections: vec![
+                GuideSection {
+                    id: "a".into(),
+                    title: "A".into(),
+                    body: "No block here.".into(),
+                },
+                GuideSection {
+                    id: "b".into(),
+                    title: "B".into(),
+                    body: "1. Paste this:\n\n   ```text\n   one\n     two\n\n   three\n   ```\n\n```\nlater\n```".into(),
+                },
+            ],
+        };
+        assert_eq!(steps.copy_block().as_deref(), Some("one\n  two\n\nthree"));
+        let none = SetupSteps {
+            page: "p".into(),
+            sections: steps.sections[..1].to_vec(),
+        };
+        assert_eq!(none.copy_block(), None);
     }
 
     #[test]

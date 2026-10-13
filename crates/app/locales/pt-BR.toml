@@ -250,6 +250,10 @@ title = "{name}: passo a passo"
 back = "Voltar para {tab}"
 paste_here = "Cole aqui"
 open_in_guide = "Abrir no guia"
+audits = "Auditorias e revisões"
+audit_title = "{network}: auditorias e revisões"
+copy_block = "Copiar para o formulário"
+copied = "Copiado. Cole no formulário."
 
 [provider_keys]
 title = "Chaves de provedor"
@@ -1769,7 +1773,8 @@ retrying_hint = "A conexão ou o {network} falhou no caminho. O Bardo tenta de n
 processing_hint = "O {network} recebeu o arquivo e está processando. O Bardo acompanha por cerca de uma hora."
 still_processing_hint = "O {network} ainda processava o vídeo quando o Bardo parou de acompanhar. Verifique de novo mais tarde."
 stopped_hint = "Retome para enviar o resto. O que o {network} já recebeu não é enviado de novo."
-restricted_hint = "Mantido privado pelo YouTube: seu projeto do Google ainda não passou pela auditoria da API do YouTube."
+restricted_hint = "O YouTube manteve este vídeo privado."
+restricted_causes = "Possíveis causas"
 stop = "Parar"
 resume = "Retomar"
 retry = "Tentar de novo"
@@ -1780,7 +1785,7 @@ scheduled_at = "Fica público {when}"
 over_limit_at = "Sai {when}"
 over_limit_retry_at = "Tenta de novo {when}"
 scheduled_hint = "Privado no {network} até lá. O {network} publica sozinho, mesmo com o Bardo e o computador desligados."
-restricted_scheduled_hint = "O YouTube o manteve privado no horário de publicação: seu projeto do Google ainda não passou pela auditoria da API do YouTube."
+restricted_scheduled_hint = "O YouTube manteve este vídeo privado no horário de publicação."
 reel_hint = "O Bardo envia o arquivo renderizado à conta do Instagram conectada com esta legenda e publica o Reel quando o Instagram terminar de processar. Nada é enviado antes de você confirmar a revisão."
 cover_hint = "O quadro que a capa mostra, em segundos ou m:ss desde o início."
 cover_invalid = "Digite o tempo da capa em segundos ou m:ss, dentro do vídeo."
@@ -2407,6 +2412,10 @@ body = "Cole o ID (o TikTok chama de client key) e a chave secreta do site de de
 [tour.networks.setup]
 title = "Passo a passo"
 body = "Não sabe por onde começar? Passo a passo abre uma tela com cada etapa no site de desenvolvedores da rede, um link direto para cada página e, no fim, os campos onde colar."
+
+[tour.networks.audits]
+title = "Auditorias e revisões"
+body = "Cada rede pode revisar o seu app, para mais cota ou mais contas. Com o seu próprio app, quase nada disso se aplica. Auditorias e revisões abre uma tela que diz quando se aplica, o que a rede pede e o que o Bardo já oferece para isso."
 
 [tour.networks.kept]
 title = "Onde ficam guardados"
