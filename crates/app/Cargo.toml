@@ -22,6 +22,11 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+zip.workspace = true
+
+# The Windows version in an exported diagnostic (issue #140).
+[target.'cfg(windows)'.dependencies]
+windows-version.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

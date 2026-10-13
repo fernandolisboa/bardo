@@ -42,3 +42,5 @@ What Bardo's messages mean when something stops, and what to do. A job that stop
 ## Still stuck
 
 Bardo's log, at `%LOCALAPPDATA%\Bardo\logs\bardo.log`, records each step with no key or token in it ([Logs](data-and-keys.md#logs)). A failed job's **Details** shows the provider's own message, which its documentation explains.
+
+To report a problem, open an issue on [GitHub](https://github.com/fernandolisboa/bardo/issues) and attach the file that **Export diagnostics**, in [Settings › About](about.md#diagnostics), saves: it carries the logs and what is needed to read them, with every key, token and account name masked.

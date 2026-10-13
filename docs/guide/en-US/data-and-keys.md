@@ -31,7 +31,7 @@ Your API keys, your networks' app credentials and the sign-ins of your connected
 <a id="logs"></a>
 ## Logs
 
-Bardo writes what it does to `%LOCALAPPDATA%\Bardo\logs\bardo.log`, kept to a bounded size. Every line passes through the same masking as the screen: no key, secret or token is ever written to it.
+Bardo writes what it does to `%LOCALAPPDATA%\Bardo\logs\bardo.log`, kept to a bounded size. Every line passes through the same masking as the screen: no key, secret or token is ever written to it. The background agent writes `agent.log` beside it. [Export diagnostics](about.md#diagnostics) gathers both to attach to an issue.
 
 <a id="backup"></a>
 ## Backing up and moving

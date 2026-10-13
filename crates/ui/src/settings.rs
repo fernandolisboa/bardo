@@ -3,7 +3,8 @@
 //! credentials Bardo signs in to networks with; the Publishing tab turns the
 //! background agent on and off; the Appearance tab picks the layout,
 //! the theme and the interface language; the Metrics tab picks when a
-//! start syncs public post numbers. Each key and app card opens a setup
+//! start syncs public post numbers; the About tab shows the version and
+//! exports diagnostics. Each key and app card opens a setup
 //! screen in its tab (issue #129): the guide's steps for getting it, with
 //! links to the provider's pages, then the card itself. Rules, storage and
 //! the test call live in `bardo_app`; this file maps clicks to use cases and
@@ -16,8 +17,9 @@ use bardo_app::bardo_domain::{
     ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
 use bardo_app::{
-    AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, GuideLink, GuidePlace,
-    GuideRef, KeyState, ProviderKeyStatus, SettingsTab, SetupTarget, Text, TourAnchor, TourPlace,
+    AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, DisplayInfo, GpuInfo,
+    GuideLink, GuidePlace, GuideRef, KeyState, ProviderKeyStatus, SettingsTab, SetupTarget, Text,
+    TourAnchor, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -126,6 +128,37 @@ const CLIENT_SECRET_ERRORS: &[AppCredentialsFieldError] = &[
     AppCredentialsFieldError::ClientSecretInvalid,
 ];
 
+/// How the last diagnostics export ended.
+enum DiagnosticsNotice {
+    Saved(std::path::PathBuf),
+    Failed,
+    DialogFailed,
+}
+
+/// How this build's window draws, for the diagnostics.
+const RENDERER: &str = if cfg!(windows) {
+    "DirectX 11"
+} else if cfg!(target_os = "macos") {
+    "Metal"
+} else {
+    "wgpu"
+};
+
+/// What the window knows that `Bardo` does not: the graphics adapter and
+/// the theme on screen.
+fn display_info(window: &Window, cx: &App) -> DisplayInfo {
+    DisplayInfo {
+        gpu: window.gpu_specs().map(|gpu| GpuInfo {
+            adapter: gpu.device_name,
+            vendor: gpu.driver_name,
+            driver: gpu.driver_info,
+            software: gpu.is_software_emulated,
+        }),
+        renderer: RENDERER.into(),
+        theme: look(cx).theme,
+    }
+}
+
 /// What the screen holds for one network's app credentials.
 struct CredentialsRow {
     client_id: Entity<InputState>,
@@ -156,6 +189,9 @@ pub struct SettingsScreen {
     /// The agent's task changing with the system; dropping it stops waiting
     /// for the result.
     agent_work: Option<Task<()>>,
+    /// The save dialog or the diagnostics export in flight.
+    diagnostics: Option<Task<()>>,
+    diagnostics_notice: Option<DiagnosticsNotice>,
     /// What the labels and pickers were last set from; other changes to
     /// Bardo leave them, and an open picker, alone.
     labeled: Option<(UiLanguage, UiThemePreference)>,
@@ -280,6 +316,8 @@ impl SettingsScreen {
             appearance_error: None,
             agent_error: None,
             agent_work: None,
+            diagnostics: None,
+            diagnostics_notice: None,
             labeled: None,
             scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
@@ -1463,8 +1501,59 @@ impl SettingsScreen {
             .into_any_element()
     }
 
+    /// Asks where to save a diagnostics export, then writes it on a
+    /// background thread (issue #140).
+    fn export_diagnostics(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(logs) = bardo_app::logging::logs_dir() else {
+            self.diagnostics_notice = Some(DiagnosticsNotice::Failed);
+            cx.notify();
+            return;
+        };
+        let display = display_info(window, cx);
+        let name = bardo_app::diagnostics_file_name(std::time::SystemTime::now());
+        let chosen = cx.prompt_for_new_path(&bardo_app::diagnostics_folder(), Some(&name));
+        self.diagnostics_notice = None;
+        self.diagnostics = Some(cx.spawn(async move |this, cx| {
+            let notice = match chosen.await {
+                Ok(Ok(Some(path))) => {
+                    // Gathered once a file is chosen: it reads the secret
+                    // store, for nothing when the dialog is cancelled.
+                    let Ok(export) = this.update(cx, |this, cx| {
+                        this.bardo.read(cx).diagnostics(&logs, &display)
+                    }) else {
+                        return;
+                    };
+                    let written = cx
+                        .background_executor()
+                        .spawn({
+                            let path = path.clone();
+                            async move { export.write_to(&path) }
+                        })
+                        .await;
+                    match written {
+                        Ok(()) => Some(DiagnosticsNotice::Saved(path)),
+                        Err(error) => {
+                            tracing::warn!(%error, "diagnostics export failed");
+                            Some(DiagnosticsNotice::Failed)
+                        }
+                    }
+                }
+                // Cancelled.
+                Ok(Ok(None)) | Err(_) => None,
+                Ok(Err(_)) => Some(DiagnosticsNotice::DialogFailed),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.diagnostics = None;
+                this.diagnostics_notice = notice;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
     /// Bardo's version, the FFmpeg it ships with its license and source,
-    /// and the third-party notices (issue #135).
+    /// the third-party notices (issue #135) and the diagnostics export
+    /// (issue #140).
     fn render_about(&self, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let look = look(cx);
@@ -1547,12 +1636,91 @@ impl SettingsScreen {
                 }),
             scroll,
         );
+        let exporting = self.diagnostics.is_some();
+        let diagnostics = kit::anchor_in(
+            TourAnchor::Control(Control::AboutDiagnostics),
+            v_flex()
+                .gap_2()
+                .child(kit::section_heading(tr(bardo, Text::AboutDiagnosticsTitle)))
+                .child(body(bardo.text(Text::AboutDiagnostics).into_owned()))
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new("about-export-diagnostics")
+                                .small()
+                                .primary()
+                                .label(tr(
+                                    bardo,
+                                    if exporting {
+                                        Text::AboutExportingDiagnostics
+                                    } else {
+                                        Text::AboutExportDiagnostics
+                                    },
+                                ))
+                                .loading(exporting)
+                                .disabled(exporting)
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.export_diagnostics(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("about-open-logs")
+                                .small()
+                                .label(tr(bardo, Text::AboutOpenLogs))
+                                .on_click(|_, _, cx| {
+                                    if let Some(logs) = bardo_app::logging::logs_dir() {
+                                        // A fresh install may not have logged yet.
+                                        let _ = std::fs::create_dir_all(&logs);
+                                        cx.open_with_system(&logs);
+                                    }
+                                }),
+                        ),
+                )
+                .children(self.diagnostics_notice.as_ref().map(|notice| {
+                    match notice {
+                        DiagnosticsNotice::Saved(path) => {
+                            let reveal = path.clone();
+                            h_flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(kit::notice(
+                                    Tone::Success,
+                                    bardo.text_with(
+                                        Text::AboutDiagnosticsSaved,
+                                        &[("path", path.display().to_string().as_str())],
+                                    ),
+                                    cx,
+                                ))
+                                .child(
+                                    Button::new("about-show-diagnostics")
+                                        .ghost()
+                                        .xsmall()
+                                        .label(tr(bardo, Text::AboutShowDiagnostics))
+                                        .on_click(move |_, _, cx| cx.reveal_path(&reveal)),
+                                )
+                                .into_any_element()
+                        }
+                        DiagnosticsNotice::Failed => {
+                            kit::notice(Tone::Danger, tr(bardo, Text::AboutDiagnosticsFailed), cx)
+                                .into_any_element()
+                        }
+                        DiagnosticsNotice::DialogFailed => {
+                            kit::notice(Tone::Danger, tr(bardo, Text::FileDialogFailed), cx)
+                                .into_any_element()
+                        }
+                    }
+                })),
+            scroll,
+        );
         v_flex()
             .max_w(px(720.))
             .gap_5()
             .child(version)
             .child(ffmpeg)
             .child(notices)
+            .child(diagnostics)
             .into_any_element()
     }
 

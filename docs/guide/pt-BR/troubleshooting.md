@@ -42,3 +42,5 @@ O que as mensagens do Bardo querem dizer quando algo para, e o que fazer. Uma ta
 ## Ainda sem solução
 
 O log do Bardo, em `%LOCALAPPDATA%\Bardo\logs\bardo.log`, registra cada passo sem nenhuma chave ou token ([Logs](data-and-keys.md#logs)). Os **Detalhes** de uma tarefa com falha mostram a mensagem do próprio provedor, que a documentação dele explica.
+
+Para relatar um problema, abra uma issue no [GitHub](https://github.com/fernandolisboa/bardo/issues) e anexe o arquivo que **Exportar diagnóstico**, em [Configurações › Sobre](about.md#diagnostics), salva: ele leva os logs e o necessário para lê-los, com cada chave, token e nome de conta mascarados.

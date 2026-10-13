@@ -2623,6 +2623,10 @@ body = "O Bardo lê, pré-visualiza e renderiza vídeo com o FFmpeg, que vem jun
 title = "Avisos de terceiros"
 body = "As bibliotecas de código aberto com que o Bardo é feito, e as licenças delas."
 
+[tour.about.diagnostics]
+title = "Diagnóstico"
+body = "Quando algo der errado, exporte aqui um arquivo de diagnóstico e anexe-o a uma issue. Chaves, tokens e nomes de contas saem mascarados, e nada é enviado a lugar nenhum."
+
 [guide]
 back_to_editor = "Voltar ao editor"
 resume_tour = "Retomar tour"
@@ -2727,3 +2731,11 @@ notices_title = "Avisos de terceiros"
 notices = "O Bardo é feito com bibliotecas de código aberto. As licenças e os avisos de direitos autorais delas estão numa página instalada com o Bardo."
 open_notices = "Abrir os avisos"
 no_notices = "Os avisos vêm com o app instalado. Esta cópia foi compilada a partir do código-fonte."
+diagnostics_title = "Diagnóstico"
+diagnostics = "Quando algo der errado, exporte um arquivo de diagnóstico e anexe-o a uma issue. Ele traz os logs do Bardo, a configuração deste computador, um resumo das tarefas e se cada conta está conectada. Chaves, tokens e nomes de contas saem mascarados, e nada é enviado a lugar nenhum."
+export_diagnostics = "Exportar diagnóstico"
+exporting_diagnostics = "Exportando…"
+open_logs = "Abrir pasta de logs"
+diagnostics_saved = "Salvo em {path}."
+show_diagnostics = "Mostrar na pasta"
+diagnostics_failed = "Não foi possível salvar o arquivo de diagnóstico. Tente outra pasta."
