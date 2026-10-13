@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bardo: third-party notices</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 "Segoe UI", system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.5rem; }
+  ul.used-by { columns: 3 14rem; padding-left: 1.2rem; }
+  pre { white-space: pre-wrap; font-size: 0.8rem; padding: 1rem; border: 1px solid rgba(127, 127, 127, 0.4); border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>Third-party notices</h1>
+<p>Bardo is built with the open-source Rust crates listed below, under the licenses that follow. FFmpeg, which Bardo runs as separate programs, comes with its own license and the address of its source code in the <code>ffmpeg</code> folder next to <code>bardo.exe</code> (<code>LICENSE.txt</code> and <code>SOURCE.txt</code>).</p>
+<h2>Licenses</h2>
+<ul>
+{{#each overview}}
+  <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+{{#each licenses}}
+<h2 id="{{id}}">{{name}}</h2>
+<p>Used by:</p>
+<ul class="used-by">
+{{#each used_by}}
+  <li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a></li>
+{{/each}}
+</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

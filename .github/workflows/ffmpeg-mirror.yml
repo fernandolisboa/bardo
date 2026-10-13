@@ -1,0 +1,51 @@
+name: FFmpeg mirror
+
+# Bardo's own copy of the pinned ffmpeg archives and of the source they
+# were built from (ADR-0007, issue #135): the `ffmpeg-<version>` release,
+# which `cargo xtask fetch-ffmpeg` falls back to and the installer's
+# ffmpeg\SOURCE.txt points at. Runs when the pin changes on main, or by
+# hand. A mirror release that exists is left as it is.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/media/ffmpeg.toml
+      - .github/workflows/ffmpeg-mirror.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ffmpeg-mirror
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mirror:
+    name: Mirror the pinned ffmpeg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/media/ffmpeg.toml | head -n 1)
+          tag="ffmpeg-$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already mirrored"
+            exit 0
+          fi
+          cargo xtask mirror-ffmpeg mirror
+          gh release create "$tag" mirror/*.zip mirror/*.tar.* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "FFmpeg $version (Bardo's copy)" \
+            --notes-file mirror/NOTES.md \
+            --prerelease \
+            --latest=false

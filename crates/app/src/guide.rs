@@ -35,6 +35,7 @@ macro_rules! page {
 /// Every page, in the order the contents list them within their group.
 pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("what-bardo-is"),
+    page!("install"),
     page!("api-keys"),
     page!("get-api-keys"),
     page!("first-video"),
@@ -64,6 +65,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("metrics-sync"),
     page!("jobs"),
     page!("settings"),
+    page!("about"),
     page!("data-and-keys"),
     page!("troubleshooting"),
     page!("glossary"),

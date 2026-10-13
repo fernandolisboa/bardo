@@ -11,6 +11,7 @@ ui_language = "Idioma da interface"
 title = "Configurações"
 keys_tab = "Chaves de API"
 appearance_tab = "Aparência"
+about_tab = "Sobre"
 publishing_tab = "Publicação"
 
 [language]
@@ -2607,6 +2608,21 @@ body = "Aqui aparece se o agente está rodando agora. Se estiver ligado mas para
 title = "Do que ele precisa"
 body = "O computador precisa estar ligado e você conectado. Com o Bardo aberto, o próprio Bardo envia os posts e o agente espera."
 
+[tour.about]
+name = "Tour de Sobre"
+
+[tour.about.version]
+title = "Versão"
+body = "A versão do Bardo neste computador. Informe-a quando relatar um problema."
+
+[tour.about.ffmpeg]
+title = "FFmpeg"
+body = "O Bardo lê, pré-visualiza e renderiza vídeo com o FFmpeg, que vem junto com ele. A licença e o código-fonte estão a um clique."
+
+[tour.about.notices]
+title = "Avisos de terceiros"
+body = "As bibliotecas de código aberto com que o Bardo é feito, e as licenças delas."
+
 [guide]
 back_to_editor = "Voltar ao editor"
 resume_tour = "Retomar tour"
@@ -2698,3 +2714,16 @@ not_running = "Ligado, mas não está rodando agora. O Windows inicia o agente n
 not_set_up = "O Windows não deixou o Bardo configurar o agente, então ele continua desligado. Tente de novo."
 not_removed = "O agente está desligado e para sozinho, mas o Windows não deixou o Bardo removê-lo. O Bardo tenta de novo na próxima vez que abrir."
 not_saved = "Não foi possível salvar a configuração. Tente de novo."
+
+[about]
+title = "Sobre o Bardo"
+version = "Versão {version}"
+summary = "O Bardo ajuda você a criar e operar canais de vídeo sem rosto, com você decidindo cada passo. Seus projetos, chaves e contas ficam neste computador."
+ffmpeg_title = "FFmpeg"
+ffmpeg = "O Bardo usa o FFmpeg {version} para ler, pré-visualizar e renderizar vídeo. O FFmpeg é software livre sob a GNU Lesser General Public License versão 3 (LGPL v3). O Bardo o executa como programas separados e o distribui sem modificações."
+ffmpeg_source = "Código-fonte do FFmpeg"
+ffmpeg_license = "Licença (LGPL v3)"
+notices_title = "Avisos de terceiros"
+notices = "O Bardo é feito com bibliotecas de código aberto. As licenças e os avisos de direitos autorais delas estão numa página instalada com o Bardo."
+open_notices = "Abrir os avisos"
+no_notices = "Os avisos vêm com o app instalado. Esta cópia foi compilada a partir do código-fonte."

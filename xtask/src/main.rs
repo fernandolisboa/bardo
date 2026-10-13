@@ -5,23 +5,47 @@
 //!
 //! `cargo xtask fetch-ffmpeg`: downloads the pinned ffmpeg build into
 //! `.ffmpeg/bin` (ADR-0007).
+//!
+//! `cargo xtask package`: stages Bardo as installed and builds the Windows
+//! installer (issue #135).
+//!
+//! `cargo xtask mirror-ffmpeg <dir>`: the pinned ffmpeg archives and their
+//! source, for the release that mirrors them.
 
 mod deps;
 mod ffmpeg;
+mod package;
 
 use std::process::ExitCode;
 
 use anyhow::Context as _;
 use cargo_metadata::{CargoOpt, MetadataCommand};
 
+const USAGE: &str = "usage: cargo xtask <lint-deps | fetch-ffmpeg [--archive <path>] | \
+                     package [--no-build] [--no-installer] [--tag <vX.Y.Z>] | \
+                     mirror-ffmpeg <dir>>";
+
 fn main() -> anyhow::Result<ExitCode> {
     let task = std::env::args().nth(1);
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("xtask lives inside the workspace")?;
     match task.as_deref() {
         Some("lint-deps") => lint_deps(),
+        Some("package") => {
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            package::package(workspace, &package::Options::parse(&args)?)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some("mirror-ffmpeg") => {
+            let Some(dir) = std::env::args().nth(2) else {
+                eprintln!("{USAGE}");
+                return Ok(ExitCode::FAILURE);
+            };
+            ffmpeg::mirror(workspace, std::path::Path::new(&dir))?;
+            Ok(ExitCode::SUCCESS)
+        }
         Some("fetch-ffmpeg") => {
-            let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .context("xtask lives inside the workspace")?;
             let archive = match (std::env::args().nth(2).as_deref(), std::env::args().nth(3)) {
                 (Some("--archive"), Some(path)) => Some(path.into()),
                 (None, _) => None,
@@ -34,7 +58,7 @@ fn main() -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         _ => {
-            eprintln!("usage: cargo xtask <lint-deps | fetch-ffmpeg>");
+            eprintln!("{USAGE}");
             Ok(ExitCode::FAILURE)
         }
     }

@@ -11,6 +11,7 @@ ui_language = "Interface language"
 title = "Settings"
 keys_tab = "API keys"
 appearance_tab = "Appearance"
+about_tab = "About"
 publishing_tab = "Publishing"
 
 [language]
@@ -2607,6 +2608,21 @@ body = "This says whether the agent is running now. If it is on but not running,
 title = "What it needs"
 body = "The computer must be on and you signed in. While Bardo is open, Bardo sends the posts itself and the agent waits."
 
+[tour.about]
+name = "About tour"
+
+[tour.about.version]
+title = "Version"
+body = "The version of Bardo on this computer. Say it when you report a problem."
+
+[tour.about.ffmpeg]
+title = "FFmpeg"
+body = "Bardo reads, previews and renders video with FFmpeg, which comes with it. Its license and source code are one click away."
+
+[tour.about.notices]
+title = "Third-party notices"
+body = "The open-source libraries Bardo is built with, and their licenses."
+
 [guide]
 back_to_editor = "Back to the editor"
 resume_tour = "Resume tour"
@@ -2698,3 +2714,16 @@ not_running = "On, but not running right now. Windows starts it the next time yo
 not_set_up = "Windows did not let Bardo set up the agent, so it stays off. Try again."
 not_removed = "The agent is off and stops by itself, but Windows did not let Bardo remove it. Bardo tries again the next time it opens."
 not_saved = "Couldn't save the setting. Try again."
+
+[about]
+title = "About Bardo"
+version = "Version {version}"
+summary = "Bardo helps you create and run faceless video channels, with you deciding every step. Your projects, keys and accounts stay on this computer."
+ffmpeg_title = "FFmpeg"
+ffmpeg = "Bardo uses FFmpeg {version} to read, preview and render video. FFmpeg is free software under the GNU Lesser General Public License version 3 (LGPL v3). Bardo runs it as separate programs and ships it unmodified."
+ffmpeg_source = "FFmpeg source code"
+ffmpeg_license = "License (LGPL v3)"
+notices_title = "Third-party notices"
+notices = "Bardo is built with open-source libraries. Their licenses and copyright notices are in one page installed with Bardo."
+open_notices = "Open the notices"
+no_notices = "The notices come with the installed app. This copy was built from source."

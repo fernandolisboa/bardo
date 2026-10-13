@@ -1,6 +1,6 @@
 # ADR-0006: Running scheduled publications
 
-- Status: Accepted; decision 2 amended by [ADR-0008](0008-network-connections.md)
+- Status: Accepted; decision 2 amended by [ADR-0008](0008-network-connections.md); decision 3's installer offer settled by [ADR-0009](0009-windows-installer.md)
 - Date: 2026-09-30
 
 ## Context
@@ -21,5 +21,5 @@ Scheduled posts must go out at the chosen time. Secrets live in the user's Windo
 - Instagram posts in the MVP go out only while the app is open; the UI shows this on the scheduling screen.
 - The job queue and publication state must be shareable between the app and the future agent (same SQLite database, with locking).
 - The in-app scheduler keeps each post's due time and its claim in SQLite with the publication: the run that publishes a post claims it in one statement that also checks it is due, so the agent can read and claim due posts from the same database without posting one twice. The agent still needs a lease on the job itself, so the app and the agent never run the same job at once.
-- The agent (issue #87) is `bardo --agent`. Until an installer exists, Bardo registers its task from Settings › Publishing, with the copy above (the off switch removes the task), and re-registers it on open while it is on. Its task starts it at sign-in and every 15 minutes after, never as a second copy. The app and the agent each lease a job in SQLite before running it and renew the lease while it runs; a due post's claim also requires its job's lease, so the two never post one twice. While the app is open, the agent starts nothing new.
+- The agent (issue #87) is `bardo --agent`. Bardo registers its task from Settings › Publishing, with the copy above (the off switch removes the task), and re-registers it on open while it is on. The installer asks the same question on a first install and leaves the answer for Bardo to apply at its next start; its uninstaller turns the agent off (ADR-0009). Its task starts it at sign-in and every 15 minutes after, never as a second copy. The app and the agent each lease a job in SQLite before running it and renew the lease while it runs; a due post's claim also requires its job's lease, so the two never post one twice. While the app is open, the agent starts nothing new.
 - A post whose due time passed while the app was closed is never sent silently: the app lists it on the next launch and the user sends it now, reschedules or cancels it.
