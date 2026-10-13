@@ -28,6 +28,7 @@ icon_assets!(
         TrendingUp,
         Scissors,
         Send,
+        ShieldCheck,
         Trash,
         Tv,
     ]

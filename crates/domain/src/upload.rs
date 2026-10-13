@@ -109,8 +109,9 @@ pub enum UploadStatus {
     /// On the network with the visibility the upload asked for.
     Published,
     /// On the network, but kept private by it although the upload asked
-    /// for unlisted or public: the user's API project has not passed the
-    /// network's audit (YouTube's API Services audit).
+    /// for unlisted or public. The network does not say why: an unaudited
+    /// API project (YouTube's rule since 2020), the channel's own settings,
+    /// or a review of the video.
     Restricted,
     /// In the creator's inbox as a draft (TikTok's `SEND_TO_USER_INBOX`):
     /// the creator finishes the post in the network's app, so Bardo has
@@ -318,7 +319,7 @@ impl Upload {
     }
 
     /// The publish time passed and the network kept the scheduled video
-    /// private: the user's API project has not passed the network's audit.
+    /// private (see [`UploadStatus::Restricted`] for why it may).
     pub fn kept_private(&mut self) -> Result<(), InvalidUploadTransition> {
         self.require_scheduled("keep private")?;
         self.status = UploadStatus::Restricted;

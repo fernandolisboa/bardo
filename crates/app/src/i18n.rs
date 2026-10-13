@@ -263,6 +263,13 @@ pub enum Text {
     SetupBack,
     SetupPasteHere,
     SetupOpenInGuide,
+    /// A network app card's button to its audits and reviews.
+    SetupAudits,
+    /// Placeholder: `{network}`.
+    SetupAuditTitle,
+    /// Copies the steps' block for a form on the network's site.
+    SetupCopyBlock,
+    SetupCopied,
     ProviderKeysHint,
     ProviderName(Provider),
     ProviderPurpose(Provider),
@@ -1299,6 +1306,8 @@ pub enum Text {
     UploadStillProcessingHint,
     UploadStoppedHint,
     UploadRestrictedHint,
+    /// Opens the guide's list of why YouTube keeps a video private.
+    UploadRestrictedCauses,
     UploadFailureQuota,
     UploadFailureUploadLimit,
     UploadFailureReconnect,
@@ -1866,6 +1875,10 @@ impl Text {
             Text::SetupBack => "setup.back",
             Text::SetupPasteHere => "setup.paste_here",
             Text::SetupOpenInGuide => "setup.open_in_guide",
+            Text::SetupAudits => "setup.audits",
+            Text::SetupAuditTitle => "setup.audit_title",
+            Text::SetupCopyBlock => "setup.copy_block",
+            Text::SetupCopied => "setup.copied",
             Text::ProviderKeysHint => "provider_keys.hint",
             Text::ProviderName(provider) => {
                 return format!("provider.{}.name", provider.code()).into();
@@ -2986,6 +2999,7 @@ impl Text {
             Text::UploadStillProcessingHint => "upload.still_processing_hint",
             Text::UploadStoppedHint => "upload.stopped_hint",
             Text::UploadRestrictedHint => "upload.restricted_hint",
+            Text::UploadRestrictedCauses => "upload.restricted_causes",
             Text::UploadFailureQuota => "upload.failure.quota",
             Text::UploadFailureUploadLimit => "upload.failure.upload_limit",
             Text::UploadFailureReconnect => "upload.failure.reconnect",
@@ -3681,6 +3695,10 @@ mod tests {
             Text::SetupBack,
             Text::SetupPasteHere,
             Text::SetupOpenInGuide,
+            Text::SetupAudits,
+            Text::SetupAuditTitle,
+            Text::SetupCopyBlock,
+            Text::SetupCopied,
             Text::KeyNotSet,
             Text::KeySaved,
             Text::KeyUnreadable,
@@ -4705,6 +4723,7 @@ mod tests {
         texts.push(Text::UploadStillProcessingHint);
         texts.push(Text::UploadStoppedHint);
         texts.push(Text::UploadRestrictedHint);
+        texts.push(Text::UploadRestrictedCauses);
         texts.push(Text::UploadFailureQuota);
         texts.push(Text::UploadFailureUploadLimit);
         texts.push(Text::UploadFailureReconnect);
@@ -4992,6 +5011,8 @@ mod tests {
             assert!(text.contains("Claude") && !text.contains('{'), "{text}");
             let text = catalog.format(Text::SetupBack, &[("tab", "API keys")]);
             assert!(text.contains("API keys") && !text.contains('{'), "{text}");
+            let text = catalog.format(Text::SetupAuditTitle, &[("network", "YouTube")]);
+            assert!(text.contains("YouTube") && !text.contains('{'), "{text}");
         }
     }
 

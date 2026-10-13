@@ -2901,9 +2901,11 @@ pub(crate) mod tests {
         );
         assert_eq!(state(&s), UploadState::Restricted);
         assert!(!publication.has_public_metrics());
+        // Neutral: the audit is one possible cause among several, and the
+        // guide lists them.
         assert_eq!(
             s.app.text(Text::UploadRestrictedHint),
-            "Kept private by YouTube: your Google project has not passed the YouTube API audit."
+            "YouTube kept this video private."
         );
     }
 

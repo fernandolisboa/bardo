@@ -191,6 +191,8 @@ pub enum Control {
     CredentialsCard,
     /// Settings › Networks: the first card's Step by step.
     CredentialsSetup,
+    /// Settings › Networks: the first card's Audits and reviews.
+    CredentialsAudits,
     /// Settings › Networks: whether the first network's are saved.
     CredentialsState,
     /// Publish: the picked network's title, description and tags, or the
@@ -864,7 +866,7 @@ pub const NETWORKS: Tour = {
     const CARDS: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Networks,
-        version: 2,
+        version: 3,
         place: Some(AT),
         steps: &[
             TourStep::at("tab", TourAnchor::Toolbar)
@@ -882,6 +884,10 @@ pub const NETWORKS: Tour = {
                 .on(AT)
                 .missing(CARDS)
                 .learn(PAGE, "step-by-step"),
+            TourStep::at("audits", control(Control::CredentialsAudits))
+                .on(AT)
+                .missing(CARDS)
+                .learn(PAGE, "audits"),
             TourStep::at("kept", control(Control::CredentialsState))
                 .on(AT)
                 .missing(CARDS)

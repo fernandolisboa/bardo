@@ -73,7 +73,7 @@ Confirming starts the upload as a job, with its progress here and in Jobs. If th
 | Missed its time | Bardo was closed at that time; see [Missed posts](missed-posts.md) |
 | Over the publishing limit | Queued until the network takes more posts |
 | Uploaded | On the network, with its link |
-| Kept private | YouTube kept it private: see [Uploads stay private until the audit](connect-youtube.md#private) |
+| Kept private | YouTube kept it private although you asked for more: see [the possible causes](platform-audits.md#youtube-private) |
 | Draft in TikTok | In the TikTok inbox, for you to finish in the app |
 | Upload stopped, Upload failed | Stopped by you, or refused; **Resume** or **Retry** when it can go on |
 

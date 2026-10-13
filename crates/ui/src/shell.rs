@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{BudgetLevel, TourId, VideoProjectId};
 use bardo_app::{
-    Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SpendSummary, Stage, Text, TourMove,
-    TourPlace,
+    Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SetupTarget, SpendSummary, Stage, Text,
+    TourMove, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
@@ -175,6 +175,7 @@ impl Shell {
         // A screen's "Tour this screen" and its ⓘ's "More in the guide".
         let tour_shell = cx.entity().downgrade();
         let section_shell = cx.entity().downgrade();
+        let setup_shell = cx.entity().downgrade();
         cx.set_global(GuideHooks {
             tour: Rc::new(move |tour, window, cx| {
                 let _ =
@@ -183,6 +184,9 @@ impl Shell {
             section: Rc::new(move |section, window, cx| {
                 let _ =
                     section_shell.update(cx, |shell, cx| shell.open_section(section, window, cx));
+            }),
+            setup: Rc::new(move |target, window, cx| {
+                let _ = setup_shell.update(cx, |shell, cx| shell.open_setup(target, window, cx));
             }),
         });
         let mut shell = Self {
@@ -557,6 +561,13 @@ impl Shell {
         self.guide.update(cx, |guide, cx| guide.close_cards(cx));
         self.show_section(section, cx);
         cx.notify();
+    }
+
+    /// Settings, at the setup screen for `target`.
+    fn open_setup(&mut self, target: SetupTarget, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings
+            .update(cx, |settings, cx| settings.open_setup(target, cx));
+        self.pick(Destination::Settings, window, cx);
     }
 
     /// The Guide screen at `section`, over the editor when it is open.

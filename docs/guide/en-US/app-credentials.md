@@ -37,6 +37,11 @@ Setting an app up takes a few minutes per network, once:
 
 Each card's **Step by step** opens a screen with that network's setup: each step on the network's developer site, with a link straight to the page it happens on, and the card's fields at the end to paste the ID and secret into and save. **Back** returns to the tab. The steps are the first sections of the network's guide.
 
+<a id="audits"></a>
+## Audits and reviews
+
+Next to Step by step, **Audits and reviews** opens the network's part of [Platform audits and reviews](platform-audits.md) the same way: whether your app needs the network's audit or review (with your own app, mostly not), what the network asks, what Bardo already gives you for it, and what changes once it is approved.
+
 <a id="save"></a>
 ## Saving an app
 

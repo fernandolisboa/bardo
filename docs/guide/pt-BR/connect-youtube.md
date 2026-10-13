@@ -106,9 +106,11 @@ O post passa a mostrar **Agendado** com o horário em que fica público. Até l�
 Cada sincronização de métricas lê de volta um vídeo agendado pela conta conectada. Quando o YouTube o torna público, o post passa a **Publicado** com o horário de publicação do YouTube, e as métricas dele são lidas como as de qualquer outro post. A sincronização não precisa de chave de API enquanto só houver vídeos agendados.
 
 <a id="private"></a>
-## Envios ficam privados até a auditoria
+## Quando o YouTube mantém um vídeo privado
 
-O Google trava como **privado** todo vídeo enviado por um projeto de API sem auditoria criado depois de 28/07/2020, e os vídeos agendados também. O Bardo mostra essa publicação como **Mantido privado**, com "Mantido privado pelo YouTube: seu projeto do Google ainda não passou pela auditoria da API do YouTube". Um vídeo agendado que continua privado quinze minutos depois do horário de publicação aparece do mesmo jeito. Não é uma falha. Para publicar como público pelo Bardo, peça a [auditoria dos Serviços da API do YouTube](https://support.google.com/youtube/contact/yt_api_form) para o seu projeto; ela muda o resultado, nada no Bardo. Até lá, você pode tornar um vídeo público no YouTube Studio.
+Quando o YouTube deixa um envio como privado embora você tenha escolhido público ou não listado, o Bardo mostra a publicação como **Mantido privado**, com "O YouTube manteve este vídeo privado". Um vídeo agendado que continua privado quinze minutos depois do horário de publicação aparece do mesmo jeito. Não é uma falha: o vídeo está no YouTube, e você pode torná-lo público no YouTube Studio.
+
+O YouTube não diz o motivo. Desde 2020 ele trava como privados os envios de projetos de API sem auditoria, mas a página de `videos.insert` agora diz o contrário (08/10/2026); uma mudança feita no YouTube Studio, ou uma restrição no vídeo, tem o mesmo resultado. **Possíveis causas**, abaixo do post, abre [a lista de causas](platform-audits.md#youtube-private); **Passo a passo** abre os passos da auditoria do YouTube nas Configurações, para quando você decidir pedi-la. A auditoria muda o resultado, nada no Bardo.
 
 <a id="owner-metrics"></a>
 ## Métricas do dono

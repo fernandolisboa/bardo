@@ -37,6 +37,11 @@ Configurar um app leva alguns minutos por rede, uma vez só:
 
 O **Passo a passo** de cada cartão abre uma tela com a configuração daquela rede: cada etapa no site de desenvolvedores da rede, com um link direto para a página onde ela acontece, e, no fim, os campos do cartão para colar o ID e a chave secreta e salvar. **Voltar** leva de volta à aba. Os passos são as primeiras seções do guia da rede.
 
+<a id="audits"></a>
+## Auditorias e revisões
+
+Ao lado do Passo a passo, **Auditorias e revisões** abre do mesmo jeito a parte da rede em [Auditorias e revisões das plataformas](platform-audits.md): se o seu app precisa da auditoria ou revisão da rede (com o seu próprio app, quase nunca), o que a rede pede, o que o Bardo já oferece para isso e o que muda depois da aprovação.
+
 <a id="save"></a>
 ## Salvar um app
 

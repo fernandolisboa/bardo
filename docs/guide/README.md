@@ -27,6 +27,7 @@ The guide Bardo shows on its Guide screen (F1), in two languages, also published
 | [Connecting YouTube](en-US/connect-youtube.md) | [Conectar o YouTube](pt-BR/connect-youtube.md) |
 | [Connecting Instagram](en-US/connect-instagram.md) | [Conectar o Instagram](pt-BR/connect-instagram.md) |
 | [Connecting TikTok](en-US/connect-tiktok.md) | [Conectar o TikTok](pt-BR/connect-tiktok.md) |
+| [Platform audits and reviews](en-US/platform-audits.md) | [Auditorias e revisões das plataformas](pt-BR/platform-audits.md) |
 | [Uploading and scheduling](en-US/uploading.md) | [Envio e agendamento](pt-BR/uploading.md) |
 | [Exporting](en-US/exporting.md) | [Exportação](pt-BR/exporting.md) |
 | [Missed posts](en-US/missed-posts.md) | [Posts perdidos](pt-BR/missed-posts.md) |

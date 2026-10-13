@@ -73,7 +73,7 @@ Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o re
 | Perdeu o horário | O Bardo estava fechado no horário; veja [Posts perdidos](missed-posts.md) |
 | Acima do limite de publicação | Na fila até a rede aceitar mais posts |
 | Enviado | Na rede, com o link |
-| Mantido privado | O YouTube manteve privado: veja [Envios ficam privados até a auditoria](connect-youtube.md#private) |
+| Mantido privado | O YouTube manteve privado embora você tenha pedido mais: veja [as possíveis causas](platform-audits.md#youtube-private) |
 | Rascunho no TikTok | Na caixa de entrada do TikTok, para você finalizar no app |
 | Envio parado, Envio falhou | Parado por você ou recusado; **Retomar** ou **Tentar de novo** quando puder continuar |
 

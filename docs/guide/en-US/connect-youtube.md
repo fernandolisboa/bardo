@@ -104,9 +104,11 @@ The post then shows **Scheduled** with the time it goes public. Until then, **Ch
 Each metrics sync reads a scheduled video back through the connected account. Once YouTube made it public, the post becomes **Posted** with YouTube's publish time and its metrics are read like any other post's. The sync needs no API key while only scheduled videos are tracked.
 
 <a id="private"></a>
-## Uploads stay private until the audit
+## When YouTube keeps a video private
 
-Google locks every video uploaded through an unaudited API project created after 2020-07-28 to **private**, and scheduled videos too. Bardo reports such a publication as **Kept private**, with "Kept private by YouTube: your Google project has not passed the YouTube API audit". A scheduled video still private a quarter of an hour after its publish time is reported the same way. It is not a failure. To publish publicly from Bardo, request the [YouTube API Services audit](https://support.google.com/youtube/contact/yt_api_form) for your project; it changes the result, not anything in Bardo. Until then, you can make a video public yourself in YouTube Studio.
+When YouTube has an upload as private although you chose public or unlisted, Bardo reports the publication as **Kept private**, with "YouTube kept this video private". A scheduled video still private a quarter of an hour after its publish time is reported the same way. It is not a failure: the video is on YouTube, and you can make it public in YouTube Studio.
+
+YouTube does not say why. Since 2020 it has locked uploads from unaudited API projects to private, but its `videos.insert` page now says otherwise (2026-10-08); a change made in YouTube Studio, or a restriction on the video, has the same result. **Possible causes**, under the post, opens [the list of causes](platform-audits.md#youtube-private); **Step by step** opens the YouTube audit's steps in Settings, for when you decide to request it. The audit changes the result, not anything in Bardo.
 
 <a id="owner-metrics"></a>
 ## Owner metrics
