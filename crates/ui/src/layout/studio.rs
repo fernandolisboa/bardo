@@ -23,6 +23,7 @@ use crate::parts::{
 use crate::tour::Anchored as _;
 
 const TOP_BAR_HEIGHT: f32 = 44.;
+const TAB_HEIGHT: f32 = 28.;
 const STATUS_BAR_HEIGHT: f32 = 28.;
 /// A list of records beside the one open.
 const LIST_WIDTH: f32 = 260.;
@@ -94,13 +95,23 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
             .bg(t.border)
     };
 
+    // A separator opens every group but the first and stays with it, so a
+    // group that wraps to the next line never leaves one at a line's end.
+    let lead = |first: bool, group: AnyElement| {
+        h_flex()
+            .flex_none()
+            .items_center()
+            .when(!first, |row| row.child(separator()))
+            .child(group)
+            .into_any_element()
+    };
+
     let mut tabs: Vec<AnyElement> = Vec::new();
     for (ix, group) in nav.groups.iter().enumerate() {
-        if ix > 0 {
-            tabs.push(separator().into_any_element());
-        }
-        // A pillar's tabs together, so the tour can light them as one.
-        tabs.push(
+        // A pillar's tabs together, so the tour can light them as one and
+        // a narrow window wraps them as one.
+        tabs.push(lead(
+            ix == 0,
             h_flex()
                 .flex_none()
                 .gap_0p5()
@@ -109,16 +120,12 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
                     tab(item, item.place == nav.current).tour_anchor(
                         TourAnchor::NavPlace(item.place),
                         Side::Below,
-                        Some(&nav.scroll),
+                        None,
                     )
                 }))
-                .tour_anchor(
-                    TourAnchor::NavGroup(group.pillar),
-                    Side::Below,
-                    Some(&nav.scroll),
-                )
+                .tour_anchor(TourAnchor::NavGroup(group.pillar), Side::Below, None)
                 .into_any_element(),
-        );
+        ));
     }
     // Costs is a screen; jobs open a panel, the guide a menu, and settings
     // sit apart.
@@ -163,40 +170,36 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
                     .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
                     .into_any_element(),
             ),
-            _ => {
-                tabs.push(separator().into_any_element());
-                tabs.push(
-                    tab(item, nav.current == item.place)
-                        .tour_anchor(
-                            TourAnchor::NavPlace(item.place),
-                            Side::Below,
-                            Some(&nav.scroll),
-                        )
-                        .into_any_element(),
-                );
-            }
+            _ => tabs.push(lead(
+                tabs.is_empty(),
+                tab(item, nav.current == item.place)
+                    .tour_anchor(TourAnchor::NavPlace(item.place), Side::Below, None)
+                    .into_any_element(),
+            )),
         }
     }
 
+    // The tabs wrap, a pillar at a time, when the window is too narrow
+    // for one line (issue #151); jobs, the guide and settings keep the
+    // first line's right end.
     h_flex()
         .flex_none()
         .w_full()
-        .h(px(TOP_BAR_HEIGHT))
+        .min_h(px(TOP_BAR_HEIGHT))
         .px_3()
+        .py(px((TOP_BAR_HEIGHT - TAB_HEIGHT) / 2.))
         .gap_1()
-        .items_center()
+        .items_start()
         .bg(t.surface)
         .border_b(t.border_width)
         .border_color(t.border)
         .child(
             h_flex()
-                .id("nav-tabs")
                 .flex_1()
                 .min_w_0()
+                .flex_wrap()
                 .gap_0p5()
                 .items_center()
-                .overflow_x_scroll()
-                .track_scroll(&nav.scroll)
                 .children(tabs),
         )
         .child(
@@ -215,9 +218,9 @@ fn nav_tab(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> 
     h_flex()
         .id(id)
         .flex_none()
-        .h(px(28.))
+        .h(px(TAB_HEIGHT))
         // Snug, so every place fits the default window in both languages,
-        // terminal fonts included; the strip scrolls only below that.
+        // terminal fonts included; the strip wraps only below that.
         .px_1p5()
         .gap_1()
         .items_center()

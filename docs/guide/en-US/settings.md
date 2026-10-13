@@ -32,6 +32,8 @@ The layout decides where every screen places its parts; the screens do the same 
 
 Switching keeps the screen and the selection you are on, and a tour running at the time goes on in the new layout.
 
+Bardo's window goes down to 960 × 600, half of a Full HD screen at 100 % scale, so two windows fit side by side. In a window too narrow for one line, Studio's tabs go onto a second line, a pillar at a time, and every tab stays whole.
+
 <a id="follow"></a>
 ## Following Windows
 
