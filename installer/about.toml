@@ -1,0 +1,29 @@
+# Third-party notices for bardo.exe (issue #135): `cargo xtask package` runs
+# `cargo about generate` with this file and about.hbs, for the crates the
+# Windows build of bardo-ui links. Bardo's own crates are left out.
+targets = ["x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
+# In order of preference, for crates offered under several licenses. A new
+# dependency under another license fails the package until it is reviewed
+# and added here.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "MIT-0",
+    "CC0-1.0",
+    "Unlicense",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "bzip2-1.0.6",
+    "CDLA-Permissive-2.0",
+    "OFL-1.1",
+    "MPL-2.0",
+]

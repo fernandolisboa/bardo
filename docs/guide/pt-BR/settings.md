@@ -18,6 +18,7 @@ tour: appearance
 - **Publicação**: se os Reels agendados saem com o Bardo fechado. Veja [Publicar com o Bardo fechado](background-agent.md).
 - **Aparência**: o layout, o tema, o idioma da interface e os tours guiados, abaixo.
 - **Métricas**: quando os números dos seus posts sincronizam sozinhos. Veja [Sincronizar métricas](metrics-sync.md).
+- **Sobre**: a versão do Bardo, o FFmpeg que vem com ele e os avisos de terceiros. Veja [Sobre o Bardo](about.md).
 
 Cada aba tem o próprio tour: **Tour desta tela** no cabeçalho, ou Shift+F1, começa o da aba em que você está.
 

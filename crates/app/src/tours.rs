@@ -260,6 +260,12 @@ pub enum Control {
     AgentSwitch,
     /// Settings › Publishing: whether the agent is running.
     AgentStatus,
+    /// Settings › About: Bardo's version.
+    AboutVersion,
+    /// Settings › About: the FFmpeg Bardo ships, its license and source.
+    AboutFfmpeg,
+    /// Settings › About: the third-party notices.
+    AboutNotices,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1138,9 +1144,35 @@ pub const BACKGROUND_AGENT: Tour = {
     }
 };
 
+/// Settings › About: the version, the FFmpeg Bardo ships and the notices.
+pub const ABOUT: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::About);
+    const PAGE: &str = "about";
+    const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::About,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("version", control(Control::AboutVersion))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "version"),
+            TourStep::at("ffmpeg", control(Control::AboutFfmpeg))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "ffmpeg"),
+            TourStep::at("notices", control(Control::AboutNotices))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "notices"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 25] = [
+    pub const ALL: [&'static Tour; 26] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -1166,6 +1198,7 @@ impl Tour {
         &APPEARANCE,
         &METRICS_SYNC,
         &BACKGROUND_AGENT,
+        &ABOUT,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -1195,6 +1228,7 @@ impl Tour {
             TourId::Appearance => &APPEARANCE,
             TourId::MetricsSync => &METRICS_SYNC,
             TourId::BackgroundAgent => &BACKGROUND_AGENT,
+            TourId::About => &ABOUT,
         }
     }
 
@@ -2244,6 +2278,7 @@ mod tests {
             (SettingsTab::Appearance, TourId::Appearance),
             (SettingsTab::Metrics, TourId::MetricsSync),
             (SettingsTab::Publishing, TourId::BackgroundAgent),
+            (SettingsTab::About, TourId::About),
         ];
         for (tab, tour) in tabs {
             assert_eq!(Tour::of(TourPlace::Settings(tab)).map(|t| t.id), Some(tour));

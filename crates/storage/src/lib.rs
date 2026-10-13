@@ -1,6 +1,7 @@
 //! SQLite persistence and migrations, the secret store for provider keys,
 //! network app credentials and OAuth tokens (Windows Credential Manager),
-//! and the background agent's task (Windows Task Scheduler).
+//! the background agent's task (Windows Task Scheduler), and the choices
+//! the installer leaves for the next start.
 
 mod agent_task;
 mod channel;
@@ -23,6 +24,7 @@ mod research;
 mod scene;
 mod script;
 mod secrets;
+mod setup_choices;
 mod template;
 mod theme;
 mod timeline;
@@ -49,6 +51,10 @@ pub use secrets::CredentialManager;
 pub use secrets::{
     MemorySecretStore, app_credentials_target, credential_target, platform_connection_secrets,
     platform_secret_store, tokens_target,
+};
+pub use setup_choices::{
+    SETUP_CHOICES_FILE, SetupChoices, SetupChoicesError, default_setup_choices_path,
+    take_setup_choices,
 };
 pub use voice_samples::{LocalVoiceSamples, MemoryVoiceSamples, default_voice_samples_dir};
 

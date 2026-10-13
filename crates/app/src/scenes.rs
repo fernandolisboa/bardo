@@ -967,7 +967,7 @@ pub(crate) mod tests {
         /// The database as a new process opens it: the same data, under a
         /// job runner of its own, so a restart cannot run on as the closed
         /// app's runner.
-        fn process_db(&self) -> Arc<Database> {
+        pub(crate) fn process_db(&self) -> Arc<Database> {
             Arc::new(self.db.other_runner())
         }
 

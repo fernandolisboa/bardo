@@ -43,7 +43,7 @@ pub const MIN_VERSION: Version = Version { major: 7, minor: 1 };
 pub const DIR_VARIABLE: &str = "BARDO_FFMPEG_DIR";
 
 /// Where the installer puts the bundled build, next to the Bardo executable.
-const INSTALLED_DIR: &str = "ffmpeg";
+pub const INSTALLED_DIR: &str = "ffmpeg";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {

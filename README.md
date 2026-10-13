@@ -13,6 +13,10 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 - Brand (mark, wordmark, app icon): [`assets/brand/`](assets/brand/)
 - Spikes: [`docs/spikes/`](docs/spikes/)
 
+## Installing
+
+Download `Bardo-Setup-<version>-x64.exe` from [Releases](https://github.com/fernandolisboa/bardo/releases) and run it: it installs for your Windows user, with no administrator rights, and brings FFmpeg with it. See the guide's [Installing Bardo](docs/guide/en-US/install.md) and [ADR-0009](docs/adr/0009-windows-installer.md).
+
 ## Development
 
 Requires Windows 10/11 and the stable Rust toolchain (MSVC).
@@ -22,7 +26,11 @@ cargo xtask fetch-ffmpeg  # once: the pinned ffmpeg build into .ffmpeg/ (ADR-000
 cargo run                 # opens the app (crate bardo-ui)
 cargo test --workspace
 cargo xtask lint-deps     # fails if any crate other than bardo-ui depends on GPUI
+cargo xtask package       # the installed layout in target/package/Bardo and, with
+                          # Inno Setup 6 and cargo-about installed, the installer
 ```
+
+`cargo xtask package` needs [Inno Setup 6](https://jrsoftware.org/isdl.php) and `cargo install cargo-about --locked --features cli`. The Release workflow runs it on Windows: a manual run gives an installer to test, a `v*` tag drafts a release.
 
 Workspace layout follows [ADR-0001](docs/adr/0001-architecture-and-stack.md): `crates/{domain,media,ai,publish,storage,app,ui}`, plus `xtask` for repository checks. The local profile and its settings live in `%APPDATA%\Bardo\bardo.db`.
 

@@ -1030,6 +1030,7 @@ impl SettingsScreen {
             SettingsTab::Publishing => self.render_publishing(cx),
             SettingsTab::Appearance => self.render_appearance(cx),
             SettingsTab::Metrics => self.render_metrics(cx),
+            SettingsTab::About => self.render_about(cx),
         }
     }
 
@@ -1458,6 +1459,99 @@ impl SettingsScreen {
             .into_any_element()
     }
 
+    /// Bardo's version, the FFmpeg it ships with its license and source,
+    /// and the third-party notices (issue #135).
+    fn render_about(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let look = look(cx);
+        let t = look.tokens;
+        let scroll = Some(&self.scroll);
+        let about = bardo.about();
+        let body = |text: String| div().text_sm().text_color(t.text2).child(text);
+        let version = kit::anchor_in(
+            TourAnchor::Control(Control::AboutVersion),
+            v_flex()
+                .gap_2()
+                .child(crate::brand::Lockup::new(
+                    px(40.),
+                    crate::brand::Ink::interface(look.theme, t.accent_text),
+                    t.text,
+                ))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .child(bardo.text_with(Text::AboutVersion, &[("version", about.version)])),
+                )
+                .child(body(bardo.text(Text::AboutSummary).into_owned())),
+            scroll,
+        );
+        let source = about.ffmpeg_source.clone();
+        let license = about.ffmpeg_license.clone();
+        let ffmpeg = kit::anchor_in(
+            TourAnchor::Control(Control::AboutFfmpeg),
+            v_flex()
+                .gap_2()
+                .child(kit::section_heading(tr(bardo, Text::AboutFfmpegTitle)))
+                .child(body(bardo.text_with(
+                    Text::AboutFfmpeg,
+                    &[("version", about.ffmpeg_version.as_str())],
+                )))
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new("about-ffmpeg-source")
+                                .small()
+                                .label(tr(bardo, Text::AboutFfmpegSource))
+                                .on_click(move |_, _, cx| cx.open_url(&source)),
+                        )
+                        .child(
+                            Button::new("about-ffmpeg-license")
+                                .small()
+                                .label(tr(bardo, Text::AboutFfmpegLicense))
+                                .on_click(move |_, _, cx| match &license {
+                                    Some(path) => cx.open_with_system(path),
+                                    None => cx.open_url(bardo_app::LGPL_URL),
+                                }),
+                        ),
+                ),
+            scroll,
+        );
+        let notices_path = about.notices.clone();
+        let notices = kit::anchor_in(
+            TourAnchor::Control(Control::AboutNotices),
+            v_flex()
+                .gap_2()
+                .child(kit::section_heading(tr(bardo, Text::AboutNoticesTitle)))
+                .child(body(bardo.text(Text::AboutNotices).into_owned()))
+                .child(match notices_path {
+                    Some(path) => h_flex()
+                        .child(
+                            Button::new("about-notices")
+                                .small()
+                                .label(tr(bardo, Text::AboutOpenNotices))
+                                .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                        )
+                        .into_any_element(),
+                    None => div()
+                        .text_xs()
+                        .text_color(t.text2)
+                        .child(tr(bardo, Text::AboutNoNotices))
+                        .into_any_element(),
+                }),
+            scroll,
+        );
+        v_flex()
+            .max_w(px(720.))
+            .gap_5()
+            .child(version)
+            .child(ffmpeg)
+            .child(notices)
+            .into_any_element()
+    }
+
     fn render_metrics(&self, cx: &mut Context<Self>) -> AnyElement {
         let bardo = self.bardo.read(cx);
         v_flex()
@@ -1793,6 +1887,7 @@ impl Render for SettingsScreen {
             .child(Tab::new().label(tr(bardo, Text::SettingsPublishingTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
+            .child(Tab::new().label(tr(bardo, Text::SettingsAboutTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {
                 if let Some(tab) = SettingsTab::ALL.get(*index) {
                     this.show_tab(*tab, cx);

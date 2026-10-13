@@ -34,7 +34,7 @@ Two ways to use ffmpeg from Rust:
 ## Consequences
 
 - No C toolchain or FFmpeg SDK in CI; a new FFmpeg is a manifest change plus `cargo xtask fetch-ffmpeg`.
-- Distribution follows FFmpeg's LGPL checklist: ship the DLLs unmodified and unrenamed with `LICENSE.txt`, offer the matching source and configure line, credit FFmpeg in the About box. The installer slice carries this.
+- Distribution follows FFmpeg's LGPL checklist: ship the DLLs unmodified and unrenamed with `LICENSE.txt`, offer the matching source and configure line, credit FFmpeg in the About box. The installer carries this, and the archives and source are mirrored to this repository's `ffmpeg-<version>` release ([ADR-0009](0009-windows-installer.md)).
 - Each call pays a process start; calls are coarse (a whole proxy, a whole render, one preview stream), so it does not add up. Preview opens one child per play or seek, not per frame.
 - A crash of Bardo can leave a running child until it finishes. Putting children in a Windows job object that dies with Bardo needs the Win32 API: unsafe calls, which the workspace forbids, or a wrapper crate. The render slice (#27) left it open; a render interrupted that way resumes from its last finished file when Bardo starts again.
 - Very long timelines make long command lines (one input per clip). Windows limits a command line to 32,767 characters; past a few hundred clips the graph goes into a file (`-/filter_complex`) and sources are deduplicated. Not needed for 60 s shorts.

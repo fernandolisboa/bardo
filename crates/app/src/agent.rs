@@ -14,6 +14,10 @@
 //! The user turns it on and off in Settings › Publishing: on registers the
 //! task with the system and starts it; off removes the task, and the agent
 //! sees the choice and stops.
+//!
+//! The installer (issue #135) asks the same question on a first install and
+//! leaves the answer for Bardo's next start (`apply_setup_choices`); its
+//! uninstaller runs `bardo --uninstall`, which turns the agent off.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +27,7 @@ use bardo_domain::{
     AgentTask, AgentTaskError, Job, PublicationRepository, RUNNER_ALIVE, RUNNER_TICK,
     RepositoryError, RunnerRole, RunnerSeen, UserProfile,
 };
+use bardo_storage::SetupChoices;
 
 use crate::jobs::{JobSettings, Runner};
 use crate::{AppError, Bardo, Providers, Repositories, Text};
@@ -309,6 +314,65 @@ impl Bardo {
         }
     }
 
+    /// Applies what the installer asked on a first install. Only the
+    /// choice is saved: `agent_upkeep`, run next, sets the task up.
+    pub fn apply_setup_choices(&mut self, choices: &SetupChoices) -> Result<(), AgentError> {
+        if let Some(on) = choices.background_agent
+            && on != self.profile.background_agent
+        {
+            self.save_background_agent(on)?;
+            tracing::info!(on, "the installer's background agent choice is saved");
+        }
+        Ok(())
+    }
+
+    /// `bardo --uninstall`, run by the uninstaller before it removes the
+    /// program: turns the agent off, removes its task and waits for a
+    /// running agent to stop, so its program file is free. Nothing else
+    /// changes; the user's data stays.
+    pub fn uninstall(repositories: Repositories) -> Result<(), AgentError> {
+        Self::uninstall_waiting(repositories, RUNNER_ALIVE + RUNNER_TICK)
+    }
+
+    /// `uninstall`, waiting at most `wait` for the agent.
+    pub(crate) fn uninstall_waiting(
+        repositories: Repositories,
+        wait: Duration,
+    ) -> Result<(), AgentError> {
+        let Repositories {
+            profiles,
+            jobs,
+            agent_task,
+            ..
+        } = repositories;
+        if let Some(profile) = profiles.load_default()?
+            && profile.background_agent
+        {
+            profiles.save(&UserProfile {
+                background_agent: false,
+                ..profile
+            })?;
+        }
+        if agent_task.is_registered().map_err(AgentError::NotRemoved)? {
+            agent_task.remove().map_err(AgentError::NotRemoved)?;
+        }
+        // The agent reads the setting every tick and leaves when it is off;
+        // one that died stays listed until it counts as gone.
+        let deadline = Instant::now() + wait;
+        loop {
+            let now = SystemTime::now();
+            let others = jobs.runners(now.checked_sub(RUNNER_ALIVE).unwrap_or(now))?;
+            if !others.iter().any(|other| other.role == RunnerRole::Agent) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                tracing::warn!("the background agent did not stop before uninstalling");
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
     fn agent_work(&self, step: AgentStep) -> AgentWork {
         AgentWork {
             task: Arc::clone(&self.agent_task),
@@ -329,6 +393,7 @@ impl Bardo {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::{Duration, Instant, SystemTime};
 
     use bardo_domain::{
@@ -554,5 +619,91 @@ mod tests {
         assert!(s.h.agent_task.is_registered().unwrap());
         s.app.agent_upkeep().run().unwrap();
         assert!(!s.h.agent_task.is_registered().unwrap());
+    }
+
+    #[test]
+    fn the_installer_choice_turns_the_agent_on_and_bardo_sets_it_up() {
+        let mut s = ready();
+        let choices = SetupChoices {
+            background_agent: Some(true),
+        };
+        s.app.apply_setup_choices(&choices).unwrap();
+        assert!(profile(&s.h).background_agent);
+        assert!(
+            !s.h.agent_task.is_registered().unwrap(),
+            "the choice only is saved"
+        );
+        s.app.agent_upkeep().run().unwrap();
+        assert!(s.h.agent_task.is_registered().unwrap());
+        assert_eq!(s.h.agent_task.starts(), 1);
+
+        // Asking again changes nothing; no answer changes nothing.
+        s.app.apply_setup_choices(&choices).unwrap();
+        s.app.apply_setup_choices(&SetupChoices::default()).unwrap();
+        assert!(profile(&s.h).background_agent);
+        s.app
+            .apply_setup_choices(&SetupChoices {
+                background_agent: Some(false),
+            })
+            .unwrap();
+        assert!(!profile(&s.h).background_agent);
+    }
+
+    fn agent_repositories(h: &Harness) -> Repositories {
+        Repositories {
+            agent_task: Arc::clone(&h.agent_task) as _,
+            ..Repositories::shared(h.process_db(), Arc::clone(&h.secrets) as _)
+        }
+    }
+
+    #[test]
+    fn uninstalling_turns_the_agent_off_and_waits_for_it_to_stop() {
+        let mut s = ready();
+        turn_on(&mut s);
+        let (h, _) = s.close();
+        let agent = h.start_agent().unwrap();
+        // Repositories stay on the thread that made them.
+        let (db, secrets, task) = (
+            h.process_db(),
+            Arc::clone(&h.secrets),
+            Arc::clone(&h.agent_task),
+        );
+        let uninstall = std::thread::spawn(move || {
+            let repositories = Repositories {
+                agent_task: task as _,
+                ..Repositories::shared(db, secrets as _)
+            };
+            Bardo::uninstall_waiting(repositories, Duration::from_secs(30))
+        });
+
+        let mut renewed = None;
+        while agent.agent_step(&mut renewed) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(!uninstall.is_finished(), "waits while the agent is up");
+        drop(agent);
+        let started = Instant::now();
+        uninstall.join().unwrap().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "ends once the agent left"
+        );
+        assert!(!profile(&h).background_agent);
+        assert!(!h.agent_task.is_registered().unwrap());
+    }
+
+    #[test]
+    fn uninstalling_without_an_agent_or_a_profile_is_quick() {
+        let h = Harness::new();
+        let started = Instant::now();
+        Bardo::uninstall_waiting(agent_repositories(&h), Duration::from_secs(30)).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(h.db.load_default().unwrap().is_none(), "no profile made");
+
+        // A task left over without a profile goes too.
+        h.agent_task.register(Path::new("bardo.exe")).unwrap();
+        Bardo::uninstall_waiting(agent_repositories(&h), Duration::from_secs(30)).unwrap();
+        assert!(!h.agent_task.is_registered().unwrap());
     }
 }

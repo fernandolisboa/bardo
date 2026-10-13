@@ -1,5 +1,6 @@
 //! Bardo desktop entry point: opens the main window over `bardo_app::Bardo`,
 //! or, with `--agent`, runs the background publishing agent without one.
+//! The uninstaller runs it with `--uninstall` (issue #135).
 
 // No console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -77,17 +78,57 @@ fn run_agent() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The argument the uninstaller runs `bardo` with.
+const UNINSTALL_ARGUMENT: &str = "--uninstall";
+
+/// Before the uninstaller removes the program: the background agent is
+/// turned off, its task removed, and a running agent has stopped. A
+/// machine where Bardo never opened gets no database from it.
+fn uninstall() -> anyhow::Result<()> {
+    if !bardo_storage::default_database_path()?.exists() {
+        let task = bardo_storage::platform_agent_task();
+        if task.is_registered()? {
+            task.remove()?;
+        }
+        return Ok(());
+    }
+    Bardo::uninstall(repositories()?)?;
+    Ok(())
+}
+
+/// What the installer asked on a first install, read once and deleted.
+fn apply_setup_choices(bardo: &mut Bardo) {
+    let Ok(path) = bardo_storage::default_setup_choices_path() else {
+        return;
+    };
+    match bardo_storage::take_setup_choices(&path) {
+        Ok(Some(choices)) => {
+            if let Err(error) = bardo.apply_setup_choices(&choices) {
+                tracing::warn!("the installer's choices were not saved: {error}");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!("{error}"),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     if std::env::args().any(|arg| arg == bardo_storage::AGENT_ARGUMENT) {
         return run_agent();
     }
+    if std::env::args().any(|arg| arg == UNINSTALL_ARGUMENT) {
+        return uninstall();
+    }
     let locale = sys_locale::get_locale();
-    let bardo = Bardo::start(repositories()?, Providers::live(), locale.as_deref())?;
+    let mut bardo = Bardo::start(repositories()?, Providers::live(), locale.as_deref())?;
     // Started after the app so the saved keys are already masked. Without a
     // log file Bardo still runs; it only loses its diagnostics.
     if let Some(log_path) = bardo_app::logging::default_log_path() {
         let _ = bardo_app::logging::init(&log_path, bardo.redactor());
     }
+    // Before the agent's upkeep below, which sets the task up when the
+    // installer's answer turned it on.
+    apply_setup_choices(&mut bardo);
     // Public post numbers catch up in the background when the profile's
     // setting says they are due.
     bardo.sync_metrics_on_start();

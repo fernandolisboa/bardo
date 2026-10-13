@@ -1,6 +1,7 @@
 //! Application state and use cases. The UI talks to Bardo only through this
 //! crate, so behavior is tested here instead of through pixels (ADR-0001).
 
+mod about;
 mod agent;
 mod appearance;
 mod channels;
@@ -63,6 +64,7 @@ use bardo_storage::{
     Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore, MemoryVoiceSamples,
 };
 
+pub use about::{About, LGPL_URL};
 pub use agent::{AgentError, AgentStatus, AgentWork};
 pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
 pub use bardo_domain;

@@ -1,0 +1,89 @@
+name: Release
+
+# Bardo's Windows installer (issue #135), made by `cargo xtask package`.
+# - A `v*` tag builds it and drafts a GitHub Release with the installer
+#   and its SHA-256; publishing the draft is a person's call.
+# - A manual run builds it as a run artifact, for test builds.
+# - Pull requests that touch the packaging build it too, so a broken
+#   installer fails before it merges.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - installer/**
+      - xtask/**
+      - crates/media/ffmpeg.toml
+      - crates/ui/build.rs
+      - assets/brand/bardo.ico
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  installer:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Cache the pinned ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: .ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('crates/media/ffmpeg.toml') }}
+      - name: Install cargo-about (third-party notices)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2
+      # Inno Setup 6 comes with the windows-latest image; xtask finds it.
+      - name: Package
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            cargo xtask package --tag "$GITHUB_REF_NAME"
+          else
+            cargo xtask package
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bardo-installer
+          path: |
+            target/package/Bardo-Setup-*.exe
+            target/package/Bardo-Setup-*.exe.sha256
+          if-no-files-found: error
+
+  release:
+    name: Draft the release
+    needs: installer
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bardo-installer
+          path: dist
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --draft
+          --title "Bardo ${GITHUB_REF_NAME#v}"
+          --generate-notes
