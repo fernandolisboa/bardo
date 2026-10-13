@@ -32,6 +32,8 @@ O layout decide onde cada tela coloca as suas partes; as telas fazem as mesmas c
 
 Trocar mantém a tela e a seleção em que você está, e um tour em andamento continua no novo layout.
 
+A janela do Bardo vai até 960 × 600, metade de uma tela Full HD em escala de 100 %, para caberem duas janelas lado a lado. Numa janela estreita demais para uma linha, as abas do Studio passam para uma segunda linha, um pilar de cada vez, e toda aba fica inteira.
+
 <a id="follow"></a>
 ## Seguir o Windows
 

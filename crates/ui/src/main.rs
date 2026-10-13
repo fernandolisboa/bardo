@@ -78,6 +78,10 @@ fn run_agent() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The smallest the main window goes, in logical pixels.
+const MIN_WIDTH: f32 = 960.;
+const MIN_HEIGHT: f32 = 600.;
+
 /// The argument the uninstaller runs `bardo` with.
 const UNINSTALL_ARGUMENT: &str = "--uninstall";
 
@@ -169,6 +173,11 @@ fn main() -> anyhow::Result<()> {
                     ..Default::default()
                 }),
                 app_owns_titlebar_drag: true,
+                // The narrowest window every screen is checked at in both
+                // layouts: half of a 1920-pixel-wide screen at 100 % scale,
+                // where Windows snaps two windows side by side (issue #151).
+                // Laptop snap halves are narrower; issue #153 lowers it.
+                window_min_size: Some(size(px(MIN_WIDTH), px(MIN_HEIGHT))),
                 icon: brand::window_icon(),
                 ..Default::default()
             };
