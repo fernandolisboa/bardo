@@ -38,6 +38,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 uuid = { version = "1", features = ["v4"] }
 zeroize = "1"
+windows-version = "0.1"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [workspace.lints.rust]

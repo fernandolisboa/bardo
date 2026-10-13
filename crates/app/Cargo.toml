@@ -26,7 +26,7 @@ zip.workspace = true
 
 # The Windows version in an exported diagnostic (issue #140).
 [target.'cfg(windows)'.dependencies]
-windows-version = "0.1"
+windows-version.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

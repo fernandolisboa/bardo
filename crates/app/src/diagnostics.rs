@@ -82,9 +82,11 @@ impl Scrubber {
 
     fn new(redactor: Redactor, accounts: Vec<String>, home: Option<PathBuf>) -> Self {
         let mut accounts: Vec<String> = accounts
-            .into_iter()
-            .map(|name| name.trim().to_owned())
+            .iter()
+            // `@username` also travels as a bare `username` (in addresses).
+            .flat_map(|name| [name.trim(), name.trim().trim_start_matches('@')])
             .filter(|name| name.chars().count() >= Self::MIN_ACCOUNT_CHARS)
+            .map(str::to_ascii_lowercase)
             .collect();
         accounts.sort_by_key(|name| std::cmp::Reverse(name.len()));
         accounts.dedup();
@@ -106,9 +108,7 @@ impl Scrubber {
     fn scrub(&self, text: &str) -> String {
         let mut text = self.redactor.redact(text);
         for name in &self.accounts {
-            if text.contains(name.as_str()) {
-                text = replace_whole(&text, name, ACCOUNT_MASK);
-            }
+            text = replace_whole(&text, name, ACCOUNT_MASK);
         }
         if let Some(home) = &self.home
             && text.contains(home.as_str())
@@ -119,14 +119,19 @@ impl Scrubber {
     }
 }
 
-/// `text` with each whole-word `needle` replaced by `mask`: one that no
-/// letter, digit or `_` touches, so an account named `Bar` leaves `Bardo`
-/// alone.
+/// `text` with each whole-word `needle` (lowercase) replaced by `mask`,
+/// ignoring ASCII case, since networks do with handles: one that no letter,
+/// digit or `_` touches, so an account named `Bar` leaves `Bardo` alone.
 fn replace_whole(text: &str, needle: &str, mask: &str) -> String {
     let word = |c: char| c.is_alphanumeric() || c == '_';
+    // ASCII lowercasing keeps every byte where it was.
+    let lower = text.to_ascii_lowercase();
+    if !lower.contains(needle) {
+        return text.to_owned();
+    }
     let mut out = String::with_capacity(text.len());
     let mut copied = 0;
-    for (at, _) in text.match_indices(needle) {
+    for (at, _) in lower.match_indices(needle) {
         if at < copied {
             continue;
         }
@@ -316,17 +321,20 @@ impl Bardo {
     /// (`logging::logs_dir`). Never fails: what cannot be read is written
     /// as such. Write it with `DiagnosticsExport::write_to`.
     pub fn diagnostics(&self, logs: &Path, display: &DisplayInfo) -> DiagnosticsExport {
+        // First: it teaches the redactor the tokens and collects the names
+        // the rest is scrubbed of.
         let mut accounts = Vec::new();
         let accounts_report = self.accounts_report(&mut accounts);
+        let scrubber = Scrubber::new(self.redactor(), accounts, dirs::home_dir());
         let reports = vec![
             ("system.txt", self.system_report(logs, display)),
-            ("jobs.txt", self.jobs_report()),
+            ("jobs.txt", self.jobs_report(&scrubber)),
             ("accounts.txt", accounts_report),
         ];
         DiagnosticsExport {
             reports,
             logs: logs.to_owned(),
-            scrubber: Scrubber::new(self.redactor(), accounts, dirs::home_dir()),
+            scrubber,
         }
     }
 
@@ -397,7 +405,9 @@ impl Bardo {
         out
     }
 
-    fn jobs_report(&self) -> String {
+    /// Failure details are scrubbed before they are cut: a secret or name
+    /// cut in half would not be masked.
+    fn jobs_report(&self, scrubber: &Scrubber) -> String {
         let jobs = self.jobs();
         let mut out = String::from("Jobs\n\n");
         for state in JobState::ALL {
@@ -407,7 +417,7 @@ impl Bardo {
         let failures: Vec<_> = jobs.iter().filter(|job| job.failure().is_some()).collect();
         let _ = writeln!(
             out,
-            "\nLast failures (newest last, up to {FAILURES_LISTED}):"
+            "\nLast failures (by when the job was created, newest last, up to {FAILURES_LISTED}):"
         );
         if failures.is_empty() {
             out.push_str("none\n");
@@ -423,7 +433,7 @@ impl Bardo {
                 job.state().code(),
                 job.attempts(),
                 failure.kind.code(),
-                one_line(&failure.detail)
+                one_line(&scrubber.scrub(&failure.detail))
             );
         }
         out
@@ -520,7 +530,6 @@ fn connection_detail(connection: &NetworkConnection) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read as _;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -642,6 +651,19 @@ mod tests {
         })
         .unwrap();
         JobRepository::save(&*db, &failed).unwrap();
+        // A long detail whose token and channel id straddle the cut.
+        let pad = "x".repeat(DETAIL_CHARS - 15);
+        let long = Job::restore(JobRecord {
+            state: JobState::Failed,
+            attempts: 1,
+            failure: Some(JobFailure::new(
+                JobFailureKind::NotAllowed,
+                format!("{pad} {ACCESS} {CHANNEL_ID}"),
+            )),
+            ..JobRecord::from(&Job::new(owner, JobKind::MetricsSync, "{}"))
+        })
+        .unwrap();
+        JobRepository::save(&*db, &long).unwrap();
         // A restart: the new run knows the keys and app credentials, not
         // the tokens.
         drop(app);
@@ -717,7 +739,9 @@ mod tests {
                 CHANNEL_NAME,
                 HANDLE,
             ] {
-                assert!(!text.contains(secret), "{secret} in {name}:\n{text}");
+                // Nor a part of one left by a cut.
+                let part = &secret[..secret.len().min(10)];
+                assert!(!text.contains(part), "{part} in {name}:\n{text}");
             }
         }
         let text = |wanted: &str| &entries.iter().find(|(name, _)| name == wanted).unwrap().1;
@@ -774,7 +798,7 @@ mod tests {
         }
         let jobs = &export.reports[1].1;
         assert!(
-            jobs.contains("failed: 1\n") && jobs.contains("done: 0\n"),
+            jobs.contains("failed: 2\n") && jobs.contains("done: 0\n"),
             "{jobs}"
         );
         assert_eq!(
@@ -865,8 +889,13 @@ mod tests {
              %USERPROFILE%\\AppData"
         );
         assert_eq!(
-            replace_whole("UCid/UCid?x=UCidX", "UCid", "[a]"),
+            replace_whole("UCid/ucID?x=UCidX", "ucid", "[a]"),
             "[a]/[a]?x=UCidX"
+        );
+        let handles = Scrubber::new(Redactor::new(), vec!["@SpaceFacts".into()], None);
+        assert_eq!(
+            handles.scrub("@spacefacts at instagram.com/SPACEFACTS/"),
+            "[account] at instagram.com/[account]/"
         );
         let root = Scrubber::new(Redactor::new(), vec![], Some(PathBuf::from("/")));
         assert_eq!(root.scrub("/var/log"), "/var/log");

@@ -1509,16 +1509,20 @@ impl SettingsScreen {
             cx.notify();
             return;
         };
-        let export = self
-            .bardo
-            .read(cx)
-            .diagnostics(&logs, &display_info(window, cx));
+        let display = display_info(window, cx);
         let name = bardo_app::diagnostics_file_name(std::time::SystemTime::now());
         let chosen = cx.prompt_for_new_path(&bardo_app::diagnostics_folder(), Some(&name));
         self.diagnostics_notice = None;
         self.diagnostics = Some(cx.spawn(async move |this, cx| {
             let notice = match chosen.await {
                 Ok(Ok(Some(path))) => {
+                    // Gathered once a file is chosen: it reads the secret
+                    // store, for nothing when the dialog is cancelled.
+                    let Ok(export) = this.update(cx, |this, cx| {
+                        this.bardo.read(cx).diagnostics(&logs, &display)
+                    }) else {
+                        return;
+                    };
                     let written = cx
                         .background_executor()
                         .spawn({
