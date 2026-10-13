@@ -45,7 +45,7 @@ pub use agent_task::{
 };
 pub use export_files::{LocalExportFiles, MemoryExportFiles, default_exports_dir};
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
-pub use migrations::{BrokenReferences, MigrationError};
+pub use migrations::{BrokenReferences, MigrationError, SCHEMA_VERSION};
 #[cfg(windows)]
 pub use secrets::CredentialManager;
 pub use secrets::{

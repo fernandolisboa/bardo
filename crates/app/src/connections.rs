@@ -244,6 +244,31 @@ impl Connections {
         Ok(self.state(account.id)?.identity)
     }
 
+    /// The account's stored connection, for a diagnostic export (issue
+    /// #140). Its tokens and the network's app credentials are taught to
+    /// the redactor first, so the export masks them even when nothing has
+    /// used them since Bardo started. A store that cannot be read is
+    /// skipped: those secrets were never loaded, so no text holds them.
+    pub(crate) fn connection_for_diagnostics(
+        &self,
+        account: &NetworkAccount,
+    ) -> Result<Option<NetworkConnection>, RepositoryError> {
+        let Some(connection) = self
+            .states
+            .get(account.id)?
+            .filter(|connection| connection.owner == self.owner)
+        else {
+            return Ok(None);
+        };
+        if let Ok(Some(tokens)) = self.secrets.tokens(self.owner, account.id) {
+            self.redactor.add_parts(&tokens.sensitive_parts());
+        }
+        if let Ok(Some(credentials)) = self.secrets.app_credentials(self.owner, account.network) {
+            self.redactor.add_parts(&credentials.sensitive_parts());
+        }
+        Ok(Some(connection))
+    }
+
     /// The account's tokens, fresh: refreshed first when they expire
     /// within the network's `refresh_margin`. A refused refresh marks the
     /// account "reconnect needed". Blocks on the network when refreshing.

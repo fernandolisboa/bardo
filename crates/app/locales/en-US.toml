@@ -2623,6 +2623,10 @@ body = "Bardo reads, previews and renders video with FFmpeg, which comes with it
 title = "Third-party notices"
 body = "The open-source libraries Bardo is built with, and their licenses."
 
+[tour.about.diagnostics]
+title = "Diagnostics"
+body = "When something goes wrong, export a diagnostic file here and attach it to an issue. Keys, tokens and account names are masked, and nothing is sent anywhere."
+
 [guide]
 back_to_editor = "Back to the editor"
 resume_tour = "Resume tour"
@@ -2727,3 +2731,11 @@ notices_title = "Third-party notices"
 notices = "Bardo is built with open-source libraries. Their licenses and copyright notices are in one page installed with Bardo."
 open_notices = "Open the notices"
 no_notices = "The notices come with the installed app. This copy was built from source."
+diagnostics_title = "Diagnostics"
+diagnostics = "When something goes wrong, export a diagnostic file and attach it to an issue. It holds Bardo's logs, this computer's setup, a summary of the jobs and whether each account is connected. Keys, tokens and account names are masked, and nothing is sent anywhere."
+export_diagnostics = "Export diagnostics"
+exporting_diagnostics = "Exporting…"
+open_logs = "Open logs folder"
+diagnostics_saved = "Saved to {path}."
+show_diagnostics = "Show in folder"
+diagnostics_failed = "Couldn't save the diagnostic file. Try another folder."

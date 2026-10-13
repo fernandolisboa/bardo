@@ -9,6 +9,7 @@ mod clips;
 mod connections;
 mod costs;
 mod cut_suggestions;
+mod diagnostics;
 mod editor;
 mod export;
 mod guide;
@@ -83,6 +84,10 @@ pub use costs::{
 };
 pub use cut_suggestions::{
     CHUNK_LIMITS, CutSuggestionError, SuggestionState, SuggestionView, SuggestionsView,
+};
+pub use diagnostics::{
+    DiagnosticsError, DiagnosticsExport, DisplayInfo, GpuInfo, diagnostics_file_name,
+    diagnostics_folder,
 };
 pub use editor::{
     BinScene, ClipMedia, ClipProblem, ClipShows, ClipView, CutBasis, EditAction, Editor,

@@ -61,7 +61,8 @@ pub enum TourId {
     MetricsSync,
     /// The tour of Settings › Publishing: the background agent.
     BackgroundAgent,
-    /// The tour of Settings › About: the version, FFmpeg and the notices.
+    /// The tour of Settings › About: the version, FFmpeg, the notices and
+    /// the diagnostics export.
     About,
 }
 

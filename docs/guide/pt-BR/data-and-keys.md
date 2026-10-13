@@ -31,7 +31,7 @@ Suas chaves de API, as credenciais de app das redes e os logins das contas conec
 <a id="logs"></a>
 ## Logs
 
-O Bardo registra o que faz em `%LOCALAPPDATA%\Bardo\logs\bardo.log`, com tamanho limitado. Cada linha passa pelo mesmo mascaramento da tela: nenhuma chave, chave secreta ou token é escrito nele.
+O Bardo registra o que faz em `%LOCALAPPDATA%\Bardo\logs\bardo.log`, com tamanho limitado. Cada linha passa pelo mesmo mascaramento da tela: nenhuma chave, chave secreta ou token é escrito nele. O agente em segundo plano escreve `agent.log` ao lado dele. [Exportar diagnóstico](about.md#diagnostics) reúne os dois para anexar a uma issue.
 
 <a id="backup"></a>
 ## Backup e troca de computador

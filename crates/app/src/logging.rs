@@ -21,6 +21,12 @@ pub fn default_log_path() -> Option<PathBuf> {
     dirs::data_local_dir().map(|dir| dir.join("Bardo").join("logs").join("bardo.log"))
 }
 
+/// The folder of both logs, which Settings › About opens and a diagnostic
+/// export reads (issue #140).
+pub fn logs_dir() -> Option<PathBuf> {
+    default_log_path().and_then(|path| path.parent().map(Path::to_path_buf))
+}
+
 /// Where the background agent logs, beside the app's log.
 pub fn agent_log_path() -> Option<PathBuf> {
     default_log_path().map(|path| path.with_file_name("agent.log"))

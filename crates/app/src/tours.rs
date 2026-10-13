@@ -266,6 +266,8 @@ pub enum Control {
     AboutFfmpeg,
     /// Settings › About: the third-party notices.
     AboutNotices,
+    /// Settings › About: export diagnostics and open the logs folder.
+    AboutDiagnostics,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1144,14 +1146,15 @@ pub const BACKGROUND_AGENT: Tour = {
     }
 };
 
-/// Settings › About: the version, the FFmpeg Bardo ships and the notices.
+/// Settings › About: the version, the FFmpeg Bardo ships, the notices and
+/// the diagnostics export.
 pub const ABOUT: Tour = {
     const AT: TourPlace = TourPlace::Settings(SettingsTab::About);
     const PAGE: &str = "about";
     const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::About,
-        version: 1,
+        version: 2,
         place: Some(AT),
         steps: &[
             TourStep::at("version", control(Control::AboutVersion))
@@ -1166,6 +1169,10 @@ pub const ABOUT: Tour = {
                 .on(AT)
                 .missing(TAB)
                 .learn(PAGE, "notices"),
+            TourStep::at("diagnostics", control(Control::AboutDiagnostics))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "diagnostics"),
         ],
     }
 };

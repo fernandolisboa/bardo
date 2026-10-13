@@ -41,6 +41,10 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0037_background_agent.sql"),
 ];
 
+/// The schema version this build migrates every database to (SQLite's
+/// `user_version` after `run`), shown in an exported diagnostic.
+pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
+
 /// A migration left rows whose foreign keys point nowhere.
 #[derive(Debug, thiserror::Error)]
 #[error("migration {migration} breaks {rows} foreign key reference(s)")]
