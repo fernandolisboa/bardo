@@ -216,8 +216,10 @@ fn nav_tab(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> 
         .id(id)
         .flex_none()
         .h(px(28.))
-        .px_2()
-        .gap_1p5()
+        // Snug, so every place fits the default window in both languages,
+        // terminal fonts included; the strip scrolls only below that.
+        .px_1p5()
+        .gap_1()
         .items_center()
         .rounded(t.radius)
         .border(t.border_width)
