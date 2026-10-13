@@ -1,0 +1,1 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><clipPath id="gap"><path clip-rule="evenodd" d="M-8 -8 H72 V72 H-8 Z M32.5 -2 H47.5 V10 L44.5 12.6 V64 H35.5 V12.6 L32.5 10 Z"/></clipPath></defs><path clip-path="url(#gap)" d="M10 40 H34" stroke-width="7" stroke-linecap="round" fill="none" stroke="#000"/></svg>

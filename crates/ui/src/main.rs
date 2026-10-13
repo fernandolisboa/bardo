@@ -6,6 +6,7 @@
 
 mod accounts;
 mod appearance;
+mod brand;
 mod channels;
 mod costs;
 mod editor;
@@ -127,6 +128,7 @@ fn main() -> anyhow::Result<()> {
                     ..Default::default()
                 }),
                 app_owns_titlebar_drag: true,
+                icon: brand::window_icon(),
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
