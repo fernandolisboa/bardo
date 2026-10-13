@@ -431,8 +431,10 @@ mod tests {
         let agent = h.start_agent().unwrap();
         wait_until("published", || reel_status(&h) == UploadStatus::Published);
         assert_posted_once(&h);
-        let ran = JobRepository::job(&*h.db, job).unwrap().unwrap();
-        assert_eq!(ran.state(), JobState::Done);
+        // The post is recorded while the job runs; the job ends just after.
+        wait_until("done", || {
+            JobRepository::job(&*h.db, job).unwrap().unwrap().state() == JobState::Done
+        });
         drop(agent);
 
         // Bardo opens later: nothing is missed, and nothing goes again.
