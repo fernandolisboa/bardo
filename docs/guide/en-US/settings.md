@@ -59,4 +59,4 @@ The interface language sets Bardo's own words: the screens, the messages and thi
 <a id="tours"></a>
 ## Guided tours
 
-Every screen, stage and Settings tab has a tour of its own, which never starts by itself. **Offer tours on new screens** marks a screen's **Tour this screen** as **New** until you take or skip its tour; turned off, the mark never shows and the button stays. **Reset tours**, in the Guide menu, shows every tour as never seen and offers the welcome tour again.
+Every screen, stage and Settings tab has a tour of its own, which never starts by itself. **Offer tours on new screens** marks a screen's **Tour this screen** as **New** until you take or skip its tour; turned off, the mark never shows and the button stays. **Reset tours**, in the Guide menu, shows every tour as never seen and offers the welcome tour again. In a narrow window the tour buttons and their marks go under the screen's title rather than cut it short.
