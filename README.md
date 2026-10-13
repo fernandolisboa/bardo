@@ -10,6 +10,7 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 - Specs: [`docs/spec/`](docs/spec/)
 - PRD: [`docs/prd/`](docs/prd/)
 - Design handoffs: [`docs/design/`](docs/design/)
+- Brand (mark, wordmark, app icon): [`assets/brand/`](assets/brand/)
 - Spikes: [`docs/spikes/`](docs/spikes/)
 
 ## Development

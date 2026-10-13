@@ -666,6 +666,7 @@ dependencies = [
  "bardo-media",
  "bardo-storage",
  "cpu-time",
+ "embed-resource",
  "gpui-kit",
  "image",
  "sys-locale",

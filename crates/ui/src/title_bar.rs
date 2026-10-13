@@ -1,5 +1,5 @@
 //! The window's title bar (issue #104), drawn by Bardo in the interface
-//! theme in place of the native caption: the app mark and name, a drag
+//! theme in place of the native caption: Bardo's mark and name, a drag
 //! area, and the minimize / maximize / close buttons.
 //!
 //! On Windows every part declares what it is ([`WindowControlArea`]) and
@@ -12,14 +12,16 @@
 use gpui_kit::component::{Icon, IconName, InteractiveElementExt as _, h_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Decorations, Hsla, MouseButton, Pixels, SharedString, Window,
-    WindowControlArea, div, px,
+    AnyElement, App, Decorations, Hsla, MouseButton, Pixels, Window, WindowControlArea, div, px,
 };
 
 use crate::appearance::{EditorColor, editor_color, look};
+use crate::brand::{Ink, Lockup};
 
 /// Height of the bar.
 const HEIGHT: Pixels = px(32.);
+/// Side of the mark: the small mark's size, as the window icon's 20 px.
+const MARK: Pixels = px(20.);
 /// Width of each window button, as Windows draws its own.
 const BUTTON_WIDTH: Pixels = px(46.);
 
@@ -30,8 +32,7 @@ pub struct Colors {
     pub border: Hsla,
     pub border_width: Pixels,
     pub text: Hsla,
-    pub mark: Hsla,
-    pub mark_radius: Pixels,
+    pub mark: Ink,
     pub hover: Hsla,
     pub close: Hsla,
     pub on_close: Hsla,
@@ -46,8 +47,7 @@ impl Colors {
             border: t.border,
             border_width: t.border_width,
             text: t.text,
-            mark: t.accent,
-            mark_radius: if t.radius == px(0.) { px(0.) } else { px(3.) },
+            mark: Ink::interface(look(cx).theme, t.accent_text),
             hover: t.hover,
             close: t.danger,
             on_close: t.surface,
@@ -55,14 +55,15 @@ impl Colors {
     }
 
     /// The editor's palette, over the editor.
-    pub fn editor() -> Self {
+    pub fn editor(cx: &App) -> Self {
         Self {
             background: editor_color(EditorColor::Panel),
             border: editor_color(EditorColor::Hairline),
             border_width: px(1.),
             text: editor_color(EditorColor::Text),
-            mark: editor_color(EditorColor::Accent),
-            mark_radius: px(3.),
+            // Where the editor tints the mark it wears the theme's own palette,
+            // whose accent for text reads on its ground.
+            mark: Ink::editor(look(cx).theme, look(cx).tokens.accent_text),
             hover: editor_color(EditorColor::RaisedHover),
             close: editor_color(EditorColor::Error),
             on_close: editor_color(EditorColor::App),
@@ -70,16 +71,15 @@ impl Colors {
     }
 }
 
-/// The bar, with the app's name in the interface language.
+/// The bar, with Bardo's mark and wordmark.
 #[derive(IntoElement)]
 pub struct TitleBar {
-    name: SharedString,
     colors: Colors,
 }
 
 impl TitleBar {
-    pub fn new(name: SharedString, colors: Colors) -> Self {
-        Self { name, colors }
+    pub fn new(colors: Colors) -> Self {
+        Self { colors }
     }
 }
 
@@ -91,23 +91,11 @@ impl RenderOnce for TitleBar {
         let colors = self.colors;
         let windows = cfg!(target_os = "windows");
         let brand = h_flex()
-            .gap_2()
             .pl_3()
             // Room for the traffic lights, which macOS keeps drawing.
             .when(cfg!(target_os = "macos"), |brand| brand.pl(px(80.)))
             .items_center()
-            .child(
-                div()
-                    .size(px(12.))
-                    .rounded(colors.mark_radius)
-                    .bg(colors.mark),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .child(self.name),
-            );
+            .child(Lockup::new(MARK, colors.mark, colors.text));
         let drag = h_flex()
             .id("title-bar-drag")
             .flex_1()
