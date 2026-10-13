@@ -460,23 +460,35 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
         .items_center()
         .border_b(t.border_width)
         .border_color(t.border)
+        // The way here and the title, then the ⓘ and tour buttons, which
+        // drop below the title when the line is too short for both: they
+        // never cut the title (issue #142).
         .child(
             h_flex()
-                .flex_none()
+                .min_w_0()
+                .flex_wrap()
                 .gap_1()
                 .items_center()
                 .text_sm()
-                .children((!trail.is_empty()).then(|| {
+                .child(
                     h_flex()
+                        .min_w_0()
                         .gap_1()
                         .items_center()
-                        .text_color(t.text2)
-                        .children(trail)
-                }))
-                .child(
-                    div()
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .child(header.title),
+                        .children((!trail.is_empty()).then(|| {
+                            h_flex()
+                                .flex_none()
+                                .gap_1()
+                                .items_center()
+                                .text_color(t.text2)
+                                .children(trail)
+                        }))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .child(header.title),
+                        ),
                 )
                 .children(header.info),
         )

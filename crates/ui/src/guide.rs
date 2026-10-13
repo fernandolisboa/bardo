@@ -19,7 +19,7 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, Entity, EventEmitter, FocusHandle, Global,
+    AnyElement, App, ClickEvent, Div, ElementId, Entity, EventEmitter, FocusHandle, Global,
     KeyDownEvent, SharedString, Window, deferred, div, px,
 };
 
@@ -275,9 +275,7 @@ pub fn header_tours(
     // screen's.
     let screen_key = stage_tour.is_none();
     Some(
-        h_flex()
-            .gap_1()
-            .items_center()
+        tours_row()
             .children(info)
             .children(screen_tour.map(|tour| {
                 tour_button(
@@ -315,9 +313,7 @@ pub fn place_info(
         return info;
     };
     Some(
-        h_flex()
-            .gap_1()
-            .items_center()
+        tours_row()
             .children(info)
             .child(tour_button(
                 bardo,
@@ -359,6 +355,14 @@ pub fn missed_posts_tour(bardo: &Bardo, cx: &App) -> Option<AnyElement> {
     Some(
         tour_button(bardo, "tour-this-list", Text::TourThisList, tour, true, cx).into_any_element(),
     )
+}
+
+/// A header's ⓘ and tour buttons. In a narrow window the row gives up
+/// its width before the title does (issue #142): the layouts put it after
+/// the title and let it drop below, and here the buttons, each with its
+/// "New", go one under the other when even that line is too short.
+fn tours_row() -> Div {
+    h_flex().min_w_0().flex_wrap().gap_1().items_center()
 }
 
 fn tour_button(

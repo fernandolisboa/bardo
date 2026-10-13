@@ -59,4 +59,4 @@ O idioma da interface define as palavras do próprio Bardo: as telas, as mensage
 <a id="tours"></a>
 ## Tours guiados
 
-Cada tela, etapa e aba das Configurações tem o próprio tour, que nunca começa sozinho. **Oferecer tours em telas novas** marca o **Tour desta tela** de uma tela como **Novo** até você fazer ou pular o tour dela; desligado, a marca não aparece e o botão continua. **Reiniciar tours**, no menu Guia, mostra todos os tours como nunca vistos e oferece o tour de boas-vindas de novo.
+Cada tela, etapa e aba das Configurações tem o próprio tour, que nunca começa sozinho. **Oferecer tours em telas novas** marca o **Tour desta tela** de uma tela como **Novo** até você fazer ou pular o tour dela; desligado, a marca não aparece e o botão continua. **Reiniciar tours**, no menu Guia, mostra todos os tours como nunca vistos e oferece o tour de boas-vindas de novo. Numa janela estreita, os botões de tour e as marcas deles passam para baixo do título da tela em vez de encurtá-lo.

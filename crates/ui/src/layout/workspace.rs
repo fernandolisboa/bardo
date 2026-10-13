@@ -28,6 +28,9 @@ const INSPECTOR_WIDTH: f32 = 340.;
 const ASIDE_WIDTH: f32 = 300.;
 /// The longest a page's text runs.
 const PAGE_WIDTH: f32 = 920.;
+/// The narrowest a screen's title column gets, with the way here above
+/// it (a pillar, "Projects › channel").
+const TITLE_MIN_WIDTH: f32 = 320.;
 /// The narrowest a project stage gets before the stepper scrolls.
 const STEP_MIN_WIDTH: f32 = 132.;
 /// Cards per row of a grid.
@@ -373,17 +376,21 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
         }
         trail.push(crumb);
     }
+    // The title's column never gets narrower than TITLE_MIN_WIDTH: in a
+    // narrow window the actions drop below it instead (issue #142).
     h_flex()
         .flex_none()
+        .flex_wrap()
         .px_6()
         .pt_4()
         .pb_3()
-        .gap_4()
+        .gap_x_4()
+        .gap_y_2()
         .items_center()
         .child(
             v_flex()
                 .flex_1()
-                .min_w_0()
+                .min_w(px(TITLE_MIN_WIDTH))
                 .gap_0p5()
                 .when(!trail.is_empty(), |column| {
                     column.child(
@@ -395,9 +402,13 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
                             .children(trail),
                     )
                 })
+                // The ⓘ and tour buttons follow the title while both fit,
+                // and drop below it otherwise: they never cut the title.
                 .child(
                     h_flex()
-                        .gap_2()
+                        .flex_wrap()
+                        .gap_x_2()
+                        .gap_y_1()
                         .items_center()
                         .child(
                             div()
@@ -417,6 +428,7 @@ fn screen_header(header: Header, cx: &App) -> AnyElement {
         .child(
             h_flex()
                 .flex_none()
+                .ml_auto()
                 .gap_2()
                 .items_center()
                 .children(header.actions),
