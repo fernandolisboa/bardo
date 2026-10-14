@@ -34,7 +34,9 @@ FFmpeg, which Bardo reads, previews and renders video with, comes inside the ins
 <a id="update"></a>
 ## Updating
 
-Run the installer of the newer version over the one you have. It keeps the folder, your settings and your choice about the background agent, and closes Bardo and its agent first if they are running. Bardo shows its version in [Settings › About](about.md#version).
+Bardo tells you when a newer version is out and installs it for you after you review it: see [Updates](about.md#updates).
+
+To update by hand, run the installer of the newer version over the one you have. It keeps the folder, your settings and your choice about the background agent, and closes Bardo and its agent first if they are running. Bardo shows its version in [Settings › About](about.md#version).
 
 <a id="uninstall"></a>
 ## Uninstalling

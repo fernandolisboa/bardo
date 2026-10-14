@@ -264,6 +264,8 @@ pub enum Control {
     AgentStatus,
     /// Settings › About: Bardo's version.
     AboutVersion,
+    /// Settings › About: updates, their switch and the newer release.
+    AboutUpdates,
     /// Settings › About: the FFmpeg Bardo ships, its license and source.
     AboutFfmpeg,
     /// Settings › About: the third-party notices.
@@ -1158,7 +1160,7 @@ pub const BACKGROUND_AGENT: Tour = {
     }
 };
 
-/// Settings › About: the version, the FFmpeg Bardo ships, the notices and
+/// Settings › About: the version, updates, the FFmpeg Bardo ships, the notices and
 /// the diagnostics export.
 pub const ABOUT: Tour = {
     const AT: TourPlace = TourPlace::Settings(SettingsTab::About);
@@ -1166,13 +1168,17 @@ pub const ABOUT: Tour = {
     const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::About,
-        version: 2,
+        version: 3,
         place: Some(AT),
         steps: &[
             TourStep::at("version", control(Control::AboutVersion))
                 .on(AT)
                 .missing(TAB)
                 .learn(PAGE, "version"),
+            TourStep::at("updates", control(Control::AboutUpdates))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "updates"),
             TourStep::at("ffmpeg", control(Control::AboutFfmpeg))
                 .on(AT)
                 .missing(TAB)

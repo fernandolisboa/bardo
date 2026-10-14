@@ -869,6 +869,7 @@ pub(crate) mod tests {
                 uploaders: Vec::new(),
                 analytics: Vec::new(),
                 post_insights: Vec::new(),
+                releases: Arc::new(crate::updates::testing::FakeReleases::default()),
             };
             let mut app = Bardo::start_with(
                 Repositories::shared_with_files(

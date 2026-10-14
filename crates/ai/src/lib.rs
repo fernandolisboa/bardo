@@ -1,9 +1,10 @@
 //! Adapters for the decision engine, generative providers, voices, market
-//! data and public video statistics.
+//! data, public video statistics and Bardo's own releases.
 
 pub mod claude;
 pub mod elevenlabs;
 pub mod gemini;
+pub mod github_releases;
 pub mod google_clips;
 pub mod higgsfield;
 pub mod http;
@@ -16,6 +17,7 @@ pub mod youtube_stats;
 pub use claude::ClaudeTextGenerator;
 pub use elevenlabs::{ElevenLabsAlignment, ElevenLabsPreviews, ElevenLabsSpeech, ElevenLabsVoices};
 pub use gemini::GeminiImages;
+pub use github_releases::GitHubReleases;
 pub use google_clips::GoogleClips;
 pub use higgsfield::HiggsfieldClips;
 pub use jev::JevDecisionEngine;

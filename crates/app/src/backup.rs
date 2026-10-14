@@ -389,6 +389,11 @@ pub fn beside_another_window() {
     ANOTHER_WINDOW.store(true, Ordering::SeqCst);
 }
 
+/// Whether another Bardo window holds the data.
+pub(crate) fn another_window() -> bool {
+    ANOTHER_WINDOW.load(Ordering::SeqCst)
+}
+
 /// Ends restores a closed Bardo left under way: they are not run again on
 /// their own (a restart the user did not ask for), and the hold they took
 /// is gone with the process that took it. Only the window that holds the

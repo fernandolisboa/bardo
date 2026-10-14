@@ -90,6 +90,9 @@ Name: "{autodesktop}\Bardo"; Filename: "{app}\bardo.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\bardo.exe"; Description: "{cm:LaunchProgram,Bardo}"; Flags: nowait postinstall skipifsilent
+; An update Bardo started (issue #144) runs this silently with /RELAUNCH=1
+; after Bardo quit: Bardo opens again once its files are in place.
+Filename: "{app}\bardo.exe"; Flags: nowait; Check: RelaunchAfterUpdate
 
 [UninstallRun]
 ; Turns the background agent off, removes its task and waits for it to
@@ -132,6 +135,23 @@ begin
       '# Left by the Bardo installer. Bardo reads it once at its next start.'#13#10 +
       'background_agent = ' + Answer + #13#10, False);
   end;
+end;
+
+// Bardo runs its update's installer with /SILENT ... /RELAUNCH=1 and quits
+// (ADR-0011); a silent install from the command line leaves Bardo closed.
+function RelaunchAfterUpdate(): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if not WizardSilent then
+    Exit;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/RELAUNCH=1') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
 end;
 
 // Whether Bardo's window (not the background agent) runs from this folder.

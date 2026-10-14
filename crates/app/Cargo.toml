@@ -17,6 +17,8 @@ dirs.workspace = true
 jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Checks a downloaded update against its release (issue #144).
+sha2 = "0.10"
 thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true

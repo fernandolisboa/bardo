@@ -202,6 +202,8 @@ pub struct SettingsScreen {
     scroll: ScrollHandle,
     /// The Backup tab, which polls the job queue on its own.
     backup: Entity<crate::backup::BackupPanel>,
+    /// Settings › About's Updates section.
+    updates: Entity<crate::updates::UpdatePanel>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -313,6 +315,10 @@ impl SettingsScreen {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
             cx.new(|cx| crate::backup::BackupPanel::new(bardo, scroll, cx))
         };
+        let updates = {
+            let (bardo, scroll) = (bardo.clone(), scroll.clone());
+            cx.new(|cx| crate::updates::UpdatePanel::new(bardo, scroll, cx))
+        };
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
@@ -332,6 +338,7 @@ impl SettingsScreen {
             labeled: None,
             scroll,
             backup,
+            updates,
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -1803,6 +1810,7 @@ impl SettingsScreen {
             .max_w(px(720.))
             .gap_5()
             .child(version)
+            .child(self.updates.clone())
             .child(ffmpeg)
             .child(notices)
             .child(diagnostics)

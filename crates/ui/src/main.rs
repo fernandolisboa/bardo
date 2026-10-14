@@ -33,6 +33,7 @@ mod templates;
 mod themes;
 mod title_bar;
 mod tour;
+mod updates;
 
 use anyhow::Context as _;
 use bardo_app::{Bardo, Providers, Repositories};

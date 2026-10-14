@@ -41,6 +41,7 @@ mod stages;
 mod templates;
 mod themes;
 mod tours;
+mod updates;
 mod uploads;
 mod voice_samples;
 
@@ -61,10 +62,14 @@ use bardo_domain::{
     UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
     running_since,
 };
+use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{
     DataPaths, Database, LocalBackups, MemoryBackups, MemoryExportFiles, MemoryProjectFiles,
     MemorySecretStore, MemoryVoiceSamples,
+};
+use bardo_storage::{
+    LocalInstallers, MemoryInstallerRunner, MemoryInstallers, ProcessInstallerRunner, updates_dir,
 };
 
 pub use about::{About, LGPL_URL};
@@ -145,6 +150,11 @@ pub use tours::{
     CLIPS, Control, GuideRef, NARRATION, PERFORMANCE, PERSONAS, PROJECTS, RESEARCH, SCENES, SCRIPT,
     ScreenTour, Side, Spot, TEMPLATES, THEMES, Tour, TourAnchor, TourError, TourMove, TourPlace,
     TourStep, TourStepView, WELCOME, WhenMissing,
+};
+pub use updates::{
+    AvailableUpdate, CHECK_EVERY, InstallBlock, Installation, UpdateCheck, UpdateCheckResult,
+    UpdateError, UpdateFound, UpdateInstall, UpdateLastCheck, UpdateView, current_version,
+    install_block_text,
 };
 pub use uploads::{
     DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
@@ -239,6 +249,10 @@ pub struct Repositories {
     /// Backups of the database and the project folders, and restores.
     /// Shared with the job queue.
     pub backups: Arc<dyn BackupStore>,
+    /// Downloaded updates' installers. Shared with the job queue.
+    pub installers: Arc<dyn InstallerStore>,
+    /// Starts an update's installer.
+    pub installer_runner: Arc<dyn InstallerRunner>,
 }
 
 impl Repositories {
@@ -261,6 +275,8 @@ impl Repositories {
             voice_samples: Arc::from(voice_samples),
             connection_secrets: Arc::from(connection_secrets),
             agent_task: Arc::from(bardo_storage::platform_agent_task()),
+            installers: Arc::new(LocalInstallers::new(updates_dir(&paths.local))),
+            installer_runner: Arc::new(ProcessInstallerRunner),
             backups: Arc::new(LocalBackups::new(Arc::clone(&db), paths)),
             ..Self::shared_with_files(db, Arc::from(secrets), Arc::from(files))
         }
@@ -273,8 +289,8 @@ impl Repositories {
     }
 
     /// `shared` with the project files the caller chose, and export
-    /// packages, voice samples, app credentials, tokens and backups in
-    /// memory.
+    /// packages, voice samples, app credentials, tokens, backups and
+    /// update installers in memory.
     pub fn shared_with_files(
         db: Arc<Database>,
         secrets: Arc<dyn SecretStore>,
@@ -309,6 +325,8 @@ impl Repositories {
             connection_secrets: Arc::new(MemorySecretStore::default()),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
             backups: Arc::new(MemoryBackups::default()),
+            installers: Arc::new(MemoryInstallers::default()),
+            installer_runner: Arc::new(MemoryInstallerRunner::default()),
         }
     }
 }
@@ -356,6 +374,8 @@ pub struct Providers {
     /// Posts' numbers read through the connected account, per network
     /// that has them (#85): Instagram insights and TikTok's video query.
     pub post_insights: Vec<Arc<dyn InsightsReader>>,
+    /// Bardo's own releases, for updates (GitHub Releases).
+    pub releases: Arc<dyn ReleaseFeed>,
 }
 
 impl Providers {
@@ -394,8 +414,29 @@ impl Providers {
                 Arc::new(bardo_publish::InstagramInsights::new()),
                 Arc::new(bardo_publish::TikTokInsights::new()),
             ],
+            releases: Arc::new(live_releases()),
         }
     }
+}
+
+/// GitHub's releases. A debug build reads `BARDO_RELEASES_API` for another
+/// API address: a local server, over plain HTTP, that answers with a test
+/// release.
+fn live_releases() -> bardo_ai::GitHubReleases {
+    if cfg!(debug_assertions)
+        && let Ok(api) = std::env::var("BARDO_RELEASES_API")
+    {
+        let timeout = bardo_ai::GitHubReleases::TIMEOUT;
+        return bardo_ai::GitHubReleases::with_transports(
+            bardo_ai::http::UreqTransport::without_proxy(timeout),
+            bardo_ai::http::UreqTransport::for_downloads(
+                timeout,
+                bardo_ai::GitHubReleases::DOWNLOAD_TIMEOUT,
+            ),
+        )
+        .at(api);
+    }
+    bardo_ai::GitHubReleases::new()
 }
 
 /// The running app for the local user profile.
@@ -458,6 +499,8 @@ pub struct Bardo {
     backups: Arc<dyn BackupStore>,
     /// Set once a restore is unpacked: Bardo restarts to apply it.
     restart_needed: Arc<std::sync::atomic::AtomicBool>,
+    /// Checks for, downloads and installs newer releases.
+    updates: updates::UpdateBook,
 }
 
 impl Bardo {
@@ -532,6 +575,8 @@ impl Bardo {
             tours,
             agent_task,
             backups,
+            installers,
+            installer_runner,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -701,6 +746,7 @@ impl Bardo {
             tick: job_settings.tick,
             restart_needed: Arc::clone(&restart_needed),
         };
+        let program = std::env::current_exe().unwrap_or_default();
         let runner = match role {
             RunnerRole::App => crate::jobs::Runner::app(),
             RunnerRole::Agent => crate::agent::runner(Arc::clone(&publications), &others),
@@ -727,6 +773,10 @@ impl Bardo {
                 uploads: upload_handler,
                 backups: backup_handler,
                 restores: restore_handler,
+                updates: crate::updates::UpdateDownloadHandler {
+                    feed: Arc::clone(&providers.releases),
+                    installers: Arc::clone(&installers),
+                },
             }),
             job_settings,
             redactor,
@@ -774,11 +824,20 @@ impl Bardo {
             zone: Zone::new(jiff::tz::TimeZone::system()),
             role,
             agent_task,
-            agent_program: std::env::current_exe().unwrap_or_default(),
+            agent_program: program.clone(),
             backups,
             restart_needed,
+            updates: updates::UpdateBook::new(
+                providers.releases,
+                installers,
+                installer_runner,
+                Installation::here(&program),
+            ),
         })
-        .inspect(|bardo| bardo.mark_restored_connections())
+        .inspect(|bardo| {
+            bardo.mark_restored_connections();
+            bardo.prune_installers();
+        })
     }
 
     /// Masks every key the app knows. Hand it to the log (`logging::init`)
@@ -1878,6 +1937,7 @@ pub(crate) mod testing {
             uploaders: Vec::new(),
             analytics: Vec::new(),
             post_insights: Vec::new(),
+            releases: Arc::new(crate::updates::testing::FakeReleases::default()),
         }
     }
 }
@@ -1946,6 +2006,8 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
             backups: Arc::new(bardo_storage::MemoryBackups::default()),
+            installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+            installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
             profiles: Box::new(profiles.clone()),
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),

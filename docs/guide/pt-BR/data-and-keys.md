@@ -16,7 +16,7 @@ Seus canais, personas, modelos, projetos e os roteiros deles, pesquisas, ideias,
 <a id="projects"></a>
 ## Pastas dos projetos
 
-A mídia de cada projeto de vídeo fica numa pasta própria em `%LOCALAPPDATA%\Bardo\projects`: a narração, as imagens, os clipes, os arquivos importados, as cópias de pré-visualização do editor e os arquivos renderizados. Mídia é grande e pertence a este computador, então fica fora de um perfil móvel do Windows. As amostras de voz são um cache em `%LOCALAPPDATA%\Bardo\voice-samples`: só as mais recentes ficam, e uma mais antiga é feita de novo quando você toca.
+A mídia de cada projeto de vídeo fica numa pasta própria em `%LOCALAPPDATA%\Bardo\projects`: a narração, as imagens, os clipes, os arquivos importados, as cópias de pré-visualização do editor e os arquivos renderizados. Mídia é grande e pertence a este computador, então fica fora de um perfil móvel do Windows. As amostras de voz são um cache em `%LOCALAPPDATA%\Bardo\voice-samples`: só as mais recentes ficam, e uma mais antiga é feita de novo quando você toca. Uma atualização baixada espera em `%LOCALAPPDATA%\Bardo\updates` até ser instalada; o Bardo a apaga quando já roda a versão mais nova ([Atualizações](about.md#updates)).
 
 <a id="exports"></a>
 ## Exportações

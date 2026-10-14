@@ -34,7 +34,9 @@ O FFmpeg, com que o Bardo lê, pré-visualiza e renderiza vídeo, vem dentro do 
 <a id="update"></a>
 ## Atualizar
 
-Rode o instalador da versão mais nova por cima da que você tem. Ele mantém a pasta, suas configurações e sua escolha sobre o agente em segundo plano, e fecha o Bardo e o agente antes, se estiverem rodando. O Bardo mostra a versão em [Configurações › Sobre](about.md#version).
+O Bardo avisa quando sai uma versão mais nova e a instala para você depois da sua revisão: veja [Atualizações](about.md#updates).
+
+Para atualizar manualmente, rode o instalador da versão mais nova por cima da que você tem. Ele mantém a pasta, suas configurações e sua escolha sobre o agente em segundo plano, e fecha o Bardo e o agente antes, se estiverem rodando. O Bardo mostra a versão em [Configurações › Sobre](about.md#version).
 
 <a id="uninstall"></a>
 ## Desinstalar

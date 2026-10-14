@@ -284,6 +284,24 @@ pub struct BinaryResponse {
     pub bytes: Vec<u8>,
 }
 
+/// An answer whose body is read as it arrives, so a large file never sits
+/// whole in memory (an update's installer).
+pub struct StreamedResponse {
+    pub status: u16,
+    /// Names in lowercase.
+    pub headers: Vec<(String, String)>,
+    pub body: Box<dyn std::io::Read + Send>,
+}
+
+impl fmt::Debug for StreamedResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StreamedResponse")
+            .field("status", &self.status)
+            .field("headers", &self.headers)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Sends requests. Blocking: call it off the UI thread.
 pub trait Transport: Send + Sync {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError>;
@@ -305,6 +323,17 @@ pub trait Transport: Send + Sync {
         Ok(BinaryResponse {
             status: response.status,
             bytes: response.body.into_bytes(),
+        })
+    }
+
+    /// Sends `request` and hands its body over as a reader. Transports that
+    /// only replay text answer with the text's bytes.
+    fn send_streamed(&self, request: &HttpRequest) -> Result<StreamedResponse, TransportError> {
+        let response = self.send(request)?;
+        Ok(StreamedResponse {
+            status: response.status,
+            headers: response.headers,
+            body: Box::new(std::io::Cursor::new(response.body.into_bytes())),
         })
     }
 }
@@ -360,6 +389,30 @@ impl UreqTransport {
     /// HTTPS, so a link checked as HTTPS stays HTTPS to the end.
     pub fn https_only(timeout: Duration) -> Self {
         Self::configured(timeout, true, true)
+    }
+
+    /// For downloading large files (an update's installer): follows
+    /// redirects, but only to HTTPS. A whole file may take a long time on a
+    /// slow line, so no global timeout applies: connecting and the first
+    /// answer each have `wait`, the body has `body`.
+    pub fn for_downloads(wait: Duration, body: Duration) -> Self {
+        let tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(wait))
+            .timeout_recv_response(Some(wait))
+            .timeout_recv_body(Some(body))
+            .tls_config(tls)
+            .https_only(true)
+            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .new_agent();
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
     }
 
     /// `for_uploads` against a local server: plain HTTP, no proxy.
@@ -477,6 +530,25 @@ impl Transport for UreqTransport {
             .map_err(|error| TransportError(error.to_string()))?;
         Ok(BinaryResponse { status, bytes })
     }
+
+    fn send_streamed(&self, request: &HttpRequest) -> Result<StreamedResponse, TransportError> {
+        let response = self.call(request)?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
+            })
+            .collect();
+        // Not limited here: the caller stops reading at its own limit.
+        let body = response.into_body().into_reader();
+        Ok(StreamedResponse {
+            status,
+            headers,
+            body: Box::new(body),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -490,6 +562,49 @@ mod tests {
         let transport = UreqTransport::https_only(Duration::from_secs(1));
         let error = transport
             .send_for_bytes(&HttpRequest::get("http://127.0.0.1:9/preview.mp3"), 1024)
+            .unwrap_err();
+        assert!(error.0.contains("https only"), "{}", error.0);
+    }
+
+    #[test]
+    fn a_streamed_body_is_read_as_it_arrives() {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\nX-Note: hi\r\n\r\nhello world",
+                )
+                .unwrap();
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let mut response = transport
+            .send_streamed(&HttpRequest::get(format!("http://{address}/file")))
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert!(
+            response
+                .headers
+                .iter()
+                .any(|(name, value)| name == "x-note" && value == "hi")
+        );
+        let mut body = String::new();
+        response.body.read_to_string(&mut body).unwrap();
+        assert_eq!(body, "hello world");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_download_transport_refuses_plain_http() {
+        let transport =
+            UreqTransport::for_downloads(Duration::from_secs(1), Duration::from_secs(1));
+        let error = transport
+            .send_streamed(&HttpRequest::get("http://127.0.0.1:9/setup.exe"))
             .unwrap_err();
         assert!(error.0.contains("https only"), "{}", error.0);
     }
