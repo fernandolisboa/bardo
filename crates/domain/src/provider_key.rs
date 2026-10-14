@@ -6,7 +6,9 @@ use zeroize::Zeroize;
 
 use crate::ProfileId;
 
-/// A paid service Bardo calls with the user's own API key (PRD story 1).
+/// A service Bardo calls, with the user's own API key (PRD story 1) or,
+/// for X, through the network account the user connected (#147): what
+/// Costs adds spend up by, and what budgets and rates are for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Provider {
     /// Anthropic's Claude API: scripts, titles, descriptions, prompts.
@@ -21,17 +23,22 @@ pub enum Provider {
     TypeSafe,
     /// Market research and public video statistics.
     YouTubeData,
+    /// The X API, billed per post from the credits of the user's own X
+    /// developer app. Bardo signs in to it as a network (Settings ›
+    /// Networks); it has no API key.
+    X,
 }
 
 impl Provider {
     /// In the order the settings screen lists them.
-    pub const ALL: [Provider; 6] = [
+    pub const ALL: [Provider; 7] = [
         Provider::Claude,
         Provider::ElevenLabs,
         Provider::Gemini,
         Provider::Higgsfield,
         Provider::TypeSafe,
         Provider::YouTubeData,
+        Provider::X,
     ];
 
     /// Stable identifier for storage and resource keys. Never change one.
@@ -43,7 +50,21 @@ impl Provider {
             Provider::Higgsfield => "higgsfield",
             Provider::TypeSafe => "typesafe",
             Provider::YouTubeData => "youtube-data",
+            Provider::X => "x",
         }
+    }
+
+    /// Whether Bardo calls it with an API key the user saves in Settings ›
+    /// API keys. X goes through the connected network account instead.
+    pub fn has_key(self) -> bool {
+        self != Provider::X
+    }
+
+    /// The providers with an API key, in settings order.
+    pub fn with_keys() -> impl Iterator<Item = Provider> {
+        Provider::ALL
+            .into_iter()
+            .filter(|provider| provider.has_key())
     }
 
     /// Whether calls cost money. The YouTube Data API is free within a
@@ -357,6 +378,24 @@ mod tests {
             assert_eq!(provider.code().parse::<Provider>(), Ok(provider));
         }
         assert!("openai".parse::<Provider>().is_err());
+    }
+
+    #[test]
+    fn x_is_paid_per_post_without_an_api_key() {
+        assert!(Provider::X.is_paid());
+        assert!(!Provider::X.has_key());
+        assert!(Provider::paid().any(|provider| provider == Provider::X));
+        assert_eq!(
+            Provider::with_keys().collect::<Vec<_>>(),
+            [
+                Provider::Claude,
+                Provider::ElevenLabs,
+                Provider::Gemini,
+                Provider::Higgsfield,
+                Provider::TypeSafe,
+                Provider::YouTubeData
+            ]
+        );
     }
 
     #[test]

@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json;charset=UTF-8
+
+{"token_type":"bearer","expires_in":7200,"access_token":"Rml4dHVyZUFjY2Vzc1Rva2VuMDAwMg:1:1:at:1","scope":"tweet.read tweet.write users.read media.write offline.access","refresh_token":"Rml4dHVyZVJlZnJlc2hUb2tlbjAwMDI:1:1:rt:1"}

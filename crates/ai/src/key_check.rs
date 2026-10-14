@@ -17,10 +17,11 @@ const NO_SUCH_HIGGSFIELD_REQUEST: &str = "00000000-0000-0000-0000-000000000000";
 /// Longest provider message passed on; longer ones are cut.
 const MAX_DETAIL_CHARS: usize = 300;
 
-/// The request that tests `key` with `provider`.
-pub fn check_request(provider: Provider, key: &ApiKey) -> HttpRequest {
+/// The request that tests `key` with `provider`; `None` for a provider
+/// without API keys (X signs in as a network).
+pub fn check_request(provider: Provider, key: &ApiKey) -> Option<HttpRequest> {
     let key = key.expose();
-    match provider {
+    Some(match provider {
         Provider::Claude => HttpRequest::get("https://api.anthropic.com/v1/models?limit=1")
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01"),
@@ -42,7 +43,8 @@ pub fn check_request(provider: Provider, key: &ApiKey) -> HttpRequest {
             HttpRequest::get("https://www.googleapis.com/youtube/v3/i18nLanguages?part=snippet")
                 .header("x-goog-api-key", key)
         }
-    }
+        Provider::X => return None,
+    })
 }
 
 /// What a provider's answer to `check_request` means.
@@ -182,7 +184,13 @@ impl<T: Transport> HttpKeyChecker<T> {
 
 impl<T: Transport> KeyChecker for HttpKeyChecker<T> {
     fn check(&self, provider: Provider, key: &ApiKey) -> KeyCheck {
-        match self.transport.send(&check_request(provider, key)) {
+        let Some(request) = check_request(provider, key) else {
+            return KeyCheck::new(
+                KeyCheckOutcome::Unexpected,
+                Some(format!("{provider} has no API key to test")),
+            );
+        };
+        match self.transport.send(&request) {
             Ok(response) => classify(provider, &response),
             Err(error) => KeyCheck::new(KeyCheckOutcome::Unreachable, Some(error.0)),
         }

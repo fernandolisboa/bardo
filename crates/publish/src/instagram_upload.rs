@@ -389,11 +389,13 @@ impl<T: Transport> VideoUploader for InstagramUploader<T> {
         }))
     }
 
+    /// The caption went with the container; `video` adds nothing now.
     fn publish(
         &self,
         access_token: &SecretText,
         account: &str,
         id: &str,
+        _video: &VideoUpload,
     ) -> Result<NetworkPost, UploadError> {
         if !is_id(account) || !is_id(id) {
             return Err(unexpected("not an Instagram account or container id"));

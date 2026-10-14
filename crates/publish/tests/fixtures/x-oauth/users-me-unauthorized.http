@@ -1,0 +1,9 @@
+HTTP/2 401 
+content-type: application/problem+json
+
+{
+  "title": "Unauthorized",
+  "type": "about:blank",
+  "status": 401,
+  "detail": "Unauthorized"
+}

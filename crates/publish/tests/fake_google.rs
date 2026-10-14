@@ -189,7 +189,7 @@ fn a_full_sign_in_refresh_and_revoke_against_a_fake_google() {
     let youtube = sign_in(&address);
     let credentials = AppCredentials::parse(Network::YouTube, CLIENT_ID, CLIENT_SECRET).unwrap();
 
-    let callback = LoopbackReceiver.listen("/").unwrap();
+    let callback = LoopbackReceiver.listen("/", None).unwrap();
     let redirect = callback.redirect_uri().to_owned();
     let request = youtube.consent_request(&credentials, &redirect);
     assert!(request.url.starts_with(&format!("{address}/authorize?")));

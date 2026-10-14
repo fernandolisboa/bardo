@@ -155,6 +155,8 @@ pub enum Meter {
     VideoSeconds,
     /// Seconds of audio sent to be timed or transcribed.
     AudioSeconds,
+    /// Posts made (X bills each post it creates).
+    Posts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -162,13 +164,14 @@ pub enum Meter {
 pub struct UnknownMeter(pub String);
 
 impl Meter {
-    pub const ALL: [Meter; 6] = [
+    pub const ALL: [Meter; 7] = [
         Meter::InputTokens,
         Meter::OutputTokens,
         Meter::ImageTokens,
         Meter::Characters,
         Meter::VideoSeconds,
         Meter::AudioSeconds,
+        Meter::Posts,
     ];
 
     /// Stable identifier for storage and the rate file. Never change one.
@@ -180,17 +183,18 @@ impl Meter {
             Meter::Characters => "characters",
             Meter::VideoSeconds => "video_seconds",
             Meter::AudioSeconds => "audio_seconds",
+            Meter::Posts => "posts",
         }
     }
 
     /// How many units a price is for, as providers publish them: tokens
     /// per million, characters per thousand, video per second, audio per
-    /// hour.
+    /// hour, posts one by one.
     pub fn units_per_price(self) -> u64 {
         match self {
             Meter::InputTokens | Meter::OutputTokens | Meter::ImageTokens => 1_000_000,
             Meter::Characters => 1_000,
-            Meter::VideoSeconds => 1,
+            Meter::VideoSeconds | Meter::Posts => 1,
             Meter::AudioSeconds => 3_600,
         }
     }
@@ -216,6 +220,7 @@ pub struct Metered {
     pub characters: u64,
     pub video_seconds: u64,
     pub audio_seconds: u64,
+    pub posts: u64,
 }
 
 impl Metered {
@@ -240,6 +245,13 @@ impl Metered {
         }
     }
 
+    pub fn posts(posts: u64) -> Self {
+        Metered {
+            posts,
+            ..Metered::default()
+        }
+    }
+
     pub fn get(&self, meter: Meter) -> u64 {
         match meter {
             Meter::InputTokens => self.input_tokens,
@@ -248,6 +260,7 @@ impl Metered {
             Meter::Characters => self.characters,
             Meter::VideoSeconds => self.video_seconds,
             Meter::AudioSeconds => self.audio_seconds,
+            Meter::Posts => self.posts,
         }
     }
 
@@ -259,6 +272,7 @@ impl Metered {
             Meter::Characters => self.characters = value,
             Meter::VideoSeconds => self.video_seconds = value,
             Meter::AudioSeconds => self.audio_seconds = value,
+            Meter::Posts => self.posts = value,
         }
     }
 
@@ -489,6 +503,8 @@ pub enum CostPurpose {
     CutSuggestions,
     /// A short sentence read to hear a persona's voice and presets.
     VoiceSample,
+    /// A post Bardo made on a network that bills each one (X).
+    Post,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -496,7 +512,7 @@ pub enum CostPurpose {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 12] = [
+    pub const ALL: [CostPurpose; 13] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -509,6 +525,7 @@ impl CostPurpose {
         CostPurpose::Metadata,
         CostPurpose::CutSuggestions,
         CostPurpose::VoiceSample,
+        CostPurpose::Post,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -526,6 +543,7 @@ impl CostPurpose {
             CostPurpose::Metadata => "metadata",
             CostPurpose::CutSuggestions => "cut_suggestions",
             CostPurpose::VoiceSample => "voice_sample",
+            CostPurpose::Post => "post",
         }
     }
 }
@@ -1028,6 +1046,25 @@ mod tests {
             "narration_alignment".parse(),
             Ok(CostPurpose::NarrationAlignment)
         );
+    }
+
+    #[test]
+    fn x_posts_are_priced_one_by_one_and_a_link_costs_more() {
+        let table = RateTable::new(vec![
+            rate(Provider::X, "post", Meter::Posts, "0.015"),
+            rate(Provider::X, "post-with-link", Meter::Posts, "0.20"),
+        ]);
+        assert_eq!(
+            table.price(Provider::X, "post", &Metered::posts(1)),
+            Some(dollars("0.015"))
+        );
+        assert_eq!(
+            table.price(Provider::X, "post-with-link", &Metered::posts(2)),
+            Some(dollars("0.40")),
+            "the most specific rate wins"
+        );
+        assert_eq!(Meter::Posts.code().parse(), Ok(Meter::Posts));
+        assert_eq!("post".parse(), Ok(CostPurpose::Post));
     }
 
     #[test]

@@ -1,0 +1,9 @@
+HTTP/2 403 
+content-type: application/problem+json
+
+{
+  "title": "Unsupported Authentication",
+  "detail": "Authenticating with OAuth 2.0 Application-Only is forbidden for this endpoint.  Supported authentication types are [OAuth 1.0a User Context, OAuth 2.0 User Context].",
+  "type": "https://api.twitter.com/2/problems/unsupported-authentication",
+  "status": 403
+}

@@ -1,0 +1,9 @@
+HTTP/2 403 
+content-type: application/problem+json
+
+{
+  "title": "Forbidden",
+  "detail": "This user is not allowed to post a video longer than 20 minutes.",
+  "type": "about:blank",
+  "status": 403
+}

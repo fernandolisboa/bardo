@@ -1,0 +1,9 @@
+HTTP/2 402 
+content-type: application/problem+json
+
+{
+  "title": "CreditsDepleted",
+  "detail": "Your enrolled account does not have any credits to fulfill this request.",
+  "type": "https://api.twitter.com/2/problems/credits",
+  "status": 402
+}
