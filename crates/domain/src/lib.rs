@@ -41,6 +41,7 @@ macro_rules! uuid_id {
 
 mod agent_task;
 mod appearance;
+mod backup;
 mod budget;
 mod caption;
 mod channel;
@@ -95,6 +96,10 @@ pub use agent_task::{AgentTask, AgentTaskError};
 pub use appearance::{
     LayoutId, ThemeFamily, ThemeMode, UiTheme, UiThemePreference, UnknownLayout, UnknownUiTheme,
     UnknownUiThemePreference,
+};
+pub use backup::{
+    AUTOMATIC_BACKUP_EVERY, AUTOMATIC_BACKUPS_KEPT, BackupError, BackupInfo, BackupOptions,
+    BackupStore, MediaSize, ProgressReport, RestoreOutcome, SavedBackup,
 };
 pub use budget::{Budget, BudgetLevel, Month};
 pub use caption::{
@@ -213,7 +218,7 @@ pub use research::{
     NicheSeedError, NicheSeeds, NicheStatistics, Score, UploadSample, rank,
 };
 pub use runner::{
-    JOB_LEASE, JobHeldElsewhere, RUNNER_ALIVE, RUNNER_TICK, RunnerRole, RunnerSeen,
+    Holder, JOB_LEASE, JobHeldElsewhere, RUNNER_ALIVE, RUNNER_TICK, RunnerRole, RunnerSeen,
     UnknownRunnerRole, running_since,
 };
 pub use scene::{

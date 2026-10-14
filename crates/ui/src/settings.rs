@@ -3,8 +3,9 @@
 //! credentials Bardo signs in to networks with; the Publishing tab turns the
 //! background agent on and off; the Appearance tab picks the layout,
 //! the theme and the interface language; the Metrics tab picks when a
-//! start syncs public post numbers; the About tab shows the version and
-//! exports diagnostics. Each key and app card opens a setup
+//! start syncs public post numbers; the Backup tab backs up and restores
+//! (`crate::backup`); the About tab shows the version and exports
+//! diagnostics. Each key and app card opens a setup
 //! screen in its tab (issue #129): the guide's steps for getting it, with
 //! links to the provider's pages, then the card itself. Rules, storage and
 //! the test call live in `bardo_app`; this file maps clicks to use cases and
@@ -199,6 +200,8 @@ pub struct SettingsScreen {
     labeled: Option<(UiLanguage, UiThemePreference)>,
     /// The tab's scroll, so the tour brings its parts into view.
     scroll: ScrollHandle,
+    /// The Backup tab, which polls the job queue on its own.
+    backup: Entity<crate::backup::BackupPanel>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -305,6 +308,11 @@ impl SettingsScreen {
                 }
             },
         ));
+        let scroll = ScrollHandle::new();
+        let backup = {
+            let (bardo, scroll) = (bardo.clone(), scroll.clone());
+            cx.new(|cx| crate::backup::BackupPanel::new(bardo, scroll, cx))
+        };
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
@@ -322,7 +330,8 @@ impl SettingsScreen {
             diagnostics: None,
             diagnostics_notice: None,
             labeled: None,
-            scroll: ScrollHandle::new(),
+            scroll,
+            backup,
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -1110,6 +1119,7 @@ impl SettingsScreen {
             SettingsTab::Publishing => self.render_publishing(cx),
             SettingsTab::Appearance => self.render_appearance(cx),
             SettingsTab::Metrics => self.render_metrics(cx),
+            SettingsTab::Backup => self.backup.clone().into_any_element(),
             SettingsTab::About => self.render_about(cx),
         }
     }
@@ -2134,6 +2144,7 @@ impl Render for SettingsScreen {
             .child(Tab::new().label(tr(bardo, Text::SettingsPublishingTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAppearanceTab)))
             .child(Tab::new().label(tr(bardo, Text::MetricsSettingsTab)))
+            .child(Tab::new().label(tr(bardo, Text::SettingsBackupTab)))
             .child(Tab::new().label(tr(bardo, Text::SettingsAboutTab)))
             .on_click(cx.listener(|this, index: &usize, _, cx| {
                 if let Some(tab) = SettingsTab::ALL.get(*index) {

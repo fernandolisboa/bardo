@@ -36,4 +36,4 @@ O Bardo registra o que faz em `%LOCALAPPDATA%\Bardo\logs\bardo.log`, com tamanho
 <a id="backup"></a>
 ## Backup e troca de computador
 
-Para fazer backup do seu trabalho, copie o `bardo.db` e a pasta `projects` com o Bardo fechado. Chaves, credenciais e logins não estão neles, de propósito: depois de restaurar em outro computador, salve tudo de novo nas [Configurações](settings.md#tabs) e reconecte cada conta em [Contas](network-accounts.md#connect).
+Faça backup em [Configurações › Backup](backup.md): um arquivo `.zip` com o banco de dados e, se quiser, as pastas dos projetos, feito com o Bardo aberto. O Bardo também faz sozinho um backup do banco de dados toda semana em `%LOCALAPPDATA%\Bardo\backups`. Chaves, credenciais e logins não entram no backup, de propósito: depois de restaurar em outro computador, salve tudo de novo e reconecte cada conta, como a aba lista ([Trocar de computador](backup.md#moving)).

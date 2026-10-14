@@ -10,12 +10,15 @@ publish.workspace = true
 [dependencies]
 bardo-domain.workspace = true
 dirs.workspace = true
-rusqlite.workspace = true
+jiff.workspace = true
+# The online backup API copies the database while it is in use (#143).
+rusqlite = { workspace = true, features = ["backup"] }
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+zip.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 keyring-core = "1"

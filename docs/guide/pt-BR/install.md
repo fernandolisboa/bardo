@@ -41,4 +41,4 @@ Rode o instalador da versão mais nova por cima da que você tem. Ele mantém a 
 
 Desinstale o Bardo em Configurações do Windows › Aplicativos › Aplicativos instalados. Feche o Bardo antes; o desinstalador pede isso se ele ainda estiver aberto. Ele desliga o agente em segundo plano e o remove do Windows, depois remove o programa.
 
-Seus projetos, exportações, configurações e as chaves no Gerenciador de Credenciais do Windows ficam onde estão, então instalar o Bardo de novo os encontra. Veja [Onde ficam seus dados e chaves](data-and-keys.md).
+Seus projetos, exportações, configurações, backups automáticos e as chaves no Gerenciador de Credenciais do Windows ficam onde estão, então instalar o Bardo de novo os encontra. Veja [Onde ficam seus dados e chaves](data-and-keys.md).

@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{ThemeFamily, TourId};
 use bardo_app::{
-    Bardo, Destination, GuideRef, SHORTCUTS, ScreenTour, SetupTarget, Spot, Stage, Text,
-    TourAnchor, TourPlace, TourStepView,
+    Bardo, Destination, GuidePlace, GuideRef, SHORTCUTS, ScreenTour, SetupTarget, Spot, Stage,
+    Text, TourAnchor, TourPlace, TourStepView,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
@@ -71,6 +71,7 @@ pub struct GuideHooks {
     pub tour: OnPick<TourId>,
     pub section: OnPick<GuideRef>,
     pub setup: OnPick<SetupTarget>,
+    pub go: OnPick<GuidePlace>,
 }
 
 impl Global for GuideHooks {}
@@ -103,6 +104,13 @@ pub fn open_setup(target: SetupTarget, window: &mut Window, cx: &mut App) {
         .map(|hooks| hooks.setup.clone())
     {
         open(target, window, cx);
+    }
+}
+
+/// Goes to `place`, as a link to it in the guide does.
+pub fn go(place: GuidePlace, window: &mut Window, cx: &mut App) {
+    if let Some(go) = cx.try_global::<GuideHooks>().map(|hooks| hooks.go.clone()) {
+        go(place, window, cx);
     }
 }
 

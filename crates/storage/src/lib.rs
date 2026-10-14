@@ -1,9 +1,10 @@
 //! SQLite persistence and migrations, the secret store for provider keys,
 //! network app credentials and OAuth tokens (Windows Credential Manager),
-//! the background agent's task (Windows Task Scheduler), and the choices
-//! the installer leaves for the next start.
+//! the background agent's task (Windows Task Scheduler), the choices the
+//! installer leaves for the next start, and backups.
 
 mod agent_task;
+mod backup;
 mod channel;
 mod connection;
 mod cost;
@@ -42,6 +43,10 @@ use rusqlite::Connection;
 pub use agent_task::TaskScheduler;
 pub use agent_task::{
     AGENT_ARGUMENT, MemoryAgentTask, platform_agent_task, task_definition, task_name,
+};
+pub use backup::{
+    BACKUP_FORMAT, DATABASE_ENTRY, DataPaths, LocalBackups, MANIFEST, MemoryBackups, WindowLock,
+    apply_pending_restore, clean_restore_leftovers, lock_window, restore_pending,
 };
 pub use export_files::{LocalExportFiles, MemoryExportFiles, default_exports_dir};
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
@@ -122,6 +127,14 @@ impl Database {
             conn: Arc::clone(&self.conn),
             runner: uuid::Uuid::new_v4().to_string(),
         }
+    }
+
+    /// The database file, or `None` in memory.
+    pub(crate) fn file_path(&self) -> Option<PathBuf> {
+        self.conn()
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
     }
 
     pub(crate) fn runner(&self) -> &str {

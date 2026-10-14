@@ -64,10 +64,13 @@ pub enum TourId {
     /// The tour of Settings › About: the version, FFmpeg, the notices and
     /// the diagnostics export.
     About,
+    /// The tour of Settings › Backup: backing up, automatic backups and
+    /// restoring.
+    Backup,
 }
 
 impl TourId {
-    pub const ALL: [TourId; 26] = [
+    pub const ALL: [TourId; 27] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -94,6 +97,7 @@ impl TourId {
         TourId::MetricsSync,
         TourId::BackgroundAgent,
         TourId::About,
+        TourId::Backup,
     ];
 
     pub fn code(self) -> &'static str {
@@ -124,6 +128,7 @@ impl TourId {
             TourId::MetricsSync => "metrics-sync",
             TourId::BackgroundAgent => "background-agent",
             TourId::About => "about",
+            TourId::Backup => "backup",
         }
     }
 

@@ -100,6 +100,9 @@ pub struct UserProfile {
     /// Whether the background agent publishes scheduled posts while Bardo
     /// is closed (ADR-0006). Off until the user turns it on.
     pub background_agent: bool,
+    /// Whether Bardo backs up the database once a week by itself
+    /// (ADR-0010). On until the user turns it off.
+    pub auto_backup: bool,
 }
 
 impl UserProfile {
@@ -113,6 +116,7 @@ impl UserProfile {
             cut_suggestion_floor: DEFAULT_CUT_FLOOR,
             offer_screen_tours: true,
             background_agent: false,
+            auto_backup: true,
         }
     }
 }

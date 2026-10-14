@@ -39,6 +39,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0035_tour_progress.sql"),
     include_str!("../migrations/0036_offer_screen_tours.sql"),
     include_str!("../migrations/0037_background_agent.sql"),
+    include_str!("../migrations/0038_backup.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
