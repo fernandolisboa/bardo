@@ -58,19 +58,20 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    DraftRoom, DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind, JobRepository, JobState,
-    LIMIT_RECHECK, MetadataProblem, Network, NetworkAccount, NetworkAccountId,
-    NetworkAccountRepository, Post, Progress, ProjectFiles, Publication, PublicationId,
-    PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem, Render, RenderRepository,
-    RepositoryError, ScheduleProblem, SecretText, SignInFailureKind, TIKTOK_DRAFT_WINDOW,
-    TIKTOK_PENDING_DRAFTS, TikTokFile, TikTokSpecProblem, Upload, UploadError, UploadErrorKind,
-    UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId, VideoState, VideoUpload,
-    VideoUploader, Visibility, check_publish_time, check_reel, check_tiktok, draft_room, due_step,
-    mp4_layout, prepare_at, video_container,
+    CostPurpose, DraftRoom, DueStep, Job, JobFailure, JobFailureKind, JobId, JobKind,
+    JobRepository, JobState, LIMIT_RECHECK, MetadataProblem, Metered, Network, NetworkAccount,
+    NetworkAccountId, NetworkAccountRepository, Post, Progress, ProjectFiles, Provider,
+    Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem,
+    Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText, SignInFailureKind,
+    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, TikTokFile, TikTokSpecProblem, Upload, UploadError,
+    UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId,
+    VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time, check_reel,
+    check_tiktok, draft_room, due_step, mp4_layout, prepare_at, video_container, x_post_model,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::connections::Connections;
+use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::export::{ExportError, ExportTarget};
 use crate::jobs::{JobActionError, JobContext, JobHandler};
 use crate::scenes::{id, parse, to_json, unexpected};
@@ -186,6 +187,9 @@ pub struct UploadReview {
     pub synthetic: bool,
     /// The network's publication now, which the upload replaces.
     pub replaces: Option<Publication>,
+    /// What the post costs and where it leaves the network's budget, on a
+    /// network that bills each post (X); `None` elsewhere.
+    pub cost: Option<SpendEstimate>,
     rendering: bool,
     uploading: bool,
     /// The rendered file's size now; `None` when it is gone.
@@ -252,6 +256,7 @@ impl UploadReview {
             publish_at: None,
             share_to_feed: true,
             cover: Duration::ZERO,
+            budget: BudgetConsent::Ask,
         }
     }
 
@@ -266,6 +271,13 @@ impl UploadReview {
     /// made for kids, and the caption is theirs to paste.
     pub fn is_draft(&self) -> bool {
         self.network.uploads_drafts()
+    }
+
+    /// Whether Bardo makes a post with the video and the text once the
+    /// network processed it (X): no title, visibility, cover or made for
+    /// kids, and the network bills the post.
+    pub fn is_post(&self) -> bool {
+        self.network.publishes_uploads() && !self.network.uploads_reels()
     }
 }
 
@@ -286,6 +298,9 @@ pub struct UploadChoices {
     pub share_to_feed: bool,
     /// The frame of a Reel its cover shows, from the start.
     pub cover: Duration,
+    /// Whether the user confirmed a post that reaches the network's
+    /// monthly budget (X bills each post).
+    pub budget: BudgetConsent,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -323,6 +338,10 @@ pub enum UploadReviewError {
     /// (ADR-0012).
     #[error("the privacy policy is not accepted")]
     PrivacyNotAccepted,
+    /// The post would reach the network's monthly budget (X): the screen
+    /// asks, with the estimate, and the user confirms or not.
+    #[error("the post would reach the budget")]
+    OverBudget(SpendEstimate),
     #[error(transparent)]
     Job(#[from] JobActionError),
     #[error(transparent)]
@@ -341,6 +360,7 @@ impl UploadReviewError {
             UploadReviewError::Schedule(problem) => Text::ScheduleProblem(*problem),
             UploadReviewError::CoverPastEnd => Text::UploadCoverPastEnd,
             UploadReviewError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
+            UploadReviewError::OverBudget(_) => Text::BudgetReachedTitle,
             UploadReviewError::NoSchedule
             | UploadReviewError::NotNow
             | UploadReviewError::Job(_)
@@ -760,6 +780,8 @@ pub(crate) struct UploadHandler {
     /// When this session of Bardo opened: a due time that passed before
     /// it passed while Bardo was closed (`bardo_domain::due_step`).
     pub(crate) opened_at: SystemTime,
+    /// Records the posts X bills.
+    pub(crate) costs: CostBook,
 }
 
 /// The upload jobs that send to `creator` (the connected identity) on
@@ -804,6 +826,11 @@ fn draft_times(job: &Job, checkpoint: &UploadCheckpoint, now: SystemTime) -> Vec
         times.push(now);
     }
     times
+}
+
+/// The post X bills for `text`, as the budget check plans it.
+fn post_call(text: &str) -> PlannedCall {
+    PlannedCall::new(Provider::X, CostPurpose::Post, 1).with_model(x_post_model(text))
 }
 
 /// Why a job of a scheduled upload stops when its due time passed without
@@ -1234,6 +1261,24 @@ impl UploadHandler {
         Ok(())
     }
 
+    /// Records the post X bills, under the project and its channel.
+    fn record_post(&self, payload: &UploadPayload, job: JobId) {
+        let Ok(project) = id::<VideoProjectId>(&payload.project) else {
+            return;
+        };
+        self.costs.record_for_project(
+            PaidCall {
+                provider: Provider::X,
+                model: x_post_model(&payload.description),
+                purpose: CostPurpose::Post,
+                usage: Metered::posts(1),
+                job: Some(job),
+                reported: None,
+            },
+            project,
+        );
+    }
+
     /// Publishes the processed upload `video`, within the publishing limit.
     #[allow(clippy::too_many_arguments)]
     fn publish(
@@ -1251,12 +1296,16 @@ impl UploadHandler {
             Ok(None) => {}
             Err(error) => return Err(self.failed(publication, job, &error, network)),
         }
+        let upload = payload.video()?;
         let post = access_token(&self.connections, account)
-            .and_then(|token| uploader.publish(&token, &payload.destination, video));
+            .and_then(|token| uploader.publish(&token, &payload.destination, video, &upload));
         match post {
             Ok(post) => {
                 if let Some(issue) = &post.issue {
                     tracing::info!(network = network.code(), %issue, "published with an issue");
+                }
+                if network.bills_posts() {
+                    self.record_post(payload, job);
                 }
                 self.update(publication, job, |p| p.published(post, SystemTime::now()))?;
                 Ok(Publishing::Done)
@@ -1621,6 +1670,10 @@ impl Bardo {
             self.text_with(text, &[("network", &name), ("reason", reason)])
         };
         match failure {
+            // X's app ran out of credits (or hit its spending limit).
+            UploadFailure::QuotaExceeded if network.bills_posts() => {
+                self.text(Text::UploadFailureCredits).into_owned()
+            }
             UploadFailure::QuotaExceeded => self.text(Text::UploadFailureQuota).into_owned(),
             UploadFailure::UploadLimit => self.text(Text::UploadFailureUploadLimit).into_owned(),
             UploadFailure::ReconnectNeeded => self.text(Text::UploadFailureReconnect).into_owned(),
@@ -1885,6 +1938,13 @@ impl Bardo {
                 .map(|publication| publication.id.to_string())
                 .unwrap_or_default(),
         );
+        let cost = match (&post, network.bills_posts()) {
+            (Some(post), true) => {
+                let text = post.text.as_deref().unwrap_or_default();
+                Some(self.estimate(&[post_call(text)])?)
+            }
+            _ => None,
+        };
         Ok(UploadReview {
             project,
             account: account.id,
@@ -1898,6 +1958,7 @@ impl Bardo {
             visibility: target.visibility,
             synthetic,
             replaces,
+            cost,
             rendering,
             uploading,
             size,
@@ -2033,6 +2094,11 @@ impl Bardo {
         let (Some(render), Some(post), Some(size)) = (&now.render, &now.post, now.size) else {
             return Err(UploadReviewError::Changed);
         };
+        if now.network.bills_posts() {
+            let text = post.text.as_deref().unwrap_or_default();
+            self.check_budget(&[post_call(text)], choices.budget)?
+                .map_err(UploadReviewError::OverBudget)?;
+        }
         if let Some(at) = choices.publish_at {
             if !now.network.schedules_uploads() && !now.network.schedules_in_app() {
                 return Err(UploadReviewError::NoSchedule);
@@ -2172,10 +2238,10 @@ impl Bardo {
             return Err(UploadReviewError::NotNow);
         };
         let (old, mut payload) = self.upload_job(upload.job)?;
-        // A Reel's post id is its shortcode, which only comes once Bardo
-        // publishes it, and a TikTok draft has none: the container or the
-        // draft is the job's.
-        let video = if network.uploads_reels() || network.uploads_drafts() {
+        // A Reel's post id is its shortcode and an X post's its id, which
+        // only come once Bardo publishes it, and a TikTok draft has none:
+        // the container, media or draft is the job's.
+        let video = if network.publishes_uploads() || network.uploads_drafts() {
             let checkpoint = old
                 .checkpoint()
                 .and_then(|text| serde_json::from_str::<UploadCheckpoint>(text).ok())
@@ -2250,6 +2316,9 @@ pub(crate) mod testing {
     pub(crate) struct FakeUploader {
         pub(crate) reels: bool,
         pub(crate) drafts: bool,
+        /// As X: a processed upload waits for Bardo to post it, with no
+        /// publishing limit.
+        pub(crate) posts: bool,
         /// Answers to publishing limit reads; when empty, there is no limit.
         pub(crate) limits: Mutex<VecDeque<Result<PublishingLimit, UploadErrorKind>>>,
         /// The account each limit read was for.
@@ -2258,6 +2327,8 @@ pub(crate) mod testing {
         pub(crate) publishes: Mutex<VecDeque<Result<NetworkPost, UploadErrorKind>>>,
         /// Every publish: the account and the upload.
         pub(crate) published: Mutex<Vec<(String, String)>>,
+        /// The videos as each publish described them.
+        pub(crate) posted: Mutex<Vec<VideoUpload>>,
         /// The account each upload went to.
         pub(crate) accounts: Mutex<Vec<String>>,
         /// What each attempt said already arrived (`UploadRun::resumed`).
@@ -2307,6 +2378,13 @@ pub(crate) mod testing {
             }
         }
 
+        pub(crate) fn x() -> Self {
+            Self {
+                posts: true,
+                ..Self::default()
+            }
+        }
+
         pub(crate) fn limit(&self, limit: Result<PublishingLimit, UploadErrorKind>) {
             self.limits.lock().unwrap().push_back(limit);
         }
@@ -2342,6 +2420,8 @@ pub(crate) mod testing {
         fn network(&self) -> Network {
             if self.drafts {
                 Network::TikTok
+            } else if self.posts {
+                Network::X
             } else if self.reels {
                 Network::InstagramReels
             } else {
@@ -2350,7 +2430,7 @@ pub(crate) mod testing {
         }
 
         fn link(&self, id: &str) -> Result<Option<PostLink>, UploadError> {
-            if self.reels || self.drafts {
+            if self.reels || self.drafts || self.posts {
                 return Ok(None);
             }
             Ok(Some(
@@ -2384,6 +2464,7 @@ pub(crate) mod testing {
             access_token: &SecretText,
             account: &str,
             id: &str,
+            video: &VideoUpload,
         ) -> Result<NetworkPost, UploadError> {
             self.tokens
                 .lock()
@@ -2393,6 +2474,7 @@ pub(crate) mod testing {
                 .lock()
                 .unwrap()
                 .push((account.to_owned(), id.to_owned()));
+            self.posted.lock().unwrap().push(video.clone());
             if self.stall_publish.load(Ordering::SeqCst) {
                 self.stalled.store(true, Ordering::SeqCst);
                 while self.stall_publish.load(Ordering::SeqCst) {
@@ -2404,6 +2486,12 @@ pub(crate) mod testing {
             match self.publishes.lock().unwrap().pop_front() {
                 Some(Ok(post)) => Ok(post),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
+                None if self.posts => Ok(NetworkPost {
+                    id: "1880028106020515999".into(),
+                    link: PostLink::parse(Network::X, "https://x.com/i/status/1880028106020515999")
+                        .ok(),
+                    issue: None,
+                }),
                 None => Ok(NetworkPost {
                     id: "17900000000000001".into(),
                     link: Some(PostLink::parse(Network::InstagramReels, REEL).unwrap()),
@@ -2497,7 +2585,7 @@ pub(crate) mod testing {
                     Ok(VideoState::Expired)
                 }
                 Some(Ok(state)) => Ok(state),
-                None if self.reels => Ok(VideoState::Processed),
+                None if self.reels || self.posts => Ok(VideoState::Processed),
                 None if self.drafts => Ok(VideoState::InInbox),
                 Some(Err(kind)) => Err(UploadError::new(kind, "the fake failed")),
                 // As asked: a scheduled video stays private with its time.
@@ -2825,6 +2913,7 @@ pub(crate) mod tests {
             publish_at: None,
             share_to_feed: true,
             cover: Duration::ZERO,
+            budget: BudgetConsent::Ask,
         };
         let job = s.app.start_upload(&review, choices).unwrap();
         done(&s.app, job);
@@ -4387,5 +4476,260 @@ mod tiktok_tests {
         );
         assert_eq!(*s.h.tiktok.files.lock().unwrap(), [tiktok_file()]);
         assert_eq!(state(&s), UploadState::DraftSent);
+    }
+}
+
+/// X posts (#147): the review's text, label and price, the post Bardo
+/// makes once X processed the video, and what it costs.
+#[cfg(test)]
+mod x_tests {
+    use std::time::{Duration, SystemTime};
+
+    use bardo_domain::{
+        ConnectedIdentity, ConnectionSecrets, ConnectionStatus, CostRepository, Money,
+        NetworkConnection, NetworkConnectionRepository, TokenGrant, TokenSet,
+    };
+
+    use super::*;
+    use crate::export::tests::{Setup, rendered_with};
+    use crate::scenes::tests::{done, wait_done};
+
+    const USER_ID: &str = "1840000000000000001";
+    const ACCESS: &str = "x-access-token";
+    const TEXT: &str = "Nobody found the probe. #space";
+
+    fn x_account(s: &Setup) -> NetworkAccount {
+        NetworkAccountRepository::list(&*s.h.db, s.project.channel)
+            .unwrap()
+            .into_iter()
+            .find(|account| account.network == Network::X)
+            .unwrap()
+    }
+
+    fn connect(s: &Setup) {
+        let account = x_account(s);
+        let now = SystemTime::now();
+        let tokens = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(ACCESS),
+                refresh_token: Some(SecretText::new("x-refresh-token")),
+                expires_in: Duration::from_secs(2 * 60 * 60),
+                scopes: Vec::new(),
+            },
+            now,
+        );
+        s.h.connection_secrets
+            .set_tokens(s.app.profile().id, account.id, &tokens)
+            .unwrap();
+        NetworkConnectionRepository::save(
+            &*s.h.db,
+            &NetworkConnection {
+                account: account.id,
+                owner: s.app.profile().id,
+                status: ConnectionStatus::Connected,
+                identity: ConnectedIdentity {
+                    id: USER_ID.into(),
+                    name: "@arquivosdoespaco".into(),
+                },
+                scopes: Vec::new(),
+                expires_at: tokens.expires_at(),
+                connected_at: now,
+                refreshed_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn generate(s: &Setup, x_text: &str) {
+        let answer = serde_json::json!({ "posts": [
+            {
+                "network": "youtube",
+                "title": "The probe nobody found",
+                "description": "In 1969 a probe went silent.",
+                "tags": ["space history", "nasa"]
+            },
+            {
+                "network": "tiktok",
+                "title": "",
+                "description": "The probe nobody found.",
+                "tags": ["#space", "nasa"]
+            },
+            {
+                "network": "x",
+                "title": "",
+                "description": x_text,
+                "tags": []
+            }
+        ]});
+        s.h.text.answers.lock().unwrap().push(answer.to_string());
+        done(
+            &s.app,
+            s.app
+                .generate_metadata(s.project.id, crate::BudgetConsent::Ask)
+                .unwrap(),
+        );
+    }
+
+    /// The project rendered with metadata and its X account connected.
+    fn ready(x_text: &str) -> Setup {
+        let s = rendered_with(&[Network::X]);
+        generate(&s, x_text);
+        connect(&s);
+        s
+    }
+
+    fn review(s: &Setup) -> UploadReview {
+        s.app.upload_review(s.project.id, Network::X).unwrap()
+    }
+
+    fn upload(s: &Setup) -> Publication {
+        s.app
+            .publications
+            .publications(s.project.id)
+            .unwrap()
+            .into_iter()
+            .find(|publication| publication.network() == Network::X)
+            .unwrap()
+    }
+
+    fn posts_recorded(s: &Setup) -> Vec<bardo_domain::CostRecord> {
+        CostRepository::recent_costs(&*s.h.db, s.app.profile().id, CostPurpose::Post, 10).unwrap()
+    }
+
+    #[test]
+    fn a_reviewed_post_goes_once_processed_with_its_text_and_ai_label_and_is_billed() {
+        let s = ready(TEXT);
+        let review = review(&s);
+        assert!(review.is_post());
+        assert!(!review.is_reel() && !review.is_draft());
+        assert_eq!(review.block(), None);
+        assert_eq!(review.post.as_ref().unwrap().title, None);
+        let cost = review.cost.as_ref().expect("X bills the post");
+        assert_eq!(cost.total(), Money::from_micros(15_000));
+
+        let job = s
+            .app
+            .start_upload(
+                &review,
+                UploadChoices {
+                    synthetic: true,
+                    ..review.choices()
+                },
+            )
+            .unwrap();
+        done(&s.app, job);
+
+        let posted = s.h.x.posted.lock().unwrap().clone();
+        assert_eq!(posted.len(), 1);
+        assert_eq!(
+            Some(&posted[0].description),
+            review.post.as_ref().unwrap().text.as_ref()
+        );
+        assert!(posted[0].synthetic, "X's label goes with the post");
+        assert_eq!(s.h.x.published.lock().unwrap()[0].0, USER_ID);
+        let publication = upload(&s);
+        assert_eq!(
+            s.app.upload_state(&publication),
+            Some(UploadState::Published)
+        );
+        assert_eq!(
+            publication.link.unwrap().url(),
+            "https://x.com/i/status/1880028106020515999"
+        );
+        let recorded = posts_recorded(&s);
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].provider, Provider::X);
+        assert_eq!(recorded[0].model, "post");
+        assert_eq!(recorded[0].usage, Metered::posts(1));
+        assert_eq!(recorded[0].cost.amount(), Money::from_micros(15_000));
+        assert_eq!(recorded[0].project, Some(s.project.id));
+    }
+
+    #[test]
+    fn a_post_with_a_link_is_priced_and_recorded_as_one() {
+        let s = ready("The full story: https://example.com/probe");
+        let review = review(&s);
+        assert_eq!(
+            review.cost.as_ref().unwrap().total(),
+            Money::from_micros(200_000)
+        );
+        let job = s.app.start_upload(&review, review.choices()).unwrap();
+        done(&s.app, job);
+        assert_eq!(posts_recorded(&s)[0].model, "post-with-link");
+    }
+
+    #[test]
+    fn a_post_that_reaches_the_x_budget_waits_for_the_users_word() {
+        let s = ready(TEXT);
+        s.app.set_budget(Provider::X, "0.01").unwrap();
+        let review = review(&s);
+        let Err(UploadReviewError::OverBudget(estimate)) =
+            s.app.start_upload(&review, review.choices())
+        else {
+            panic!("the post reaches the budget");
+        };
+        assert_eq!(estimate.over_budget().count(), 1);
+        assert!(
+            s.app
+                .publications
+                .publications(s.project.id)
+                .unwrap()
+                .is_empty()
+        );
+
+        let job = s
+            .app
+            .start_upload(
+                &review,
+                UploadChoices {
+                    budget: BudgetConsent::Confirmed,
+                    ..review.choices()
+                },
+            )
+            .unwrap();
+        done(&s.app, job);
+        assert_eq!(posts_recorded(&s).len(), 1);
+    }
+
+    #[test]
+    fn an_app_out_of_credits_fails_the_post_with_what_to_do_and_costs_nothing() {
+        let s = ready(TEXT);
+        s.h.x.publish_answer(Err(UploadErrorKind::QuotaExceeded));
+        let review = review(&s);
+        let job = s.app.start_upload(&review, review.choices()).unwrap();
+        wait_done(&s.app, job);
+        let Some(UploadState::Failed { failure, .. }) = s.app.upload_state(&upload(&s)) else {
+            panic!("the post failed");
+        };
+        assert_eq!(failure, UploadFailure::QuotaExceeded);
+        assert!(
+            s.app
+                .upload_failure_text(&failure, Network::X)
+                .contains("credits")
+        );
+        assert!(posts_recorded(&s).is_empty());
+    }
+
+    #[test]
+    fn a_scheduled_post_waits_for_its_time_in_bardo() {
+        let s = ready(TEXT);
+        let review = review(&s);
+        let due = SystemTime::now() + Duration::from_secs(3 * 24 * 60 * 60);
+        s.app
+            .start_upload(
+                &review,
+                UploadChoices {
+                    publish_at: Some(due),
+                    ..review.choices()
+                },
+            )
+            .unwrap();
+        let publication = upload(&s);
+        assert!(publication.due().is_some());
+        assert!(matches!(
+            s.app.upload_state(&publication),
+            Some(UploadState::Due(_))
+        ));
+        assert!(s.h.x.files.lock().unwrap().is_empty(), "nothing goes yet");
     }
 }

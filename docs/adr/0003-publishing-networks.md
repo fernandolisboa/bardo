@@ -1,6 +1,6 @@
 # ADR-0003: Publishing networks in the MVP
 
-- Status: Accepted; upload paths amended by [ADR-0008](0008-network-connections.md)
+- Status: Accepted; upload paths amended by [ADR-0008](0008-network-connections.md); X upload by [ADR-0013](0013-x-direct-upload.md)
 - Date: 2026-09-30
 
 ## Context
@@ -17,7 +17,7 @@ Automatic publishing depends on each platform's API access rules, which are outs
 
 - **Automatic upload and scheduling**: YouTube, TikTok and Instagram Reels. YouTube and TikTok are the primary focus.
 - **Export** (file in the network's render preset + metadata to copy) for **all five** networks, including those with automatic upload.
-- X and Kick are export-only until their API situation changes; each can become a `publish` adapter later without touching the core.
+- X and Kick are export-only until their API situation changes; each can become a `publish` adapter later without touching the core. X became one with [ADR-0013](0013-x-direct-upload.md) (pay-per-use API, 2026-10-14); Kick stays export-only.
 
 ## Consequences
 

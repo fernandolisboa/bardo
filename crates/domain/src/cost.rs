@@ -507,6 +507,49 @@ pub enum CostPurpose {
     Post,
 }
 
+/// The rate-table model of a post X bills without a link in its text.
+pub const X_POST: &str = "post";
+/// The rate-table model of a post X bills with a link in its text, at a
+/// higher price.
+pub const X_POST_WITH_LINK: &str = "post-with-link";
+
+/// The rate-table model of a post on X with `text`: X prices a post with
+/// a link apart.
+pub fn x_post_model(text: &str) -> &'static str {
+    if holds_link(text) {
+        X_POST_WITH_LINK
+    } else {
+        X_POST
+    }
+}
+
+/// Whether X may read a link in `text`: a word with a scheme, starting
+/// with `www.`, or a bare domain (`bardo.app`), which X links too. A word
+/// it takes for a domain that X does not makes the estimate higher, never
+/// lower.
+fn holds_link(text: &str) -> bool {
+    text.split_whitespace().any(|word| {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric());
+        let lower = word.to_ascii_lowercase();
+        if lower.contains("://") || lower.starts_with("www.") {
+            return true;
+        }
+        let host = lower.split('/').next().unwrap_or_default();
+        match host.rsplit_once('.') {
+            Some((name, tld)) => {
+                !name.is_empty()
+                    && !host.contains('@')
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+                    && (2..=24).contains(&tld.len())
+                    && tld.chars().all(|c| c.is_ascii_alphabetic())
+            }
+            None => false,
+        }
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("unknown cost purpose: {0}")]
 pub struct UnknownCostPurpose(pub String);
@@ -1065,6 +1108,26 @@ mod tests {
         );
         assert_eq!(Meter::Posts.code().parse(), Ok(Meter::Posts));
         assert_eq!("post".parse(), Ok(CostPurpose::Post));
+    }
+
+    #[test]
+    fn a_post_with_a_link_is_priced_as_one() {
+        for text in [
+            "Plutão, explicado. https://bardo.app/v/1",
+            "Mais em www.exemplo.com.br",
+            "Mais em exemplo.com.br!",
+            "(veja bardo.app)",
+        ] {
+            assert_eq!(x_post_model(text), X_POST_WITH_LINK, "{text}");
+        }
+        for text in [
+            "Por que Plutão deixou de ser planeta? #espaço",
+            "Pi é 3.14, e.g. um número.",
+            "Fim... ou não?",
+            "fale@exemplo.com",
+        ] {
+            assert_eq!(x_post_model(text), X_POST, "{text}");
+        }
     }
 
     #[test]

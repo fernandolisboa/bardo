@@ -8,7 +8,7 @@ tour: publish
 
 # Envio e agendamento
 
-A etapa [Publicação](bardo:go/projects/publish) transforma cada arquivo renderizado num post: escreve o texto do post para cada rede e então o envia a uma conta conectada do YouTube, do Instagram Reels ou do TikTok, ou o [exporta](exporting.md) para você postar à mão. Nada sai do seu computador antes de você confirmar uma revisão. [Mostre a etapa para mim](bardo:tour/publish).
+A etapa [Publicação](bardo:go/projects/publish) transforma cada arquivo renderizado num post: escreve o texto do post para cada rede e então o envia a uma conta conectada do YouTube, do Instagram Reels, do TikTok ou do X, ou o [exporta](exporting.md) para você postar à mão. Nada sai do seu computador antes de você confirmar uma revisão. [Mostre a etapa para mim](bardo:tour/publish).
 
 <a id="networks"></a>
 ## Um post por rede
@@ -42,7 +42,8 @@ Quando a voz do narrador está marcada como clone ou voz sintética realista, ca
 - **YouTube**: "Conteúdo alterado ou sintético", que a revisão do envio marca para você.
 - **Instagram**: o rótulo "Informações de IA", que a revisão marca para você.
 - **TikTok**: o rótulo de conteúdo gerado por IA, que você ativa no app do TikTok; o lembrete da revisão aparece quando o rascunho chega.
-- **X e Kick** não têm rótulo: diga isso no texto ou no título do post.
+- **X**: o rótulo de feito com IA, que a revisão do envio marca para você. Ao postar uma exportação à mão, diga isso no texto do post.
+- **Kick** não tem rótulo: diga isso no título.
 
 O arquivo de metadados de uma exportação diz onde ativar o rótulo em cada rede.
 
@@ -53,10 +54,11 @@ Uma conta conectada oferece **Revisar envio**. O botão fica desligado, com o mo
 
 - o arquivo, a conta e o título, a descrição e as tags (ou a legenda) do jeito que a rede os recebe;
 - suas escolhas: visibilidade e conteúdo para crianças no YouTube, a capa e Mostrar também no Feed no Instagram, o rótulo de conteúdo sintético;
+- no X, quanto o X cobra pelo post, e uma pergunta antes quando ele chegaria ao orçamento do X;
 - quando vai (veja [abaixo](#schedule));
 - se o projeto já tem um post nessa rede, uma caixa para substituí-lo no Bardo (o post continua na rede).
 
-Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o render, o corte ou os metadados mudarem com a revisão aberta, o Bardo fecha a revisão e pede que você revise de novo. O guia de cada rede tem os detalhes: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft).
+Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o render, o corte ou os metadados mudarem com a revisão aberta, o Bardo fecha a revisão e pede que você revise de novo. O guia de cada rede tem os detalhes: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft), [X](connect-x.md#upload).
 
 <a id="states"></a>
 ## Estados do envio
@@ -69,7 +71,7 @@ Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o re
 | Processando | A rede tem o arquivo e está trabalhando nele |
 | Ainda processando | O Bardo parou de esperar pela rede; **Verificar de novo** mais tarde |
 | Agendado | No YouTube, privado até o horário de publicação |
-| Agendado no Bardo | Instagram: o Bardo posta no horário, com o Bardo aberto ou o [agente em segundo plano](background-agent.md) ligado |
+| Agendado no Bardo | Instagram e X: o Bardo posta no horário, com o Bardo aberto ou o [agente em segundo plano](background-agent.md) ligado |
 | Perdeu o horário | O Bardo estava fechado no horário; veja [Posts perdidos](missed-posts.md) |
 | Acima do limite de publicação | Na fila até a rede aceitar mais posts |
 | Enviado | Na rede, com o link |
@@ -84,6 +86,7 @@ Cada rede agenda do seu jeito:
 
 - O **YouTube** aceita um horário de publicação. Na revisão, escolha **Agendar** e digite a data e a hora, lidas no fuso horário do seu computador: o Bardo envia o vídeo como privado e o YouTube o torna público nesse horário sozinho, mesmo com o Bardo e o computador desligados. Até lá, **Mudar horário** e **Cancelar agendamento** mudam isso no YouTube. Mais em [Agendar no YouTube](connect-youtube.md#schedule).
 - O **Instagram** não aceita horário de publicação de apps. Com **Agendar**, o Bardo envia o arquivo antes e publica o Reel ele mesmo nesse horário, então deixe o Bardo aberto e o computador ligado, ou ligue o [agente em segundo plano](background-agent.md), que envia com o Bardo fechado. Se nenhum dos dois estiver rodando, nada é postado e o Bardo pergunta o que fazer quando abrir: veja [Posts perdidos](missed-posts.md).
+- O **X** também não recebe horário de publicação de apps: agenda como o Instagram, com o Bardo fazendo o post no horário. Veja [Agendar um post](connect-x.md#schedule).
 - O **TikTok** recebe um rascunho na sua caixa de entrada, nunca um post. Você cola a legenda, escolhe quem pode assistir e posta ou agenda no app do TikTok. O Bardo não agenda rascunhos.
 
 Um horário que já passou é recusado quando você confirma.
@@ -91,7 +94,7 @@ Um horário que já passou é recusado quando você confirma.
 <a id="export"></a>
 ## Exportar
 
-**Exportar** grava uma pasta por rede escolhida com o arquivo renderizado e um arquivo de metadados para copiar, para postar à mão em qualquer uma das cinco redes. É o jeito de postar no X e na Kick, e funciona para as outras também. Veja [Exportação](exporting.md).
+**Exportar** grava uma pasta por rede escolhida com o arquivo renderizado e um arquivo de metadados para copiar, para postar à mão em qualquer uma das cinco redes. É o jeito de postar na Kick, e funciona para as outras também. Veja [Exportação](exporting.md).
 
 <a id="post"></a>
 ## A publicação

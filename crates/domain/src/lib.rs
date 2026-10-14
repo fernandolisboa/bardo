@@ -124,7 +124,8 @@ pub use connection::{
 };
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
-    Rate, RateFieldError, RateTable, Spend, UnknownCostPurpose, UnknownMeter,
+    Rate, RateFieldError, RateTable, Spend, UnknownCostPurpose, UnknownMeter, X_POST,
+    X_POST_WITH_LINK, x_post_model,
 };
 pub use cut_suggestion::{
     ChunkLimits, CutCandidate, CutChunk, CutPlace, CutReasons, CutRules, CutSuggestion,

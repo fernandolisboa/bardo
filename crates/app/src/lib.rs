@@ -410,12 +410,14 @@ impl Providers {
                 Arc::new(bardo_publish::YouTubeSignIn::new()),
                 Arc::new(bardo_publish::TikTokSignIn::new()),
                 Arc::new(bardo_publish::InstagramSignIn::new()),
+                Arc::new(bardo_publish::XSignIn::new()),
             ],
             consent: Arc::new(bardo_publish::LoopbackReceiver),
             uploaders: vec![
                 Arc::new(bardo_publish::YouTubeUploader::new()),
                 Arc::new(bardo_publish::InstagramUploader::new()),
                 Arc::new(bardo_publish::TikTokUploader::new()),
+                Arc::new(bardo_publish::XUploader::new()),
             ],
             analytics: vec![Arc::new(bardo_publish::YouTubeAnalytics::new())],
             post_insights: vec![
@@ -738,6 +740,7 @@ impl Bardo {
             uploaders: providers.uploaders.clone(),
             jobs: Arc::clone(&jobs),
             opened_at,
+            costs: cost_book.clone(),
         };
         // Scheduled posts whose time passed while Bardo was closed wait for
         // the user; their jobs must not start first.

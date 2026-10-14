@@ -310,6 +310,10 @@ name = "YouTube Data API"
 purpose = "Pesquisa de nicho e estatísticas públicas de vídeos. Cada teste usa 1 unidade da sua cota diária."
 placeholder = "AIza…"
 
+[provider.x]
+name = "API do X"
+purpose = "Posts no X, cobrados por post dos créditos do seu app do X. Usada pela conta do X conectada, sem chave de API."
+
 [key_check]
 valid = "A chave funciona."
 rejected = "O provedor recusou esta chave. Confira se ela foi copiada inteira e se ainda está ativa."
@@ -828,6 +832,7 @@ image_tokens = "Tokens de imagem"
 characters = "Caracteres"
 video_seconds = "Segundos de vídeo"
 audio_seconds = "Segundos de áudio"
+posts = "Posts"
 
 [meter.unit]
 input_tokens = "por milhão de tokens"
@@ -836,6 +841,7 @@ image_tokens = "por milhão de tokens"
 characters = "por mil caracteres"
 video_seconds = "por segundo de vídeo"
 audio_seconds = "por hora de áudio"
+posts = "por post"
 
 [costs]
 overview = "Visão geral"
@@ -1469,7 +1475,7 @@ cost_unpriced = "Sem tarifa ainda"
 youtube = "No YouTube, responda Sim em \"Conteúdo alterado ou sintético\" nos Detalhes do upload."
 tiktok = "No TikTok, ative \"Conteúdo gerado por IA\" em Mais opções antes de postar."
 instagram_reels = "No Instagram, ative o rótulo de IA em Configurações avançadas antes de compartilhar."
-x = "O X não tem opção de rótulo: diga no post que a voz é sintética."
+x = "Postando pelo Bardo, a revisão marca o rótulo de feito com IA do X. Postando à mão, diga no post que a voz é sintética."
 kick = "A Kick não tem opção de rótulo nem descrição: diga no título que a voz é sintética."
 
 [metadata.problem]
@@ -1661,6 +1667,20 @@ client_id_invalid = "Cole o ID do app que aparece nas configurações básicas d
 client_secret_required = "Informe a chave secreta do app."
 client_secret_invalid = "Isso não parece uma chave secreta de app. Copie de novo das configurações básicas do app."
 
+[app_credentials.x]
+name = "X · app do X Developer Console"
+purpose = "Um app no seu X Developer Console com OAuth 2.0 ligado: permissões Read and write, tipo Web App, Automated App or Bot e o callback URI http://127.0.0.1:47147/callback. O X cobra cada post dos créditos do app."
+client_id = "OAuth 2.0 Client ID"
+client_secret = "Client Secret"
+client_id_placeholder = "M1M5R3Bm…"
+client_secret_placeholder = "Letras, números, - e _"
+
+[app_credentials.x.error]
+client_id_required = "Informe o client ID."
+client_id_invalid = "Cole o OAuth 2.0 Client ID de Keys and tokens do seu app do X. Ele tem só letras, números, - e _."
+client_secret_required = "Informe o client secret."
+client_secret_invalid = "Isso não parece um client secret. Copie de novo de Keys and tokens do app, ou gere um novo."
+
 [connection]
 not_connected = "Não conectada"
 connected = "Conectada como {channel}"
@@ -1707,6 +1727,13 @@ open_token_tool = "Abrir o Explorador da Graph API"
 choose = "O token alcança várias contas do Instagram. Escolha a deste canal."
 choice_via = "Página: {via}"
 
+[connection.x]
+connecting = "Aguardando você autorizar o Bardo no navegador…"
+checked = "A conexão funciona. Conta: {channel}."
+reconnect_hint = "O X recusou renovar o acesso: ele foi revogado nas configurações do X, a senha mudou ou o secret do app mudou. Reconecte para entrar de novo."
+needs_app_credentials = "Salve o seu app do X em Configurações › Redes antes de conectar."
+missing_scopes = "Nem todas as permissões foram dadas. Confira se as permissões do seu app do X estão em Read and write e conecte de novo: o Bardo precisa delas para ler a sua conta, enviar o vídeo e fazer o post."
+
 [connection.error]
 not_offered = "O Bardo ainda não entra nesta rede."
 not_connected = "Esta conta não está conectada."
@@ -1714,6 +1741,7 @@ denied = "O acesso não foi permitido no navegador. Conecte de novo e escolha Pe
 timed_out = "Nenhuma resposta voltou do navegador em cinco minutos. Conecte de novo."
 cancelled = "Conexão cancelada."
 listen_failed = "O Bardo não conseguiu esperar a resposta do navegador neste computador. Tente de novo; se continuar falhando, confira se algum firewall bloqueia o Bardo em 127.0.0.1."
+port_in_use = "Outro programa neste computador está usando a porta em que o Bardo espera a resposta do navegador. Feche-o, ou espere um minuto se acabou de tentar, e conecte de novo."
 tokens_too_large = "Os tokens da rede são grandes demais para o Gerenciador de Credenciais do Windows, então não foram guardados."
 store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
 not_saved = "Não foi possível salvar a conexão. Tente de novo."
@@ -1750,6 +1778,14 @@ not_allowed = "A Meta recusou o acesso. Confira se o token tem todas as permiss�
 no_channel = "A Página não está mais vinculada a uma conta profissional do Instagram. Vincule de novo nas configurações do Instagram e reconecte."
 limit_reached = "A Meta está limitando as chamadas do seu app agora. Tente de novo em alguns minutos."
 network_down = "A Meta está com falha do lado dela. Tente mais tarde."
+
+[connection.failure.x]
+refused = "O X recusou a entrada. Conecte de novo."
+client_rejected = "O X não reconhece o client ID ou o client secret. Confira em Configurações › Redes e veja se o tipo do app é Web App, Automated App or Bot."
+not_allowed = "O X recusou o acesso. Confira se as permissões do app estão em Read and write e se o callback URI é exatamente http://127.0.0.1:47147/callback."
+no_channel = "O X não devolveu esta conta. Entre com a conta de onde você posta."
+limit_reached = "O X recusou a chamada: o app ficou sem créditos ou passou de um limite de requisições. Confira os créditos no X Developer Console e tente de novo."
+network_down = "O X está com falha do lado dele. Tente mais tarde."
 
 [consent_page]
 done = "O Bardo está conectado. Pode fechar esta aba."
@@ -1834,6 +1870,14 @@ draft_limit_recheck_hint = "O TikTok recusou mais rascunhos por enquanto, talvez
 due_hint_agent = "O Bardo posta neste horário por conta própria: o agente em segundo plano envia enquanto você estiver conectado ao Windows, mesmo com o Bardo fechado. O computador precisa estar ligado. Se nada estiver rodando nesse horário, nada é postado e o Bardo pergunta o que fazer quando abrir."
 reel_schedule_hint_agent = "O {network} não aceita horário de publicação vindo de apps, então o Bardo posta neste horário por conta própria: o agente em segundo plano envia enquanto você estiver conectado ao Windows, mesmo com o Bardo fechado, desde que o computador esteja ligado. Se nada estiver rodando nesse horário, nada é postado e o Bardo pergunta o que fazer quando abrir."
 missed_hint_agent = "Nem o Bardo nem o agente em segundo plano estavam rodando no horário (o computador estava desligado, dormindo ou sem ninguém conectado), então nada foi postado. Poste agora, escolha um novo horário ou cancele."
+post_hint = "O Bardo envia o arquivo renderizado para a conta do X conectada e faz o post com este texto quando o X termina de processá-lo. O X cobra cada post dos créditos do seu app. Nada é enviado antes de você confirmar a revisão."
+post_ai_label = "Rótulo de feito com IA"
+post_ai_label_hint = "Avisa o X que o post tem mídia feita com IA, como uma voz realista. O X mostra um rótulo no post."
+post_irreversible = "Depois de postado, o vídeo fica na sua conta do X e o X já cobrou o post. Para apagá-lo, use o X."
+post_start = "Enviar e postar"
+post_processing_hint = "O X recebeu o arquivo e está processando. O Bardo confere a cada minuto e faz o post quando ele estiver pronto."
+post_cost = "O X cobra cerca de {amount} dos créditos do seu app por este post."
+post_cost_hint = "O X cobra cada post dos créditos do seu app do X: US$ 0,015, ou US$ 0,20 quando o texto tem link. O Bardo registra em Custos quando o X aceita o post. Adicione créditos e defina um limite de gastos no X Developer Console."
 
 [upload.field]
 file = "Arquivo"
@@ -1844,6 +1888,7 @@ draft_caption = "Legenda para colar no TikTok"
 cover = "Capa"
 visibility = "Visibilidade"
 when = "Quando"
+post_text = "Texto do post"
 
 [upload.state]
 waiting = "Aguardando envio"
@@ -1871,6 +1916,7 @@ removed = "O vídeo não está mais no {network}."
 account_changed = "A conta foi reconectada a outra conta do {network}, diferente da revisada. Revise o envio de novo."
 render_changed = "O render mudou depois da revisão, então o resto do arquivo não é o que você revisou. Revise o envio de novo."
 schedule_missed = "O horário de publicação passou antes de o envio começar, então nada foi enviado. Revise o envio de novo com um horário mais tarde."
+credits = "O X recusou o post: o seu app do X ficou sem créditos ou atingiu o limite de gastos. Adicione créditos ou aumente o limite no X Developer Console e tente de novo."
 
 [upload.block]
 not_offered = "O Bardo ainda não envia para esta rede. Exporte o arquivo e publique manualmente."
@@ -2396,7 +2442,7 @@ body = "Cada rede renderiza no próprio preset: quadro, tamanho, codec, bitrate,
 
 [tour.accounts.connect]
 title = "Conecte a conta"
-body = "Contas do YouTube e do TikTok se conectam pelo navegador, e a do Instagram com um token que você cola, para o Bardo enviar vídeos e ler os números. O cartão mostra a situação: não conectada, esperando o navegador, conectada como a conta, ou reconexão necessária."
+body = "Contas do YouTube, do TikTok e do X se conectam pelo navegador, e a do Instagram com um token que você cola, para o Bardo enviar vídeos e, em todas menos o X, ler os números. O cartão mostra a situação: não conectada, esperando o navegador, conectada como a conta, ou reconexão necessária."
 
 [tour.accounts.add]
 title = "Adicione uma rede"
@@ -2407,7 +2453,7 @@ name = "Tour das redes"
 
 [tour.networks.tab]
 title = "Redes"
-body = "Esta aba guarda os apps com que o Bardo entra em cada rede: um cliente OAuth do Google para o YouTube, um app da Meta para o Instagram, um app do TikTok for Developers para o TikTok."
+body = "Esta aba guarda os apps com que o Bardo entra em cada rede: um cliente OAuth do Google para o YouTube, um app da Meta para o Instagram, um app do TikTok for Developers para o TikTok, um app do X Developer Console para o X."
 
 [tour.networks.why]
 title = "Seus próprios apps"
@@ -2450,11 +2496,11 @@ body = "Quando a voz do narrador é sintética e realista, cada rede pede que vo
 
 [tour.publish.upload]
 title = "A revisão do envio"
-body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram ou o TikTok: o arquivo, a conta, o texto e suas escolhas. Nada é enviado até você confirmar."
+body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram, o TikTok ou o X: o arquivo, a conta, o texto e suas escolhas. Nada é enviado até você confirmar."
 
 [tour.publish.schedule]
 title = "Quando vai ao ar"
-body = "O YouTube aceita um horário de publicação e publica sozinho. O Instagram é publicado pelo Bardo no horário, então deixe o Bardo aberto; o TikTok recebe um rascunho na caixa de entrada, que você termina e agenda no app do TikTok."
+body = "O YouTube aceita um horário de publicação e publica sozinho. O Instagram e o X são publicados pelo Bardo no horário, então deixe o Bardo aberto; o TikTok recebe um rascunho na caixa de entrada, que você termina e agenda no app do TikTok."
 
 [tour.publish.export]
 title = "Exportar"

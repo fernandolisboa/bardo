@@ -18,8 +18,9 @@ To upload to a network and read its numbers, Bardo signs in to it with an app yo
 | YouTube | A Google OAuth client of type Desktop, in your Google Cloud project | Client ID and client secret |
 | Instagram Reels | A Business app in your Meta developer account, with Facebook Login for Business | App ID and app secret |
 | TikTok | An app (or its sandbox) in your TikTok for Developers account | Client key and client secret |
+| X | An app in your X Developer Console, with OAuth 2.0 and credits | OAuth 2.0 client ID and client secret |
 
-X and Kick have no card: Bardo exports their posts for you to post by hand. Each card's line under the network's name says what the app needs; the network's guide walks through it step by step.
+Kick has no card: Bardo exports its posts for you to post by hand. Each card's line under the network's name says what the app needs; the network's guide walks through it step by step.
 
 <a id="why"></a>
 ## Why Bardo ships none
@@ -31,6 +32,7 @@ Setting an app up takes a few minutes per network, once:
 - [Connecting YouTube](connect-youtube.md)
 - [Connecting Instagram](connect-instagram.md)
 - [Connecting TikTok](connect-tiktok.md)
+- [Connecting X](connect-x.md)
 
 <a id="step-by-step"></a>
 ## Step by step for each app

@@ -844,7 +844,7 @@ pub const ACCOUNTS: Tour = {
     const PANEL: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Accounts,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "channel", TourAnchor::Collection).learn(PAGE, "channel"),
@@ -857,7 +857,7 @@ pub const ACCOUNTS: Tour = {
             on(AT, "preset", control(Control::AccountPreset))
                 .missing(PANEL)
                 .learn(PAGE, "preset"),
-            // X and Kick export only: nothing to connect.
+            // Kick exports only: nothing to connect.
             on(AT, "connect", control(Control::AccountConnection))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "connect"),
@@ -877,7 +877,7 @@ pub const NETWORKS: Tour = {
     const CARDS: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Networks,
-        version: 3,
+        version: 4,
         place: Some(AT),
         steps: &[
             TourStep::at("tab", TourAnchor::Toolbar)
@@ -919,7 +919,7 @@ pub const PUBLISH: Tour = {
     const NETWORK: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Publish,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "networks", TourAnchor::Collection).learn(PAGE, "networks"),
@@ -930,7 +930,7 @@ pub const PUBLISH: Tour = {
             at_stage(AT, "disclosure", control(Control::PublishDisclosure))
                 .missing(WhenMissing::LightPart(control(Control::PublishUpload)))
                 .learn(PAGE, "disclosure"),
-            // X and Kick: exported only, so the card says it in the middle.
+            // Kick: exported only, so the card says it in the middle.
             at_stage(AT, "upload", control(Control::PublishUpload)).learn(PAGE, "review"),
             // The review closed: the upload stands in.
             at_stage(AT, "schedule", control(Control::UploadWhen))

@@ -104,6 +104,7 @@ impl ConnectionError {
             ConnectionError::Consent(ConsentError::TimedOut) => Text::ConnectionTimedOut,
             ConnectionError::Consent(ConsentError::Cancelled) => Text::ConnectionCancelled,
             ConnectionError::Consent(ConsentError::Listen(_)) => Text::ConnectionListenFailed,
+            ConnectionError::Consent(ConsentError::PortInUse(_)) => Text::ConnectionPortInUse,
             ConnectionError::MissingScopes(network) => Text::ConnectionMissingScopes(*network),
             ConnectionError::PastedToken(error) => Text::PastedTokenError(*error),
             ConnectionError::NoPages => Text::ConnectionNoPages,
@@ -1267,7 +1268,7 @@ impl Bardo {
         let callback = self
             .connection_book
             .consent
-            .listen(browser.redirect_path())?;
+            .listen(browser.redirect_path(), browser.redirect_port())?;
         let request = browser.consent_request(&credentials, callback.redirect_uri());
         connections
             .redactor
@@ -1509,7 +1510,11 @@ pub(crate) mod testing {
     pub(crate) struct NoConsent;
 
     impl ConsentReceiver for NoConsent {
-        fn listen(&self, _: &str) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+        fn listen(
+            &self,
+            _: &str,
+            _: Option<u16>,
+        ) -> Result<Box<dyn ConsentCallback>, ConsentError> {
             Err(ConsentError::Listen("no browser in this test".into()))
         }
     }
@@ -1524,6 +1529,10 @@ pub(crate) mod testing {
         pub(crate) states: Arc<Mutex<Vec<String>>>,
         /// The callback path each listen was asked for.
         pub(crate) paths: Mutex<Vec<String>>,
+        /// The fixed port each listen was asked for, if any.
+        pub(crate) ports: Mutex<Vec<Option<u16>>>,
+        /// Fails the next listen (a busy fixed port).
+        pub(crate) listen_failure: Mutex<Option<ConsentError>>,
     }
 
     impl FakeConsent {
@@ -1561,8 +1570,16 @@ pub(crate) mod testing {
     }
 
     impl ConsentReceiver for FakeConsent {
-        fn listen(&self, path: &str) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+        fn listen(
+            &self,
+            path: &str,
+            port: Option<u16>,
+        ) -> Result<Box<dyn ConsentCallback>, ConsentError> {
             self.paths.lock().unwrap().push(path.to_owned());
+            self.ports.lock().unwrap().push(port);
+            if let Some(failure) = self.listen_failure.lock().unwrap().take() {
+                return Err(failure);
+            }
             let outcome = self
                 .outcomes
                 .lock()
@@ -1597,6 +1614,8 @@ pub(crate) mod testing {
     pub(crate) struct FakeSignIn {
         pub(crate) network: Network,
         pub(crate) redirect_path: &'static str,
+        /// The fixed callback port, for a network that matches it (X).
+        pub(crate) redirect_port: Option<u16>,
         /// Whether a refresh grants a new refresh token (TikTok rotates).
         pub(crate) rotates: bool,
         pub(crate) calls: Mutex<Vec<Call>>,
@@ -1619,6 +1638,7 @@ pub(crate) mod testing {
             Self {
                 network: Network::YouTube,
                 redirect_path: "/",
+                redirect_port: None,
                 rotates: false,
                 calls: Mutex::default(),
                 revoked_with: Mutex::default(),
@@ -1729,6 +1749,10 @@ pub(crate) mod testing {
     impl BrowserSignIn for FakeSignIn {
         fn redirect_path(&self) -> &'static str {
             self.redirect_path
+        }
+
+        fn redirect_port(&self) -> Option<u16> {
+            self.redirect_port
         }
 
         fn consent_request(
@@ -1978,6 +2002,8 @@ mod tests {
     const PASTED: &str = "pasted-explorer-token-0001";
     const TIKTOK_KEY: &str = concat!("awfixture", "key0000001");
     const TIKTOK_SECRET: &str = concat!("FixtureClientSecret", "0000000000000");
+    const X_ID: &str = concat!("Rml4dHVyZUNsaWVudElk", "MDAwMDAxOjE6Y2k");
+    const X_SECRET: &str = concat!("Fixture-X-client-secret_", "0000000000000000000000000");
 
     struct Harness {
         db: Arc<Database>,
@@ -1985,6 +2011,7 @@ mod tests {
         sign_in: Arc<FakeSignIn>,
         meta: Arc<FakeMeta>,
         tiktok: Arc<FakeSignIn>,
+        x: Arc<FakeSignIn>,
         consent: Arc<FakeConsent>,
         youtube_data: Arc<testing::FakeYouTubeData>,
     }
@@ -2011,6 +2038,18 @@ mod tests {
                     })),
                     ..FakeSignIn::default()
                 }),
+                x: Arc::new(FakeSignIn {
+                    network: Network::X,
+                    redirect_path: "/callback",
+                    redirect_port: Some(47147),
+                    rotates: true,
+                    expires_in: Mutex::new(Duration::from_secs(7_200)),
+                    identity: Mutex::new(Ok(ConnectedIdentity {
+                        id: "1840000000000000001".into(),
+                        name: "@arquivosdoespaco".into(),
+                    })),
+                    ..FakeSignIn::default()
+                }),
                 consent: Arc::default(),
                 youtube_data: Arc::default(),
             }
@@ -2034,6 +2073,7 @@ mod tests {
                     Arc::clone(&self.sign_in) as _,
                     Arc::clone(&self.meta) as _,
                     Arc::clone(&self.tiktok) as _,
+                    Arc::clone(&self.x) as _,
                 ],
                 consent: Arc::clone(&self.consent) as _,
                 ..testing::providers()
@@ -2182,6 +2222,10 @@ mod tests {
                 AppCredentialsStatus {
                     network: Network::InstagramReels,
                     state: KeyState::NotSet
+                },
+                AppCredentialsStatus {
+                    network: Network::X,
+                    state: KeyState::NotSet
                 }
             ]
         );
@@ -2233,8 +2277,8 @@ mod tests {
         assert_eq!(error.message(), None);
         assert_eq!(app.app_credentials()[0].state, KeyState::NotSet);
         assert!(matches!(
-            app.save_app_credentials(Network::X, CLIENT_ID, CLIENT_SECRET),
-            Err(ConnectionError::NotOffered(Network::X))
+            app.save_app_credentials(Network::Kick, CLIENT_ID, CLIENT_SECRET),
+            Err(ConnectionError::NotOffered(Network::Kick))
         ));
     }
 
@@ -2269,10 +2313,10 @@ mod tests {
         );
 
         let channel = account.channel;
-        let x = app
+        let kick = app
             .add_network_account(
                 channel,
-                Network::X,
+                Network::Kick,
                 NetworkAccountDraft {
                     handle: "space".into(),
                     ..NetworkAccountDraft::default()
@@ -2280,12 +2324,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            app.connection_state(&x).unwrap(),
+            app.connection_state(&kick).unwrap(),
             ConnectionState::Unavailable
         );
         assert!(matches!(
-            app.connect(x.id),
-            Err(ConnectionError::NotOffered(Network::X))
+            app.connect(kick.id),
+            Err(ConnectionError::NotOffered(Network::Kick))
         ));
         assert!(matches!(
             app.connect(NetworkAccountId::new()),
@@ -3313,6 +3357,38 @@ mod tests {
             .redact(&format!("{TIKTOK_KEY} {TIKTOK_SECRET}"));
         assert!(!masked.contains(TIKTOK_KEY), "{masked}");
         assert!(!masked.contains(TIKTOK_SECRET), "{masked}");
+    }
+
+    #[test]
+    fn x_connects_at_its_fixed_port_and_a_busy_port_says_so() {
+        let harness = Harness::new();
+        let mut app = harness.start();
+        let account = account_on(&app, Network::X);
+        app.save_app_credentials(Network::X, X_ID, X_SECRET)
+            .unwrap();
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+
+        // Another program holds the port X calls back on.
+        *harness.consent.listen_failure.lock().unwrap() = Some(ConsentError::PortInUse(47147));
+        let error = app.connect(account.id).unwrap_err();
+        assert_eq!(error.message(), Some(Text::ConnectionPortInUse));
+
+        assert_eq!(
+            connect(&mut app, &account).unwrap().name,
+            "@arquivosdoespaco"
+        );
+        assert_eq!(*harness.consent.paths.lock().unwrap(), ["/callback"; 2]);
+        assert_eq!(*harness.consent.ports.lock().unwrap(), [Some(47147); 2]);
+        assert!(matches!(
+            harness.x.calls()[0],
+            Call::Exchange { ref client_secret, .. } if client_secret == X_SECRET
+        ));
+        let masked = app.redactor().redact(&format!("{X_ID} {X_SECRET}"));
+        assert!(!masked.contains(X_ID), "{masked}");
+        assert!(!masked.contains(X_SECRET), "{masked}");
     }
 
     #[test]

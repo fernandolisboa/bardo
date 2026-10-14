@@ -80,6 +80,13 @@ impl Network {
         self.publishes_uploads()
     }
 
+    /// Whether the network bills each post an app makes (X's API is paid
+    /// per use), so the upload review shows the price and checks the
+    /// budget, and the post is recorded on the costs screen.
+    pub fn bills_posts(self) -> bool {
+        self == Network::X
+    }
+
     /// Whether an upload declares whether the video is made for kids
     /// (YouTube's `selfDeclaredMadeForKids`).
     pub fn asks_made_for_kids(self) -> bool {

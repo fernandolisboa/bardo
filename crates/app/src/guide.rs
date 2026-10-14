@@ -57,6 +57,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("connect-youtube"),
     page!("connect-instagram"),
     page!("connect-tiktok"),
+    page!("connect-x"),
     page!("platform-audits"),
     page!("uploading"),
     page!("exporting"),
@@ -779,8 +780,7 @@ impl SetupTarget {
     /// Every key and every network app the Settings tabs ask for, then the
     /// audits of those apps.
     pub fn all() -> Vec<SetupTarget> {
-        Provider::ALL
-            .into_iter()
+        Provider::with_keys()
             .map(SetupTarget::Key)
             .chain(Network::sign_in_networks().map(SetupTarget::App))
             .chain(Network::sign_in_networks().map(SetupTarget::Audit))
@@ -815,6 +815,8 @@ impl SetupTarget {
                     Provider::Higgsfield => &["higgsfield"],
                     Provider::TypeSafe => &["typesafe"],
                     Provider::YouTubeData => &["youtube-data"],
+                    // No key: X is reached through the connected account.
+                    Provider::X => return SetupTarget::App(Network::X).steps(),
                 },
             ),
             SetupTarget::App(network) => match network {
@@ -827,8 +829,9 @@ impl SetupTarget {
                     "connect-tiktok",
                     &["need", "register", "products", "sandbox", "review", "save"],
                 ),
-                // No app to register: these networks are exported by hand.
-                Network::X | Network::Kick => ("app-credentials", &["networks"]),
+                Network::X => ("connect-x", &["need", "app", "credits", "save"]),
+                // No app to register: Kick is exported by hand.
+                Network::Kick => ("app-credentials", &["networks"]),
             },
             SetupTarget::Audit(network) => (
                 "platform-audits",
@@ -844,8 +847,9 @@ impl SetupTarget {
                         &["instagram-need", "instagram-asks", "instagram-after"]
                     }
                     Network::TikTok => &["tiktok-need", "tiktok-asks", "tiktok-after"],
+                    Network::X => &["x-need", "x-asks", "x-after"],
                     // No app, so nothing to audit.
-                    Network::X | Network::Kick => &["summary"],
+                    Network::Kick => &["summary"],
                 },
             ),
         }
@@ -1425,7 +1429,7 @@ Text of the **first** part.
         let targets = SetupTarget::all();
         assert_eq!(
             targets.len(),
-            Provider::ALL.len() + 2 * Network::sign_in_networks().count()
+            Provider::with_keys().count() + 2 * Network::sign_in_networks().count()
         );
         for language in UiLanguage::ALL {
             let guide = Guide::load(language);

@@ -532,3 +532,10 @@ fn post_errors_say_what_x_refused() {
     let (post, _) = publish(&["rate-limited"], &video());
     assert_eq!(post.unwrap_err().kind, UploadErrorKind::RateLimited);
 }
+
+#[test]
+fn processing_is_checked_once_a_minute_for_about_a_quarter_of_an_hour() {
+    let uploader = uploader(&[]);
+    assert_eq!(uploader.poll_delay(0), Duration::from_secs(60));
+    assert_eq!(uploader.processing_polls(), 15);
+}

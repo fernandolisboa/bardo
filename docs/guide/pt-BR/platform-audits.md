@@ -18,8 +18,9 @@ Em [Configurações › Redes](bardo:go/settings/networks), o botão **Auditoria
 | YouTube | Só para cota acima do padrão e, talvez, para envios públicos (veja [Mantido privado](#youtube-private)) | Cumprir as Políticas para Desenvolvedores do YouTube, uma política de privacidade, capturas de tela e uma conta de demonstração | Nada no código; a cota do seu projeto |
 | TikTok | Não, e nem passaria: ferramentas pessoais são recusadas. Os rascunhos na sua caixa de entrada funcionam pelo sandbox | Um site público com política de privacidade e termos, um vídeo de demonstração do fluxo inteiro, um motivo por escopo | Nada, a não ser que o Bardo tenha um app próprio |
 | Instagram | Não: o Acesso Padrão atende às contas que você tem ou administra | Revisão do App (uma gravação de tela por permissão) e Verificação da Empresa, para o Acesso Avançado | Nada, a não ser que contas que você não administra devam se conectar |
+| X | Não: o X não revisa apps; o acesso é pago por uso, com créditos | Aceitar o Developer Agreement and Policy e uma descrição curta do seu uso | Nada |
 
-Fatos conferidos em 13/10/2026 na documentação de cada rede, com os links em cada seção.
+Fatos conferidos em 13/10/2026 (o X em 14/10/2026) na documentação de cada rede, com os links em cada seção.
 
 <a id="youtube-need"></a>
 ## YouTube: você precisa da auditoria?
@@ -156,3 +157,20 @@ A Meta diz que a decisão costuma sair em até uma semana. Apps com Acesso Avan�
 ## Instagram: o que muda depois da aprovação
 
 Para as suas próprias contas, nada: o Acesso Padrão já as atende. O Acesso Avançado deixaria contas do Instagram cujos donos não têm função no seu app se conectarem a ele, o que o Bardo não oferece: cada pessoa que usa o Bardo registra o próprio app.
+
+<a id="x-need"></a>
+## X: você precisa de revisão?
+
+Não. A página [Getting access](https://docs.x.com/x-api/getting-started/getting-access) do X configura um app em três passos (cadastro no Developer Console, criação do app, guarda das credenciais), sem revisão no meio. O acesso é [pago por uso](https://docs.x.com/x-api/getting-started/pricing) com créditos que você compra, então o que limita um app são os créditos, o limite de gastos e os limites de requisição do X (para posts, 100 a cada 15 minutos por conta e 10.000 por dia por app), não uma aprovação.
+
+<a id="x-asks"></a>
+## X: o que o X pede
+
+- No Developer Console: aceitar o Developer Agreement and Policy e informações básicas sobre como você vai usar a API.
+- Para o app: um nome, uma descrição e um caso de uso.
+- Depois, seguir a Developer Policy e as regras de automação do X: o Bardo posta só o que você revisou, da sua própria conta, um post por vídeo.
+
+<a id="x-after"></a>
+## X: o que muda depois da aprovação
+
+Não há aprovação a esperar. Volume acima do que o pago por uso permite (3 milhões de leituras de posts por mês, longe de qualquer uso do Bardo) exige o plano Enterprise do X, de que o Bardo não precisa.

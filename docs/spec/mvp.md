@@ -95,7 +95,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Posting limits enforced before queuing: Instagram's publishing limit as `content_publishing_limit` reports it, TikTok's 5 pending drafts per 24 h, YouTube's daily uploads bucket.
 
 **Not in the MVP**
-- Upload to X and Kick (export only).
+- Upload to X and Kick (export only). X upload came after the MVP ([ADR-0013](../adr/0013-x-direct-upload.md)); Kick stays export-only.
 - Background agent for scheduling (right after the MVP).
 
 **Acceptance**

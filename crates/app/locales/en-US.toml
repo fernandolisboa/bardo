@@ -310,6 +310,10 @@ name = "YouTube Data API"
 purpose = "Niche research and public video statistics. Each test uses 1 unit of your daily quota."
 placeholder = "AIza…"
 
+[provider.x]
+name = "X API"
+purpose = "Posts on X, billed per post from your X app's credits. Reached through the connected X account, with no API key."
+
 [key_check]
 valid = "The key works."
 rejected = "The provider rejected this key. Check that it was copied in full and is still active."
@@ -828,6 +832,7 @@ image_tokens = "Image tokens"
 characters = "Characters"
 video_seconds = "Video seconds"
 audio_seconds = "Audio seconds"
+posts = "Posts"
 
 [meter.unit]
 input_tokens = "per million tokens"
@@ -836,6 +841,7 @@ image_tokens = "per million tokens"
 characters = "per thousand characters"
 video_seconds = "per second of video"
 audio_seconds = "per hour of audio"
+posts = "per post"
 
 [costs]
 overview = "Overview"
@@ -1469,7 +1475,7 @@ cost_unpriced = "No rate yet"
 youtube = "On YouTube, answer Yes to \"Altered or synthetic content\" in the upload's Details."
 tiktok = "On TikTok, turn on \"AI-generated content\" under More options before posting."
 instagram_reels = "On Instagram, turn on the AI label under Advanced settings before sharing."
-x = "X has no label setting: say in the post that the voice is synthetic."
+x = "Posting from Bardo, the review sets X's Made with AI label. Posting by hand, say in the post that the voice is synthetic."
 kick = "Kick has no label setting and no description: say in the title that the voice is synthetic."
 
 [metadata.problem]
@@ -1661,6 +1667,20 @@ client_id_invalid = "Paste the app ID from your Meta app's Basic settings. It's 
 client_secret_required = "Enter the app secret."
 client_secret_invalid = "That doesn't look like an app secret. Copy it again from the app's Basic settings."
 
+[app_credentials.x]
+name = "X · X Developer Console app"
+purpose = "An app in your X Developer Console with OAuth 2.0 on: app permissions Read and write, type Web App, Automated App or Bot, and the callback URI http://127.0.0.1:47147/callback. X bills each post from the app's credits."
+client_id = "OAuth 2.0 Client ID"
+client_secret = "Client Secret"
+client_id_placeholder = "M1M5R3Bm…"
+client_secret_placeholder = "Letters, digits, - and _"
+
+[app_credentials.x.error]
+client_id_required = "Enter the client ID."
+client_id_invalid = "Paste the OAuth 2.0 Client ID from your X app's Keys and tokens. It's letters, digits, - and _ only."
+client_secret_required = "Enter the client secret."
+client_secret_invalid = "That doesn't look like a client secret. Copy it again from the app's Keys and tokens, or generate a new one."
+
 [connection]
 not_connected = "Not connected"
 connected = "Connected as {channel}"
@@ -1707,6 +1727,13 @@ open_token_tool = "Open the Graph API Explorer"
 choose = "The token reaches several Instagram accounts. Choose the one for this channel."
 choice_via = "Page: {via}"
 
+[connection.x]
+connecting = "Waiting for you to authorize Bardo in the browser…"
+checked = "The connection works. Account: {channel}."
+reconnect_hint = "X refused to renew access: it was revoked in your X settings, your password changed, or the app's secret changed. Reconnect to sign in again."
+needs_app_credentials = "Save your X app in Settings › Networks before connecting."
+missing_scopes = "Not every permission was allowed. Check that your X app's permissions are Read and write, then connect again: Bardo needs them to read your account, upload the video and make the post."
+
 [connection.error]
 not_offered = "Bardo doesn't sign in to this network yet."
 not_connected = "This account isn't connected."
@@ -1714,6 +1741,7 @@ denied = "Access wasn't allowed in the browser. Connect again and choose Allow."
 timed_out = "No answer came back from the browser within five minutes. Connect again."
 cancelled = "Connection cancelled."
 listen_failed = "Bardo couldn't wait for the browser's answer on this computer. Try again; if it keeps failing, check that a firewall allows Bardo on 127.0.0.1."
+port_in_use = "Another program on this computer is using the port Bardo waits on for the browser's answer. Close it, or wait a minute if you just tried, and connect again."
 tokens_too_large = "The network's tokens are too large for Windows Credential Manager, so they weren't kept."
 store_failed = "Could not reach Windows Credential Manager. Try again."
 not_saved = "Couldn't save the connection. Try again."
@@ -1750,6 +1778,14 @@ not_allowed = "Meta refused access. Check that the token has every permission an
 no_channel = "The Page is no longer linked to an Instagram professional account. Link it again in Instagram's settings, then reconnect."
 limit_reached = "Meta is limiting requests from your app right now. Try again in a few minutes."
 network_down = "Meta is failing on its side. Try again later."
+
+[connection.failure.x]
+refused = "X refused the sign-in. Connect again."
+client_rejected = "X doesn't recognize the client ID or secret. Check them in Settings › Networks, and that the app's type is Web App, Automated App or Bot."
+not_allowed = "X refused access. Check that the app's permissions are Read and write and that its callback URI is exactly http://127.0.0.1:47147/callback."
+no_channel = "X didn't return this account. Sign in with the account you post from."
+limit_reached = "X refused the request: the app is out of credits or over a rate limit. Check its credits in the X Developer Console, then try again."
+network_down = "X is failing on its side. Try again later."
 
 [consent_page]
 done = "Bardo is connected. You can close this tab."
@@ -1834,6 +1870,14 @@ draft_limit_recheck_hint = "TikTok refused more drafts for now, some maybe sent 
 due_hint_agent = "Bardo posts it at this time itself: the background agent sends it while you are signed in to Windows, even with Bardo closed. The computer must be on. If nothing runs at that time, nothing is posted and Bardo asks you what to do when it opens."
 reel_schedule_hint_agent = "{network} takes no publish time from apps, so Bardo posts it at this time itself: the background agent sends it while you are signed in to Windows, even with Bardo closed, as long as the computer is on. If nothing runs then, nothing is posted and Bardo asks you what to do when it opens."
 missed_hint_agent = "Neither Bardo nor the background agent was running at its time (the computer was off, asleep or signed out), so nothing was posted. Post it now, give it a new time or cancel it."
+post_hint = "Bardo sends the rendered file to the connected X account, then makes the post with this text once X has processed it. X bills each post from your app's credits. Nothing is sent until you confirm the review."
+post_ai_label = "Made with AI label"
+post_ai_label_hint = "Tells X the post has media made with AI, such as a realistic voice. X shows a label on the post."
+post_irreversible = "Once posted, the video is on your X account and X has billed the post. Deleting it is done on X."
+post_start = "Upload and post"
+post_processing_hint = "X has the file and is processing it. Bardo checks once a minute and makes the post when it is ready."
+post_cost = "X bills this post about {amount} from your app's credits."
+post_cost_hint = "X bills each post from your X app's credits: US$ 0.015, or US$ 0.20 when the text has a link. Bardo records it on Costs once X takes the post. Add credits and set a spending limit in the X Developer Console."
 
 [upload.field]
 file = "File"
@@ -1844,6 +1888,7 @@ draft_caption = "Caption to paste in TikTok"
 cover = "Cover"
 visibility = "Visibility"
 when = "When"
+post_text = "Post text"
 
 [upload.state]
 waiting = "Waiting to upload"
@@ -1871,6 +1916,7 @@ removed = "The video is no longer on {network}."
 account_changed = "The account was reconnected to another {network} account than the one reviewed. Review the upload again."
 render_changed = "The render changed after the review, so the rest of the file is not what you reviewed. Review the upload again."
 schedule_missed = "The publish time passed before the upload started, so nothing was sent. Review the upload again with a later time."
+credits = "X refused the post: your X app is out of credits or reached its spending limit. Add credits or raise the limit in the X Developer Console, then retry."
 
 [upload.block]
 not_offered = "Bardo doesn't upload to this network yet. Export the file and post it by hand."
@@ -2396,7 +2442,7 @@ body = "Each network renders in its own preset: frame, size, codec, bitrate, len
 
 [tour.accounts.connect]
 title = "Connect the account"
-body = "YouTube and TikTok accounts connect in your browser, Instagram with a token you paste, so Bardo can upload and read their numbers. The card says where it stands: not connected, waiting for the browser, connected as the account, or reconnect needed."
+body = "YouTube, TikTok and X accounts connect in your browser, Instagram with a token you paste, so Bardo can upload to them, and on all but X read their numbers. The card says where it stands: not connected, waiting for the browser, connected as the account, or reconnect needed."
 
 [tour.accounts.add]
 title = "Add a network"
@@ -2407,7 +2453,7 @@ name = "Networks tour"
 
 [tour.networks.tab]
 title = "Networks"
-body = "This tab keeps the apps Bardo signs in to each network with: a Google OAuth client for YouTube, a Meta app for Instagram, a TikTok for Developers app for TikTok."
+body = "This tab keeps the apps Bardo signs in to each network with: a Google OAuth client for YouTube, a Meta app for Instagram, a TikTok for Developers app for TikTok, an X Developer Console app for X."
 
 [tour.networks.why]
 title = "Your own apps"
@@ -2450,11 +2496,11 @@ body = "When the narrator's voice is a realistic synthetic one, each network ask
 
 [tour.publish.upload]
 title = "The upload review"
-body = "Review upload shows exactly what goes to YouTube, Instagram or TikTok: the file, the account, the text and your choices. Nothing is sent until you confirm it."
+body = "Review upload shows exactly what goes to YouTube, Instagram, TikTok or X: the file, the account, the text and your choices. Nothing is sent until you confirm it."
 
 [tour.publish.schedule]
 title = "When it goes"
-body = "YouTube takes a publish time and publishes by itself. Instagram is posted by Bardo at its time, so keep Bardo open then; TikTok gets a draft in its inbox that you finish and schedule in the TikTok app."
+body = "YouTube takes a publish time and publishes by itself. Instagram and X are posted by Bardo at their time, so keep Bardo open then; TikTok gets a draft in its inbox that you finish and schedule in the TikTok app."
 
 [tour.publish.export]
 title = "Export"

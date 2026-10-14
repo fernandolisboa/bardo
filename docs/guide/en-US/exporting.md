@@ -6,7 +6,7 @@ group: publishing
 
 # Exporting
 
-An export is a ready-to-post package: for each network, the rendered file and a text file with everything to paste in the network's upload form. It is how you post on X and Kick, which Bardo doesn't upload to, and it works for every network. Exports start at the [Publish](bardo:go/projects/publish) stage.
+An export is a ready-to-post package: for each network, the rendered file and a text file with everything to paste in the network's upload form. It is how you post on Kick, which Bardo doesn't upload to, and it works for every network. Exports start at the [Publish](bardo:go/projects/publish) stage.
 
 <a id="choose"></a>
 ## Choosing the networks

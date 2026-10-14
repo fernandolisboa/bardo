@@ -59,6 +59,15 @@ const LIFETIME_MARGIN: Duration = Duration::from_secs(10 * 60);
 /// before it gives up on uploads X keeps dropping.
 const MAX_NEW_SESSIONS: u32 = 2;
 
+/// How long between checks on a video X is processing: X suggests a few
+/// seconds (`check_after_secs`), and a short video is usually ready by the
+/// first check.
+const POLL_DELAY: Duration = Duration::from_secs(60);
+
+/// Checks before the post shows "still processing": about a quarter of an
+/// hour.
+const PROCESSING_POLLS: u32 = 15;
+
 /// Bardo renders MP4 files.
 const CONTENT_TYPE: &str = "video/mp4";
 
@@ -426,6 +435,14 @@ impl<T: Transport> VideoUploader for XUploader<T> {
             link: PostLink::parse(Network::X, &format!("https://x.com/i/status/{post_id}")).ok(),
             issue: None,
         })
+    }
+
+    fn processing_polls(&self) -> u32 {
+        PROCESSING_POLLS
+    }
+
+    fn poll_delay(&self, _polls: u32) -> Duration {
+        POLL_DELAY
     }
 }
 

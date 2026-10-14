@@ -173,6 +173,7 @@ pub mod refs {
     pub const YOUTUBE_UPLOAD: GuideRef = at("connect-youtube", "upload");
     pub const INSTAGRAM_UPLOAD: GuideRef = at("connect-instagram", "upload");
     pub const INSTAGRAM_TOKEN: GuideRef = at("connect-instagram", "token");
+    pub const X_COSTS: GuideRef = at("connect-x", "costs");
     pub const COSTS_MONTH: GuideRef = at("costs", "month");
     pub const COSTS_BUDGETS: GuideRef = at("costs", "budgets");
     pub const COSTS_RATES: GuideRef = at("costs", "rates");
@@ -187,7 +188,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 62] = [
+    pub const ALL: [GuideRef; 63] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -238,6 +239,7 @@ pub mod refs {
         YOUTUBE_UPLOAD,
         INSTAGRAM_UPLOAD,
         INSTAGRAM_TOKEN,
+        X_COSTS,
         COSTS_MONTH,
         COSTS_BUDGETS,
         COSTS_RATES,

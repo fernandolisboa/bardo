@@ -213,8 +213,7 @@ impl SettingsScreen {
         let mut subscriptions = vec![cx.observe_in(&bardo, window, |this, _, window, cx| {
             this.relabel(window, cx)
         })];
-        let rows = Provider::ALL
-            .into_iter()
+        let rows = Provider::with_keys()
             .map(|provider| {
                 // Masked: a key never shows on screen, even while typed.
                 let input = cx.new(|cx| InputState::new(window, cx).masked(true));
@@ -422,7 +421,7 @@ impl SettingsScreen {
             return;
         }
         self.labeled = Some(now);
-        for provider in Provider::ALL {
+        for provider in Provider::with_keys() {
             let placeholder = tr(self.bardo.read(cx), Text::ProviderKeyPlaceholder(provider));
             self.rows[&provider].input.update(cx, |input, cx| {
                 input.set_placeholder(placeholder, window, cx)
