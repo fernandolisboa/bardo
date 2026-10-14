@@ -75,4 +75,4 @@ This is a plain API key in a Google Cloud project, apart from the YouTube sign-i
 3. Open [Credentials](https://console.cloud.google.com/apis/credentials) and select **Create credentials › API key**.
 4. Under **API restrictions**, choose **Restrict key** and tick **YouTube Data API v3** (Google asks for a restriction before it makes the key). Leave **Authenticate API calls through a service account** off. Select **Create**.
 5. Copy the key from **API key created**. It starts with `AIza`.
-6. Paste it into the **YouTube Data API** card in [Settings › API keys](bardo:go/settings/keys), select **Save key**, then **Test key**. The test uses 1 unit of the day's quota.
+6. Paste it into the **YouTube Data API** card in [Settings › API keys](bardo:go/settings/keys), select **Save key**, then **Test key**. The test uses 1 unit of the day's quota. The card asks you to accept Bardo's [privacy policy](https://fernandolisboa.github.io/bardo/en-US/privacy.html) first, once.

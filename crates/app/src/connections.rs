@@ -22,10 +22,11 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     AppCredentials, AppCredentialsFieldError, ConnectedIdentity, ConnectionSecrets,
     ConnectionStatus, ConsentCallback, ConsentError, ConsentPages, ConsentReceiver, ConsentRequest,
-    Network, NetworkAccount, NetworkAccountId, NetworkConnection, NetworkConnectionRepository,
-    NetworkSignIn, PastedTokenError, ProfileId, Redactor, RepositoryError, SecretStoreError,
-    SecretText, SignInFailure, SignInFailureKind, TokenGrant, TokenSet, TokenSetTooLarge,
-    parse_pasted_token,
+    Forgotten, Network, NetworkAccount, NetworkAccountId, NetworkConnection,
+    NetworkConnectionRepository, NetworkSignIn, PastedTokenError, ProfileId, Redactor,
+    RepositoryError, SecretStoreError, SecretText, SignInFailure, SignInFailureKind, TokenGrant,
+    TokenSet, TokenSetTooLarge, YouTubeDataStore, YouTubeRetention, authorization_current,
+    keep_since, parse_pasted_token,
 };
 
 use crate::{Bardo, KeyState, Text};
@@ -78,6 +79,10 @@ pub enum ConnectionError {
     TooLarge(#[from] TokenSetTooLarge),
     #[error(transparent)]
     Store(SecretStoreError),
+    /// YouTube waits until the user accepts Bardo's privacy policy
+    /// (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -109,6 +114,7 @@ impl ConnectionError {
             }
             ConnectionError::TooLarge(_) => Text::ConnectionTokensTooLarge,
             ConnectionError::Store(_) => Text::ConnectionStoreFailed,
+            ConnectionError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             ConnectionError::Repository(_) => Text::ConnectionNotSaved,
         })
     }
@@ -189,6 +195,8 @@ pub(crate) struct Connections {
     /// One refresh at a time, so two callers never spend the same refresh
     /// token (networks that rotate it would refuse the second).
     refreshing: Arc<Mutex<()>>,
+    /// What a YouTube disconnection deletes (ADR-0012).
+    youtube_data: Arc<dyn YouTubeDataStore>,
 }
 
 impl Connections {
@@ -497,6 +505,10 @@ impl Connections {
             .delete_tokens(self.owner, account.id)
             .map_err(|error| self.store_failure("delete tokens", error))?;
         self.states.delete(account.id)?;
+        // What the authorization gave goes with it (policy III.D.2).
+        if account.network == Network::YouTube {
+            self.forget_youtube_account(account.id, SystemTime::now());
+        }
         tracing::info!(
             network = account.network.code(),
             revoked,
@@ -509,6 +521,121 @@ impl Connections {
             kept_for_others,
             credentials_refused,
         })
+    }
+}
+
+impl Connections {
+    /// Deletes what Bardo read through the YouTube account's
+    /// authorization. A failure is logged: the next upkeep tries again.
+    fn forget_youtube_account(&self, account: NetworkAccountId, now: SystemTime) -> Forgotten {
+        match self.youtube_data.forget_account(account, keep_since(now)) {
+            Ok(forgotten) => forgotten,
+            Err(error) => {
+                tracing::warn!("could not delete a YouTube account's data: {error}");
+                Forgotten::default()
+            }
+        }
+    }
+
+    /// Asks YouTube whether the connection still works: renews its tokens
+    /// when due and reads who they act as, keeping a changed channel
+    /// title. A refused renewal marks it "reconnect needed".
+    fn confirm(&self, account: &NetworkAccount) {
+        let tokens = match self.access_token(account) {
+            Ok(tokens) => tokens,
+            Err(error) => {
+                tracing::info!(error = %error, "could not confirm a YouTube connection");
+                return;
+            }
+        };
+        let Ok(sign_in) = self.sign_in(account.network) else {
+            return;
+        };
+        match sign_in.identity(tokens.access_token()) {
+            Ok(identity) => {
+                if let Ok(state) = self.state(account.id)
+                    && state.identity != identity
+                {
+                    let _ = self.states.save(&NetworkConnection { identity, ..state });
+                }
+            }
+            Err(failure) => {
+                let _ = self.sign_in_failure(account.network, failure);
+            }
+        }
+    }
+
+    /// Whether any account of the owner on `network` has a connection.
+    pub(crate) fn has_any(&self, network: Network) -> Result<bool, RepositoryError> {
+        Ok(!self.states.connected_on(self.owner, network)?.is_empty())
+    }
+
+    /// Deletes every YouTube datum of the owner (ADR-0012).
+    pub(crate) fn forget_all_youtube(&self) -> Result<Forgotten, RepositoryError> {
+        self.youtube_data.forget_all(self.owner)
+    }
+
+    /// Forgets a connection whose authorization went unconfirmed past the
+    /// policy's limit, with what it read: its tokens no longer work, or
+    /// cannot be shown to.
+    fn forget_lapsed(&self, account: NetworkAccountId, now: SystemTime) -> Forgotten {
+        let _one_at_a_time = self
+            .refreshing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Err(error) = self.secrets.delete_tokens(self.owner, account) {
+            let _ = self.store_failure("delete tokens", error);
+        }
+        if let Err(error) = self.states.delete(account) {
+            tracing::warn!("could not forget a lapsed connection: {error}");
+        }
+        tracing::info!("forgot a YouTube connection not confirmed for 30 days");
+        self.forget_youtube_account(account, now)
+    }
+}
+
+/// The YouTube upkeep, ready to run on a background thread (ADR-0012):
+/// reconfirms each YouTube connection, forgets one whose authorization
+/// lapsed with what it read, then deletes the YouTube data the retention
+/// rule no longer allows. Bardo runs it when it opens and once a day; the
+/// background agent once a day while Bardo is closed.
+pub struct YouTubeUpkeep {
+    accounts: Vec<NetworkAccount>,
+    connections: Connections,
+    /// Whether it may call YouTube: only once the user accepted the
+    /// privacy policy. Deleting needs no call.
+    confirm: bool,
+}
+
+impl YouTubeUpkeep {
+    /// What it deleted. Failures are logged; the next upkeep tries again.
+    pub fn run(self) -> Forgotten {
+        let connections = &self.connections;
+        let now = SystemTime::now();
+        let mut forgotten = Forgotten::default();
+        let mut authorized = Vec::new();
+        for account in &self.accounts {
+            if self.confirm {
+                connections.confirm(account);
+            }
+            match connections.state(account.id) {
+                Ok(state) if authorization_current(&state, now) => authorized.push(account.id),
+                Ok(_) => forgotten = forgotten + connections.forget_lapsed(account.id, now),
+                Err(_) => {}
+            }
+        }
+        let rule = YouTubeRetention::at(now, authorized);
+        match connections
+            .youtube_data
+            .forget_expired(connections.owner, &rule)
+        {
+            Ok(expired) => forgotten = forgotten + expired,
+            Err(error) => tracing::warn!("could not delete expired YouTube data: {error}"),
+        }
+        if !forgotten.is_empty() {
+            tracing::info!(?forgotten, "deleted YouTube data past its time");
+        }
+        forgotten
     }
 }
 
@@ -554,6 +681,7 @@ impl ConnectionBook {
         sign_ins: Vec<Arc<dyn NetworkSignIn>>,
         consent: Arc<dyn ConsentReceiver>,
         redactor: Redactor,
+        youtube_data: Arc<dyn YouTubeDataStore>,
     ) -> Self {
         let credentials = Network::sign_in_networks()
             .map(|network| {
@@ -585,6 +713,7 @@ impl ConnectionBook {
                 sign_ins: sign_ins.into(),
                 redactor,
                 refreshing: Arc::default(),
+                youtube_data,
             },
             consent,
             credentials,
@@ -996,6 +1125,7 @@ impl Bardo {
         if !network.signs_in() {
             return Err(ConnectionError::NotOffered(network));
         }
+        self.youtube_allowed(network)?;
         let credentials = AppCredentials::parse(network, client_id, client_secret)
             .map_err(ConnectionError::Invalid)?;
         let connections = &self.connection_book.connections;
@@ -1104,6 +1234,7 @@ impl Bardo {
     /// sign in with a pasted token use `connect_with_token`.
     pub fn connect(&mut self, id: NetworkAccountId) -> Result<ConnectAttempt, ConnectionError> {
         let account = self.connection_account(id)?;
+        self.youtube_allowed(account.network)?;
         let connections = self.connection_book.connections.clone();
         let sign_in = connections.sign_in(account.network)?;
         let browser = sign_in
@@ -1244,6 +1375,7 @@ impl Bardo {
         id: NetworkAccountId,
     ) -> Result<ConnectionCheck, ConnectionError> {
         let account = self.connection_account(id)?;
+        self.youtube_allowed(account.network)?;
         let connections = self.connection_book.connections.clone();
         connections.state(id)?;
         Ok(ConnectionCheck {
@@ -1288,6 +1420,40 @@ impl Bardo {
             accounts,
             connections,
         }
+    }
+
+    /// Prepares the YouTube upkeep (ADR-0012), for a background thread.
+    pub fn youtube_upkeep(&self) -> YouTubeUpkeep {
+        let connections = self.connection_book.connections.clone();
+        let accounts = connections
+            .states
+            .connected_on(self.profile.id, Network::YouTube)
+            .unwrap_or_else(|error| {
+                tracing::warn!(error = %error, "could not list YouTube connections");
+                Vec::new()
+            })
+            .into_iter()
+            .filter_map(|id| self.connection_account(id).ok())
+            .collect();
+        // Read again: the background agent's copy of the profile is as
+        // old as the agent.
+        let confirm = match self.profiles.load_default() {
+            Ok(Some(profile)) if profile.id == self.profile.id => profile.accepted_privacy(),
+            _ => self.profile.accepted_privacy(),
+        };
+        YouTubeUpkeep {
+            accounts,
+            connections,
+            confirm,
+        }
+    }
+
+    /// Refuses YouTube until the user accepts the privacy policy.
+    fn youtube_allowed(&self, network: Network) -> Result<(), ConnectionError> {
+        if network == Network::YouTube && !self.profile.accepted_privacy() {
+            return Err(ConnectionError::PrivacyNotAccepted);
+        }
+        Ok(())
     }
 
     fn connection_account(&self, id: NetworkAccountId) -> Result<NetworkAccount, ConnectionError> {
@@ -1770,7 +1936,7 @@ pub(crate) mod meta {
 mod tests {
     use std::path::Path;
 
-    use bardo_domain::{ChannelDraft, ContentLanguage, NetworkAccountDraft};
+    use bardo_domain::{ChannelDraft, ContentLanguage, NetworkAccountDraft, ProfileRepository};
     use bardo_storage::{Database, MemorySecretStore};
 
     use super::meta::{FakeMeta, MetaCall};
@@ -1794,6 +1960,7 @@ mod tests {
         meta: Arc<FakeMeta>,
         tiktok: Arc<FakeSignIn>,
         consent: Arc<FakeConsent>,
+        youtube_data: Arc<testing::FakeYouTubeData>,
     }
 
     impl Harness {
@@ -1819,12 +1986,21 @@ mod tests {
                     ..FakeSignIn::default()
                 }),
                 consent: Arc::default(),
+                youtube_data: Arc::default(),
             }
         }
 
+        /// A started app whose user accepted the privacy policy.
         fn start(&self) -> Bardo {
+            let mut app = self.start_unaccepted();
+            app.accept_privacy_policy().unwrap();
+            app
+        }
+
+        fn start_unaccepted(&self) -> Bardo {
             let repositories = Repositories {
                 connection_secrets: Arc::clone(&self.secrets) as _,
+                youtube_data: Arc::clone(&self.youtube_data) as _,
                 ..Repositories::shared(Arc::clone(&self.db), Arc::new(MemorySecretStore::default()))
             };
             let providers = Providers {
@@ -3212,5 +3388,179 @@ mod tests {
         ] {
             assert!(!contains(&written, secret), "{secret} reached SQLite");
         }
+    }
+
+    /// Makes the connection last confirmed `days` ago, its one-hour
+    /// tokens long expired.
+    fn age(harness: &Harness, account: &NetworkAccount, days: u64) {
+        let state = harness.state(account).unwrap();
+        let then = SystemTime::now() - Duration::from_secs(days * 86_400);
+        let tokens = harness
+            .secrets
+            .tokens(state.owner, account.id)
+            .unwrap()
+            .unwrap();
+        let expired = TokenSet::granted(
+            &TokenGrant {
+                access_token: SecretText::new(tokens.access_token()),
+                refresh_token: tokens.refresh_token().map(SecretText::new),
+                expires_in: Duration::from_secs(3600),
+                scopes: Vec::new(),
+            },
+            then,
+        );
+        harness
+            .secrets
+            .set_tokens(state.owner, account.id, &expired)
+            .unwrap();
+        NetworkConnectionRepository::save(
+            &*harness.db,
+            &NetworkConnection {
+                connected_at: then,
+                refreshed_at: Some(then),
+                expires_at: then + Duration::from_secs(3600),
+                ..state
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_upkeep_confirms_each_youtube_connection_and_keeps_its_data() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.ready();
+        connect(&mut app, &account).unwrap();
+        // Last confirmed 20 days ago: the upkeep renews it, and reads the
+        // channel's new title.
+        age(&harness, &account, 20);
+        *harness.sign_in.identity.lock().unwrap() = Ok(ConnectedIdentity {
+            id: "UCfake-channel-0001".into(),
+            name: "Arquivos do Espaço (novo)".into(),
+        });
+
+        app.youtube_upkeep().run();
+        let state = harness.state(&account).unwrap();
+        assert_eq!(state.identity.name, "Arquivos do Espaço (novo)");
+        assert!(state.refreshed_at.unwrap() > SystemTime::now() - Duration::from_secs(60));
+        assert!(matches!(
+            harness.sign_in.calls()[..],
+            [.., Call::Refresh(_), Call::Identity(_)]
+        ));
+        assert_eq!(
+            harness.youtube_data.calls(),
+            [testing::YouTubeDataCall::Expired(vec![account.id])]
+        );
+    }
+
+    #[test]
+    fn a_connection_unconfirmed_for_thirty_days_is_forgotten_with_its_data() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.ready();
+        connect(&mut app, &account).unwrap();
+        // Revoked on Google's page: the renewal is refused.
+        *harness.sign_in.refresh_failure.lock().unwrap() =
+            Some(failure(SignInFailureKind::Refused, "invalid_grant"));
+        age(&harness, &account, 28);
+        app.youtube_upkeep().run();
+        assert_eq!(
+            harness.state(&account).map(|state| state.status),
+            Some(ConnectionStatus::ReconnectNeeded),
+            "still within the 30 days"
+        );
+        assert_eq!(
+            harness.youtube_data.calls(),
+            [testing::YouTubeDataCall::Expired(vec![account.id])]
+        );
+
+        // 29 days: it would pass 30 before the next upkeep.
+        age(&harness, &account, 29);
+        app.youtube_upkeep().run();
+        assert_eq!(harness.state(&account), None);
+        assert_eq!(harness.tokens(&app, &account), None);
+        assert_eq!(
+            app.connection_state(&account).unwrap(),
+            ConnectionState::NotConnected
+        );
+        assert_eq!(
+            harness.youtube_data.calls()[1..],
+            [
+                testing::YouTubeDataCall::Account(account.id),
+                testing::YouTubeDataCall::Expired(Vec::new())
+            ]
+        );
+    }
+
+    #[test]
+    fn without_the_privacy_policy_the_upkeep_calls_nothing_and_still_deletes() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.ready();
+        connect(&mut app, &account).unwrap();
+        let mut profile = app.profile().clone();
+        profile.privacy = None;
+        ProfileRepository::save(&*harness.db, &profile).unwrap();
+        drop(app);
+        let calls = harness.sign_in.calls().len();
+
+        let mut app = harness.start_unaccepted();
+        app.youtube_upkeep().run();
+        assert_eq!(harness.sign_in.calls().len(), calls, "no call to YouTube");
+        assert_eq!(
+            harness.youtube_data.calls(),
+            [testing::YouTubeDataCall::Expired(vec![account.id])]
+        );
+        assert!(matches!(
+            app.connect(account.id),
+            Err(ConnectionError::PrivacyNotAccepted)
+        ));
+    }
+
+    #[test]
+    fn disconnecting_youtube_deletes_what_its_authorization_gave() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.ready();
+        connect(&mut app, &account).unwrap();
+        app.disconnection(account.id).unwrap().run().unwrap();
+        assert_eq!(
+            harness.youtube_data.calls(),
+            [testing::YouTubeDataCall::Account(account.id)]
+        );
+
+        // Other networks keep theirs: their policies differ.
+        let (mut app, instagram) = harness.instagram();
+        paste(&mut app, &instagram, PASTED).unwrap();
+        app.disconnection(instagram.id).unwrap().run().unwrap();
+        assert_eq!(harness.youtube_data.calls().len(), 1);
+    }
+
+    #[test]
+    fn deleting_youtube_data_on_request_deletes_it_all() {
+        let harness = Harness::new();
+        let app = harness.start();
+        let forgotten = app.forget_youtube_data().unwrap();
+        assert_eq!(forgotten.research, 1);
+        assert_eq!(
+            harness.youtube_data.calls(),
+            [testing::YouTubeDataCall::All]
+        );
+    }
+
+    #[test]
+    fn a_youtube_connection_alone_makes_youtube_wait_for_the_policy() {
+        let harness = Harness::new();
+        let (mut app, account) = harness.ready();
+        connect(&mut app, &account).unwrap();
+        app.remove_app_credentials(Network::YouTube).unwrap();
+        let mut profile = app.profile().clone();
+        profile.privacy = None;
+        ProfileRepository::save(&*harness.db, &profile).unwrap();
+        drop(app);
+
+        let app = harness.start_unaccepted();
+        assert!(app.youtube_waits_for_privacy());
+        // Checking calls YouTube too.
+        assert!(matches!(
+            app.connection_check(account.id),
+            Err(ConnectionError::PrivacyNotAccepted)
+        ));
     }
 }

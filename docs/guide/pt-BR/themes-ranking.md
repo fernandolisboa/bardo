@@ -22,6 +22,8 @@ As ideias são escritas para um canal e um nicho. Os nichos disponíveis são os
 
 **Ranquear de novo** aparece quando há ideias esperando: as que você editou, as cujo ranqueamento falhou ou as ranqueadas antes de os seus vídeos terem números. Ele ranqueia só essas, sem pedir ideias novas.
 
+Um ranqueamento é feito com dados do YouTube, então vai embora junto com eles 30 dias depois de feito: a ideia fica, esperando ser ranqueada de novo ([Política de privacidade](privacy.md#kept)).
+
 <a id="ranking"></a>
 ## Prioridade e confiança
 

@@ -6,7 +6,9 @@ mod common;
 use std::collections::HashMap;
 
 use bardo_ai::YouTubeStats;
-use bardo_domain::{ApiKey, Provider, ProviderFailureKind, VideoStatistics, VideoStats};
+use bardo_domain::{
+    ApiKey, Provider, ProviderFailureKind, SecretText, VideoStatistics, VideoStats,
+};
 use common::{Scripted, fixture};
 
 const KEY: &str = "AIzaSyTestKey0001abcdefghijklmnopqrstu";
@@ -83,6 +85,31 @@ fn one_call_asks_for_every_id_and_only_the_fields_read() {
     // The key travels in a header, never in the URL.
     assert_eq!(sent[0].header("x-goog-api-key"), Some(KEY));
     assert!(!url.contains(KEY));
+}
+
+#[test]
+fn a_connected_channel_reads_its_own_posts_with_its_token() {
+    let stats = answers(&["videos-two-of-three"]);
+    let found = stats
+        .owned_statistics(
+            &SecretText::new("ya29.fake-access-0001"),
+            &["Qm4f1rT8vXa", "Lp2c9Wk3sYb", "Hy6j8Pm1gFd"],
+        )
+        .unwrap();
+    assert_eq!(found.len(), 2);
+    let sent = stats.transport().sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        query(&sent[0].url)["id"],
+        "Qm4f1rT8vXa,Lp2c9Wk3sYb,Hy6j8Pm1gFd"
+    );
+    assert_eq!(
+        sent[0].header("authorization"),
+        Some("Bearer ya29.fake-access-0001")
+    );
+    // The channel's authorization, not the key: Authorized Data.
+    assert_eq!(sent[0].header("x-goog-api-key"), None);
+    assert!(!sent[0].url.contains("ya29"));
 }
 
 #[test]

@@ -587,6 +587,7 @@ mod tests {
         };
         let mut app = start();
         let owner = app.profile().id;
+        app.accept_privacy_policy().unwrap();
         app.save_provider_key(Provider::Claude, CLAUDE_KEY).unwrap();
         app.save_app_credentials(Network::YouTube, CLIENT_ID, CLIENT_SECRET)
             .unwrap();

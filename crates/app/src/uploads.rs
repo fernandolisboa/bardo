@@ -319,6 +319,10 @@ pub enum UploadReviewError {
     /// The cover frame is past the video's end.
     #[error("the cover is past the end of the video")]
     CoverPastEnd,
+    /// YouTube waits until the user accepts Bardo's privacy policy
+    /// (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
     #[error(transparent)]
     Job(#[from] JobActionError),
     #[error(transparent)]
@@ -336,6 +340,7 @@ impl UploadReviewError {
             UploadReviewError::ReplaceNotConfirmed => Text::UploadReplaceNotConfirmed,
             UploadReviewError::Schedule(problem) => Text::ScheduleProblem(*problem),
             UploadReviewError::CoverPastEnd => Text::UploadCoverPastEnd,
+            UploadReviewError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             UploadReviewError::NoSchedule
             | UploadReviewError::NotNow
             | UploadReviewError::Job(_)
@@ -2003,6 +2008,9 @@ impl Bardo {
         review: &UploadReview,
         choices: UploadChoices,
     ) -> Result<JobId, UploadReviewError> {
+        if review.network == Network::YouTube && !self.profile.accepted_privacy() {
+            return Err(UploadReviewError::PrivacyNotAccepted);
+        }
         // What is stored now, not what the screen last read.
         let now = self.upload_review(review.project, review.network)?;
         if let Some(block) = now.block() {

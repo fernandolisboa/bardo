@@ -29,6 +29,10 @@ pub enum ResearchError {
     /// Research would call YouTube, and no key is saved for it.
     #[error("no YouTube Data API key saved")]
     MissingKey,
+    /// Research would call YouTube, and the user has not accepted Bardo's
+    /// privacy policy (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -44,6 +48,7 @@ impl ResearchError {
             }
             ResearchError::ChannelNotFound => Text::ChannelNotFound,
             ResearchError::MissingKey => Text::ResearchMissingKey,
+            ResearchError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             ResearchError::Repository(_) => Text::ResearchNotStarted,
         }
     }
@@ -362,6 +367,9 @@ impl Bardo {
             refresh,
             SystemTime::now(),
         )?;
+        if fetches > 0 && !self.profile.accepted_privacy() {
+            return Err(ResearchError::PrivacyNotAccepted);
+        }
         if fetches > 0 && self.provider_key(Provider::YouTubeData).state == KeyState::NotSet {
             return Err(ResearchError::MissingKey);
         }
@@ -422,6 +430,7 @@ mod tests {
                 backups: Arc::new(bardo_storage::MemoryBackups::default()),
                 installers: Arc::new(bardo_storage::MemoryInstallers::default()),
                 installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
+                youtube_data: Arc::new(crate::testing::FakeYouTubeData::default()),
                 profiles: Box::new(Arc::clone(&self.db)),
                 tours: Box::new(Arc::clone(&self.db)),
                 agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
@@ -450,7 +459,7 @@ mod tests {
                 secrets: Arc::clone(&self.secrets) as _,
                 connection_secrets: Arc::new(MemorySecretStore::default()),
             };
-            Bardo::start_with(
+            let mut app = Bardo::start_with(
                 repositories,
                 providers_with(Arc::clone(&self.market)),
                 Some("en-US"),
@@ -463,7 +472,9 @@ mod tests {
                     ..JobSettings::default()
                 },
             )
-            .unwrap()
+            .unwrap();
+            app.accept_privacy_policy().unwrap();
+            app
         }
 
         /// Started with a YouTube key saved.

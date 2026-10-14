@@ -1,11 +1,11 @@
 use bardo_domain::{
-    LayoutId, MetricsSyncOnStart, ProfileId, ProfileRepository, RepositoryError, Score, UiLanguage,
-    UiThemePreference, UserProfile,
+    LayoutId, MetricsSyncOnStart, PrivacyConsent, ProfileId, ProfileRepository, RepositoryError,
+    Score, UiLanguage, UiThemePreference, UserProfile,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
-use crate::{Database, boxed};
+use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 impl ProfileRepository for Database {
     fn load_default(&self) -> Result<Option<UserProfile>, RepositoryError> {
@@ -13,7 +13,8 @@ impl ProfileRepository for Database {
             .conn()
             .query_row(
                 "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
-                        offer_screen_tours, background_agent, auto_backup, update_check
+                        offer_screen_tours, background_agent, auto_backup, update_check,
+                        privacy_version, privacy_accepted_at
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -29,6 +30,8 @@ impl ProfileRepository for Database {
                         row.get::<_, bool>(7)?,
                         row.get::<_, bool>(8)?,
                         row.get::<_, bool>(9)?,
+                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, Option<i64>>(11)?,
                     ))
                 },
             )
@@ -46,6 +49,8 @@ impl ProfileRepository for Database {
             background_agent,
             auto_backup,
             update_check,
+            privacy_version,
+            privacy_accepted_at,
         )) = row
         else {
             return Ok(None);
@@ -61,6 +66,13 @@ impl ProfileRepository for Database {
             background_agent,
             auto_backup,
             update_check,
+            privacy: match (privacy_version, privacy_accepted_at) {
+                (Some(version), Some(at)) => Some(PrivacyConsent {
+                    version: u32::try_from(version).map_err(boxed)?,
+                    accepted_at: from_unix_millis(at),
+                }),
+                _ => None,
+            },
         }))
     }
 
@@ -69,8 +81,9 @@ impl ProfileRepository for Database {
             .execute(
                 "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
                                            cut_suggestion_floor, offer_screen_tours,
-                                           background_agent, auto_backup, update_check)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                                           background_agent, auto_backup, update_check,
+                                           privacy_version, privacy_accepted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
@@ -80,7 +93,9 @@ impl ProfileRepository for Database {
                      offer_screen_tours = excluded.offer_screen_tours,
                      background_agent = excluded.background_agent,
                      auto_backup = excluded.auto_backup,
-                     update_check = excluded.update_check",
+                     update_check = excluded.update_check,
+                     privacy_version = excluded.privacy_version,
+                     privacy_accepted_at = excluded.privacy_accepted_at",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -92,6 +107,10 @@ impl ProfileRepository for Database {
                     profile.background_agent,
                     profile.auto_backup,
                     profile.update_check,
+                    profile.privacy.map(|consent| consent.version),
+                    profile
+                        .privacy
+                        .map(|consent| to_unix_millis(consent.accepted_at)),
                 ],
             )
             .map_err(boxed)?;
@@ -169,6 +188,22 @@ mod tests {
         profile.update_check = false;
         db.save(&profile).unwrap();
         assert_eq!(db.load_default().unwrap(), Some(profile));
+    }
+
+    #[test]
+    fn the_privacy_policy_is_unaccepted_until_the_user_accepts_it() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap().unwrap().privacy, None);
+
+        let at =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_760_000_000_123);
+        profile.privacy = Some(PrivacyConsent::current(at));
+        db.save(&profile).unwrap();
+        let loaded = db.load_default().unwrap().unwrap();
+        assert_eq!(loaded, profile);
+        assert!(loaded.accepted_privacy());
     }
 
     #[test]

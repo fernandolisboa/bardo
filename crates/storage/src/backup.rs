@@ -524,8 +524,9 @@ fn zip_time(at: SystemTime) -> zip::DateTime {
 
 /// Copies the database to `to` as it is at one moment, with SQLite's
 /// online backup API, while other connections (the app, the agent) keep
-/// writing. Then cleans the copy, takes it out of WAL, vacuums it (no page
-/// of deleted data survives) and checks it.
+/// writing. Then cleans the copy, leaves out the YouTube data a backup may
+/// not keep, takes it out of WAL, vacuums it (no page of deleted data
+/// survives) and checks it.
 fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
     let _ = fs::remove_file(to);
     let mut copy = Connection::open(to).map_err(database_error)?;
@@ -560,6 +561,7 @@ fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
         }
     }
     clean(&copy, None)?;
+    crate::youtube_data::strip_for_backup(&copy).map_err(database_error)?;
     copy.pragma_update(None, "journal_mode", "DELETE")
         .map_err(database_error)?;
     copy.execute_batch("VACUUM").map_err(database_error)?;

@@ -2636,6 +2636,10 @@ body = "A versão do Bardo neste computador. Informe-a quando relatar um problem
 title = "Atualizações"
 body = "O Bardo procura uma versão mais nova ao abrir e uma vez por dia, a menos que você desligue. Como ele se atualiza depende de como foi instalado: esta seção diz o que fazer."
 
+[tour.about.privacy]
+title = "Privacidade e YouTube"
+body = "O Bardo só usa o YouTube depois que você aceita a política de privacidade dele. Leia-a aqui, encontre os termos do YouTube e a política de privacidade do Google, e apague quando quiser o que o Bardo guardou do YouTube."
+
 [tour.about.ffmpeg]
 title = "FFmpeg"
 body = "O Bardo lê, pré-visualiza e renderiza vídeo com o FFmpeg, que vem junto com ele. A licença e o código-fonte estão a um clique."
@@ -2775,6 +2779,30 @@ open_logs = "Abrir pasta de logs"
 diagnostics_saved = "Salvo em {path}."
 show_diagnostics = "Mostrar na pasta"
 diagnostics_failed = "Não foi possível salvar o arquivo de diagnóstico. Tente outra pasta."
+
+[privacy]
+not_accepted = "O Bardo só usa o YouTube depois que você aceita a política de privacidade dele. Leia e aceite em Configurações › Sobre."
+title = "Privacidade e YouTube"
+summary = "O Bardo usa os Serviços de API do YouTube. Seus projetos, chaves e contas ficam neste computador, e o que o Bardo lê do YouTube não é guardado por mais tempo do que o YouTube permite. Ao usar os recursos do YouTube no Bardo, você concorda com os Termos de Serviço do YouTube."
+accepted_on = "Você aceitou a política de privacidade em {when}."
+not_yet = "Ainda não aceita. Os recursos do YouTube esperam até você aceitá-la."
+changed = "A política de privacidade mudou desde que você a aceitou. Os recursos do YouTube esperam até você aceitar a nova."
+read = "Ler a política de privacidade"
+online = "Política de privacidade online"
+accept = "Aceitar a política de privacidade"
+consent = "Antes de o Bardo usar o YouTube, leia a política de privacidade dele e aceite-a. Ao usar os recursos do YouTube no Bardo, você concorda com os Termos de Serviço do YouTube."
+uses_youtube = "Usa os Serviços de API do YouTube."
+youtube_terms = "Termos de Serviço do YouTube"
+google_privacy = "Política de Privacidade do Google"
+google_permissions = "Acesso da conta Google"
+delete = "Apagar dados do YouTube…"
+delete_confirm = "Isto apaga, agora, a pesquisa de nichos, os ranqueamentos de temas e os números de posts que o Bardo leu do YouTube. Nada muda no YouTube: para apagar algo lá, use o YouTube. Seus canais, temas, projetos, links de posts e conexões continuam, e a próxima sincronização lê os números de novo."
+delete_now = "Apagar agora"
+delete_cancel = "Manter"
+deleted = "Apagado. Nada mudou no YouTube."
+not_deleted = "Não foi possível apagar os dados do YouTube. Tente de novo."
+banner = "Os recursos do YouTube esperam até você aceitar a política de privacidade do Bardo."
+banner_review = "Revisar"
 
 [update]
 title = "Atualizações"

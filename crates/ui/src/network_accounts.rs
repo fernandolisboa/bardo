@@ -1040,9 +1040,24 @@ impl NetworkAccountsPanel {
                     }
                 }))
         };
+        // YouTube waits for the privacy policy (ADR-0012): the card asks
+        // for it in place of Connect.
+        let youtube = network == Network::YouTube;
+        let consent = (youtube
+            && !bardo.privacy_accepted()
+            && matches!(
+                state,
+                ConnectionState::NotConnected | ConnectionState::ReconnectNeeded { .. }
+            ))
+        .then(|| crate::privacy::consent(&self.bardo, "account", cx));
+        // The consent carries the same links.
+        let links =
+            (youtube && consent.is_none()).then(|| crate::privacy::links(bardo, "account", cx));
         let actions: Vec<AnyElement> = match &state {
             ConnectionState::Unavailable => Vec::new(),
-            ConnectionState::NotConnected if self.pasting == Some(id) => Vec::new(),
+            ConnectionState::NotConnected if self.pasting == Some(id) || consent.is_some() => {
+                Vec::new()
+            }
             ConnectionState::NotConnected => vec![
                 small("connect-account", Text::Connect)
                     .primary()
@@ -1078,7 +1093,9 @@ impl NetworkAccountsPanel {
                 .into_any_element(),
                 disconnect().into_any_element(),
             ],
-            ConnectionState::ReconnectNeeded { .. } if self.pasting == Some(id) => {
+            ConnectionState::ReconnectNeeded { .. }
+                if self.pasting == Some(id) || consent.is_some() =>
+            {
                 vec![disconnect().into_any_element()]
             }
             ConnectionState::ReconnectNeeded { .. } => vec![
@@ -1140,9 +1157,11 @@ impl NetworkAccountsPanel {
                         .children(actions),
                 )
                 .children(hint)
+                .children(consent)
                 .children(paste)
                 .children(choices)
                 .children(notice)
+                .children(links)
                 .into_any_element(),
         )
     }

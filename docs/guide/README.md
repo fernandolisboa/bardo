@@ -39,6 +39,7 @@ The guide Bardo shows on its Guide screen (F1), in two languages, also published
 | [About Bardo](en-US/about.md) | [Sobre o Bardo](pt-BR/about.md) |
 | [Backup and restore](en-US/backup.md) | [Backup e restauração](pt-BR/backup.md) |
 | [Where your data and keys live](en-US/data-and-keys.md) | [Onde ficam seus dados e chaves](pt-BR/data-and-keys.md) |
+| [Privacy policy](en-US/privacy.md) | [Política de privacidade](pt-BR/privacy.md) |
 | [Troubleshooting](en-US/troubleshooting.md) | [Solução de problemas](pt-BR/troubleshooting.md) |
 | [Glossary](en-US/glossary.md) | [Glossário](pt-BR/glossary.md) |
 | [Keyboard shortcuts](en-US/shortcuts.md) | [Atalhos de teclado](pt-BR/shortcuts.md) |

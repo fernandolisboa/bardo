@@ -27,6 +27,8 @@ Digite um nicho ou palavra-chave por linha, até 20 por pesquisa e 100 caractere
 
 Cada resultado fica guardado por **7 dias** por nicho, país e idioma. Pesquisar de novo dentro de uma semana reaproveita o resultado e não gasta cota; um resultado mais velho que isso avisa no próprio cartão e é buscado de novo na próxima pesquisa. **Atualizar tudo** busca todos os nichos de novo agora, seja qual for a idade, e mostra o custo no próprio botão.
 
+As regras do YouTube deixam o Bardo guardar o que lê por 30 dias, então um resultado é apagado 30 dias depois de buscado; a próxima pesquisa busca de novo ([Política de privacidade](privacy.md#kept)).
+
 A tarefa roda em segundo plano: continue trabalhando, e acompanhe ou cancele em [Tarefas](bardo:go/jobs).
 
 <a id="results"></a>

@@ -53,7 +53,7 @@ A desktop client needs no redirect address: Bardo listens once on `127.0.0.1` on
 ## 4. Save the client in Bardo
 
 1. Open [Settings › Networks](bardo:go/settings/networks).
-2. Paste the client ID and secret into **YouTube · Google OAuth client** and select **Save**.
+2. Paste the client ID and secret into **YouTube · Google OAuth client** and select **Save**. The first time, the card asks you to accept Bardo's privacy policy, which YouTube's rules require before an app uses YouTube.
 
 Both are kept in Windows Credential Manager under your Windows account, per Bardo profile. They never reach Bardo's database, logs or error messages, and the secret never shows on screen again; the card shows its last four characters.
 
@@ -74,7 +74,7 @@ The access and refresh tokens are kept in Windows Credential Manager, keyed by p
 
 - **Check** renews the access if it is close to expiring and reads the channel name again.
 - **Reconnect needed** means Google refused to renew the access: it was revoked from your Google account, the client secret changed, or the app is still in **Testing** and the seven days ran out. Select **Reconnect**.
-- **Disconnect** revokes Bardo's access at Google and forgets the tokens. If Google cannot be reached, Bardo still forgets the tokens and tells you to remove its access from your Google account's security settings (**Third-party apps & services**).
+- **Disconnect** revokes Bardo's access at Google, forgets the tokens and deletes the channel's owner numbers and retention curves ([Removing Bardo's access](privacy.md#revoke)). If Google cannot be reached, Bardo still forgets the tokens and tells you to remove its access from your Google account's security settings (**Third-party apps & services**).
 - A connected account must be disconnected before it can be removed.
 
 <a id="upload"></a>
@@ -113,7 +113,7 @@ YouTube does not say why. Since 2020 it has locked uploads from unaudited API pr
 <a id="owner-metrics"></a>
 ## Owner metrics
 
-Once the channel's YouTube account is connected, every metrics sync also reads the owner's numbers of each YouTube post it finds, linked by hand or uploaded, from the YouTube Analytics API: engaged views, views, watch time, the average view (length and percentage), the audience retention curve and, for a channel in the YouTube Partner Program, estimated revenue, CPM and playback-based CPM. RPM is worked out by Bardo as revenue per 1,000 views. The public views, likes and comments still come from the YouTube Data API key, so the sync needs the key as before.
+Once the channel's YouTube account is connected, every metrics sync also reads the owner's numbers of each YouTube post it finds, linked by hand or uploaded, from the YouTube Analytics API: engaged views, views, watch time, the average view (length and percentage), the audience retention curve and, for a channel in the YouTube Partner Program, estimated revenue, CPM and playback-based CPM. RPM is worked out by Bardo as revenue per 1,000 views. The public views, likes and comments are read through the connected account too, so they are the channel's own data and stay while it is connected; the sync still needs the YouTube Data API key saved, as before.
 
 - **No new permission.** The two `yt-analytics` scopes are among the four Bardo asks for at connection, and a connection missing any of them is refused, so a channel connected before owner metrics existed reads them without reconnecting.
 - **Engaged views lead.** YouTube's views now count every start of a video (Shorts since March 2025, every format since August 2026); engaged views keep the earlier meaning, so they are the headline number on the post and on Strategy › Performance.

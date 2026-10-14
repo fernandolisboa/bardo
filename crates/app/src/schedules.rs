@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    NetworkAccount, NetworkAccountRepository, PublicationId, PublicationRepository,
+    Network, NetworkAccount, NetworkAccountRepository, PublicationId, PublicationRepository,
     RepositoryError, ScheduleChange, ScheduleOutcome, ScheduleProblem, ScheduleReading,
     UploadErrorKind, VideoState, VideoUploader, Visibility, check_publish_time,
     default_publish_time, local_time, publish_time,
@@ -47,6 +47,9 @@ pub enum ScheduleError {
     /// The network did not take the change: offline, refused or down.
     #[error("the network did not take the change: {0}")]
     Failed(String),
+    /// YouTube waits for the privacy policy (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -60,6 +63,7 @@ impl ScheduleError {
             ScheduleError::ReconnectNeeded => Text::UploadFailureReconnect,
             ScheduleError::Removed => Text::UploadFailureRemoved,
             ScheduleError::NotAllowed => Text::ScheduleNotAllowed,
+            ScheduleError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             ScheduleError::Failed(_) | ScheduleError::Repository(_) => Text::ScheduleFailed,
         }
     }
@@ -263,6 +267,9 @@ impl Bardo {
         let upload = publication.upload().ok_or(ScheduleError::NotScheduled)?;
         if self.job_active(upload.job) {
             return Err(ScheduleError::NotScheduled);
+        }
+        if publication.network() == Network::YouTube && !self.privacy_accepted() {
+            return Err(ScheduleError::PrivacyNotAccepted);
         }
         let video = publication
             .post_id()
@@ -651,6 +658,19 @@ mod tests {
         push(UploadErrorKind::NotFound);
         assert!(matches!(change(&s, None), Err(ScheduleError::Removed)));
         assert!(upload(&s).missing_since.is_some(), "flagged as gone");
+    }
+
+    #[test]
+    fn a_youtube_schedule_waits_for_the_privacy_policy() {
+        let mut s = scheduled(tomorrow());
+        s.app.profile.privacy = None;
+        let error = change(&s, None).unwrap_err();
+        assert!(matches!(error, ScheduleError::PrivacyNotAccepted));
+        assert_eq!(error.message(), Text::PrivacyNotAccepted);
+        assert!(
+            s.h.uploader.changes.lock().unwrap().is_empty(),
+            "nothing sent"
+        );
     }
 
     #[test]

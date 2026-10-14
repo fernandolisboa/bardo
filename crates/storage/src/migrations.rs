@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0037_background_agent.sql"),
     include_str!("../migrations/0038_backup.sql"),
     include_str!("../migrations/0039_update_check.sql"),
+    include_str!("../migrations/0040_youtube_privacy.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's

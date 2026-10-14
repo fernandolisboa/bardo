@@ -20,6 +20,10 @@ pub enum ProviderKeyError {
     NotSet,
     #[error(transparent)]
     Store(#[from] SecretStoreError),
+    /// The YouTube Data API key waits until the user accepts Bardo's
+    /// privacy policy (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
 }
 
 impl ProviderKeyError {
@@ -29,6 +33,7 @@ impl ProviderKeyError {
             ProviderKeyError::Invalid(error) => Text::ApiKeyError(*error),
             ProviderKeyError::NotSet => Text::ProviderKeyNotSet,
             ProviderKeyError::Store(_) => Text::ProviderKeyStoreFailed,
+            ProviderKeyError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
         }
     }
 }
@@ -225,6 +230,9 @@ impl Bardo {
         input: &str,
     ) -> Result<(), ProviderKeyError> {
         let key = ApiKey::parse(provider, input)?;
+        if provider == Provider::YouTubeData && !self.profile.accepted_privacy() {
+            return Err(ProviderKeyError::PrivacyNotAccepted);
+        }
         let keys = &mut self.provider_keys;
         // Masked before the store sees it, in case its error quotes it.
         keys.redactor.add(&key);
@@ -252,6 +260,9 @@ impl Bardo {
     /// Prepares a test of the saved key. Reads the key fresh from the
     /// secret store, so it tests exactly what features will use.
     pub fn key_test(&self, provider: Provider) -> Result<KeyTest, ProviderKeyError> {
+        if provider == Provider::YouTubeData && !self.profile.accepted_privacy() {
+            return Err(ProviderKeyError::PrivacyNotAccepted);
+        }
         let keys = &self.provider_keys;
         let key = keys.read(self.profile.id, provider)?;
         Ok(KeyTest {
@@ -329,6 +340,7 @@ mod tests {
                 backups: Arc::new(bardo_storage::MemoryBackups::default()),
                 installers: Arc::new(bardo_storage::MemoryInstallers::default()),
                 installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
+                youtube_data: Arc::new(crate::testing::FakeYouTubeData::default()),
                 profiles: Box::new(Arc::clone(&self.db)),
                 tours: Box::new(Arc::clone(&self.db)),
                 agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
@@ -361,7 +373,9 @@ mod tests {
                 key_checker: Arc::clone(&self.checker) as _,
                 ..testing::providers()
             };
-            Bardo::start(repositories, providers, Some("en-US")).unwrap()
+            let mut app = Bardo::start(repositories, providers, Some("en-US")).unwrap();
+            app.accept_privacy_policy().unwrap();
+            app
         }
 
         /// Starts (or restarts) the app over the same database and store.

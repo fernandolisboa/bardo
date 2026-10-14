@@ -222,7 +222,8 @@ impl Bardo {
 
     /// One round of the agent: false once the user turned it off. Takes no
     /// new job while Bardo's window is open, and renews the connections
-    /// once a day while it is closed (the app renews them when it opens).
+    /// and runs the YouTube upkeep (ADR-0012) once a day while it is closed
+    /// (the app does both when it opens).
     pub(crate) fn agent_step(&self, renewed_at: &mut Option<Instant>) -> bool {
         match self.profiles.load_default() {
             Ok(Some(UserProfile {
@@ -250,6 +251,7 @@ impl Bardo {
         self.jobs.pause(app_open);
         if !app_open && renewed_at.is_none_or(|at| at.elapsed() >= RENEW_CONNECTIONS_EVERY) {
             self.connection_renewal().run();
+            self.youtube_upkeep().run();
             *renewed_at = Some(Instant::now());
         }
         true

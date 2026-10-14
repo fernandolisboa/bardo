@@ -1018,6 +1018,7 @@ pub(crate) mod tests {
                 Self::job_settings(),
             )
             .unwrap();
+            app.accept_privacy_policy().unwrap();
             for (provider, key) in [
                 (Provider::Claude, CLAUDE_KEY),
                 (Provider::ElevenLabs, ELEVENLABS_KEY),

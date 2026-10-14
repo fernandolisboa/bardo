@@ -24,6 +24,7 @@ mod network_accounts;
 mod parts;
 mod performance;
 mod personas;
+mod privacy;
 mod projects;
 mod research;
 mod settings;
