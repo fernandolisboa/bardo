@@ -1645,6 +1645,8 @@ pub(crate) mod testing {
         /// `calls`.
         pub(crate) owned: Mutex<Vec<Vec<String>>>,
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// Fails only the reads made with a channel's token.
+        pub(crate) owned_failure: Mutex<Option<ProviderFailure>>,
         /// While set, calls wait (a test can catch a sync running).
         pub(crate) hold: std::sync::atomic::AtomicBool,
     }
@@ -1716,6 +1718,9 @@ pub(crate) mod testing {
                 .lock()
                 .unwrap()
                 .push(ids.iter().map(|id| (*id).to_owned()).collect());
+            if let Some(failure) = self.owned_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
             self.answer(ids)
         }
     }
@@ -1729,10 +1734,12 @@ pub(crate) mod testing {
         All,
     }
 
-    /// Records each deletion of YouTube data; deletes nothing.
+    /// Records each deletion of YouTube data; deletes nothing. The stored
+    /// privacy policy reads accepted unless `unaccepted` is set.
     #[derive(Default)]
     pub(crate) struct FakeYouTubeData {
         pub(crate) calls: Mutex<Vec<YouTubeDataCall>>,
+        pub(crate) unaccepted: std::sync::atomic::AtomicBool,
     }
 
     impl FakeYouTubeData {
@@ -1775,6 +1782,13 @@ pub(crate) mod testing {
                 research: 1,
                 ..bardo_domain::Forgotten::default()
             })
+        }
+
+        fn privacy_accepted(
+            &self,
+            _: bardo_domain::ProfileId,
+        ) -> Result<bool, bardo_domain::RepositoryError> {
+            Ok(!self.unaccepted.load(std::sync::atomic::Ordering::SeqCst))
         }
     }
 

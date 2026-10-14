@@ -388,9 +388,16 @@ impl MetricsSyncHandler {
                 OwnerAccount::Reading { account, .. } => self.owner_token(account),
                 OwnerAccount::Off => None,
             };
-            match token {
-                Some(token) => {
-                    found.extend(self.stats.owned_statistics(&token, &ids).map_err(failed)?)
+            let read = token.map(|token| self.stats.owned_statistics(&token, &ids));
+            match read {
+                Some(Ok(statistics)) => found.extend(statistics),
+                // Refused (access revoked on Google's page) or not
+                // connected: the key reads them, and the owner's numbers
+                // wait for this sync, as they did before.
+                Some(Err(failure)) => {
+                    tracing::warn!("read a channel's posts with the key: {}", failure.detail);
+                    *owner = OwnerAccount::Off;
+                    with_key.extend(ids);
                 }
                 None => {
                     *owner = OwnerAccount::Off;
@@ -640,6 +647,9 @@ impl JobHandler for MetricsSyncHandler {
         }
         let mut key = None;
         let mut owners: HashMap<NetworkAccountId, OwnerAccount> = HashMap::new();
+        // YouTube waits for the privacy policy, even in a sync queued
+        // before it changed (ADR-0012).
+        let youtube = self.connections.may_call(Network::YouTube);
         let taken_at = match checkpoint.taken_at {
             Some(millis) => SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis),
             None => whole_millis(SystemTime::now()),
@@ -667,6 +677,9 @@ impl JobHandler for MetricsSyncHandler {
                 else {
                     continue;
                 };
+                if post.network() == Network::YouTube && !youtube {
+                    continue;
+                }
                 if post.reads_insights() {
                     networked.push(post);
                 } else if post.is_tracked() {
@@ -1711,6 +1724,36 @@ mod tests {
             Some(bardo_domain::Money::from_micros(96_000_000))
         );
         assert!(view.posts[0].post.retention.is_some());
+    }
+
+    #[test]
+    fn a_refused_token_read_falls_back_to_the_key() {
+        let s = connected();
+        s.h.analytics.set("dQw4w9WgXcQ", 48_000);
+        // Access removed on Google's page, the token not expired yet.
+        *s.h.stats.owned_failure.lock().unwrap() =
+            Some(ProviderFailure::new(ProviderFailureKind::Rejected, "401"));
+        link_and_sync(&s);
+
+        let latest = *posted(&s, Network::YouTube).unwrap().latest().unwrap();
+        assert_eq!(latest.views, 50_000, "read with the key");
+        assert_eq!(latest.owner, None, "the account is off for this sync");
+        assert_eq!(s.h.stats.owned().len(), 1, "tried as the channel first");
+        assert_eq!(s.h.stats.calls().len(), 1);
+        assert_eq!(s.app.latest_sync_job().unwrap().state(), JobState::Done);
+    }
+
+    #[test]
+    fn a_sync_queued_before_the_policy_changed_leaves_youtube_out() {
+        let s = connected();
+        let mut profile = s.app.profile().clone();
+        profile.privacy = None;
+        bardo_domain::ProfileRepository::save(&*s.h.db, &profile).unwrap();
+        link_and_sync(&s);
+
+        assert!(s.h.stats.calls().is_empty(), "YouTube never asked");
+        assert!(s.h.analytics.calls().is_empty());
+        assert_eq!(posted(&s, Network::YouTube).unwrap().latest(), None);
     }
 
     #[test]

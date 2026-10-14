@@ -4,10 +4,11 @@
 use std::time::SystemTime;
 
 use bardo_domain::{
-    Forgotten, NetworkAccountId, ProfileId, RepositoryError, YouTubeDataStore, YouTubeRetention,
+    Forgotten, NetworkAccountId, PRIVACY_POLICY_VERSION, ProfileId, RepositoryError,
+    YouTubeDataStore, YouTubeRetention,
 };
 use rusqlite::types::Value;
-use rusqlite::{Connection, Transaction, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension as _, Transaction, params, params_from_iter};
 
 use crate::{Database, boxed, to_unix_millis};
 
@@ -256,6 +257,20 @@ impl YouTubeDataStore for Database {
         .map_err(boxed)?;
         tx.commit().map_err(boxed)?;
         Ok(forgotten)
+    }
+
+    fn privacy_accepted(&self, owner: ProfileId) -> Result<bool, RepositoryError> {
+        let version: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT privacy_version FROM user_profile WHERE id = ?1",
+                [owner.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?
+            .flatten();
+        Ok(version == Some(i64::from(PRIVACY_POLICY_VERSION)))
     }
 }
 
@@ -686,5 +701,22 @@ mod tests {
         assert_eq!(kept_days(&s, &connected), [5, 15]);
         assert_eq!(owner_numbers(&s, &connected), 2);
         assert_eq!(curve(&s, &connected), 1);
+    }
+
+    #[test]
+    fn the_privacy_policy_is_read_fresh_from_the_profile() {
+        let s = setup();
+        assert!(!s.db.privacy_accepted(s.profile.id).unwrap());
+        let accepted = UserProfile {
+            privacy: Some(bardo_domain::PrivacyConsent::current(time(1))),
+            ..s.profile.clone()
+        };
+        ProfileRepository::save(&s.db, &accepted).unwrap();
+        assert!(s.db.privacy_accepted(s.profile.id).unwrap());
+        assert!(
+            !s.db
+                .privacy_accepted(bardo_domain::ProfileId::new())
+                .unwrap()
+        );
     }
 }

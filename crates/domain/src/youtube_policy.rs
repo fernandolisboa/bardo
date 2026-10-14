@@ -159,6 +159,11 @@ pub trait YouTubeDataStore: Send + Sync {
     /// Deletes every YouTube datum the owner has: research, rankings, and
     /// the numbers and curves of their YouTube posts.
     fn forget_all(&self, owner: ProfileId) -> Result<Forgotten, RepositoryError>;
+
+    /// Whether the owner accepted the current privacy policy, as stored
+    /// now: background work reads it fresh, since another process (the
+    /// window or the agent) may have changed it.
+    fn privacy_accepted(&self, owner: ProfileId) -> Result<bool, RepositoryError>;
 }
 
 #[cfg(test)]

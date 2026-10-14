@@ -565,6 +565,20 @@ impl Connections {
         }
     }
 
+    /// Whether background work may call `network`: YouTube only once the
+    /// stored profile accepted the privacy policy (ADR-0012), read fresh
+    /// since the window and the agent each hold their own copy.
+    pub(crate) fn may_call(&self, network: Network) -> bool {
+        network != Network::YouTube
+            || self
+                .youtube_data
+                .privacy_accepted(self.owner)
+                .unwrap_or_else(|error| {
+                    tracing::warn!("could not read the privacy policy's acceptance: {error}");
+                    false
+                })
+    }
+
     /// Whether any account of the owner on `network` has a connection.
     pub(crate) fn has_any(&self, network: Network) -> Result<bool, RepositoryError> {
         Ok(!self.states.connected_on(self.owner, network)?.is_empty())
@@ -577,12 +591,18 @@ impl Connections {
 
     /// Forgets a connection whose authorization went unconfirmed past the
     /// policy's limit, with what it read: its tokens no longer work, or
-    /// cannot be shown to.
-    fn forget_lapsed(&self, account: NetworkAccountId, now: SystemTime) -> Forgotten {
+    /// cannot be shown to. `None` when a renewal confirmed it meanwhile.
+    fn forget_lapsed(&self, account: NetworkAccountId, now: SystemTime) -> Option<Forgotten> {
         let _one_at_a_time = self
             .refreshing
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // A sync may have renewed it since the upkeep looked.
+        if let Ok(state) = self.state(account)
+            && authorization_current(&state, now)
+        {
+            return None;
+        }
         if let Err(error) = self.secrets.delete_tokens(self.owner, account) {
             let _ = self.store_failure("delete tokens", error);
         }
@@ -590,7 +610,7 @@ impl Connections {
             tracing::warn!("could not forget a lapsed connection: {error}");
         }
         tracing::info!("forgot a YouTube connection not confirmed for 30 days");
-        self.forget_youtube_account(account, now)
+        Some(self.forget_youtube_account(account, now))
     }
 }
 
@@ -620,7 +640,10 @@ impl YouTubeUpkeep {
             }
             match connections.state(account.id) {
                 Ok(state) if authorization_current(&state, now) => authorized.push(account.id),
-                Ok(_) => forgotten = forgotten + connections.forget_lapsed(account.id, now),
+                Ok(_) => match connections.forget_lapsed(account.id, now) {
+                    Some(lapsed) => forgotten = forgotten + lapsed,
+                    None => authorized.push(account.id),
+                },
                 Err(_) => {}
             }
         }
@@ -1415,6 +1438,9 @@ impl Bardo {
                     })
             })
             .filter_map(|id| self.connection_account(id).ok())
+            // YouTube's tokens wait for the privacy policy, so a connection
+            // made before it lapses rather than lasting (ADR-0012).
+            .filter(|account| connections.may_call(account.network))
             .collect();
         ConnectionRenewal {
             accounts,
