@@ -7,6 +7,7 @@
 
 mod accounts;
 mod appearance;
+mod backup;
 mod brand;
 mod channels;
 mod costs;
@@ -35,7 +36,7 @@ mod tour;
 
 use anyhow::Context as _;
 use bardo_app::{Bardo, Providers, Repositories};
-use bardo_storage::Database;
+use bardo_storage::{DataPaths, Database};
 use gpui_kit::{
     App, AppContext as _, Bounds, SharedString, TitlebarOptions, WindowBounds, WindowOptions, px,
     size,
@@ -44,7 +45,7 @@ use gpui_kit::{
 use crate::shell::Shell;
 
 /// Bardo's local storage, as both the app and the agent open it.
-fn repositories() -> anyhow::Result<Repositories> {
+fn repositories(paths: DataPaths) -> anyhow::Result<Repositories> {
     let db_path = bardo_storage::default_database_path()?;
     let db = Database::open(&db_path)
         .with_context(|| format!("opening the database at {}", db_path.display()))?;
@@ -61,13 +62,20 @@ fn repositories() -> anyhow::Result<Repositories> {
         Box::new(files),
         Box::new(exports),
         Box::new(voice_samples),
+        paths,
     ))
 }
 
 /// The background agent: sends scheduled posts until the user turns it
 /// off. It exits at once when it is off, or another agent runs.
 fn run_agent() -> anyhow::Result<()> {
-    let Some(agent) = Bardo::start_agent(repositories()?, Providers::live())? else {
+    let paths = DataPaths::local_default()?;
+    // A restore waits to be put in place at Bardo's next start: the
+    // database must stay closed until then (ADR-0010).
+    if bardo_storage::restore_pending(&paths) {
+        return Ok(());
+    }
+    let Some(agent) = Bardo::start_agent(repositories(paths)?, Providers::live())? else {
         return Ok(());
     };
     if let Some(log_path) = bardo_app::logging::agent_log_path() {
@@ -81,6 +89,10 @@ fn run_agent() -> anyhow::Result<()> {
 /// The smallest the main window goes, in logical pixels.
 const MIN_WIDTH: f32 = 640.;
 const MIN_HEIGHT: f32 = 600.;
+
+/// How long a start waits for a window on its way out to let go of the
+/// data, as when Bardo restarts after a restore.
+const WINDOW_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// The argument the uninstaller runs `bardo` with.
 const UNINSTALL_ARGUMENT: &str = "--uninstall";
@@ -96,7 +108,7 @@ fn uninstall() -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    Bardo::uninstall(repositories()?)?;
+    Bardo::uninstall(repositories(DataPaths::local_default()?)?)?;
     Ok(())
 }
 
@@ -123,13 +135,51 @@ fn main() -> anyhow::Result<()> {
     if std::env::args().any(|arg| arg == UNINSTALL_ARGUMENT) {
         return uninstall();
     }
+    let paths = DataPaths::local_default()?;
+    // One window holds the data; a window restarting after a restore is
+    // waited for. Another window leaves restores to the one holding it.
+    let (_window_lock, sole) = match bardo_storage::lock_window(&paths, WINDOW_WAIT) {
+        Ok(Some(lock)) => (Some(lock), true),
+        Ok(None) => (None, false),
+        // Without the lock file Bardo runs as it did, as the only window.
+        Err(_) => (None, true),
+    };
+    if !sole {
+        bardo_app::beside_another_window();
+    }
+    // A restore staged before the restart goes in place before the
+    // database opens; it is logged once the log is up.
+    let restored = sole
+        .then(|| bardo_storage::apply_pending_restore(&paths))
+        .flatten();
     let locale = sys_locale::get_locale();
-    let mut bardo = Bardo::start(repositories()?, Providers::live(), locale.as_deref())?;
+    let mut bardo = Bardo::start(
+        repositories(paths.clone())?,
+        Providers::live(),
+        locale.as_deref(),
+    )?;
     // Started after the app so the saved keys are already masked. Without a
     // log file Bardo still runs; it only loses its diagnostics.
     if let Some(log_path) = bardo_app::logging::default_log_path() {
         let _ = bardo_app::logging::init(&log_path, bardo.redactor());
     }
+    match restored {
+        Some(outcome) if outcome.succeeded() => tracing::info!("put a restored backup in place"),
+        Some(outcome) => tracing::warn!(
+            "could not put the restored backup in place; the data is as it was: {}",
+            outcome.failure.unwrap_or_default()
+        ),
+        None => {}
+    }
+    // The data a restore replaced, or a restore never finished, goes;
+    // deleting a large media folder takes a while.
+    if sole {
+        std::thread::spawn(move || bardo_storage::clean_restore_leftovers(&paths));
+    } else {
+        tracing::info!("another Bardo window has the data open");
+    }
+    // The weekly automatic backup, when it is due.
+    bardo.back_up_on_start();
     // Before the agent's upkeep below, which sets the task up when the
     // installer's answer turned it on.
     apply_setup_choices(&mut bardo);

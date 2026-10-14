@@ -270,6 +270,12 @@ pub enum Control {
     AboutNotices,
     /// Settings › About: export diagnostics and open the logs folder.
     AboutDiagnostics,
+    /// Settings › Backup: include media, and Back up.
+    BackupCreate,
+    /// Settings › Backup: the weekly backups and their list.
+    BackupAutomatic,
+    /// Settings › Backup: Restore from a file.
+    BackupRestore,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1183,9 +1189,34 @@ pub const ABOUT: Tour = {
     }
 };
 
+pub const BACKUP: Tour = {
+    const AT: TourPlace = TourPlace::Settings(SettingsTab::Backup);
+    const PAGE: &str = "backup";
+    const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Backup,
+        version: 1,
+        place: Some(AT),
+        steps: &[
+            TourStep::at("back_up", control(Control::BackupCreate))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "back-up"),
+            TourStep::at("automatic", control(Control::BackupAutomatic))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "automatic"),
+            TourStep::at("restore", control(Control::BackupRestore))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "restore"),
+        ],
+    }
+};
+
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 26] = [
+    pub const ALL: [&'static Tour; 27] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -1212,6 +1243,7 @@ impl Tour {
         &METRICS_SYNC,
         &BACKGROUND_AGENT,
         &ABOUT,
+        &BACKUP,
     ];
 
     pub fn get(id: TourId) -> &'static Tour {
@@ -1242,6 +1274,7 @@ impl Tour {
             TourId::MetricsSync => &METRICS_SYNC,
             TourId::BackgroundAgent => &BACKGROUND_AGENT,
             TourId::About => &ABOUT,
+            TourId::Backup => &BACKUP,
         }
     }
 
@@ -2292,6 +2325,7 @@ mod tests {
             (SettingsTab::Metrics, TourId::MetricsSync),
             (SettingsTab::Publishing, TourId::BackgroundAgent),
             (SettingsTab::About, TourId::About),
+            (SettingsTab::Backup, TourId::Backup),
         ];
         for (tab, tour) in tabs {
             assert_eq!(Tour::of(TourPlace::Settings(tab)).map(|t| t.id), Some(tour));

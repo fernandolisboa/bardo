@@ -123,17 +123,20 @@ pub enum SettingsTab {
     Publishing,
     Appearance,
     Metrics,
+    /// Backing up and restoring Bardo's data.
+    Backup,
     /// Bardo's version, the FFmpeg it ships and the third-party notices.
     About,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 6] = [
+    pub const ALL: [SettingsTab; 7] = [
         SettingsTab::Keys,
         SettingsTab::Networks,
         SettingsTab::Publishing,
         SettingsTab::Appearance,
         SettingsTab::Metrics,
+        SettingsTab::Backup,
         SettingsTab::About,
     ];
 
@@ -145,6 +148,7 @@ impl SettingsTab {
             SettingsTab::Publishing => "publishing",
             SettingsTab::Appearance => "appearance",
             SettingsTab::Metrics => "metrics",
+            SettingsTab::Backup => "backup",
             SettingsTab::About => "about",
         }
     }

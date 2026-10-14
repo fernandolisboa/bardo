@@ -18,9 +18,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    InvalidJobTransition, JOB_LEASE, Job, JobFailure, JobId, JobKind, JobRepository, JobState,
-    ProfileId, Progress, RUNNER_ALIVE, RUNNER_TICK, Redactor, RepositoryError, RetryPolicy,
-    RunnerRole, RunnerSeen,
+    Holder, InvalidJobTransition, JOB_LEASE, Job, JobFailure, JobId, JobKind, JobRepository,
+    JobState, ProfileId, Progress, RUNNER_ALIVE, RUNNER_TICK, Redactor, RepositoryError,
+    RetryPolicy, RunnerRole, RunnerSeen,
 };
 
 /// Runs one kind of job. Handlers run on a worker thread, read their payload
@@ -95,6 +95,9 @@ pub enum JobActionError {
     /// now.
     #[error("the job runs in another Bardo process")]
     Elsewhere,
+    /// A restore waits until no job runs.
+    #[error("jobs are running")]
+    Busy,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]
@@ -247,6 +250,9 @@ struct State {
     renewed_at: SystemTime,
     /// Starts no job while true; running ones go on.
     paused: bool,
+    /// A runner holds the whole database (a restore, ADR-0010): only a
+    /// restore job starts.
+    held: bool,
     closing: bool,
     /// When the queue next renews, says it is up and reads storage.
     next_tick: Instant,
@@ -437,6 +443,7 @@ impl JobQueue {
             }
         }
         let paused = runner.paused;
+        let held = repository.holder(now)?.is_some();
         let shared = Arc::new(Shared {
             repository,
             owner,
@@ -453,6 +460,7 @@ impl JobQueue {
                 lost: HashSet::new(),
                 renewed_at: now,
                 paused,
+                held,
                 closing: false,
                 next_tick: Instant::now() + settings.tick,
             }),
@@ -494,6 +502,44 @@ impl JobQueue {
             state.paused = paused;
             self.shared.wake.notify_all();
         }
+    }
+
+    /// Holds the whole database for this runner until `until` (a
+    /// restore, ADR-0010): from now on only a restore job starts here.
+    /// False when another runner holds it.
+    pub(crate) fn hold(&self, now: SystemTime, until: SystemTime) -> Result<bool, RepositoryError> {
+        let held = self.shared.repository.hold(now, until)?;
+        if held {
+            self.set_held(true);
+        }
+        Ok(held)
+    }
+
+    /// Gives up this runner's hold; jobs start again.
+    pub(crate) fn release_hold(&self) -> Result<(), RepositoryError> {
+        self.shared.repository.release_hold()?;
+        self.set_held(false);
+        Ok(())
+    }
+
+    /// Who holds the database now, if anyone.
+    pub(crate) fn holder(&self) -> Result<Option<Holder>, RepositoryError> {
+        self.shared.repository.holder(SystemTime::now())
+    }
+
+    /// Starts only a restore job while `held`; the next tick reads the
+    /// hold again.
+    fn set_held(&self, held: bool) {
+        let mut state = self.shared.state();
+        if state.held != held {
+            state.held = held;
+            self.shared.wake.notify_all();
+        }
+    }
+
+    /// Whether a job runs in this process now.
+    pub(crate) fn busy(&self) -> bool {
+        !self.shared.state().workers.is_empty()
     }
 
     #[cfg(test)]
@@ -634,13 +680,16 @@ fn start_due(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
             jobs,
             workers,
             elsewhere,
+            held,
             ..
         } = &mut **state;
+        let held = *held;
         let Some(index) = jobs
             .iter()
             .enumerate()
             .filter(|(_, job)| {
                 job.is_due(now)
+                    && (!held || job.kind() == JobKind::Restore)
                     && !workers.contains_key(&job.id())
                     && !elsewhere.contains(&job.id())
                     && !tried.contains(&job.id())
@@ -726,6 +775,15 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
             state.others = others;
         }
         Err(error) => tracing::warn!("could not read the other job runners: {error}"),
+    }
+    match repository.holder(now) {
+        Ok(holder) => {
+            if state.held != holder.is_some() {
+                state.held = holder.is_some();
+                shared.changed();
+            }
+        }
+        Err(error) => tracing::warn!("could not read the database hold: {error}"),
     }
     let running: Vec<JobId> = state
         .workers

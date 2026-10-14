@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    Job, JobFailure, JobHeldElsewhere, JobId, JobRecord, JobRepository, ProfileId, Progress,
-    RepositoryError, RunnerRole, RunnerSeen,
+    Holder, Job, JobFailure, JobHeldElsewhere, JobId, JobRecord, JobRepository, ProfileId,
+    Progress, RepositoryError, RunnerRole, RunnerSeen,
 };
 use rusqlite::{OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -299,6 +299,59 @@ impl JobRepository for Database {
             .map_err(boxed)?;
         Ok(())
     }
+
+    fn hold(&self, now: SystemTime, until: SystemTime) -> Result<bool, RepositoryError> {
+        // One statement, so two runners racing for the hold cannot both
+        // win: it is taken when free or run out, renewed when it is ours.
+        let held = self
+            .conn()
+            .execute(
+                "INSERT INTO runner_hold (id, held_by, held_until) VALUES (1, ?1, ?2)
+                 ON CONFLICT (id) DO UPDATE SET
+                     held_by = excluded.held_by,
+                     held_until = excluded.held_until
+                 WHERE runner_hold.held_by = excluded.held_by OR runner_hold.held_until <= ?3",
+                params![self.runner(), to_unix_millis(until), to_unix_millis(now)],
+            )
+            .map_err(boxed)?;
+        Ok(held > 0)
+    }
+
+    fn release_hold(&self) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM runner_hold WHERE held_by = ?1",
+                [self.runner()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn clear_hold(&self) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute("DELETE FROM runner_hold", [])
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn holder(&self, now: SystemTime) -> Result<Option<Holder>, RepositoryError> {
+        let held_by: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT held_by FROM runner_hold WHERE held_until > ?1",
+                [to_unix_millis(now)],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(held_by.map(|by| {
+            if by == self.runner() {
+                Holder::ThisRunner
+            } else {
+                Holder::OtherRunner
+            }
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -514,6 +567,41 @@ mod tests {
 
         agent.leave().unwrap();
         assert!(db.runners(at(0)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn one_runner_holds_the_database_until_its_hold_runs_out() {
+        let app = Database::open_in_memory().unwrap();
+        let agent = app.other_runner();
+        assert_eq!(app.holder(at(0)).unwrap(), None);
+
+        assert!(app.hold(at(0), at(1_000)).unwrap());
+        assert_eq!(app.holder(at(500)).unwrap(), Some(Holder::ThisRunner));
+        assert_eq!(agent.holder(at(500)).unwrap(), Some(Holder::OtherRunner));
+        assert!(!agent.hold(at(500), at(2_000)).unwrap(), "the app's");
+        assert!(app.hold(at(900), at(3_000)).unwrap(), "renewed");
+        assert_eq!(agent.holder(at(2_500)).unwrap(), Some(Holder::OtherRunner));
+
+        // Not renewed, it runs out and is free.
+        assert_eq!(agent.holder(at(3_000)).unwrap(), None);
+        assert!(agent.hold(at(3_000), at(4_000)).unwrap());
+        assert_eq!(app.holder(at(3_500)).unwrap(), Some(Holder::OtherRunner));
+    }
+
+    #[test]
+    fn a_released_hold_is_free_at_once_and_only_its_holder_releases_it() {
+        let app = Database::open_in_memory().unwrap();
+        let agent = app.other_runner();
+        assert!(app.hold(at(0), at(10_000)).unwrap());
+        agent.release_hold().unwrap();
+        assert_eq!(agent.holder(at(1)).unwrap(), Some(Holder::OtherRunner));
+        app.release_hold().unwrap();
+        assert_eq!(agent.holder(at(1)).unwrap(), None);
+        assert!(agent.hold(at(1), at(2)).unwrap());
+
+        // A new window clears any hold its earlier session left.
+        app.clear_hold().unwrap();
+        assert_eq!(agent.holder(at(1)).unwrap(), None);
     }
 
     #[test]

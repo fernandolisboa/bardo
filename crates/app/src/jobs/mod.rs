@@ -13,6 +13,7 @@ pub use countdown::TestJob;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 pub(crate) use queue::{JobQueue, Runner};
 
+use crate::backup::{BackupHandler, RestoreHandler};
 use crate::clips::ClipHandler;
 use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
@@ -46,6 +47,8 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) metrics: MetricsSyncHandler,
     pub(crate) cuts: CutSuggestionHandler,
     pub(crate) uploads: UploadHandler,
+    pub(crate) backups: BackupHandler,
+    pub(crate) restores: RestoreHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -68,6 +71,8 @@ pub(crate) fn built_in_handlers(
         metrics,
         cuts,
         uploads,
+        backups,
+        restores,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -90,6 +95,8 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::MetricsSync, Arc::new(metrics));
     handlers.insert(JobKind::CutSuggestions, Arc::new(cuts));
     handlers.insert(JobKind::Upload, Arc::new(uploads));
+    handlers.insert(JobKind::Backup, Arc::new(backups));
+    handlers.insert(JobKind::Restore, Arc::new(restores));
     handlers
 }
 
@@ -98,6 +105,7 @@ impl JobActionError {
     pub fn message(&self) -> Text {
         match self {
             JobActionError::Elsewhere => Text::JobRunsElsewhere,
+            JobActionError::Busy => Text::RestoreWaitsForJobs,
             _ => Text::JobNotUpdated,
         }
     }
@@ -181,6 +189,13 @@ impl Bardo {
     /// Queues a failed or cancelled job again; it resumes from its last
     /// checkpoint.
     pub fn retry_job(&self, id: JobId) -> Result<(), JobActionError> {
+        if let Some(restore) = self
+            .jobs()
+            .into_iter()
+            .find(|job| job.id() == id && job.kind() == JobKind::Restore)
+        {
+            return self.retry_restore(&restore);
+        }
         self.jobs.retry(id)
     }
 }
@@ -1195,6 +1210,7 @@ mod tests {
 
     fn start(db: &Arc<Database>) -> Bardo {
         let repositories = Repositories {
+            backups: Arc::new(bardo_storage::MemoryBackups::default()),
             profiles: Box::new(Arc::clone(db)),
             tours: Box::new(Arc::clone(db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),

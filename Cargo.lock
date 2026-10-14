@@ -650,6 +650,7 @@ version = "0.1.0"
 dependencies = [
  "bardo-domain",
  "dirs 6.0.0",
+ "jiff",
  "keyring-core",
  "rusqlite",
  "serde",
@@ -659,6 +660,7 @@ dependencies = [
  "uuid",
  "windows-native-keyring-store",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

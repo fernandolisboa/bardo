@@ -1272,6 +1272,15 @@ pub(crate) mod tests {
             (h, project)
         }
 
+        /// Bardo closes, then opens again on `db`: the data a restore put
+        /// in place (`bardo_storage::apply_pending_restore`).
+        pub(crate) fn reopen_on(mut self, db: Arc<bardo_storage::Database>) -> Setup {
+            drop(self.app);
+            self.h.db = db;
+            self.app = self.h.start_with_exports(Arc::clone(&self.held) as _);
+            self
+        }
+
         /// Bardo closes, then opens again on the same data.
         pub(crate) fn restart(self) -> Setup {
             let Setup {

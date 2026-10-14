@@ -880,6 +880,9 @@ pub(crate) mod tests {
         /// Instagram and TikTok numbers of connected accounts.
         pub(crate) instagram_insights: Arc<crate::testing::FakeInsights>,
         pub(crate) tiktok_insights: Arc<crate::testing::FakeInsights>,
+        /// Backups the app makes and restores; each start gets its own
+        /// in memory when `None`.
+        pub(crate) backups: Option<Arc<dyn bardo_domain::BackupStore>>,
     }
 
     impl Harness {
@@ -908,6 +911,7 @@ pub(crate) mod tests {
                 analytics: Arc::default(),
                 instagram_insights: Arc::new(crate::testing::FakeInsights::instagram()),
                 tiktok_insights: Arc::new(crate::testing::FakeInsights::tiktok()),
+                backups: None,
             }
         }
 
@@ -986,8 +990,13 @@ pub(crate) mod tests {
             }
         }
 
-        fn start_from(&self, repositories: Repositories) -> Bardo {
+        pub(crate) fn start_from(&self, repositories: Repositories) -> Bardo {
+            let backups = self
+                .backups
+                .clone()
+                .unwrap_or_else(|| Arc::clone(&repositories.backups));
             let repositories = Repositories {
+                backups,
                 connection_secrets: Arc::clone(&self.connection_secrets) as _,
                 agent_task: Arc::clone(&self.agent_task) as _,
                 ..repositories

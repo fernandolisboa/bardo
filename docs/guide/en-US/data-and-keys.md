@@ -36,4 +36,4 @@ Bardo writes what it does to `%LOCALAPPDATA%\Bardo\logs\bardo.log`, kept to a bo
 <a id="backup"></a>
 ## Backing up and moving
 
-To back up your work, copy `bardo.db` and the `projects` folder while Bardo is closed. Keys, credentials and sign-ins are not in them, on purpose: after restoring on another computer, save them again in [Settings](settings.md#tabs) and reconnect each account on [Accounts](network-accounts.md#connect).
+Back up from [Settings › Backup](backup.md): one `.zip` file with the database and, if you want, the project folders, made while Bardo is open. Bardo also backs up the database by itself every week to `%LOCALAPPDATA%\Bardo\backups`. Keys, credentials and sign-ins are not in a backup, on purpose: after restoring on another computer, save them again and reconnect each account, as the tab lists ([Moving to another computer](backup.md#moving)).

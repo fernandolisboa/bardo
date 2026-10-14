@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    AgentTask, AgentTaskError, Job, PublicationRepository, RUNNER_ALIVE, RUNNER_TICK,
+    AgentTask, AgentTaskError, Holder, Job, PublicationRepository, RUNNER_ALIVE, RUNNER_TICK,
     RepositoryError, RunnerRole, RunnerSeen, UserProfile,
 };
 use bardo_storage::SetupChoices;
@@ -192,6 +192,10 @@ impl Bardo {
             tracing::info!("another background agent is running");
             return Ok(None);
         }
+        if repositories.jobs.holder(now)?.is_some() {
+            tracing::info!("Bardo is restoring a backup");
+            return Ok(None);
+        }
         Self::open(
             repositories,
             providers,
@@ -231,6 +235,16 @@ impl Bardo {
                 tracing::warn!("could not read whether the agent is on: {error}");
                 return true;
             }
+        }
+        // A restore holds the database (ADR-0010): the agent finishes what
+        // it runs and stops, so the files can be swapped.
+        if matches!(self.jobs.holder(), Ok(Some(Holder::OtherRunner))) {
+            self.jobs.pause(true);
+            if !self.jobs.busy() {
+                tracing::info!("Bardo is restoring a backup");
+                return false;
+            }
+            return true;
         }
         let app_open = app_is_up(&self.jobs.others());
         self.jobs.pause(app_open);
@@ -578,6 +592,46 @@ mod tests {
         turn_on(&mut s);
         assert!(s.h.agent_task.is_registered().unwrap(), "restored");
         assert_eq!(s.h.agent_task.starts(), 2);
+    }
+
+    #[test]
+    fn a_restore_holds_the_database_and_the_agent_stops_for_it() {
+        let mut s = ready();
+        turn_on(&mut s);
+        let agent = s.h.start_agent().unwrap();
+        let mut renewed = None;
+        assert!(agent.agent_step(&mut renewed));
+        let backup = Path::new("bardo-backup.zip").to_owned();
+        crate::scenes::tests::done(&s.app, s.app.start_backup(backup.clone(), false).unwrap());
+        let review = s.app.backup_check(backup).run().unwrap();
+
+        let restore = s.app.start_restore(&review).unwrap();
+        assert!(!agent.agent_step(&mut renewed), "the agent stops");
+        assert!(agent.jobs.is_paused());
+        drop(agent);
+        crate::scenes::tests::done(&s.app, restore);
+        assert!(s.app.restart_needed());
+        assert!(
+            s.h.start_agent().is_none(),
+            "no agent starts while Bardo restarts"
+        );
+        // Nothing else starts here either.
+        let waiting = s
+            .app
+            .start_test_job(crate::TestJob {
+                steps: 1,
+                step: Duration::from_millis(1),
+                fail_at_step: None,
+            })
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let job = s
+            .app
+            .jobs()
+            .into_iter()
+            .find(|job| job.id() == waiting)
+            .unwrap();
+        assert_eq!(job.state(), JobState::Queued);
     }
 
     #[test]

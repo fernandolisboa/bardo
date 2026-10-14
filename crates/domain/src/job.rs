@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use uuid::Uuid;
 
-use crate::{ProfileId, ProviderFailureKind, RepositoryError, RunnerRole, RunnerSeen};
+use crate::{Holder, ProfileId, ProviderFailureKind, RepositoryError, RunnerRole, RunnerSeen};
 
 /// Identifies a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,10 +106,17 @@ pub enum JobKind {
     /// it confirmed as the checkpoint, so a resumed upload sends only the
     /// rest. Then waits for the network to process the video.
     Upload,
+    /// Writes a backup of the data to a `.zip` (ADR-0010): the database,
+    /// and the project folders when asked. Starts over on resume.
+    Backup,
+    /// Unpacks and checks a backup to replace the data at the next start,
+    /// holding the database meanwhile (ADR-0010). Not resumed: one cut
+    /// short asks the user to start it again.
+    Restore,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 18] = [
+    pub const ALL: [JobKind; 20] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -128,6 +135,8 @@ impl JobKind {
         JobKind::MetricsSync,
         JobKind::CutSuggestions,
         JobKind::Upload,
+        JobKind::Backup,
+        JobKind::Restore,
     ];
 
     /// Stable name stored in the database.
@@ -151,6 +160,8 @@ impl JobKind {
             JobKind::MetricsSync => "metrics_sync",
             JobKind::CutSuggestions => "cut_suggestions",
             JobKind::Upload => "upload",
+            JobKind::Backup => "backup",
+            JobKind::Restore => "restore",
         }
     }
 }
@@ -305,10 +316,20 @@ pub enum JobFailureKind {
     /// A scheduled job's time passed without it (Bardo was closed, or busy):
     /// it waits for the user to send it now or give it a new time.
     Missed,
+    /// Reading or writing files failed: a full disk, a folder gone, a
+    /// backup file that is not whole. Retrying fails until that changes.
+    Files,
+    /// Bardo closed before the job finished, and the job does not resume
+    /// (a restore): nothing changed, and the user starts it again.
+    CutShort,
+    /// The job was under way in a backup that was restored: it may have
+    /// finished after the backup was made (an upload that went), so Bardo
+    /// does not resume it, and the user checks before starting it again.
+    Restored,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 11] = [
+    pub const ALL: [JobFailureKind; 14] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -320,6 +341,9 @@ impl JobFailureKind {
         JobFailureKind::Declined,
         JobFailureKind::Media,
         JobFailureKind::Missed,
+        JobFailureKind::Files,
+        JobFailureKind::CutShort,
+        JobFailureKind::Restored,
     ];
 
     /// Stable name stored in the database.
@@ -336,6 +360,9 @@ impl JobFailureKind {
             JobFailureKind::Declined => "declined",
             JobFailureKind::Media => "media",
             JobFailureKind::Missed => "missed",
+            JobFailureKind::Files => "files",
+            JobFailureKind::CutShort => "cut_short",
+            JobFailureKind::Restored => "restored",
         }
     }
 
@@ -351,7 +378,10 @@ impl JobFailureKind {
             | JobFailureKind::UnexpectedAnswer
             | JobFailureKind::Declined
             | JobFailureKind::Media
-            | JobFailureKind::Missed => false,
+            | JobFailureKind::Missed
+            | JobFailureKind::Files
+            | JobFailureKind::CutShort
+            | JobFailureKind::Restored => false,
         }
     }
 }
@@ -851,6 +881,29 @@ pub trait JobRepository: Send + Sync {
 
     /// This runner stops: its presence goes.
     fn leave(&self) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+
+    /// Holds the whole database for this runner until `until`, unless
+    /// another runner's hold is live at `now` (a restore, ADR-0010). True
+    /// when this runner holds it now; holding again renews it.
+    fn hold(&self, _now: SystemTime, _until: SystemTime) -> Result<bool, RepositoryError> {
+        Ok(true)
+    }
+
+    /// Gives up this runner's hold, if it has one.
+    fn release_hold(&self) -> Result<(), RepositoryError> {
+        Ok(())
+    }
+
+    /// Who holds the database at `now`, if anyone.
+    fn holder(&self, _now: SystemTime) -> Result<Option<Holder>, RepositoryError> {
+        Ok(None)
+    }
+
+    /// Removes any runner's hold: the window's start, as its earlier
+    /// session (the only one that holds) is gone.
+    fn clear_hold(&self) -> Result<(), RepositoryError> {
         Ok(())
     }
 }

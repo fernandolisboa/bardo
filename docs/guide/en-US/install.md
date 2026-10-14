@@ -41,4 +41,4 @@ Run the installer of the newer version over the one you have. It keeps the folde
 
 Uninstall Bardo from Windows Settings › Apps › Installed apps. Close Bardo first; the uninstaller asks if it is still open. It turns the background agent off and removes it from Windows, then removes the program.
 
-Your projects, exports, settings and the keys in Windows Credential Manager stay where they are, so installing Bardo again finds them. See [Where your data and keys live](data-and-keys.md).
+Your projects, exports, settings, automatic backups and the keys in Windows Credential Manager stay where they are, so installing Bardo again finds them. See [Where your data and keys live](data-and-keys.md).

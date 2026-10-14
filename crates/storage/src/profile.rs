@@ -13,7 +13,7 @@ impl ProfileRepository for Database {
             .conn()
             .query_row(
                 "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
-                        offer_screen_tours, background_agent
+                        offer_screen_tours, background_agent, auto_backup
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -27,6 +27,7 @@ impl ProfileRepository for Database {
                         row.get::<_, i64>(5)?,
                         row.get::<_, bool>(6)?,
                         row.get::<_, bool>(7)?,
+                        row.get::<_, bool>(8)?,
                     ))
                 },
             )
@@ -42,6 +43,7 @@ impl ProfileRepository for Database {
             cut_floor,
             screen_tours,
             background_agent,
+            auto_backup,
         )) = row
         else {
             return Ok(None);
@@ -55,6 +57,7 @@ impl ProfileRepository for Database {
             cut_suggestion_floor: Score::new(u8::try_from(cut_floor).map_err(boxed)?),
             offer_screen_tours: screen_tours,
             background_agent,
+            auto_backup,
         }))
     }
 
@@ -63,8 +66,8 @@ impl ProfileRepository for Database {
             .execute(
                 "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
                                            cut_suggestion_floor, offer_screen_tours,
-                                           background_agent)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                                           background_agent, auto_backup)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
@@ -72,7 +75,8 @@ impl ProfileRepository for Database {
                      metrics_sync = excluded.metrics_sync,
                      cut_suggestion_floor = excluded.cut_suggestion_floor,
                      offer_screen_tours = excluded.offer_screen_tours,
-                     background_agent = excluded.background_agent",
+                     background_agent = excluded.background_agent,
+                     auto_backup = excluded.auto_backup",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -82,6 +86,7 @@ impl ProfileRepository for Database {
                     profile.cut_suggestion_floor.value(),
                     profile.offer_screen_tours,
                     profile.background_agent,
+                    profile.auto_backup,
                 ],
             )
             .map_err(boxed)?;

@@ -4,6 +4,7 @@
 mod about;
 mod agent;
 mod appearance;
+mod backup;
 mod channels;
 mod clips;
 mod connections;
@@ -48,7 +49,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AgentTask, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver,
+    AgentTask, BackupStore, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver,
     CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository,
     ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData,
     MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
@@ -62,12 +63,18 @@ use bardo_domain::{
 };
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{
-    Database, MemoryExportFiles, MemoryProjectFiles, MemorySecretStore, MemoryVoiceSamples,
+    DataPaths, Database, LocalBackups, MemoryBackups, MemoryExportFiles, MemoryProjectFiles,
+    MemorySecretStore, MemoryVoiceSamples,
 };
 
 pub use about::{About, LGPL_URL};
 pub use agent::{AgentError, AgentStatus, AgentWork};
 pub use appearance::{EditorPalette, Palette, Rgb, Rgba, TrackColors, UiFont, palette};
+pub use backup::{
+    AutomaticBackups, BackupCheck, BackupJob, BackupStartError, BackupView, MediaSizeCheck,
+    RESTART_HOLD, RESTORE_HOLD, RestoreBlock, RestoreReview, SetUpAgain, backup_error_text,
+    backup_file_name, backup_folder, beside_another_window,
+};
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
@@ -229,13 +236,16 @@ pub struct Repositories {
     /// Where the background agent is registered with the system (Task
     /// Scheduler on Windows).
     pub agent_task: Arc<dyn AgentTask>,
+    /// Backups of the database and the project folders, and restores.
+    /// Shared with the job queue.
+    pub backups: Arc<dyn BackupStore>,
 }
 
 impl Repositories {
     /// Every data port served by one SQLite database, keys by `secrets`,
     /// app credentials and tokens by `connection_secrets`, media by `files`,
-    /// export packages by `export_files` and voice samples by
-    /// `voice_samples`.
+    /// export packages by `export_files`, voice samples by `voice_samples`
+    /// and backups by the folders at `paths`.
     pub fn local(
         db: Database,
         secrets: Box<dyn SecretStore>,
@@ -243,13 +253,16 @@ impl Repositories {
         files: Box<dyn ProjectFiles>,
         export_files: Box<dyn ExportFiles>,
         voice_samples: Box<dyn VoiceSampleStore>,
+        paths: DataPaths,
     ) -> Self {
+        let db = Arc::new(db);
         Self {
             export_files: Arc::from(export_files),
             voice_samples: Arc::from(voice_samples),
             connection_secrets: Arc::from(connection_secrets),
             agent_task: Arc::from(bardo_storage::platform_agent_task()),
-            ..Self::shared_with_files(Arc::new(db), Arc::from(secrets), Arc::from(files))
+            backups: Arc::new(LocalBackups::new(Arc::clone(&db), paths)),
+            ..Self::shared_with_files(db, Arc::from(secrets), Arc::from(files))
         }
     }
 
@@ -260,7 +273,8 @@ impl Repositories {
     }
 
     /// `shared` with the project files the caller chose, and export
-    /// packages, voice samples, app credentials and tokens in memory.
+    /// packages, voice samples, app credentials, tokens and backups in
+    /// memory.
     pub fn shared_with_files(
         db: Arc<Database>,
         secrets: Arc<dyn SecretStore>,
@@ -294,6 +308,7 @@ impl Repositories {
             secrets,
             connection_secrets: Arc::new(MemorySecretStore::default()),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
+            backups: Arc::new(MemoryBackups::default()),
         }
     }
 }
@@ -440,6 +455,9 @@ pub struct Bardo {
     agent_task: Arc<dyn AgentTask>,
     /// The program the agent's task runs: this one.
     agent_program: std::path::PathBuf,
+    backups: Arc<dyn BackupStore>,
+    /// Set once a restore is unpacked: Bardo restarts to apply it.
+    restart_needed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Bardo {
@@ -513,6 +531,7 @@ impl Bardo {
             connection_secrets,
             tours,
             agent_task,
+            backups,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -668,6 +687,20 @@ impl Bardo {
         // Scheduled posts whose time passed while Bardo was closed wait for
         // the user; their jobs must not start first.
         crate::scheduler::mark_missed(&*publications, &*jobs, profile.id, opened_at)?;
+        // A restore the last session left under way is not run again on
+        // its own.
+        crate::backup::end_cut_short_restores(&*jobs, profile.id, role)?;
+        let restart_needed = Arc::default();
+        let backup_handler = crate::backup::BackupHandler {
+            backups: Arc::clone(&backups),
+        };
+        let restore_handler = crate::backup::RestoreHandler {
+            backups: Arc::clone(&backups),
+            jobs: Arc::clone(&jobs),
+            session: uuid::Uuid::new_v4().to_string(),
+            tick: job_settings.tick,
+            restart_needed: Arc::clone(&restart_needed),
+        };
         let runner = match role {
             RunnerRole::App => crate::jobs::Runner::app(),
             RunnerRole::Agent => crate::agent::runner(Arc::clone(&publications), &others),
@@ -692,6 +725,8 @@ impl Bardo {
                 metrics: metrics_handler,
                 cuts: cut_handler,
                 uploads: upload_handler,
+                backups: backup_handler,
+                restores: restore_handler,
             }),
             job_settings,
             redactor,
@@ -740,7 +775,10 @@ impl Bardo {
             role,
             agent_task,
             agent_program: std::env::current_exe().unwrap_or_default(),
+            backups,
+            restart_needed,
         })
+        .inspect(|bardo| bardo.mark_restored_connections())
     }
 
     /// Masks every key the app knows. Hand it to the log (`logging::init`)
@@ -1907,6 +1945,7 @@ mod tests {
     fn start(profiles: &FakeProfiles, locale: Option<&str>) -> Bardo {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
+            backups: Arc::new(bardo_storage::MemoryBackups::default()),
             profiles: Box::new(profiles.clone()),
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
@@ -2063,6 +2102,7 @@ mod tests {
     #[test]
     fn works_against_real_sqlite() {
         let db = Database::open_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let repositories = Repositories::local(
             db,
             Box::new(MemorySecretStore::default()),
@@ -2070,6 +2110,11 @@ mod tests {
             Box::new(MemoryProjectFiles::default()),
             Box::new(MemoryExportFiles::default()),
             Box::new(MemoryVoiceSamples::default()),
+            DataPaths {
+                database: dir.path().join("bardo.db"),
+                projects: dir.path().join("projects"),
+                local: dir.path().to_owned(),
+            },
         );
         let mut app = Bardo::start(repositories, testing::providers(), Some("en-US")).unwrap();
         app.set_ui_language(UiLanguage::PtBr).unwrap();

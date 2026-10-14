@@ -332,6 +332,41 @@ impl Connections {
         }
     }
 
+    /// The account's stored connection status, if it has one.
+    pub(crate) fn status(&self, account: NetworkAccountId) -> Option<ConnectionStatus> {
+        self.state(account).ok().map(|connection| connection.status)
+    }
+
+    /// Marks "reconnect needed" every connection whose tokens are not in
+    /// the secret store: a backup restored on another computer brings the
+    /// connections, never their tokens (ADR-0010). A store that cannot be
+    /// read changes nothing. Returns how many were marked.
+    pub(crate) fn mark_signed_out(&self) -> Result<usize, RepositoryError> {
+        let mut marked = 0;
+        for network in Network::sign_in_networks() {
+            for account in self.states.connected_on(self.owner, network)? {
+                let Some(state) = self
+                    .states
+                    .get(account)?
+                    .filter(|state| state.owner == self.owner)
+                else {
+                    continue;
+                };
+                if state.status != ConnectionStatus::Connected
+                    || !matches!(self.secrets.tokens(self.owner, account), Ok(None))
+                {
+                    continue;
+                }
+                self.states.save(&NetworkConnection {
+                    status: ConnectionStatus::ReconnectNeeded,
+                    ..state
+                })?;
+                marked += 1;
+            }
+        }
+        Ok(marked)
+    }
+
     fn mark_reconnect_needed(&self, state: NetworkConnection) -> Result<(), ConnectionError> {
         tracing::warn!(account = %state.account, "the network refused a refresh; reconnect needed");
         self.states.save(&NetworkConnection {

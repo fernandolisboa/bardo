@@ -1,6 +1,6 @@
 # ADR-0006: Running scheduled publications
 
-- Status: Accepted; decision 2 amended by [ADR-0008](0008-network-connections.md); decision 3's installer offer settled by [ADR-0009](0009-windows-installer.md)
+- Status: Accepted; decision 2 amended by [ADR-0008](0008-network-connections.md); decision 3's installer offer settled by [ADR-0009](0009-windows-installer.md); runners amended by [ADR-0010](0010-backup-and-restore.md) (a restore holds the database)
 - Date: 2026-09-30
 
 ## Context

@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{BudgetLevel, TourId, VideoProjectId};
 use bardo_app::{
-    Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SetupTarget, SpendSummary, Stage, Text,
-    TourMove, TourPlace,
+    Bardo, Destination, GuidePlace, GuideRef, ScreenTour, SettingsTab, SetupTarget, SpendSummary,
+    Stage, Text, TourMove, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
@@ -176,6 +176,7 @@ impl Shell {
         let tour_shell = cx.entity().downgrade();
         let section_shell = cx.entity().downgrade();
         let setup_shell = cx.entity().downgrade();
+        let go_shell = cx.entity().downgrade();
         cx.set_global(GuideHooks {
             tour: Rc::new(move |tour, window, cx| {
                 let _ =
@@ -187,6 +188,9 @@ impl Shell {
             }),
             setup: Rc::new(move |target, window, cx| {
                 let _ = setup_shell.update(cx, |shell, cx| shell.open_setup(target, window, cx));
+            }),
+            go: Rc::new(move |place, window, cx| {
+                let _ = go_shell.update(cx, |shell, cx| shell.go(place, window, cx));
             }),
         });
         let mut shell = Self {
@@ -216,6 +220,10 @@ impl Shell {
             _subscriptions: subscriptions,
         };
         shell.refresh_spend(cx);
+        // Bardo opens on what a restore needs from the user next.
+        if shell.bardo.read(cx).backup_view().last_restore.is_some() {
+            shell.go(GuidePlace::Settings(SettingsTab::Backup), window, cx);
+        }
         shell
     }
 

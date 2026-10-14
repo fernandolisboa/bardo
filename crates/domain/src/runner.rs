@@ -12,6 +12,9 @@
 //! - Each runner says it is up (**presence**) every few seconds. The agent
 //!   takes no new job while the app is up, and the app reads whether the
 //!   agent runs from it.
+//! - A runner restoring a backup **holds** the whole database (ADR-0010):
+//!   while its hold is live, the other runner starts no job, and the agent
+//!   stops.
 //! - The claim on a scheduled post (`due`) is taken only by the runner that
 //!   holds the lease on its upload job, so two runners never publish one
 //!   post.
@@ -80,6 +83,14 @@ pub struct RunnerSeen {
     pub started_at: SystemTime,
     /// When it last said it is up.
     pub seen_at: SystemTime,
+}
+
+/// Who holds the whole database (ADR-0010): while a hold is live, only the
+/// holder's restore runs; other runners start no job and the agent stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Holder {
+    ThisRunner,
+    OtherRunner,
 }
 
 /// A save refused because another runner holds the job's lease: that
