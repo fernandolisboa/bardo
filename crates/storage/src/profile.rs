@@ -13,7 +13,7 @@ impl ProfileRepository for Database {
             .conn()
             .query_row(
                 "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
-                        offer_screen_tours, background_agent, auto_backup
+                        offer_screen_tours, background_agent, auto_backup, update_check
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -28,6 +28,7 @@ impl ProfileRepository for Database {
                         row.get::<_, bool>(6)?,
                         row.get::<_, bool>(7)?,
                         row.get::<_, bool>(8)?,
+                        row.get::<_, bool>(9)?,
                     ))
                 },
             )
@@ -44,6 +45,7 @@ impl ProfileRepository for Database {
             screen_tours,
             background_agent,
             auto_backup,
+            update_check,
         )) = row
         else {
             return Ok(None);
@@ -58,6 +60,7 @@ impl ProfileRepository for Database {
             offer_screen_tours: screen_tours,
             background_agent,
             auto_backup,
+            update_check,
         }))
     }
 
@@ -66,8 +69,8 @@ impl ProfileRepository for Database {
             .execute(
                 "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
                                            cut_suggestion_floor, offer_screen_tours,
-                                           background_agent, auto_backup)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                                           background_agent, auto_backup, update_check)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
@@ -76,7 +79,8 @@ impl ProfileRepository for Database {
                      cut_suggestion_floor = excluded.cut_suggestion_floor,
                      offer_screen_tours = excluded.offer_screen_tours,
                      background_agent = excluded.background_agent,
-                     auto_backup = excluded.auto_backup",
+                     auto_backup = excluded.auto_backup,
+                     update_check = excluded.update_check",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -87,6 +91,7 @@ impl ProfileRepository for Database {
                     profile.offer_screen_tours,
                     profile.background_agent,
                     profile.auto_backup,
+                    profile.update_check,
                 ],
             )
             .map_err(boxed)?;
@@ -150,6 +155,18 @@ mod tests {
         assert!(db.load_default().unwrap().unwrap().offer_screen_tours);
 
         profile.offer_screen_tours = false;
+        db.save(&profile).unwrap();
+        assert_eq!(db.load_default().unwrap(), Some(profile));
+    }
+
+    #[test]
+    fn checking_for_updates_is_on_until_turned_off() {
+        let db = Database::open_in_memory().unwrap();
+        let mut profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert!(db.load_default().unwrap().unwrap().update_check);
+
+        profile.update_check = false;
         db.save(&profile).unwrap();
         assert_eq!(db.load_default().unwrap(), Some(profile));
     }

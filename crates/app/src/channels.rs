@@ -133,6 +133,8 @@ mod tests {
     fn start(db: &Arc<Database>) -> Bardo {
         let repositories = Repositories {
             backups: Arc::new(bardo_storage::MemoryBackups::default()),
+            installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+            installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
             profiles: Box::new(Arc::clone(db)),
             tours: Box::new(Arc::clone(db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
@@ -350,6 +352,8 @@ mod tests {
         let db = Arc::new(Database::open_in_memory().unwrap());
         let repositories = Repositories {
             backups: Arc::new(bardo_storage::MemoryBackups::default()),
+            installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+            installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
             profiles: Box::new(Arc::clone(&db)),
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),

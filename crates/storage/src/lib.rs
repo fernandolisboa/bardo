@@ -1,7 +1,8 @@
 //! SQLite persistence and migrations, the secret store for provider keys,
 //! network app credentials and OAuth tokens (Windows Credential Manager),
 //! the background agent's task (Windows Task Scheduler), the choices the
-//! installer leaves for the next start, and backups.
+//! installer leaves for the next start, backups, and the installers of
+//! updates.
 
 mod agent_task;
 mod backup;
@@ -12,6 +13,7 @@ mod cut_suggestion;
 mod export;
 mod export_files;
 mod files;
+mod installers;
 mod job;
 mod media;
 mod migrations;
@@ -50,6 +52,10 @@ pub use backup::{
 };
 pub use export_files::{LocalExportFiles, MemoryExportFiles, default_exports_dir};
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
+pub use installers::{
+    LocalInstallers, MemoryInstallerRunner, MemoryInstallers, PART_SUFFIX, ProcessInstallerRunner,
+    updates_dir,
+};
 pub use migrations::{BrokenReferences, MigrationError, SCHEMA_VERSION};
 #[cfg(windows)]
 pub use secrets::CredentialManager;

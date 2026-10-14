@@ -1,0 +1,124 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+x-github-api-version-selected: 2022-11-28
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 59
+x-ratelimit-reset: 1793638800
+x-ratelimit-resource: core
+x-ratelimit-used: 1
+
+{
+  "url": "https://api.github.com/repos/fernandolisboa/bardo/releases/412000001",
+  "assets_url": "https://api.github.com/repos/fernandolisboa/bardo/releases/412000001/assets",
+  "upload_url": "https://uploads.github.com/repos/fernandolisboa/bardo/releases/412000001/assets{?name,label}",
+  "html_url": "https://github.com/fernandolisboa/bardo/releases/tag/v0.2.0",
+  "id": 412000001,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "node_id": "MDM6Qm90NDE4OTgyODI=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+    "html_url": "https://github.com/apps/github-actions",
+    "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "node_id": "RE_kwDOU0EWw84Yg9Xh",
+  "tag_name": "nightly",
+  "target_commitish": "main",
+  "name": "Bardo 0.2.0",
+  "draft": false,
+  "immutable": false,
+  "prerelease": false,
+  "created_at": "2026-11-02T15:12:40Z",
+  "updated_at": "2026-11-02T15:24:02Z",
+  "published_at": "2026-11-02T15:24:02Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/fernandolisboa/bardo/releases/assets/640000101",
+      "id": 640000101,
+      "node_id": "RA_kwDOU0EWw84l5u101",
+      "name": "Bardo-Setup-0.2.0-x64.exe",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-actions",
+        "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "content_type": "application/x-msdownload",
+      "state": "uploaded",
+      "size": 48213504,
+      "digest": "sha256:9f2c7a4b1e8d3c6f5a0b2d4e6f8a1c3e5b7d9f0a2c4e6b8d1f3a5c7e9b0d2f4a",
+      "download_count": 3,
+      "created_at": "2026-11-02T15:20:11Z",
+      "updated_at": "2026-11-02T15:20:14Z",
+      "browser_download_url": "https://github.com/fernandolisboa/bardo/releases/download/v0.2.0/Bardo-Setup-0.2.0-x64.exe"
+    },
+    {
+      "url": "https://api.github.com/repos/fernandolisboa/bardo/releases/assets/640000102",
+      "id": 640000102,
+      "node_id": "RA_kwDOU0EWw84l5u102",
+      "name": "Bardo-Setup-0.2.0-x64.exe.sha256",
+      "label": "",
+      "uploader": {
+        "login": "github-actions[bot]",
+        "id": 41898282,
+        "node_id": "MDM6Qm90NDE4OTgyODI=",
+        "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+        "html_url": "https://github.com/apps/github-actions",
+        "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+        "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+        "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+        "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+        "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+        "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+        "type": "Bot",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "content_type": "application/octet-stream",
+      "state": "uploaded",
+      "size": 93,
+      "digest": "sha256:3b1f0c9e2d4a6b8c0e2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b",
+      "download_count": 3,
+      "created_at": "2026-11-02T15:20:11Z",
+      "updated_at": "2026-11-02T15:20:14Z",
+      "browser_download_url": "https://github.com/fernandolisboa/bardo/releases/download/v0.2.0/Bardo-Setup-0.2.0-x64.exe.sha256"
+    }
+  ],
+  "tarball_url": "https://api.github.com/repos/fernandolisboa/bardo/tarball/v0.2.0",
+  "zipball_url": "https://api.github.com/repos/fernandolisboa/bardo/zipball/v0.2.0",
+  "body": "## What's Changed\n* Auto-update from GitHub Releases in https://github.com/fernandolisboa/bardo/pull/157\n* Keep the project title readable beside two \"New\" tour marks in https://github.com/fernandolisboa/bardo/pull/152\n\n\n**Full Changelog**: https://github.com/fernandolisboa/bardo/compare/v0.1.0...v0.2.0"
+}

@@ -16,7 +16,7 @@ Your channels, personas, templates, projects and their scripts, research, ideas,
 <a id="projects"></a>
 ## Project folders
 
-Each video project's media is in its own folder under `%LOCALAPPDATA%\Bardo\projects`: the narration, the images, the clips, imported files, the editor's preview copies and the rendered files. Media is large and belongs to this computer, so it stays out of a roaming Windows profile. Voice samples are a cache in `%LOCALAPPDATA%\Bardo\voice-samples`: only the newest are kept, and an older one is made again when you play it.
+Each video project's media is in its own folder under `%LOCALAPPDATA%\Bardo\projects`: the narration, the images, the clips, imported files, the editor's preview copies and the rendered files. Media is large and belongs to this computer, so it stays out of a roaming Windows profile. Voice samples are a cache in `%LOCALAPPDATA%\Bardo\voice-samples`: only the newest are kept, and an older one is made again when you play it. A downloaded update waits in `%LOCALAPPDATA%\Bardo\updates` until it is installed; Bardo deletes it once it runs the newer version ([Updates](about.md#updates)).
 
 <a id="exports"></a>
 ## Exports

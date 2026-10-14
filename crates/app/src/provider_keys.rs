@@ -327,6 +327,8 @@ mod tests {
         fn start_with_store(&self, secrets: Arc<dyn SecretStore>) -> Bardo {
             let repositories = Repositories {
                 backups: Arc::new(bardo_storage::MemoryBackups::default()),
+                installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+                installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
                 profiles: Box::new(Arc::clone(&self.db)),
                 tours: Box::new(Arc::clone(&self.db)),
                 agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),

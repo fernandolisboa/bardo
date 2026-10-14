@@ -88,6 +88,7 @@ mod theme;
 mod tiktok;
 mod timeline;
 mod tour;
+mod update;
 mod upload;
 mod voice;
 mod voice_sample;
@@ -261,6 +262,11 @@ pub use timeline::{
     snap, timecode,
 };
 pub use tour::{TourId, TourProgress, TourProgressRepository, TourState};
+pub use update::{
+    DownloadError, InstallerRunner, InstallerStore, InvalidVersion, PreRelease, Release,
+    ReleaseAsset, ReleaseFeed, UpdateCheckError, Version, checksum_for, installer_name,
+    installer_version, is_sha256,
+};
 pub use upload::{
     InvalidUploadTransition, NetworkPost, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK,
     UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,

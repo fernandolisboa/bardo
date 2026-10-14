@@ -27,4 +27,4 @@ Until now Bardo ran only from source: a Rust toolchain, `cargo xtask fetch-ffmpe
 - A new FFmpeg version needs a new mirror release, which the mirror workflow makes when the pin lands on main.
 - A new dependency under an unlisted license fails the package (and the pull request that touches packaging), so licenses are reviewed when they come in, not at release time.
 - Without signing, some users will stop at SmartScreen. Signing (for example Azure Trusted Signing or an OV certificate) is a later decision with a running cost.
-- There is no auto-update: users run the newer installer over the old one.
+- There is no auto-update: users run the newer installer over the old one. (Amended by ADR-0011: Bardo checks GitHub Releases, downloads the next installer after checking its SHA-256, and runs it silently with the user's confirmation.)

@@ -49,6 +49,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) uploads: UploadHandler,
     pub(crate) backups: BackupHandler,
     pub(crate) restores: RestoreHandler,
+    pub(crate) updates: crate::updates::UpdateDownloadHandler,
 }
 
 /// The handler of every job kind Bardo ships.
@@ -73,6 +74,7 @@ pub(crate) fn built_in_handlers(
         uploads,
         backups,
         restores,
+        updates,
     } = built_in;
     let themes = Arc::new(themes);
     let mut handlers: HashMap<JobKind, Arc<dyn JobHandler>> = HashMap::new();
@@ -97,6 +99,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Upload, Arc::new(uploads));
     handlers.insert(JobKind::Backup, Arc::new(backups));
     handlers.insert(JobKind::Restore, Arc::new(restores));
+    handlers.insert(JobKind::UpdateDownload, Arc::new(updates));
     handlers
 }
 
@@ -1211,6 +1214,8 @@ mod tests {
     fn start(db: &Arc<Database>) -> Bardo {
         let repositories = Repositories {
             backups: Arc::new(bardo_storage::MemoryBackups::default()),
+            installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+            installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
             profiles: Box::new(Arc::clone(db)),
             tours: Box::new(Arc::clone(db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),

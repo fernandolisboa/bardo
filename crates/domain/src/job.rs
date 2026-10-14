@@ -113,10 +113,13 @@ pub enum JobKind {
     /// holding the database meanwhile (ADR-0010). Not resumed: one cut
     /// short asks the user to start it again.
     Restore,
+    /// Downloads the installer of a newer Bardo and checks it against its
+    /// release's SHA-256 (ADR-0011). Starts over on resume.
+    UpdateDownload,
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 20] = [
+    pub const ALL: [JobKind; 21] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -137,6 +140,7 @@ impl JobKind {
         JobKind::Upload,
         JobKind::Backup,
         JobKind::Restore,
+        JobKind::UpdateDownload,
     ];
 
     /// Stable name stored in the database.
@@ -162,6 +166,7 @@ impl JobKind {
             JobKind::Upload => "upload",
             JobKind::Backup => "backup",
             JobKind::Restore => "restore",
+            JobKind::UpdateDownload => "update_download",
         }
     }
 }
@@ -326,10 +331,13 @@ pub enum JobFailureKind {
     /// finished after the backup was made (an upload that went), so Bardo
     /// does not resume it, and the user checks before starting it again.
     Restored,
+    /// A downloaded file did not match the checksum its source published
+    /// (an update's installer): it was deleted, and nothing ran.
+    Checksum,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 14] = [
+    pub const ALL: [JobFailureKind; 15] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -344,6 +352,7 @@ impl JobFailureKind {
         JobFailureKind::Files,
         JobFailureKind::CutShort,
         JobFailureKind::Restored,
+        JobFailureKind::Checksum,
     ];
 
     /// Stable name stored in the database.
@@ -363,6 +372,7 @@ impl JobFailureKind {
             JobFailureKind::Files => "files",
             JobFailureKind::CutShort => "cut_short",
             JobFailureKind::Restored => "restored",
+            JobFailureKind::Checksum => "checksum",
         }
     }
 
@@ -381,7 +391,8 @@ impl JobFailureKind {
             | JobFailureKind::Missed
             | JobFailureKind::Files
             | JobFailureKind::CutShort
-            | JobFailureKind::Restored => false,
+            | JobFailureKind::Restored
+            | JobFailureKind::Checksum => false,
         }
     }
 }

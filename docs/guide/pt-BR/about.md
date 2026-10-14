@@ -13,7 +13,21 @@ tour: about
 <a id="version"></a>
 ## Versão
 
-A versão do Bardo neste computador. Informe-a quando relatar um problema, e compare com a release mais recente para saber se vale [atualizar](install.md#update).
+A versão do Bardo neste computador. Informe-a quando relatar um problema.
+
+<a id="updates"></a>
+## Atualizações
+
+O Bardo procura uma versão mais nova no [GitHub](https://github.com/fernandolisboa/bardo/releases) ao abrir e uma vez por dia enquanto fica aberto. Quando sai uma, uma barra sobre as telas avisa: **Ver novidades** abre esta seção, e **Depois** esconde a barra até o Bardo abrir de novo ou sair uma versão mais nova. Nada é baixado nem instalado até você escolher.
+
+- **Procurar atualizações automaticamente** liga ou desliga as buscas ao abrir e diárias. **Procurar agora** busca na hora, mesmo com ela desligada. A linha abaixo diz quando o Bardo buscou pela última vez e o que encontrou.
+- Uma versão mais nova mostra o número, quando foi publicada, as novidades e um link para a **Página da versão**.
+- **Baixar** busca o instalador como uma tarefa, com o progresso aqui e em [Tarefas](jobs.md). O arquivo é conferido com o checksum SHA-256 publicado na versão; um arquivo que não confere é apagado e nunca roda. Um download interrompido não deixa nada para trás.
+- **Instalar…** abre uma revisão. **Instalar e reiniciar** confere o arquivo mais uma vez, abre o instalador e fecha o Bardo; o instalador atualiza o Bardo sem o assistente, mantendo seus dados, configurações e a escolha sobre o agente em segundo plano, e abre o Bardo de novo ao terminar.
+
+A instalação espera enquanto houver tarefas rodando nesta janela (espere terminarem, ou cancele em Tarefas), durante uma [restauração](backup.md#restore) e enquanto outra janela do Bardo estiver aberta. Se **Publicar com o Bardo fechado** estiver ligado, o [agente em segundo plano](background-agent.md) também fecha durante a instalação e volta em até 15 minutos.
+
+A busca usa a API pública do GitHub sem conta: nenhuma chave, nenhum login, e nada sobre você ou seus projetos é enviado. Uma cópia da Microsoft Store nunca busca, porque a Store a atualiza. Uma cópia compilada a partir do código-fonte avisa quando sai uma versão e leva até ela: atualize o código-fonte para tê-la. Você sempre pode [atualizar manualmente](install.md#update).
 
 <a id="ffmpeg"></a>
 ## FFmpeg

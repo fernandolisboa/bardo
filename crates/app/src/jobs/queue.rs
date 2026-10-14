@@ -553,6 +553,16 @@ impl JobQueue {
         self.shared.state().elsewhere.contains(&id)
     }
 
+    /// Whether another of Bardo's windows runs jobs on the same data now
+    /// (its presence is live), whichever opened first.
+    pub(crate) fn other_window_up(&self) -> bool {
+        let now = SystemTime::now();
+        self.shared
+            .repository
+            .runners(now.checked_sub(bardo_domain::RUNNER_ALIVE).unwrap_or(now))
+            .is_ok_and(|others| others.iter().any(|other| other.role == RunnerRole::App))
+    }
+
     /// Grows whenever any job changes, progress included.
     pub(crate) fn revision(&self) -> u64 {
         self.shared.revision.load(Ordering::Acquire)

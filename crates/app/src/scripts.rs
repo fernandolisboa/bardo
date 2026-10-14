@@ -492,6 +492,7 @@ mod tests {
                 uploaders: Vec::new(),
                 analytics: Vec::new(),
                 post_insights: Vec::new(),
+                releases: Arc::new(crate::updates::testing::FakeReleases::default()),
             };
             Bardo::start_with(
                 Repositories::shared(Arc::clone(&self.db), Arc::clone(&self.secrets) as _),

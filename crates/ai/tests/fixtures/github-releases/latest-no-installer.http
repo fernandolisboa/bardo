@@ -1,0 +1,51 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+x-github-api-version-selected: 2022-11-28
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 59
+x-ratelimit-reset: 1793638800
+x-ratelimit-resource: core
+x-ratelimit-used: 1
+
+{
+  "url": "https://api.github.com/repos/fernandolisboa/bardo/releases/412000001",
+  "assets_url": "https://api.github.com/repos/fernandolisboa/bardo/releases/412000001/assets",
+  "upload_url": "https://uploads.github.com/repos/fernandolisboa/bardo/releases/412000001/assets{?name,label}",
+  "html_url": "https://github.com/fernandolisboa/bardo/releases/tag/v0.2.0",
+  "id": 412000001,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "node_id": "MDM6Qm90NDE4OTgyODI=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+    "html_url": "https://github.com/apps/github-actions",
+    "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+    "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+    "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+    "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+    "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+    "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+    "type": "Bot",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "node_id": "RE_kwDOU0EWw84Yg9Xh",
+  "tag_name": "v0.2.0",
+  "target_commitish": "main",
+  "name": "Bardo 0.2.0",
+  "draft": false,
+  "immutable": false,
+  "prerelease": false,
+  "created_at": "2026-11-02T15:12:40Z",
+  "updated_at": "2026-11-02T15:24:02Z",
+  "published_at": "2026-11-02T15:24:02Z",
+  "assets": [],
+  "tarball_url": "https://api.github.com/repos/fernandolisboa/bardo/tarball/v0.2.0",
+  "zipball_url": "https://api.github.com/repos/fernandolisboa/bardo/zipball/v0.2.0",
+  "body": "## What's Changed\n* Auto-update from GitHub Releases in https://github.com/fernandolisboa/bardo/pull/157\n* Keep the project title readable beside two \"New\" tour marks in https://github.com/fernandolisboa/bardo/pull/152\n\n\n**Full Changelog**: https://github.com/fernandolisboa/bardo/compare/v0.1.0...v0.2.0"
+}

@@ -883,6 +883,11 @@ pub(crate) mod tests {
         /// Backups the app makes and restores; each start gets its own
         /// in memory when `None`.
         pub(crate) backups: Option<Arc<dyn bardo_domain::BackupStore>>,
+        /// Bardo's releases, for updates.
+        pub(crate) releases: Arc<crate::updates::testing::FakeReleases>,
+        /// Downloaded updates' installers, kept across starts.
+        pub(crate) installers: Arc<dyn bardo_domain::InstallerStore>,
+        pub(crate) installer_runner: Arc<dyn bardo_domain::InstallerRunner>,
     }
 
     impl Harness {
@@ -912,6 +917,9 @@ pub(crate) mod tests {
                 instagram_insights: Arc::new(crate::testing::FakeInsights::instagram()),
                 tiktok_insights: Arc::new(crate::testing::FakeInsights::tiktok()),
                 backups: None,
+                releases: Arc::default(),
+                installers: Arc::new(bardo_storage::MemoryInstallers::default()),
+                installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
             }
         }
 
@@ -999,6 +1007,8 @@ pub(crate) mod tests {
                 backups,
                 connection_secrets: Arc::clone(&self.connection_secrets) as _,
                 agent_task: Arc::clone(&self.agent_task) as _,
+                installers: Arc::clone(&self.installers),
+                installer_runner: Arc::clone(&self.installer_runner),
                 ..repositories
             };
             let mut app = Bardo::start_with(
@@ -1048,6 +1058,7 @@ pub(crate) mod tests {
                     Arc::clone(&self.instagram_insights) as _,
                     Arc::clone(&self.tiktok_insights) as _,
                 ],
+                releases: Arc::clone(&self.releases) as _,
             }
         }
 

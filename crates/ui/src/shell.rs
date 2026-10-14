@@ -9,7 +9,8 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Window, div, px,
+    AnyElement, App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task, Window,
+    div, px,
 };
 
 use crate::accounts::AccountsScreen;
@@ -82,6 +83,8 @@ pub struct Shell {
     /// Keeps the window's keys reaching the shell (F1) when nothing inside
     /// it has the keyboard.
     focus: FocusHandle,
+    /// Checks for a newer release at start and every day.
+    _update_checks: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -146,9 +149,11 @@ impl Shell {
                 this.refresh_spend(cx);
                 cx.notify();
             }),
-            // The title follows the interface language.
+            // The title follows the interface language, and the update
+            // bar what the last check found.
             cx.observe_in(&bardo, window, |_, bardo, window, cx| {
                 window.set_window_title(&bardo.read(cx).text(Text::AppName));
+                cx.notify();
             }),
             // "Follow Windows" switches with the system's light/dark setting.
             cx.observe_window_appearance(window, |this, window, cx| {
@@ -193,6 +198,7 @@ impl Shell {
                 let _ = go_shell.update(cx, |shell, cx| shell.go(place, window, cx));
             }),
         });
+        let update_checks = crate::updates::check_daily(bardo.downgrade(), cx);
         let mut shell = Self {
             bardo,
             screen: Destination::START,
@@ -217,6 +223,7 @@ impl Shell {
             editor: None,
             guide_over_editor: false,
             focus: cx.focus_handle(),
+            _update_checks: update_checks,
             _subscriptions: subscriptions,
         };
         shell.refresh_spend(cx);
@@ -845,7 +852,15 @@ impl Shell {
             Destination::Settings => self.settings.clone().into_any_element(),
         };
         let jobs = self.jobs_open.then(|| self.jobs.clone().into_any_element());
-        let shell = layout::shell(navigation, screen, jobs, cx);
+        let mut shell = layout::shell(navigation, screen, jobs, cx);
+        // A newer release: a bar over the screens, in both layouts.
+        if let Some(version) = self.bardo.read(cx).update_banner() {
+            shell = v_flex()
+                .size_full()
+                .child(crate::updates::banner(&self.bardo, &version, cx))
+                .child(div().flex_1().min_h_0().w_full().child(shell))
+                .into_any_element();
+        }
         if !self.missed.read(cx).is_open() {
             return shell;
         }

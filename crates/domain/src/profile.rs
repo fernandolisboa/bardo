@@ -103,6 +103,9 @@ pub struct UserProfile {
     /// Whether Bardo backs up the database once a week by itself
     /// (ADR-0010). On until the user turns it off.
     pub auto_backup: bool,
+    /// Whether Bardo looks for a newer release when it opens and once a
+    /// day (ADR-0011). On until the user turns it off.
+    pub update_check: bool,
 }
 
 impl UserProfile {
@@ -117,6 +120,7 @@ impl UserProfile {
             offer_screen_tours: true,
             background_agent: false,
             auto_backup: true,
+            update_check: true,
         }
     }
 }
