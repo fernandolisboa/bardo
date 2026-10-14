@@ -54,7 +54,7 @@ A auditoria confere se o app segue os [Termos e Políticas para Desenvolvedores 
 - o cliente de API: o nome, o endereço onde é usado, uma **URL de política de privacidade** (obrigatória), uma URL de termos de serviço e uma conta de demonstração com instruções para o revisor;
 - por projeto do Google Cloud: o **número do projeto**, o caso de uso (para o Bardo, "Video Uploading & Account Management"), os métodos que ele chama, a cota que quer para `videos.insert` e `search.list` com o motivo, e capturas de tela da política de privacidade, da página inicial com o link para ela, do fluxo de login e da tela de envio.
 
-**O que falta no Bardo hoje.** As políticas pedem uma política de privacidade que cite os Serviços de API do YouTube e aponte para a do Google, um link para os Termos de Serviço do YouTube no app, e dados do YouTube guardados atualizados ou apagados em até 30 dias. O Bardo ainda não tem nada disso; está registrado na [issue #145](https://github.com/fernandolisboa/bardo/issues/145). Uma auditoria pedida antes disso provavelmente falharia nesses pontos.
+**O que o Bardo tem para isso.** As políticas pedem uma política de privacidade que cite os Serviços de API do YouTube e aponte para a do Google, um link para os Termos de Serviço do YouTube no app, e dados do YouTube guardados atualizados ou apagados em até 30 dias. A [política de privacidade](https://fernandolisboa.github.io/bardo/pt-BR/privacy.html) do Bardo está neste guia e no site dele, e o Bardo pede que você a aceite antes de usar o YouTube; [Configurações › Sobre](bardo:go/settings/about) traz links para ela, para os Termos do YouTube e para a Política de Privacidade do Google, e apaga os dados do YouTube quando você pede; e o Bardo apaga sozinho o que não pode mais guardar ([Onde fica guardado, e por quanto tempo](https://fernandolisboa.github.io/bardo/pt-BR/privacy.html#kept)).
 
 <a id="youtube-form"></a>
 ## YouTube: o formulário passo a passo
@@ -62,7 +62,7 @@ A auditoria confere se o app segue os [Termos e Políticas para Desenvolvedores 
 1. No [console do Google Cloud](https://console.cloud.google.com/home/dashboard), escolha o projeto do seu cliente OAuth e copie o **Número do projeto** do cartão **Informações do projeto**.
 2. Abra o [formulário de auditoria e extensão de cota](https://support.google.com/youtube/contact/yt_api_form) com a conta do Google dona do projeto. Escolha uma extensão de cota (ou uma nova auditoria, se uma já passou antes).
 3. Preencha quem você é e o seu negócio, como o formulário pede.
-4. No cliente de API, dê o mesmo nome da tela de consentimento (o formulário pergunta se o nome contém "YouTube"), informe o endereço da sua política de privacidade e diga que é um app de desktop instalado no seu próprio computador, não um site.
+4. No cliente de API, dê o mesmo nome da tela de consentimento (o formulário pergunta se o nome contém "YouTube"), informe o endereço da política de privacidade, `https://fernandolisboa.github.io/bardo/en-US/privacy.html` (**Política de privacidade online**, em Configurações › Sobre, abre a página), e diga que é um app de desktop instalado no seu próprio computador, não um site.
 5. No projeto, cole o número do projeto, escolha **Video Uploading & Account Management** e marque os métodos abaixo. Na descrição de como o cliente usa a API, selecione **Copiar para o formulário** abaixo destes passos e cole o texto. Ele está em inglês, que é o que os revisores do Google leem:
 
    ```text
@@ -72,14 +72,15 @@ A auditoria confere se o app segue os [Termos e Políticas para Desenvolvedores 
    - videos.insert (resumable upload): uploads a rendered video with its title, description, tags, privacy status, publish time, made-for-kids answer and altered or synthetic content disclosure.
    - videos.list (part=snippet,status): reads back the processing and privacy status and the publish time of the creator's own uploads.
    - videos.update (part=status): changes or cancels the publish time of the creator's scheduled videos.
-   - channels.list (mine=true): shows which channel is connected.
+   - channels.list (mine=true): shows which channel is connected, and confirms once a day that the authorization still works.
+   - videos.list (part=statistics): public views, likes and comments of the creator's own posts.
 
    YouTube Analytics API, with the creator's OAuth token:
    - reports.query (ids=channel==MINE): views, engaged views, watch time, average view, audience retention and, for channels in the YouTube Partner Program, estimated revenue and CPM of the creator's own videos.
 
    YouTube Data API v3, with the creator's API key (public data only):
    - search.list, videos.list and channels.list: niche research, reading recent public videos, their view counts and their channels' subscriber counts in a market.
-   - videos.list (part=statistics): public views, likes and comments of the creator's own posts.
+   - videos.list (part=statistics): public views, likes and comments of the creator's own posts while their channel is not connected.
 
    OAuth scopes:
    - https://www.googleapis.com/auth/youtube.upload: upload the creator's videos.
@@ -87,11 +88,15 @@ A auditoria confere se o app segue os [Termos e Políticas para Desenvolvedores 
    - https://www.googleapis.com/auth/yt-analytics.readonly: the owner's analytics reports.
    - https://www.googleapis.com/auth/yt-analytics-monetary.readonly: the revenue and CPM reports.
 
-   Data handling: everything stays on the creator's computer. Tokens and keys are kept in Windows Credential Manager; channel ids, video ids and metrics are kept in a local database. Bardo runs no server and sends no YouTube data anywhere else. Disconnecting in the app revokes the token at Google.
+   Data handling: everything stays on the creator's computer. Tokens and keys are kept in Windows Credential Manager; channel ids, video ids and metrics are kept in a local database. Bardo runs no server. The creator accepts Bardo's privacy policy (https://fernandolisboa.github.io/bardo/en-US/privacy.html) before any YouTube feature works; the app links to it, to the YouTube Terms of Service and to the Google Privacy Policy.
+
+   Retention: nothing read from YouTube is kept more than 30 days, except the connected channel's own numbers while its authorization is confirmed, once a day, within the last 30 days. Niche research, theme rankings and numbers read with the API key are deleted 30 days after reading; a connection unconfirmed for 30 days is removed with its data; a daily job does the deleting. Disconnecting in the app revokes the token at Google and deletes the channel's Authorized Data at once; Settings › About deletes all stored YouTube data on request.
+
+   Sharing: only the creator's AI providers (Anthropic Claude for ideas, TypeSafe JEV for ranking) receive a few aggregate numbers (a niche's competition and trend scores, median views per day, upload volume, and first-week views of the creator's own videos), never videos, titles or channels read from YouTube.
    ```
 
 6. Informe a cota que quer para `videos.insert` e `search.list` e diga por quê, por exemplo quantos vídeos por dia somando seus canais.
-7. Anexe as capturas de tela que o formulário pede: sua política de privacidade, a página com o link para ela, a tela de consentimento do Google ao conectar um canal e a revisão de envio do Bardo.
+7. Anexe as capturas de tela que o formulário pede: a política de privacidade, a página com o link para ela (Configurações › Sobre, a seção **Privacidade e YouTube**), a tela de consentimento do Google ao conectar um canal e a revisão de envio do Bardo.
 8. Na conta de demonstração, dê ao revisor uma conta do Google de teste com um canal de teste, nunca a sua.
 
 A equipe do Google responde por e-mail; a página não dá um prazo.

@@ -55,7 +55,7 @@ Um cliente para computador não precisa de endereço de redirecionamento: o Bard
 ## 4. Salve o cliente no Bardo
 
 1. Abra [Configurações › Redes](bardo:go/settings/networks).
-2. Cole o ID e a chave secreta do cliente em **YouTube · cliente OAuth do Google** e escolha **Salvar**.
+2. Cole o ID e a chave secreta do cliente em **YouTube · cliente OAuth do Google** e escolha **Salvar**. Na primeira vez, o cartão pede que você aceite a política de privacidade do Bardo, que as regras do YouTube exigem antes de um app usar o YouTube.
 
 Os dois ficam no Gerenciador de Credenciais do Windows, na sua conta do Windows, por perfil do Bardo. Eles nunca chegam ao banco de dados, aos logs nem às mensagens de erro do Bardo, e a chave secreta não aparece mais na tela; o cartão mostra os quatro últimos caracteres dela.
 
@@ -76,7 +76,7 @@ Os tokens de acesso e de renovação ficam no Gerenciador de Credenciais do Wind
 
 - **Verificar** renova o acesso se ele estiver perto de expirar e lê de novo o nome do canal.
 - **Reconexão necessária** quer dizer que o Google recusou renovar o acesso: ele foi revogado na sua conta do Google, a chave secreta do cliente mudou, ou o app ainda está em **Teste** e os sete dias acabaram. Escolha **Reconectar**.
-- **Desconectar** revoga o acesso do Bardo no Google e esquece os tokens. Se não for possível falar com o Google, o Bardo esquece os tokens mesmo assim e pede que você remova o acesso dele nas configurações de segurança da sua conta do Google (**Apps e serviços de terceiros**).
+- **Desconectar** revoga o acesso do Bardo no Google, esquece os tokens e apaga os números de dono e as curvas de retenção do canal ([Remover o acesso do Bardo](privacy.md#revoke)). Se não for possível falar com o Google, o Bardo esquece os tokens mesmo assim e pede que você remova o acesso dele nas configurações de segurança da sua conta do Google (**Apps e serviços de terceiros**).
 - Uma conta conectada precisa ser desconectada antes de ser removida.
 
 <a id="upload"></a>
@@ -115,7 +115,7 @@ O YouTube não diz o motivo. Desde 2020 ele trava como privados os envios de pro
 <a id="owner-metrics"></a>
 ## Métricas do dono
 
-Com a conta do YouTube do canal conectada, toda sincronização de métricas também lê, da YouTube Analytics API, os números de dono de cada post do YouTube que encontra, vinculado à mão ou enviado: visualizações engajadas, visualizações, tempo de exibição, a visualização média (duração e porcentagem), a curva de retenção do público e, para um canal no Programa de Parcerias do YouTube, a receita estimada, o CPM e o CPM por reprodução. O RPM é calculado pelo Bardo como receita por 1.000 visualizações. As visualizações, curtidas e comentários públicos continuam vindo da chave da YouTube Data API, então a sincronização precisa da chave como antes.
+Com a conta do YouTube do canal conectada, toda sincronização de métricas também lê, da YouTube Analytics API, os números de dono de cada post do YouTube que encontra, vinculado à mão ou enviado: visualizações engajadas, visualizações, tempo de exibição, a visualização média (duração e porcentagem), a curva de retenção do público e, para um canal no Programa de Parcerias do YouTube, a receita estimada, o CPM e o CPM por reprodução. O RPM é calculado pelo Bardo como receita por 1.000 visualizações. As visualizações, curtidas e comentários públicos também são lidos pela conta conectada, então são dados do próprio canal e ficam enquanto ele estiver conectado; a sincronização ainda precisa da chave da YouTube Data API salva, como antes.
 
 - **Nenhuma permissão nova.** Os dois escopos `yt-analytics` estão entre os quatro que o Bardo pede na conexão, e uma conexão sem algum deles é recusada, então um canal conectado antes das métricas do dono as lê sem reconectar.
 - **Visualizações engajadas na frente.** As visualizações do YouTube agora contam todo início de vídeo (Shorts desde março de 2025, todos os formatos desde agosto de 2026); as visualizações engajadas mantêm o sentido antigo, então são o número principal no post e em Estratégia › Desempenho.

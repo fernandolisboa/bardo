@@ -29,7 +29,7 @@ use std::time::{Duration, SystemTime};
 use crate::{
     ApiKey, ChannelId, Insights, InvalidUploadTransition, Money, Network, NetworkAccountId,
     NetworkPost, OwnerMetrics, PostNumbers, ProfileId, ProviderFailure, RenderId, RepositoryError,
-    RetentionCurve, SCHEDULE_GRACE, Upload, UploadStatus, VideoProjectId, Visibility,
+    RetentionCurve, SCHEDULE_GRACE, SecretText, Upload, UploadStatus, VideoProjectId, Visibility,
 };
 
 uuid_id!(
@@ -739,6 +739,15 @@ pub trait VideoStats: Send + Sync {
     fn statistics(
         &self,
         key: &ApiKey,
+        ids: &[&str],
+    ) -> Result<Vec<VideoStatistics>, ProviderFailure>;
+
+    /// The same, read as the connected channel that owns the posts, with
+    /// its `access_token`: numbers Bardo may keep while the channel's
+    /// authorization lasts (ADR-0012).
+    fn owned_statistics(
+        &self,
+        access_token: &SecretText,
         ids: &[&str],
     ) -> Result<Vec<VideoStatistics>, ProviderFailure>;
 }

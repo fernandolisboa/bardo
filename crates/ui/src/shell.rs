@@ -85,6 +85,7 @@ pub struct Shell {
     focus: FocusHandle,
     /// Checks for a newer release at start and every day.
     _update_checks: Task<()>,
+    _privacy_upkeep: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -199,6 +200,7 @@ impl Shell {
             }),
         });
         let update_checks = crate::updates::check_daily(bardo.downgrade(), cx);
+        let privacy_upkeep = crate::privacy::upkeep_daily(bardo.downgrade(), cx);
         let mut shell = Self {
             bardo,
             screen: Destination::START,
@@ -224,6 +226,7 @@ impl Shell {
             guide_over_editor: false,
             focus: cx.focus_handle(),
             _update_checks: update_checks,
+            _privacy_upkeep: privacy_upkeep,
             _subscriptions: subscriptions,
         };
         shell.refresh_spend(cx);
@@ -853,11 +856,17 @@ impl Shell {
         };
         let jobs = self.jobs_open.then(|| self.jobs.clone().into_any_element());
         let mut shell = layout::shell(navigation, screen, jobs, cx);
-        // A newer release: a bar over the screens, in both layouts.
-        if let Some(version) = self.bardo.read(cx).update_banner() {
+        // A newer release, or YouTube waiting for the privacy policy: a bar
+        // over the screens, in both layouts.
+        let update = self.bardo.read(cx).update_banner();
+        let privacy = self.bardo.read(cx).youtube_waits_for_privacy();
+        if update.is_some() || privacy {
             shell = v_flex()
                 .size_full()
-                .child(crate::updates::banner(&self.bardo, &version, cx))
+                .when(privacy, |bars| {
+                    bars.child(crate::privacy::banner(&self.bardo, cx))
+                })
+                .children(update.map(|version| crate::updates::banner(&self.bardo, &version, cx)))
                 .child(div().flex_1().min_h_0().w_full().child(shell))
                 .into_any_element();
         }

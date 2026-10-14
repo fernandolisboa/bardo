@@ -11,7 +11,7 @@ O Bardo guarda tudo no seu computador, na sua conta do Windows. Não existe serv
 <a id="database"></a>
 ## O banco de dados
 
-Seus canais, personas, modelos, projetos e os roteiros deles, pesquisas, ideias, custos, tarefas, posts e configurações ficam num único arquivo de banco de dados, `%APPDATA%\Bardo\bardo.db`. Ele não guarda nenhuma chave, chave secreta nem login.
+Seus canais, personas, modelos, projetos e os roteiros deles, pesquisas, ideias, custos, tarefas, posts e configurações ficam num único arquivo de banco de dados, `%APPDATA%\Bardo\bardo.db`. Ele não guarda nenhuma chave, chave secreta nem login. O que o Bardo lê do YouTube fica só pelo tempo que as regras do YouTube permitem ([Política de privacidade](privacy.md#kept)).
 
 <a id="projects"></a>
 ## Pastas dos projetos

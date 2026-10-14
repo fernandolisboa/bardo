@@ -29,6 +29,18 @@ Installing waits while jobs run in this window (wait for them, or cancel them in
 
 Checking asks GitHub's public API without any account: no key, no sign-in, and nothing about you or your projects is sent. A copy from the Microsoft Store never checks, since the Store updates it. A copy built from source says when a release is out and links to it: update the source to get it. You can always [update by hand](install.md#update).
 
+<a id="privacy"></a>
+## Privacy and YouTube
+
+Bardo uses YouTube API Services, so it asks you to accept its [privacy policy](privacy.md) before any YouTube feature works: saving the YouTube Data API key or YouTube app credentials, connecting a channel, niche research, syncing YouTube posts and uploading. This section shows whether you accepted it, and when.
+
+- **Read the privacy policy** opens it in the Guide; **Privacy policy online** opens the same page on the guide's website, the address to give Google's forms.
+- **Accept the privacy policy** records that you accepted this version. When the policy changes, YouTube features wait again until you accept the new one, and a bar over the screens says so.
+- The links under it lead to the [YouTube Terms of Service](https://www.youtube.com/t/terms), which you agree to by using Bardo's YouTube features, the [Google Privacy Policy](https://www.google.com/policies/privacy) and your Google account's [access page](https://security.google.com/settings/security/permissions), where you can remove Bardo's access.
+- **Delete YouTube data…** asks first, then deletes at once the niche research, theme rankings and post numbers Bardo read from YouTube ([Deleting your YouTube data](privacy.md#delete)). Nothing on YouTube changes.
+
+Bardo also deletes what YouTube's rules no longer allow it to keep, by itself, once a day ([Where it is kept, and for how long](privacy.md#kept)).
+
 <a id="ffmpeg"></a>
 ## FFmpeg
 

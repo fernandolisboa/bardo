@@ -1,7 +1,9 @@
 //! Public statistics of the user's own YouTube posts, from the YouTube
-//! Data API v3 with the API key alone (no OAuth): `videos.list` with
-//! `part=statistics,snippet`, up to 50 ids per call for one quota unit.
-//! Only the fields Bardo reads are asked for.
+//! Data API v3: `videos.list` with `part=statistics,snippet`, up to 50 ids
+//! per call for one quota unit. Only the fields Bardo reads are asked for.
+//! A connected channel's posts are read with its own token, so their
+//! numbers are Authorized Data and may be kept while the authorization
+//! lasts; the others with the API key alone (ADR-0012).
 //!
 //! A video the API does not return (removed, private) is left out; likes
 //! and comments the owner hides or turns off are absent from `statistics`
@@ -9,26 +11,32 @@
 
 use std::time::Duration;
 
-use bardo_domain::{ApiKey, ProviderFailure, STATS_BATCH, VideoStatistics, VideoStats};
+use bardo_domain::{ApiKey, ProviderFailure, STATS_BATCH, SecretText, VideoStatistics, VideoStats};
 
 use crate::http::{HttpRequest, Transport, UreqTransport};
-use crate::market::{call, count, items, request, unexpected};
+use crate::market::{call, count, items, request, unexpected, url};
 
 /// The `videos.list` request for the statistics and publish time of
 /// `ids`. `maxResults` does not apply to id lookups, so it is not sent.
 pub fn statistics_request(key: &ApiKey, ids: &[&str]) -> HttpRequest {
-    request(
-        key,
-        "videos",
-        &[
-            ("part", "statistics,snippet"),
-            ("id", &ids.join(",")),
-            (
-                "fields",
-                "items(id,snippet/publishedAt,statistics(viewCount,likeCount,commentCount))",
-            ),
-        ],
-    )
+    request(key, "videos", &statistics_params(&ids.join(",")))
+}
+
+/// The same request, made as the channel that owns the videos.
+pub fn owned_statistics_request(access_token: &SecretText, ids: &[&str]) -> HttpRequest {
+    HttpRequest::get(url("videos", &statistics_params(&ids.join(","))))
+        .header("authorization", format!("Bearer {}", access_token.expose()))
+}
+
+fn statistics_params(ids: &str) -> [(&'static str, &str); 3] {
+    [
+        ("part", "statistics,snippet"),
+        ("id", ids),
+        (
+            "fields",
+            "items(id,snippet/publishedAt,statistics(viewCount,likeCount,commentCount))",
+        ),
+    ]
 }
 
 /// Reads YouTube statistics over HTTPS.
@@ -66,9 +74,27 @@ impl<T: Transport> VideoStats for YouTubeStats<T> {
         key: &ApiKey,
         ids: &[&str],
     ) -> Result<Vec<VideoStatistics>, ProviderFailure> {
+        self.read(ids, |batch| statistics_request(key, batch))
+    }
+
+    fn owned_statistics(
+        &self,
+        access_token: &SecretText,
+        ids: &[&str],
+    ) -> Result<Vec<VideoStatistics>, ProviderFailure> {
+        self.read(ids, |batch| owned_statistics_request(access_token, batch))
+    }
+}
+
+impl<T: Transport> YouTubeStats<T> {
+    fn read(
+        &self,
+        ids: &[&str],
+        request: impl Fn(&[&str]) -> HttpRequest,
+    ) -> Result<Vec<VideoStatistics>, ProviderFailure> {
         let mut found = Vec::new();
         for batch in ids.chunks(STATS_BATCH) {
-            let body = call(&self.transport, &statistics_request(key, batch))?;
+            let body = call(&self.transport, &request(batch))?;
             if !body.is_object() {
                 return Err(unexpected("videos response is not an object"));
             }

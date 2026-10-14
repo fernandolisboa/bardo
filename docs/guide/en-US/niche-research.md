@@ -27,6 +27,8 @@ Type one niche or keyword per line, up to 20 per run and 100 characters each. Ea
 
 Each result is kept for **7 days** per niche, country and language. Running again within a week reuses it and costs no quota; a result older than that says so on its card and is fetched again on the next run. **Refresh all** fetches every niche again now, whatever its age, and says its cost on the button.
 
+YouTube's rules let Bardo keep what it reads for 30 days, so a result is deleted 30 days after it was fetched; the next run fetches it again ([Privacy policy](privacy.md#kept)).
+
 The job runs in the background: keep working, and follow or cancel it in [Jobs](bardo:go/jobs).
 
 <a id="results"></a>

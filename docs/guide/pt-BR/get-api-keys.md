@@ -75,4 +75,4 @@ Esta é uma chave de API simples num projeto do Google Cloud, à parte do login 
 3. Abra [Credentials](https://console.cloud.google.com/apis/credentials) (Credenciais) e escolha **Create credentials › API key** (Criar credenciais › Chave de API).
 4. Em **API restrictions**, escolha **Restrict key** e marque **YouTube Data API v3** (o Google pede uma restrição antes de criar a chave). Deixe **Authenticate API calls through a service account** desmarcado. Escolha **Create**.
 5. Copie a chave de **API key created**. Ela começa com `AIza`.
-6. Cole no cartão **YouTube Data API** em [Configurações › Chaves de API](bardo:go/settings/keys), escolha **Salvar chave** e depois **Testar chave**. O teste usa 1 unidade da cota do dia.
+6. Cole no cartão **YouTube Data API** em [Configurações › Chaves de API](bardo:go/settings/keys), escolha **Salvar chave** e depois **Testar chave**. O teste usa 1 unidade da cota do dia. Antes, uma vez só, o cartão pede que você aceite a [política de privacidade](https://fernandolisboa.github.io/bardo/pt-BR/privacy.html) do Bardo.

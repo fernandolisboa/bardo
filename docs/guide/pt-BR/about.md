@@ -29,6 +29,18 @@ A instalação espera enquanto houver tarefas rodando nesta janela (espere termi
 
 A busca usa a API pública do GitHub sem conta: nenhuma chave, nenhum login, e nada sobre você ou seus projetos é enviado. Uma cópia da Microsoft Store nunca busca, porque a Store a atualiza. Uma cópia compilada a partir do código-fonte avisa quando sai uma versão e leva até ela: atualize o código-fonte para tê-la. Você sempre pode [atualizar manualmente](install.md#update).
 
+<a id="privacy"></a>
+## Privacidade e YouTube
+
+O Bardo usa os Serviços de API do YouTube, então pede que você aceite a [política de privacidade](privacy.md) dele antes de qualquer recurso do YouTube funcionar: salvar a chave da YouTube Data API ou as credenciais de app do YouTube, conectar um canal, a pesquisa de nichos, sincronizar posts do YouTube e enviar vídeos. Esta seção mostra se você aceitou, e quando.
+
+- **Ler a política de privacidade** abre a política no Guia; **Política de privacidade online** abre a mesma página no site do guia, o endereço a informar nos formulários do Google.
+- **Aceitar a política de privacidade** registra que você aceitou esta versão. Quando a política muda, os recursos do YouTube voltam a esperar até você aceitar a nova, e uma barra sobre as telas avisa.
+- Os links abaixo levam aos [Termos de Serviço do YouTube](https://www.youtube.com/t/terms), com os quais você concorda ao usar os recursos do YouTube no Bardo, à [Política de Privacidade do Google](https://www.google.com/policies/privacy) e à [página de acesso](https://security.google.com/settings/security/permissions) da sua conta Google, onde você remove o acesso do Bardo.
+- **Apagar dados do YouTube…** pergunta antes e então apaga na hora a pesquisa de nichos, os ranqueamentos de temas e os números de posts que o Bardo leu do YouTube ([Apagar seus dados do YouTube](privacy.md#delete)). Nada muda no YouTube.
+
+O Bardo também apaga sozinho, uma vez por dia, o que as regras do YouTube não deixam mais guardar ([Onde fica guardado, e por quanto tempo](privacy.md#kept)).
+
 <a id="ffmpeg"></a>
 ## FFmpeg
 

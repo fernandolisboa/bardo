@@ -39,10 +39,11 @@ use bardo_domain::{
     ApiKey, ChannelId, ChannelPoint, InsightsReader, Job, JobFailure, JobFailureKind, JobId,
     JobKind, MEDIA_PAGES, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, Monetization,
     Network, NetworkAccount, NetworkAccountId, NetworkAccountRepository, OwnerAnalytics, PostLink,
-    PostLinkError, PostReading, PostRetention, ProfileId, Progress, Provider, Publication,
-    PublicationId, PublicationKind, PublicationRepository, ReportPeriod, RepositoryError,
-    STATS_BATCH, SecretStore, SecretText, UploadStatus, UserProfile, VideoProjectId, VideoStats,
-    VideoUploader, channel_history, find_media, read_insights, read_owner_metrics,
+    PostLinkError, PostReading, PostRetention, ProfileId, Progress, Provider, ProviderFailure,
+    Publication, PublicationId, PublicationKind, PublicationRepository, REFRESH_AFTER,
+    ReportPeriod, RepositoryError, STATS_BATCH, SecretStore, SecretText, UploadStatus, UserProfile,
+    VideoProjectId, VideoStatistics, VideoStats, VideoUploader, channel_history, find_media,
+    read_insights, read_owner_metrics,
 };
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +111,10 @@ pub enum MetricsError {
     AlreadySyncing,
     #[error("channel not found")]
     ChannelNotFound,
+    /// Only YouTube posts to sync, and the user has not accepted Bardo's
+    /// privacy policy (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -121,6 +126,7 @@ impl MetricsError {
             MetricsError::NothingToSync => Text::MetricsNothingToSync,
             MetricsError::AlreadySyncing => Text::MetricsAlreadySyncing,
             MetricsError::ChannelNotFound => Text::ChannelNotFound,
+            MetricsError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             MetricsError::Repository(_) => Text::MetricsNotLoaded,
         }
     }
@@ -347,6 +353,66 @@ impl MetricsSyncHandler {
                 None
             }
         }
+    }
+
+    /// The public numbers of `posts`: a connected channel's own posts read
+    /// with its token, so Bardo may keep them while its authorization
+    /// lasts; the others with the key, kept 30 days (ADR-0012).
+    fn read_public(
+        &self,
+        posts: &[Publication],
+        key: &mut Option<ApiKey>,
+        owners: &mut HashMap<NetworkAccountId, OwnerAccount>,
+    ) -> Result<Vec<VideoStatistics>, JobFailure> {
+        let failed = |failure: ProviderFailure| {
+            JobFailure::new(failure.kind.into(), format!("YouTube: {}", failure.detail))
+        };
+        let mut by_account: Vec<(NetworkAccountId, Vec<&str>)> = Vec::new();
+        for post in posts {
+            let Some(id) = post.post_id() else { continue };
+            match by_account
+                .iter_mut()
+                .find(|(account, _)| *account == post.account)
+            {
+                Some((_, ids)) => ids.push(id),
+                None => by_account.push((post.account, vec![id])),
+            }
+        }
+        let mut found = Vec::new();
+        let mut with_key = Vec::new();
+        for (account, ids) in by_account {
+            let owner = owners
+                .entry(account)
+                .or_insert_with(|| self.owner_account(account));
+            let token = match owner {
+                OwnerAccount::Reading { account, .. } => self.owner_token(account),
+                OwnerAccount::Off => None,
+            };
+            let read = token.map(|token| self.stats.owned_statistics(&token, &ids));
+            match read {
+                Some(Ok(statistics)) => found.extend(statistics),
+                // Refused (access revoked on Google's page) or not
+                // connected: the key reads them, and the owner's numbers
+                // wait for this sync, as they did before.
+                Some(Err(failure)) => {
+                    tracing::warn!("read a channel's posts with the key: {}", failure.detail);
+                    *owner = OwnerAccount::Off;
+                    with_key.extend(ids);
+                }
+                None => {
+                    *owner = OwnerAccount::Off;
+                    with_key.extend(ids);
+                }
+            }
+        }
+        if !with_key.is_empty() {
+            let key = match key {
+                Some(key) => key,
+                None => key.insert(self.key()?),
+            };
+            found.extend(self.stats.statistics(key, &with_key).map_err(failed)?);
+        }
+        Ok(found)
     }
 
     /// Adds the owner's numbers to the snapshots of `posts` whose account
@@ -581,6 +647,9 @@ impl JobHandler for MetricsSyncHandler {
         }
         let mut key = None;
         let mut owners: HashMap<NetworkAccountId, OwnerAccount> = HashMap::new();
+        // YouTube waits for the privacy policy, even in a sync queued
+        // before it changed (ADR-0012).
+        let youtube = self.connections.may_call(Network::YouTube);
         let taken_at = match checkpoint.taken_at {
             Some(millis) => SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis),
             None => whole_millis(SystemTime::now()),
@@ -608,6 +677,9 @@ impl JobHandler for MetricsSyncHandler {
                 else {
                     continue;
                 };
+                if post.network() == Network::YouTube && !youtube {
+                    continue;
+                }
                 if post.reads_insights() {
                     networked.push(post);
                 } else if post.is_tracked() {
@@ -665,14 +737,7 @@ impl JobHandler for MetricsSyncHandler {
             let mut snapshots = Vec::new();
             let mut curves = Vec::new();
             if !public.is_empty() {
-                let key = match &key {
-                    Some(key) => key,
-                    None => key.insert(self.key()?),
-                };
-                let ids: Vec<&str> = public.iter().filter_map(Publication::post_id).collect();
-                let found = self.stats.statistics(key, &ids).map_err(|failure| {
-                    JobFailure::new(failure.kind.into(), format!("YouTube: {}", failure.detail))
-                })?;
+                let found = self.read_public(&public, &mut key, &mut owners)?;
                 for post in &mut public {
                     let statistics = found
                         .iter()
@@ -930,7 +995,9 @@ impl Bardo {
         let readable = if publication.reads_insights() {
             self.account_access(publication.account) == OwnerAccess::Connected
         } else {
-            publication.has_public_metrics() && self.youtube_key_saved()
+            publication.has_public_metrics()
+                && self.youtube_key_saved()
+                && self.profile.accepted_privacy()
         };
         if readable
             && publication.checked_at.is_none()
@@ -989,16 +1056,22 @@ impl Bardo {
 
     /// The publications a sync reads (YouTube's, and the Instagram and
     /// TikTok posts of connected accounts), never checked first, then the
-    /// longest unchecked.
-    fn tracked_publications(&self) -> Result<Vec<Publication>, RepositoryError> {
+    /// longest unchecked. YouTube's wait until the user accepts the
+    /// privacy policy: the second list says whether any was left out.
+    fn tracked_publications(&self) -> Result<(Vec<Publication>, bool), RepositoryError> {
         let publications = self.publications.all_publications(self.profile.id)?;
         let access = self.insights_access(&publications);
         let mut tracked: Vec<Publication> = publications
             .into_iter()
             .filter(|publication| is_synced(publication, &access))
             .collect();
+        let before = tracked.len();
+        if !self.profile.accepted_privacy() {
+            tracked.retain(|publication| publication.network() != Network::YouTube);
+        }
+        let held = tracked.len() < before;
         tracked.sort_by_key(|publication| publication.checked_at);
-        Ok(tracked)
+        Ok((tracked, held))
     }
 
     /// Starts a sync of every YouTube publication's public statistics, of
@@ -1012,7 +1085,10 @@ impl Bardo {
         {
             return Err(MetricsError::AlreadySyncing);
         }
-        let mut tracked = self.tracked_publications()?;
+        let (mut tracked, held) = self.tracked_publications()?;
+        if tracked.is_empty() && held {
+            return Err(MetricsError::PrivacyNotAccepted);
+        }
         if tracked.is_empty() {
             return Err(MetricsError::NothingToSync);
         }
@@ -1028,17 +1104,23 @@ impl Bardo {
     /// Starts a sync when the app opens, if the profile's setting says
     /// it is due for the posts it can read (without a key, the scheduled
     /// uploads and the posts read through their account) and none is
-    /// running. Never fails: a start that cannot sync just does not.
+    /// running. Whatever the setting, a YouTube post read
+    /// [`REFRESH_AFTER`] ago is read again, so YouTube's 30-day rule
+    /// (ADR-0012) refreshes its numbers rather than deleting them. Never
+    /// fails: a start that cannot sync just does not.
     pub fn sync_metrics_on_start(&self) -> Option<JobId> {
-        let mut tracked = self.tracked_publications().ok()?;
+        let (mut tracked, _) = self.tracked_publications().ok()?;
         if !self.youtube_key_saved() {
             tracked.retain(|p| p.is_scheduled() || p.reads_insights());
         }
-        if !self
-            .profile
-            .metrics_sync
-            .is_due(&tracked, SystemTime::now())
-        {
+        let now = SystemTime::now();
+        let refresh = tracked.iter().any(|post| {
+            post.has_public_metrics()
+                && post
+                    .checked_at
+                    .is_some_and(|at| now.duration_since(at).is_ok_and(|age| age >= REFRESH_AFTER))
+        });
+        if !refresh && !self.profile.metrics_sync.is_due(&tracked, now) {
             return None;
         }
         self.sync_metrics().ok()
@@ -1604,6 +1686,9 @@ mod tests {
         let post = posted(&s, Network::YouTube).unwrap();
         let latest = post.latest().unwrap();
         assert_eq!(latest.views, 50_000, "public views as before");
+        // Read as the channel, not with the key: numbers Bardo may keep
+        // while the authorization lasts (ADR-0012).
+        assert_eq!(s.h.stats.owned(), [vec!["dQw4w9WgXcQ".to_owned()]]);
         let owner = latest.owner.expect("owner numbers on the snapshot");
         assert_eq!(owner.views, 48_000);
         assert_eq!(owner.engaged_views, 33_600);
@@ -1642,6 +1727,36 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_token_read_falls_back_to_the_key() {
+        let s = connected();
+        s.h.analytics.set("dQw4w9WgXcQ", 48_000);
+        // Access removed on Google's page, the token not expired yet.
+        *s.h.stats.owned_failure.lock().unwrap() =
+            Some(ProviderFailure::new(ProviderFailureKind::Rejected, "401"));
+        link_and_sync(&s);
+
+        let latest = *posted(&s, Network::YouTube).unwrap().latest().unwrap();
+        assert_eq!(latest.views, 50_000, "read with the key");
+        assert_eq!(latest.owner, None, "the account is off for this sync");
+        assert_eq!(s.h.stats.owned().len(), 1, "tried as the channel first");
+        assert_eq!(s.h.stats.calls().len(), 1);
+        assert_eq!(s.app.latest_sync_job().unwrap().state(), JobState::Done);
+    }
+
+    #[test]
+    fn a_sync_queued_before_the_policy_changed_leaves_youtube_out() {
+        let s = connected();
+        let mut profile = s.app.profile().clone();
+        profile.privacy = None;
+        bardo_domain::ProfileRepository::save(&*s.h.db, &profile).unwrap();
+        link_and_sync(&s);
+
+        assert!(s.h.stats.calls().is_empty(), "YouTube never asked");
+        assert!(s.h.analytics.calls().is_empty());
+        assert_eq!(posted(&s, Network::YouTube).unwrap().latest(), None);
+    }
+
+    #[test]
     fn a_channel_outside_the_partner_program_reads_not_monetized() {
         let s = connected();
         s.h.analytics.set("dQw4w9WgXcQ", 1_000);
@@ -1677,6 +1792,8 @@ mod tests {
         link_and_sync(&s);
 
         assert!(s.h.analytics.calls().is_empty(), "never asked");
+        assert!(s.h.stats.owned().is_empty(), "read with the key");
+        assert_eq!(s.h.stats.calls().len(), 1);
         let post = posted(&s, Network::YouTube).unwrap();
         let latest = *post.latest().unwrap();
         assert_eq!(

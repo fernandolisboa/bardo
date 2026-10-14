@@ -473,12 +473,14 @@ mod tests {
                 voices: Arc::clone(&self.voices) as _,
                 ..testing::providers()
             };
-            Bardo::start(
+            let mut app = Bardo::start(
                 Repositories::shared(Arc::clone(&self.db), Arc::clone(&self.secrets) as _),
                 providers,
                 Some("en-US"),
             )
-            .unwrap()
+            .unwrap();
+            app.accept_privacy_policy().unwrap();
+            app
         }
 
         fn start_with_key(&self) -> Bardo {

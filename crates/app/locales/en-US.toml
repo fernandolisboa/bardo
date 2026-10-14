@@ -2636,6 +2636,10 @@ body = "The version of Bardo on this computer. Say it when you report a problem.
 title = "Updates"
 body = "Bardo looks for a newer release when it opens and once a day, unless you turn that off. How it updates depends on how it was installed: this section says what to do."
 
+[tour.about.privacy]
+title = "Privacy and YouTube"
+body = "Bardo uses YouTube only after you accept its privacy policy. Read it here, find YouTube's terms and Google's privacy policy, and delete what Bardo stored from YouTube whenever you want."
+
 [tour.about.ffmpeg]
 title = "FFmpeg"
 body = "Bardo reads, previews and renders video with FFmpeg, which comes with it. Its license and source code are one click away."
@@ -2775,6 +2779,30 @@ open_logs = "Open logs folder"
 diagnostics_saved = "Saved to {path}."
 show_diagnostics = "Show in folder"
 diagnostics_failed = "Couldn't save the diagnostic file. Try another folder."
+
+[privacy]
+not_accepted = "Bardo uses YouTube only after you accept its privacy policy. Read it and accept it under Settings › About."
+title = "Privacy and YouTube"
+summary = "Bardo uses YouTube API Services. Your projects, keys and accounts stay on this computer, and what Bardo reads from YouTube is kept no longer than YouTube allows. By using Bardo's YouTube features you agree to the YouTube Terms of Service."
+accepted_on = "You accepted the privacy policy on {when}."
+not_yet = "Not accepted yet. YouTube features wait until you accept it."
+changed = "The privacy policy changed since you accepted it. YouTube features wait until you accept the new one."
+read = "Read the privacy policy"
+online = "Privacy policy online"
+accept = "Accept the privacy policy"
+consent = "Before Bardo uses YouTube, read its privacy policy and accept it. By using Bardo's YouTube features you agree to the YouTube Terms of Service."
+uses_youtube = "Uses YouTube API Services."
+youtube_terms = "YouTube Terms of Service"
+google_privacy = "Google Privacy Policy"
+google_permissions = "Google account access"
+delete = "Delete YouTube data…"
+delete_confirm = "This deletes, now, the niche research, theme rankings and post numbers Bardo read from YouTube. Nothing on YouTube changes: to delete something there, use YouTube. Your channels, themes, projects, post links and connections stay, and the next sync reads the numbers again."
+delete_now = "Delete now"
+delete_cancel = "Keep"
+deleted = "Deleted. Nothing on YouTube changed."
+not_deleted = "Could not delete the YouTube data. Try again."
+banner = "YouTube features wait until you accept Bardo's privacy policy."
+banner_review = "Review"
 
 [update]
 title = "Updates"

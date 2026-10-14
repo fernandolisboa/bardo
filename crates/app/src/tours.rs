@@ -272,6 +272,9 @@ pub enum Control {
     AboutNotices,
     /// Settings › About: export diagnostics and open the logs folder.
     AboutDiagnostics,
+    /// Settings › About: the privacy policy, YouTube's terms and deleting
+    /// YouTube data.
+    AboutPrivacy,
     /// Settings › Backup: include media, and Back up.
     BackupCreate,
     /// Settings › Backup: the weekly backups and their list.
@@ -1160,15 +1163,15 @@ pub const BACKGROUND_AGENT: Tour = {
     }
 };
 
-/// Settings › About: the version, updates, the FFmpeg Bardo ships, the notices and
-/// the diagnostics export.
+/// Settings › About: the version, updates, the privacy policy and YouTube,
+/// the FFmpeg Bardo ships, the notices and the diagnostics export.
 pub const ABOUT: Tour = {
     const AT: TourPlace = TourPlace::Settings(SettingsTab::About);
     const PAGE: &str = "about";
     const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::About,
-        version: 3,
+        version: 4,
         place: Some(AT),
         steps: &[
             TourStep::at("version", control(Control::AboutVersion))
@@ -1179,6 +1182,10 @@ pub const ABOUT: Tour = {
                 .on(AT)
                 .missing(TAB)
                 .learn(PAGE, "updates"),
+            TourStep::at("privacy", control(Control::AboutPrivacy))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "privacy"),
             TourStep::at("ffmpeg", control(Control::AboutFfmpeg))
                 .on(AT)
                 .missing(TAB)

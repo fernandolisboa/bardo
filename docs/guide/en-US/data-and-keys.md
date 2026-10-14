@@ -11,7 +11,7 @@ Bardo keeps everything on your computer, under your Windows account. There is no
 <a id="database"></a>
 ## The database
 
-Your channels, personas, templates, projects and their scripts, research, ideas, costs, jobs, posts and settings are in one database file, `%APPDATA%\Bardo\bardo.db`. It holds no key, secret or sign-in.
+Your channels, personas, templates, projects and their scripts, research, ideas, costs, jobs, posts and settings are in one database file, `%APPDATA%\Bardo\bardo.db`. It holds no key, secret or sign-in. What Bardo reads from YouTube stays only as long as YouTube's rules allow ([Privacy policy](privacy.md#kept)).
 
 <a id="projects"></a>
 ## Project folders

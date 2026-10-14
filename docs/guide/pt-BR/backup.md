@@ -17,6 +17,8 @@ tour: backup
 
 O backup tem o [banco de dados](data-and-keys.md#database): seus canais, personas, modelos, projetos, roteiros, pesquisas, posts e agendamentos, custos e configurações. Marque **Incluir mídias** para levar também as [pastas dos projetos](data-and-keys.md#projects): narração, imagens, clipes, música, arquivos importados e renders. A aba mostra o tamanho delas. As prévias do editor ficam de fora, porque o editor as gera de novo quando um projeto abre, assim como o cache de amostras de voz, os logs e as [exportações](data-and-keys.md#exports), que já são arquivos seus.
 
+Um backup deixa de fora os dados do YouTube que o Bardo só pode guardar por 30 dias: pesquisa de nichos, ranqueamentos de temas e os números dos posts do YouTube cujo canal não está conectado. Os números do próprio canal conectado ficam ([Política de privacidade](privacy.md#kept)).
+
 Um backup nunca tem chave, credencial de app ou login: eles ficam no [Gerenciador de Credenciais do Windows](data-and-keys.md#credentials), não no banco nem nas pastas. Guarde o arquivo onde quiser, por exemplo num disco externo ou numa pasta na nuvem.
 
 <a id="automatic"></a>

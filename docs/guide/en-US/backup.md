@@ -17,6 +17,8 @@ tour: backup
 
 The backup holds the [database](data-and-keys.md#database): your channels, personas, templates, projects, scripts, research, posts and schedules, costs and settings. Tick **Include media** to take the [project folders](data-and-keys.md#projects) too: the narration, images, clips, music, imported files and renders. The tab says how big they are. The editor's preview copies are left out, because the editor makes them again when a project opens, and so are the voice sample cache, the logs and the [exports](data-and-keys.md#exports), which are your own files already.
 
+A backup leaves out the YouTube data Bardo may keep only for 30 days: niche research, theme rankings, and the numbers of YouTube posts whose channel is not connected. A connected channel's own numbers stay ([Privacy policy](privacy.md#kept)).
+
 A backup never holds a key, an app credential or a sign-in: they are in [Windows Credential Manager](data-and-keys.md#credentials), not in the database or the folders. Store the file wherever you like, for example on an external disk or a cloud folder.
 
 <a id="automatic"></a>

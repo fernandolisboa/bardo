@@ -92,6 +92,7 @@ mod update;
 mod upload;
 mod voice;
 mod voice_sample;
+mod youtube_policy;
 
 pub use agent_task::{AgentTask, AgentTaskError};
 pub use appearance::{
@@ -275,4 +276,8 @@ pub use upload::{
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef};
 pub use voice_sample::{
     InvalidSampleText, SampleSource, SampleText, VoiceSampleStore, VoiceSampleStoreError,
+};
+pub use youtube_policy::{
+    Forgotten, KEEP_AT_MOST, PRIVACY_POLICY_VERSION, PrivacyConsent, REFRESH_AFTER, UPKEEP_EVERY,
+    YouTubeDataStore, YouTubeRetention, authorization_current, confirmed_at, keep_since,
 };

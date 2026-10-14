@@ -204,6 +204,7 @@ pub struct SettingsScreen {
     backup: Entity<crate::backup::BackupPanel>,
     /// Settings › About's Updates section.
     updates: Entity<crate::updates::UpdatePanel>,
+    privacy: Entity<crate::privacy::PrivacyPanel>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -319,6 +320,10 @@ impl SettingsScreen {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
             cx.new(|cx| crate::updates::UpdatePanel::new(bardo, scroll, cx))
         };
+        let privacy = {
+            let (bardo, scroll) = (bardo.clone(), scroll.clone());
+            cx.new(|cx| crate::privacy::PrivacyPanel::new(bardo, scroll, cx))
+        };
         let mut screen = Self {
             bardo,
             tab: SettingsTab::Keys,
@@ -339,6 +344,7 @@ impl SettingsScreen {
             scroll,
             backup,
             updates,
+            privacy,
             _subscriptions: subscriptions,
         };
         screen.relabel(window, cx);
@@ -780,6 +786,10 @@ impl SettingsScreen {
         } else {
             save.primary()
         };
+        // YouTube's app waits for the privacy policy (ADR-0012).
+        let consent = (network == Network::YouTube && !bardo.privacy_accepted())
+            .then(|| crate::privacy::consent(&self.bardo, "credentials", cx));
+        let save = save.disabled(consent.is_some());
         let error = row
             .error
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
@@ -840,6 +850,7 @@ impl SettingsScreen {
                         )
                         .child(state),
                 )
+                .children(consent)
                 .child(
                     h_flex()
                         .flex_wrap()
@@ -999,6 +1010,10 @@ impl SettingsScreen {
         } else {
             save.primary()
         };
+        // YouTube's key waits for the privacy policy (ADR-0012).
+        let consent = (provider == Provider::YouTubeData && !bardo.privacy_accepted())
+            .then(|| crate::privacy::consent(&self.bardo, "key", cx));
+        let save = save.disabled(consent.is_some());
 
         let card = kit::card(cx)
             .p_4()
@@ -1041,6 +1056,7 @@ impl SettingsScreen {
                     )
                     .child(div().flex_none().child(state)),
             )
+            .children(consent)
             .child(
                 h_flex()
                     .gap_2()
@@ -1811,6 +1827,7 @@ impl SettingsScreen {
             .gap_5()
             .child(version)
             .child(self.updates.clone())
+            .child(self.privacy.clone())
             .child(ffmpeg)
             .child(notices)
             .child(diagnostics)

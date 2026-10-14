@@ -92,10 +92,15 @@ pub fn channels_request(key: &ApiKey, ids: &[&str]) -> HttpRequest {
 /// The key goes in a header, keeping it out of the URL and so out of any
 /// error that quotes the URL.
 pub(crate) fn request(key: &ApiKey, resource: &str, params: &[(&str, &str)]) -> HttpRequest {
+    HttpRequest::get(url(resource, params)).header("x-goog-api-key", key.expose())
+}
+
+/// The address of a Data API `resource` with `params`.
+pub(crate) fn url(resource: &str, params: &[(&str, &str)]) -> String {
     let query = form_urlencoded::Serializer::new(String::new())
         .extend_pairs(params)
         .finish();
-    HttpRequest::get(format!("{API}/{resource}?{query}")).header("x-goog-api-key", key.expose())
+    format!("{API}/{resource}?{query}")
 }
 
 /// A search hit before its numbers are looked up.

@@ -319,6 +319,10 @@ pub enum UploadReviewError {
     /// The cover frame is past the video's end.
     #[error("the cover is past the end of the video")]
     CoverPastEnd,
+    /// YouTube waits until the user accepts Bardo's privacy policy
+    /// (ADR-0012).
+    #[error("the privacy policy is not accepted")]
+    PrivacyNotAccepted,
     #[error(transparent)]
     Job(#[from] JobActionError),
     #[error(transparent)]
@@ -336,6 +340,7 @@ impl UploadReviewError {
             UploadReviewError::ReplaceNotConfirmed => Text::UploadReplaceNotConfirmed,
             UploadReviewError::Schedule(problem) => Text::ScheduleProblem(*problem),
             UploadReviewError::CoverPastEnd => Text::UploadCoverPastEnd,
+            UploadReviewError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
             UploadReviewError::NoSchedule
             | UploadReviewError::NotNow
             | UploadReviewError::Job(_)
@@ -1293,6 +1298,14 @@ impl JobHandler for UploadHandler {
             return Ok(());
         }
         let network: Network = payload.network.parse().map_err(unexpected)?;
+        // Queued before the privacy policy changed, or resumed by the
+        // agent: YouTube still waits for it (ADR-0012).
+        if !self.connections.may_call(network) {
+            return Err(JobFailure::new(
+                JobFailureKind::NotAllowed,
+                "accept Bardo's privacy policy in Settings › About first",
+            ));
+        }
         // A scheduled upload Bardo publishes itself (`bardo_domain::due`):
         // what its due time allows now. Nothing goes once it is missed.
         let due = publication.due();
@@ -2003,6 +2016,9 @@ impl Bardo {
         review: &UploadReview,
         choices: UploadChoices,
     ) -> Result<JobId, UploadReviewError> {
+        if review.network == Network::YouTube && !self.profile.accepted_privacy() {
+            return Err(UploadReviewError::PrivacyNotAccepted);
+        }
         // What is stored now, not what the screen last read.
         let now = self.upload_review(review.project, review.network)?;
         if let Some(block) = now.block() {
@@ -2955,6 +2971,35 @@ pub(crate) mod tests {
         );
         assert_eq!(*s.h.uploader.files.lock().unwrap(), [FILE.to_vec()]);
         assert_eq!(state(&s), UploadState::Published);
+    }
+
+    #[test]
+    fn a_resumed_youtube_upload_waits_for_a_changed_privacy_policy() {
+        let s = ready();
+        s.h.uploader.will(Attempt::HoldAfter(1));
+        let job = start(&s, review(&s).choices());
+        wait_until("held", || {
+            s.h.uploader
+                .holding
+                .load(std::sync::atomic::Ordering::SeqCst)
+        });
+        s.app.cancel_job(job).unwrap();
+        wait_done(&s.app, job);
+        // The policy changed since (or the agent resumes it for a profile
+        // that never accepted it): the stored profile says so.
+        let mut profile = s.app.profile().clone();
+        profile.privacy = None;
+        bardo_domain::ProfileRepository::save(&*s.h.db, &profile).unwrap();
+
+        s.app.resume_upload(job).unwrap();
+        wait_done(&s.app, job);
+        let resumed = upload_jobs(&s.app).pop().unwrap();
+        assert_eq!(resumed.state(), JobState::Failed);
+        assert_eq!(
+            resumed.failure().map(|failure| failure.kind),
+            Some(JobFailureKind::NotAllowed)
+        );
+        assert_eq!(s.h.uploader.chunk_starts(), [0], "nothing more sent");
     }
 
     #[test]

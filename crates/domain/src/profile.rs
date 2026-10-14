@@ -5,7 +5,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    DEFAULT_CUT_FLOOR, LayoutId, MetricsSyncOnStart, RepositoryError, Score, UiThemePreference,
+    DEFAULT_CUT_FLOOR, LayoutId, MetricsSyncOnStart, PrivacyConsent, RepositoryError, Score,
+    UiThemePreference,
 };
 
 /// Identifies a user profile. Every entity carries the owning profile so more
@@ -106,6 +107,9 @@ pub struct UserProfile {
     /// Whether Bardo looks for a newer release when it opens and once a
     /// day (ADR-0011). On until the user turns it off.
     pub update_check: bool,
+    /// The privacy policy the user accepted before Bardo used YouTube
+    /// (ADR-0012); none until they do.
+    pub privacy: Option<PrivacyConsent>,
 }
 
 impl UserProfile {
@@ -121,7 +125,14 @@ impl UserProfile {
             background_agent: false,
             auto_backup: true,
             update_check: true,
+            privacy: None,
         }
+    }
+
+    /// Whether the user accepted the current privacy policy, so Bardo may
+    /// use YouTube.
+    pub fn accepted_privacy(&self) -> bool {
+        self.privacy.is_some_and(|consent| consent.is_current())
     }
 }
 

@@ -22,6 +22,8 @@ Ideas are written for one channel and one niche. The niches to choose from are t
 
 **Rank again** shows when ideas are waiting: ones you edited, ones whose ranking failed, or ones ranked before your videos had numbers. It ranks only those, without asking for new ideas.
 
+A ranking is made from YouTube data, so it goes with that data 30 days after it was made: the idea stays, waiting to be ranked again ([Privacy policy](privacy.md#kept)).
+
 <a id="ranking"></a>
 ## Priority and confidence
 

@@ -184,9 +184,10 @@ pub mod refs {
     pub const AGENT_ON: GuideRef = at("background-agent", "turn-on");
     pub const SHORTCUTS_LISTS: GuideRef = at("shortcuts", "lists");
     pub const SHORTCUTS_GUIDE: GuideRef = at("shortcuts", "guide");
+    pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 61] = [
+    pub const ALL: [GuideRef; 62] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -248,6 +249,7 @@ pub mod refs {
         AGENT_ON,
         SHORTCUTS_LISTS,
         SHORTCUTS_GUIDE,
+        PRIVACY_POLICY,
     ];
 }
 

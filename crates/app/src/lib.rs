@@ -44,6 +44,7 @@ mod tours;
 mod updates;
 mod uploads;
 mod voice_samples;
+mod youtube_policy;
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -59,8 +60,8 @@ use bardo_domain::{
     Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
     SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator,
     ThemeRepository, TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference,
-    UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, Zone,
-    running_since,
+    UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore,
+    YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -88,7 +89,7 @@ pub use clips::{ClipsView, SceneClipView};
 pub use connections::{
     AccountChoice, AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult,
     ConnectionCheck, ConnectionError, ConnectionRenewal, ConnectionState, Disconnected,
-    Disconnection, TokenConnect, TokenConnectResult, TokenConnected,
+    Disconnection, TokenConnect, TokenConnectResult, TokenConnected, YouTubeUpkeep,
 };
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
@@ -161,6 +162,9 @@ pub use uploads::{
     UploadState, upload_state,
 };
 pub use voice_samples::{SampleAudio, SamplePlayer, VoiceSample, VoiceSampleError, VoiceSampling};
+pub use youtube_policy::{
+    GOOGLE_PERMISSIONS_URL, GOOGLE_PRIVACY_URL, PRIVACY_PAGE, YOUTUBE_TERMS_URL, privacy_policy_url,
+};
 
 use crate::clips::ClipHandler;
 use crate::connections::ConnectionBook;
@@ -253,6 +257,9 @@ pub struct Repositories {
     pub installers: Arc<dyn InstallerStore>,
     /// Starts an update's installer.
     pub installer_runner: Arc<dyn InstallerRunner>,
+    /// Deletes stored YouTube data (ADR-0012). Shared with background
+    /// work.
+    pub youtube_data: Arc<dyn YouTubeDataStore>,
 }
 
 impl Repositories {
@@ -318,6 +325,7 @@ impl Repositories {
             cut_suggestions: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             tours: Box::new(Arc::clone(&db)),
+            youtube_data: Arc::clone(&db) as _,
             research: db,
             files,
             voice_samples: Arc::new(MemoryVoiceSamples::default()),
@@ -577,6 +585,7 @@ impl Bardo {
             backups,
             installers,
             installer_runner,
+            youtube_data,
         } = repositories;
         let profile = match profiles.load_default()? {
             Some(profile) => profile,
@@ -697,6 +706,7 @@ impl Bardo {
             providers.sign_ins,
             providers.consent,
             redactor.clone(),
+            youtube_data,
         );
         let metrics_handler = MetricsSyncHandler {
             owner: profile.id,
@@ -1631,7 +1641,12 @@ pub(crate) mod testing {
     pub(crate) struct FakeVideoStats {
         pub(crate) found: Mutex<Vec<bardo_domain::VideoStatistics>>,
         pub(crate) calls: Mutex<Vec<Vec<String>>>,
+        /// The calls made with a connected channel's token, also in
+        /// `calls`.
+        pub(crate) owned: Mutex<Vec<Vec<String>>>,
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// Fails only the reads made with a channel's token.
+        pub(crate) owned_failure: Mutex<Option<ProviderFailure>>,
         /// While set, calls wait (a test can catch a sync running).
         pub(crate) hold: std::sync::atomic::AtomicBool,
     }
@@ -1653,12 +1668,15 @@ pub(crate) mod testing {
         pub(crate) fn calls(&self) -> Vec<Vec<String>> {
             self.calls.lock().unwrap().clone()
         }
+
+        pub(crate) fn owned(&self) -> Vec<Vec<String>> {
+            self.owned.lock().unwrap().clone()
+        }
     }
 
-    impl bardo_domain::VideoStats for FakeVideoStats {
-        fn statistics(
+    impl FakeVideoStats {
+        fn answer(
             &self,
-            _key: &ApiKey,
             ids: &[&str],
         ) -> Result<Vec<bardo_domain::VideoStatistics>, ProviderFailure> {
             while self.hold.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1679,6 +1697,98 @@ pub(crate) mod testing {
                 .filter(|stats| ids.contains(&stats.post_id.as_str()))
                 .cloned()
                 .collect())
+        }
+    }
+
+    impl bardo_domain::VideoStats for FakeVideoStats {
+        fn statistics(
+            &self,
+            _key: &ApiKey,
+            ids: &[&str],
+        ) -> Result<Vec<bardo_domain::VideoStatistics>, ProviderFailure> {
+            self.answer(ids)
+        }
+
+        fn owned_statistics(
+            &self,
+            _access_token: &bardo_domain::SecretText,
+            ids: &[&str],
+        ) -> Result<Vec<bardo_domain::VideoStatistics>, ProviderFailure> {
+            self.owned
+                .lock()
+                .unwrap()
+                .push(ids.iter().map(|id| (*id).to_owned()).collect());
+            if let Some(failure) = self.owned_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            self.answer(ids)
+        }
+    }
+
+    /// One deletion asked of [`FakeYouTubeData`].
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) enum YouTubeDataCall {
+        /// The upkeep, with the accounts it kept authorized.
+        Expired(Vec<bardo_domain::NetworkAccountId>),
+        Account(bardo_domain::NetworkAccountId),
+        All,
+    }
+
+    /// Records each deletion of YouTube data; deletes nothing. The stored
+    /// privacy policy reads accepted unless `unaccepted` is set.
+    #[derive(Default)]
+    pub(crate) struct FakeYouTubeData {
+        pub(crate) calls: Mutex<Vec<YouTubeDataCall>>,
+        pub(crate) unaccepted: std::sync::atomic::AtomicBool,
+    }
+
+    impl FakeYouTubeData {
+        pub(crate) fn calls(&self) -> Vec<YouTubeDataCall> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl bardo_domain::YouTubeDataStore for FakeYouTubeData {
+        fn forget_expired(
+            &self,
+            _: bardo_domain::ProfileId,
+            rule: &bardo_domain::YouTubeRetention,
+        ) -> Result<bardo_domain::Forgotten, bardo_domain::RepositoryError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(YouTubeDataCall::Expired(rule.authorized.clone()));
+            Ok(bardo_domain::Forgotten::default())
+        }
+
+        fn forget_account(
+            &self,
+            account: bardo_domain::NetworkAccountId,
+            _: SystemTime,
+        ) -> Result<bardo_domain::Forgotten, bardo_domain::RepositoryError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(YouTubeDataCall::Account(account));
+            Ok(bardo_domain::Forgotten::default())
+        }
+
+        fn forget_all(
+            &self,
+            _: bardo_domain::ProfileId,
+        ) -> Result<bardo_domain::Forgotten, bardo_domain::RepositoryError> {
+            self.calls.lock().unwrap().push(YouTubeDataCall::All);
+            Ok(bardo_domain::Forgotten {
+                research: 1,
+                ..bardo_domain::Forgotten::default()
+            })
+        }
+
+        fn privacy_accepted(
+            &self,
+            _: bardo_domain::ProfileId,
+        ) -> Result<bool, bardo_domain::RepositoryError> {
+            Ok(!self.unaccepted.load(std::sync::atomic::Ordering::SeqCst))
         }
     }
 
@@ -2008,6 +2118,7 @@ mod tests {
             backups: Arc::new(bardo_storage::MemoryBackups::default()),
             installers: Arc::new(bardo_storage::MemoryInstallers::default()),
             installer_runner: Arc::new(bardo_storage::MemoryInstallerRunner::default()),
+            youtube_data: Arc::new(crate::testing::FakeYouTubeData::default()),
             profiles: Box::new(profiles.clone()),
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
