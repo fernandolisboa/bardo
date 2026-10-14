@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=utf-8
+
+{"data":{"id":"1880028106020515840","media_key":"7_1880028106020515840","expires_after_secs":86400}}

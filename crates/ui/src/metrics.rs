@@ -764,6 +764,8 @@ fn upload_state(
                     Text::UploadReelProcessingHint
                 } else if publication.network().uploads_drafts() {
                     Text::UploadDraftProcessingHint
+                } else if publication.network().publishes_uploads() {
+                    Text::UploadPostProcessingHint
                 } else {
                     Text::UploadProcessingHint
                 })

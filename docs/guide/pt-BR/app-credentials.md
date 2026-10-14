@@ -18,8 +18,9 @@ Para enviar a uma rede e ler os números dela, o Bardo entra nela com um app que
 | YouTube | Um cliente OAuth do Google do tipo App para computador, no seu projeto do Google Cloud | ID do cliente e chave secreta do cliente |
 | Instagram Reels | Um app do tipo Empresa na sua conta de desenvolvedor da Meta, com o Login do Facebook para Empresas | ID do app e chave secreta do app |
 | TikTok | Um app (ou o sandbox dele) na sua conta do TikTok for Developers | Client key e client secret |
+| X | Um app no seu X Developer Console, com OAuth 2.0 e créditos | OAuth 2.0 client ID e client secret |
 
-X e Kick não têm cartão: o Bardo exporta os posts deles para você postar à mão. A linha embaixo do nome da rede, em cada cartão, diz do que o app precisa; o guia de cada rede mostra o caminho passo a passo.
+A Kick não tem cartão: o Bardo exporta os posts dela para você postar à mão. A linha embaixo do nome da rede, em cada cartão, diz do que o app precisa; o guia de cada rede mostra o caminho passo a passo.
 
 <a id="why"></a>
 ## Por que o Bardo não traz nenhum
@@ -31,6 +32,7 @@ Configurar um app leva alguns minutos por rede, uma vez só:
 - [Conectar o YouTube](connect-youtube.md)
 - [Conectar o Instagram](connect-instagram.md)
 - [Conectar o TikTok](connect-tiktok.md)
+- [Conectar o X](connect-x.md)
 
 <a id="step-by-step"></a>
 ## Passo a passo de cada app

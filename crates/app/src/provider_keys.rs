@@ -87,8 +87,7 @@ impl ProviderKeys {
         redactor: Redactor,
         owner: ProfileId,
     ) -> Self {
-        let slots = Provider::ALL
-            .into_iter()
+        let slots = Provider::with_keys()
             .map(|provider| {
                 let state = match store.get(owner, provider) {
                     Ok(Some(key)) => {
@@ -207,8 +206,7 @@ pub struct KeyTestResult {
 impl Bardo {
     /// Every provider, in settings order, with its key state.
     pub fn provider_keys(&self) -> Vec<ProviderKeyStatus> {
-        Provider::ALL
-            .into_iter()
+        Provider::with_keys()
             .map(|provider| self.provider_key(provider))
             .collect()
     }
@@ -431,7 +429,7 @@ mod tests {
         let keys = app.provider_keys();
         assert_eq!(
             keys.iter().map(|k| k.provider).collect::<Vec<_>>(),
-            Provider::ALL
+            Provider::with_keys().collect::<Vec<_>>()
         );
         assert!(
             keys.iter()

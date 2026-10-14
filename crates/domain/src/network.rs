@@ -65,12 +65,26 @@ impl Network {
         self == Network::YouTube
     }
 
+    /// Whether an upload only becomes a post when Bardo asks for it, once
+    /// the network processed the file: Instagram's `media_publish` of a
+    /// container, X's post made with the uploaded media (#147).
+    pub fn publishes_uploads(self) -> bool {
+        matches!(self, Network::InstagramReels | Network::X)
+    }
+
     /// Whether Bardo publishes a scheduled upload itself, at its due time,
     /// while the app is open (the in-app scheduler, ADR-0006): the network
     /// takes no publish time, and Bardo makes the post (Instagram's
-    /// `media_publish`).
+    /// `media_publish`, X's post).
     pub fn schedules_in_app(self) -> bool {
-        self == Network::InstagramReels
+        self.publishes_uploads()
+    }
+
+    /// Whether the network bills each post an app makes (X's API is paid
+    /// per use), so the upload review shows the price and checks the
+    /// budget, and the post is recorded on the costs screen.
+    pub fn bills_posts(self) -> bool {
+        self == Network::X
     }
 
     /// Whether an upload declares whether the video is made for kids
@@ -691,6 +705,21 @@ mod tests {
                 .contains(&Visibility::Unlisted)
         );
         assert_eq!(Network::X.visibilities(), [Visibility::Public]);
+    }
+
+    #[test]
+    fn bardo_makes_the_post_and_keeps_the_schedule_on_instagram_and_x() {
+        for network in [Network::InstagramReels, Network::X] {
+            assert!(network.publishes_uploads(), "{network}");
+            assert!(network.schedules_in_app(), "{network}");
+            assert!(!network.schedules_uploads(), "{network}");
+        }
+        for network in [Network::YouTube, Network::TikTok, Network::Kick] {
+            assert!(!network.publishes_uploads(), "{network}");
+            assert!(!network.schedules_in_app(), "{network}");
+        }
+        assert!(!Network::X.uploads_reels());
+        assert!(!Network::X.uploads_drafts());
     }
 
     #[test]

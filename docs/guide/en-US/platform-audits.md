@@ -18,8 +18,9 @@ In [Settings › Networks](bardo:go/settings/networks), each app card's **Audits
 | YouTube | Only for quota above the defaults, and possibly for public uploads (see [Kept private](#youtube-private)) | Compliance with YouTube's Developer Policies, a privacy policy, screenshots and a demo account | Nothing in code; your project's quota |
 | TikTok | No, and it could not pass: personal tools are rejected. Drafts to your inbox work from the sandbox | A public website with privacy policy and terms, a demo video of the whole flow, a reason per scope | Nothing, unless Bardo ships an app of its own |
 | Instagram | No: Standard Access serves the accounts you own or manage | App Review (a screen recording per permission) and Business Verification, for Advanced Access | Nothing, unless accounts you don't manage should connect |
+| X | No: X has no app review; access is paid per use from credits | Accepting the Developer Agreement and Policy, and a short description of your use | Nothing |
 
-Facts checked on 2026-10-13 against each network's documentation, linked in each section.
+Facts checked on 2026-10-13 (X on 2026-10-14) against each network's documentation, linked in each section.
 
 <a id="youtube-need"></a>
 ## YouTube: do you need the audit?
@@ -156,3 +157,20 @@ Meta says a decision usually comes within a week. Apps with Advanced Access also
 ## Instagram: what changes after approval
 
 For your own accounts, nothing: Standard Access already serves them. Advanced Access would let Instagram accounts whose owners have no role on your app connect to it, which Bardo does not offer: each person who uses Bardo registers their own app.
+
+<a id="x-need"></a>
+## X: do you need a review?
+
+No. X's [Getting access](https://docs.x.com/x-api/getting-started/getting-access) page sets an app up in three steps (sign up in the Developer Console, create the app, save its credentials) with no review in between. Access is [paid per use](https://docs.x.com/x-api/getting-started/pricing) from credits you buy, so what limits an app is its credits, its spending limit and X's rate limits (for posts, 100 per 15 minutes per account and 10,000 per day per app), not an approval.
+
+<a id="x-asks"></a>
+## X: what X asks
+
+- In the Developer Console: accepting the Developer Agreement and Policy, and basic information about how you'll use the API.
+- For the app: a name, a description and a use case.
+- Afterwards, following the Developer Policy and X's automation rules: Bardo posts only what you reviewed, from your own account, one post per video.
+
+<a id="x-after"></a>
+## X: what changes after approval
+
+There is no approval to wait for. More volume than pay per use allows (3 million post reads a month, which Bardo never comes near) needs X's Enterprise plan, which Bardo does not need.

@@ -1,6 +1,7 @@
 //! The one-shot loopback callback (ADR-0008): a listener on `127.0.0.1` at
-//! a random port and the network's callback path, which takes exactly one
-//! browser request carrying the expected `state` and then closes.
+//! a random port (or the one port a network registers, X) and the
+//! network's callback path, which takes exactly one browser request
+//! carrying the expected `state` and then closes.
 //!
 //! Plain `std::net`, no unsafe code: the listener is polled so a timeout or
 //! a cancel from the app ends the wait.
@@ -27,8 +28,12 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 pub struct LoopbackReceiver;
 
 impl ConsentReceiver for LoopbackReceiver {
-    fn listen(&self, path: &str) -> Result<Box<dyn ConsentCallback>, ConsentError> {
-        Ok(Box::new(LoopbackCallback::bind(path)?))
+    fn listen(
+        &self,
+        path: &str,
+        port: Option<u16>,
+    ) -> Result<Box<dyn ConsentCallback>, ConsentError> {
+        Ok(Box::new(LoopbackCallback::bind(path, port)?))
     }
 }
 
@@ -41,20 +46,30 @@ pub struct LoopbackCallback {
 }
 
 impl LoopbackCallback {
-    /// Listens on `127.0.0.1` at a port the system picks, for a callback
-    /// on `path`. The literal IP, not `localhost`, as Google asks:
-    /// `localhost` could resolve to another interface. The root path keeps
-    /// the bare address (`http://127.0.0.1:port`), as Google's examples
-    /// write it; any other is appended as given (TikTok registers
-    /// `http://127.0.0.1:*/callback/`).
-    pub fn bind(path: &str) -> Result<Self, ConsentError> {
+    /// Listens on `127.0.0.1` at `port`, or at a port the system picks,
+    /// for a callback on `path`. The literal IP, not `localhost`, as Google
+    /// and X ask: `localhost` could resolve to another interface. The root
+    /// path keeps the bare address (`http://127.0.0.1:port`), as Google's
+    /// examples write it; any other is appended as given (TikTok registers
+    /// `http://127.0.0.1:*/callback/`, X the whole address with its port).
+    /// A fixed port another program holds is `ConsentError::PortInUse`.
+    pub fn bind(path: &str, port: Option<u16>) -> Result<Self, ConsentError> {
         if !is_path(path) {
             return Err(ConsentError::Listen(format!(
                 "not a callback path: {path:?}"
             )));
         }
         let listen = |error: std::io::Error| ConsentError::Listen(error.to_string());
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(listen)?;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port.unwrap_or(0))).map_err(
+            |error| match (port, error.kind()) {
+                // Windows answers a port held by another program's
+                // exclusive socket with access denied.
+                (Some(port), ErrorKind::AddrInUse | ErrorKind::PermissionDenied) => {
+                    ConsentError::PortInUse(port)
+                }
+                _ => listen(error),
+            },
+        )?;
         listener.set_nonblocking(true).map_err(listen)?;
         let port = listener.local_addr().map_err(listen)?.port();
         let suffix = if path == "/" { "" } else { path };
@@ -289,7 +304,7 @@ mod tests {
         thread::JoinHandle<Result<SecretText, ConsentError>>,
         Arc<AtomicBool>,
     ) {
-        let callback = Box::new(LoopbackCallback::bind(path).unwrap());
+        let callback = Box::new(LoopbackCallback::bind(path, None).unwrap());
         let uri = callback.redirect_uri().to_owned();
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
@@ -301,8 +316,8 @@ mod tests {
 
     #[test]
     fn the_redirect_is_the_loopback_ip_with_a_random_port() {
-        let a = LoopbackCallback::bind("/").unwrap();
-        let b = LoopbackCallback::bind("/").unwrap();
+        let a = LoopbackCallback::bind("/", None).unwrap();
+        let b = LoopbackCallback::bind("/", None).unwrap();
         assert!(a.redirect_uri().starts_with("http://127.0.0.1:"));
         assert_ne!(a.redirect_uri(), b.redirect_uri());
         assert!(!a.redirect_uri().ends_with(":0"));
@@ -331,10 +346,36 @@ mod tests {
     }
 
     #[test]
+    fn a_fixed_port_is_the_one_in_the_redirect_and_a_taken_one_says_so() {
+        // A port the system just had free, so the test does not depend on
+        // one being free on every machine.
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let callback = LoopbackCallback::bind("/callback", Some(port)).unwrap();
+        assert_eq!(
+            callback.redirect_uri(),
+            format!("http://127.0.0.1:{port}/callback")
+        );
+        // While it listens, another sign-in cannot take the port.
+        assert_eq!(
+            LoopbackCallback::bind("/callback", Some(port)).unwrap_err(),
+            ConsentError::PortInUse(port)
+        );
+        drop(callback);
+        assert!(LoopbackCallback::bind("/callback", Some(port)).is_ok());
+    }
+
+    #[test]
     fn a_path_that_is_not_one_is_refused() {
         for bad in ["", "callback", "/call back", "/cb?x=1", "/cb#top", "/%2F"] {
             assert!(
-                matches!(LoopbackCallback::bind(bad), Err(ConsentError::Listen(_))),
+                matches!(
+                    LoopbackCallback::bind(bad, None),
+                    Err(ConsentError::Listen(_))
+                ),
                 "{bad:?}"
             );
         }

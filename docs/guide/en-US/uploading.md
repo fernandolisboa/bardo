@@ -8,7 +8,7 @@ tour: publish
 
 # Uploading and scheduling
 
-The [Publish](bardo:go/projects/publish) stage turns each rendered file into a post: it writes the post's text for each network, then uploads it to a connected YouTube, Instagram Reels or TikTok account, or [exports](exporting.md) it for you to post by hand. Nothing leaves your computer until you confirm a review. [Show me the stage](bardo:tour/publish).
+The [Publish](bardo:go/projects/publish) stage turns each rendered file into a post: it writes the post's text for each network, then uploads it to a connected YouTube, Instagram Reels, TikTok or X account, or [exports](exporting.md) it for you to post by hand. Nothing leaves your computer until you confirm a review. [Show me the stage](bardo:tour/publish).
 
 <a id="networks"></a>
 ## One post per network
@@ -42,7 +42,8 @@ When the narrator's voice is flagged as a clone or a realistic synthetic voice, 
 - **YouTube**: "Altered or synthetic content", which the upload review ticks for you.
 - **Instagram**: the AI info label, which the review ticks for you.
 - **TikTok**: the AI-generated content label, which you turn on in the TikTok app; the review's reminder brings it up when the draft arrives.
-- **X and Kick** have no label: say it in the post's text or title.
+- **X**: the Made with AI label, which the upload review ticks for you. Posting an export by hand, say it in the post's text.
+- **Kick** has no label: say it in the title.
 
 An export's metadata file says where to set the label on each network.
 
@@ -53,10 +54,11 @@ A connected account offers **Review upload**. The button stays off, with the rea
 
 - the file, the account, and the title, description and tags (or the caption) as the network gets them;
 - your choices: visibility and made for kids on YouTube, the cover and Also show in Feed on Instagram, the synthetic-content label;
+- on X, what X bills for the post, and a question first when it would reach X's budget;
 - when it goes (see [below](#schedule));
 - if the project already has a post on that network, a box to replace it in Bardo (the post itself stays on the network).
 
-Confirming starts the upload as a job, with its progress here and in Jobs. If the render, the cut or the metadata changes while the review is open, Bardo closes it and asks you to review again. Each network's guide has the details: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft).
+Confirming starts the upload as a job, with its progress here and in Jobs. If the render, the cut or the metadata changes while the review is open, Bardo closes it and asks you to review again. Each network's guide has the details: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft), [X](connect-x.md#upload).
 
 <a id="states"></a>
 ## Upload states
@@ -69,7 +71,7 @@ Confirming starts the upload as a job, with its progress here and in Jobs. If th
 | Processing | The network has the file and is working on it |
 | Still processing | Bardo stopped waiting for the network; **Check again** later |
 | Scheduled | On YouTube, private until its publish time |
-| Scheduled in Bardo | Instagram: Bardo posts it at its time, with Bardo open or the [background agent](background-agent.md) on |
+| Scheduled in Bardo | Instagram and X: Bardo posts it at its time, with Bardo open or the [background agent](background-agent.md) on |
 | Missed its time | Bardo was closed at that time; see [Missed posts](missed-posts.md) |
 | Over the publishing limit | Queued until the network takes more posts |
 | Uploaded | On the network, with its link |
@@ -84,6 +86,7 @@ Each network schedules in its own way:
 
 - **YouTube** takes a publish time. In the review, choose **Schedule** and type the date and time, read in your computer's time zone: Bardo uploads the video as private and YouTube makes it public at that time by itself, even with Bardo and your computer off. Until then, **Change time** and **Cancel schedule** change it on YouTube. More in [Scheduling on YouTube](connect-youtube.md#schedule).
 - **Instagram** takes no publish time from apps. With **Schedule**, Bardo sends the file ahead and publishes the Reel itself at that time, so keep Bardo open then and the computer on, or turn on the [background agent](background-agent.md), which sends it with Bardo closed. If neither runs, nothing is posted and Bardo asks what to do when it opens: see [Missed posts](missed-posts.md).
+- **X** takes no publish time from apps either: it schedules like Instagram, with Bardo making the post at its time. See [Scheduling a post](connect-x.md#schedule).
 - **TikTok** gets a draft in your inbox, never a post. You paste the caption, choose who can watch, and post or schedule it in the TikTok app. Bardo doesn't schedule drafts.
 
 A time that has already passed is refused when you confirm.
@@ -91,7 +94,7 @@ A time that has already passed is refused when you confirm.
 <a id="export"></a>
 ## Export
 
-**Export** writes one folder per chosen network with the rendered file and a metadata file to copy from, for posting by hand on any of the five networks. It is the way to post on X and Kick, and works for the others too. See [Exporting](exporting.md).
+**Export** writes one folder per chosen network with the rendered file and a metadata file to copy from, for posting by hand on any of the five networks. It is the way to post on Kick, and works for the others too. See [Exporting](exporting.md).
 
 <a id="post"></a>
 ## The post

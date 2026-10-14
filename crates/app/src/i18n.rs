@@ -920,6 +920,7 @@ pub enum Text {
     ConnectionTimedOut,
     ConnectionCancelled,
     ConnectionListenFailed,
+    ConnectionPortInUse,
     ConnectionMissingScopes(Network),
     ConnectionTokensTooLarge,
     ConnectionStoreFailed,
@@ -1309,6 +1310,7 @@ pub enum Text {
     /// Opens the guide's list of why YouTube keeps a video private.
     UploadRestrictedCauses,
     UploadFailureQuota,
+    UploadFailureCredits,
     UploadFailureUploadLimit,
     UploadFailureReconnect,
     UploadFailureRejected,
@@ -1335,6 +1337,7 @@ pub enum Text {
     UploadRestrictedScheduledHint,
     UploadFailureScheduleMissed,
     UploadReelHint,
+    UploadPostHint,
     UploadFieldAccount,
     UploadFieldCaption,
     UploadFieldCover,
@@ -1345,9 +1348,16 @@ pub enum Text {
     UploadShareToFeedHint,
     UploadAiLabel,
     UploadAiLabelHint,
+    UploadPostAiLabel,
+    UploadPostAiLabelHint,
     UploadReelIrreversible,
+    UploadPostIrreversible,
     UploadReelStart,
+    UploadPostStart,
+    UploadPostCost,
+    UploadPostCostHint,
     UploadReelProcessingHint,
+    UploadPostProcessingHint,
     UploadStateOverLimit,
     UploadOverLimitHint,
     UploadOverLimitSoonHint,
@@ -1590,6 +1600,7 @@ pub enum Text {
     UploadDraftHint,
     UploadDraftNotice,
     UploadFieldDraftCaption,
+    UploadFieldPostText,
     UploadDraftAiLabel,
     UploadDraftAiLabelHint,
     UploadDraftIrreversible,
@@ -2131,6 +2142,7 @@ impl Text {
             Text::ConnectionTimedOut => "connection.error.timed_out",
             Text::ConnectionCancelled => "connection.error.cancelled",
             Text::ConnectionListenFailed => "connection.error.listen_failed",
+            Text::ConnectionPortInUse => "connection.error.port_in_use",
             Text::ConnectionMissingScopes(network) => {
                 return format!("connection.{}.missing_scopes", network.code()).into();
             }
@@ -3147,6 +3159,7 @@ impl Text {
             Text::UploadRestrictedHint => "upload.restricted_hint",
             Text::UploadRestrictedCauses => "upload.restricted_causes",
             Text::UploadFailureQuota => "upload.failure.quota",
+            Text::UploadFailureCredits => "upload.failure.credits",
             Text::UploadFailureUploadLimit => "upload.failure.upload_limit",
             Text::UploadFailureReconnect => "upload.failure.reconnect",
             Text::UploadFailureRejected => "upload.failure.rejected",
@@ -3174,6 +3187,7 @@ impl Text {
             Text::UploadRestrictedScheduledHint => "upload.restricted_scheduled_hint",
             Text::UploadFailureScheduleMissed => "upload.failure.schedule_missed",
             Text::UploadReelHint => "upload.reel_hint",
+            Text::UploadPostHint => "upload.post_hint",
             Text::UploadFieldAccount => "upload.field.account",
             Text::UploadFieldCaption => "upload.field.caption",
             Text::UploadFieldCover => "upload.field.cover",
@@ -3184,9 +3198,16 @@ impl Text {
             Text::UploadShareToFeedHint => "upload.share_to_feed_hint",
             Text::UploadAiLabel => "upload.ai_label",
             Text::UploadAiLabelHint => "upload.ai_label_hint",
+            Text::UploadPostAiLabel => "upload.post_ai_label",
+            Text::UploadPostAiLabelHint => "upload.post_ai_label_hint",
             Text::UploadReelIrreversible => "upload.reel_irreversible",
+            Text::UploadPostIrreversible => "upload.post_irreversible",
             Text::UploadReelStart => "upload.reel_start",
+            Text::UploadPostStart => "upload.post_start",
+            Text::UploadPostCost => "upload.post_cost",
+            Text::UploadPostCostHint => "upload.post_cost_hint",
             Text::UploadReelProcessingHint => "upload.reel_processing_hint",
+            Text::UploadPostProcessingHint => "upload.post_processing_hint",
             Text::UploadStateOverLimit => "upload.state.over_limit",
             Text::UploadOverLimitHint => "upload.over_limit_hint",
             Text::UploadOverLimitSoonHint => "upload.over_limit_soon_hint",
@@ -3390,6 +3411,7 @@ impl Text {
             Text::UploadDraftHint => "upload.draft_hint",
             Text::UploadDraftNotice => "upload.draft_notice",
             Text::UploadFieldDraftCaption => "upload.field.draft_caption",
+            Text::UploadFieldPostText => "upload.field.post_text",
             Text::UploadDraftAiLabel => "upload.draft_ai_label",
             Text::UploadDraftAiLabelHint => "upload.draft_ai_label_hint",
             Text::UploadDraftIrreversible => "upload.draft_irreversible",
@@ -4477,7 +4499,7 @@ mod tests {
         texts.extend(NicheSeedError::ALL.map(Text::NicheSeedError));
         texts.extend(Provider::ALL.map(Text::ProviderName));
         texts.extend(Provider::ALL.map(Text::ProviderPurpose));
-        texts.extend(Provider::ALL.map(Text::ProviderKeyPlaceholder));
+        texts.extend(Provider::with_keys().map(Text::ProviderKeyPlaceholder));
         texts.extend(KeyCheckOutcome::ALL.map(Text::KeyCheckOutcome));
         texts.extend(ApiKeyError::ALL.map(Text::ApiKeyError));
         texts.extend(UiLanguage::ALL.map(Text::LanguageName));
@@ -4573,6 +4595,7 @@ mod tests {
             Text::ConnectionTimedOut,
             Text::ConnectionCancelled,
             Text::ConnectionListenFailed,
+            Text::ConnectionPortInUse,
             Text::ConnectionTokensTooLarge,
             Text::ConnectionStoreFailed,
             Text::ConnectionNotSaved,
@@ -5000,6 +5023,7 @@ mod tests {
         texts.push(Text::UploadRestrictedHint);
         texts.push(Text::UploadRestrictedCauses);
         texts.push(Text::UploadFailureQuota);
+        texts.push(Text::UploadFailureCredits);
         texts.push(Text::UploadFailureUploadLimit);
         texts.push(Text::UploadFailureReconnect);
         texts.push(Text::UploadFailureRejected);
@@ -5028,6 +5052,7 @@ mod tests {
         texts.push(Text::UploadFailureScheduleMissed);
         texts.extend([
             Text::UploadReelHint,
+            Text::UploadPostHint,
             Text::UploadFieldAccount,
             Text::UploadFieldCaption,
             Text::UploadFieldCover,
@@ -5038,9 +5063,16 @@ mod tests {
             Text::UploadShareToFeedHint,
             Text::UploadAiLabel,
             Text::UploadAiLabelHint,
+            Text::UploadPostAiLabel,
+            Text::UploadPostAiLabelHint,
             Text::UploadReelIrreversible,
+            Text::UploadPostIrreversible,
             Text::UploadReelStart,
+            Text::UploadPostStart,
+            Text::UploadPostCost,
+            Text::UploadPostCostHint,
             Text::UploadReelProcessingHint,
+            Text::UploadPostProcessingHint,
             Text::UploadStateOverLimit,
             Text::UploadOverLimitHint,
             Text::UploadOverLimitSoonHint,
@@ -5247,6 +5279,7 @@ mod tests {
         texts.push(Text::UploadDraftHint);
         texts.push(Text::UploadDraftNotice);
         texts.push(Text::UploadFieldDraftCaption);
+        texts.push(Text::UploadFieldPostText);
         texts.push(Text::UploadDraftAiLabel);
         texts.push(Text::UploadDraftAiLabelHint);
         texts.push(Text::UploadDraftIrreversible);

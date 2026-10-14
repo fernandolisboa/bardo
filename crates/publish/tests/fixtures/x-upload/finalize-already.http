@@ -1,0 +1,10 @@
+HTTP/2 400 
+content-type: application/problem+json
+
+{
+  "title": "Invalid Request",
+  "detail": "One or more parameters to your request was invalid.",
+  "type": "https://api.twitter.com/2/problems/invalid-request",
+  "errors": [{"message": "Upload is already finalized."}],
+  "status": 400
+}

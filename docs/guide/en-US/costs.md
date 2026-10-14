@@ -30,10 +30,12 @@ The figures at the top add it up: what was spent, across how many providers; how
 
 Free providers, like the YouTube Data API, have a daily quota instead of a price, so they take no budget. A budget is per month; the next month starts from zero.
 
+The X API is a provider too, with no key: each post Bardo makes on X is billed from your X app's credits and recorded here under X (see [Connecting X](connect-x.md#costs)). A budget for X makes a post that would reach it ask first.
+
 <a id="rates"></a>
 ## Rates and models without a price
 
-**Rates** is the price list Bardo uses when a provider does not say what a call cost: per million tokens, per thousand characters, per second of video or per hour of audio. A model name covers every model that starts with it. **Edit** changes a price, **Restore** brings Bardo's own price back, and **Add a rate** prices a model the list does not have. A changed price applies to new calls; recorded costs keep theirs.
+**Rates** is the price list Bardo uses when a provider does not say what a call cost: per million tokens, per thousand characters, per second of video, per hour of audio or per post. A model name covers every model that starts with it. **Edit** changes a price, **Restore** brings Bardo's own price back, and **Add a rate** prices a model the list does not have. A changed price applies to new calls; recorded costs keep theirs.
 
 When a model ran without any price, its calls count as nothing, and the figure **Calls without a price** says which models. **Add price** opens the rate form with that model filled in.
 

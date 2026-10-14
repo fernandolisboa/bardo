@@ -27,6 +27,11 @@
 //! finished in the TikTok app, and has no visibility, time or made for kids.
 //! A file outside TikTok's specs blocks it, and so does TikTok's cap of
 //! drafts from apps in 24 hours, with when the next one may go.
+//!
+//! An X post (#147) is reviewed with its text, when it goes (at once once
+//! processed, or scheduled in Bardo as a Reel is) and X's "Made with AI"
+//! label. X bills each post, so the review shows what it costs, and asks
+//! before a post that reaches X's monthly budget.
 
 use std::time::SystemTime;
 
@@ -34,8 +39,8 @@ use bardo_app::bardo_domain::{
     JobId, PublicationId, ScheduleProblem, Visibility, format_cover_time, parse_cover_time,
 };
 use bardo_app::{
-    Control, MissedPostError, ScheduleError, ScheduleResult, Text, TourAnchor, UploadBlock,
-    UploadChoices, UploadReview, UploadReviewError, UploadState,
+    BudgetConsent, Control, MissedPostError, ScheduleError, ScheduleResult, Text, TourAnchor,
+    UploadBlock, UploadChoices, UploadReview, UploadReviewError, UploadState,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -52,6 +57,7 @@ use crate::appearance::look;
 use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
+use crate::spend::{budget_question, estimate_note};
 
 fn label(text: SharedString) -> gpui_kit::Div {
     div().text_xs().font_semibold().child(text)
@@ -156,6 +162,7 @@ impl ProjectsScreen {
             let choices = review.choices();
             self.upload_draft = Some((review, choices));
             self.upload_error = None;
+            self.upload_budget_ask = None;
             self.upload_scheduled = false;
             self.schedule_edit = None;
             self.schedule_notice = None;
@@ -360,11 +367,15 @@ impl ProjectsScreen {
                 }
             }
         }
+        self.upload_budget_ask = None;
         match self.bardo.read(cx).start_upload(&review, choices) {
             Ok(_) => {
                 self.upload_draft = None;
                 self.upload_error = None;
                 self.export_notice = Some(Text::UploadQueued);
+            }
+            Err(UploadReviewError::OverBudget(estimate)) => {
+                self.upload_budget_ask = Some(estimate);
             }
             Err(UploadReviewError::Schedule(problem)) => {
                 self.schedule_problem = Some(Text::ScheduleProblem(problem));
@@ -437,6 +448,8 @@ impl ProjectsScreen {
                         Text::UploadReelHint
                     } else if now.is_draft() {
                         Text::UploadDraftHint
+                    } else if now.is_post() {
+                        Text::UploadPostHint
                     } else {
                         Text::UploadHint
                     },
@@ -805,6 +818,10 @@ impl ProjectsScreen {
         let bardo = self.bardo.read(cx);
         let reel = review.is_reel();
         let draft = review.is_draft();
+        let post_only = review.is_post();
+        // A Reel and an X post are made by Bardo once processed, at once
+        // or at their time in Bardo.
+        let made_by_bardo = reel || post_only;
         let network = bardo.text(Text::NetworkName(review.network)).into_owned();
         let with_network = |text: Text| bardo.text_with(text, &[("network", &network)]);
         let row = |name: Text, value: AnyElement| {
@@ -843,7 +860,7 @@ impl ProjectsScreen {
             ));
         }
         card = card.child(row(
-            if reel || draft {
+            if reel || draft || post_only {
                 Text::UploadFieldAccount
             } else {
                 Text::UploadFieldChannel
@@ -863,6 +880,8 @@ impl ProjectsScreen {
                         Text::UploadFieldCaption
                     } else if draft {
                         Text::UploadFieldDraftCaption
+                    } else if post_only {
+                        Text::UploadFieldPostText
                     } else {
                         Text::MetadataFieldDescription
                     },
@@ -872,8 +891,8 @@ impl ProjectsScreen {
                         .into_any_element(),
                 ));
             }
-            // A Reel's or a TikTok's hashtags are in its caption.
-            if !reel && !draft {
+            // A Reel's, a TikTok's or an X post's hashtags are in its text.
+            if !reel && !draft && !post_only {
                 card = card.child(row(Text::MetadataFieldTags, text(post.tags.join(", "))));
             }
         }
@@ -925,8 +944,10 @@ impl ProjectsScreen {
             card = card.child(timing(
                 kit::notice(Tone::Info, tr(bardo, Text::UploadDraftNotice), cx).into_any_element(),
             ));
-        } else if reel {
-            card = card.child(self.cover_field(cx));
+        } else if made_by_bardo {
+            if reel {
+                card = card.child(self.cover_field(cx));
+            }
             card = card.child(timing(row(
                 Text::UploadFieldWhen,
                 h_flex().child(when).into_any_element(),
@@ -942,6 +963,24 @@ impl ProjectsScreen {
                     cx,
                 ));
             }
+        } else {
+            card = card.child(timing(row(
+                Text::UploadFieldWhen,
+                h_flex().child(when).into_any_element(),
+            )));
+            if scheduled {
+                card = card.child(self.schedule_fields(cx)).child(muted(
+                    cx,
+                    SharedString::from(with_network(Text::ScheduleHint)),
+                ));
+            } else {
+                card = card.child(row(
+                    Text::UploadFieldVisibility,
+                    h_flex().child(visibility).into_any_element(),
+                ));
+            }
+        }
+        if reel {
             let feed = Checkbox::new("upload-feed")
                 .label(tr(bardo, Text::UploadShareToFeed))
                 .checked(choices.share_to_feed)
@@ -966,22 +1005,6 @@ impl ProjectsScreen {
                         guide::refs::INSTAGRAM_UPLOAD,
                     )),
             );
-        } else {
-            card = card.child(timing(row(
-                Text::UploadFieldWhen,
-                h_flex().child(when).into_any_element(),
-            )));
-            if scheduled {
-                card = card.child(self.schedule_fields(cx)).child(muted(
-                    cx,
-                    SharedString::from(with_network(Text::ScheduleHint)),
-                ));
-            } else {
-                card = card.child(row(
-                    Text::UploadFieldVisibility,
-                    h_flex().child(visibility).into_any_element(),
-                ));
-            }
         }
 
         let kids = Checkbox::new("upload-kids")
@@ -996,7 +1019,7 @@ impl ProjectsScreen {
                     });
                 }
             });
-        if !reel && !draft {
+        if !reel && !draft && !post_only {
             card = card.child(
                 h_flex()
                     .gap_1()
@@ -1012,6 +1035,8 @@ impl ProjectsScreen {
         }
         let (synthetic_label, synthetic_hint) = if reel {
             (Text::UploadAiLabel, Text::UploadAiLabelHint)
+        } else if post_only {
+            (Text::UploadPostAiLabel, Text::UploadPostAiLabelHint)
         } else if draft {
             (Text::UploadDraftAiLabel, Text::UploadDraftAiLabelHint)
         } else {
@@ -1067,10 +1092,30 @@ impl ProjectsScreen {
             card = card.child(replace);
         }
 
+        if let Some(note) = review
+            .cost
+            .as_ref()
+            .and_then(|estimate| estimate_note(bardo, estimate, Text::UploadPostCost, cx))
+        {
+            card = card.child(
+                h_flex()
+                    .gap_1()
+                    .items_start()
+                    .child(div().flex_1().min_w_0().child(note))
+                    .child(guide::info(
+                        bardo,
+                        "upload-cost-info",
+                        tr(bardo, Text::UploadPostCostHint),
+                        guide::refs::X_COSTS,
+                    )),
+            );
+        }
         card = card.child(kit::notice(
             Tone::Warning,
             with_network(if reel {
                 Text::UploadReelIrreversible
+            } else if post_only {
+                Text::UploadPostIrreversible
             } else if draft {
                 Text::UploadDraftIrreversible
             } else {
@@ -1078,6 +1123,23 @@ impl ProjectsScreen {
             }),
             cx,
         ));
+        // The post reaches X's budget: the user confirms it goes anyway.
+        if let Some(estimate) = &self.upload_budget_ask {
+            card = card.child(budget_question(
+                "upload-budget",
+                bardo,
+                estimate,
+                cx,
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.change_upload(|choices| choices.budget = BudgetConsent::Confirmed, cx);
+                    this.confirm_upload(window, cx);
+                }),
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.upload_budget_ask = None;
+                    cx.notify();
+                }),
+            ));
+        }
         let ready = review.replaces.is_none() || choices.replace;
         card = card.child(
             h_flex()
@@ -1090,6 +1152,7 @@ impl ProjectsScreen {
                         .label(tr(bardo, Text::UploadBack))
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.upload_draft = None;
+                            this.upload_budget_ask = None;
                             cx.notify();
                         })),
                 )
@@ -1101,17 +1164,19 @@ impl ProjectsScreen {
                             bardo,
                             if draft {
                                 Text::UploadDraftStart
-                            } else if reel && scheduled {
+                            } else if made_by_bardo && scheduled {
                                 Text::UploadReelStartScheduled
                             } else if reel {
                                 Text::UploadReelStart
+                            } else if post_only {
+                                Text::UploadPostStart
                             } else if scheduled {
                                 Text::UploadStartScheduled
                             } else {
                                 Text::UploadStart
                             },
                         ))
-                        .disabled(!ready)
+                        .disabled(!ready || self.upload_budget_ask.is_some())
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.confirm_upload(window, cx);
                         })),

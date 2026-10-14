@@ -165,6 +165,7 @@ impl PlannedCall {
             Provider::TypeSafe => bardo_ai::jev::MODEL,
             Provider::Higgsfield => bardo_ai::higgsfield::DEFAULT_MODEL,
             Provider::YouTubeData => "",
+            Provider::X => bardo_domain::X_POST,
         };
         Self {
             provider,
@@ -239,6 +240,7 @@ fn first_guess(purpose: CostPurpose) -> Metered {
         CostPurpose::CutSuggestions => tokens(4_000, 0),
         // The default sample sentence.
         CostPurpose::VoiceSample => Metered::characters(80),
+        CostPurpose::Post => Metered::posts(1),
     }
 }
 

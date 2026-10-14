@@ -224,6 +224,9 @@ pub struct ProjectsScreen {
     upload_draft: Option<(UploadReview, UploadChoices)>,
     /// Why the upload did not start, or what its job action did not do.
     upload_error: Option<Text>,
+    /// The post would reach the network's budget (X bills each post): the
+    /// review asks before it goes.
+    upload_budget_ask: Option<SpendEstimate>,
     /// "Schedule" is chosen in the open review.
     upload_scheduled: bool,
     /// The publish date and time as the user types them, in the review or
@@ -416,6 +419,7 @@ impl ProjectsScreen {
             upload_now: None,
             upload_draft: None,
             upload_error: None,
+            upload_budget_ask: None,
             upload_scheduled: false,
             schedule_date,
             schedule_time,

@@ -1,0 +1,9 @@
+HTTP/2 403 
+content-type: application/problem+json
+
+{
+  "title": "Forbidden",
+  "detail": "You are not allowed to create a Tweet with duplicate content.",
+  "type": "about:blank",
+  "status": 403
+}

@@ -401,7 +401,9 @@ fn a_limit_read_without_permission_is_not_allowed() {
 fn publishing_a_finished_container_gives_the_reels_link() {
     let uploader = uploader(&["publish-ok", "permalink"]);
 
-    let post = uploader.publish(&token(), ACCOUNT, CONTAINER).unwrap();
+    let post = uploader
+        .publish(&token(), ACCOUNT, CONTAINER, &video())
+        .unwrap();
 
     assert_eq!(
         post.link,
@@ -427,7 +429,7 @@ fn publishing_a_finished_container_gives_the_reels_link() {
 #[test]
 fn what_instagram_published_without_comes_back_with_the_post() {
     let post = uploader(&["publish-config-issue", "permalink"])
-        .publish(&token(), ACCOUNT, CONTAINER)
+        .publish(&token(), ACCOUNT, CONTAINER, &video())
         .unwrap();
 
     assert_eq!(
@@ -440,7 +442,7 @@ fn what_instagram_published_without_comes_back_with_the_post() {
 #[test]
 fn a_post_whose_link_cannot_be_read_is_published_all_the_same() {
     let post = uploader(&["publish-ok", "rate-limited"])
-        .publish(&token(), ACCOUNT, CONTAINER)
+        .publish(&token(), ACCOUNT, CONTAINER, &video())
         .unwrap();
     assert_eq!(post.link, None);
 }
@@ -449,7 +451,7 @@ fn a_post_whose_link_cannot_be_read_is_published_all_the_same() {
 fn publish_refusals_say_why() {
     let refusal = |name: &str| {
         uploader(&[name])
-            .publish(&token(), ACCOUNT, CONTAINER)
+            .publish(&token(), ACCOUNT, CONTAINER, &video())
             .unwrap_err()
             .kind
     };
@@ -463,8 +465,16 @@ fn publish_refusals_say_why() {
 #[test]
 fn ids_that_are_not_meta_ids_never_reach_an_address() {
     let uploader = uploader(&[]);
-    assert!(uploader.publish(&token(), ACCOUNT, "1/../2").is_err());
-    assert!(uploader.publish(&token(), "me", CONTAINER).is_err());
+    assert!(
+        uploader
+            .publish(&token(), ACCOUNT, "1/../2", &video())
+            .is_err()
+    );
+    assert!(
+        uploader
+            .publish(&token(), "me", CONTAINER, &video())
+            .is_err()
+    );
     assert!(uploader.state(&token(), "abc").is_err());
     assert!(uploader.publishing_limit(&token(), "").is_err());
     assert!(uploader.transport().sent().is_empty());

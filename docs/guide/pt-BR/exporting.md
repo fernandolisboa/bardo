@@ -6,7 +6,7 @@ group: publishing
 
 # Exportação
 
-Uma exportação é um pacote pronto para postar: para cada rede, o arquivo renderizado e um arquivo de texto com tudo o que vai no formulário de upload da rede. É assim que você posta no X e na Kick, para onde o Bardo não envia, e funciona para todas as redes. As exportações começam na etapa [Publicação](bardo:go/projects/publish).
+Uma exportação é um pacote pronto para postar: para cada rede, o arquivo renderizado e um arquivo de texto com tudo o que vai no formulário de upload da rede. É assim que você posta na Kick, para onde o Bardo não envia, e funciona para todas as redes. As exportações começam na etapa [Publicação](bardo:go/projects/publish).
 
 <a id="choose"></a>
 ## Escolher as redes

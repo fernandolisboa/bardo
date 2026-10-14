@@ -30,10 +30,12 @@ Os números no topo somam tudo: quanto foi gasto e em quantos provedores; quanto
 
 Provedores gratuitos, como a YouTube Data API, têm uma cota diária em vez de preço, então não têm orçamento. O orçamento é mensal; o mês seguinte começa do zero.
 
+A API do X também é um provedor, sem chave: cada post que o Bardo faz no X é cobrado dos créditos do seu app do X e registrado aqui em X (veja [Conectar o X](connect-x.md#costs)). Um orçamento para o X faz um post que chegaria a ele perguntar antes.
+
 <a id="rates"></a>
 ## Tarifas e modelos sem preço
 
-**Tarifas** é a tabela de preços que o Bardo usa quando o provedor não informa quanto a chamada custou: por milhão de tokens, por mil caracteres, por segundo de vídeo ou por hora de áudio. O nome de um modelo vale para todos os modelos que começam com ele. **Editar** muda um preço, **Restaurar** traz de volta o preço do próprio Bardo, e **Adicionar tarifa** dá preço a um modelo que a tabela não tem. Um preço alterado vale para as próximas chamadas; os custos já registrados ficam como estão.
+**Tarifas** é a tabela de preços que o Bardo usa quando o provedor não informa quanto a chamada custou: por milhão de tokens, por mil caracteres, por segundo de vídeo, por hora de áudio ou por post. O nome de um modelo vale para todos os modelos que começam com ele. **Editar** muda um preço, **Restaurar** traz de volta o preço do próprio Bardo, e **Adicionar tarifa** dá preço a um modelo que a tabela não tem. Um preço alterado vale para as próximas chamadas; os custos já registrados ficam como estão.
 
 Quando um modelo rodou sem nenhum preço, as chamadas dele contam como zero, e o número **Chamadas sem preço** diz quais modelos. **Adicionar preço** abre o formulário de tarifa com esse modelo preenchido.
 

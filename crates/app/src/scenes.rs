@@ -873,6 +873,8 @@ pub(crate) mod tests {
         pub(crate) reels: Arc<crate::uploads::testing::FakeUploader>,
         /// TikTok drafts.
         pub(crate) tiktok: Arc<crate::uploads::testing::FakeUploader>,
+        /// X posts.
+        pub(crate) x: Arc<crate::uploads::testing::FakeUploader>,
         /// App credentials and network tokens.
         pub(crate) connection_secrets: Arc<MemorySecretStore>,
         /// Owner metrics of connected accounts.
@@ -912,6 +914,7 @@ pub(crate) mod tests {
                 uploader: Arc::default(),
                 reels: Arc::new(crate::uploads::testing::FakeUploader::reels()),
                 tiktok: Arc::new(crate::uploads::testing::FakeUploader::tiktok()),
+                x: Arc::new(crate::uploads::testing::FakeUploader::x()),
                 connection_secrets: Arc::default(),
                 analytics: Arc::default(),
                 instagram_insights: Arc::new(crate::testing::FakeInsights::instagram()),
@@ -1053,6 +1056,7 @@ pub(crate) mod tests {
                     Arc::clone(&self.uploader) as _,
                     Arc::clone(&self.reels) as _,
                     Arc::clone(&self.tiktok) as _,
+                    Arc::clone(&self.x) as _,
                 ],
                 analytics: vec![Arc::clone(&self.analytics) as _],
                 post_insights: vec![

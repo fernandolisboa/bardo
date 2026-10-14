@@ -42,13 +42,14 @@ Cada rede renderiza no seu próprio preset: o quadro (16:9 ou 9:16), a resoluç�
 <a id="connect"></a>
 ## Conectar uma conta
 
-Contas do YouTube, do Instagram Reels e do TikTok mostram a conexão no cartão. Conectar exige o seu próprio app nessa rede, salvo uma vez em [Configurações › Redes](app-credentials.md); o guia de cada rede mostra o caminho:
+Contas do YouTube, do Instagram Reels, do TikTok e do X mostram a conexão no cartão. Conectar exige o seu próprio app nessa rede, salvo uma vez em [Configurações › Redes](app-credentials.md); o guia de cada rede mostra o caminho:
 
 - O **YouTube** conecta pelo navegador: [Conectar o YouTube](connect-youtube.md).
 - O **Instagram** conecta com um token que você cola do Explorador da Graph API da Meta: [Conectar o Instagram](connect-instagram.md).
 - O **TikTok** conecta pelo navegador: [Conectar o TikTok](connect-tiktok.md).
+- O **X** conecta pelo navegador: [Conectar o X](connect-x.md).
 
-X e Kick não conectam: os posts deles são [exportados](exporting.md) e postados à mão.
+A Kick não conecta: os posts dela são [exportados](exporting.md) e postados à mão.
 
 <a id="states"></a>
 ## Estados da conexão

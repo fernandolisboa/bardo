@@ -7,8 +7,8 @@
 # changed here reaches every user who has not changed it.
 #
 # Layout: [provider."model"] with one price per meter (input_tokens,
-# output_tokens, image_tokens, characters, video_seconds, audio_seconds;
-# audio is priced per hour). A model covers
+# output_tokens, image_tokens, characters, video_seconds, audio_seconds,
+# posts; audio is priced per hour, posts one by one). A model covers
 # every model whose name starts with it, so `jev` covers `jev-1.13.0`, and
 # an empty model covers all of the provider's models.
 
@@ -82,3 +82,12 @@ video_seconds = "0.13"
 [typesafe."jev"]
 input_tokens = "0.042"
 output_tokens = "0"
+
+# The X API is paid per use, from credits bought ahead (checked on
+# 2026-10-14). X bills each post it creates, more when its text holds a
+# link; the media upload is not billed.
+[x."post"]
+posts = "0.015"
+
+[x."post-with-link"]
+posts = "0.20"

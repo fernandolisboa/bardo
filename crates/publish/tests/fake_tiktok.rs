@@ -202,7 +202,9 @@ fn a_full_sign_in_refresh_and_revoke_against_a_fake_tiktok() {
     let sign_in = sign_in(&address);
     let credentials = AppCredentials::parse(Network::TikTok, CLIENT_KEY, CLIENT_SECRET).unwrap();
 
-    let callback = LoopbackReceiver.listen(sign_in.redirect_path()).unwrap();
+    let callback = LoopbackReceiver
+        .listen(sign_in.redirect_path(), sign_in.redirect_port())
+        .unwrap();
     let redirect = callback.redirect_uri().to_owned();
     assert!(redirect.ends_with("/callback/"), "{redirect}");
     let request = sign_in.consent_request(&credentials, &redirect);

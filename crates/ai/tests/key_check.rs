@@ -39,7 +39,7 @@ fn check(provider: Provider, fixture_name: &str) -> KeyCheck {
 
 #[test]
 fn a_valid_key_is_valid_for_every_provider() {
-    for provider in Provider::ALL {
+    for provider in Provider::with_keys() {
         let checked = check(provider, &format!("{}-valid", provider.code()));
         assert_eq!(checked.outcome, KeyCheckOutcome::Valid, "{provider}");
     }
@@ -157,19 +157,35 @@ fn each_provider_gets_its_key_in_its_own_header_and_never_in_the_url() {
         ),
     ];
     for (provider, header, value) in expected {
-        let request = check_request(provider, &key(provider));
+        let request = check_request(provider, &key(provider)).unwrap();
         assert!(request.url.starts_with("https://"), "{provider}");
         assert_eq!(request.header_value(header), Some(value), "{provider}");
         assert!(!request.url.contains("test-key"), "{provider}");
         assert!(!request.url.contains("key-secret"), "{provider}");
     }
-    let claude = check_request(Provider::Claude, &key(Provider::Claude));
+    let claude = check_request(Provider::Claude, &key(Provider::Claude)).unwrap();
     assert_eq!(claude.header_value("anthropic-version"), Some("2023-06-01"));
 }
 
 #[test]
+fn x_has_no_key_to_test_and_the_checker_sends_nothing() {
+    let key = ApiKey::parse(Provider::X, "test-key-0001-abcdef").unwrap();
+    assert!(check_request(Provider::X, &key).is_none());
+    let replay = Replay {
+        response: Ok(fixture("gemini-rejected")),
+        asked: Mutex::default(),
+    };
+    let checker = HttpKeyChecker::with_transport(replay);
+    assert_eq!(
+        checker.check(Provider::X, &key).outcome,
+        KeyCheckOutcome::Unexpected
+    );
+    assert!(checker.transport().asked.lock().unwrap().is_empty());
+}
+
+#[test]
 fn request_debug_output_hides_header_values() {
-    let request = check_request(Provider::Claude, &key(Provider::Claude));
+    let request = check_request(Provider::Claude, &key(Provider::Claude)).unwrap();
     let shown = format!("{request:?}");
     assert!(shown.contains("x-api-key"), "{shown}");
     assert!(!shown.contains("test-key"), "{shown}");
@@ -197,7 +213,9 @@ fn the_checker_sends_the_check_request_and_classifies_the_answer() {
     let checker = HttpKeyChecker::with_transport(replay);
     let checked = checker.check(Provider::Gemini, &key(Provider::Gemini));
     assert_eq!(checked.outcome, KeyCheckOutcome::Rejected);
-    let expected = check_request(Provider::Gemini, &key(Provider::Gemini)).url;
+    let expected = check_request(Provider::Gemini, &key(Provider::Gemini))
+        .unwrap()
+        .url;
     assert_eq!(*checker.transport().asked.lock().unwrap(), [expected]);
 }
 

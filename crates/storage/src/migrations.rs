@@ -42,6 +42,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0038_backup.sql"),
     include_str!("../migrations/0039_update_check.sql"),
     include_str!("../migrations/0040_youtube_privacy.sql"),
+    include_str!("../migrations/0041_x_posts.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
@@ -554,6 +555,43 @@ mod tests {
         assert_eq!(times("held"), (None, Some(7)), "a wait is not a backoff");
         assert_eq!(times("backoff"), (Some(8), None));
         assert_eq!(times("ready"), (None, None));
+    }
+
+    #[test]
+    fn rebuilding_rates_for_posts_keeps_the_users_prices() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        for sql in &MIGRATIONS[..40] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 40).unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+             VALUES ('p', 'elevenlabs', 'forced_alignment', 'audio_seconds', 220000);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let kept: i64 = conn
+            .query_row("SELECT price_micros FROM rate", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(kept, 220_000);
+        conn.execute(
+            "INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+             VALUES ('p', 'x', 'post', 'posts', 15000)",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+                 VALUES ('p', 'x', 'post', 'likes', 1)",
+                [],
+            )
+            .is_err()
+        );
     }
 
     #[test]

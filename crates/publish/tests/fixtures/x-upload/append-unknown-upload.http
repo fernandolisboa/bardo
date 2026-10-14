@@ -1,0 +1,11 @@
+HTTP/2 404 
+content-type: application/problem+json
+
+{
+  "title": "Not Found Error",
+  "detail": "Could not find media with id: [1880028106020515840].",
+  "type": "https://api.twitter.com/2/problems/resource-not-found",
+  "resource_type": "media",
+  "resource_id": "1880028106020515840",
+  "status": 404
+}

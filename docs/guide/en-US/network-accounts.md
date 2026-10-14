@@ -42,13 +42,14 @@ Each network renders in its own preset: the frame (16:9 or 9:16), the size, the 
 <a id="connect"></a>
 ## Connecting an account
 
-YouTube, Instagram Reels and TikTok accounts show their connection on the card. Connecting needs your own app for that network, saved once in [Settings › Networks](app-credentials.md); each network's guide walks through it:
+YouTube, Instagram Reels, TikTok and X accounts show their connection on the card. Connecting needs your own app for that network, saved once in [Settings › Networks](app-credentials.md); each network's guide walks through it:
 
 - **YouTube** connects in your browser: [Connecting YouTube](connect-youtube.md).
 - **Instagram** connects with a token you paste from Meta's Graph API Explorer: [Connecting Instagram](connect-instagram.md).
 - **TikTok** connects in your browser: [Connecting TikTok](connect-tiktok.md).
+- **X** connects in your browser: [Connecting X](connect-x.md).
 
-X and Kick don't connect: their posts are [exported](exporting.md) and posted by hand.
+Kick doesn't connect: its posts are [exported](exporting.md) and posted by hand.
 
 <a id="states"></a>
 ## Connection states

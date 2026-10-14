@@ -474,7 +474,7 @@ pub struct UploadedVideo {
 }
 
 /// The post a network made when Bardo published an uploaded video
-/// (Instagram's `media_publish`).
+/// (Instagram's `media_publish`, X's post).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkPost {
     /// The post's id at the network (Instagram's media id, which its
@@ -700,15 +700,18 @@ pub trait VideoUploader: Send + Sync {
     }
 
     /// Publishes the processed upload `id` on `account`, for networks
-    /// where an upload only becomes a post when asked to (Instagram's
-    /// `media_publish`, once its container is `FINISHED`).
+    /// where an upload only becomes a post when asked to
+    /// (`Network::publishes_uploads`): Instagram's `media_publish`, once its
+    /// container is `FINISHED`, or X's post with the media, which takes the
+    /// post's text and AI label from `video` then.
     fn publish(
         &self,
         access_token: &SecretText,
         account: &str,
         id: &str,
+        video: &VideoUpload,
     ) -> Result<NetworkPost, UploadError> {
-        let _ = (access_token, account, id);
+        let _ = (access_token, account, id, video);
         Err(UploadError::new(
             UploadErrorKind::NotAllowed,
             "the network publishes uploads by itself",
