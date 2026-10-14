@@ -102,19 +102,21 @@ impl<T: Transport, D: Transport> GitHubReleases<T, D> {
     }
 }
 
-/// The time the rate limit's window resets, from `x-ratelimit-reset`
-/// (Unix seconds), else from `retry-after` (seconds from now).
+/// When to ask again: after `retry-after` (seconds from now) when GitHub
+/// gives it, which a secondary limit may set later than the hourly
+/// window, else when that window resets (`x-ratelimit-reset`, Unix
+/// seconds).
 fn rate_limit_reset(response: &HttpResponse) -> Option<SystemTime> {
-    if let Some(reset) = response
-        .header("x-ratelimit-reset")
-        .and_then(|value| value.trim().parse::<u64>().ok())
-    {
-        return Some(SystemTime::UNIX_EPOCH + Duration::from_secs(reset));
-    }
-    response
+    if let Some(seconds) = response
         .header("retry-after")
         .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(|seconds| SystemTime::now() + Duration::from_secs(seconds))
+    {
+        return Some(SystemTime::now() + Duration::from_secs(seconds));
+    }
+    response
+        .header("x-ratelimit-reset")
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|reset| SystemTime::UNIX_EPOCH + Duration::from_secs(reset))
 }
 
 fn is_rate_limited(response: &HttpResponse) -> bool {

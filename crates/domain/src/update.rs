@@ -287,14 +287,19 @@ pub trait ReleaseFeed: Send + Sync {
 
 /// Where downloaded installers wait to run: `%LOCALAPPDATA%\Bardo\updates`.
 pub trait InstallerStore: Send + Sync {
-    /// Starts writing `name` afresh, beside the finished files: a file
-    /// that is not whole never has the finished name.
-    fn begin(&self, name: &str) -> std::io::Result<Box<dyn Write + Send>>;
+    /// Starts writing `name` afresh as `attempt` (a download's own), beside
+    /// the finished files: a file that is not whole never has the finished
+    /// name, and two attempts never write the same file.
+    fn begin(&self, name: &str, attempt: &str) -> std::io::Result<Box<dyn Write + Send>>;
 
-    /// The file begun as `name` is whole and checked: it takes its name.
-    fn finish(&self, name: &str) -> std::io::Result<()>;
+    /// The file `attempt` wrote is whole and checked: it takes its name.
+    fn finish(&self, name: &str, attempt: &str) -> std::io::Result<()>;
 
-    /// Deletes `name`, finished or not. Nothing there is not an error.
+    /// Deletes what `attempt` wrote of `name`, and only that. Nothing
+    /// there is not an error.
+    fn abandon(&self, name: &str, attempt: &str) -> std::io::Result<()>;
+
+    /// Deletes the finished `name`. Nothing there is not an error.
     fn discard(&self, name: &str) -> std::io::Result<()>;
 
     /// Reads the finished `name`, if it is there.

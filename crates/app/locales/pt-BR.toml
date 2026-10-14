@@ -245,7 +245,7 @@ missed = "O horário do post agendado passou sem ele, então nada foi postado. E
 files = "Um arquivo não pôde ser lido ou gravado. Confira se a pasta existe e se há espaço no disco, e tente de novo."
 cut_short = "O Bardo fechou antes de terminar. Comece de novo."
 restored = "Isto estava em andamento quando o backup foi feito, então o Bardo não retomou depois da restauração. Confira na rede: se o post não estiver lá, tente de novo."
-checksum = "O arquivo não confere com o checksum publicado na versão, então o Bardo o apagou. Tente de novo; se acontecer outra vez, relate o problema."
+checksum = "O instalador não confere com o checksum publicado na versão, então o Bardo não o guardou. Tente de novo; se acontecer outra vez, relate o problema."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -2634,7 +2634,7 @@ body = "A versão do Bardo neste computador. Informe-a quando relatar um problem
 
 [tour.about.updates]
 title = "Atualizações"
-body = "O Bardo procura uma versão nova uma vez por dia. Quando sair uma, baixe aqui, revise e instale: o Bardo reinicia na versão nova."
+body = "O Bardo procura uma versão mais nova ao abrir e uma vez por dia, a menos que você desligue. Como ele se atualiza depende de como foi instalado: esta seção diz o que fazer."
 
 [tour.about.ffmpeg]
 title = "FFmpeg"
@@ -2805,19 +2805,23 @@ ready = "Baixada e conferida com a versão publicada."
 install = "Instalar…"
 review_title = "Instalar o Bardo {version}?"
 review_body = "O Bardo fecha, o instalador o atualiza e o Bardo abre de novo ao terminar. Seus canais, projetos, chaves e configurações continuam como estão."
-review_agent = "Se o Bardo publica fechado, o agente em segundo plano também fecha durante a instalação e volta em até 15 minutos."
+review_agent = "Se Publicar com o Bardo fechado estiver ligado, o agente em segundo plano também fecha durante a instalação e volta em até 15 minutos."
 install_and_restart = "Instalar e reiniciar"
 starting = "Abrindo o instalador…"
 no_installer = "Esta versão não tem um instalador que o Bardo possa conferir. Baixe pela página da versão."
 already_downloading = "A atualização já está sendo baixada."
 file_gone = "O instalador baixado sumiu. Baixe de novo."
 checksum_changed = "O instalador baixado mudou depois de conferido, então o Bardo o apagou. Baixe de novo."
-not_started = "O Windows não abriu o instalador. Rode-o pela página da versão."
+not_started = "O instalador não abriu. Tente de novo, ou baixe-o pela página da versão e rode-o."
 waits_for_jobs = "Há tarefas em andamento. Espere terminarem, ou cancele em Tarefas, e instale depois."
 waits_for_restore = "Há uma restauração em andamento. Instale depois que o Bardo reiniciar."
 other_window = "Há outra janela do Bardo aberta. Feche-a e instale depois."
 banner_see = "Ver novidades"
 banner_later = "Depois"
+download_unreachable = "Não foi possível falar com o GitHub. Confira a conexão e tente de novo."
+waiting_to_retry = "Aguardando para tentar de novo…"
+switch_not_saved = "Não foi possível salvar a configuração. Tente de novo."
+none_available = "Nenhuma atualização disponível agora."
 
 [backup]
 title = "Fazer backup"

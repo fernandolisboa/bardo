@@ -20,12 +20,12 @@ The version of Bardo on this computer. Say it when you report a problem.
 
 Bardo looks for a newer release on [GitHub](https://github.com/fernandolisboa/bardo/releases) when it opens and once a day while it stays open. When one is out, a bar over the screens says so: **See what's new** opens this section, and **Later** hides the bar until Bardo opens again or a newer release comes out. Nothing is downloaded or installed until you choose to.
 
-- **Check for updates automatically** turns the daily check off or on. **Check now** checks at once, even when it is off. The line under it says when Bardo last checked and what it found.
+- **Check for updates automatically** turns the checks at start and every day off or on. **Check now** checks at once, even when it is off. The line under it says when Bardo last checked and what it found.
 - A newer release shows its version, when it was published, what's new in it and a link to its **Release page**.
 - **Download** fetches its installer as a job, with its progress here and in [Jobs](jobs.md). The file is checked against the SHA-256 checksum its release publishes; a file that does not match is deleted and never runs. A download cut short leaves nothing behind.
 - **Install…** opens a review. **Install and restart** checks the file once more, starts the installer and closes Bardo; the installer updates Bardo without its wizard, keeping your data, settings and the background agent choice, and opens Bardo again when it is done.
 
-Installing waits while jobs run in this window (wait for them, or cancel them in Jobs), during a [restore](backup.md#restore), and while another Bardo window is open. If Bardo publishes while closed, the [background agent](background-agent.md) closes for the install too and starts again within 15 minutes.
+Installing waits while jobs run in this window (wait for them, or cancel them in Jobs), during a [restore](backup.md#restore), and while another Bardo window is open. If **Publish while Bardo is closed** is on, the [background agent](background-agent.md) closes for the install too and starts again within 15 minutes.
 
 Checking asks GitHub's public API without any account: no key, no sign-in, and nothing about you or your projects is sent. A copy from the Microsoft Store never checks, since the Store updates it. A copy built from source says when a release is out and links to it: update the source to get it. You can always [update by hand](install.md#update).
 

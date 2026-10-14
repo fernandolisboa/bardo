@@ -1,8 +1,10 @@
 //! Where an update's installer waits to run (issue #144, ADR-0011):
 //! `%LOCALAPPDATA%\Bardo\updates`, and how it is started.
 //!
-//! A download writes `<name>.part` and renames it once it is whole and
-//! checked, so a file with an installer's name is never half-written.
+//! A download writes `<name>.<attempt>.part` and renames it once it is
+//! whole and checked, so a file with an installer's name is never
+//! half-written, and a download cut short that ends late never touches
+//! the file a newer one writes.
 
 use std::collections::HashMap;
 use std::fs;
@@ -30,9 +32,14 @@ impl LocalInstallers {
         Self { dir }
     }
 
-    fn part(&self, name: &str) -> PathBuf {
-        self.dir.join(format!("{name}{PART_SUFFIX}"))
+    fn part(&self, name: &str, attempt: &str) -> std::io::Result<PathBuf> {
+        Ok(self.dir.join(part_name(checked(name)?, checked(attempt)?)))
     }
+}
+
+/// What an attempt at `name` writes until it is whole.
+fn part_name(name: &str, attempt: &str) -> String {
+    format!("{name}.{attempt}{PART_SUFFIX}")
 }
 
 /// Only a plain file name: nothing reaches outside the folder.
@@ -60,28 +67,30 @@ fn removed(result: std::io::Result<()>) -> std::io::Result<()> {
 }
 
 impl InstallerStore for LocalInstallers {
-    fn begin(&self, name: &str) -> std::io::Result<Box<dyn Write + Send>> {
-        let name = checked(name)?;
+    fn begin(&self, name: &str, attempt: &str) -> std::io::Result<Box<dyn Write + Send>> {
+        let part = self.part(name, attempt)?;
         fs::create_dir_all(&self.dir)?;
-        let file = fs::File::create(self.part(name))?;
+        let file = fs::File::create(part)?;
         Ok(Box::new(std::io::BufWriter::with_capacity(
             256 * 1024,
             file,
         )))
     }
 
-    fn finish(&self, name: &str) -> std::io::Result<()> {
-        let name = checked(name)?;
-        let to = self.dir.join(name);
+    fn finish(&self, name: &str, attempt: &str) -> std::io::Result<()> {
+        let part = self.part(name, attempt)?;
+        let to = self.dir.join(checked(name)?);
         // Windows does not rename over a file.
         removed(fs::remove_file(&to))?;
-        fs::rename(self.part(name), to)
+        fs::rename(part, to)
+    }
+
+    fn abandon(&self, name: &str, attempt: &str) -> std::io::Result<()> {
+        removed(fs::remove_file(self.part(name, attempt)?))
     }
 
     fn discard(&self, name: &str) -> std::io::Result<()> {
-        let name = checked(name)?;
-        removed(fs::remove_file(self.part(name)))?;
-        removed(fs::remove_file(self.dir.join(name)))
+        removed(fs::remove_file(self.dir.join(checked(name)?)))
     }
 
     fn open(&self, name: &str) -> std::io::Result<Option<Box<dyn Read + Send>>> {
@@ -107,6 +116,7 @@ impl InstallerStore for LocalInstallers {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),
         };
+        let mut failed = None;
         for entry in entries {
             let entry = entry?;
             if !entry.file_type()?.is_file() {
@@ -117,11 +127,13 @@ impl InstallerStore for LocalInstallers {
                 Some(_) => keep_unfinished,
                 None => keep(&name),
             };
-            if !kept {
-                removed(fs::remove_file(entry.path()))?;
+            // One file Windows still holds (the installer that just ran)
+            // does not keep the others: it goes another time.
+            if !kept && let Err(error) = removed(fs::remove_file(entry.path())) {
+                failed.get_or_insert(error);
             }
         }
-        Ok(())
+        failed.map_or(Ok(()), Err)
     }
 }
 
@@ -174,8 +186,8 @@ impl Write for MemoryWriter {
 }
 
 impl InstallerStore for MemoryInstallers {
-    fn begin(&self, name: &str) -> std::io::Result<Box<dyn Write + Send>> {
-        let part = format!("{}{PART_SUFFIX}", checked(name)?);
+    fn begin(&self, name: &str, attempt: &str) -> std::io::Result<Box<dyn Write + Send>> {
+        let part = part_name(checked(name)?, checked(attempt)?);
         self.lock().insert(part.clone(), Vec::new());
         Ok(Box::new(MemoryWriter {
             files: Arc::clone(&self.files),
@@ -183,19 +195,22 @@ impl InstallerStore for MemoryInstallers {
         }))
     }
 
-    fn finish(&self, name: &str) -> std::io::Result<()> {
+    fn finish(&self, name: &str, attempt: &str) -> std::io::Result<()> {
         let mut files = self.lock();
         let bytes = files
-            .remove(&format!("{name}{PART_SUFFIX}"))
+            .remove(&part_name(name, attempt))
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
         files.insert(name.to_owned(), bytes);
         Ok(())
     }
 
+    fn abandon(&self, name: &str, attempt: &str) -> std::io::Result<()> {
+        self.lock().remove(&part_name(name, attempt));
+        Ok(())
+    }
+
     fn discard(&self, name: &str) -> std::io::Result<()> {
-        let mut files = self.lock();
-        files.remove(&format!("{name}{PART_SUFFIX}"));
-        files.remove(name);
+        self.lock().remove(name);
         Ok(())
     }
 
@@ -282,8 +297,10 @@ mod tests {
         Some(bytes)
     }
 
+    const ATTEMPT: &str = "job-1";
+
     fn write(store: &dyn InstallerStore, name: &str, bytes: &[u8]) {
-        let mut file = store.begin(name).unwrap();
+        let mut file = store.begin(name, ATTEMPT).unwrap();
         file.write_all(bytes).unwrap();
         file.flush().unwrap();
     }
@@ -303,14 +320,14 @@ mod tests {
             write(&*store, name, b"MZ installer");
             assert_eq!(read(&*store, name), None, "not finished yet");
             assert!(!store.exists(name));
-            store.finish(name).unwrap();
+            store.finish(name, ATTEMPT).unwrap();
             assert!(store.exists(name));
             assert_eq!(read(&*store, name).as_deref(), Some(&b"MZ installer"[..]));
 
             // Downloading it again replaces it only once finished.
             write(&*store, name, b"MZ newer");
             assert_eq!(read(&*store, name).as_deref(), Some(&b"MZ installer"[..]));
-            store.finish(name).unwrap();
+            store.finish(name, ATTEMPT).unwrap();
             assert_eq!(read(&*store, name).as_deref(), Some(&b"MZ newer"[..]));
 
             store.discard(name).unwrap();
@@ -320,12 +337,25 @@ mod tests {
     }
 
     #[test]
-    fn discard_removes_an_unfinished_file_too() {
+    fn an_attempt_abandons_only_what_it_wrote() {
         let dir = tempfile::tempdir().unwrap();
-        let store = LocalInstallers::new(dir.path().to_owned());
-        write(&store, "a.exe", b"half");
-        store.discard("a.exe").unwrap();
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        for store in stores(dir.path()) {
+            write(&*store, "a.exe", b"cut");
+            let mut newer = store.begin("a.exe", "job-2").unwrap();
+            newer.write_all(b"whole").unwrap();
+            newer.flush().unwrap();
+            drop(newer);
+            // The first attempt ends late: the newer one's file stays.
+            store.abandon("a.exe", ATTEMPT).unwrap();
+            store.finish("a.exe", "job-2").unwrap();
+            assert_eq!(read(&*store, "a.exe").as_deref(), Some(&b"whole"[..]));
+            store.abandon("a.exe", ATTEMPT).unwrap();
+            assert!(read(&*store, "a.exe").is_some(), "never the finished file");
+        }
+        let store = LocalInstallers::new(dir.path().join("only"));
+        write(&store, "b.exe", b"half");
+        store.abandon("b.exe", ATTEMPT).unwrap();
+        assert_eq!(fs::read_dir(dir.path().join("only")).unwrap().count(), 0);
     }
 
     #[test]
@@ -335,18 +365,21 @@ mod tests {
             for name in ["old.exe", "new.exe", "cut.exe"] {
                 write(&*store, name, b"x");
             }
-            store.finish("old.exe").unwrap();
-            store.finish("new.exe").unwrap();
+            store.finish("old.exe", ATTEMPT).unwrap();
+            store.finish("new.exe", ATTEMPT).unwrap();
             store.prune(&|name| name == "new.exe", true).unwrap();
             assert_eq!(read(&*store, "old.exe"), None);
             assert!(read(&*store, "new.exe").is_some());
             store
-                .finish("cut.exe")
+                .finish("cut.exe", ATTEMPT)
                 .unwrap_or_else(|_| panic!("kept unfinished"));
 
             write(&*store, "cut2.exe", b"x");
             store.prune(&|_| true, false).unwrap();
-            assert!(store.finish("cut2.exe").is_err(), "unfinished removed");
+            assert!(
+                store.finish("cut2.exe", ATTEMPT).is_err(),
+                "unfinished removed"
+            );
         }
         // A folder that was never made has nothing to prune.
         LocalInstallers::new(dir.path().join("none"))
@@ -359,7 +392,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = LocalInstallers::new(dir.path().join("updates"));
         for name in ["../evil.exe", "..", "a/b.exe", "a\\b.exe", "C:x.exe", ""] {
-            assert!(store.begin(name).is_err(), "{name}");
+            assert!(store.begin(name, ATTEMPT).is_err(), "{name}");
+            assert!(store.begin("a.exe", name).is_err(), "{name}");
             assert!(store.discard(name).is_err(), "{name}");
             assert!(store.open(name).is_err(), "{name}");
         }

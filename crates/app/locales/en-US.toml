@@ -245,7 +245,7 @@ missed = "The scheduled post's time passed without it, so nothing was posted. Ch
 files = "A file couldn't be read or written. Check that the folder exists and the disk has room, then retry."
 cut_short = "Bardo closed before it finished. Start it again."
 restored = "This was under way when the backup was made, so Bardo didn't resume it after the restore. Check the network: if the post isn't there, retry."
-checksum = "The file doesn't match the checksum its release publishes, so Bardo deleted it. Try again; if it happens again, report it."
+checksum = "The installer doesn't match the checksum its release publishes, so Bardo didn't keep it. Try again; if it happens again, report it."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -2634,7 +2634,7 @@ body = "The version of Bardo on this computer. Say it when you report a problem.
 
 [tour.about.updates]
 title = "Updates"
-body = "Bardo looks for a newer release once a day. When one is out, download it here, review it and install: Bardo restarts in the new version."
+body = "Bardo looks for a newer release when it opens and once a day, unless you turn that off. How it updates depends on how it was installed: this section says what to do."
 
 [tour.about.ffmpeg]
 title = "FFmpeg"
@@ -2805,19 +2805,23 @@ ready = "Downloaded and checked against its release."
 install = "Install…"
 review_title = "Install Bardo {version}?"
 review_body = "Bardo closes, the installer updates it, and Bardo opens again when it's done. Your channels, projects, keys and settings stay as they are."
-review_agent = "If Bardo publishes while closed, the background agent closes for the install too and starts again within 15 minutes."
+review_agent = "If Publish while Bardo is closed is on, the background agent closes for the install too and starts again within 15 minutes."
 install_and_restart = "Install and restart"
 starting = "Starting the installer…"
 no_installer = "This release has no installer Bardo can check. Get it from the release page."
 already_downloading = "The update is already downloading."
 file_gone = "The downloaded installer is gone. Download it again."
 checksum_changed = "The downloaded installer changed after it was checked, so Bardo deleted it. Download it again."
-not_started = "Windows didn't start the installer. Run it from the release page."
+not_started = "The installer didn't start. Try again, or download it from the release page and run it."
 waits_for_jobs = "Jobs are running. Wait for them to end, or cancel them in Jobs, then install."
 waits_for_restore = "A restore is under way. Install after Bardo restarts."
 other_window = "Another Bardo window is open. Close it, then install."
 banner_see = "See what's new"
 banner_later = "Later"
+download_unreachable = "Couldn't reach GitHub. Check the connection, then try again."
+waiting_to_retry = "Waiting to try again…"
+switch_not_saved = "Couldn't save the setting. Try again."
+none_available = "No update is available now."
 
 [backup]
 title = "Back up"

@@ -225,7 +225,8 @@ impl UpdateError {
     /// What About says.
     pub fn message(&self) -> Text {
         match self {
-            UpdateError::NotAvailable | UpdateError::NotInstallable => Text::UpdateNoInstaller,
+            UpdateError::NotAvailable => Text::UpdateNoneAvailable,
+            UpdateError::NotInstallable => Text::UpdateNoInstaller,
             UpdateError::Downloading => Text::UpdateAlreadyDownloading,
             UpdateError::NotDownloaded => Text::UpdateFileGone,
             UpdateError::Blocked(block) => install_block_text(*block),
@@ -455,13 +456,14 @@ impl JobHandler for UpdateDownloadHandler {
                 "GitHub's digest of the installer differs from its checksum file",
             ));
         }
+        let attempt = cx.id().to_string();
         cx.save_checkpoint(format!("{CHECKPOINT_PREFIX}{expected}"), Progress::ZERO)
             .map_err(|error| JobFailure::unexpected(error.to_string()))?;
 
         let downloaded = {
             let mut file = self
                 .installers
-                .begin(&payload.name)
+                .begin(&payload.name, &attempt)
                 .map_err(|error| JobFailure::new(JobFailureKind::Files, error.to_string()))?;
             let mut hashing = Hashing {
                 inner: &mut *file,
@@ -477,8 +479,10 @@ impl JobHandler for UpdateDownloadHandler {
                 });
             written.map(|written| (written, hex(&hashing.hasher.finalize())))
         };
+        // Only this attempt's file: one cut short that ends late never
+        // touches what a newer download writes.
         let discard = || {
-            if let Err(error) = self.installers.discard(&payload.name) {
+            if let Err(error) = self.installers.abandon(&payload.name, &attempt) {
                 tracing::warn!("could not delete a partial update: {error}");
             }
         };
@@ -508,7 +512,7 @@ impl JobHandler for UpdateDownloadHandler {
             ));
         }
         self.installers
-            .finish(&payload.name)
+            .finish(&payload.name, &attempt)
             .map_err(|error| JobFailure::new(JobFailureKind::Files, error.to_string()))?;
         tracing::info!(%version, "downloaded and checked an update");
         Ok(())
@@ -658,7 +662,8 @@ impl Bardo {
     }
 
     fn install_block(&self, jobs: &[Job]) -> Option<InstallBlock> {
-        if crate::backup::another_window() {
+        // Whichever opened first: the installer would close the other.
+        if self.jobs.other_window_up() {
             return Some(InstallBlock::OtherWindow);
         }
         if self.restart_needed()
@@ -1364,6 +1369,34 @@ mod tests {
         app.cancel_job(id).unwrap();
         wait_done(&app, id);
         assert!(app.install_update().is_ok());
+    }
+
+    #[test]
+    fn installing_waits_while_another_window_is_open() {
+        let setup = Setup::new();
+        let mut app = setup.start();
+        downloaded(&setup, &mut app);
+        let block = |app: &Bardo| app.update_view().available.unwrap().install_block;
+        let until = |app: &Bardo, wanted: Option<InstallBlock>| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while block(app) != wanted {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "still {:?}",
+                    block(app)
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        // Opened after this one: the installer would close it.
+        let other = setup.start();
+        until(&app, Some(InstallBlock::OtherWindow));
+        assert!(matches!(
+            app.install_update(),
+            Err(UpdateError::Blocked(InstallBlock::OtherWindow))
+        ));
+        drop(other);
+        until(&app, None);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use bardo_app::bardo_domain::{Job, JobState, Version};
+use bardo_app::bardo_domain::{Job, JobFailureKind, JobState, Version};
 use bardo_app::{
     AvailableUpdate, Bardo, CHECK_EVERY, Control, GuidePlace, Installation, SettingsTab, Text,
     TourAnchor, UpdateFound, UpdateView,
@@ -226,7 +226,7 @@ impl UpdatePanel {
             cx.notify();
             saved
         });
-        self.error = (!saved).then_some(Text::JobNotUpdated);
+        self.error = (!saved).then_some(Text::UpdateSwitchNotSaved);
         cx.notify();
     }
 
@@ -470,12 +470,18 @@ impl UpdatePanel {
         let bardo = self.bardo.read(cx);
         let t = look(cx).tokens;
         let percent = job.progress().percent();
+        // Cut short, it waits in the queue before its next attempt.
+        let waiting = job.state() == JobState::Queued && job.retry_at().is_some();
         v_flex()
             .gap_1()
-            .child(div().text_sm().text_color(t.text2).child(bardo.text_with(
-                Text::UpdateDownloading,
-                &[("percent", &percent.to_string())],
-            )))
+            .child(div().text_sm().text_color(t.text2).child(if waiting {
+                bardo.text(Text::UpdateWaitingToRetry).into_owned()
+            } else {
+                bardo.text_with(
+                    Text::UpdateDownloading,
+                    &[("percent", &percent.to_string())],
+                )
+            }))
             .child(
                 h_flex()
                     .gap_2()
@@ -583,7 +589,12 @@ fn failure(bardo: &Bardo, job: &Job, cx: &App) -> AnyElement {
                         .text_color(t.text2)
                         .child(format!(
                             "{} {}",
-                            bardo.text(Text::JobFailureKindName(failure.kind)),
+                            // Its retries are spent: no "retrying" here.
+                            if failure.kind == JobFailureKind::ProviderUnavailable {
+                                bardo.text(Text::UpdateDownloadUnreachable)
+                            } else {
+                                bardo.text(Text::JobFailureKindName(failure.kind))
+                            },
                             failure.detail
                         ))
                 }),
