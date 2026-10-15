@@ -30,6 +30,7 @@ Without them, connecting fails with "Access was refused. Enable YouTube Data API
 Open [Google Auth Platform](https://console.cloud.google.com/auth/overview). A project that has none yet shows **Get started**, which asks for the app's name, your support email, the audience (**External**) and a contact email in one go; then check each page below.
 
 1. [Branding](https://console.cloud.google.com/auth/branding): give the app a name (for example `Bardo`) and your support email.
+   Under **App domain**, paste Bardo's privacy policy, `https://fernandolisboa.github.io/bardo/en-US/privacy.html`, as the **Application privacy policy link** (and, if you like, `https://fernandolisboa.github.io/bardo/` as the **Application home page**; leave the terms of service blank). Under **Authorized domains**, add `fernandolisboa.github.io`. Google requires the privacy policy link on every external app in production.
 2. [Audience](https://console.cloud.google.com/auth/audience): choose **External**. While the app is in **Testing**, add your own Google account under **Test users**.
 3. [Data Access](https://console.cloud.google.com/auth/scopes): select **Add or remove scopes** and add these (paste them under **Manually add scopes**) (Bardo asks for all four at once, since a desktop app cannot add scopes later):
    - `https://www.googleapis.com/auth/youtube.upload`
