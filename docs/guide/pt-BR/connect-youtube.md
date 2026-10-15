@@ -30,6 +30,7 @@ Sem elas, conectar falha com "O acesso foi recusado. Ative a YouTube Data API v3
 Abra a [Google Auth Platform](https://console.cloud.google.com/auth/overview). Um projeto que ainda não tem nada mostra **Primeiros passos** (*Get started*), que pede de uma vez o nome do app, o seu e-mail de suporte, o público-alvo (**Externo**) e um e-mail de contato; depois confira cada página abaixo.
 
 1. [Branding](https://console.cloud.google.com/auth/branding): dê um nome ao app (por exemplo `Bardo`) e o seu e-mail de suporte.
+   Em **Domínio do app**, cole a política de privacidade do Bardo, `https://fernandolisboa.github.io/bardo/en-US/privacy.html`, no **Link da Política de Privacidade do aplicativo** (e, se quiser, `https://fernandolisboa.github.io/bardo/` na **Página inicial do aplicativo**; deixe os termos de serviço em branco). Em **Domínios autorizados**, adicione `fernandolisboa.github.io`. O Google exige o link da política em todo app externo em produção.
 2. [Público-alvo](https://console.cloud.google.com/auth/audience): escolha **Externo**. Enquanto o app estiver em **Teste**, adicione a sua própria conta do Google em **Usuários de teste**.
 3. [Acesso a dados](https://console.cloud.google.com/auth/scopes): escolha **Adicionar ou remover escopos** e adicione estes (cole em **Adicionar escopos manualmente**) (o Bardo pede os quatro de uma vez, porque um app para computador não consegue adicionar escopos depois):
    - `https://www.googleapis.com/auth/youtube.upload`
@@ -40,7 +41,7 @@ Abra a [Google Auth Platform](https://console.cloud.google.com/auth/overview). U
 
 Por que produção: o Google encerra toda autorização dada a um app em **Teste** sete dias depois do consentimento, token de renovação incluído. O Bardo mostraria **Reconexão necessária** toda semana. Um app **Em produção** usado só por você não precisa da verificação do Google; o Google mostra uma tela de "app não verificado" no consentimento, em que você continua por **Avançado › Acessar (nome do app)**. Apps não verificados têm limite de 100 usuários no total, que um uso pessoal nunca atinge.
 
-Os nomes dos menus podem aparecer em inglês, conforme o idioma do seu console: *APIs & Services › Library*, *Audience*, *Data Access*, *Publish app*, *In production*.
+Os nomes dos menus podem aparecer em inglês, conforme o idioma do seu console: *APIs & Services › Library*, *Audience*, *Data Access*, *Publish app*, *In production*, *App domain*, *Application privacy policy link*, *Authorized domains*.
 
 <a id="client"></a>
 ## 3. Crie o cliente OAuth
