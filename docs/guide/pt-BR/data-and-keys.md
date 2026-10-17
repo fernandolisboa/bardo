@@ -37,3 +37,10 @@ O Bardo registra o que faz em `%LOCALAPPDATA%\Bardo\logs\bardo.log`, com tamanho
 ## Backup e troca de computador
 
 Faça backup em [Configurações › Backup](backup.md): um arquivo `.zip` com o banco de dados e, se quiser, as pastas dos projetos, feito com o Bardo aberto. O Bardo também faz sozinho um backup do banco de dados toda semana em `%LOCALAPPDATA%\Bardo\backups`. Chaves, credenciais e logins não entram no backup, de propósito: depois de restaurar em outro computador, salve tudo de novo e reconecte cada conta, como a aba lista ([Trocar de computador](backup.md#moving)).
+
+Para levar chaves, credenciais de app, preferências, personas e canais para outra cópia do Bardo sem o resto, exporte um [arquivo de configurações](backup.md#settings-file): ele é criptografado com uma senha que você escolhe, e você marca o que vai e o que entra.
+
+<a id="source"></a>
+## Uma cópia compilada do código
+
+O Bardo compilado e rodado a partir do código-fonte guarda os próprios dados, separados do Bardo instalado: `%APPDATA%\Bardo Dev` e `%LOCALAPPDATA%\Bardo Dev` no lugar das pastas `Bardo`, e uma tarefa própria do agente em segundo plano. As chaves e logins dele ficam no Gerenciador de Credenciais do Windows, no perfil dele. A barra de título mostra **Dev**. Testar uma mudança a partir do código nunca mexe no banco de dados do Bardo instalado, e um Bardo instalado mais antigo nunca abre um banco que uma compilação mais nova alterou. Leve configurações de um para o outro com um [arquivo de configurações](backup.md#settings-file).

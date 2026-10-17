@@ -281,6 +281,8 @@ pub enum Control {
     BackupAutomatic,
     /// Settings › Backup: Restore from a file.
     BackupRestore,
+    /// Settings › Backup: export and import a settings file.
+    BackupSettingsFile,
 }
 
 /// A place a step opens before it shows, so its anchor is on screen.
@@ -1208,7 +1210,7 @@ pub const BACKUP: Tour = {
     const TAB: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Backup,
-        version: 1,
+        version: 2,
         place: Some(AT),
         steps: &[
             TourStep::at("back_up", control(Control::BackupCreate))
@@ -1223,6 +1225,10 @@ pub const BACKUP: Tour = {
                 .on(AT)
                 .missing(TAB)
                 .learn(PAGE, "restore"),
+            TourStep::at("settings_file", control(Control::BackupSettingsFile))
+                .on(AT)
+                .missing(TAB)
+                .learn(PAGE, "settings-file"),
         ],
     }
 };

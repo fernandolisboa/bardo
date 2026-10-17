@@ -36,6 +36,8 @@ mod scheduler;
 mod schedules;
 mod scripts;
 mod selection;
+mod settings_file;
+mod settings_transfer;
 mod shortcuts;
 mod stages;
 mod templates;
@@ -140,6 +142,15 @@ pub use scheduler::{MissedPost, MissedPostError};
 pub use schedules::{ScheduleError, ScheduleResult, ScheduleUpdate};
 pub use scripts::{ScriptError, ScriptView};
 pub use selection::{Step, step_selection};
+pub use settings_file::{
+    EXTENSION as SETTINGS_FILE_EXTENSION, MIN_PASSWORD_CHARS, PasswordError, SettingsFileError,
+    SettingsFileInfo, SettingsPassword,
+};
+pub use settings_transfer::{
+    ImportOutcome, ItemEffect, ItemProblem, OpenedFile, SettingsChoice, SettingsExport,
+    SettingsGroup, SettingsItem, SettingsOffer, SettingsOpen, SettingsTransferError,
+    inspect_settings_file, settings_file_name,
+};
 pub use shortcuts::{SHORTCUTS, Shortcut, ShortcutGroup};
 pub use stages::{
     SceneState, Stage, StageNote, StageState, StageStatus, opening_stage, project_stages,
@@ -155,7 +166,7 @@ pub use tours::{
 pub use updates::{
     AvailableUpdate, CHECK_EVERY, InstallBlock, Installation, UpdateCheck, UpdateCheckResult,
     UpdateError, UpdateFound, UpdateInstall, UpdateLastCheck, UpdateView, current_version,
-    install_block_text,
+    install_block_text, this_data_home,
 };
 pub use uploads::{
     DraftNote, SpecProblem, UploadBlock, UploadChoices, UploadReview, UploadReviewError,
@@ -511,6 +522,8 @@ pub struct Bardo {
     restart_needed: Arc<std::sync::atomic::AtomicBool>,
     /// Checks for, downloads and installs newer releases.
     updates: updates::UpdateBook,
+    /// Bringing settings in from a file, offered over the screens.
+    settings_offer: Option<settings_transfer::SettingsOffer>,
 }
 
 impl Bardo {
@@ -589,12 +602,12 @@ impl Bardo {
             installer_runner,
             youtube_data,
         } = repositories;
-        let profile = match profiles.load_default()? {
-            Some(profile) => profile,
+        let (profile, first_start) = match profiles.load_default()? {
+            Some(profile) => (profile, false),
             None => {
                 let profile = UserProfile::new(language_for_locale(system_locale));
                 profiles.save(&profile)?;
-                profile
+                (profile, true)
             }
         };
         if role == RunnerRole::App && personas.list(profile.id)?.is_empty() {
@@ -846,6 +859,9 @@ impl Bardo {
                 installer_runner,
                 Installation::here(&program),
             ),
+            // A new copy may want another copy's settings.
+            settings_offer: (first_start && role == RunnerRole::App)
+                .then(settings_transfer::SettingsOffer::default),
         })
         .inspect(|bardo| {
             bardo.mark_restored_connections();

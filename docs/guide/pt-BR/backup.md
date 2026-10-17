@@ -28,6 +28,26 @@ Com **Fazer backup do banco de dados toda semana** ligado, como vem de início, 
 
 Eles ficam no mesmo disco dos seus dados: protegem contra um engano ou uma atualização ruim, não contra um disco com defeito ou um computador perdido. Guarde também um backup com mídias em outro lugar.
 
+<a id="settings-file"></a>
+## Arquivo de configurações
+
+Um arquivo de configurações leva suas chaves, preferências, personas e canais para outra cópia do Bardo: de uma compilada do código para a instalada, ou para um computador novo, sem os projetos e posts que um backup leva. Uma senha o protege.
+
+**Exportar configurações…** lista o que esta cópia tem, tudo marcado menos os logins:
+
+- **Chaves de API** e **Credenciais de app**, cada uma salva pelo nome.
+- **Preferências e custos**: o idioma, o tema e o layout da interface, se o Bardo oferece tours, faz backup toda semana e procura atualizações, como os números dos posts sincronizam, a pontuação mínima das sugestões de corte, seus orçamentos e os preços que você mudou.
+- **Personas** e **Canais**, cada canal com suas contas nas redes.
+- **Logins**: o login de uma conta, que só vai junto com o canal dele. Em geral, deixe desmarcado e entre de novo na outra cópia. Algumas redes, como o X, mantêm só uma cópia conectada: a primeira que renovar o login desconecta a outra.
+
+Digite duas vezes uma senha de pelo menos 10 caracteres e selecione **Salvar arquivo…**. O Bardo não recupera uma senha esquecida: sem ela, o arquivo não abre. O arquivo é criptografado com essa senha, então guarde o arquivo e a senha separados; quem tiver os dois consegue ler suas chaves.
+
+**Importar configurações…** pede o arquivo, mostra qual Bardo o fez e quando, e pede a senha. Depois lista o que o arquivo tem, tudo marcado menos os logins, cada item marcado **Novo aqui** ou **Substitui o daqui**. O que substitui fica com os dados do arquivo e mantém o lugar: uma persona ou um canal de mesmo nome continua com seus projetos, e uma chave ou credencial de app da mesma rede é sobrescrita. Nada que você deixar desmarcado, e nada que o arquivo não tenha, muda. **Importar** traz os itens marcados e lista os que não puderam ser salvos.
+
+Um arquivo feito por um Bardo mais novo abre se o formato dele for um que este Bardo conhece; valores ou partes que este Bardo não conhece aparecem numa lista e ficam de fora. Atualize o Bardo para importá-los. Um arquivo de formato mais novo pede que você atualize o Bardo antes ([Atualizar](install.md#update)).
+
+Na primeira vez que uma cópia nova do Bardo abre, uma barra sobre as telas oferece importar um arquivo de configurações; **Agora não** a fecha, e a aba oferece o mesmo a qualquer momento. O instalador também aceita um arquivo de configurações ([Instalação](install.md#setup)).
+
 <a id="restore"></a>
 ## Restaurar
 
@@ -49,4 +69,4 @@ A aba lista o que este computador ainda precisa: as chaves e credenciais de app 
 
 1. No computador antigo, faça um backup com **Incluir mídias** marcado e copie o arquivo para o novo.
 2. [Instale o Bardo](install.md) no computador novo, abra e restaure o arquivo em **Configurações › Backup**.
-3. Depois de reiniciar, siga a lista: salve de novo suas chaves e credenciais de app e reconecte cada conta.
+3. Depois de reiniciar, siga a lista: salve de novo suas chaves e credenciais de app e reconecte cada conta. Um [arquivo de configurações](#settings-file) feito no computador antigo traz as chaves e credenciais de app de uma vez.

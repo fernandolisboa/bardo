@@ -58,9 +58,7 @@ pub struct DataPaths {
 impl DataPaths {
     /// Bardo's own folders for this user.
     pub fn local_default() -> Result<Self, StorageError> {
-        let local = dirs::data_local_dir()
-            .ok_or(StorageError::NoDataDir)?
-            .join("Bardo");
+        let local = crate::data_home().local()?;
         Ok(Self {
             database: crate::default_database_path()?,
             projects: crate::default_projects_dir()?,

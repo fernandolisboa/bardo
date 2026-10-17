@@ -12,6 +12,7 @@
 //! results to text.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use bardo_app::bardo_domain::{
     AppCredentialsFieldError, KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Network, Provider,
@@ -202,6 +203,8 @@ pub struct SettingsScreen {
     scroll: ScrollHandle,
     /// The Backup tab, which polls the job queue on its own.
     backup: Entity<crate::backup::BackupPanel>,
+    /// Inside the Backup tab; the import offer opens it.
+    settings_file: Entity<crate::settings_transfer::SettingsFilePanel>,
     /// Settings › About's Updates section.
     updates: Entity<crate::updates::UpdatePanel>,
     privacy: Entity<crate::privacy::PrivacyPanel>,
@@ -311,9 +314,14 @@ impl SettingsScreen {
             },
         ));
         let scroll = ScrollHandle::new();
-        let backup = {
+        let settings_file = {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
-            cx.new(|cx| crate::backup::BackupPanel::new(bardo, scroll, cx))
+            cx.new(|cx| crate::settings_transfer::SettingsFilePanel::new(bardo, scroll, window, cx))
+        };
+        let backup = {
+            let (bardo, scroll, settings_file) =
+                (bardo.clone(), scroll.clone(), settings_file.clone());
+            cx.new(|cx| crate::backup::BackupPanel::new(bardo, scroll, settings_file, cx))
         };
         let updates = {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
@@ -342,6 +350,7 @@ impl SettingsScreen {
             labeled: None,
             scroll,
             backup,
+            settings_file,
             updates,
             privacy,
             _subscriptions: subscriptions,
@@ -371,6 +380,21 @@ impl SettingsScreen {
         self.setup = None;
         self.copied = false;
         cx.notify();
+    }
+
+    /// Opens the Backup tab on importing a settings file: `file`'s
+    /// password, or the file dialog.
+    pub fn import_settings(
+        &mut self,
+        file: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_tab(SettingsTab::Backup, cx);
+        self.settings_file.update(cx, |panel, cx| match file {
+            Some(file) => panel.inspect(file, window, cx),
+            None => panel.pick_file(window, cx),
+        });
     }
 
     /// Opens the Networks tab, where a connection's app credentials live.
@@ -1683,7 +1707,11 @@ impl SettingsScreen {
                         .font_medium()
                         .child(bardo.text_with(Text::AboutVersion, &[("version", about.version)])),
                 )
-                .child(body(bardo.text(Text::AboutSummary).into_owned())),
+                .child(body(bardo.text(Text::AboutSummary).into_owned()))
+                .when(
+                    bardo_storage::data_home() == bardo_storage::DataHome::Development,
+                    |about| about.child(kit::notice(Tone::Info, tr(bardo, Text::AboutDevCopy), cx)),
+                ),
             scroll,
         );
         let source = about.ffmpeg_source.clone();

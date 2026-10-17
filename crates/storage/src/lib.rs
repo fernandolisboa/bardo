@@ -10,6 +10,7 @@ mod channel;
 mod connection;
 mod cost;
 mod cut_suggestion;
+mod data_home;
 mod export;
 mod export_files;
 mod files;
@@ -51,6 +52,7 @@ pub use backup::{
     BACKUP_FORMAT, DATABASE_ENTRY, DataPaths, LocalBackups, MANIFEST, MemoryBackups, WindowLock,
     apply_pending_restore, clean_restore_leftovers, lock_window, restore_pending,
 };
+pub use data_home::{DataHome, data_home, use_data_home};
 pub use export_files::{LocalExportFiles, MemoryExportFiles, default_exports_dir};
 pub use files::{LocalProjectFiles, MemoryProjectFiles, default_projects_dir};
 pub use installers::{
@@ -178,8 +180,8 @@ pub(crate) fn from_unix_millis(millis: i64) -> SystemTime {
 }
 
 /// `%APPDATA%\Bardo\bardo.db` on Windows (the platform's per-user data
-/// directory elsewhere).
+/// directory elsewhere), under `Bardo Dev` for a copy built from source
+/// (`data_home`).
 pub fn default_database_path() -> Result<PathBuf, StorageError> {
-    let dir = dirs::data_dir().ok_or(StorageError::NoDataDir)?;
-    Ok(dir.join("Bardo").join("bardo.db"))
+    Ok(data_home().roaming()?.join("bardo.db"))
 }

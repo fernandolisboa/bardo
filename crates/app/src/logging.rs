@@ -16,9 +16,13 @@ use tracing_subscriber::fmt::MakeWriter;
 pub const ROTATE_AT_BYTES: u64 = 5 * 1024 * 1024;
 
 /// `%LOCALAPPDATA%\Bardo\logs\bardo.log` on Windows (the platform's local
-/// data directory elsewhere). Local, not roaming: logs belong to this PC.
+/// data directory elsewhere), under `Bardo Dev` for a copy built from
+/// source. Local, not roaming: logs belong to this PC.
 pub fn default_log_path() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|dir| dir.join("Bardo").join("logs").join("bardo.log"))
+    bardo_storage::data_home()
+        .local()
+        .ok()
+        .map(|dir| dir.join("logs").join("bardo.log"))
 }
 
 /// The folder of both logs, which Settings › About opens and a diagnostic

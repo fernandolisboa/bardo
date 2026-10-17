@@ -339,6 +339,9 @@ impl Bardo {
             self.save_background_agent(on)?;
             tracing::info!(on, "the installer's background agent choice is saved");
         }
+        if let Some(file) = &choices.settings_file {
+            self.offer_settings_file(file.clone());
+        }
         Ok(())
     }
 
@@ -682,6 +685,7 @@ mod tests {
         let mut s = ready();
         let choices = SetupChoices {
             background_agent: Some(true),
+            ..SetupChoices::default()
         };
         s.app.apply_setup_choices(&choices).unwrap();
         assert!(profile(&s.h).background_agent);
@@ -700,6 +704,7 @@ mod tests {
         s.app
             .apply_setup_choices(&SetupChoices {
                 background_agent: Some(false),
+                ..SetupChoices::default()
             })
             .unwrap();
         assert!(!profile(&s.h).background_agent);

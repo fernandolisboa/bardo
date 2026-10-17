@@ -17,8 +17,7 @@ use crate::StorageError;
 /// `%LOCALAPPDATA%\Bardo\voice-samples` on Windows (the platform's local
 /// data directory elsewhere).
 pub fn default_voice_samples_dir() -> Result<PathBuf, StorageError> {
-    let dir = dirs::data_local_dir().ok_or(StorageError::NoDataDir)?;
-    Ok(dir.join("Bardo").join("voice-samples"))
+    Ok(crate::data_home().local()?.join("voice-samples"))
 }
 
 fn error(key: &str, source: std::io::Error) -> VoiceSampleStoreError {

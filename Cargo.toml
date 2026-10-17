@@ -46,3 +46,11 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# The settings file's key derivation (issue #162) runs 64 MiB of Argon2:
+# seconds unoptimized, so it is optimized in debug builds too.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

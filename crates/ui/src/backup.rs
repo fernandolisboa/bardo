@@ -60,12 +60,20 @@ pub struct BackupPanel {
     /// What the last action could not do.
     error: Option<Text>,
     restarting: bool,
+    /// Settings › Backup › Settings file, shown before Restore so a
+    /// restore's review stays the tab's last part.
+    settings_file: Entity<crate::settings_transfer::SettingsFilePanel>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl BackupPanel {
-    pub fn new(bardo: Entity<Bardo>, scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        bardo: Entity<Bardo>,
+        scroll: ScrollHandle,
+        settings_file: Entity<crate::settings_transfer::SettingsFilePanel>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -97,6 +105,7 @@ impl BackupPanel {
             review: None,
             error: None,
             restarting: false,
+            settings_file,
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -867,6 +876,7 @@ impl Render for BackupPanel {
             .children(error)
             .child(self.render_back_up(cx))
             .child(self.render_automatic(cx))
+            .child(self.settings_file.clone())
             .child(self.render_restore(cx))
     }
 }
