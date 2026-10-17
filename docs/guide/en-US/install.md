@@ -28,6 +28,7 @@ The installer speaks English or Portuguese, following Windows. It asks:
 - **Where**: by default `%LOCALAPPDATA%\Programs\Bardo`.
 - **A desktop shortcut**, if you want one. The Start menu always gets one.
 - **Publish even when Bardo is closed?** Asked on the first install only, and unticked unless you tick it. Ticked, Bardo turns its background agent on the next time it opens, as **Publish while Bardo is closed** does. You can change it at any time in [Settings › Publishing](background-agent.md#turn-on).
+- **Import settings from a file?** Asked on the first install only. Pick a [settings file](backup.md#settings-file) exported from another copy of Bardo, or leave it empty. The next time Bardo opens it asks for the file's password and lets you tick what to import.
 
 FFmpeg, which Bardo reads, previews and renders video with, comes inside the installer: there is nothing else to install. Your API keys come next: see [Your API keys](api-keys.md).
 

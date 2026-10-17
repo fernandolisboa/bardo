@@ -28,6 +28,7 @@ mod privacy;
 mod projects;
 mod research;
 mod settings;
+mod settings_transfer;
 mod shell;
 mod spend;
 mod templates;
@@ -131,6 +132,9 @@ fn apply_setup_choices(bardo: &mut Bardo) {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Before anything opens the data: a copy built from source keeps its
+    // own folders (ADR-0014), the agent and the uninstaller alike.
+    bardo_storage::use_data_home(bardo_app::this_data_home());
     if std::env::args().any(|arg| arg == bardo_storage::AGENT_ARGUMENT) {
         return run_agent();
     }

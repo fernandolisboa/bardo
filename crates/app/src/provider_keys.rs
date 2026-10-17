@@ -243,6 +243,34 @@ impl Bardo {
         Ok(())
     }
 
+    /// The saved key, for a settings file (issue #162); `None` when none
+    /// is saved or it cannot be read.
+    pub(crate) fn saved_provider_key(&self, provider: Provider) -> Option<ApiKey> {
+        self.provider_keys.read(self.profile.id, provider).ok()
+    }
+
+    /// Saves a key read from a settings file. Unlike typing it, YouTube's
+    /// key is kept without the privacy policy: its features wait for the
+    /// policy, as after a restore (ADR-0012).
+    pub(crate) fn keep_provider_key(
+        &mut self,
+        provider: Provider,
+        key: &ApiKey,
+    ) -> Result<(), ProviderKeyError> {
+        let keys = &mut self.provider_keys;
+        keys.redactor.add(key);
+        keys.store
+            .set(self.profile.id, provider, key)
+            .map_err(|error| store_failure(&keys.redactor, provider, "save", error))?;
+        tracing::info!(
+            provider = provider.code(),
+            "saved a provider key from a settings file"
+        );
+        keys.replaced(provider, KeyState::Saved { hint: key.hint() });
+        self.forget_voice_list(provider);
+        Ok(())
+    }
+
     /// Removes the key from the secret store.
     pub fn remove_provider_key(&mut self, provider: Provider) -> Result<(), ProviderKeyError> {
         let keys = &mut self.provider_keys;

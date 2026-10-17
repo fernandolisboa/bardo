@@ -12,7 +12,8 @@
 use gpui_kit::component::{Icon, IconName, InteractiveElementExt as _, h_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Decorations, Hsla, MouseButton, Pixels, Window, WindowControlArea, div, px,
+    AnyElement, App, Decorations, Hsla, MouseButton, Pixels, SharedString, Window,
+    WindowControlArea, div, px,
 };
 
 use crate::appearance::{EditorColor, editor_color, look};
@@ -75,11 +76,18 @@ impl Colors {
 #[derive(IntoElement)]
 pub struct TitleBar {
     colors: Colors,
+    /// The chip after the name on a copy built from source.
+    dev: Option<SharedString>,
 }
 
 impl TitleBar {
     pub fn new(colors: Colors) -> Self {
-        Self { colors }
+        Self { colors, dev: None }
+    }
+
+    pub fn dev(mut self, label: Option<SharedString>) -> Self {
+        self.dev = label;
+        self
     }
 }
 
@@ -95,7 +103,18 @@ impl RenderOnce for TitleBar {
             // Room for the traffic lights, which macOS keeps drawing.
             .when(cfg!(target_os = "macos"), |brand| brand.pl(px(80.)))
             .items_center()
-            .child(Lockup::new(MARK, colors.mark, colors.text));
+            .gap_2()
+            .child(Lockup::new(MARK, colors.mark, colors.text))
+            .children(self.dev.map(|label| {
+                div()
+                    .px_1p5()
+                    .rounded(px(4.))
+                    .border_1()
+                    .border_color(colors.border)
+                    .text_xs()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(label)
+            }));
         let drag = h_flex()
             .id("title-bar-drag")
             .flex_1()

@@ -1171,6 +1171,99 @@ impl Bardo {
         Ok(())
     }
 
+    /// The network's saved app credentials, for a settings file (issue
+    /// #162); `None` when none are saved or they cannot be read.
+    pub(crate) fn saved_app_credentials(&self, network: Network) -> Option<AppCredentials> {
+        let connections = &self.connection_book.connections;
+        let credentials = connections
+            .secrets
+            .app_credentials(self.profile.id, network)
+            .ok()??;
+        connections
+            .redactor
+            .add_parts(&credentials.sensitive_parts());
+        Some(credentials)
+    }
+
+    /// Saves app credentials read from a settings file. YouTube's are kept
+    /// without the privacy policy: its features wait for the policy, as
+    /// after a restore (ADR-0012).
+    pub(crate) fn keep_app_credentials(
+        &mut self,
+        network: Network,
+        credentials: &AppCredentials,
+    ) -> Result<(), ConnectionError> {
+        if !network.signs_in() {
+            return Err(ConnectionError::NotOffered(network));
+        }
+        let connections = &self.connection_book.connections;
+        connections
+            .redactor
+            .add_parts(&credentials.sensitive_parts());
+        connections
+            .secrets
+            .set_app_credentials(self.profile.id, network, credentials)
+            .map_err(|error| connections.store_failure("save app credentials", error))?;
+        tracing::info!(
+            network = network.code(),
+            "saved app credentials from a settings file"
+        );
+        self.connection_book.credentials.insert(
+            network,
+            KeyState::Saved {
+                hint: credentials.hint(),
+            },
+        );
+        Ok(())
+    }
+
+    /// The account's connection and its tokens, for a settings file; `None`
+    /// when it is not connected or its tokens cannot be read.
+    pub(crate) fn saved_sign_in(
+        &self,
+        account: &NetworkAccount,
+    ) -> Option<(NetworkConnection, TokenSet)> {
+        let connections = &self.connection_book.connections;
+        let state = connections.states.get(account.id).ok()??;
+        let tokens = connections
+            .secrets
+            .tokens(self.profile.id, account.id)
+            .ok()??;
+        connections.redactor.add_parts(&tokens.sensitive_parts());
+        Some((state, tokens))
+    }
+
+    /// Keeps a connection read from a settings file for `account`: tokens
+    /// to the secret store first, then the state, as signing in does.
+    pub(crate) fn keep_sign_in(
+        &self,
+        account: &NetworkAccount,
+        connection: NetworkConnection,
+        tokens: &TokenSet,
+    ) -> Result<(), ConnectionError> {
+        if !account.network.signs_in() {
+            return Err(ConnectionError::NotOffered(account.network));
+        }
+        let connections = &self.connection_book.connections;
+        tokens.encode()?;
+        connections.redactor.add_parts(&tokens.sensitive_parts());
+        connections
+            .secrets
+            .set_tokens(self.profile.id, account.id, tokens)
+            .map_err(|error| connections.store_failure("save tokens", error))?;
+        connections.states.save(&NetworkConnection {
+            account: account.id,
+            owner: self.profile.id,
+            expires_at: tokens.expires_at(),
+            ..connection
+        })?;
+        tracing::info!(
+            network = account.network.code(),
+            "kept a connection from a settings file"
+        );
+        Ok(())
+    }
+
     pub fn remove_app_credentials(&mut self, network: Network) -> Result<(), ConnectionError> {
         let connections = &self.connection_book.connections;
         connections
