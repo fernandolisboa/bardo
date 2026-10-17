@@ -399,7 +399,7 @@ impl Bardo {
     }
 
     /// Whether the last successful listing has `voice`; `None` without one.
-    fn voice_lookup(&self, voice: &VoiceRef) -> Option<bool> {
+    pub(crate) fn voice_lookup(&self, voice: &VoiceRef) -> Option<bool> {
         match self.voice_status(voice) {
             VoiceStatus::Available => Some(true),
             VoiceStatus::Missing => Some(false),

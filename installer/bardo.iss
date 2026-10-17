@@ -4,8 +4,9 @@
 ;
 ; Per user, no administrator: %LOCALAPPDATA%\Programs\Bardo. On a first
 ; install it asks the background agent question (ADR-0006) and leaves the
-; answer in %APPDATA%\Bardo\setup-choices.toml, which Bardo reads at its
-; next start; Bardo registers the agent's task itself. The uninstaller runs
+; answer, and an optional settings file to import (ADR-0014), in
+; %APPDATA%\Bardo\setup-choices.toml, which Bardo reads at its next start;
+; Bardo registers the agent's task itself. The uninstaller runs
 ; `bardo --uninstall` (agent off, task removed) and keeps the user's data.
 
 #ifndef AppVersion
@@ -70,6 +71,19 @@ en.AgentGroup=Publish even when Bardo is closed? Installs a lightweight agent th
 ptbr.AgentGroup=Publicar mesmo com o Bardo fechado? Instala um agente leve que envia os posts agendados em segundo plano enquanto você estiver conectado ao Windows. Dá para desligar depois nas configurações.
 en.AgentTask=Publish scheduled posts while Bardo is closed
 ptbr.AgentTask=Publicar os posts agendados com o Bardo fechado
+; The settings file page (ADR-0014), on a first install only.
+en.SettingsCaption=Import settings
+ptbr.SettingsCaption=Importar configurações
+en.SettingsDescription=Bring settings from another copy of Bardo.
+ptbr.SettingsDescription=Traga configurações de outra cópia do Bardo.
+en.SettingsHelp=If you exported a settings file from another copy of Bardo (Settings › Backup › Settings file), pick it here. The next time Bardo opens it asks for the file's password and lets you tick what to import. Leave it empty to start fresh.
+ptbr.SettingsHelp=Se você exportou um arquivo de configurações de outra cópia do Bardo (Configurações › Backup › Arquivo de configurações), escolha-o aqui. Na próxima vez que abrir, o Bardo pede a senha do arquivo e deixa você marcar o que importar. Deixe em branco para começar do zero.
+en.SettingsFile=Settings file (optional):
+ptbr.SettingsFile=Arquivo de configurações (opcional):
+en.SettingsFilter=Bardo settings (*.bardo-settings)|*.bardo-settings|All files|*.*
+ptbr.SettingsFilter=Configurações do Bardo (*.bardo-settings)|*.bardo-settings|Todos os arquivos|*.*
+en.SettingsMissing=That file does not exist. Pick another or leave the field empty.
+ptbr.SettingsMissing=Esse arquivo não existe. Escolha outro ou deixe o campo em branco.
 en.CloseBardo=Bardo is open. Close it, then select Retry to uninstall.
 ptbr.CloseBardo=O Bardo está aberto. Feche o Bardo e selecione Repetir para desinstalar.
 
@@ -105,6 +119,7 @@ const
 
 var
   FirstInstall: Boolean;
+  SettingsPage: TInputFileWizardPage;
 
 function InitializeSetup(): Boolean;
 begin
@@ -119,9 +134,42 @@ begin
   Result := FirstInstall;
 end;
 
+// An optional settings file to import (ADR-0014): Bardo asks its password
+// at its next start, so the installer never sees it.
+procedure InitializeWizard();
+begin
+  SettingsPage := CreateInputFilePage(wpSelectTasks,
+    CustomMessage('SettingsCaption'), CustomMessage('SettingsDescription'),
+    CustomMessage('SettingsHelp'));
+  SettingsPage.Add(CustomMessage('SettingsFile'),
+    CustomMessage('SettingsFilter'), '.bardo-settings');
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = SettingsPage.ID) and not FirstInstall;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Chosen: String;
+begin
+  Result := True;
+  if CurPageID = SettingsPage.ID then
+  begin
+    Chosen := Trim(SettingsPage.Values[0]);
+    if (Chosen <> '') and not FileExists(Chosen) then
+    begin
+      MsgBox(CustomMessage('SettingsMissing'), mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Dir, Answer: String;
+  Dir, Answer, Chosen: String;
+  Lines: TArrayOfString;
 begin
   if (CurStep = ssPostInstall) and FirstInstall then
   begin
@@ -129,11 +177,20 @@ begin
       Answer := 'true'
     else
       Answer := 'false';
+    SetArrayLength(Lines, 2);
+    Lines[0] := '# Left by the Bardo installer. Bardo reads it once at its next start.';
+    Lines[1] := 'background_agent = ' + Answer;
+    Chosen := Trim(SettingsPage.Values[0]);
+    if Chosen <> '' then
+    begin
+      // A TOML multi-line literal string: no escapes, quotes allowed.
+      SetArrayLength(Lines, 3);
+      Lines[2] := 'settings_file = ' + #39#39#39 + Chosen + #39#39#39;
+    end;
     Dir := ExpandConstant('{userappdata}\Bardo');
     ForceDirectories(Dir);
-    SaveStringToFile(Dir + '\setup-choices.toml',
-      '# Left by the Bardo installer. Bardo reads it once at its next start.'#13#10 +
-      'background_agent = ' + Answer + #13#10, False);
+    // UTF-8, so a path with accents reaches Bardo intact.
+    SaveStringsToUTF8File(Dir + '\setup-choices.toml', Lines, False);
   end;
 end;
 

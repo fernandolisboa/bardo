@@ -10,6 +10,8 @@ use std::sync::Mutex;
 
 use bardo_domain::{AgentTask, AgentTaskError};
 
+use crate::DataHome;
+
 /// The argument that makes `bardo` run as the background agent.
 pub const AGENT_ARGUMENT: &str = "--agent";
 
@@ -169,10 +171,11 @@ fn xml_escape(text: &str) -> String {
     escaped
 }
 
-/// The task's name: one per Windows user, in the root folder, which a user
-/// without administrator rights may write to.
-pub fn task_name(user_name: &str) -> String {
-    format!("Bardo publishing agent ({user_name})")
+/// The task's name: one per Windows user and copy of Bardo (a copy built
+/// from source has its own, so the two never replace each other's), in the
+/// root folder, which a user without administrator rights may write to.
+pub fn task_name(home: DataHome, user_name: &str) -> String {
+    format!("{} publishing agent ({user_name})", home.folder())
 }
 
 #[cfg(windows)]
@@ -207,7 +210,7 @@ mod windows {
             };
             Self {
                 user,
-                name: task_name(&name),
+                name: task_name(crate::data_home(), &name),
             }
         }
 
@@ -301,8 +304,13 @@ mod tests {
 
     #[test]
     fn each_windows_user_has_a_task_of_their_own() {
-        assert_eq!(task_name("ana"), "Bardo publishing agent (ana)");
-        assert_ne!(task_name("ana"), task_name("bia"));
+        let installed = DataHome::Installed;
+        assert_eq!(task_name(installed, "ana"), "Bardo publishing agent (ana)");
+        assert_ne!(task_name(installed, "ana"), task_name(installed, "bia"));
+        assert_eq!(
+            task_name(DataHome::Development, "ana"),
+            "Bardo Dev publishing agent (ana)"
+        );
     }
 
     #[test]

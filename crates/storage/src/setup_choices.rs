@@ -4,6 +4,7 @@
 //!
 //! ```toml
 //! background_agent = true
+//! settings_file = '''C:\Users\Ana\Documents\bardo.bardo-settings'''
 //! ```
 //!
 //! The installer writes it only on a first install. A file Bardo cannot
@@ -20,13 +21,15 @@ use crate::StorageError;
 pub struct SetupChoices {
     /// "Publish even when Bardo is closed?" (ADR-0006).
     pub background_agent: Option<bool>,
+    /// A settings file to bring in (ADR-0014): Bardo asks its password at
+    /// the next start.
+    pub settings_file: Option<PathBuf>,
 }
 
 /// `%APPDATA%\Bardo\setup-choices.toml` on Windows, next to the database
 /// (the platform's per-user data directory elsewhere).
 pub fn default_setup_choices_path() -> Result<PathBuf, StorageError> {
-    let dir = dirs::data_dir().ok_or(StorageError::NoDataDir)?;
-    Ok(dir.join("Bardo").join(SETUP_CHOICES_FILE))
+    Ok(crate::data_home().roaming()?.join(SETUP_CHOICES_FILE))
 }
 
 /// The file name the installer writes.
@@ -91,7 +94,8 @@ mod tests {
         assert_eq!(
             take_setup_choices(&path).unwrap(),
             Some(SetupChoices {
-                background_agent: Some(true)
+                background_agent: Some(true),
+                ..SetupChoices::default()
             })
         );
         assert!(!path.exists(), "deleted after reading");
@@ -110,8 +114,26 @@ mod tests {
         assert_eq!(
             take_setup_choices(&path).unwrap(),
             Some(SetupChoices {
-                background_agent: Some(false)
+                background_agent: Some(false),
+                ..SetupChoices::default()
             })
+        );
+    }
+
+    #[test]
+    fn the_settings_file_is_a_windows_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SETUP_CHOICES_FILE);
+        // Inno writes UTF-8 with a byte order mark, and the path in a
+        // multi-line literal string: no escapes, quotes allowed.
+        std::fs::write(
+            &path,
+            "\u{feff}background_agent = false\r\nsettings_file = '''C:\\Users\\Ana Lú\\d'Ávila.bardo-settings'''\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            take_setup_choices(&path).unwrap().unwrap().settings_file,
+            Some(PathBuf::from(r"C:\Users\Ana Lú\d'Ávila.bardo-settings"))
         );
     }
 

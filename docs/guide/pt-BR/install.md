@@ -28,6 +28,7 @@ O instalador fala português ou inglês, conforme o Windows. Ele pergunta:
 - **Onde**: por padrão, `%LOCALAPPDATA%\Programs\Bardo`.
 - **Um atalho na área de trabalho**, se você quiser. O menu Iniciar sempre ganha um.
 - **Publicar mesmo com o Bardo fechado?** Só na primeira instalação, e desmarcado a menos que você marque. Marcado, o Bardo liga o agente em segundo plano na próxima vez que abrir, como faz **Publicar com o Bardo fechado**. Dá para mudar a qualquer momento em [Configurações › Publicação](background-agent.md#turn-on).
+- **Importar configurações de um arquivo?** Só na primeira instalação. Escolha um [arquivo de configurações](backup.md#settings-file) exportado de outra cópia do Bardo, ou deixe em branco. Na próxima vez que abrir, o Bardo pede a senha do arquivo e deixa você marcar o que importar.
 
 O FFmpeg, com que o Bardo lê, pré-visualiza e renderiza vídeo, vem dentro do instalador: não há mais nada para instalar. Em seguida vêm suas chaves de API: veja [Suas chaves de API](api-keys.md).
 

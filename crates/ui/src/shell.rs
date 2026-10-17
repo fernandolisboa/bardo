@@ -9,8 +9,8 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task, Window,
-    div, px,
+    AnyElement, App, ClickEvent, Entity, FocusHandle, ScrollHandle, SharedString, Subscription,
+    Task, Window, div, px,
 };
 
 use crate::accounts::AccountsScreen;
@@ -612,6 +612,20 @@ impl Shell {
     /// A guide link or "Go to …": opens the place. From the guide over the
     /// editor, the editor itself is back where it was; any other place
     /// closes it.
+    /// Takes up the offer to import settings: Settings › Backup, on the
+    /// installer's file or the file dialog.
+    fn import_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let offer = self.bardo.update(cx, |bardo, cx| {
+            cx.notify();
+            bardo.take_settings_offer()
+        });
+        self.go(GuidePlace::Settings(SettingsTab::Backup), window, cx);
+        let file = offer.and_then(|offer| offer.file);
+        self.settings.update(cx, |settings, cx| {
+            settings.import_settings(file, window, cx)
+        });
+    }
+
     fn go(&mut self, place: GuidePlace, window: &mut Window, cx: &mut Context<Self>) {
         if self.editor.is_some() {
             if place == GuidePlace::Stage(Stage::Edit) {
@@ -769,12 +783,15 @@ impl Render for Shell {
         };
         // Over the editor, the Guide shows the editor's tours alone.
         let guide = self.guide.clone();
+        // A copy built from source says so, as its data is its own.
+        let dev = (bardo_storage::data_home() == bardo_storage::DataHome::Development)
+            .then(|| tr(self.bardo.read(cx), Text::DevCopyChip));
         v_flex()
             .size_full()
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_open_guide))
             .on_action(cx.listener(Self::on_tour_this_screen))
-            .child(TitleBar::new(colors))
+            .child(TitleBar::new(colors).dev(dev))
             .child(
                 div()
                     .relative()
@@ -860,9 +877,27 @@ impl Shell {
         // over the screens, in both layouts.
         let update = self.bardo.read(cx).update_banner();
         let privacy = self.bardo.read(cx).youtube_waits_for_privacy();
-        if update.is_some() || privacy {
+        let offer = self.bardo.read(cx).settings_offer().cloned();
+        if update.is_some() || privacy || offer.is_some() {
+            let offer = offer.map(|offer| {
+                crate::settings_transfer::banner(
+                    self.bardo.read(cx),
+                    &offer,
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.import_settings(window, cx)
+                    }),
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.bardo.update(cx, |bardo, cx| {
+                            bardo.take_settings_offer();
+                            cx.notify();
+                        });
+                    }),
+                    cx,
+                )
+            });
             shell = v_flex()
                 .size_full()
+                .children(offer)
                 .when(privacy, |bars| {
                     bars.child(crate::privacy::banner(&self.bardo, cx))
                 })

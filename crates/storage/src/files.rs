@@ -12,10 +12,9 @@ use bardo_domain::{ProjectFileError, ProjectFiles, VideoProjectId};
 use crate::StorageError;
 
 /// `%LOCALAPPDATA%\Bardo\projects` on Windows (the platform's local data
-/// directory elsewhere).
+/// directory elsewhere), under `Bardo Dev` for a copy built from source.
 pub fn default_projects_dir() -> Result<PathBuf, StorageError> {
-    let dir = dirs::data_local_dir().ok_or(StorageError::NoDataDir)?;
-    Ok(dir.join("Bardo").join("projects"))
+    Ok(crate::data_home().local()?.join("projects"))
 }
 
 /// Project folders under one root directory.

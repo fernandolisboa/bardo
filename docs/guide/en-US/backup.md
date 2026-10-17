@@ -28,6 +28,26 @@ With **Back up the database every week** on, as it is at first, the first time B
 
 They live on the same disk as your data: they protect against a mistake or a bad update, not against a failed disk or a lost computer. Keep a backup with media somewhere else too.
 
+<a id="settings-file"></a>
+## Settings file
+
+A settings file takes your keys, preferences, personas and channels to another copy of Bardo: from one built from source to the installed one, or to a new computer, without the projects and posts a backup carries. A password protects it.
+
+**Export settings…** lists what this copy has, all ticked but the sign-ins:
+
+- **API keys** and **App credentials**, each saved one by name.
+- **Preferences and costs**: the interface language, theme and layout, whether Bardo offers tours, backs up every week and checks for updates, how post numbers sync, the lowest score of the cut suggestions shown, your budgets and the prices you changed.
+- **Personas** and **Channels**, each channel with its network accounts.
+- **Sign-ins**: an account's sign-in, which goes only with its channel. Usually leave these off and sign in again in the other copy. Some networks, X among them, keep only one copy signed in: the first copy to renew its sign-in signs the other out.
+
+Type a password of at least 10 characters twice and select **Save file…**. Bardo cannot recover a forgotten password: without it the file does not open. The file is encrypted with that password, so keep the file and the password apart; anyone with both can read your keys.
+
+**Import settings…** asks for the file, shows which Bardo made it and when, and asks for its password. Then it lists what the file holds, all ticked but the sign-ins, each marked **New here** or **Replaces the one here**. What replaces takes the file's details and keeps its place: a persona or channel of the same name keeps its projects, and a key or app credential of the same network is overwritten. Nothing you leave unticked, and nothing the file does not hold, changes. **Import** brings the ticked items in and lists any that could not be saved.
+
+A file made by a newer Bardo opens if its format is one this Bardo knows; values or parts this Bardo does not know are listed and left out. Update Bardo to import them. A file of a newer format asks you to update Bardo first ([Updating](install.md#update)).
+
+The first time a new copy of Bardo opens, a bar over the screens offers to import a settings file; **Not now** closes it, and the tab offers the same at any time. The installer can take a settings file too ([Setting it up](install.md#setup)).
+
 <a id="restore"></a>
 ## Restoring
 
@@ -49,4 +69,4 @@ The tab lists what this computer still needs: the keys and app credentials the b
 
 1. On the old computer, back up with **Include media** ticked, and copy the file to the new one.
 2. [Install Bardo](install.md) on the new computer, open it, and restore the file from **Settings › Backup**.
-3. After the restart, follow the list: save your keys and app credentials again and reconnect each account.
+3. After the restart, follow the list: save your keys and app credentials again and reconnect each account. A [settings file](#settings-file) made on the old computer brings the keys and app credentials in one go.

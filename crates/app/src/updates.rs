@@ -22,6 +22,7 @@ use bardo_domain::{
     JobKind, JobState, Progress, Release, ReleaseFeed, RepositoryError, RunnerRole,
     UpdateCheckError, UserProfile, Version, checksum_for, installer_name, installer_version,
 };
+use bardo_storage::DataHome;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -81,6 +82,15 @@ impl Installation {
         Installation::of(program)
     }
 
+    /// Whose folders this copy keeps its data in: a copy built from source
+    /// keeps its own, apart from the installed one's (ADR-0014).
+    pub fn data_home(self) -> DataHome {
+        match self {
+            Installation::Source => DataHome::Development,
+            Installation::Installer | Installation::Store => DataHome::Installed,
+        }
+    }
+
     /// From where `program` runs: the Store's `WindowsApps` folder, or the
     /// installed layout (the notices sit next to `bardo.exe`) on Windows.
     pub fn of(program: &Path) -> Installation {
@@ -99,6 +109,15 @@ impl Installation {
             Installation::Source
         }
     }
+}
+
+/// Whose folders the program running now keeps its data in, by where it
+/// runs: never `BARDO_INSTALLATION`, so a debug build looking at another
+/// kind's screens still keeps a source build's data apart.
+pub fn this_data_home() -> DataHome {
+    std::env::current_exe()
+        .map(|program| Installation::of(&program).data_home())
+        .unwrap_or_default()
 }
 
 /// What the last check found.
@@ -964,6 +983,10 @@ mod tests {
             Installation::of(Path::new("/opt/WindowsApps/Bardo/bardo.exe")),
             Installation::Store
         );
+        // A copy built from source keeps its data apart (ADR-0014).
+        assert_eq!(Installation::Source.data_home(), DataHome::Development);
+        assert_eq!(Installation::Installer.data_home(), DataHome::Installed);
+        assert_eq!(Installation::Store.data_home(), DataHome::Installed);
         let dir = tempfile::tempdir().unwrap();
         let program = dir.path().join("bardo.exe");
         assert_eq!(Installation::of(&program), Installation::Source);
