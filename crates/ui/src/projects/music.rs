@@ -362,9 +362,10 @@ impl ProjectsScreen {
                         .children(generate),
                 )
                 .children(estimate_note(bardo, &view.estimate, Text::EstimateCost, cx))
-                .children(tracks)
                 .into_any_element(),
         };
+        // Music is made from a prompt, so it shows once there is one.
+        let tracks = tracks.filter(|_| prompt.is_some());
         let ask = self.music_ask.as_ref().map(|estimate| {
             budget_question(
                 "music-budget",
@@ -401,6 +402,7 @@ impl ProjectsScreen {
                 .children(ask)
                 .child(body)
                 .children(provenance)
+                .children(tracks)
                 .into_any_element(),
         )
     }
