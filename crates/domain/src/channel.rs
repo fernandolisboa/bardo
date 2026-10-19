@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, PersonaId, ProfileId,
-    RepositoryError,
+    RepositoryError, Transition,
 };
 
 /// Identifies a channel.
@@ -57,6 +57,9 @@ pub struct ChannelDraft {
     pub clip_model: Option<ClipModelRef>,
     /// How the captions of the channel's new projects look.
     pub caption_style: CaptionStyle,
+    /// The transition the editor puts on a cut, unless the user picks
+    /// another.
+    pub transition: Transition,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -95,6 +98,7 @@ pub struct ChannelDetails {
     default_persona: Option<PersonaId>,
     clip_model: Option<ClipModelRef>,
     caption_style: CaptionStyle,
+    transition: Transition,
 }
 
 impl ChannelDetails {
@@ -152,6 +156,7 @@ impl ChannelDetails {
             default_persona: draft.default_persona,
             clip_model: draft.clip_model,
             caption_style: draft.caption_style,
+            transition: draft.transition,
         })
     }
 
@@ -194,6 +199,12 @@ impl ChannelDetails {
         self.caption_style
     }
 
+    /// The transition the editor puts on a cut unless the user picks
+    /// another.
+    pub fn transition(&self) -> Transition {
+        self.transition
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -217,6 +228,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             default_persona: details.default_persona,
             clip_model: details.clip_model.clone(),
             caption_style: details.caption_style,
+            transition: details.transition,
         }
     }
 }
@@ -404,6 +416,7 @@ mod tests {
             default_persona: Some(PersonaId::new()),
             clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
             caption_style: crate::CaptionStyle::Punch,
+            transition: crate::Transition::new(crate::TransitionKind::ZoomIn, 30),
         })
         .unwrap();
         assert_eq!(

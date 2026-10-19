@@ -5,11 +5,11 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use bardo_domain::{CaptionStyle, VideoCodec};
+use bardo_domain::{CaptionStyle, TransitionKind, VideoCodec};
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
     Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Output, ProxyCodec, ProxySettings,
-    RenderPlan, VideoClip, VideoEncoder,
+    RenderPlan, Transition, VideoClip, VideoEncoder,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -64,12 +64,14 @@ fn short_plan() -> RenderPlan {
                 start: secs(0.5),
                 duration: secs(1.5),
                 framing: Framing::Crop { x: 0.5, y: 0.5 },
+                transition: None,
             },
             VideoClip {
                 source: ClipSource::Video(fixture("clip-b.mp4")),
                 start: Duration::ZERO,
                 duration: secs(2.0),
                 framing: Framing::Crop { x: 0.0, y: 0.5 },
+                transition: None,
             },
         ],
         audio: vec![
@@ -103,6 +105,7 @@ fn short_plan() -> RenderPlan {
             },
         ],
         captions: None,
+        skipped: Duration::ZERO,
     }
 }
 
@@ -465,6 +468,7 @@ fn music_plan() -> RenderPlan {
             start: Duration::ZERO,
             duration: secs(4.0),
             framing: Framing::Fit,
+            transition: None,
         }],
         audio: vec![AudioTrack {
             clips: vec![AudioClip {
@@ -481,6 +485,7 @@ fn music_plan() -> RenderPlan {
             duck: None,
         }],
         captions: None,
+        skipped: Duration::ZERO,
     }
 }
 
@@ -648,18 +653,21 @@ fn rough_cut_plan() -> RenderPlan {
                 start: Duration::ZERO,
                 duration: secs(1.0),
                 framing: Framing::Fit,
+                transition: None,
             },
             VideoClip {
                 source: ClipSource::Video(fixture("clip-b.mp4")),
                 start: Duration::ZERO,
                 duration: secs(3.0),
                 framing: Framing::Fit,
+                transition: None,
             },
             VideoClip {
                 source: ClipSource::Black,
                 start: Duration::ZERO,
                 duration: secs(0.5),
                 framing: Framing::Fit,
+                transition: None,
             },
         ],
         audio: vec![AudioTrack {
@@ -677,6 +685,7 @@ fn rough_cut_plan() -> RenderPlan {
             duck: None,
         }],
         captions: None,
+        skipped: Duration::ZERO,
     }
 }
 
@@ -725,6 +734,7 @@ fn captioned_plan(style: CaptionStyle) -> RenderPlan {
             start: Duration::ZERO,
             duration: secs(2.0),
             framing: Framing::Fit,
+            transition: None,
         }],
         audio: Vec::new(),
         captions: Some(CaptionTrack {
@@ -735,6 +745,7 @@ fn captioned_plan(style: CaptionStyle) -> RenderPlan {
                 duration: secs(1.0),
             }],
         }),
+        skipped: Duration::ZERO,
     }
 }
 
@@ -828,6 +839,7 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
                 start: Duration::ZERO,
                 duration: secs(0.5),
                 framing: Framing::Crop { x, y },
+                transition: None,
             }
         })
         .collect();
@@ -836,11 +848,13 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
         start: Duration::ZERO,
         duration: secs(0.5),
         framing: Framing::Fit,
+        transition: None,
     });
     let plan = RenderPlan {
         video,
         audio: Vec::new(),
         captions: None,
+        skipped: Duration::ZERO,
     };
     let ffmpeg = ffmpeg();
     let destination = scratch("framing").join("framed.mp4");
@@ -897,4 +911,118 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
             "bars at row {row}"
         );
     }
+}
+
+/// The bands still for a second, then black for a second, joined by
+/// `kind` over half a second centered on the cut.
+fn transition_plan(kind: TransitionKind) -> RenderPlan {
+    RenderPlan {
+        video: vec![
+            VideoClip {
+                source: ClipSource::Still(fixture("still-640x360.png")),
+                start: Duration::ZERO,
+                duration: secs(1.0),
+                framing: Framing::Fit,
+                transition: None,
+            },
+            VideoClip {
+                source: ClipSource::Black,
+                start: Duration::ZERO,
+                duration: secs(1.0),
+                framing: Framing::Fit,
+                transition: Some(Transition {
+                    kind,
+                    before: secs(0.25),
+                    after: secs(0.25),
+                }),
+            },
+        ],
+        audio: Vec::new(),
+        captions: None,
+        skipped: Duration::ZERO,
+    }
+}
+
+/// How bright a frame is on average, 0 to 255.
+fn brightness(bgra: &[u8]) -> f64 {
+    let sum: u64 = bgra
+        .chunks(4)
+        .map(|pixel| pixel[..3].iter().map(|&c| u64::from(c)).sum::<u64>())
+        .sum();
+    sum as f64 / (bgra.len() / 4 * 3) as f64
+}
+
+fn preview_frames(plan: &RenderPlan, from: Duration) -> Vec<f64> {
+    ffmpeg()
+        .preview(plan, from, FrameSize::new(160, 90), (30, 1))
+        .unwrap()
+        .map(|frame| brightness(&frame.bgra))
+        .collect()
+}
+
+#[test]
+fn a_crossfade_blends_the_clips_around_the_cut_and_keeps_the_length() {
+    let frames = preview_frames(&transition_plan(TransitionKind::Crossfade), Duration::ZERO);
+    assert_eq!(frames.len(), 60, "the cut stays where it was");
+    let still = frames[10];
+    assert!(still > 20.0, "{still}");
+    // Untouched before the crossfade (0.75 s) and black after it (1.25 s).
+    assert!((frames[21] - still).abs() < 1.0, "{frames:?}");
+    assert!(frames[40] < 1.0, "{frames:?}");
+    // Half way at the cut, fading all along.
+    assert!((frames[30] - still / 2.0).abs() < still / 8.0, "{frames:?}");
+    assert!(
+        frames[24..37]
+            .windows(2)
+            .all(|pair| pair[1] <= pair[0] + 0.5)
+    );
+}
+
+#[test]
+fn a_preview_starting_inside_a_transition_plays_it_on_from_there() {
+    let plan = transition_plan(TransitionKind::Crossfade);
+    let whole = preview_frames(&plan, Duration::ZERO);
+    let from_cut = preview_frames(&plan, secs(1.0));
+    assert_eq!(from_cut.len(), 30);
+    for (later, frame) in from_cut.iter().zip(&whole[30..]).take(8) {
+        assert!((later - frame).abs() < 1.0, "{from_cut:?} {whole:?}");
+    }
+}
+
+#[test]
+fn every_transition_kind_renders_through_xfade() {
+    for kind in TransitionKind::ALL {
+        let frames = preview_frames(&transition_plan(kind), Duration::ZERO);
+        assert_eq!(frames.len(), 60, "{kind}");
+        assert!(frames[59] < 1.0, "{kind} ends on black");
+        let still = frames[10];
+        let middle = frames[30];
+        if kind == TransitionKind::FadeWhite {
+            assert!(middle > still, "{kind} goes through white: {frames:?}");
+        } else {
+            assert!(
+                middle < still - 1.0,
+                "{kind} is under way at the cut: {frames:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_clip_without_picture_before_its_start_holds_its_first_frame_into_a_transition() {
+    let mut plan = transition_plan(TransitionKind::Crossfade);
+    plan.video.swap(0, 1);
+    plan.video[1].transition = plan.video[0].transition.take();
+    plan.video[1] = VideoClip {
+        source: ClipSource::Video(fixture("clip-b.mp4")),
+        ..plan.video[1].clone()
+    };
+    let output = vertical(VideoEncoder::OpenH264);
+    let dir = scratch("transition-render");
+    let destination = dir.join("out.mp4");
+    ffmpeg()
+        .render(&plan, &output, None, &destination, &Recorder::default())
+        .unwrap();
+    let info = ffmpeg().probe(&destination).unwrap();
+    assert!(close(info.duration, 2.0, 0.05), "{:?}", info.duration);
 }

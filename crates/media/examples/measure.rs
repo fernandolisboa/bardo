@@ -264,10 +264,12 @@ fn plan(clips: &[PathBuf], sources: &Sources) -> RenderPlan {
                 start: Duration::ZERO,
                 duration: Duration::from_secs(CLIP_SECONDS),
                 framing: Framing::Crop { x: 0.5, y: 0.5 },
+                transition: None,
             })
             .collect(),
         audio: vec![audio(&sources.voice, 0.0), audio(&sources.music, -12.0)],
         captions: None,
+        skipped: Duration::ZERO,
     }
 }
 

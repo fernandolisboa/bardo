@@ -89,6 +89,7 @@ mod theme;
 mod tiktok;
 mod timeline;
 mod tour;
+mod transition;
 mod update;
 mod upload;
 mod voice;
@@ -269,6 +270,7 @@ pub use timeline::{
     snap, timecode,
 };
 pub use tour::{TourId, TourProgress, TourProgressRepository, TourState};
+pub use transition::{PlayedTransition, Transition, TransitionKind, UnknownTransition};
 pub use update::{
     DownloadError, InstallerRunner, InstallerStore, InvalidVersion, PreRelease, Release,
     ReleaseAsset, ReleaseFeed, UpdateCheckError, Version, checksum_for, installer_name,

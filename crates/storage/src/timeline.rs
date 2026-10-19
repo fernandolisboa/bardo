@@ -3,7 +3,8 @@ use std::time::Duration;
 use bardo_domain::{
     AspectRatio, AudioLane, Caption, CaptionStyle, CropPosition, Decibels, Ducking, Framing,
     LaneMix, Mix, NarrationId, Picture, ProfileId, RepositoryError, SavedAudioItem, SavedCaptions,
-    SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, VideoProjectId,
+    SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, Transition, TransitionKind,
+    VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -69,6 +70,29 @@ fn framing(kind: &str, x: i64, y: i64) -> Result<Framing, RepositoryError> {
     }
 }
 
+/// A transition as stored: its kind and length in frames, both NULL for a
+/// cut.
+fn transition_columns(transition: Option<Transition>) -> (Option<&'static str>, Option<u32>) {
+    match transition {
+        Some(transition) => (Some(transition.kind.code()), Some(transition.frames())),
+        None => (None, None),
+    }
+}
+
+fn transition(
+    kind: Option<String>,
+    frames: Option<i64>,
+) -> Result<Option<Transition>, RepositoryError> {
+    match (kind, frames) {
+        (Some(kind), Some(frames)) => Ok(Some(Transition::new(
+            kind.parse::<TransitionKind>().map_err(boxed)?,
+            u32::try_from(frames).map_err(boxed)?,
+        ))),
+        (None, None) => Ok(None),
+        _ => Err(invalid("a transition without its kind or length")),
+    }
+}
+
 fn tenths(value: i64) -> Result<Decibels, RepositoryError> {
     i16::try_from(value)
         .map(Decibels::from_tenths)
@@ -88,6 +112,8 @@ struct ItemRow {
     framing: String,
     crop_x: i64,
     crop_y: i64,
+    transition: Option<String>,
+    transition_frames: Option<i64>,
 }
 
 impl TimelineRepository for Database {
@@ -167,7 +193,7 @@ impl TimelineRepository for Database {
         let mut statement = conn
             .prepare(
                 "SELECT track, scene, file, start_ns, at_ns, duration_ns, fade_in_ns, fade_out_ns,
-                        framing, crop_x, crop_y
+                        framing, crop_x, crop_y, transition, transition_frames
                  FROM timeline_item
                  WHERE project_id = ?1 ORDER BY track, position",
             )
@@ -186,6 +212,8 @@ impl TimelineRepository for Database {
                     framing: row.get(8)?,
                     crop_x: row.get(9)?,
                     crop_y: row.get(10)?,
+                    transition: row.get(11)?,
+                    transition_frames: row.get(12)?,
                 })
             })
             .map_err(boxed)?
@@ -256,6 +284,7 @@ impl TimelineRepository for Database {
                     start: duration(row.start)?,
                     duration: duration(row.duration)?,
                     framing: framing(&row.framing, row.crop_x, row.crop_y)?,
+                    transition: transition(row.transition, row.transition_frames)?,
                 });
                 continue;
             }
@@ -355,13 +384,15 @@ impl TimelineRepository for Database {
                 .prepare(
                     "INSERT INTO timeline_item
                          (project_id, track, position, scene, file, start_ns, at_ns, duration_ns,
-                          fade_in_ns, fade_out_ns, framing, crop_x, crop_y)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                          fade_in_ns, fade_out_ns, framing, crop_x, crop_y, transition,
+                          transition_frames)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 )
                 .map_err(boxed)?;
             let mut at = Duration::ZERO;
             for (position, item) in timeline.video.iter().enumerate() {
                 let (framing, crop_x, crop_y) = framing_columns(item.framing);
+                let (transition, transition_frames) = transition_columns(item.transition);
                 let (scene, file) = match &item.picture {
                     Picture::Scene(scene) => (Some(i64::try_from(*scene).map_err(boxed)?), None),
                     Picture::Footage(file) => (None, Some(file)),
@@ -381,6 +412,8 @@ impl TimelineRepository for Database {
                         framing,
                         crop_x,
                         crop_y,
+                        transition,
+                        transition_frames,
                     ])
                     .map_err(boxed)?;
                 at += item.duration;
@@ -411,6 +444,8 @@ impl TimelineRepository for Database {
                         CROP,
                         CropPosition::CENTER.x(),
                         CropPosition::CENTER.y(),
+                        None::<&str>,
+                        None::<u32>,
                     ])
                     .map_err(boxed)?;
             }
@@ -471,18 +506,21 @@ mod tests {
                     start: Duration::from_nanos(1_500_000_001),
                     duration: Duration::from_nanos(966_666_666),
                     framing: Framing::Crop(CropPosition::new(125, 1_000)),
+                    transition: Some(Transition::new(TransitionKind::FadeBlack, 21)),
                 },
                 SavedVideoItem {
                     picture: Picture::Footage("media-walk.mov".into()),
                     start: Duration::from_millis(250),
                     duration: Duration::from_secs(1),
                     framing: Framing::Crop(CropPosition::new(500, 0)),
+                    transition: Some(Transition::new(TransitionKind::SlideUp, 9)),
                 },
                 SavedVideoItem {
                     picture: Picture::Scene(0),
                     start: Duration::ZERO,
                     duration: Duration::from_secs(2),
                     framing: Framing::Fit,
+                    transition: None,
                 },
             ],
             narration_items: vec![
@@ -648,6 +686,48 @@ mod tests {
         .unwrap();
         drop(conn);
         assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn a_cut_saved_before_transitions_existed_has_cuts_only() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut saved = cut(&project);
+        db.save_timeline(&saved).unwrap();
+        // As a cut saved by an older Bardo: the new columns NULL.
+        db.conn()
+            .execute(
+                "UPDATE timeline_item SET transition = NULL, transition_frames = NULL",
+                [],
+            )
+            .unwrap();
+        for item in &mut saved.video {
+            item.transition = None;
+        }
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn a_transition_needs_its_kind_and_length() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        db.save_timeline(&cut(&project)).unwrap();
+        let conn = db.conn();
+        assert!(
+            conn.execute("UPDATE timeline_item SET transition_frames = 0", [])
+                .is_err()
+        );
+        conn.execute(
+            "UPDATE timeline_item SET transition = 'spin' WHERE transition IS NOT NULL",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(db.saved_timeline(project.id).is_err());
+        db.conn()
+            .execute("UPDATE timeline_item SET transition = NULL", [])
+            .unwrap();
+        assert!(db.saved_timeline(project.id).is_err(), "a length alone");
     }
 
     #[test]

@@ -25,7 +25,7 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, ChannelDraft, ClipModelRef, ConnectedIdentity,
     ConnectionStatus, LayoutId, Meter, MetricsSyncOnStart, Money, Network, NetworkAccount,
     NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate, Resolution, Score, TokenSet,
-    UiLanguage, UiThemePreference, VoiceFlag,
+    Transition, UiLanguage, UiThemePreference, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -404,6 +404,9 @@ struct ChannelEntry {
     clip_model: Option<ClipEntry>,
     #[serde(default)]
     caption_style: Option<String>,
+    /// Missing from files made before transitions: the default one.
+    #[serde(default)]
+    transition: Option<TransitionEntry>,
     #[serde(default)]
     accounts: Vec<AccountEntry>,
 }
@@ -412,6 +415,12 @@ struct ChannelEntry {
 struct ClipEntry {
     provider: String,
     model: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TransitionEntry {
+    kind: String,
+    frames: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -493,6 +502,10 @@ impl ChannelEntry {
             caption_style: match &self.caption_style {
                 Some(style) => style.parse().ok()?,
                 None => Default::default(),
+            },
+            transition: match &self.transition {
+                Some(entry) => Transition::new(entry.kind.parse().ok()?, entry.frames),
+                None => Transition::default(),
             },
         })
     }
@@ -835,6 +848,10 @@ impl Bardo {
                     model: model.model().to_owned(),
                 }),
                 caption_style: Some(details.caption_style().code().to_owned()),
+                transition: Some(TransitionEntry {
+                    kind: details.transition().kind.code().to_owned(),
+                    frames: details.transition().frames(),
+                }),
                 accounts,
             });
         }
@@ -1336,6 +1353,7 @@ mod tests {
                 themes: vec!["Sondas".into()],
                 language: ContentLanguage::Portuguese,
                 default_persona: Some(persona.id),
+                transition: Transition::new(bardo_domain::TransitionKind::WipeRight, 21),
                 ..ChannelDraft::default()
             })
             .unwrap();
@@ -1544,6 +1562,10 @@ mod tests {
             .unwrap();
         assert_eq!(channel.details.default_persona(), Some(narrator.id));
         assert_eq!(channel.details.themes(), ["Sondas"]);
+        assert_eq!(
+            channel.details.transition(),
+            Transition::new(bardo_domain::TransitionKind::WipeRight, 21)
+        );
         let accounts = other.network_accounts.list(channel.id).unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].details.handle(), "arquivos");

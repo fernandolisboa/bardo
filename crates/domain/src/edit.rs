@@ -5,7 +5,8 @@
 //! audio item's fades) are edits too, so they undo the same way, and so are
 //! caption changes (stories 65, 66: a caption's text and ends, deleting
 //! one, showing them or not, their style), and so is framing (story 67:
-//! the frame's shape, each clip's crop).
+//! the frame's shape, each clip's crop), and so are video transitions
+//! (issue #167: the transition into a clip, or into every clip at once).
 //!
 //! Edits are exact: they cut where they are told, and the caller snaps the
 //! time first (to a frame, and to a word when snapping is on). Trims and
@@ -26,7 +27,8 @@ use std::time::Duration;
 
 use crate::{
     AspectRatio, AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, Framing,
-    GAIN_RANGE, LaneMix, MediaAsset, Timeline, VideoItem, VideoSource, caption_text, min_length,
+    GAIN_RANGE, LaneMix, MediaAsset, Timeline, Transition, VideoItem, VideoSource, caption_text,
+    min_length,
 };
 
 /// A track of the timeline that edits reach.
@@ -254,6 +256,16 @@ pub enum Edit {
         index: usize,
         framing: Framing,
     },
+    /// Sets the transition into a video item from the one before (`None`
+    /// for a cut). It is kept as given; items shorter than it play it cut
+    /// short (`Timeline::transition_into`).
+    SetTransition {
+        index: usize,
+        transition: Option<Transition>,
+    },
+    /// Sets the transition into every video item, in order: how a
+    /// transition goes on every cut at once, and its undo.
+    SetTransitions(Vec<Option<Transition>>),
 }
 
 /// Why an edit was not made. The timeline is left as it was.
@@ -537,6 +549,10 @@ impl Timeline {
             Edit::SetCaptionStyle(style) => self.set_caption_style(*style)?,
             Edit::SetAspect(aspect) => self.set_aspect(*aspect)?,
             Edit::SetFraming { index, framing } => self.set_framing(*index, *framing)?,
+            Edit::SetTransition { index, transition } => {
+                self.set_transition(*index, *transition)?
+            }
+            Edit::SetTransitions(transitions) => self.set_transitions(transitions)?,
         };
         self.relayout();
         Ok(undo)
@@ -557,7 +573,9 @@ impl Timeline {
         let first = at - start;
         match track {
             Track::Video => {
+                // The cut between the halves is seamless: no transition.
                 let mut second = self.video[index].clone();
+                second.transition = None;
                 second.start += first;
                 second.at = at;
                 second.duration = end - at;
@@ -593,10 +611,12 @@ impl Timeline {
         let at = match track {
             Track::Video => {
                 let (first, second) = (&self.video[index], &self.video[index + 1]);
-                // A framing set on one half alone would be lost.
+                // A framing set on one half alone, or a transition between
+                // them, would be lost.
                 if first.picture != second.picture
                     || first.source != second.source
                     || first.framing != second.framing
+                    || second.transition.is_some()
                     || second.start != first.start + first.duration
                 {
                     return Err(EditError::CannotJoin);
@@ -869,6 +889,55 @@ impl Timeline {
             framing: before,
         })
     }
+
+    fn set_transition(
+        &mut self,
+        index: usize,
+        transition: Option<Transition>,
+    ) -> Result<Edit, EditError> {
+        let item = self.video.get_mut(index).ok_or(EditError::NoSuchItem)?;
+        if item.transition == transition {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut item.transition, transition);
+        Ok(Edit::SetTransition {
+            index,
+            transition: before,
+        })
+    }
+
+    fn set_transitions(&mut self, transitions: &[Option<Transition>]) -> Result<Edit, EditError> {
+        if transitions.len() != self.video.len() {
+            return Err(EditError::NoSuchItem);
+        }
+        let before: Vec<Option<Transition>> =
+            self.video.iter().map(|item| item.transition).collect();
+        if before == transitions {
+            return Err(EditError::NoChange);
+        }
+        for (item, transition) in self.video.iter_mut().zip(transitions) {
+            item.transition = *transition;
+        }
+        Ok(Edit::SetTransitions(before))
+    }
+
+    /// The edit that puts `transition` on every cut between video items,
+    /// leaving the first item's as it is.
+    pub fn transition_everywhere(&self, transition: Transition) -> Edit {
+        Edit::SetTransitions(
+            self.video
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    if index == 0 {
+                        item.transition
+                    } else {
+                        Some(transition)
+                    }
+                })
+                .collect(),
+        )
+    }
 }
 
 /// How many edits a history keeps to undo.
@@ -946,7 +1015,7 @@ impl History {
 mod tests {
     use super::*;
     use crate::timeline::tests::{asset, image, ms, narration, plan, scene};
-    use crate::{CropPosition, MediaKind, SceneClip, frame_time};
+    use crate::{CropPosition, MediaKind, SceneClip, frame_at, frame_time};
 
     /// Three scenes over a 4 s narration: a still (0-1 s), a clip (1-3 s)
     /// and a still (3-4 s).
@@ -2409,5 +2478,213 @@ mod tests {
         );
         assert_eq!(swapped.narration(), timeline().narration());
         assert_eq!(swapped.video(), timeline().video());
+    }
+
+    fn fade_black(frames: u32) -> Transition {
+        Transition::new(crate::TransitionKind::FadeBlack, frames)
+    }
+
+    #[test]
+    fn a_transition_goes_into_a_clip_and_undoes() {
+        let before = timeline();
+        let edited = round_trip(
+            &before,
+            Edit::SetTransition {
+                index: 1,
+                transition: Some(fade_black(15)),
+            },
+        );
+        assert_eq!(edited.video()[1].transition, Some(fade_black(15)));
+        let played = edited.transition_into(1).unwrap();
+        assert_eq!(played.kind, crate::TransitionKind::FadeBlack);
+        // Centered on the cut at 1 s: the clip comes in 7 frames early and
+        // the still plays on 8 frames past the cut.
+        assert_eq!(
+            (played.start, played.cut, played.end),
+            (frame_time(23), ms(1_000), frame_time(38))
+        );
+        assert_eq!(spans(&edited, Track::Video), spans(&before, Track::Video));
+        assert_eq!(edited.duration(), before.duration(), "the cut stays put");
+        assert_unchanged(
+            Edit::SetTransition {
+                index: 1,
+                transition: None,
+            },
+            EditError::NoChange,
+        );
+        assert_unchanged(
+            Edit::SetTransition {
+                index: 3,
+                transition: Some(fade_black(15)),
+            },
+            EditError::NoSuchItem,
+        );
+    }
+
+    #[test]
+    fn short_clips_play_their_transitions_cut_short() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::SetTransition {
+                index: 2,
+                transition: Some(fade_black(60)),
+            })
+            .unwrap();
+        // Kept as set, played no longer than the 1 s still after the cut.
+        assert_eq!(timeline.video()[2].transition, Some(fade_black(60)));
+        assert_eq!(
+            timeline.transition_into(2).unwrap().duration(),
+            frame_time(30)
+        );
+        // The clip before is trimmed to 3 frames: the transition plays 3.
+        let trim = Edit::Trim {
+            track: Track::Video,
+            index: 1,
+            edge: Edge::End,
+            by: Shift::earlier(ms(1_900)),
+        };
+        timeline.apply(&trim).unwrap();
+        let played = timeline.transition_into(2).unwrap();
+        assert_eq!(played.duration(), frame_time(3));
+        assert_eq!(played.cut, frame_time(33));
+        // At one frame there is nothing to blend: a cut.
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 1,
+                edge: Edge::End,
+                by: Shift::earlier(frame_time(2)),
+            })
+            .unwrap();
+        assert_eq!(frame_at(timeline.video()[1].duration), 1);
+        assert_eq!(timeline.transition_into(2), None);
+        // The first clip has none to play, whatever it keeps.
+        timeline
+            .apply(&Edit::SetTransition {
+                index: 0,
+                transition: Some(fade_black(15)),
+            })
+            .unwrap();
+        assert_eq!(timeline.transition_into(0), None);
+        assert_eq!(timeline.transitions().len(), 0);
+    }
+
+    #[test]
+    fn transitions_on_both_sides_of_a_short_clip_never_overlap() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 1,
+                edge: Edge::End,
+                by: Shift::earlier(frame_time(49)),
+            })
+            .unwrap();
+        // The middle clip is 11 frames long; both transitions want 2 s.
+        let edit =
+            timeline.transition_everywhere(Transition::new(crate::TransitionKind::WipeLeft, 60));
+        timeline.apply(&edit).unwrap();
+        let played = timeline.transitions();
+        assert_eq!(played.len(), 2);
+        let (into, out) = (played[0].1, played[1].1);
+        assert_eq!(into.duration(), frame_time(11));
+        assert_eq!(out.duration(), frame_time(11));
+        assert!(into.end <= out.start, "{into:?} {out:?}");
+    }
+
+    #[test]
+    fn a_transition_moves_with_its_clip_and_a_split_makes_none() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::SetTransition {
+                index: 1,
+                transition: Some(fade_black(15)),
+            })
+            .unwrap();
+        let split = round_trip(
+            &timeline,
+            Edit::Split {
+                track: Track::Video,
+                index: 1,
+                at: ms(2_000),
+            },
+        );
+        assert_eq!(split.video()[1].transition, Some(fade_black(15)));
+        assert_eq!(split.video()[2].transition, None, "a seamless cut");
+
+        let reordered = round_trip(&timeline, Edit::Reorder { from: 1, to: 2 });
+        assert_eq!(reordered.video()[2].transition, Some(fade_black(15)));
+        assert_eq!(reordered.video()[1].transition, None);
+
+        let deleted = round_trip(
+            &timeline,
+            Edit::Delete {
+                track: Track::Video,
+                index: 1,
+            },
+        );
+        assert!(deleted.video().iter().all(|item| item.transition.is_none()));
+
+        // Halves with a transition between them do not join: it would be
+        // lost.
+        let mut halves = split.clone();
+        halves
+            .apply(&Edit::SetTransition {
+                index: 2,
+                transition: Some(fade_black(6)),
+            })
+            .unwrap();
+        assert_eq!(
+            halves.apply(&Edit::Join {
+                track: Track::Video,
+                index: 1,
+            }),
+            Err(EditError::CannotJoin)
+        );
+    }
+
+    #[test]
+    fn a_transition_goes_on_every_cut_at_once_and_undoes_as_one() {
+        let mut before = timeline();
+        before
+            .apply(&Edit::SetTransition {
+                index: 0,
+                transition: Some(fade_black(9)),
+            })
+            .unwrap();
+        let crossfade = Transition::default();
+        let edit = before.transition_everywhere(crossfade);
+        let after = round_trip(&before, edit);
+        let set: Vec<_> = after.video().iter().map(|item| item.transition).collect();
+        assert_eq!(set, [Some(fade_black(9)), Some(crossfade), Some(crossfade)]);
+        assert_eq!(
+            after.clone().apply(&after.transition_everywhere(crossfade)),
+            Err(EditError::NoChange)
+        );
+        assert_eq!(
+            after.clone().apply(&Edit::SetTransitions(vec![None])),
+            Err(EditError::NoSuchItem)
+        );
+    }
+
+    #[test]
+    fn the_cut_nearest_a_time_is_found_by_the_clip_after_it() {
+        let timeline = timeline();
+        assert_eq!(timeline.cut_near(ms(0)), Some(1));
+        assert_eq!(timeline.cut_near(ms(1_900)), Some(1));
+        assert_eq!(timeline.cut_near(ms(2_100)), Some(2));
+        assert_eq!(timeline.cut_near(ms(4_000)), Some(2));
+        let mut one = timeline.clone();
+        one.apply(&Edit::Delete {
+            track: Track::Video,
+            index: 0,
+        })
+        .unwrap();
+        one.apply(&Edit::Delete {
+            track: Track::Video,
+            index: 0,
+        })
+        .unwrap();
+        assert_eq!(one.cut_near(ms(500)), None);
     }
 }

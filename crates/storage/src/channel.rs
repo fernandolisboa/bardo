@@ -1,6 +1,6 @@
 use bardo_domain::{
     Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipModelRef, PersonaId,
-    ProfileId, Provider, RepositoryError,
+    ProfileId, Provider, RepositoryError, Transition, TransitionKind,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
-     country, default_persona_id, clip_provider, clip_model, caption_style FROM channel";
+     country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
+     transition_frames FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
@@ -17,6 +18,7 @@ struct ChannelRow {
     default_persona: Option<String>,
     clip_model: (Option<String>, Option<String>),
     caption_style: String,
+    transition: (String, i64),
     draft: ChannelDraft,
 }
 
@@ -29,6 +31,7 @@ impl ChannelRow {
                 default_persona: row.get(7)?,
                 clip_model: (row.get(8)?, row.get(9)?),
                 caption_style: row.get(10)?,
+                transition: (row.get(11)?, row.get(12)?),
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -60,6 +63,11 @@ impl ChannelRow {
             .map_err(boxed)?;
         draft.clip_model = clip_model(self.clip_model)?;
         draft.caption_style = self.caption_style.parse().map_err(boxed)?;
+        let (kind, frames) = self.transition;
+        draft.transition = Transition::new(
+            kind.parse::<TransitionKind>().map_err(boxed)?,
+            u32::try_from(frames).map_err(boxed)?,
+        );
         let details = ChannelDetails::validate(draft)
             .map_err(|errors| boxed(InvalidRow(format!("{errors:?}"))))?;
         Ok(Channel {
@@ -135,8 +143,9 @@ impl ChannelRepository for Database {
         let details = &channel.details;
         tx.execute(
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
-                                  default_persona_id, clip_provider, clip_model, caption_style)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                                  default_persona_id, clip_provider, clip_model, caption_style,
+                                  transition, transition_frames)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -147,6 +156,8 @@ impl ChannelRepository for Database {
                  clip_provider = excluded.clip_provider,
                  clip_model = excluded.clip_model,
                  caption_style = excluded.caption_style,
+                 transition = excluded.transition,
+                 transition_frames = excluded.transition_frames,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -160,6 +171,8 @@ impl ChannelRepository for Database {
                 details.clip_model().map(|model| model.provider().code()),
                 details.clip_model().map(ClipModelRef::model),
                 details.caption_style().code(),
+                details.transition().kind.code(),
+                details.transition().frames(),
             ],
         )
         .map_err(boxed)?;
@@ -205,6 +218,7 @@ mod tests {
                     .unwrap(),
             ),
             caption_style: CaptionStyle::Boxed,
+            transition: Transition::new(TransitionKind::SlideLeft, 24),
         })
         .unwrap();
         Channel::new(owner, details)

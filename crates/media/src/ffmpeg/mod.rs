@@ -29,7 +29,7 @@ pub use probe::{AudioStream, MediaInfo, VideoStream};
 pub use proxy::{ProxyCodec, ProxySettings};
 pub use render::{
     AudioClip, AudioTrack, ClipSource, Dip, Duck, Framing, Loudness, LoudnessTarget, Output,
-    RenderPlan, VideoClip,
+    RenderPlan, Transition, VideoClip,
 };
 pub use waveform::Waveform;
 
