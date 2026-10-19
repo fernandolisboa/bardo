@@ -1236,7 +1236,15 @@ impl Bardo {
                 .map(|image| self.files.path(project.id, &image.file))
         };
 
-        let assets = self.media_assets.media_assets(project.id)?;
+        // A generated track waiting for review is not in the media bin yet;
+        // the one in use starts every new cut on the music track.
+        let tracks = self.music_tracks.music_tracks(project.id)?;
+        let mut assets = self.media_assets.media_assets(project.id)?;
+        assets.retain(|asset| !tracks.holds_back(asset.id));
+        let music = tracks
+            .in_use()
+            .and_then(|track| assets.iter().find(|asset| asset.id == track.asset))
+            .cloned();
         let saved = self.timelines.saved_timeline(project.id)?;
         let (timeline, basis, cut_outdated) = match (&plan, &narration) {
             (Some(plan), Some(narration)) => {
@@ -1256,13 +1264,17 @@ impl Bardo {
                 };
                 // A cut that starts over keeps the frame shape it had.
                 let timeline = restored.unwrap_or_else(|| {
-                    Timeline::rough_cut(plan, narration)
+                    let cut = Timeline::rough_cut(plan, narration)
                         .with_caption_style(caption_style)
                         .with_aspect(
                             saved
                                 .as_ref()
                                 .map_or(AspectRatio::Landscape, |saved| saved.aspect),
-                        )
+                        );
+                    match &music {
+                        Some(music) => cut.use_music(None, music).unwrap_or(cut),
+                        None => cut,
+                    }
                 });
                 (Some(timeline), Some(basis), outdated)
             }
@@ -1499,7 +1511,7 @@ impl Bardo {
         }))
     }
 
-    fn save_cut(
+    pub(crate) fn save_cut(
         &self,
         project: VideoProjectId,
         timeline: &Timeline,

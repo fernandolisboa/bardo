@@ -861,6 +861,7 @@ pub(crate) mod tests {
                 previews: Arc::new(crate::testing::NoPreviews),
                 aligner: Arc::clone(&self.aligner) as _,
                 images: Arc::new(crate::testing::FakeImages::default()),
+                music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),

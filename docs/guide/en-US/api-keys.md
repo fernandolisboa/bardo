@@ -14,7 +14,7 @@ Bardo has no AI of its own and no account to sign up for. It works with your acc
 ## Which provider does what
 
 - **Claude** writes scripts, titles, descriptions, video ideas, scene plans and the prompts for image and video models. You need it for the script, the scenes, the ideas and the post texts.
-- **ElevenLabs** narrates and lists your voices, clones included. You need it for the narration and the persona voices.
+- **ElevenLabs** narrates, lists your voices (clones included) and composes the video's music. You need it for the narration and the persona voices, and for music only if you generate it in Bardo (a paid ElevenLabs plan).
 - **Gemini** makes scene images (Nano Banana) and video clips (Veo, Gemini Omni Flash). You need it for the scene images, and for clips only if you use Google's models.
 - **Higgsfield** makes video clips through the models it offers. You need it only for clips, if you pick its models.
 - **TypeSafe (JEV)** is the decision engine: it ranks video ideas and scores cut suggestions. You need it to rank ideas and suggest cuts.

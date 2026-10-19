@@ -26,12 +26,13 @@ A few things hold for every provider:
 <a id="elevenlabs"></a>
 ## ElevenLabs
 
-1. Open [ElevenLabs](https://elevenlabs.io/app/sign-up) and sign in, or create an account. Narration spends the credits of your plan.
+1. Open [ElevenLabs](https://elevenlabs.io/app/sign-up) and sign in, or create an account. Narration and music spend the credits of your plan. Music over the API needs a paid plan (Starter or above); paid plans also carry the commercial license for the music.
 2. Open [Developers › API Keys](https://elevenlabs.io/app/developers/api-keys) and select **Create key**. Name it (for example `Bardo`).
-3. Leave **Restrict Key** on, give the key access to the three features Bardo calls, and leave the rest at **No Access** (you can also set a credit limit for the key):
+3. Leave **Restrict Key** on, give the key access to the four features Bardo calls, and leave the rest at **No Access** (you can also set a credit limit for the key):
    - **Text to Speech**: Access (the narration);
    - **Voices**: Read (your voices, clones included);
-   - **Forced Alignment**: Access (word timings for the captions).
+   - **Forced Alignment**: Access (word timings for the captions);
+   - **Music**: Access (the video's music, if you generate it in Bardo).
 4. Select **Create key** and copy the key. It shows only this once.
 5. Paste it into the **ElevenLabs** card in [Settings › API keys](bardo:go/settings/keys), select **Save key**, then **Test key**. A key missing one of those features fails with a message naming it.
 

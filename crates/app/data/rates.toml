@@ -27,6 +27,11 @@ characters = "0.10"
 [elevenlabs."forced_alignment"]
 audio_seconds = "0.22"
 
+# ElevenLabs Music over the API: US$ 0.15 per minute of music (checked on
+# 2026-10-19), per hour here like the other audio.
+[elevenlabs."music_v1"]
+audio_seconds = "9.00"
+
 # Google Gemini API, paid tier. Images are priced per output image token
 # (a 2K image is 1,680 of them); reasoning is billed as text output.
 [gemini."gemini-3.1-flash-image"]

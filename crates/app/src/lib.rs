@@ -20,6 +20,7 @@ mod jobs;
 pub mod logging;
 mod media_import;
 mod music_prompts;
+mod music_tracks;
 mod narration_import;
 mod narrations;
 mod navigation;
@@ -56,14 +57,14 @@ use bardo_domain::{
     AgentTask, BackupStore, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver,
     CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository,
     ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData,
-    MediaAssetRepository, MusicPromptRepository, NarrationRepository, NetworkAccountRepository,
-    NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
-    PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
-    Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
-    SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator,
-    ThemeRepository, TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference,
-    UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore,
-    YouTubeDataStore, Zone, running_since,
+    MediaAssetRepository, MusicGenerator, MusicPromptRepository, MusicTrackRepository,
+    NarrationRepository, NetworkAccountRepository, NetworkConnectionRepository, NetworkSignIn,
+    NicheResearchRepository, OwnerAnalytics, Persona, PersonaRepository, ProfileRepository,
+    ProjectFiles, PublicationRepository, RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError,
+    RunnerRole, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
+    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
+    TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
+    VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -121,6 +122,7 @@ pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
+pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use navigation::{Destination, Pillar, SettingsTab};
@@ -184,6 +186,7 @@ use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
 use crate::jobs::JobQueue;
 use crate::music_prompts::MusicPromptHandler;
+use crate::music_tracks::MusicHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::provider_keys::ProviderKeys;
@@ -229,6 +232,8 @@ pub struct Repositories {
     pub media_assets: Arc<dyn MediaAssetRepository>,
     /// Each project's music prompt. Shared with the job queue.
     pub music_prompts: Arc<dyn MusicPromptRepository>,
+    /// Each project's generated music. Shared with the job queue.
+    pub music_tracks: Arc<dyn MusicTrackRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
     /// Each network account's connection state. Never its tokens.
@@ -327,6 +332,7 @@ impl Repositories {
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
+            music_tracks: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
@@ -373,6 +379,8 @@ pub struct Providers {
     pub aligner: Arc<dyn SpeechAligner>,
     /// Scene images (Nano Banana, through the Gemini API).
     pub images: Arc<dyn ImageGenerator>,
+    /// The video's music (ElevenLabs Music).
+    pub music: Arc<dyn MusicGenerator>,
     /// Scene clips, one adapter per video provider (Higgsfield, then Google
     /// through the Gemini API).
     pub clips: Vec<Arc<dyn ClipGenerator>>,
@@ -411,6 +419,7 @@ impl Providers {
             previews: Arc::new(bardo_ai::ElevenLabsPreviews::new()),
             aligner: Arc::new(bardo_ai::ElevenLabsAlignment::new()),
             images: Arc::new(bardo_ai::GeminiImages::new()),
+            music: Arc::new(bardo_ai::ElevenLabsMusic::new()),
             clips: vec![
                 Arc::new(bardo_ai::HiggsfieldClips::new()),
                 Arc::new(bardo_ai::GoogleClips::new()),
@@ -474,6 +483,7 @@ pub struct Bardo {
     timelines: Arc<dyn TimelineRepository>,
     media_assets: Arc<dyn MediaAssetRepository>,
     music_prompts: Arc<dyn MusicPromptRepository>,
+    music_tracks: Arc<dyn MusicTrackRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
     renders: Arc<dyn RenderRepository>,
     exports: Arc<dyn ExportRepository>,
@@ -485,6 +495,7 @@ pub struct Bardo {
     voice_samples: Arc<dyn VoiceSampleStore>,
     audio: Arc<dyn AudioOutput>,
     speech: Arc<dyn SpeechSynthesizer>,
+    music: Arc<dyn MusicGenerator>,
     previews: Arc<dyn VoicePreviews>,
     samples_in_flight: Arc<voice_samples::SamplesInFlight>,
     media: Arc<dyn MediaEngine>,
@@ -583,6 +594,7 @@ impl Bardo {
             timelines,
             media_assets,
             music_prompts,
+            music_tracks,
             network_accounts,
             connections,
             renders,
@@ -700,6 +712,14 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let music_handler = MusicHandler {
+            owner: profile.id,
+            tracks: Arc::clone(&music_tracks),
+            files: Arc::clone(&files),
+            music: Arc::clone(&providers.music),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let metadata_handler = MetadataHandler {
             owner: profile.id,
             exports: Arc::clone(&exports),
@@ -791,6 +811,7 @@ impl Bardo {
                 clips: clip_handler,
                 proxies: proxy_handler,
                 music_prompts: music_prompt_handler,
+                music: music_handler,
                 renders: render_handler,
                 metadata: metadata_handler,
                 exports: export_handler,
@@ -820,6 +841,7 @@ impl Bardo {
             timelines,
             media_assets,
             music_prompts,
+            music_tracks,
             network_accounts,
             renders,
             exports,
@@ -831,6 +853,7 @@ impl Bardo {
             voice_samples,
             audio: providers.audio,
             speech: providers.speech,
+            music: providers.music,
             previews: providers.previews,
             samples_in_flight: Arc::default(),
             media: providers.media,
@@ -1025,12 +1048,13 @@ pub(crate) mod testing {
 
     use bardo_domain::{
         Alignment, Answer, ApiKey, CharTiming, ClipDurations, ClipGenerator, ClipHandle, ClipImage,
-        ClipModel, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, Confidence,
-        DecisionEngine, Decisions, GeneratedClip, GeneratedImage, GeneratedText, ImageFormat,
-        ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market, MarketData,
-        MarketSample, Money, Niche, Provider, ProviderFailure, Question, Questions, ScoreAnswer,
-        Speech, SpeechRequest, SpeechSynthesizer, StagedImage, TextGenerator, TextRequest,
-        TokenUsage, UploadSample, Voice, VoiceLibrary, YesNoAnswer,
+        ClipModel, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, ComposedMusic,
+        Confidence, DecisionEngine, Decisions, GeneratedClip, GeneratedImage, GeneratedText,
+        ImageFormat, ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market,
+        MarketData, MarketSample, Money, MusicGenerator, MusicRequest, Niche, Provider,
+        ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
+        SpeechSynthesizer, StagedImage, TextGenerator, TextRequest, TokenUsage, UploadSample,
+        Voice, VoiceLibrary, YesNoAnswer,
     };
 
     use crate::Providers;
@@ -1415,6 +1439,46 @@ pub(crate) mod testing {
                 },
                 model: "eleven-fake".into(),
                 billed_characters: chars.len() as u64,
+            })
+        }
+    }
+
+    /// Composes every request as tone as long as asked, in whole seconds;
+    /// `failure` wins when set. Keeps the requests.
+    #[derive(Default)]
+    pub(crate) struct FakeMusic {
+        pub(crate) requests: Mutex<Vec<MusicRequest>>,
+        pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        /// How long each call takes, to catch a job mid-run.
+        pub(crate) delay: Mutex<Duration>,
+    }
+
+    impl FakeMusic {
+        pub(crate) fn requests(&self) -> Vec<MusicRequest> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl MusicGenerator for FakeMusic {
+        fn provider(&self) -> Provider {
+            Provider::ElevenLabs
+        }
+
+        fn compose(
+            &self,
+            _key: &ApiKey,
+            request: &MusicRequest,
+        ) -> Result<ComposedMusic, ProviderFailure> {
+            let delay = *self.delay.lock().unwrap();
+            std::thread::sleep(delay);
+            self.requests.lock().unwrap().push(request.clone());
+            if let Some(failure) = self.failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
+            let seconds = request.length.as_secs_f64().ceil().max(1.0) as usize;
+            Ok(ComposedMusic {
+                audio: PART_AUDIO.repeat(seconds),
+                model: "music-fake".into(),
             })
         }
     }
@@ -2058,6 +2122,7 @@ pub(crate) mod testing {
             previews: Arc::new(NoPreviews),
             aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
             images: Arc::new(FakeImages::default()),
+            music: Arc::new(FakeMusic::default()),
             clips: vec![Arc::new(FakeClips::default())],
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             media: Arc::new(crate::editor::testing::FakeMedia::default()),
@@ -2152,6 +2217,7 @@ mod tests {
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
+            music_tracks: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,

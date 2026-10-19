@@ -14,7 +14,7 @@ O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas cont
 ## O que cada provedor faz
 
 - **Claude** escreve roteiros, títulos, descrições, ideias de vídeo, planos de cena e os prompts para os modelos de imagem e vídeo. Você precisa dele para o roteiro, as cenas, as ideias e os textos dos posts.
-- **ElevenLabs** narra e lista as suas vozes, clones incluídos. Você precisa dela para a narração e as vozes das personas.
+- **ElevenLabs** narra, lista as suas vozes (clones incluídos) e compõe a música do vídeo. Você precisa dela para a narração e as vozes das personas, e para a música só se gerar no Bardo (plano pago da ElevenLabs).
 - **Gemini** gera as imagens das cenas (Nano Banana) e clipes de vídeo (Veo, Gemini Omni Flash). Você precisa dele para as imagens das cenas e, para os clipes, só se usar os modelos do Google.
 - **Higgsfield** gera clipes de vídeo pelos modelos que oferece. Você só precisa dela para clipes, se escolher os modelos dela.
 - **TypeSafe (JEV)** é o motor de decisão: ranqueia ideias de vídeo e pontua sugestões de corte. Você precisa dele para ranquear ideias e sugerir cortes.
