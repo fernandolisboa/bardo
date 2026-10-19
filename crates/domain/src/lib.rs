@@ -62,6 +62,7 @@ mod media;
 mod metadata;
 mod mix;
 mod music_prompt;
+mod music_track;
 mod narration;
 mod network;
 mod network_account;
@@ -164,6 +165,10 @@ pub use mix::{
     DuckEnvelope, Ducking, GAIN_RANGE, LaneMix, Mix,
 };
 pub use music_prompt::{MusicPrompt, MusicPromptFieldError, MusicPromptRepository};
+pub use music_track::{
+    ComposedMusic, MAX_MUSIC_LENGTH, MIN_MUSIC_LENGTH, MusicGenerator, MusicRequest, MusicTrack,
+    MusicTrackRepository, MusicTracks, music_length,
+};
 pub use narration::{
     InvalidWordTimings, Narration, NarrationId, NarrationRepository, NarrationSource, WordTiming,
     WordTimings, spoken_words,

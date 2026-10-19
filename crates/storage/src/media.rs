@@ -1,8 +1,9 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    MediaAsset, MediaAssetId, MediaAssetRepository, MusicPrompt, MusicPromptRepository,
-    PictureSize, ProfileId, RepositoryError, VideoProjectId,
+    JobId, MediaAsset, MediaAssetId, MediaAssetRepository, MusicPrompt, MusicPromptRepository,
+    MusicTrack, MusicTrackRepository, MusicTracks, PictureSize, ProfileId, RepositoryError,
+    VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -85,27 +86,153 @@ impl MediaAssetRepository for Database {
     }
 
     fn save_media_asset(&self, asset: &MediaAsset) -> Result<(), RepositoryError> {
-        let duration = i64::try_from(asset.duration.as_nanos()).map_err(boxed)?;
+        insert_asset(&self.conn(), asset)
+    }
+}
+
+fn insert_asset(conn: &rusqlite::Connection, asset: &MediaAsset) -> Result<(), RepositoryError> {
+    let duration = i64::try_from(asset.duration.as_nanos()).map_err(boxed)?;
+    conn.execute(
+        "INSERT INTO media_asset (id, project_id, profile_id, kind, source, file, name,
+                                  duration_ns, width, height, imported_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name",
+        params![
+            asset.id.to_string(),
+            asset.project.to_string(),
+            asset.owner.to_string(),
+            asset.kind.code(),
+            asset.source.code(),
+            asset.file,
+            asset.name,
+            duration,
+            asset.picture.map(|picture| i64::from(picture.width)),
+            asset.picture.map(|picture| i64::from(picture.height)),
+            to_unix_millis(asset.imported_at),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
+}
+
+/// A music track row as stored, before domain validation.
+struct TrackRow {
+    asset_id: String,
+    project_id: String,
+    profile_id: String,
+    provider: String,
+    model: String,
+    prompt: String,
+    length_ms: i64,
+    job_id: Option<String>,
+    generated_at: i64,
+    chosen_at: Option<i64>,
+}
+
+impl TrackRow {
+    fn into_track(self) -> Result<MusicTrack, RepositoryError> {
+        Ok(MusicTrack {
+            asset: MediaAssetId::from(uuid(&self.asset_id)?),
+            project: VideoProjectId::from(uuid(&self.project_id)?),
+            owner: ProfileId::from(uuid(&self.profile_id)?),
+            provider: self.provider.parse().map_err(boxed)?,
+            model: self.model,
+            prompt: self.prompt,
+            length: Duration::from_millis(u64::try_from(self.length_ms).map_err(boxed)?),
+            job: self
+                .job_id
+                .as_deref()
+                .map(|job| uuid(job).map(JobId::from))
+                .transpose()?,
+            generated_at: from_unix_millis(self.generated_at),
+            chosen_at: self.chosen_at.map(from_unix_millis),
+        })
+    }
+}
+
+impl MusicTrackRepository for Database {
+    fn music_tracks(&self, project: VideoProjectId) -> Result<MusicTracks, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT asset_id, project_id, profile_id, provider, model, prompt, length_ms,
+                        job_id, generated_at, chosen_at
+                 FROM music_track WHERE project_id = ?1
+                 ORDER BY generated_at, rowid",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok(TrackRow {
+                    asset_id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    profile_id: row.get(2)?,
+                    provider: row.get(3)?,
+                    model: row.get(4)?,
+                    prompt: row.get(5)?,
+                    length_ms: row.get(6)?,
+                    job_id: row.get(7)?,
+                    generated_at: row.get(8)?,
+                    chosen_at: row.get(9)?,
+                })
+            })
+            .map_err(boxed)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(boxed)?;
+        let tracks = rows
+            .into_iter()
+            .map(TrackRow::into_track)
+            .collect::<Result<_, _>>()?;
+        Ok(MusicTracks::new(tracks))
+    }
+
+    fn add_music_track(
+        &self,
+        track: &MusicTrack,
+        asset: &MediaAsset,
+    ) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        insert_asset(&tx, asset)?;
+        tx.execute(
+            "INSERT INTO music_track (asset_id, project_id, profile_id, provider, model, prompt,
+                                      length_ms, job_id, generated_at, chosen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                track.asset.to_string(),
+                track.project.to_string(),
+                track.owner.to_string(),
+                track.provider.code(),
+                track.model,
+                track.prompt,
+                i64::try_from(track.length.as_millis()).map_err(boxed)?,
+                track.job.map(|job| job.to_string()),
+                to_unix_millis(track.generated_at),
+                track.chosen_at.map(to_unix_millis),
+            ],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)
+    }
+
+    fn choose_music_track(
+        &self,
+        asset: MediaAssetId,
+        at: SystemTime,
+    ) -> Result<(), RepositoryError> {
         self.conn()
             .execute(
-                "INSERT INTO media_asset (id, project_id, profile_id, kind, source, file, name,
-                                          duration_ns, width, height, imported_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-                 ON CONFLICT (id) DO UPDATE SET name = excluded.name",
-                params![
-                    asset.id.to_string(),
-                    asset.project.to_string(),
-                    asset.owner.to_string(),
-                    asset.kind.code(),
-                    asset.source.code(),
-                    asset.file,
-                    asset.name,
-                    duration,
-                    asset.picture.map(|picture| i64::from(picture.width)),
-                    asset.picture.map(|picture| i64::from(picture.height)),
-                    to_unix_millis(asset.imported_at),
-                ],
+                "UPDATE music_track SET chosen_at = ?2 WHERE asset_id = ?1",
+                params![asset.to_string(), to_unix_millis(at)],
             )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn remove_music_track(&self, asset: MediaAssetId) -> Result<(), RepositoryError> {
+        // The track goes with its asset (ON DELETE CASCADE).
+        self.conn()
+            .execute("DELETE FROM media_asset WHERE id = ?1", [asset.to_string()])
             .map_err(boxed)?;
         Ok(())
     }
@@ -171,8 +298,6 @@ impl MusicPromptRepository for Database {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
-
     use bardo_domain::{
         AssetSource, Channel, ChannelDetails, ChannelDraft, ChannelRepository, Generation,
         GenerationId, MediaKind, Niche, ProfileRepository, Provider, TemplateBody, TemplateKind,
@@ -315,5 +440,70 @@ mod tests {
         .unwrap();
         db.save_music_prompt(&again).unwrap();
         assert_eq!(db.music_prompt(project.id).unwrap(), Some(again));
+    }
+
+    fn track(asset: &MediaAsset, generated: u64) -> MusicTrack {
+        MusicTrack {
+            asset: asset.id,
+            project: asset.project,
+            owner: asset.owner,
+            provider: Provider::ElevenLabs,
+            model: "music_v1".into(),
+            prompt: "Calm piano, 70 BPM".into(),
+            length: Duration::from_millis(95_123),
+            job: Some(JobId::new()),
+            generated_at: time(generated),
+            chosen_at: None,
+        }
+    }
+
+    #[test]
+    fn a_track_is_saved_with_its_asset_chosen_and_removed_with_it() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut first_asset = asset(&project, MediaKind::Audio, "media-first.mp3", 1_000);
+        first_asset.source = AssetSource::Generated;
+        let mut second_asset = asset(&project, MediaKind::Audio, "media-second.mp3", 2_000);
+        second_asset.source = AssetSource::Generated;
+        let first = track(&first_asset, 1_000);
+        let second = MusicTrack {
+            job: None,
+            ..track(&second_asset, 2_000)
+        };
+        db.add_music_track(&first, &first_asset).unwrap();
+        db.add_music_track(&second, &second_asset).unwrap();
+        assert_eq!(
+            db.music_tracks(project.id).unwrap().all(),
+            [first.clone(), second.clone()]
+        );
+        assert_eq!(
+            db.media_assets(project.id).unwrap(),
+            [first_asset.clone(), second_asset.clone()]
+        );
+
+        db.choose_music_track(first.asset, time(3_000)).unwrap();
+        let tracks = db.music_tracks(project.id).unwrap();
+        assert_eq!(tracks.in_use().map(|track| track.asset), Some(first.asset));
+        assert_eq!(tracks.in_review(), Some(&second));
+
+        db.remove_music_track(second.asset).unwrap();
+        assert_eq!(db.music_tracks(project.id).unwrap().all().len(), 1);
+        assert_eq!(db.media_assets(project.id).unwrap(), [first_asset]);
+        assert_eq!(db.music_tracks(VideoProjectId::new()).unwrap().all(), []);
+    }
+
+    #[test]
+    fn a_track_whose_asset_cannot_be_saved_leaves_nothing() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let music = asset(&project, MediaKind::Audio, "media-a.mp3", 1_000);
+        db.save_media_asset(&music).unwrap();
+        // Another asset with the same file name is refused, and its track
+        // with it.
+        let mut clash = asset(&project, MediaKind::Audio, "media-a.mp3", 2_000);
+        clash.source = AssetSource::Generated;
+        assert!(db.add_music_track(&track(&clash, 2_000), &clash).is_err());
+        assert_eq!(db.music_tracks(project.id).unwrap().all(), []);
+        assert_eq!(db.media_assets(project.id).unwrap(), [music]);
     }
 }

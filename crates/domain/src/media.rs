@@ -1,6 +1,7 @@
-//! Imported media (PRD stories 40, 41): audio and video files the user
+//! Media assets (PRD stories 40, 41): audio and video files the user
 //! brings into a video project, such as music they have the rights to, sound
-//! effects or footage of their own. Each is copied into the project folder
+//! effects or footage of their own, and the music tracks Bardo makes
+//! (`crate::MusicTrack`). Each is copied into the project folder
 //! (the original stays where it was) and becomes an asset of the project
 //! that the editor places on the timeline: audio on the music or SFX track,
 //! video on the video track.
@@ -60,21 +61,23 @@ impl std::str::FromStr for MediaKind {
     }
 }
 
-/// Where an asset came from. Generated music would be another source; the
-/// MVP only imports it.
+/// Where an asset came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetSource {
     /// A file the user brought in.
     Imported,
+    /// A music track Bardo made (`crate::MusicTrack`).
+    Generated,
 }
 
 impl AssetSource {
-    pub const ALL: [AssetSource; 1] = [AssetSource::Imported];
+    pub const ALL: [AssetSource; 2] = [AssetSource::Imported, AssetSource::Generated];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             AssetSource::Imported => "imported",
+            AssetSource::Generated => "generated",
         }
     }
 }
@@ -192,6 +195,8 @@ mod tests {
         for kind in MediaKind::ALL {
             assert_eq!(kind.code().parse::<MediaKind>(), Ok(kind));
         }
-        assert_eq!("imported".parse::<AssetSource>(), Ok(AssetSource::Imported));
+        for source in AssetSource::ALL {
+            assert_eq!(source.code().parse::<AssetSource>(), Ok(source));
+        }
     }
 }

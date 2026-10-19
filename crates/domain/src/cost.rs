@@ -497,6 +497,8 @@ pub enum CostPurpose {
     NarrationAlignment,
     /// Claude writing the prompt for a video's music.
     MusicPrompt,
+    /// A provider composing a video's music (#169).
+    Music,
     /// Claude writing each network's title, description and tags.
     Metadata,
     /// The decision engine scoring cut points in the editor.
@@ -555,7 +557,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 13] = [
+    pub const ALL: [CostPurpose; 14] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -565,6 +567,7 @@ impl CostPurpose {
         CostPurpose::SceneClip,
         CostPurpose::NarrationAlignment,
         CostPurpose::MusicPrompt,
+        CostPurpose::Music,
         CostPurpose::Metadata,
         CostPurpose::CutSuggestions,
         CostPurpose::VoiceSample,
@@ -583,6 +586,7 @@ impl CostPurpose {
             CostPurpose::SceneClip => "scene_clip",
             CostPurpose::NarrationAlignment => "narration_alignment",
             CostPurpose::MusicPrompt => "music_prompt",
+            CostPurpose::Music => "music",
             CostPurpose::Metadata => "metadata",
             CostPurpose::CutSuggestions => "cut_suggestions",
             CostPurpose::VoiceSample => "voice_sample",
