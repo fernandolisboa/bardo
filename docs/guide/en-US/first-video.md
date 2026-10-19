@@ -45,7 +45,7 @@ When a script or a narration changes, what was made from it shows as out of date
 
 The **Edit** stage opens the editor with a rough cut already laid out from the scenes and the narration. Split, trim, move and delete clips; cuts snap to the narration's words. Mix the narration with music and sound effects, edit the captions, and choose the frame shape (16:9 or 9:16). Cut suggestions mark good places to cut; accepting one is just an edit, and you can undo it. [The editor](editor.md) explains each part.
 
-Bardo does not make music. In the project it writes a music prompt for your own music tool; import the track you make in the editor's Media tab.
+For the music, the Script stage writes a music prompt and, with a paid ElevenLabs plan, composes a track from it; **Use this track** puts it on the music track ([Music from the prompt](script.md#generated-music)). Or make the track in your own tool and import it in the editor's Media tab.
 
 <a id="render"></a>
 ## 7. Review and render

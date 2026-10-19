@@ -2225,7 +2225,11 @@ body = "Detalhes diz qual modelo de IA escreveu o roteiro, a partir de qual vers
 
 [tour.script.music]
 title = "O prompt de música"
-body = "O Claude escreve um prompt para a sua ferramenta de música a partir do canal, do tema e da duração do vídeo. O Bardo não faz música: copie o prompt, faça a faixa e importe-a no editor."
+body = "O Claude escreve um prompt para a música do vídeo a partir do canal, do tema e da duração do vídeo. Edite como quiser: a música é feita a partir dele, aqui ou numa ferramenta sua."
+
+[tour.script.track]
+title = "Música a partir do prompt"
+body = "Gerar música pede ao ElevenLabs Music uma faixa instrumental com a duração da narração. Ouça, e então Usar esta faixa coloca a faixa na trilha de música desde 0:00, ou Descartar joga fora. Uma faixa sua ainda pode ser importada no editor."
 
 [tour.narration]
 name = "Tour da Narração"

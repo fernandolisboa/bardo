@@ -8,7 +8,7 @@ tour: script
 
 # Roteiro
 
-O roteiro é o que o narrador vai dizer. O Claude escreve, você edita, e todas as etapas seguintes partem dele. Ele fica na etapa [Roteiro](bardo:go/projects/script) de um projeto, com o prompt de música do vídeo logo abaixo. [Mostre a etapa para mim](bardo:tour/script).
+O roteiro é o que o narrador vai dizer. O Claude escreve, você edita, e todas as etapas seguintes partem dele. Ele fica na etapa [Roteiro](bardo:go/projects/script) de um projeto, com a música do vídeo logo abaixo: o prompt dela e as faixas feitas a partir dele. [Mostre a etapa para mim](bardo:tour/script).
 
 <a id="write"></a>
 ## Gere e depois edite
@@ -45,4 +45,18 @@ Antes de gerar, a estimativa sob os botões diz quanto a chamada vai custar pela
 <a id="music"></a>
 ## O prompt de música
 
-Abaixo do roteiro, **Gerar prompt de música** pede ao Claude um prompt para a sua ferramenta de música, a partir do **modelo de prompt de música**, do canal, do tema e da duração do vídeo. O Bardo não faz música: **Copie** o prompt, faça a faixa numa ferramenta que você tenha direito de usar e importe-a na aba Mídia do editor. Edite o prompt e **Salve**; **Gerar de novo** o substitui, inclusive as suas edições.
+Abaixo do roteiro, **Gerar prompt de música** pede ao Claude um prompt para a música do vídeo, a partir do **modelo de prompt de música**, do canal, do tema e da duração do vídeo. Edite o prompt e **Salve**; **Gerar de novo** o substitui, inclusive as suas edições. Faça a música a partir dele logo abaixo ([Música a partir do prompt](#generated-music)), ou **Copie** o prompt para uma ferramenta que você tenha direito de usar e importe a faixa na aba Mídia do editor.
+
+<a id="generated-music"></a>
+## Música a partir do prompt
+
+Abaixo do prompt, **Gerar música** pede ao ElevenLabs Music uma faixa instrumental composta a partir do prompt salvo, com a duração da narração (de 3 segundos a 10 minutos). Faça a narração primeiro. Roda como tarefa e precisa de uma chave da ElevenLabs com a permissão **Music** num plano pago da ElevenLabs ([Como obter cada chave de API](get-api-keys.md#elevenlabs)). A estimativa ao lado do botão é calculada por minuto de música, e uma faixa que passaria do orçamento da ElevenLabs pergunta antes ([Custos e orçamentos](costs.md)).
+
+A faixa nova espera no cartão, marcada como **Faixa nova**, com a duração e o modelo. **Ouça** e então:
+
+- **Usar esta faixa** coloca a faixa na trilha de música (A2) desde 0:00, abaixada sob a narração como o seu corte já faz, no lugar da faixa gerada usada antes. A música que você mesmo colocou fica. Todo corte feito depois (o primeiro corte, ou um corte que recomeça depois de cenas ou narração novas) já começa com a faixa em uso.
+- **Descartar** apaga a faixa.
+
+**Gerar outra** faz uma faixa nova, que toma o lugar da que espera revisão; a faixa em uso fica até você usar outra. Uma faixa usada é um arquivo de mídia do projeto, então também aparece na aba Mídia do editor ([O editor](editor.md)), onde dá para colocá-la de novo à mão. Uma faixa esperando revisão não aparece.
+
+Cada faixa guarda o prompt, a duração pedida, o modelo e a tarefa que a fez. A ElevenLabs assina a faixa com credenciais de conteúdo C2PA, que dizem que ela foi feita por IA. Uma tarefa que falhou mostra o motivo dado pela ElevenLabs: plano sem acesso ao Music, chave sem a permissão Music, créditos esgotados ou um prompt recusado (por exemplo, um que cita um artista; a ElevenLabs sugere outra redação).

@@ -22,9 +22,10 @@ use bardo_app::bardo_domain::{
 };
 use bardo_app::{
     Bardo, BudgetConsent, Control, Destination, ExportSummary, ExportView, MusicPromptView,
-    NarrationError, NarrationPlayer, NarrationView, Recording, RenderReview, RenderSummary,
-    ScenesView, ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text,
-    TourAnchor, UploadChoices, UploadReview, opening_stage, project_stages,
+    MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer, NarrationView, Recording,
+    RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage,
+    StageState, StageStatus, Text, TourAnchor, UploadChoices, UploadReview, opening_stage,
+    project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -164,6 +165,15 @@ pub struct ProjectsScreen {
     music_notice: Option<Text>,
     /// The music prompt waiting on a budget answer.
     music_ask: Option<SpendEstimate>,
+    /// The music made from the prompt: the track in use and the one in
+    /// review.
+    tracks: Option<MusicTracksView>,
+    /// The track loaded for playback, once the user plays one.
+    track_player: Option<MusicTrackPlayer>,
+    track_error: Option<Text>,
+    track_notice: Option<Text>,
+    /// A track waiting on a budget answer.
+    track_ask: Option<SpendEstimate>,
     /// The Render stage's review of the project's cut.
     render_review: Option<RenderReview>,
     /// Where the project's renders stand, for its Render stage.
@@ -389,6 +399,11 @@ impl ProjectsScreen {
             music_error: None,
             music_notice: None,
             music_ask: None,
+            tracks: None,
+            track_player: None,
+            track_error: None,
+            track_notice: None,
+            track_ask: None,
             render_review: None,
             render_summary: None,
             render_found: None,
@@ -542,6 +557,10 @@ impl ProjectsScreen {
         self.music_error = None;
         self.music_notice = None;
         self.music_ask = None;
+        self.track_player = None;
+        self.track_error = None;
+        self.track_notice = None;
+        self.track_ask = None;
         self.render_found = None;
         self.render_checking = None;
         self.render_check_failed = false;
@@ -731,6 +750,8 @@ impl ProjectsScreen {
             self.player = None;
             self.scenes = None;
             self.music = None;
+            self.tracks = None;
+            self.track_player = None;
             self.render_review = None;
             self.render_summary = None;
             self.export_view = None;
@@ -792,7 +813,8 @@ impl ProjectsScreen {
             self.load(window, cx);
             cx.notify();
         } else {
-            let playing = self.player.as_ref().is_some_and(|p| p.is_playing());
+            let playing = self.player.as_ref().is_some_and(|p| p.is_playing())
+                || self.track_player.as_ref().is_some_and(|p| p.is_playing());
             if playing || playing != self.was_playing {
                 cx.notify();
             }

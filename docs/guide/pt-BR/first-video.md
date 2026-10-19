@@ -45,7 +45,7 @@ Quando um roteiro ou uma narração muda, o que foi feito a partir deles aparece
 
 A etapa **Edição** abre o editor com um primeiro corte já montado a partir das cenas e da narração. Divida, apare, mova e apague clipes; os cortes se encaixam nas palavras da narração. Mixe a narração com música e efeitos sonoros, edite as legendas e escolha o formato do quadro (16:9 ou 9:16). As sugestões de corte marcam bons pontos para cortar; aceitar uma é só mais uma edição, e dá para desfazer. [O editor](editor.md) explica cada parte.
 
-O Bardo não faz música. No projeto, ele escreve um prompt de música para a sua ferramenta; importe a faixa que você fizer na aba Mídia do editor.
+Para a música, a etapa Roteiro escreve um prompt de música e, com um plano pago da ElevenLabs, compõe uma faixa a partir dele; **Usar esta faixa** coloca a faixa na trilha de música ([Música a partir do prompt](script.md#generated-music)). Ou faça a faixa na sua ferramenta e importe na aba Mídia do editor.
 
 <a id="render"></a>
 ## 7. Revise e renderize

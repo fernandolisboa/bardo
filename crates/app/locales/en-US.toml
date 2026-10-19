@@ -2225,7 +2225,11 @@ body = "Details tells which model wrote the script, from which template version 
 
 [tour.script.music]
 title = "The music prompt"
-body = "Claude writes a prompt for your own music tool from the channel, the theme and the video's length. Bardo makes no music: copy the prompt, make the track, and import it in the editor."
+body = "Claude writes a prompt for the video's music from the channel, the theme and the video's length. Edit it as you like: the music is made from it, here or in a tool of your own."
+
+[tour.script.track]
+title = "Music from the prompt"
+body = "Generate music has ElevenLabs Music compose an instrumental track as long as the narration. Play it, then Use this track puts it on the music track from 0:00, or Discard drops it. A track of your own can still be imported in the editor."
 
 [tour.narration]
 name = "Narration tour"

@@ -96,6 +96,9 @@ pub enum Control {
     ScriptDetails,
     /// Script: the music prompt.
     MusicPrompt,
+    /// Script: the music made from the prompt, and the button that
+    /// composes it.
+    MusicTrack,
     /// Narration: its title, out of date mark and details.
     NarrationStatus,
     /// Narration: generating it with the narrator's voice.
@@ -559,7 +562,7 @@ pub const SCRIPT: Tour = {
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Script,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "write", control(Control::ScriptBody))
@@ -581,6 +584,10 @@ pub const SCRIPT: Tour = {
             at_stage(AT, "music", control(Control::MusicPrompt))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "music"),
+            // Only once there is a music prompt.
+            at_stage(AT, "track", control(Control::MusicTrack))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "generated-music"),
         ],
     }
 };

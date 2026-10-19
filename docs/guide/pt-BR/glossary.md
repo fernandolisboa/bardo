@@ -64,7 +64,9 @@ As palavras que o Bardo usa, em termos simples.
 
 **Geração**: o registro de como algo foi feito: provedor, modelo, prompt e versão do modelo de instruções. Editar o resultado não muda esse registro.
 
-**Prompt de música**: um prompt que o Claude escreve para a sua ferramenta de música. O Bardo não faz música; você importa a faixa.
+**Prompt de música**: um prompt que o Claude escreve para a música do vídeo. O ElevenLabs Music compõe uma faixa a partir dele no Bardo, ou você o usa na sua ferramenta e importa a faixa.
+
+**Faixa gerada**: uma faixa de música que o ElevenLabs Music compôs para o projeto. Ela espera revisão até você usar ou descartar.
 
 <a id="editing"></a>
 ## Edição
