@@ -26,12 +26,13 @@ Algumas coisas valem para todo provedor:
 <a id="elevenlabs"></a>
 ## ElevenLabs
 
-1. Abra a [ElevenLabs](https://elevenlabs.io/app/sign-up) e entre, ou crie uma conta. A narração gasta os créditos do seu plano.
+1. Abra a [ElevenLabs](https://elevenlabs.io/app/sign-up) e entre, ou crie uma conta. A narração e a música gastam os créditos do seu plano. A música pela API exige um plano pago (Starter ou acima); os planos pagos também trazem a licença comercial da música.
 2. Abra [Developers › API Keys](https://elevenlabs.io/app/developers/api-keys) e escolha **Create key**. Dê um nome (por exemplo `Bardo`).
-3. Deixe **Restrict Key** ligado, dê à chave acesso aos três recursos que o Bardo usa e deixe o resto em **No Access** (você também pode pôr um limite de créditos na chave):
+3. Deixe **Restrict Key** ligado, dê à chave acesso aos quatro recursos que o Bardo usa e deixe o resto em **No Access** (você também pode pôr um limite de créditos na chave):
    - **Text to Speech**: Access (a narração);
    - **Voices**: Read (as suas vozes, clones incluídos);
-   - **Forced Alignment**: Access (o tempo de cada palavra para as legendas).
+   - **Forced Alignment**: Access (o tempo de cada palavra para as legendas);
+   - **Music**: Access (a música do vídeo, se você gerar no Bardo).
 4. Escolha **Create key** e copie a chave. Ela aparece só desta vez.
 5. Cole no cartão **ElevenLabs** em [Configurações › Chaves de API](bardo:go/settings/keys), escolha **Salvar chave** e depois **Testar chave**. Uma chave sem um desses recursos falha com uma mensagem que diz qual falta.
 

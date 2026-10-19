@@ -17,13 +17,18 @@
 //! made and the text it reads, sent as a form; the answer times each
 //! character of the text. ElevenLabs bills it like speech-to-text, per
 //! hour of audio, and says nothing of it in the answer.
+//!
+//! Music (`POST /v1/music`, ADR-0015): an instrumental track composed from
+//! the video's music prompt, as long as asked, answered as MP3 bytes.
+//! ElevenLabs opens the Music API to paid plans only, and bills it by the
+//! length of the track.
 
 use std::time::Duration;
 
 use bardo_domain::{
-    AlignedSpeech, Alignment, AlignmentRequest, ApiKey, CharTiming, Provider, ProviderFailure,
-    ProviderFailureKind, Speech, SpeechAligner, SpeechRequest, SpeechSynthesizer, Voice,
-    VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef,
+    AlignedSpeech, Alignment, AlignmentRequest, ApiKey, CharTiming, ComposedMusic, MusicGenerator,
+    MusicRequest, Provider, ProviderFailure, ProviderFailureKind, Speech, SpeechAligner,
+    SpeechRequest, SpeechSynthesizer, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -598,4 +603,124 @@ fn alignment_failure(response: &HttpResponse) -> ProviderFailure {
         return unexpected(format!("the recording was not accepted: {detail}"));
     }
     failure(Provider::ElevenLabs, response)
+}
+
+pub const MUSIC_URL: &str = "https://api.elevenlabs.io/v1/music";
+/// The model whose prompt-to-track flow ElevenLabs documents (ADR-0015).
+pub const MUSIC_MODEL: &str = "music_v1";
+/// The largest answer kept: ten minutes of MP3 at 128 kbit/s is under
+/// 10 MB.
+pub const MAX_MUSIC_BYTES: u64 = 24 * 1024 * 1024;
+
+/// The request that composes `request`: always instrumental, since the
+/// narration plays over it, and signed with C2PA so the file says it was
+/// made by AI.
+pub fn music_request(key: &ApiKey, request: &MusicRequest) -> HttpRequest {
+    let body = json!({
+        "prompt": request.prompt,
+        "music_length_ms": request.length.as_millis(),
+        "model_id": MUSIC_MODEL,
+        "force_instrumental": true,
+        "sign_with_c2pa": true,
+    });
+    HttpRequest::post_json(
+        format!("{MUSIC_URL}?output_format={OUTPUT_FORMAT}"),
+        body.to_string(),
+    )
+    .header("xi-api-key", key.expose())
+}
+
+/// A refused composition. A prompt that names an artist or a song is
+/// declined, and ElevenLabs suggests one it would take.
+pub fn music_failure(response: &HttpResponse) -> ProviderFailure {
+    let body: Value = serde_json::from_str(&response.body).unwrap_or_default();
+    if body["detail"]["status"].as_str() == Some("bad_prompt") {
+        let mut detail =
+            String::from("the prompt was declined (it may name an artist, a song or lyrics)");
+        if let Some(suggestion) = body["detail"]["data"]["prompt_suggestion"].as_str() {
+            detail.push_str(&format!("; ElevenLabs suggests: {}", suggestion.trim()));
+        }
+        return ProviderFailure::new(ProviderFailureKind::Declined, detail);
+    }
+    failure(Provider::ElevenLabs, response)
+}
+
+/// Composes music with ElevenLabs over HTTPS.
+pub struct ElevenLabsMusic<T = UreqTransport> {
+    transport: T,
+    backoff: Backoff,
+    sleep: Sleeper,
+}
+
+impl ElevenLabsMusic {
+    /// Composing a long track takes the provider a few minutes.
+    pub const TIMEOUT: Duration = Duration::from_secs(600);
+
+    pub fn new() -> Self {
+        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_MUSIC_BYTES))
+    }
+}
+
+impl Default for ElevenLabsMusic {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsMusic<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self {
+            transport,
+            backoff: Backoff::default(),
+            sleep: thread_sleeper(),
+        }
+    }
+
+    /// Replaces how the adapter waits between retries (tests record the
+    /// waits instead).
+    pub fn with_sleeper(mut self, sleep: Sleeper) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> MusicGenerator for ElevenLabsMusic<T> {
+    fn provider(&self) -> Provider {
+        Provider::ElevenLabs
+    }
+
+    fn compose(
+        &self,
+        key: &ApiKey,
+        request: &MusicRequest,
+    ) -> Result<ComposedMusic, ProviderFailure> {
+        let call = music_request(key, request);
+        let mut retry = 0;
+        loop {
+            let answer = self
+                .transport
+                .send_for_bytes(&call, MAX_MUSIC_BYTES)
+                .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+            if (200..=299).contains(&answer.status) {
+                if answer.bytes.is_empty() {
+                    return Err(unexpected("the answer has no audio"));
+                }
+                return Ok(ComposedMusic {
+                    audio: answer.bytes,
+                    model: MUSIC_MODEL.to_owned(),
+                });
+            }
+            // An error answer is a short JSON text.
+            let response = HttpResponse::new(answer.status, String::from_utf8_lossy(&answer.bytes));
+            if retry >= self.backoff.retries || !Backoff::is_retryable(&response) {
+                return Err(music_failure(&response));
+            }
+            (self.sleep)(self.backoff.delay(retry, &response));
+            retry += 1;
+        }
+    }
 }

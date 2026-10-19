@@ -136,6 +136,7 @@ pub mod refs {
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
     pub const SCRIPT_MUSIC: GuideRef = at("script", "music");
+    pub const SCRIPT_MUSIC_TRACK: GuideRef = at("script", "generated-music");
     pub const NARRATION_GENERATE: GuideRef = at("narration", "generate");
     pub const NARRATION_PLAY: GuideRef = at("narration", "play");
     pub const NARRATION_STALE: GuideRef = at("narration", "stale");
@@ -188,7 +189,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 63] = [
+    pub const ALL: [GuideRef; 64] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -202,6 +203,7 @@ pub mod refs {
         SCRIPT_WRITE,
         SCRIPT_REVIEW,
         SCRIPT_MUSIC,
+        SCRIPT_MUSIC_TRACK,
         NARRATION_GENERATE,
         NARRATION_PLAY,
         NARRATION_STALE,

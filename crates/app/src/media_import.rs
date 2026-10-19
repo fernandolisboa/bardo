@@ -220,6 +220,7 @@ mod tests {
                 previews: Arc::new(crate::testing::NoPreviews),
                 aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
                 images: Arc::new(crate::testing::FakeImages::default()),
+                music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::clone(&self.media) as _,

@@ -43,3 +43,13 @@ for MP3 bytes), `preview-down.http`, `preview-empty.http`,
 `tts-normalized-only.http` (no timings of the text as sent, no cost
 header), `tts-no-audio.http`, `tts-misaligned.http` (timing lists of
 different lengths).
+
+Music (`POST /v1/music`), written from the documented shapes because
+composing needs a paid plan (re-record when generating music misbehaves
+with a real key):
+
+- `music-track.http`: a text body standing in for the MP3 bytes.
+- `music-bad-prompt.http`: the `bad_prompt` refusal of a prompt with
+  copyrighted material, with its `prompt_suggestion`.
+- `music-missing-permission.http`, `music-quota-exceeded.http`,
+  `music-rate-limited.http`.

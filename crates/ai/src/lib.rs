@@ -15,7 +15,9 @@ pub mod retry;
 pub mod youtube_stats;
 
 pub use claude::ClaudeTextGenerator;
-pub use elevenlabs::{ElevenLabsAlignment, ElevenLabsPreviews, ElevenLabsSpeech, ElevenLabsVoices};
+pub use elevenlabs::{
+    ElevenLabsAlignment, ElevenLabsMusic, ElevenLabsPreviews, ElevenLabsSpeech, ElevenLabsVoices,
+};
 pub use gemini::GeminiImages;
 pub use github_releases::GitHubReleases;
 pub use google_clips::GoogleClips;

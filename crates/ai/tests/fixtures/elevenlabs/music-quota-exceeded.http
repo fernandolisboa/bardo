@@ -1,0 +1,5 @@
+HTTP/2 401
+server: uvicorn
+content-type: application/json
+
+{"detail":{"status":"quota_exceeded","message":"This request exceeds your quota of 100000. You have 120 credits remaining, while 900 credits are required for this request."}}

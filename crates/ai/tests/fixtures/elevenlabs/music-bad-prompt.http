@@ -1,0 +1,5 @@
+HTTP/2 400
+server: uvicorn
+content-type: application/json
+
+{"detail":{"status":"bad_prompt","message":"The prompt contains copyrighted material.","data":{"prompt_suggestion":"A calm, cinematic piano piece with soft strings and a slow build. "}}}

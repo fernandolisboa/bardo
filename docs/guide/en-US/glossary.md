@@ -64,7 +64,9 @@ The words Bardo uses, in plain terms.
 
 **Generation**: the record of how something was made: provider, model, prompt and template version. Editing the result leaves it as it was.
 
-**Music prompt**: a prompt Claude writes for your own music tool. Bardo does not make music; you import the track.
+**Music prompt**: a prompt Claude writes for the video's music. ElevenLabs Music composes a track from it in Bardo, or you use it in your own tool and import the track.
+
+**Generated track**: a music track ElevenLabs Music composed for the project. It waits for review until you use or discard it.
 
 <a id="editing"></a>
 ## Editing

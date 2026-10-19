@@ -485,6 +485,29 @@ impl Timeline {
         Ok((edit, ItemRef { track, index }))
     }
 
+    /// The cut with the generated track `asset` on the music track
+    /// (#169): the music items playing `previous`, the track it takes
+    /// over from, come out first, while music the user placed stays. It
+    /// goes in from the start, or where the music playing there ends, as
+    /// `place` puts it. A cut whose music track already plays `asset` is
+    /// left as it is.
+    pub fn use_music(
+        &self,
+        previous: Option<&str>,
+        asset: &MediaAsset,
+    ) -> Result<Timeline, EditError> {
+        let mut timeline = self.clone();
+        if let Some(previous) = previous.filter(|previous| *previous != asset.file) {
+            timeline.music.retain(|item| item.file != previous);
+        }
+        if timeline.music.iter().any(|item| item.file == asset.file) {
+            return Ok(timeline);
+        }
+        let (edit, _) = timeline.place(asset, Track::Music, Duration::ZERO)?;
+        timeline.apply(&edit)?;
+        Ok(timeline)
+    }
+
     /// Makes `edit` and returns the edit that undoes it. On error the
     /// timeline is unchanged.
     pub fn apply(&mut self, edit: &Edit) -> Result<Edit, EditError> {
@@ -2331,5 +2354,60 @@ mod tests {
         );
         assert_eq!(gone.music().len(), 1);
         assert_eq!(gone.narration(), timeline().narration());
+    }
+
+    #[test]
+    fn a_generated_track_takes_over_from_the_one_it_replaces_and_leaves_the_rest() {
+        let mut first = asset(MediaKind::Audio, "media-first.mp3", 4_000);
+        first.source = crate::AssetSource::Generated;
+        let mut second = asset(MediaKind::Audio, "media-second.mp3", 4_000);
+        second.source = crate::AssetSource::Generated;
+        let boom = asset(MediaKind::Audio, "boom.wav", 500);
+
+        // An empty music track: from the start.
+        let used = timeline().use_music(None, &first).unwrap();
+        let music = used.music();
+        assert_eq!(music.len(), 1);
+        assert_eq!(
+            (music[0].file.as_str(), music[0].at),
+            ("media-first.mp3", ms(0))
+        );
+        assert_eq!(music[0].duration, ms(4_000));
+        // Using it again changes nothing.
+        assert_eq!(used.use_music(None, &first).unwrap(), used);
+
+        // The user cut the first track and added a hit of their own; the
+        // new track takes the first one's place, the hit stays.
+        let mut edited = used.clone();
+        edited
+            .apply(&Edit::Split {
+                track: Track::Music,
+                index: 0,
+                at: ms(2_000),
+            })
+            .unwrap();
+        edited
+            .apply(&Edit::Delete {
+                track: Track::Music,
+                index: 1,
+            })
+            .unwrap();
+        let edited = placed(&edited, &boom, Track::Music, 3_000);
+        let swapped = edited.use_music(Some("media-first.mp3"), &second).unwrap();
+        let files: Vec<_> = swapped
+            .music()
+            .iter()
+            .map(|item| (item.file.as_str(), item.at, item.duration))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("media-second.mp3", ms(0), ms(3_000)),
+                ("boom.wav", ms(3_000), ms(500)),
+            ],
+            "the new track plays up to the user's hit"
+        );
+        assert_eq!(swapped.narration(), timeline().narration());
+        assert_eq!(swapped.video(), timeline().video());
     }
 }
