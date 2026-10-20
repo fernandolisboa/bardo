@@ -223,10 +223,18 @@ function Invoke-Upgrade {
     Test-Check 'S1.08' 'the upgrade does not ask the agent question again' { -not (Test-Path $paths.SetupChoices) }
     Test-ProgramFolder 'S1.08'
     Test-AgentTask 'S1.08'
-    Start-BardoWindow | Out-Null
-    Test-Check 'S1.08' 'the agent setting is kept: the new Bardo starts the agent again' {
-        Wait-Until { @(Get-BardoProcesses Agent).Count -eq 1 } 60
+    # The upgrade ends the agent; Task Scheduler starts it again within 15
+    # minutes or at the next sign-in. Running the task now stands in for
+    # that wait. An agent that finds itself off exits at once.
+    schtasks.exe /Run /TN $paths.TaskName | Out-Null
+    Test-Check 'S1.08' 'the agent stays on and its task still works' {
+        $started = Wait-Until { @(Get-BardoProcesses Agent).Count -eq 1 } 30
+        Start-Sleep -Seconds 10
+        $started -and @(Get-BardoProcesses Agent).Count -eq 1
     }
+    Start-BardoWindow | Out-Null
+    [void](Wait-Until { @(Get-BardoProcesses Window).Count -ge 1 } 30)
+    Start-Sleep -Seconds 10
     $colours = Save-Screen "$Out\screens\after-upgrade.png"
     Test-Check 'S2.05' 'without a GPU, the upgraded Bardo draws its window' { $colours -gt 16 } { "$colours colours" }
     Stop-BardoAll

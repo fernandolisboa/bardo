@@ -184,14 +184,16 @@ function Invoke-App {
     $secretValues = $keys + @($apps.app_credentials.PSObject.Properties | ForEach-Object { $_.Value.secret })
     $secrets = $secretValues + @('Canal Único de Teste', 'bardo_e2e_handle', $env:USERNAME)
     Test-Check 'S13.04' 'no key, secret, channel name, @handle or Windows user name in the zip' { Test-NoneIn $text $secrets }
-    Test-Check 'S13.04' 'the home folder shows as %USERPROFILE%' { $text.Contains('%USERPROFILE%') }
+    Test-Check 'S13.04' 'a path in the home folder shows only as %USERPROFILE%' {
+        -not $text.Contains($env:USERPROFILE)
+    } { "%USERPROFILE% appears: $($text.Contains('%USERPROFILE%'))" }
     $before = (Get-Item $zip).LastWriteTimeUtc
     Start-Sleep -Seconds 2
     $again = Installed diagnostics $zip
     Test-Check 'S13.02' 'saving over an existing zip replaces it' { $again.written -and (Get-Item $zip).LastWriteTimeUtc -gt $before }
     $locked = Join-Path $work 'not writable'
     New-Item -ItemType Directory -Force $locked | Out-Null
-    icacls.exe $locked /deny "$($env:USERNAME):(W,AD)" | Out-Null
+    icacls.exe $locked /deny "$($env:USERNAME):(WD,AD)" | Out-Null
     $refused = Installed diagnostics (Join-Path $locked 'bardo-diagnostics.zip')
     Test-Check 'S13.02' "saving where Bardo can't write fails and leaves no .zip.part" {
         -not $refused.written -and @(Get-ChildItem $locked -Force).Count -eq 0

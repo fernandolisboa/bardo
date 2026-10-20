@@ -141,7 +141,9 @@ fn state(bardo: &Bardo) -> anyhow::Result<Value> {
         "keys": keys,
         "app_credentials": credentials,
         "channels": bardo.channels()?.iter().map(|c| c.details.name().to_owned()).collect::<Vec<_>>(),
-        "settings_offer": bardo.settings_offer().map(|offer| offer.file.clone()),
+        // Offered with no file on a copy's first start; with the installer's
+        // file after a first install.
+        "settings_offer": bardo.settings_offer().map(|offer| json!({ "file": offer.file })),
         "restart_needed": backups.restart_needed,
         "restore_block": backups.restore_block.map(|block| format!("{block:?}")),
         "last_restore": backups.last_restore.map(|outcome| json!({

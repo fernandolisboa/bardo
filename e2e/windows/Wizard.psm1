@@ -9,7 +9,9 @@ $script:Auto = [System.Windows.Automation.AutomationElement]
 $script:Tree = [System.Windows.Automation.TreeScope]
 
 # The wizard's window, once it shows: Inno Setup's loader starts a second
-# process that owns it, so it is found by its title.
+# process that owns it, so it is found by its title. That process also has
+# an application window with the same title and no buttons, so the wizard
+# is the one with buttons.
 function Find-WizardWindow {
     param([int]$Seconds = 60)
     $deadline = (Get-Date).AddSeconds($Seconds)
@@ -17,7 +19,10 @@ function Find-WizardWindow {
         $windows = $script:Auto::RootElement.FindAll($script:Tree::Children,
             [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($window in $windows) {
-            if ($window.Current.Name -like 'Setup - Bardo*') { return $window }
+            if ($window.Current.Name -like 'Setup - Bardo*' -and
+                (Get-Descendants $window ([System.Windows.Automation.ControlType]::Button)).Count -gt 0) {
+                return $window
+            }
         }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
@@ -55,7 +60,11 @@ function Find-WizardButton {
 function Invoke-WizardButton {
     param([Parameter(Mandatory)]$Window, [Parameter(Mandatory)][string]$Pattern)
     $button = Find-WizardButton $Window $Pattern
-    if (-not $button) { throw "no enabled button matches '$Pattern'" }
+    if (-not $button) {
+        $buttons = Get-Descendants $Window ([System.Windows.Automation.ControlType]::Button) |
+            ForEach-Object { "'$($_.Current.Name)' enabled=$($_.Current.IsEnabled)" }
+        throw "no enabled button matches '$Pattern' in '$($Window.Current.Name)' ($($Window.Current.ClassName)); buttons: $($buttons -join ', ')"
+    }
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
 
