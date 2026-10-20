@@ -1,0 +1,86 @@
+name: Windows end to end
+
+# Issue #166: the Windows-only checks of the regression pass that a
+# machine can verify, run against the installed Bardo on a Windows runner.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  spike:
+    name: Spike (installed Bardo on the runner)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Cache the pinned ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: .ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('crates/media/ffmpeg.toml') }}
+      - name: Install cargo-about (third-party notices)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2
+      - name: Package
+        run: cargo xtask package
+      - name: Spike
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force spike | Out-Null
+          "== whoami"; whoami; $env:USERNAME; $env:USERDOMAIN
+          "== video"; Get-CimInstance Win32_VideoController | Format-List Name,DriverVersion,CurrentHorizontalResolution,CurrentVerticalResolution
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          "== screen"; [System.Windows.Forms.Screen]::AllScreens | Format-List
+          $setup = Get-ChildItem target/package/Bardo-Setup-*.exe | Select-Object -First 1
+          "== install $setup"
+          $p = Start-Process -Wait -PassThru $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=backgroundagent',"/LOG=$PWD\spike\install.log"
+          "exit $($p.ExitCode)"
+          Get-ChildItem "$env:LOCALAPPDATA\Programs\Bardo" -Recurse | Select-Object FullName,Length | Format-Table -AutoSize | Out-String -Width 300
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" | Format-Table Name
+          Get-Content "$env:APPDATA\Bardo\setup-choices.toml"
+          "== start"
+          Start-Process "$env:LOCALAPPDATA\Programs\Bardo\bardo.exe"
+          Start-Sleep 30
+          Get-CimInstance Win32_Process -Filter "Name='bardo.exe'" | Format-List ProcessId,CommandLine
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\spike\desktop.png")
+          "== setup-choices left?"; Test-Path "$env:APPDATA\Bardo\setup-choices.toml"
+          "== task"; schtasks /Query /TN "Bardo publishing agent ($env:USERNAME)" /XML
+          "== logs"; Get-ChildItem "$env:LOCALAPPDATA\Bardo" -Recurse | Select-Object FullName,Length | Format-Table -AutoSize | Out-String -Width 300
+          Get-Content "$env:LOCALAPPDATA\Bardo\logs\bardo.log" -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\Bardo\logs\agent.log" -ErrorAction SilentlyContinue
+          "== cmdkey"; cmdkey /list
+          "== stop"; Get-Process bardo -ErrorAction SilentlyContinue | Stop-Process -Force
+          "== uninstall"
+          $u = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{C6E790A6-186B-4ED1-8997-82360B3BE325}_is1"
+          $u | Format-List DisplayName,DisplayVersion,UninstallString,InstallLocation
+          $p = Start-Process -Wait -PassThru "$env:LOCALAPPDATA\Programs\Bardo\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$PWD\spike\uninstall.log"
+          "exit $($p.ExitCode)"; Start-Sleep 5
+          Test-Path "$env:LOCALAPPDATA\Programs\Bardo"
+          schtasks /Query /TN "Bardo publishing agent ($env:USERNAME)"
+          Get-CimInstance Win32_Process -Filter "Name='bardo.exe'" | Format-List ProcessId,CommandLine
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spike
+          path: spike
