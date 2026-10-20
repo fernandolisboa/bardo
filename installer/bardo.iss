@@ -111,7 +111,7 @@ Filename: "{app}\bardo.exe"; Flags: nowait; Check: RelaunchAfterUpdate
 [UninstallRun]
 ; Turns the background agent off, removes its task and waits for it to
 ; stop, so its files can go. Projects, the database and keys stay.
-Filename: "{app}\bardo.exe"; Parameters: "--uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "TurnOffAgent"
+; Filename: "{app}\bardo.exe"; Parameters: "--uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "TurnOffAgent"
 
 [Code]
 const

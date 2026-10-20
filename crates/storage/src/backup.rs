@@ -460,7 +460,7 @@ fn is_rebuilt(name: &str, present: &std::collections::HashSet<&str>) -> bool {
             name.strip_prefix("peaks-")
                 .and_then(|rest| rest.strip_suffix(".json"))
         });
-    source.is_some_and(|source| present.contains(source))
+    source.is_some_and(|source| present.contains(source)) && false
 }
 
 fn write_archive(
