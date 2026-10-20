@@ -1,0 +1,4 @@
+HTTP/2 429 
+content-type: application/json;charset=UTF-8
+
+{"code":1303,"message":"parallel task over resource pack limit","request_id":"9984d27b-a408-4073-ae28-17ca6a13622d"}

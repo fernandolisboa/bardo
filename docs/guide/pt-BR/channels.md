@@ -42,7 +42,7 @@ A [persona](personas.md) que narra os vídeos do canal: a voz, o tom e o estilo 
 <a id="defaults"></a>
 ## Modelo de vídeo, legendas e transições
 
-- **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield ou pelo Google. Manter o padrão do provedor acompanha esse padrão quando ele muda. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
+- **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google. Manter o padrão do provedor acompanha esse padrão quando ele muda. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
 - **Estilo de legenda**: o visual das legendas nos projetos novos do canal. Cada projeto pode escolher outro estilo no [editor](editor.md#captions).
 - **Transição padrão** e a **Duração** dela: o que o editor põe num corte quando você aperta **T** ou escolhe uma transição para um clipe; uma fusão de 0,5 s, a menos que você mude. Cada corte pode usar outra ([Transições](editor.md#transitions)).
 

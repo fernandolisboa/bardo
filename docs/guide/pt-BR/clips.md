@@ -15,7 +15,7 @@ Um clipe anima a imagem de uma cena num vídeo curto. Os clipes são opcionais: 
 
 **Animar cenas sem clipe** envia ao provedor de vídeo, numa só tarefa, cada cena que tem imagem e não tem clipe; **Animar** numa cena faz só aquela. Cada clipe dura o tempo em que a cena é narrada, dentro das durações que o modelo aceita. Uma cena que falha não para as outras, e tentar a tarefa de novo envia só as cenas ainda sem clipe.
 
-Os clipes são feitos pela Higgsfield ou pelo Google, com a sua própria chave de cada um ([Suas chaves de API](api-keys.md#providers)). Cancelar uma rodada para a espera, não o provedor: um clipe já enviado ainda pode ficar pronto e ser cobrado.
+Os clipes são feitos pela Higgsfield, pelo Kling ou pelo Google, com a sua própria chave de cada um ([Suas chaves de API](api-keys.md#providers)). Cancelar uma rodada para a espera, não o provedor: um clipe já enviado ainda pode ficar pronto e ser cobrado.
 
 <a id="motion"></a>
 ## Movimento

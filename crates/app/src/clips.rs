@@ -1216,6 +1216,127 @@ mod tests {
         assert_eq!(record.job, Some(job.id()));
     }
 
+    /// Kling's API as documented: a task that succeeded on the first
+    /// check, and its clip.
+    #[derive(Default, Clone)]
+    struct KlingApi {
+        sent: Arc<std::sync::Mutex<Vec<Sent>>>,
+    }
+
+    impl bardo_ai::http::Transport for KlingApi {
+        fn send(
+            &self,
+            request: &bardo_ai::http::HttpRequest,
+        ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
+            self.sent.lock().unwrap().push((
+                request.url.clone(),
+                request.header_value("authorization").map(str::to_owned),
+                request.body.clone().unwrap_or_default(),
+            ));
+            const VIDEO: &str = "https://cdn.kling.example/output/7001.mp4";
+            let body = if request.url.ends_with("/image-to-video/kling-3.0") {
+                serde_json::json!({ "code": 0, "data": { "id": "7001", "status": "submitted" } })
+                    .to_string()
+            } else if request.url.ends_with("/tasks?task_ids=7001") {
+                serde_json::json!({ "code": 0, "data": [{
+                    "id": "7001",
+                    "status": "succeeded",
+                    "outputs": [{ "type": "video", "url": VIDEO }],
+                }] })
+                .to_string()
+            } else if request.url == VIDEO {
+                String::from_utf8(CLIP.to_vec()).unwrap()
+            } else {
+                return Ok(bardo_ai::http::HttpResponse::new(404, "{}"));
+            };
+            Ok(bardo_ai::http::HttpResponse::new(200, body))
+        }
+    }
+
+    #[test]
+    fn a_scene_animated_with_kling_goes_straight_to_kling_on_its_own_key() {
+        const KLING_KEY: &str = "kling-test-key-0001";
+        let mut h = Harness::new();
+        let kling = KlingApi::default();
+        h.more_clips.push(Arc::new(
+            bardo_ai::KlingClips::with_transport(kling.clone()).with_sleeper(Arc::new(|_| {})),
+        ));
+        let mut app = h.start();
+        let (project, drawn) = h.drawn_project(&app);
+        let kling_3 = ClipModelRef::new(Provider::Kling, bardo_ai::kling::DEFAULT_MODEL).unwrap();
+        assert!(
+            app.clip_models()
+                .iter()
+                .any(|offered| offered.id == kling_3),
+            "Kling's models are offered"
+        );
+        channel_uses(&app, &project, Some(kling_3.clone()));
+
+        let error = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap_err();
+        assert!(matches!(error, SceneError::MissingKey(Provider::Kling)));
+        assert_eq!(error.message(), Text::ScenesMissingKlingKey);
+        app.save_provider_key(Provider::Kling, KLING_KEY).unwrap();
+
+        let view = app.scenes(project.id).unwrap().clips;
+        let seconds = view.scenes[0].seconds.unwrap();
+        let price = Money::from_micros(84_000 * u64::from(seconds));
+        assert_eq!(
+            view.scenes[0].price,
+            Some(price),
+            "Kling 3.0 720p at $0.084 a second"
+        );
+
+        let job = done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+
+        assert!(h.clips.submissions().is_empty(), "not the other provider");
+        let sent = kling.sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 3, "submit, one status check, download");
+        let bearer = format!("Bearer {KLING_KEY}");
+        assert!(
+            sent[..2]
+                .iter()
+                .all(|(_, key, _)| key.as_deref() == Some(bearer.as_str()))
+        );
+        assert_eq!(sent[2].1, None, "the CDN gets no key");
+        let body: serde_json::Value = serde_json::from_slice(&sent[0].2).unwrap();
+        assert_eq!(
+            body["contents"][0]["text"],
+            drawn.scenes()[0].prompt().as_str()
+        );
+        assert!(
+            !body["contents"][1]["url"].as_str().unwrap().is_empty(),
+            "the scene image, inline"
+        );
+        assert_eq!(body["settings"]["duration"], seconds);
+        assert!(
+            body["options"]["external_task_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("bardo-")
+        );
+
+        let plan = plan_of(&app, &project);
+        let clip = plan.scenes()[0].pending_clip().unwrap().clone();
+        assert_eq!(h.files.read(project.id, &clip.file).unwrap(), CLIP);
+        assert_eq!(clip.generation.provider, Provider::Kling);
+        assert_eq!(clip.generation.model, kling_3.model());
+        let record =
+            h.db.project_costs(project.id)
+                .unwrap()
+                .into_iter()
+                .find(|record| record.purpose == CostPurpose::SceneClip)
+                .unwrap();
+        assert_eq!(record.provider, Provider::Kling);
+        assert_eq!(record.cost, Cost::Estimated(price), "Kling quotes nothing");
+        assert_eq!(record.job, Some(job.id()));
+    }
+
     #[test]
     fn the_channel_model_applies_unless_the_scene_picks_its_own() {
         let h = Harness::new();

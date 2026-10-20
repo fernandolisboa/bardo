@@ -14,6 +14,11 @@ use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
 /// a request that cannot exist: valid credentials get 404, invalid get 401.
 const NO_SUCH_HIGGSFIELD_REQUEST: &str = "00000000-0000-0000-0000-000000000000";
 
+/// Kling's account endpoints take only the older access key pair, so its
+/// check looks up a task by a custom id no task has: valid keys get an
+/// empty list (or a not-found service code), invalid ones get 401.
+const NO_SUCH_KLING_TASK: &str = "bardo-key-check";
+
 /// Longest provider message passed on; longer ones are cut.
 const MAX_DETAIL_CHARS: usize = 300;
 
@@ -35,6 +40,10 @@ pub fn check_request(provider: Provider, key: &ApiKey) -> Option<HttpRequest> {
             "https://api.higgsfield.ai/requests/{NO_SUCH_HIGGSFIELD_REQUEST}/status"
         ))
         .header("authorization", format!("Key {key}")),
+        Provider::Kling => HttpRequest::get(format!(
+            "https://api-singapore.klingai.com/tasks?external_task_ids={NO_SUCH_KLING_TASK}"
+        ))
+        .header("authorization", format!("Bearer {key}")),
         Provider::TypeSafe => HttpRequest::get("https://api.typesafe.ai/v1/models")
             .header("authorization", format!("Bearer {key}")),
         // The header keeps the key out of the URL, and so out of any error
@@ -54,6 +63,9 @@ pub fn classify(provider: Provider, response: &HttpResponse) -> KeyCheck {
         (_, 200..=299) => KeyCheckOutcome::Valid,
         (Provider::Higgsfield, 404) => KeyCheckOutcome::Valid,
         (Provider::Higgsfield, 403) => KeyCheckOutcome::LimitReached,
+        (Provider::Kling, 400 | 404) if (1200..=1203).contains(&kling_code(&body)) => {
+            KeyCheckOutcome::Valid
+        }
         (Provider::ElevenLabs, 401)
             if body["detail"]["status"].as_str() == Some("missing_permissions") =>
         {
@@ -127,6 +139,11 @@ fn google_quota_reason(body: &Value) -> bool {
             "quotaExceeded" | "rateLimitExceeded" | "dailyLimitExceeded" | "RATE_LIMIT_EXCEEDED"
         )
     })
+}
+
+/// Kling's service code, which names the cause of a refusal.
+fn kling_code(body: &Value) -> u64 {
+    body["code"].as_u64().unwrap_or(0)
 }
 
 /// The human-readable message, wherever this provider puts it.

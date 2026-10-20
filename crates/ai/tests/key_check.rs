@@ -56,6 +56,10 @@ fn an_invalid_key_is_rejected_by_every_provider_with_its_message() {
         ),
         (Provider::Higgsfield, "Invalid credentials"),
         (
+            Provider::Kling,
+            "Authentication error. The current API does not support AK/SK; please go to the console (https://kling.ai/dev/api-key) to create API key.",
+        ),
+        (
             Provider::TypeSafe,
             "Cannot authenticate with the server. Please check your API key and try again.",
         ),
@@ -90,6 +94,7 @@ fn quotas_rate_limits_and_credits_are_limits_not_bad_keys() {
         (Provider::YouTubeData, "youtube-data-quota"),
         (Provider::TypeSafe, "typesafe-rate-limited"),
         (Provider::Higgsfield, "higgsfield-no-credits"),
+        (Provider::Kling, "kling-no-units"),
     ] {
         assert_eq!(
             check(provider, name).outcome,
@@ -114,6 +119,15 @@ fn an_unknown_answer_is_unexpected_and_names_the_status() {
     assert_eq!(
         check(Provider::TypeSafe, "unknown-status"),
         KeyCheck::new(KeyCheckOutcome::Unexpected, Some("HTTP 418".into()))
+    );
+    // A not-found answer only means "valid" for Kling's deliberate lookup.
+    assert_eq!(
+        check(Provider::Kling, "kling-no-such-task").outcome,
+        KeyCheckOutcome::Valid
+    );
+    assert_eq!(
+        check(Provider::Claude, "kling-no-such-task").outcome,
+        KeyCheckOutcome::Unexpected
     );
     // A 404 only means "valid" for Higgsfield's deliberate lookup.
     assert_eq!(
@@ -144,6 +158,11 @@ fn each_provider_gets_its_key_in_its_own_header_and_never_in_the_url() {
             Provider::Higgsfield,
             "authorization",
             "Key key-id-0001:key-secret-0001",
+        ),
+        (
+            Provider::Kling,
+            "authorization",
+            "Bearer test-key-0001-abcdef",
         ),
         (
             Provider::TypeSafe,

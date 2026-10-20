@@ -813,6 +813,7 @@ impl SetupTarget {
                     Provider::ElevenLabs => &["elevenlabs"],
                     Provider::Gemini => &["gemini"],
                     Provider::Higgsfield => &["higgsfield"],
+                    Provider::Kling => &["kling"],
                     Provider::TypeSafe => &["typesafe"],
                     Provider::YouTubeData => &["youtube-data"],
                     // No key: X is reached through the connected account.

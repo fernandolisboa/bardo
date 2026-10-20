@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json;charset=UTF-8
+
+{"code":0,"message":"SUCCEED","request_id":"a3","data":[{"id":"893605946402811985","status":"succeeded","message":"","create_time":1792454400000,"update_time":1792454520000,"outputs":[{"type":"video","id":"v1","url":"https://cdn.kling.example/output/893605946402811985.mp4","watermark_url":"https://cdn.kling.example/output/893605946402811985-wm.mp4","duration":"8.0"}],"billing":[{"charge_type":"unit","amount":"4.8","package_type":"video"}]}]}

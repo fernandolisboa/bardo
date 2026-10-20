@@ -17,6 +17,7 @@ Bardo has no AI of its own and no account to sign up for. It works with your acc
 - **ElevenLabs** narrates, lists your voices (clones included) and composes the video's music. You need it for the narration and the persona voices, and for music only if you generate it in Bardo (a paid ElevenLabs plan).
 - **Gemini** makes scene images (Nano Banana) and video clips (Veo, Gemini Omni Flash). You need it for the scene images, and for clips only if you use Google's models.
 - **Higgsfield** makes video clips through the models it offers. You need it only for clips, if you pick its models.
+- **Kling** makes video clips straight from Kling's own models (Kling 3.0, 2.6 and 2.5 Turbo). You need it only for clips, if you pick its models.
 - **TypeSafe (JEV)** is the decision engine: it ranks video ideas and scores cut suggestions. You need it to rank ideas and suggest cuts.
 - **YouTube Data API** gives niche research and public video statistics. You need it for research and your posts' public numbers.
 

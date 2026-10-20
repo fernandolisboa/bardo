@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json;charset=UTF-8
+
+{"code":0,"message":"SUCCEED","request_id":"3c1d2e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f","data":{"id":"893605946402811985","status":"submitted","create_time":1792454400000,"update_time":1792454400000,"external_id":"bardo-00000000000000000000000000000000"}}

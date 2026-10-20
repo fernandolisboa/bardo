@@ -94,6 +94,7 @@ impl SceneError {
             SceneError::SceneNotFound(_) => Text::SceneNotFound,
             SceneError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
             SceneError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
+            SceneError::MissingKey(Provider::Kling) => Text::ScenesMissingKlingKey,
             SceneError::MissingKey(_) => Text::ScenesMissingGeminiKey,
             SceneError::Busy => Text::ScenesBusy,
             SceneError::WouldDiscardImages(_) => Text::ScenesWouldDiscardImages,

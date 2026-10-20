@@ -46,14 +46,14 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
   1. Script (Claude) from niche + theme + persona + channel aesthetic.
   2. Narration (ElevenLabs) from the approved script with the persona's voice. The same call returns the word timings of the script text, so generated narration needs no speech-to-text.
   3. Scene plan and prompts (Claude), one per scene.
-  4. Images (Nano Banana) and video clips through two video adapters: Higgsfield first (it aggregates Kling, Seedance, Wan, MiniMax and its own models), then Google through the Gemini API (Veo 3.1 and Gemini Omni Flash, sharing the Nano Banana key). Provider and model are a setting per channel with a per-scene override, and the scene screen shows the estimated cost before generating.
+  4. Images (Nano Banana) and video clips through two video adapters: Higgsfield first (it aggregates Kling, Seedance, Wan, MiniMax and its own models), then Google through the Gemini API (Veo 3.1 and Gemini Omni Flash, sharing the Nano Banana key); since then also Kling's own API (Kling 3.0, 2.6 and 2.5 Turbo at 720p or 1080p, on a Kling key; ADR-0017). Provider and model are a setting per channel with a per-scene override, and the scene screen shows the estimated cost before generating.
   5. Music: prompt generated; then either an instrumental track composed from it (ElevenLabs Music, as long as the narration, reviewed before it goes on the music track; ADR-0015) or audio imported by the user.
 - Imported narration (e.g. the user's own recording) gets word timings from the alignment adapter: forced alignment when the script text is known, speech-to-text with timestamps otherwise. Not on the critical path; can land late in the MVP.
 - Regenerate any single asset without redoing the rest.
 
 **Not in the MVP**
 - In-app voice cloning (done in the provider's own flow).
-- Video providers other than Higgsfield and Google (e.g. Kling direct); the adapter interface allows adding them later.
+- Video providers other than Higgsfield and Google (e.g. Kling direct); the adapter interface allows adding them later. Since brought in: Kling direct (ADR-0017, #168).
 - Music generation API. Since brought in: ElevenLabs Music (ADR-0015, #169).
 
 **Acceptance**

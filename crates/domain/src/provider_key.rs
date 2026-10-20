@@ -19,6 +19,8 @@ pub enum Provider {
     Gemini,
     /// Video clips through the models Higgsfield aggregates.
     Higgsfield,
+    /// Video clips straight from Kling's own API.
+    Kling,
     /// The decision engine (JEV).
     TypeSafe,
     /// Market research and public video statistics.
@@ -31,11 +33,12 @@ pub enum Provider {
 
 impl Provider {
     /// In the order the settings screen lists them.
-    pub const ALL: [Provider; 7] = [
+    pub const ALL: [Provider; 8] = [
         Provider::Claude,
         Provider::ElevenLabs,
         Provider::Gemini,
         Provider::Higgsfield,
+        Provider::Kling,
         Provider::TypeSafe,
         Provider::YouTubeData,
         Provider::X,
@@ -48,6 +51,7 @@ impl Provider {
             Provider::ElevenLabs => "elevenlabs",
             Provider::Gemini => "gemini",
             Provider::Higgsfield => "higgsfield",
+            Provider::Kling => "kling",
             Provider::TypeSafe => "typesafe",
             Provider::YouTubeData => "youtube-data",
             Provider::X => "x",
@@ -392,6 +396,7 @@ mod tests {
                 Provider::ElevenLabs,
                 Provider::Gemini,
                 Provider::Higgsfield,
+                Provider::Kling,
                 Provider::TypeSafe,
                 Provider::YouTubeData
             ]
