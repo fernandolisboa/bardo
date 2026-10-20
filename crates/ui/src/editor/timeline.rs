@@ -351,6 +351,9 @@ impl EditorScreen {
                 })
                 .collect::<Vec<_>>(),
         );
+        video
+            .get_or_insert_default()
+            .extend(self.render_transition_marks(view, selection, cx));
         let mut narration = Some(self.render_narration(view, selection, cx));
         let mut music = Some(self.render_music(view, selection, cx));
         let mut sfx = Some(self.render_sfx(view, selection, cx));
@@ -597,6 +600,19 @@ impl EditorScreen {
                             )
                             .tour_anchor(
                                 TourAnchor::Control(Control::EditorTools),
+                                Side::Above,
+                                None,
+                            ),
+                    )
+                    .child(
+                        tool_button("tool-transition", editing, false)
+                            .relative()
+                            .child(tr(bardo, Text::EditorToolTransition))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.edit(EditAction::TransitionAtPlayhead, cx);
+                            }))
+                            .tour_anchor(
+                                TourAnchor::Control(Control::EditorTransitions),
                                 Side::Above,
                                 None,
                             ),
@@ -1013,6 +1029,69 @@ impl EditorScreen {
             )
             .children(self.edge_handles(ItemRef::video(index), width, cx));
         Some(element.into_any_element())
+    }
+
+    /// A band low on V1 over each transition as it plays, from where the
+    /// clip after starts to where the clip before ends. Clicking one
+    /// selects the clip it leads into, whose inspector sets it.
+    fn render_transition_marks(
+        &self,
+        view: &EditorView,
+        selection: Option<ItemRef>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let Some(timeline) = view.timeline.as_ref() else {
+            return Vec::new();
+        };
+        timeline
+            .transitions()
+            .into_iter()
+            .filter_map(|(index, played)| {
+                let left = self.timeline.x(played.start);
+                let width = (played.duration().as_secs_f32() * self.timeline.zoom).max(6.);
+                if left + width < 0. || left > self.timeline.width() {
+                    return None;
+                }
+                let selected = selection == Some(ItemRef::video(index));
+                let name = (width > 64.).then(|| {
+                    label(tr(bardo, Text::TransitionName(played.kind)), APP)
+                        .text_size(px(9.))
+                        .overflow_hidden()
+                        .text_ellipsis()
+                });
+                let cut = played.cut;
+                Some(
+                    div()
+                        .id(("transition-mark", index))
+                        .absolute()
+                        .bottom(px(1.))
+                        .h(px(11.))
+                        .left(px(left))
+                        .w(px(width))
+                        .px_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .overflow_hidden()
+                        .rounded(px(3.))
+                        .bg(color(ACCENT).opacity(if selected { 1. } else { 0.75 }))
+                        .border_1()
+                        .border_color(color(if selected { TEXT } else { ACCENT }))
+                        .cursor_pointer()
+                        .children(name)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.seek(cut, cx);
+                                this.select(Some(ItemRef::video(index)), cx);
+                            }),
+                        )
+                        .into_any_element(),
+                )
+            })
+            .collect()
     }
 
     /// The grab zones at an item's two ends, for trimming.

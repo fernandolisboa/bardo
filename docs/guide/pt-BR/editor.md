@@ -46,6 +46,25 @@ O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe
 
 A faixa de vídeo fecha os vãos: aparar ou remover um clipe move os clipes seguintes. Os trechos de áudio se movem livremente e param nos vizinhos, e remover um deixa silêncio.
 
+<a id="transitions"></a>
+## Transições
+
+Um corte vai direto de um clipe para o seguinte. Uma transição mistura os dois por um instante em volta do corte:
+
+| Transição | O que faz |
+| --- | --- |
+| Fusão | O próximo clipe aparece aos poucos sobre o anterior |
+| Pelo preto, Pelo branco | Desce para o preto (ou sobe para o branco) e entra no próximo clipe |
+| Cortina ← → | Uma borda atravessa a tela e revela o próximo clipe |
+| Deslizar ← → ↑ ↓ | O próximo clipe empurra o anterior para fora do quadro |
+| Zoom | O clipe anterior se aproxima e dá lugar ao próximo |
+
+**Transição (T)**, na barra de ferramentas, põe a transição padrão do canal (definida no [canal](channels.md#defaults)) no corte mais perto do cursor e seleciona o clipe depois dele; um corte que já tem transição fica com ela. Com um clipe selecionado, a **Transição de entrada** do inspetor escolhe como a imagem entra nele: **Corte** ou uma das transições, a **Duração** (de 0,1 a 2 s) e **Usar em todos os cortes** para aplicar a mesma escolha em todos. A transição aparece em V1 como uma faixa sobre o corte; clique nela para selecionar o clipe em que ela entra.
+
+A transição fica centrada no corte: o clipe anterior continua por metade dela e o seguinte começa metade dela antes. O corte não sai do lugar, então o vídeo continua com a mesma duração e sincronizado com a narração. Onde o arquivo de um clipe não tem imagem além da borda, o quadro da borda fica parado durante essa metade. Uma transição nunca dura mais que os clipes vizinhos: ao lado de um clipe curto ela toca mais curta, e o inspetor diz por quanto tempo. O primeiro clipe abre o vídeo e não tem transição de entrada. Dividir um clipe deixa um corte simples entre as metades, e a transição acompanha o clipe quando você reordena.
+
+A prévia e o render desenham as transições do mesmo jeito.
+
 <a id="snapping"></a>
 ## Encaixar nas palavras
 
@@ -54,7 +73,7 @@ Com **Encaixar nas palavras** ligado, cortes, aparas e bordas de legenda caem en
 <a id="undo"></a>
 ## Desfazer e refazer
 
-Toda edição, inclusive de mixagem, legendas e enquadramento, se desfaz com **Ctrl+Z** e se refaz com **Ctrl+Y** (ou **Ctrl+Shift+Z**), ou pelas setas no topo. O histórico vale enquanto o editor está aberto. Se as cenas ou a narração mudarem depois que você editou, o editor avisa e o corte recomeça do corte bruto.
+Toda edição, inclusive de transições, mixagem, legendas e enquadramento, se desfaz com **Ctrl+Z** e se refaz com **Ctrl+Y** (ou **Ctrl+Shift+Z**), ou pelas setas no topo. O histórico vale enquanto o editor está aberto. Se as cenas ou a narração mudarem depois que você editou, o editor avisa e o corte recomeça do corte bruto.
 
 <a id="mix"></a>
 ## A mixagem

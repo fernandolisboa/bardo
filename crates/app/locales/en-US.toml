@@ -76,6 +76,9 @@ clip_model_default = "{model} (default)"
 clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield or Google. Any scene can pick another."
 caption_style = "Caption style"
 caption_style_hint = "How captions look in this channel's new projects. Each project can pick another in the editor."
+transition = "Default transition"
+transition_hint = "What the editor puts on a cut when you press T or pick a transition. Any cut can use another."
+transition_length = "Length"
 
 [channel.error]
 name_required = "Give the channel a name."
@@ -174,6 +177,19 @@ private = "Private"
 clean = "Clean"
 boxed = "Boxed"
 punch = "Punch"
+
+[transition]
+cut = "Cut"
+crossfade = "Crossfade"
+fade_black = "Through black"
+fade_white = "Through white"
+wipe_left = "Wipe ←"
+wipe_right = "Wipe →"
+slide_left = "Slide ←"
+slide_right = "Slide →"
+slide_up = "Slide ↑"
+slide_down = "Slide ↓"
+zoom_in = "Zoom"
 
 [aspect_ratio]
 vertical = "Vertical (9:16)"
@@ -930,6 +946,7 @@ cancel = "Cancel"
 open = "Open editor"
 back = "Projects"
 duration = "{duration} · {fps} fps"
+seconds = "{n} s"
 undo = "Undo"
 redo = "Redo"
 review_render = "Review & render"
@@ -970,7 +987,7 @@ narration = "Narration"
 audio = "Audio"
 source_in = "Source in"
 remove = "Remove from the cut"
-shortcuts = "S split · [ and ] trim to the playhead · Alt+← and Alt+→ move · Delete remove"
+shortcuts = "S split · T transition · [ and ] trim to the playhead · Alt+← and Alt+→ move · Delete remove"
 
 [editor.captions]
 text = "Text"
@@ -1007,9 +1024,18 @@ fade_in = "Fade in"
 fade_out = "Fade out"
 decibels = "{n} dB"
 lane_hint = "Level, mute and solo apply to the whole track."
+[editor.transition]
+title = "Transition in"
+length = "Length"
+everywhere = "Use on every cut"
+first = "The first clip opens the video, so it has no transition in."
+hint = "Centered on the cut: the cut and the narration stay where they are."
+short = "Plays for {length}: a clip beside it is shorter."
+
 [editor.tool]
 select = "Select (V)"
 split = "Split (S)"
+transition = "Transition (T)"
 snap_words = "Snap to words"
 ai_cuts = "AI cut suggestions"
 duck_music = "Duck music under narration"
@@ -2365,6 +2391,10 @@ body = "The cut runs left to right on five tracks: captions, video, narration, m
 title = "Cutting"
 body = "Split (S) cuts at the playhead. Drag an item's end, or press [ or ], to trim it; drag a clip between two others to reorder it; Delete removes the selection. The video track closes its gaps, while audio leaves silence."
 
+[tour.editor.transitions]
+title = "Transitions"
+body = "Transition (T) puts your channel's transition on the cut nearest the playhead: a crossfade, a pass through black or white, a wipe, a slide or a zoom. Select the clip after a cut to pick another or change its length. The cut stays put, so the narration stays in sync."
+
 [tour.editor.snap]
 title = "Snap to words"
 body = "Cuts, trims and caption edges land between the narration's words, so a cut never clips one. Hold Alt while you drag to place freely."
@@ -2447,8 +2477,8 @@ title = "Default persona"
 body = "Who narrates the channel's videos unless a project picks someone else. Personas live on their own screen, and one can narrate several channels."
 
 [tour.channels.defaults]
-title = "Video model and captions"
-body = "The model that animates the channel's scene images into clips, and the look of the captions in its new projects. Any scene can pick another model, and any project other captions."
+title = "Video model, captions and transitions"
+body = "The model that animates the channel's scene images into clips, the look of the captions in its new projects, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
 
 [tour.channels.accounts]
 title = "Network accounts"
@@ -2809,6 +2839,7 @@ play = "Play or pause"
 frame = "Step one frame back or forward"
 start_end = "Go to the start or the end"
 split = "Split at the playhead"
+transition = "Put the channel's transition on the nearest cut"
 trim = "Trim the selected clip's start or end to the playhead"
 delete = "Delete the selection"
 nudge = "Move the selected clip one place, or audio one frame"

@@ -921,9 +921,9 @@ impl Timeline {
         Ok(Edit::SetTransitions(before))
     }
 
-    /// The edit that puts `transition` on every cut between video items,
-    /// leaving the first item's as it is.
-    pub fn transition_everywhere(&self, transition: Transition) -> Edit {
+    /// The edit that puts `transition` (`None`: a plain cut) on every cut
+    /// between video items, leaving the first item's as it is.
+    pub fn transition_everywhere(&self, transition: Option<Transition>) -> Edit {
         Edit::SetTransitions(
             self.video
                 .iter()
@@ -932,7 +932,7 @@ impl Timeline {
                     if index == 0 {
                         item.transition
                     } else {
-                        Some(transition)
+                        transition
                     }
                 })
                 .collect(),
@@ -2581,8 +2581,8 @@ mod tests {
             })
             .unwrap();
         // The middle clip is 11 frames long; both transitions want 2 s.
-        let edit =
-            timeline.transition_everywhere(Transition::new(crate::TransitionKind::WipeLeft, 60));
+        let edit = timeline
+            .transition_everywhere(Some(Transition::new(crate::TransitionKind::WipeLeft, 60)));
         timeline.apply(&edit).unwrap();
         let played = timeline.transitions();
         assert_eq!(played.len(), 2);
@@ -2653,14 +2653,20 @@ mod tests {
             })
             .unwrap();
         let crossfade = Transition::default();
-        let edit = before.transition_everywhere(crossfade);
+        let edit = before.transition_everywhere(Some(crossfade));
         let after = round_trip(&before, edit);
         let set: Vec<_> = after.video().iter().map(|item| item.transition).collect();
         assert_eq!(set, [Some(fade_black(9)), Some(crossfade), Some(crossfade)]);
         assert_eq!(
-            after.clone().apply(&after.transition_everywhere(crossfade)),
+            after
+                .clone()
+                .apply(&after.transition_everywhere(Some(crossfade))),
             Err(EditError::NoChange)
         );
+        // Cuts everywhere take them off again; the first clip keeps its own.
+        let cuts = round_trip(&after, after.transition_everywhere(None));
+        let set: Vec<_> = cuts.video().iter().map(|item| item.transition).collect();
+        assert_eq!(set, [Some(fade_black(9)), None, None]);
         assert_eq!(
             after.clone().apply(&Edit::SetTransitions(vec![None])),
             Err(EditError::NoSuchItem)

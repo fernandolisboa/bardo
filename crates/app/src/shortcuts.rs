@@ -59,6 +59,7 @@ pub const SHORTCUTS: &[ShortcutGroup] = &[
             shortcut(&["←", "→"], "frame"),
             shortcut(&["Home", "End"], "start_end"),
             shortcut(&["S"], "split"),
+            shortcut(&["T"], "transition"),
             shortcut(&["[", "]"], "trim"),
             shortcut(&["Delete"], "delete"),
             shortcut(&["Alt+←", "Alt+→"], "nudge"),

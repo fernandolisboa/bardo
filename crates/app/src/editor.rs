@@ -404,10 +404,12 @@ pub enum EditAction {
         transition: Option<Transition>,
     },
     /// Puts the channel's default transition on the cut nearest the
-    /// playhead, and selects the clip it leads into.
+    /// playhead, and selects the clip it leads into. A cut that has a
+    /// transition keeps it: the clip is only selected.
     TransitionAtPlayhead,
-    /// Puts `transition` on every cut between clips.
-    TransitionEverywhere(Transition),
+    /// Puts `transition` on every cut between clips (`None` makes them
+    /// all cuts).
+    TransitionEverywhere(Option<Transition>),
     Undo,
     Redo,
 }
@@ -1611,6 +1613,15 @@ impl Bardo {
         else {
             return Err(EditorError::NothingToCut);
         };
+        // T on a cut that has a transition keeps it and shows it.
+        if let Change::Action(EditAction::TransitionAtPlayhead) = change
+            && let Some(index) = timeline
+                .cut_near(editor.playhead)
+                .filter(|&index| timeline.video()[index].transition.is_some())
+        {
+            editor.select(Some(ItemRef::video(index)));
+            return Ok(());
+        }
         let mut history = editor.history.clone();
         let made = match change {
             // Items may have moved: the selection goes, a picked lane stays.
@@ -2562,7 +2573,7 @@ mod tests {
         )
         .unwrap();
         let fade = Transition::new(TransitionKind::FadeBlack, 9);
-        app.edit(&mut editor, EditAction::TransitionEverywhere(fade))
+        app.edit(&mut editor, EditAction::TransitionEverywhere(Some(fade)))
             .unwrap();
         let set = |editor: &Editor| -> Vec<Option<Transition>> {
             editor.view().timeline.as_ref().unwrap().video()[1..]
@@ -2570,6 +2581,13 @@ mod tests {
                 .map(|clip| clip.transition)
                 .collect()
         };
+        assert!(set(&editor).iter().all(|t| *t == Some(fade)));
+        // T on a cut that has one keeps it and only selects its clip.
+        editor.select(None);
+        editor.seek(before[0]);
+        app.edit(&mut editor, EditAction::TransitionAtPlayhead)
+            .unwrap();
+        assert_eq!(editor.selection(), Some(ItemRef::video(1)));
         assert!(set(&editor).iter().all(|t| *t == Some(fade)));
         let reopened = app.open_editor(project.id).unwrap();
         assert_eq!(set(&reopened), set(&editor), "saved with the cut");

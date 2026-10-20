@@ -147,6 +147,8 @@ pub enum Control {
     EditorTracks,
     /// Editor: the Select and Split tools.
     EditorTools,
+    /// Editor: the Transition tool.
+    EditorTransitions,
     /// Editor: Snap to words.
     EditorSnap,
     /// Editor: undo and redo.
@@ -743,19 +745,21 @@ pub const TEMPLATES: Tour = {
 };
 
 /// The editor, part one: the preview and playback, the tracks, cutting,
-/// snapping and undo. Starting it pauses playback; its steps only explain,
+/// transitions, snapping and undo. Starting it pauses playback; its steps only explain,
 /// so the cut and its undo history stay as they were.
 pub const EDITOR: Tour = {
     const AT: Stage = Stage::Edit;
     const PAGE: &str = "editor";
     Tour {
         id: TourId::Editor,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "preview", control(Control::EditorPreview)).learn(PAGE, "preview"),
             at_stage(AT, "tracks", control(Control::EditorTracks)).learn(PAGE, "timeline"),
             at_stage(AT, "tools", control(Control::EditorTools)).learn(PAGE, "cuts"),
+            at_stage(AT, "transitions", control(Control::EditorTransitions))
+                .learn(PAGE, "transitions"),
             at_stage(AT, "snap", control(Control::EditorSnap)).learn(PAGE, "snapping"),
             at_stage(AT, "undo", control(Control::EditorUndo)).learn(PAGE, "undo"),
         ],

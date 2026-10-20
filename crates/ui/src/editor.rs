@@ -27,8 +27,8 @@ use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
     AspectRatio, AudioLane, CaptionStyle, CropPosition, DUCK_RANGE, Decibels, Ducking, Edge, FPS,
-    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, PictureSize, Track,
-    VideoProjectId, crop_window, frame_time, timecode,
+    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, PictureSize, Track, Transition,
+    TransitionKind, VideoProjectId, crop_window, frame_time, timecode,
 };
 use bardo_app::{
     Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, Control, EditAction, Editor, EditorView,
@@ -490,6 +490,7 @@ impl EditorScreen {
         match key {
             "space" => self.toggle_play(cx),
             "s" => self.edit(EditAction::SplitAtPlayhead { reach }, cx),
+            "t" => self.edit(EditAction::TransitionAtPlayhead, cx),
             "delete" | "backspace" => self.edit(EditAction::DeleteSelection, cx),
             "[" => self.trim_to_playhead(Edge::Start, cx),
             "]" => self.trim_to_playhead(Edge::End, cx),
@@ -1784,6 +1785,12 @@ impl EditorScreen {
                         self.editor
                             .as_ref()
                             .and_then(Editor::selected_clip)
+                            .and_then(|index| self.render_transition_controls(index, cx)),
+                    )
+                    .children(
+                        self.editor
+                            .as_ref()
+                            .and_then(Editor::selected_clip)
                             .and_then(|index| self.render_framing_controls(index, cx)),
                     )
                     .children(clip.file.clone().map(|file| {
@@ -1846,7 +1853,17 @@ impl EditorScreen {
                         TEXT_2,
                     )),
             )
-            .child(body)
+            .child(
+                // A clip's controls run past a short window.
+                div()
+                    .id("inspector-body")
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .overflow_y_scroll()
+                    .child(body),
+            )
             .into_any_element()
     }
 
@@ -2115,6 +2132,114 @@ impl EditorScreen {
                         .text_color(color(TEXT_3))
                         .child(tr(bardo, hint)),
                 )
+                .into_any_element(),
+        )
+    }
+
+    /// The transition into a selected clip from the one before: a cut or
+    /// one of the kinds, its length, and putting it on every cut. The first
+    /// clip only says why it has none.
+    fn render_transition_controls(&self, index: usize, cx: &Context<Self>) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let editor = self.editor.as_ref()?;
+        let timeline = editor.view().timeline.as_ref()?;
+        let item = timeline.video().get(index)?;
+        let hint = |text: SharedString| {
+            div()
+                .text_size(px(11.))
+                .text_color(color(TEXT_3))
+                .child(text)
+        };
+        let section = v_flex()
+            .gap_1p5()
+            .child(label(tr(bardo, Text::EditorTransition), TEXT_3));
+        if index == 0 {
+            return Some(
+                section
+                    .child(hint(tr(bardo, Text::EditorTransitionFirst)))
+                    .into_any_element(),
+            );
+        }
+        let set = item.transition;
+        let target =
+            move |transition: Option<Transition>| EditAction::SetTransition { index, transition };
+        // A kind picked on a cut takes the channel's length; on a
+        // transition, the length it has.
+        let base = set.unwrap_or(editor.view().transition);
+        let chip = |id: usize, name: SharedString, choice: Option<Transition>| {
+            let active = choice.map(|t| t.kind) == set.map(|t| t.kind);
+            tool_button(("transition", id), true, active)
+                .h(px(24.))
+                .border_1()
+                .border_color(color(OUTLINE))
+                .child(name)
+                .when(!active, |button| {
+                    button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.edit(target(choice), cx);
+                    }))
+                })
+        };
+        let chips = h_flex()
+            .flex_wrap()
+            .gap_1()
+            .child(chip(0, tr(bardo, Text::TransitionCut), None))
+            .children(
+                TransitionKind::ALL
+                    .into_iter()
+                    .enumerate()
+                    .map(|(n, kind)| {
+                        chip(
+                            n + 1,
+                            tr(bardo, Text::TransitionName(kind)),
+                            Some(base.with_kind(kind)),
+                        )
+                    }),
+            );
+        let (value, less, more) = match set {
+            Some(transition) => (
+                bardo.seconds(transition.duration()),
+                (transition.frames() > Transition::MIN_FRAMES)
+                    .then(|| target(Some(transition.stepped(false)))),
+                (transition.frames() < Transition::MAX_FRAMES)
+                    .then(|| target(Some(transition.stepped(true)))),
+            ),
+            None => ("—".to_owned(), None, None),
+        };
+        // Short clips beside it play it cut short.
+        let played = timeline
+            .transition_into(index)
+            .map_or(0, |played| played.frames());
+        let short = set
+            .filter(|transition| played < u64::from(transition.frames()))
+            .map(|_| {
+                let length = bardo.seconds(frame_time(played));
+                hint(
+                    bardo
+                        .text_with(Text::EditorTransitionShort, &[("length", &length)])
+                        .into(),
+                )
+            });
+        let everywhere = tool_button("transition-everywhere", true, false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(tr(bardo, Text::EditorTransitionEverywhere))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.edit(EditAction::TransitionEverywhere(set), cx);
+            }));
+        Some(
+            section
+                .child(chips)
+                .child(self.stepper(
+                    "transition-length",
+                    tr(bardo, Text::EditorTransitionLength),
+                    value,
+                    less,
+                    more,
+                    cx,
+                ))
+                .children(short)
+                .child(hint(tr(bardo, Text::EditorTransitionHint)))
+                .child(everywhere)
                 .into_any_element(),
         )
     }

@@ -46,6 +46,7 @@ Keys are named as they are printed on the keyboard. The Guide menu lists them to
 | ← → | One frame back or forward |
 | Home, End | Go to the start or the end |
 | S | Split at the playhead |
+| T | Put the channel's transition on the nearest cut |
 | [ ] | Trim the selected clip's start or end to the playhead |
 | Delete | Delete the selection |
 | Alt+← Alt+→ | Move the selected clip one place, or audio one frame |
