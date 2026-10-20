@@ -21,7 +21,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $paths = Get-BardoPaths
 New-Item -ItemType Directory -Force $Out | Out-Null
-$work = Join-Path $env:RUNNER_TEMP 'bardo-e2e'
+$work = Join-Path ($env:RUNNER_TEMP ?? [System.IO.Path]::GetTempPath()) 'bardo-e2e'
 New-Item -ItemType Directory -Force $work | Out-Null
 $password = 'correct horse battery staple'
 
