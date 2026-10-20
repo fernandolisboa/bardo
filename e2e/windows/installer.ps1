@@ -225,7 +225,10 @@ function Invoke-Upgrade {
     Test-AgentTask 'S1.08'
     # The upgrade ends the agent; Task Scheduler starts it again within 15
     # minutes or at the next sign-in. Running the task now stands in for
-    # that wait. An agent that finds itself off exits at once.
+    # that wait. An agent that finds itself off exits at once, and so does
+    # one started within 30 seconds of the ended agent's last sign of life
+    # (RUNNER_ALIVE), which still counts as running.
+    Start-Sleep -Seconds 35
     schtasks.exe /Run /TN $paths.TaskName | Out-Null
     Test-Check 'S1.08' 'the agent stays on and its task still works' {
         $started = Wait-Until { @(Get-BardoProcesses Agent).Count -eq 1 } 30
