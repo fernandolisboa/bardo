@@ -40,10 +40,11 @@ Each network account of the channel can still post in another language; see [met
 The [persona](personas.md) that narrates the channel's videos: its voice, tone and script style. A new project starts with it, and a project can pick another narrator. One persona can narrate several channels; **No default persona** leaves the choice to each project.
 
 <a id="defaults"></a>
-## Video model and captions
+## Video model, captions and transitions
 
 - **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield or Google. Keeping the provider's default follows it when it changes. Any scene can pick another model at the [Clips](clips.md#model) stage.
 - **Caption style**: how captions look in the channel's new projects. Each project can pick another style in the [editor](editor.md#captions).
+- **Default transition** and its **Length**: what the editor puts on a cut when you press **T** or pick a transition for a clip, a crossfade of 0.5 s unless you change it. Every cut can use another one ([Transitions](editor.md#transitions)).
 
 <a id="accounts"></a>
 ## Next: network accounts

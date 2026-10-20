@@ -46,6 +46,25 @@ The bin on the left lists the project's **Scenes** (click one to jump to its cli
 
 The video track closes its gaps: trimming or removing a clip moves the clips after it. Audio pieces move freely and stop at their neighbours, and removing one leaves silence.
 
+<a id="transitions"></a>
+## Transitions
+
+A cut goes straight from one clip to the next. A transition blends them instead, for a moment around the cut:
+
+| Transition | What it does |
+| --- | --- |
+| Crossfade | The next clip fades in over the one before |
+| Through black, Through white | Down to black (or up to white), then into the next clip |
+| Wipe ← → | An edge moving across uncovers the next clip |
+| Slide ← → ↑ ↓ | The next clip pushes the one before out of the frame |
+| Zoom | The clip before zooms in and gives way to the next |
+
+**Transition (T)** in the toolbar puts the channel's default transition (set on the [channel](channels.md#defaults)) on the cut nearest the playhead and selects the clip after it; a cut that already has a transition keeps it. With a clip selected, the inspector's **Transition in** picks how the picture comes into it: **Cut** or one of the transitions, its **Length** (0.1 to 2 s), and **Use on every cut** to put the same choice on all of them. A transition shows on V1 as a band across its cut; click it to select the clip it leads into.
+
+A transition is centered on its cut: the clip before plays on for half of it and the clip after starts half of it early. The cut does not move, so the video stays as long as it was and in sync with the narration. Where a clip's file has no picture past its edge, its edge frame holds for that half. A transition never runs longer than the clips beside it: next to a short clip it plays shorter, and the inspector says for how long. The first clip opens the video and has no transition in. Splitting a clip leaves a plain cut between the halves, and a transition moves with its clip when you reorder.
+
+The preview and the render draw transitions the same way.
+
 <a id="snapping"></a>
 ## Snapping to words
 
@@ -54,7 +73,7 @@ With **Snap to words** on, cuts, trims and caption edges land between the narrat
 <a id="undo"></a>
 ## Undo and redo
 
-Every edit, including the mix, captions and framing, can be undone with **Ctrl+Z** and redone with **Ctrl+Y** (or **Ctrl+Shift+Z**), or with the arrows at the top. The history lasts while the editor is open. If the scenes or the narration change after you edited, the editor says so and the cut starts over from the rough cut.
+Every edit, including transitions, the mix, captions and framing, can be undone with **Ctrl+Z** and redone with **Ctrl+Y** (or **Ctrl+Shift+Z**), or with the arrows at the top. The history lasts while the editor is open. If the scenes or the narration change after you edited, the editor says so and the cut starts over from the rough cut.
 
 <a id="mix"></a>
 ## The mix

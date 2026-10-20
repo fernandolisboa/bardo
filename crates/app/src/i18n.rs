@@ -14,8 +14,8 @@ use bardo_domain::{
     MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
     PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError,
     ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind,
-    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId, UiLanguage,
-    UiTheme, Visibility, VoiceCategory, VoiceFlag,
+    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId,
+    TransitionKind, UiLanguage, UiTheme, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -64,6 +64,9 @@ pub enum Text {
     ChannelClipModelHint,
     ChannelCaptionStyle,
     ChannelCaptionStyleHint,
+    ChannelTransition,
+    ChannelTransitionHint,
+    ChannelTransitionLength,
     ChannelClipModelNotOffered,
     ChannelAccountsTitle,
     ChannelAccountsHint,
@@ -127,6 +130,9 @@ pub enum Text {
     VisibilityName(Visibility),
     AspectRatioName(AspectRatio),
     CaptionStyleName(CaptionStyle),
+    TransitionName(TransitionKind),
+    /// No transition: a hard cut.
+    TransitionCut,
     NetworkAccountFieldError(NetworkAccountFieldError),
     PersonasTitle,
     PersonasHint,
@@ -704,6 +710,7 @@ pub enum Text {
     EditorNarrationLabel,
     EditorToolSelect,
     EditorToolSplit,
+    EditorToolTransition,
     EditorSnapWords,
     EditorAiCuts,
     CutsSuggest,
@@ -798,6 +805,15 @@ pub enum Text {
     EditorFades,
     EditorFadeIn,
     EditorFadeOut,
+    EditorTransition,
+    EditorTransitionLength,
+    EditorTransitionEverywhere,
+    EditorTransitionFirst,
+    EditorTransitionHint,
+    /// Placeholder: `{length}`.
+    EditorTransitionShort,
+    /// Placeholder: `{n}`.
+    EditorSeconds,
     /// Placeholder: `{n}`, signed, with the decimal separator.
     EditorDecibels,
     EditorLaneHint,
@@ -1864,6 +1880,9 @@ impl Text {
             Text::ChannelClipModelHint => "channel.clip_model_hint",
             Text::ChannelCaptionStyle => "channel.caption_style",
             Text::ChannelCaptionStyleHint => "channel.caption_style_hint",
+            Text::ChannelTransition => "channel.transition",
+            Text::ChannelTransitionHint => "channel.transition_hint",
+            Text::ChannelTransitionLength => "channel.transition_length",
             Text::ChannelClipModelNotOffered => "channel.error.clip_model_not_offered",
             Text::ChannelAccountsTitle => "network_accounts.title",
             Text::ChannelAccountsHint => "network_accounts.hint",
@@ -1935,6 +1954,19 @@ impl Text {
                 CaptionStyle::Boxed => "caption_style.boxed",
                 CaptionStyle::Punch => "caption_style.punch",
             },
+            Text::TransitionName(kind) => match kind {
+                TransitionKind::Crossfade => "transition.crossfade",
+                TransitionKind::FadeBlack => "transition.fade_black",
+                TransitionKind::FadeWhite => "transition.fade_white",
+                TransitionKind::WipeLeft => "transition.wipe_left",
+                TransitionKind::WipeRight => "transition.wipe_right",
+                TransitionKind::SlideLeft => "transition.slide_left",
+                TransitionKind::SlideRight => "transition.slide_right",
+                TransitionKind::SlideUp => "transition.slide_up",
+                TransitionKind::SlideDown => "transition.slide_down",
+                TransitionKind::ZoomIn => "transition.zoom_in",
+            },
+            Text::TransitionCut => "transition.cut",
             Text::NetworkAccountFieldError(error) => match error {
                 NetworkAccountFieldError::HandleRequired => "network_account.error.handle_required",
                 NetworkAccountFieldError::HandleTooLong => "network_account.error.handle_too_long",
@@ -2667,6 +2699,7 @@ impl Text {
             Text::EditorNarrationLabel => "editor.inspector.narration",
             Text::EditorToolSelect => "editor.tool.select",
             Text::EditorToolSplit => "editor.tool.split",
+            Text::EditorToolTransition => "editor.tool.transition",
             Text::EditorSnapWords => "editor.tool.snap_words",
             Text::EditorAiCuts => "editor.tool.ai_cuts",
             Text::CutsSuggest => "editor.cuts.suggest",
@@ -2757,6 +2790,13 @@ impl Text {
             Text::EditorFades => "editor.mix.fades",
             Text::EditorFadeIn => "editor.mix.fade_in",
             Text::EditorFadeOut => "editor.mix.fade_out",
+            Text::EditorTransition => "editor.transition.title",
+            Text::EditorTransitionLength => "editor.transition.length",
+            Text::EditorTransitionEverywhere => "editor.transition.everywhere",
+            Text::EditorTransitionFirst => "editor.transition.first",
+            Text::EditorTransitionHint => "editor.transition.hint",
+            Text::EditorTransitionShort => "editor.transition.short",
+            Text::EditorSeconds => "editor.seconds",
             Text::EditorDecibels => "editor.mix.decibels",
             Text::EditorLaneHint => "editor.mix.lane_hint",
             Text::EditorInspectorCaption => "editor.inspector.caption",
@@ -3764,6 +3804,18 @@ impl Catalog {
         self.format(Text::EditorDecibels, &[("n", &n)])
     }
 
+    /// A length to the tenth of a second: `0.5 s`, `1,2 s`.
+    pub fn seconds(&self, length: Duration) -> String {
+        let tenths = (length.as_millis() + 50) / 100;
+        let n = format!(
+            "{}{}{}",
+            tenths / 10,
+            self.get(Text::DecimalSeparator),
+            tenths % 10
+        );
+        self.format(Text::EditorSeconds, &[("n", &n)])
+    }
+
     /// A share as a percentage to the tenth: `71.6%`, `71,6%`, `100%`.
     pub fn percent(&self, share: Share) -> String {
         let tenths = (u64::from(share.ten_thousandths()) + 5) / 10;
@@ -3979,6 +4031,9 @@ mod tests {
             Text::ChannelClipModelHint,
             Text::ChannelCaptionStyle,
             Text::ChannelCaptionStyleHint,
+            Text::ChannelTransition,
+            Text::ChannelTransitionHint,
+            Text::ChannelTransitionLength,
             Text::ChannelClipModelNotOffered,
             Text::ChannelAccountsTitle,
             Text::ChannelAccountsHint,
@@ -4502,6 +4557,7 @@ mod tests {
             Text::EditorNarrationLabel,
             Text::EditorToolSelect,
             Text::EditorToolSplit,
+            Text::EditorToolTransition,
             Text::EditorSnapWords,
             Text::EditorAiCuts,
             Text::CutsSuggest,
@@ -4592,6 +4648,13 @@ mod tests {
             Text::EditorFades,
             Text::EditorFadeIn,
             Text::EditorFadeOut,
+            Text::EditorTransition,
+            Text::EditorTransitionLength,
+            Text::EditorTransitionEverywhere,
+            Text::EditorTransitionFirst,
+            Text::EditorTransitionHint,
+            Text::EditorTransitionShort,
+            Text::EditorSeconds,
             Text::EditorDecibels,
             Text::EditorLaneHint,
             Text::EditorInspectorCaption,
@@ -4690,6 +4753,8 @@ mod tests {
         texts.extend(Visibility::ALL.map(Text::VisibilityName));
         texts.extend(AspectRatio::ALL.map(Text::AspectRatioName));
         texts.extend(CaptionStyle::ALL.map(Text::CaptionStyleName));
+        texts.extend(TransitionKind::ALL.map(Text::TransitionName));
+        texts.push(Text::TransitionCut);
         texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
         for flag in [VoiceFlag::Unchecked, VoiceFlag::Unavailable] {

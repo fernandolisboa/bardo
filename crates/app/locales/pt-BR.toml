@@ -76,6 +76,9 @@ clip_model_default = "{model} (padrão)"
 clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield ou pelo Google. Qualquer cena pode escolher outro."
 caption_style = "Estilo de legenda"
 caption_style_hint = "Como as legendas aparecem nos novos projetos deste canal. Cada projeto pode escolher outro no editor."
+transition = "Transição padrão"
+transition_hint = "O que o editor põe num corte quando você aperta T ou escolhe uma transição. Qualquer corte pode usar outra."
+transition_length = "Duração"
 
 [channel.error]
 name_required = "Dê um nome ao canal."
@@ -174,6 +177,19 @@ private = "Privado"
 clean = "Limpa"
 boxed = "Tarja"
 punch = "Impacto"
+
+[transition]
+cut = "Corte"
+crossfade = "Fusão"
+fade_black = "Pelo preto"
+fade_white = "Pelo branco"
+wipe_left = "Cortina ←"
+wipe_right = "Cortina →"
+slide_left = "Deslizar ←"
+slide_right = "Deslizar →"
+slide_up = "Deslizar ↑"
+slide_down = "Deslizar ↓"
+zoom_in = "Zoom"
 
 [aspect_ratio]
 vertical = "Vertical (9:16)"
@@ -930,6 +946,7 @@ cancel = "Cancelar"
 open = "Abrir editor"
 back = "Projetos"
 duration = "{duration} · {fps} fps"
+seconds = "{n} s"
 undo = "Desfazer"
 redo = "Refazer"
 review_render = "Revisar e renderizar"
@@ -970,7 +987,7 @@ narration = "Narração"
 audio = "Áudio"
 source_in = "Início na fonte"
 remove = "Remover do corte"
-shortcuts = "S divide · [ e ] aparam até o cursor · Alt+← e Alt+→ movem · Delete remove"
+shortcuts = "S divide · T transição · [ e ] aparam até o cursor · Alt+← e Alt+→ movem · Delete remove"
 
 [editor.captions]
 text = "Texto"
@@ -1007,9 +1024,18 @@ fade_in = "Entrada gradual"
 fade_out = "Saída gradual"
 decibels = "{n} dB"
 lane_hint = "Volume, mudo e solo valem para a faixa inteira."
+[editor.transition]
+title = "Transição de entrada"
+length = "Duração"
+everywhere = "Usar em todos os cortes"
+first = "O primeiro clipe abre o vídeo, então não tem transição de entrada."
+hint = "Centrada no corte: o corte e a narração ficam onde estão."
+short = "Toca por {length}: um clipe vizinho é mais curto."
+
 [editor.tool]
 select = "Selecionar (V)"
 split = "Dividir (S)"
+transition = "Transição (T)"
 snap_words = "Encaixar nas palavras"
 ai_cuts = "Sugestões de corte da IA"
 duck_music = "Atenuar música sob a narração"
@@ -2365,6 +2391,10 @@ body = "O corte corre da esquerda para a direita em cinco faixas: legendas, víd
 title = "Cortar"
 body = "Dividir (S) corta no cursor de reprodução. Arraste a ponta de um item, ou aperte [ ou ], para apará-lo; arraste um clipe entre outros dois para reordená-lo; Delete remove a seleção. A faixa de vídeo fecha os vãos, e o áudio deixa silêncio."
 
+[tour.editor.transitions]
+title = "Transições"
+body = "Transição (T) põe a transição do seu canal no corte mais perto do cursor: uma fusão, uma passagem pelo preto ou pelo branco, uma cortina, um deslize ou um zoom. Selecione o clipe depois de um corte para escolher outra ou mudar a duração. O corte não sai do lugar, então a narração continua sincronizada."
+
 [tour.editor.snap]
 title = "Encaixar nas palavras"
 body = "Cortes, aparas e bordas de legenda caem entre as palavras da narração, então um corte nunca come uma palavra. Segure Alt enquanto arrasta para posicionar livremente."
@@ -2447,8 +2477,8 @@ title = "Persona padrão"
 body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra persona. As personas ficam numa tela própria, e uma pode narrar vários canais."
 
 [tour.channels.defaults]
-title = "Modelo de vídeo e legendas"
-body = "O modelo que anima as imagens das cenas do canal em clipes, e o visual das legendas nos projetos novos. Qualquer cena pode escolher outro modelo, e qualquer projeto outras legendas."
+title = "Modelo de vídeo, legendas e transições"
+body = "O modelo que anima as imagens das cenas do canal em clipes, o visual das legendas nos projetos novos e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
 
 [tour.channels.accounts]
 title = "Contas de rede"
@@ -2809,6 +2839,7 @@ play = "Tocar ou pausar"
 frame = "Voltar ou avançar um quadro"
 start_end = "Ir para o início ou o fim"
 split = "Dividir no cursor"
+transition = "Põe a transição do canal no corte mais próximo"
 trim = "Aparar o início ou o fim do clipe selecionado até o cursor"
 delete = "Excluir a seleção"
 nudge = "Mover o clipe selecionado uma posição, ou o áudio um quadro"

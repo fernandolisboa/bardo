@@ -1288,6 +1288,7 @@ pub(crate) mod tests {
             video: Vec::new(),
             audio: Vec::new(),
             captions: None,
+            skipped: Duration::ZERO,
         };
         assert_eq!(fingerprint(&plan), fingerprint(&plan.clone()));
         assert_eq!(fingerprint(&plan).len(), 16);
@@ -1309,6 +1310,7 @@ pub(crate) mod tests {
                 start: Duration::ZERO,
                 duration: Duration::from_secs(2),
                 framing: bardo_media::ffmpeg::Framing::Fit,
+                transition: None,
             }],
             audio: vec![bardo_media::ffmpeg::AudioTrack {
                 clips: vec![bardo_media::ffmpeg::AudioClip {
@@ -1325,6 +1327,7 @@ pub(crate) mod tests {
                 duck: None,
             }],
             captions: None,
+            skipped: Duration::ZERO,
         };
         assert_eq!(
             fingerprint(&plan("/home/a/Bardo/projects/p", "scene-1.png")),

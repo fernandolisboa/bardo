@@ -2,7 +2,8 @@
 //! back, audio tracks of clips placed on the timeline, cropped or fitted to
 //! the output frame, mixed, and normalized to a loudness target. Audio
 //! clips fade in and out, and a track can duck under a level envelope (the
-//! music under the narration). Captions are burned in over the joined
+//! music under the narration). Video clips join with a cut or a transition
+//! (`xfade`) centered on the cut. Captions are burned in over the joined
 //! picture (`captions`).
 //!
 //! The same filter graph feeds preview (raw frames on a pipe, from the
@@ -19,6 +20,7 @@ use super::frames::{FrameSize, FrameStream};
 use super::process::{self, Span};
 use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, seconds};
 use crate::PcmStream;
+use bardo_domain::TransitionKind;
 
 /// Every audio stream is mixed at this rate and layout.
 const SAMPLE_RATE: u32 = 48_000;
@@ -32,6 +34,12 @@ pub struct RenderPlan {
     pub audio: Vec<AudioTrack>,
     /// Burned in over the picture, when there are any.
     pub captions: Option<CaptionTrack>,
+    /// How much picture the video makes before the plan's start, left out
+    /// of what it shows: a plan starting inside a transition makes its
+    /// video from where the transition starts, so the transition plays on
+    /// from where it was.
+    #[serde(default, skip_serializing_if = "Duration::is_zero")]
+    pub skipped: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,6 +51,65 @@ pub struct VideoClip {
     /// this holds its last frame to the end.
     pub duration: Duration,
     pub framing: Framing,
+    /// How the picture goes into this clip from the one before; `None` for
+    /// a cut (and on the first clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Transition>,
+}
+
+/// A transition into a clip, around the cut: the clip starts `before`
+/// ahead of the cut, and the clip before it plays on `after` past the cut.
+/// Each holds its edge frame where its source has no picture there. Each
+/// part rounds to whole frames of the output rate; together they are no
+/// longer than either clip.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Transition {
+    #[serde(with = "transition_code")]
+    pub kind: TransitionKind,
+    pub before: Duration,
+    pub after: Duration,
+}
+
+impl Transition {
+    pub fn duration(&self) -> Duration {
+        self.before + self.after
+    }
+}
+
+/// A transition kind by its stored code, so a plan can be written down.
+mod transition_code {
+    use bardo_domain::TransitionKind;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        kind: &TransitionKind,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(kind.code())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<TransitionKind, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        code.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// The `xfade` transition that draws `kind`.
+fn xfade_name(kind: TransitionKind) -> &'static str {
+    match kind {
+        TransitionKind::Crossfade => "fade",
+        TransitionKind::FadeBlack => "fadeblack",
+        TransitionKind::FadeWhite => "fadewhite",
+        TransitionKind::WipeLeft => "wipeleft",
+        TransitionKind::WipeRight => "wiperight",
+        TransitionKind::SlideLeft => "slideleft",
+        TransitionKind::SlideRight => "slideright",
+        TransitionKind::SlideUp => "slideup",
+        TransitionKind::SlideDown => "slidedown",
+        TransitionKind::ZoomIn => "zoomin",
+    }
 }
 
 /// What a video clip shows.
@@ -161,27 +228,59 @@ impl Loudness {
 }
 
 impl RenderPlan {
+    /// How long the plan plays: its video, less what it skips.
     pub fn duration(&self) -> Duration {
-        self.video.iter().map(|clip| clip.duration).sum()
+        let made: Duration = self.video.iter().map(|clip| clip.duration).sum();
+        made.saturating_sub(self.skipped)
+    }
+
+    /// Where each transition plays on the plan's timeline (before
+    /// `skipped`), by the clip it leads into: from its start to its end.
+    fn transition_spans(&self) -> Vec<(usize, Duration, Duration)> {
+        let mut spans = Vec::new();
+        let mut cut = Duration::ZERO;
+        for (index, clip) in self.video.iter().enumerate() {
+            if let Some(transition) = clip.transition.filter(|_| index > 0) {
+                spans.push((
+                    index,
+                    cut.saturating_sub(transition.before),
+                    cut + transition.after,
+                ));
+            }
+            cut += clip.duration;
+        }
+        spans
     }
 
     /// The plan from `from` on, as if the timeline started there: what a
-    /// preview starting at the playhead plays.
+    /// preview starting at the playhead plays. Starting inside a
+    /// transition, the video starts where the transition does and skips
+    /// up to `from`.
     pub fn starting_at(&self, from: Duration) -> RenderPlan {
+        let made_from = self.skipped + from;
+        let video_from = self
+            .transition_spans()
+            .into_iter()
+            .find(|&(_, start, end)| start < made_from && made_from < end)
+            .map_or(made_from, |(_, start, _)| start);
         let mut video = Vec::new();
         let mut clip_start = Duration::ZERO;
         for clip in &self.video {
             let clip_end = clip_start + clip.duration;
-            if clip_end > from {
-                let skip = from.saturating_sub(clip_start);
+            if clip_end > video_from {
+                let skip = video_from.saturating_sub(clip_start);
+                // The clip before it is gone, and its transition with it.
+                let first = video.is_empty();
                 video.push(VideoClip {
                     start: clip.start + skip,
                     duration: clip.duration - skip,
+                    transition: clip.transition.filter(|_| !first),
                     ..clip.clone()
                 });
             }
             clip_start = clip_end;
         }
+        let from = made_from - self.skipped;
         let audio = self
             .audio
             .iter()
@@ -228,6 +327,7 @@ impl RenderPlan {
                 .captions
                 .as_ref()
                 .map(|captions| captions.starting_at(from)),
+            skipped: made_from - video_from,
         }
     }
 
@@ -244,6 +344,23 @@ impl RenderPlan {
         });
         if bad_crop {
             return Err(MediaError::InvalidPlan("crop window outside the picture"));
+        }
+        // A clip's own time holds the end of the transition into it and
+        // the start of the one out of it, and they must not overlap.
+        let overlapping = self.video.iter().enumerate().any(|(index, clip)| {
+            let into = clip
+                .transition
+                .filter(|_| index > 0)
+                .map_or(Duration::ZERO, |t| t.after);
+            let out = self
+                .video
+                .get(index + 1)
+                .and_then(|next| next.transition)
+                .map_or(Duration::ZERO, |t| t.before);
+            into + out > clip.duration
+        });
+        if overlapping {
+            return Err(MediaError::InvalidPlan("transitions overlap inside a clip"));
         }
         Ok(())
     }
@@ -284,9 +401,21 @@ fn frame_count(duration: Duration, (numerator, denominator): (u32, u32)) -> u64 
     ((nanos * numerator + denominator * 500_000_000) / (denominator * 1_000_000_000)) as u64
 }
 
+/// `frames` frames at `fps`, in seconds as ffmpeg reads them.
+fn frame_seconds(frames: u64, (numerator, denominator): (u32, u32)) -> String {
+    let seconds = frames as f64 * f64::from(denominator) / f64::from(numerator.max(1));
+    format!("{seconds:.6}")
+}
+
 /// Inputs and the filter graph that turns them into `[vout]`: each clip
-/// trimmed, framed and set to the output rate, then joined, with the
-/// captions (`overlay`: a filter such as `subtitles=…`) drawn over them.
+/// trimmed, framed and set to the output rate, then joined with a cut or
+/// its transition, with the captions (`overlay`: a filter such as
+/// `subtitles=…`) drawn over them.
+///
+/// A clip with a transition on either side runs longer than its place on
+/// the timeline: on into the clip after it (`after`) and from before the
+/// clip before it ends (`before`). `xfade` lays the two over each other
+/// there, so the cut stays where it was and the timeline as long.
 fn video_graph<'a>(
     plan: &'a RenderPlan,
     size: FrameSize,
@@ -299,14 +428,30 @@ fn video_graph<'a>(
     let mut inputs = Vec::new();
     let mut chains = Vec::new();
     for (index, clip) in plan.video.iter().enumerate() {
+        let into = clip.transition.filter(|_| index > 0);
+        let before = into.map_or(Duration::ZERO, |t| t.before);
+        let after = plan
+            .video
+            .get(index + 1)
+            .and_then(|next| next.transition)
+            .map_or(Duration::ZERO, |t| t.after);
+        // A source with less picture before its start than the transition
+        // needs holds its first frame for the rest.
+        let (start, held) = match clip.source {
+            ClipSource::Video(_) => (
+                clip.start.saturating_sub(before),
+                frame_count(before.saturating_sub(clip.start), fps),
+            ),
+            ClipSource::Still(_) | ClipSource::Black => (clip.start, 0),
+        };
         inputs.push(Input {
             source: match &clip.source {
                 ClipSource::Video(path) => InputSource::File(path),
                 ClipSource::Still(path) => InputSource::Still(path, fps),
                 ClipSource::Black => InputSource::Black(fps),
             },
-            start: clip.start,
-            duration: clip.duration,
+            start,
+            duration: before + clip.duration + after,
         });
         let framing = match clip.framing {
             Framing::Crop { x, y } => format!(
@@ -318,27 +463,71 @@ fn video_graph<'a>(
                  pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
             ),
         };
+        let held = if held > 0 {
+            format!("start={held}:start_mode=clone:")
+        } else {
+            String::new()
+        };
+        let frames = frame_count(clip.duration, fps).max(1)
+            + frame_count(before, fps)
+            + frame_count(after, fps);
         // A source that ends early holds its last frame (`tpad`), so every
         // clip is exactly as many frames long as asked and the clips after
         // it stay in time with the audio.
         chains.push(format!(
             "[{index}:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps={numerator}/{denominator},\
-             tpad=stop=-1:stop_mode=clone,trim=end_frame={},{framing},setsar=1,format=yuv420p[v{index}]",
-            frame_count(clip.duration, fps).max(1)
+             tpad={held}stop=-1:stop_mode=clone,trim=end_frame={frames},{framing},setsar=1,format=yuv420p[v{index}]"
         ));
     }
-    let labels: String = (0..plan.video.len())
-        .map(|index| format!("[v{index}]"))
-        .collect();
+    // Runs of clips joined by transitions, each one stream; cuts join the
+    // runs.
+    let mut runs: Vec<String> = Vec::new();
+    let mut run_frames = 0;
+    for (index, clip) in plan.video.iter().enumerate() {
+        let frames = frame_count(clip.duration, fps).max(1);
+        match clip.transition.filter(|_| index > 0) {
+            Some(transition) => {
+                let after = frame_count(transition.after, fps);
+                let length = frame_count(transition.before, fps) + after;
+                let joined = runs.pop().expect("a clip before the transition");
+                // The clip comes in `length` before the run's end.
+                chains.push(format!(
+                    "{joined}[v{index}]xfade=transition={}:duration={}:offset={}[x{index}]",
+                    xfade_name(transition.kind),
+                    frame_seconds(length, fps),
+                    frame_seconds(run_frames - length, fps),
+                ));
+                runs.push(format!("[x{index}]"));
+                run_frames = run_frames - after + frames;
+            }
+            None => {
+                runs.push(format!("[v{index}]"));
+                run_frames = frames;
+            }
+        }
+        // The run reaches on into the clip after when it has a transition.
+        run_frames += plan
+            .video
+            .get(index + 1)
+            .and_then(|next| next.transition)
+            .map_or(0, |t| frame_count(t.after, fps));
+    }
+    let skip = frame_count(plan.skipped, fps);
+    let skip = if skip > 0 {
+        format!("trim=start_frame={skip},setpts=PTS-STARTPTS,")
+    } else {
+        String::new()
+    };
     let overlay = overlay
         .map(|filter| format!("{filter},"))
         .unwrap_or_default();
-    chains.push(if plan.video.len() == 1 {
-        format!("{labels}{overlay}format={pixel_format}[vout]")
+    let labels = runs.concat();
+    chains.push(if runs.len() == 1 {
+        format!("{labels}{skip}{overlay}format={pixel_format}[vout]")
     } else {
         format!(
-            "{labels}concat=n={}:v=1:a=0,{overlay}format={pixel_format}[vout]",
-            plan.video.len()
+            "{labels}concat=n={}:v=1:a=0,{skip}{overlay}format={pixel_format}[vout]",
+            runs.len()
         )
     });
     (inputs, chains.join(";"))
@@ -722,6 +911,7 @@ mod tests {
             start: secs(start),
             duration: secs(duration),
             framing: Framing::Crop { x: 0.5, y: 0.5 },
+            transition: None,
         }
     }
 
@@ -754,6 +944,7 @@ mod tests {
                 },
             ],
             captions: None,
+            skipped: Duration::ZERO,
         }
     }
 
@@ -817,6 +1008,125 @@ mod tests {
              scale=1080:1920:flags=bicubic,setsar=1,format=yuv420p[v0];"
         ));
         assert!(graph.ends_with("[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[vout]"));
+    }
+
+    fn transition(kind: TransitionKind, before: f64, after: f64) -> Option<Transition> {
+        Some(Transition {
+            kind,
+            before: secs(before),
+            after: secs(after),
+        })
+    }
+
+    /// Three clips of 2, 3 and 2 s: a crossfade of 0.5 s into the second
+    /// and a hard cut into the third.
+    fn crossfaded() -> RenderPlan {
+        let mut plan = plan();
+        plan.video.push(video("c.mp4", 4.0, 2.0));
+        plan.video[1].transition = transition(TransitionKind::Crossfade, 0.2, 0.3);
+        plan
+    }
+
+    #[test]
+    fn a_transition_overlaps_the_clips_around_their_cut() {
+        let plan = crossfaded();
+        assert_eq!(plan.duration(), secs(7.0), "the cuts stay where they were");
+        let (inputs, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        // The first clip plays on 0.3 s past its cut; the second starts
+        // 0.2 s early, from further back in its file when it has picture
+        // there, else holding its first frame.
+        assert_eq!(
+            (inputs[0].start, inputs[0].duration),
+            (secs(1.0), secs(2.3))
+        );
+        assert_eq!(
+            (inputs[1].start, inputs[1].duration),
+            (secs(0.0), secs(3.2))
+        );
+        assert!(graph.contains("tpad=stop=-1:stop_mode=clone,trim=end_frame=69,"));
+        assert!(
+            graph.contains(
+                "tpad=start=6:start_mode=clone:stop=-1:stop_mode=clone,trim=end_frame=96,"
+            )
+        );
+        assert!(
+            graph.contains("[v0][v1]xfade=transition=fade:duration=0.500000:offset=1.800000[x1]")
+        );
+        assert!(graph.ends_with("[x1][v2]concat=n=2:v=1:a=0,format=bgra[vout]"));
+    }
+
+    #[test]
+    fn a_source_with_picture_before_its_start_plays_it_into_the_transition() {
+        let mut plan = crossfaded();
+        plan.video[2].start = secs(1.0);
+        plan.video[2].transition = transition(TransitionKind::SlideUp, 0.5, 0.5);
+        let (inputs, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert_eq!(
+            (inputs[2].start, inputs[2].duration),
+            (secs(0.5), secs(2.5))
+        );
+        assert!(graph.contains(
+            "[2:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps=30/1,tpad=stop=-1:stop_mode=clone,\
+             trim=end_frame=75,"
+        ));
+        // The third clip comes in half a second before its cut at 5 s.
+        assert!(
+            graph
+                .contains("[x1][v2]xfade=transition=slideup:duration=1.000000:offset=4.500000[x2]")
+        );
+        assert!(graph.ends_with("[x2]format=bgra[vout]"));
+    }
+
+    #[test]
+    fn starting_inside_a_transition_makes_it_from_its_start_and_skips_to_there() {
+        let plan = crossfaded();
+        // The crossfade plays 1.8-2.3 s.
+        let inside = plan.starting_at(secs(2.1));
+        assert_eq!(inside.skipped, secs(0.3));
+        assert_eq!(inside.duration(), secs(4.9));
+        assert_eq!(inside.video[0], video("a.mp4", 2.8, 0.2));
+        assert_eq!(inside.video[1].transition, plan.video[1].transition);
+        let (_, graph) = video_graph(&inside, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert!(
+            graph.contains("[v0][v1]xfade=transition=fade:duration=0.500000:offset=0.000000[x1]")
+        );
+        assert!(graph.ends_with(
+            "[x1][v2]concat=n=2:v=1:a=0,trim=start_frame=9,setpts=PTS-STARTPTS,format=bgra[vout]"
+        ));
+        // The audio and captions start at the playhead itself.
+        assert_eq!(inside.audio[0].clips[0].start, secs(1.6));
+
+        // At the transition's start it plays whole; past its end the
+        // second clip starts the plan with a cut.
+        let at_start = plan.starting_at(secs(1.8));
+        assert_eq!(at_start.skipped, Duration::ZERO);
+        assert!(at_start.video[1].transition.is_some());
+        let after = plan.starting_at(secs(2.3));
+        assert_eq!(after.skipped, Duration::ZERO);
+        assert_eq!(after.video[0].transition, None);
+        assert_eq!(after.video[0].start, secs(0.3));
+    }
+
+    #[test]
+    fn plans_without_transitions_write_down_as_before() {
+        // A render's fingerprint is its plan's JSON: renders made before
+        // transitions stay current.
+        let json = serde_json::to_value(plan()).unwrap();
+        assert!(json.get("skipped").is_none());
+        assert!(!json.to_string().contains("transition"));
+        let written = serde_json::to_string(&crossfaded()).unwrap();
+        assert!(written.contains("\"kind\":\"crossfade\""));
+        let back: RenderPlan = serde_json::from_str(&written).unwrap();
+        assert_eq!(back, crossfaded());
+    }
+
+    #[test]
+    fn transitions_that_overlap_inside_a_clip_are_refused() {
+        let mut plan = crossfaded();
+        plan.video[2].transition = transition(TransitionKind::Crossfade, 2.8, 0.2);
+        assert!(matches!(plan.check(), Err(MediaError::InvalidPlan(_))));
+        plan.video[2].transition = transition(TransitionKind::Crossfade, 2.7, 0.2);
+        assert!(plan.check().is_ok());
     }
 
     #[test]

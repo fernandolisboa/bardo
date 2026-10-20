@@ -30,8 +30,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     AspectRatio, AudioLane, CaptionStyle, Captions, DuckEnvelope, Edge, Framing, MediaAsset,
-    MediaKind, Mix, Narration, NarrationId, ProfileId, RepositoryError, SavedCaptions, Scene,
-    ScenePlan, ScenePlanId, VideoProjectId,
+    MediaKind, Mix, Narration, NarrationId, PlayedTransition, ProfileId, RepositoryError,
+    SavedCaptions, Scene, ScenePlan, ScenePlanId, Transition, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -122,6 +122,9 @@ pub struct VideoItem {
     pub duration: Duration,
     /// How its picture fills a frame of another shape.
     pub framing: Framing,
+    /// How the picture goes into it from the item before, as the user set
+    /// it; `None` for a cut. The first item has none to play.
+    pub transition: Option<Transition>,
 }
 
 impl VideoItem {
@@ -177,6 +180,7 @@ impl VideoItem {
             at: Duration::ZERO,
             duration,
             framing: Framing::default(),
+            transition: None,
         })
     }
 }
@@ -296,6 +300,7 @@ impl Timeline {
                     at,
                     duration: frame_time(end) - at,
                     framing: Framing::default(),
+                    transition: None,
                 }
             })
             .collect();
@@ -393,6 +398,7 @@ impl Timeline {
                     at: Duration::ZERO,
                     duration: item.duration,
                     framing: item.framing,
+                    transition: item.transition,
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -442,6 +448,7 @@ impl Timeline {
                     start: item.start,
                     duration: item.duration,
                     framing: item.framing,
+                    transition: item.transition,
                 })
                 .collect(),
             narration_items: self.narration.iter().map(SavedAudioItem::of).collect(),
@@ -610,6 +617,36 @@ impl Timeline {
         (index < self.video.len()).then_some(index)
     }
 
+    /// How the picture goes into video item `index` from the one before
+    /// it, as it plays: the transition set on it, cut short to fit both
+    /// items (no longer than either), centered on the cut. `None` for a
+    /// cut, for the first item, and for a transition cut shorter than
+    /// [`Transition::PLAYED_MIN_FRAMES`].
+    pub fn transition_into(&self, index: usize) -> Option<PlayedTransition> {
+        let before = self.video.get(index.checked_sub(1)?)?;
+        let item = &self.video[index];
+        let transition = item.transition?;
+        let frames = u64::from(transition.frames())
+            .min(frame_at(before.duration))
+            .min(frame_at(item.duration));
+        (frames >= u64::from(Transition::PLAYED_MIN_FRAMES))
+            .then(|| PlayedTransition::around(transition.kind, item.at, frames))
+    }
+
+    /// Every transition as it plays, with the video item it leads into, in
+    /// order.
+    pub fn transitions(&self) -> Vec<(usize, PlayedTransition)> {
+        (1..self.video.len())
+            .filter_map(|index| Some((index, self.transition_into(index)?)))
+            .collect()
+    }
+
+    /// The cut between two video items nearest `time`, by the index of the
+    /// item after it.
+    pub fn cut_near(&self, time: Duration) -> Option<usize> {
+        (1..self.video.len()).min_by_key(|&index| self.video[index].at.abs_diff(time))
+    }
+
     /// The narration item playing at `time`, if any.
     pub fn narration_at(&self, time: Duration) -> Option<usize> {
         self.narration
@@ -739,6 +776,7 @@ pub struct SavedVideoItem {
     pub start: Duration,
     pub duration: Duration,
     pub framing: Framing,
+    pub transition: Option<Transition>,
 }
 
 /// An audio item as saved.

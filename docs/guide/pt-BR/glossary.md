@@ -77,6 +77,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Sugestão de corte**: um ponto onde o motor de decisão acha que a imagem poderia cortar, com uma nota e os motivos. Nada muda até você aceitar.
 
+**Transição**: como a imagem passa de um clipe para o seguinte em volta de um corte: uma fusão, uma passagem pelo preto ou pelo branco, uma cortina, um deslize ou um zoom. Fica centrada no corte, então o corte e a narração ficam onde estão.
+
 **Mixagem**: o volume de cada trilha de áudio, com mudo e solo.
 
 **Ducking**: abaixar a música enquanto o narrador fala, na medida que você escolher.

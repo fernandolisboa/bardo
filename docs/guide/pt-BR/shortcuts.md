@@ -46,6 +46,7 @@ As teclas têm o nome que aparece impresso no teclado. O menu do Guia também li
 | ← → | Um quadro para trás ou para a frente |
 | Home, End | Vai para o início ou para o fim |
 | S | Divide no cursor |
+| T | Põe a transição do canal no corte mais próximo |
 | [ ] | Apara o início ou o fim do clipe selecionado até o cursor |
 | Delete | Apaga a seleção |
 | Alt+← Alt+→ | Move o clipe selecionado uma posição, ou o áudio um quadro |

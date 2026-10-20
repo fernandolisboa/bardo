@@ -77,6 +77,8 @@ The words Bardo uses, in plain terms.
 
 **Cut suggestion**: a place where the decision engine thinks the picture could cut, with a score and its reasons. Nothing changes until you accept one.
 
+**Transition**: how the picture goes from one clip to the next around a cut: a crossfade, a pass through black or white, a wipe, a slide or a zoom. Centered on the cut, so the cut and the narration stay where they are.
+
 **Mix**: how loud each audio track plays, with mute and solo.
 
 **Ducking**: lowering the music while the narrator speaks, by an amount you choose.

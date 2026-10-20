@@ -46,10 +46,10 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     AspectRatio, AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit,
     EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
-    MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, Picture, ProjectFiles,
-    RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
-    TimelineRepository, Track, VideoProject, VideoProjectId, VideoSource, frame_at, frame_time,
-    nearest_frame, snap,
+    MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, Picture,
+    PlayedTransition, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
+    Shift, ThemeRepository, Timeline, TimelineRepository, Track, Transition, VideoProject,
+    VideoProjectId, VideoSource, frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -244,6 +244,9 @@ pub struct ClipProblem {
 pub struct EditorView {
     pub project: VideoProject,
     pub channel_name: String,
+    /// The channel's default transition: what goes on a cut unless the
+    /// user picks another.
+    pub transition: Transition,
     /// `None` until the project has a narration and a scene plan.
     pub timeline: Option<Timeline>,
     /// What the timeline is cut on, when there is one.
@@ -395,6 +398,18 @@ pub enum EditAction {
     CutPicture {
         at: Duration,
     },
+    /// Sets the transition into video clip `index` (`None` for a cut).
+    SetTransition {
+        index: usize,
+        transition: Option<Transition>,
+    },
+    /// Puts the channel's default transition on the cut nearest the
+    /// playhead, and selects the clip it leads into. A cut that has a
+    /// transition keeps it: the clip is only selected.
+    TransitionAtPlayhead,
+    /// Puts `transition` on every cut between clips (`None` makes them
+    /// all cuts).
+    TransitionEverywhere(Option<Transition>),
     Undo,
     Redo,
 }
@@ -742,6 +757,27 @@ impl Editor {
                     None,
                 )
             }
+            EditAction::SetTransition { index, transition } => {
+                (Edit::SetTransition { index, transition }, None)
+            }
+            EditAction::TransitionAtPlayhead => {
+                let index = timeline
+                    .cut_near(self.playhead)
+                    .ok_or(EditorError::NothingToCut)?;
+                (
+                    Edit::SetTransition {
+                        index,
+                        transition: Some(self.view.transition),
+                    },
+                    Some(Some(ItemRef::video(index))),
+                )
+            }
+            EditAction::TransitionEverywhere(transition) => {
+                if timeline.video().len() < 2 {
+                    return Err(EditorError::NothingToCut);
+                }
+                (timeline.transition_everywhere(transition), None)
+            }
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
     }
@@ -1074,7 +1110,8 @@ pub(crate) fn timeline_plan(
     let mut video: Vec<VideoClip> = timeline
         .video()
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(index, item)| {
             let shown = ProxyKind::of(&item.source).and_then(|kind| {
                 let file = item.source.file()?;
                 let name = match media {
@@ -1095,6 +1132,7 @@ pub(crate) fn timeline_plan(
                 start: item.source_start(),
                 duration: item.duration,
                 framing: media_framing(item.framing_in(aspect)),
+                transition: timeline.transition_into(index).map(media_transition),
             }
         })
         .collect();
@@ -1106,6 +1144,7 @@ pub(crate) fn timeline_plan(
             start: Duration::ZERO,
             duration: end - timeline.video_end(),
             framing: ffmpeg::Framing::Fit,
+            transition: None,
         });
     }
     let mix = timeline.mix();
@@ -1158,7 +1197,17 @@ pub(crate) fn timeline_plan(
         video,
         audio,
         captions,
+        skipped: Duration::ZERO,
     })
+}
+
+/// A transition as the media engine plays it.
+fn media_transition(played: PlayedTransition) -> ffmpeg::Transition {
+    ffmpeg::Transition {
+        kind: played.kind,
+        before: played.cut - played.start,
+        after: played.end - played.cut,
+    }
 }
 
 /// The music's ducking as the media engine plays it.
@@ -1221,6 +1270,9 @@ impl Bardo {
             .as_ref()
             .map(|channel| channel.details.name().to_owned())
             .unwrap_or_default();
+        let transition = channel.as_ref().map_or(Transition::default(), |channel| {
+            channel.details.transition()
+        });
         // A new cut's captions take the channel's style.
         let caption_style = channel.as_ref().map_or(CaptionStyle::default(), |channel| {
             channel.details.caption_style()
@@ -1431,6 +1483,7 @@ impl Bardo {
         Ok(EditorView {
             suggestions,
             channel_name,
+            transition,
             stale: plan
                 .as_ref()
                 .is_some_and(|plan| plan.is_stale(narration.as_ref())),
@@ -1560,6 +1613,15 @@ impl Bardo {
         else {
             return Err(EditorError::NothingToCut);
         };
+        // T on a cut that has a transition keeps it and shows it.
+        if let Change::Action(EditAction::TransitionAtPlayhead) = change
+            && let Some(index) = timeline
+                .cut_near(editor.playhead)
+                .filter(|&index| timeline.video()[index].transition.is_some())
+        {
+            editor.select(Some(ItemRef::video(index)));
+            return Ok(());
+        }
         let mut history = editor.history.clone();
         let made = match change {
             // Items may have moved: the selection goes, a picked lane stays.
@@ -2451,6 +2513,97 @@ mod tests {
         let editor = app.open_editor(project.id).unwrap();
         assert!(editor.cut_reset());
         assert_eq!(editor.aspect(), AspectRatio::Vertical);
+    }
+
+    #[test]
+    fn transitions_play_centered_on_their_cut_and_are_kept_with_it() {
+        use bardo_domain::{ChannelDetails, ChannelDraft, TransitionKind};
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        let slide = Transition::new(TransitionKind::SlideLeft, 12);
+        channel.details = ChannelDetails::validate(ChannelDraft {
+            transition: slide,
+            ..ChannelDraft::from(&channel.details)
+        })
+        .unwrap();
+        app.channels.save(&channel).unwrap();
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        assert_eq!(editor.view().transition, slide, "the channel's default");
+        let cuts = |editor: &Editor| -> Vec<Duration> {
+            editor.view().timeline.as_ref().unwrap().video()[1..]
+                .iter()
+                .map(|clip| clip.at)
+                .collect()
+        };
+        let before = cuts(&editor);
+        let length = editor.view().duration();
+
+        // T by the second cut puts the default there and selects its clip.
+        editor.seek(before[1] + Duration::from_millis(200));
+        app.edit(&mut editor, EditAction::TransitionAtPlayhead)
+            .unwrap();
+        assert_eq!(editor.selection(), Some(ItemRef::video(2)));
+        let timeline = editor.view().timeline.clone().unwrap();
+        assert_eq!(timeline.video()[2].transition, Some(slide));
+        assert_eq!(cuts(&editor), before, "the cuts stay where they were");
+        assert_eq!(editor.view().duration(), length);
+        // Played as long as set, or as the clips beside it when shorter,
+        // half before the cut (rounded down) and the rest after it.
+        let longest = frame_at(timeline.video()[1].duration)
+            .min(frame_at(timeline.video()[2].duration))
+            .min(12);
+        let plan = editor.preview_plan().unwrap();
+        let played = plan.video[2].transition.unwrap();
+        assert_eq!(played.kind, TransitionKind::SlideLeft);
+        assert_eq!(frame_at(played.before + played.after), longest);
+        assert_eq!(frame_at(played.before), longest / 2);
+        assert_eq!(plan.video[1].transition, None);
+
+        // Picking another one for the first cut, then one for every cut.
+        let crossfade = Transition::default();
+        app.edit(
+            &mut editor,
+            EditAction::SetTransition {
+                index: 1,
+                transition: Some(crossfade),
+            },
+        )
+        .unwrap();
+        let fade = Transition::new(TransitionKind::FadeBlack, 9);
+        app.edit(&mut editor, EditAction::TransitionEverywhere(Some(fade)))
+            .unwrap();
+        let set = |editor: &Editor| -> Vec<Option<Transition>> {
+            editor.view().timeline.as_ref().unwrap().video()[1..]
+                .iter()
+                .map(|clip| clip.transition)
+                .collect()
+        };
+        assert!(set(&editor).iter().all(|t| *t == Some(fade)));
+        // T on a cut that has one keeps it and only selects its clip.
+        editor.select(None);
+        editor.seek(before[0]);
+        app.edit(&mut editor, EditAction::TransitionAtPlayhead)
+            .unwrap();
+        assert_eq!(editor.selection(), Some(ItemRef::video(1)));
+        assert!(set(&editor).iter().all(|t| *t == Some(fade)));
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(set(&reopened), set(&editor), "saved with the cut");
+
+        // Every cut at once undoes in one step.
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(set(&editor)[..2], [Some(crossfade), Some(slide)]);
+        app.edit(
+            &mut editor,
+            EditAction::SetTransition {
+                index: 1,
+                transition: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(editor.preview_plan().unwrap().video[1].transition, None);
     }
 
     #[test]

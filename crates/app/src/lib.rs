@@ -987,6 +987,11 @@ impl Bardo {
         self.catalog.decibels(level)
     }
 
+    /// A length to the tenth of a second, in the interface's language.
+    pub fn seconds(&self, length: std::time::Duration) -> String {
+        self.catalog.seconds(length)
+    }
+
     /// A 0–100 score as a fraction, e.g. `0.82`, `0,82`.
     pub fn score(&self, score: bardo_domain::Score) -> String {
         self.catalog.score(score)
