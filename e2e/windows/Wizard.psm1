@@ -16,17 +16,30 @@ function Find-WizardWindow {
     param([int]$Seconds = 60)
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
-        $windows = $script:Auto::RootElement.FindAll($script:Tree::Children,
-            [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($window in $windows) {
-            if ($window.Current.Name -like 'Setup - Bardo*' -and
-                @(Get-Descendants $window ([System.Windows.Automation.ControlType]::Button)).Count -gt 0) {
+        foreach ($window in Get-SetupWindows) {
+            if (@(Get-Descendants $window ([System.Windows.Automation.ControlType]::Button)).Count -gt 0) {
                 return $window
             }
         }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
-    throw 'the setup wizard did not show'
+    $seen = foreach ($window in Get-SetupWindows) {
+        $all = @($window.FindAll($script:Tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+        $kinds = $all | ForEach-Object { "$($_.Current.ControlType.ProgrammaticName -replace 'ControlType\.')/$($_.Current.ClassName)" }
+        "'$($window.Current.Name)' $($window.Current.ClassName) pid $($window.Current.ProcessId): $($kinds -join ' ')"
+    }
+    throw "the setup wizard did not show; windows titled Setup - Bardo: $($seen -join ' | ')"
+}
+
+# Every window titled 'Setup - Bardo …': the top-level ones UI Automation
+# lists and the main windows of running processes.
+function Get-SetupWindows {
+    $windows = @($script:Auto::RootElement.FindAll($script:Tree::Children,
+            [System.Windows.Automation.Condition]::TrueCondition) |
+            Where-Object { $_.Current.Name -like 'Setup - Bardo*' })
+    $windows += @(Get-Process | Where-Object { $_.MainWindowTitle -like 'Setup - Bardo*' } |
+            ForEach-Object { $script:Auto::FromHandle($_.MainWindowHandle) })
+    return $windows
 }
 
 function Get-Descendants {
