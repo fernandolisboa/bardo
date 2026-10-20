@@ -20,7 +20,7 @@ function Find-WizardWindow {
             [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($window in $windows) {
             if ($window.Current.Name -like 'Setup - Bardo*' -and
-                (Get-Descendants $window ([System.Windows.Automation.ControlType]::Button)).Count -gt 0) {
+                @(Get-Descendants $window ([System.Windows.Automation.ControlType]::Button)).Count -gt 0) {
                 return $window
             }
         }
