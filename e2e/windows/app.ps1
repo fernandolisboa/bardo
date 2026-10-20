@@ -20,7 +20,7 @@ Import-Module (Join-Path $PSScriptRoot 'Bardo.psm1') -Force
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $paths = Get-BardoPaths
-New-Item -ItemType Directory -Force $Out | Out-Null
+$Out = (New-Item -ItemType Directory -Force $Out).FullName
 $work = Join-Path ($env:RUNNER_TEMP ?? [System.IO.Path]::GetTempPath()) 'bardo-e2e'
 New-Item -ItemType Directory -Force $work | Out-Null
 $password = 'correct horse battery staple'

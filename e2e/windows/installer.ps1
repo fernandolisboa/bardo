@@ -27,7 +27,8 @@ Import-Module (Join-Path $PSScriptRoot 'Checks.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Bardo.psm1') -Force
 
 $paths = Get-BardoPaths
-New-Item -ItemType Directory -Force $Out | Out-Null
+# Absolute: the uninstaller runs from a copy in another folder.
+$Out = (New-Item -ItemType Directory -Force $Out).FullName
 $Setup = (Resolve-Path $Setup).Path
 $built = Get-FileSha256 $Program
 
@@ -126,7 +127,7 @@ function Invoke-Fresh {
 
     # First install, through the wizard, with the agent ticked on the
     # command line (the wizard keeps it ticked).
-    $setup = Start-Process -FilePath $Setup -ArgumentList @('/TASKS="backgroundagent"', "/LOG=`"$Out\install-wizard.log`"") -PassThru
+    $wizard = Start-Process -FilePath $Setup -ArgumentList @('/TASKS="backgroundagent"', "/LOG=`"$Out\install-wizard.log`"") -PassThru
     Import-Module (Join-Path $PSScriptRoot 'Wizard.psm1') -Force
     $window = Find-WizardWindow
     $pages = Invoke-WizardWalk $window {
@@ -148,7 +149,7 @@ function Invoke-Fresh {
     } { Get-Content -Raw -Encoding utf8 $paths.SetupChoices }
     Test-ProgramFolder 'S1.01'
     Invoke-WizardButton $window '^&?Finish'
-    [void]$setup.WaitForExit(60000)
+    [void]$wizard.WaitForExit(60000)
     Test-Check 'S1.01' "the finished page's Launch Bardo opens it" {
         Wait-Until { @(Get-BardoProcesses Window).Count -ge 1 } 30
     }
@@ -168,10 +169,11 @@ function Invoke-Fresh {
     Set-Content (Join-Path $paths.Projects 'kept.txt') 'kept'
     Stop-BardoWindow
     Test-Check 'S13.13' 'the agent still runs after the window closed' { @(Get-BardoProcesses Agent).Count -eq 1 }
+    $running = (Get-BardoProcesses Any | ForEach-Object { $_.CommandLine }) -join '; '
     $code = Uninstall-Bardo "$Out\uninstall.log"
     Test-Check 'S13.13' 'the uninstall finishes without a file in use' {
         $code -eq 0 -and -not (Select-String -Quiet -Path "$Out\uninstall.log" -Pattern 'in use|DeleteFile failed')
-    } { "exit $code" }
+    } { "exit $code; running before: $running" }
     Test-Check 'S13.13' 'the agent process is gone' { Wait-Until { @(Get-BardoProcesses Any).Count -eq 0 } 20 }
     Test-Check 'S13.13' "the agent's task is removed" { $null -eq (Get-AgentTask) }
     Test-Check 'S13.13' 'the program folder, the Start menu entry and the uninstall entry are gone' {
@@ -244,7 +246,7 @@ function Invoke-Upgrade {
 
     # This build over itself, through the wizard: an upgrade shows no
     # Import settings page and no agent question, and does not reopen Bardo.
-    $setup = Start-Process -FilePath $Setup -ArgumentList @("/LOG=`"$Out\upgrade-wizard.log`"") -PassThru
+    $wizard = Start-Process -FilePath $Setup -ArgumentList @("/LOG=`"$Out\upgrade-wizard.log`"") -PassThru
     Import-Module (Join-Path $PSScriptRoot 'Wizard.psm1') -Force
     $window = Find-WizardWindow
     $pages = Invoke-WizardWalk $window
@@ -260,7 +262,7 @@ function Invoke-Upgrade {
         @(Get-BardoProcesses Any).Count -eq 0
     }
     Invoke-WizardButton $window '^&?Finish'
-    [void]$setup.WaitForExit(60000)
+    [void]$wizard.WaitForExit(60000)
     Stop-BardoAll
 }
 
