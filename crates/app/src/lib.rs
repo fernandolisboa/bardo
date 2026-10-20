@@ -10,6 +10,7 @@ mod clips;
 mod connections;
 mod costs;
 mod cut_suggestions;
+mod decision_engines;
 mod diagnostics;
 mod editor;
 mod export;
@@ -366,8 +367,9 @@ pub struct Providers {
     pub video_stats: Arc<dyn VideoStats>,
     /// Generative text (Claude).
     pub text: Arc<dyn TextGenerator>,
-    /// Typed decisions (JEV).
-    pub decisions: Arc<dyn DecisionEngine>,
+    /// Typed decisions, one adapter per engine the user can pick in
+    /// Settings (JEV for now). Never empty.
+    pub decisions: Vec<Arc<dyn DecisionEngine>>,
     /// The user's voices (ElevenLabs).
     pub voices: Arc<dyn VoiceLibrary>,
     /// Narration and voice samples (ElevenLabs).
@@ -413,7 +415,7 @@ impl Providers {
             market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
             video_stats: Arc::new(bardo_ai::YouTubeStats::new()),
             text: Arc::new(bardo_ai::ClaudeTextGenerator::new()),
-            decisions: Arc::new(bardo_ai::JevDecisionEngine::new()),
+            decisions: vec![Arc::new(bardo_ai::JevDecisionEngine::new())],
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
             previews: Arc::new(bardo_ai::ElevenLabsPreviews::new()),
@@ -503,6 +505,7 @@ pub struct Bardo {
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
+    decision_engines: decision_engines::DecisionEngines,
     uploaders: Vec<Arc<dyn VideoUploader>>,
     /// What the network's specs (a Reel's, TikTok's) found in each
     /// render, by render and size.
@@ -647,11 +650,12 @@ impl Bardo {
             market_data: Arc::clone(&providers.market_data),
             secrets: Arc::clone(&secrets),
         };
+        let decision_engines = decision_engines::DecisionEngines::new(providers.decisions);
         let theme_handler = ThemeHandler {
             owner: profile.id,
             themes: Arc::clone(&themes),
             text: Arc::clone(&providers.text),
-            decisions: Arc::clone(&providers.decisions),
+            engines: decision_engines.clone(),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
@@ -759,7 +763,7 @@ impl Bardo {
             owner: profile.id,
             suggestions: Arc::clone(&cut_suggestions),
             narrations: Arc::clone(&narrations),
-            decisions: Arc::clone(&providers.decisions),
+            engines: decision_engines.clone(),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
@@ -861,6 +865,7 @@ impl Bardo {
             market_data: providers.market_data,
             voices: providers.voices,
             clips: providers.clips,
+            decision_engines,
             uploaders: providers.uploaders,
             spec_checks: std::sync::Mutex::default(),
             voice_list: None,
@@ -1276,6 +1281,10 @@ pub(crate) mod testing {
     }
 
     impl DecisionEngine for FakeDecisionEngine {
+        fn id(&self) -> bardo_domain::DecisionEngineId {
+            bardo_domain::DecisionEngineId::Jev
+        }
+
         fn decide(
             &self,
             _key: &ApiKey,
@@ -2122,7 +2131,7 @@ pub(crate) mod testing {
             market_data,
             video_stats: Arc::new(FakeVideoStats::default()),
             text: Arc::new(FakeTextGenerator::default()),
-            decisions: Arc::new(FakeDecisionEngine::default()),
+            decisions: vec![Arc::new(FakeDecisionEngine::default())],
             voices: Arc::new(FakeVoiceLibrary::default()),
             speech: Arc::new(FakeSpeech::default()),
             previews: Arc::new(NoPreviews),
@@ -2361,6 +2370,15 @@ mod tests {
 
         assert!(app.set_ui_layout(LayoutId::Studio).is_err());
         assert_eq!(app.ui_layout(), LayoutId::Workspace);
+    }
+
+    #[test]
+    fn a_new_profile_ranks_and_scores_with_jev() {
+        use bardo_domain::DecisionEngineId;
+
+        let app = start(&FakeProfiles::default(), None);
+        assert_eq!(app.decision_engine(), DecisionEngineId::Jev);
+        assert_eq!(app.decision_engines(), [DecisionEngineId::Jev]);
     }
 
     #[test]

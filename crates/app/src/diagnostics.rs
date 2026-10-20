@@ -382,6 +382,7 @@ impl Bardo {
             &format!("{} (setting: {})", display.theme, profile.ui_theme.code()),
         );
         line("Language", profile.ui_language.tag());
+        line("Decision engine", self.decision_engine().code());
         line(
             "Database schema",
             &bardo_storage::SCHEMA_VERSION.to_string(),
@@ -791,6 +792,7 @@ mod tests {
             "Layout: workspace".into(),
             "Theme: graphite (setting: system:paper:graphite)".into(),
             "Language: en-US".into(),
+            "Decision engine: jev".into(),
             format!("Database schema: {}", bardo_storage::SCHEMA_VERSION),
             "Background agent: off".into(),
             "- agent.log.1: none".into(),

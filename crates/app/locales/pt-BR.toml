@@ -293,6 +293,15 @@ testing = "Testando…"
 remove = "Remover"
 info = "Onde as chaves ficam"
 
+[decision_engine]
+label = "Motor de decisão"
+hint = "O motor que ranqueia as ideias de vídeo e pontua as sugestões de corte."
+caption = "Ele chama com a chave do provedor dele, salva abaixo, e os custos contam para esse provedor."
+not_saved = "Não foi possível salvar o motor de decisão. Tente de novo."
+
+[decision_engine.name]
+jev = "JEV (TypeSafe)"
+
 [provider_keys.error]
 not_set = "Salve uma chave antes de testá-la."
 store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
@@ -1072,7 +1081,7 @@ next = "Próxima (Tab)"
 undo = "Desfazer"
 accepted = "Cortado"
 confidence = "{n}% de certeza"
-missing_key = "Salve sua chave da TypeSafe em Configurações para pontuar cortes."
+missing_key.typesafe = "Salve sua chave da TypeSafe em Configurações para pontuar cortes."
 busy = "Os pontos de corte já estão sendo pontuados."
 gone = "Essa sugestão não está mais no corte."
 not_saved = "Não foi possível salvar as sugestões. Tente de novo."
@@ -2658,6 +2667,10 @@ name = "Tour de Chaves de API"
 [tour.keys.tab]
 title = "Chaves de API"
 body = "O Bardo trabalha com a sua própria conta em cada provedor de IA, uma chave por provedor. Você paga cada um diretamente, pelos preços dele."
+
+[tour.keys.engine]
+title = "Motor de decisão"
+body = "Escolha o motor que ranqueia as ideias de vídeo e pontua as sugestões de corte. Ele chama com a chave do provedor dele, desta aba: o JEV, o único motor por enquanto, usa a chave da TypeSafe."
 
 [tour.keys.card]
 title = "Uma chave por provedor"

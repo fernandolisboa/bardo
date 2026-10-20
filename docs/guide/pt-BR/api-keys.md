@@ -23,6 +23,13 @@ O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas cont
 
 Você não precisa de todas as chaves no primeiro dia. Uma tela que depende de uma chave que falta avisa. Clipes são opcionais: uma cena sem clipe fica com a imagem parada.
 
+<a id="decision-engine"></a>
+## Motor de decisão
+
+O **Motor de decisão**, no alto da aba, escolhe o motor que ranqueia as ideias de vídeo em [Temas](themes-ranking.md) e pontua as [sugestões de corte](editor.md) no editor. O motor chama com a chave do provedor dele, desta aba; a estimativa conta no orçamento desse provedor, e os custos ficam registrados nele.
+
+Por enquanto há um motor, o **JEV (TypeSafe)**, que usa a sua chave da TypeSafe. Uma nova escolha vale para o próximo ranqueamento ou pontuação; uma tarefa já na fila termina com o motor com que começou. A escolha vai num [arquivo de configurações](backup.md#settings-file) junto com as suas outras preferências.
+
 <a id="step-by-step"></a>
 ## Passo a passo de cada chave
 

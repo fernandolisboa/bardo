@@ -1,6 +1,7 @@
-//! Settings screen. The API keys tab has one card per provider to save,
-//! replace, test and remove its key; the Networks tab keeps the OAuth app
-//! credentials Bardo signs in to networks with; the Publishing tab turns the
+//! Settings screen. The API keys tab picks the decision engine and has one
+//! card per provider to save, replace, test and remove its key; the
+//! Networks tab keeps the OAuth app credentials Bardo signs in to networks
+//! with; the Publishing tab turns the
 //! background agent on and off; the Appearance tab picks the layout,
 //! the theme and the interface language; the Metrics tab picks when a
 //! start syncs public post numbers; the Backup tab backs up and restores
@@ -15,8 +16,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bardo_app::bardo_domain::{
-    AppCredentialsFieldError, KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Network, Provider,
-    ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
+    AppCredentialsFieldError, DecisionEngineId, KeyCheckOutcome, LayoutId, MetricsSyncOnStart,
+    Network, Provider, ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
 use bardo_app::{
     AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, DisplayInfo, GpuInfo,
@@ -88,6 +89,40 @@ impl SearchableListItem for SyncChoice {
 }
 
 type SyncSelect = Entity<SelectState<SearchableVec<SyncChoice>>>;
+
+/// One decision engine Settings offers.
+#[derive(Clone)]
+struct EngineChoice {
+    value: DecisionEngineId,
+    title: SharedString,
+}
+
+impl SearchableListItem for EngineChoice {
+    type Value = DecisionEngineId;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &DecisionEngineId {
+        &self.value
+    }
+}
+
+type EngineSelect = Entity<SelectState<SearchableVec<EngineChoice>>>;
+
+fn engine_choices(bardo: &Bardo) -> SearchableVec<EngineChoice> {
+    SearchableVec::new(
+        bardo
+            .decision_engines()
+            .into_iter()
+            .map(|value| EngineChoice {
+                value,
+                title: tr(bardo, Text::DecisionEngineName(value)),
+            })
+            .collect::<Vec<_>>(),
+    )
+}
 
 fn sync_choices(bardo: &Bardo) -> SearchableVec<SyncChoice> {
     SearchableVec::new(
@@ -186,6 +221,10 @@ pub struct SettingsScreen {
     metrics_sync: SyncSelect,
     /// Why the last metrics setting was not saved.
     metrics_error: Option<Text>,
+    /// Which engine ranks themes and scores cut points.
+    decision_engine: EngineSelect,
+    /// Why the last decision engine choice was not saved.
+    engine_error: Option<Text>,
     /// Why the last theme or language change was not saved.
     appearance_error: Option<Text>,
     /// Why the background agent did not turn on or off.
@@ -313,6 +352,25 @@ impl SettingsScreen {
                 }
             },
         ));
+        let decision_engine = {
+            let bardo = bardo.read(cx);
+            let choices = engine_choices(bardo);
+            let at = bardo
+                .decision_engines()
+                .iter()
+                .position(|engine| *engine == bardo.decision_engine())
+                .unwrap_or(0);
+            cx.new(|cx| SelectState::new(choices, Some(IndexPath::new(at)), window, cx))
+        };
+        subscriptions.push(cx.subscribe_in(
+            &decision_engine,
+            window,
+            |this, _, event: &SelectEvent<SearchableVec<EngineChoice>>, _, cx| {
+                if let SelectEvent::Confirm(Some(engine)) = event {
+                    this.set_decision_engine(*engine, cx);
+                }
+            },
+        ));
         let scroll = ScrollHandle::new();
         let settings_file = {
             let (bardo, scroll) = (bardo.clone(), scroll.clone());
@@ -342,6 +400,8 @@ impl SettingsScreen {
             dark_theme,
             metrics_sync,
             metrics_error: None,
+            decision_engine,
+            engine_error: None,
             appearance_error: None,
             agent_error: None,
             agent_work: None,
@@ -478,6 +538,12 @@ impl SettingsScreen {
             select.set_items(choices, window, cx);
             select.set_selected_value(&setting, window, cx);
         });
+        let bardo = self.bardo.read(cx);
+        let (choices, engine) = (engine_choices(bardo), bardo.decision_engine());
+        self.decision_engine.update(cx, |select, cx| {
+            select.set_items(choices, window, cx);
+            select.set_selected_value(&engine, window, cx);
+        });
         cx.notify();
     }
 
@@ -527,6 +593,16 @@ impl SettingsScreen {
             result
         });
         self.metrics_error = result.err().map(|_| Text::MetricsSettingNotSaved);
+        cx.notify();
+    }
+
+    fn set_decision_engine(&mut self, engine: DecisionEngineId, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.set_decision_engine(engine);
+            cx.notify();
+            result
+        });
+        self.engine_error = result.err().map(|_| Text::DecisionEngineNotSaved);
         cx.notify();
     }
 
@@ -1141,6 +1217,34 @@ impl SettingsScreen {
         let bardo = self.bardo.read(cx);
         v_flex()
             .gap_3()
+            .children(
+                self.engine_error
+                    .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
+            )
+            .child(kit::anchor_in(
+                TourAnchor::Control(Control::DecisionEngine),
+                kit::field(
+                    tr(bardo, Text::DecisionEngineLabel),
+                    Some(guide::info(
+                        bardo,
+                        "decision-engine-info",
+                        tr(bardo, Text::DecisionEngineHint),
+                        guide::refs::DECISION_ENGINE,
+                    )),
+                    div()
+                        .w(px(280.))
+                        .child(Select::new(&self.decision_engine).small())
+                        .into_any_element(),
+                    Some(
+                        div()
+                            .text_xs()
+                            .text_color(look(cx).tokens.text2)
+                            .child(tr(bardo, Text::DecisionEngineCaption))
+                            .into_any_element(),
+                    ),
+                ),
+                Some(&self.scroll),
+            ))
             .child(kit::anchor_in(
                 TourAnchor::Control(Control::KeysKept),
                 kit::section_heading(tr(bardo, Text::ProviderKeysTitle)).child(

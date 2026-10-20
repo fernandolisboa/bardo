@@ -855,7 +855,7 @@ pub(crate) mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::new(crate::testing::FakeVideoStats::default()),
                 text: Arc::clone(&self.text) as _,
-                decisions: Arc::new(FakeDecisionEngine::default()),
+                decisions: vec![Arc::new(FakeDecisionEngine::default())],
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::clone(&self.speech) as _,
                 previews: Arc::new(crate::testing::NoPreviews),

@@ -143,7 +143,7 @@ The words Bardo uses, in plain terms.
 
 **Budget**: a monthly spending limit per provider. Once reached, new jobs for that provider ask before starting.
 
-**Decision engine**: the AI that ranks and scores (ideas, cuts) with typed answers and a confidence. It never writes content.
+**Decision engine**: the AI that ranks and scores (ideas, cuts) with typed answers and a confidence. It never writes content. You pick it in [Settings › API keys](api-keys.md#decision-engine).
 
 <a id="interface"></a>
 ## The app

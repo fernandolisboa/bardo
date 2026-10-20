@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngine, Decisions, EvidenceScope, Job,
+    ApiKey, Channel, ChannelId, CostPurpose, DecisionEngineId, Decisions, EvidenceScope, Job,
     JobFailure, JobFailureKind, JobId, JobKind, Niche, NicheScores, NicheSeedError,
     PastPerformance, PerformanceEvidence, PerformanceReason, ProfileId, Progress, Provider,
     ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore, Standing,
@@ -27,6 +27,7 @@ use bardo_domain::{
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
+use crate::decision_engines::DecisionEngines;
 use crate::jobs::{JobContext, JobHandler};
 use crate::{Bardo, Catalog, KeyState, Text};
 
@@ -131,18 +132,18 @@ pub struct ThemesView {
     pub past: Option<PerformanceEvidence>,
 }
 
-/// The paid calls of a suggestion run: Claude proposes, the engine ranks.
-fn suggestion_calls() -> [PlannedCall; 2] {
+/// The paid calls of a suggestion run: Claude proposes, `engine` ranks.
+fn suggestion_calls(engine: DecisionEngineId) -> [PlannedCall; 2] {
     [
         PlannedCall::new(Provider::Claude, CostPurpose::ThemeIdeas, 1),
-        ranking_call(SUGGESTIONS_PER_RUN),
+        ranking_call(engine, SUGGESTIONS_PER_RUN),
     ]
 }
 
-/// The engine's calls to rank `themes` themes.
-fn ranking_call(themes: usize) -> PlannedCall {
+/// `engine`'s calls to rank `themes` themes.
+fn ranking_call(engine: DecisionEngineId, themes: usize) -> PlannedCall {
     PlannedCall::new(
-        Provider::TypeSafe,
+        engine.provider(),
         CostPurpose::ThemeRanking,
         themes.div_ceil(RANK_BATCH) as u64,
     )
@@ -364,6 +365,10 @@ struct ThemePayload {
     channel: String,
     niche: String,
     brief: Brief,
+    /// The decision engine picked when the job started; jobs queued before
+    /// the setting existed have none and rank with the default.
+    #[serde(default)]
+    engine: String,
 }
 
 impl ThemePayload {
@@ -621,7 +626,7 @@ pub(crate) struct ThemeHandler {
     pub(crate) owner: ProfileId,
     pub(crate) themes: Arc<dyn ThemeRepository>,
     pub(crate) text: Arc<dyn TextGenerator>,
-    pub(crate) decisions: Arc<dyn DecisionEngine>,
+    pub(crate) engines: DecisionEngines,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
 }
@@ -734,7 +739,11 @@ impl ThemeHandler {
         if pending.is_empty() {
             return Ok(());
         }
-        let key = self.key(Provider::TypeSafe)?;
+        let engine = self
+            .engines
+            .get(DecisionEngineId::from_code_or_default(&payload.engine));
+        let provider = engine.id().provider();
+        let key = self.key(provider)?;
         let state = payload.brief.state(niche.label());
         let aspects = Aspect::asked(evidence.is_some());
         let total = pending.len() as u64;
@@ -752,13 +761,12 @@ impl ThemeHandler {
                         .map_err(unexpected)?;
                 }
             }
-            let decisions = self
-                .decisions
+            let decisions = engine
                 .decide(&key, &state, &questions)
                 .map_err(|failure| provider_failure("decision engine", failure))?;
             self.costs.record(
                 PaidCall {
-                    provider: Provider::TypeSafe,
+                    provider,
                     model: &decisions.model,
                     purpose: CostPurpose::ThemeRanking,
                     usage: decisions.usage.into(),
@@ -947,6 +955,7 @@ impl Bardo {
             channel: channel.id.to_string(),
             niche: niche.label().to_owned(),
             brief: self.brief(channel, niche)?,
+            engine: self.decision_engine().code().to_owned(),
         };
         let job = Job::new(self.profile.id, kind, payload.to_json());
         Ok(self.jobs.enqueue(job)?)
@@ -966,7 +975,7 @@ impl Bardo {
             .or_else(|| niches.first().cloned());
         let job = self.latest_theme_job(channel.id);
         let projects = self.themes.projects(channel.id)?;
-        let suggest_estimate = self.estimate(&suggestion_calls())?;
+        let suggest_estimate = self.estimate(&suggestion_calls(self.decision_engine()))?;
         let Some(niche) = niche else {
             return Ok(ThemesView {
                 niches,
@@ -1025,7 +1034,7 @@ impl Bardo {
             suggest_estimate,
             rank_estimate: match waiting {
                 0 => None,
-                n => Some(self.estimate(&[ranking_call(n)])?),
+                n => Some(self.estimate(&[ranking_call(self.decision_engine(), n)])?),
             },
         })
     }
@@ -1041,7 +1050,7 @@ impl Bardo {
     }
 
     /// Starts a job in which Claude proposes ideas for the niche and the
-    /// decision engine ranks them. Past Claude's or TypeSafe's budget it
+    /// decision engine ranks them. Past Claude's or the engine's budget it
     /// needs `consent`.
     pub fn suggest_themes(
         &self,
@@ -1052,16 +1061,17 @@ impl Bardo {
         let channel = self.theme_channel(channel)?;
         let niche = Niche::new(niche).map_err(ThemeError::InvalidNiche)?;
         self.ensure_idle(channel.id)?;
+        let engine = self.decision_engine();
         self.ensure_key(Provider::Claude)?;
-        self.ensure_key(Provider::TypeSafe)?;
-        self.theme_budget(&suggestion_calls(), consent)?;
+        self.ensure_key(engine.provider())?;
+        self.theme_budget(&suggestion_calls(engine), consent)?;
         self.enqueue_theme_job(JobKind::ThemeSuggestion, &channel, &niche)
     }
 
     /// Starts a job ranking the niche's suggested themes that have no
     /// ranking (edited ones, or ones a failed job left behind) and, when
-    /// the channel has history, those ranked before it had. Past
-    /// TypeSafe's budget it needs `consent`.
+    /// the channel has history, those ranked before it had. Past the
+    /// decision engine's budget it needs `consent`.
     pub fn rank_themes(
         &self,
         channel: ChannelId,
@@ -1084,8 +1094,9 @@ impl Bardo {
         if waiting == 0 {
             return Err(ThemeError::NothingToRank);
         }
-        self.ensure_key(Provider::TypeSafe)?;
-        self.theme_budget(&[ranking_call(waiting)], consent)?;
+        let engine = self.decision_engine();
+        self.ensure_key(engine.provider())?;
+        self.theme_budget(&[ranking_call(engine, waiting)], consent)?;
         self.enqueue_theme_job(JobKind::ThemeRanking, &channel, &niche)
     }
 
@@ -1231,7 +1242,7 @@ mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::new(crate::testing::FakeVideoStats::default()),
                 text: Arc::clone(&self.text) as _,
-                decisions: Arc::clone(&self.decisions) as _,
+                decisions: vec![Arc::clone(&self.decisions) as _],
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
                 previews: Arc::new(crate::testing::NoPreviews),
@@ -1371,6 +1382,24 @@ mod tests {
                 .all(|theme| theme.status() == ThemeStatus::Suggested
                     && theme.channel == channel.id
                     && theme.suggestion_job == Some(job.id()))
+        );
+    }
+
+    #[test]
+    fn a_job_ranks_with_the_engine_picked_when_it_was_queued() {
+        let h = Harness::new();
+        let app = h.start_with_keys();
+        let channel = channel(&app, "space history");
+        let job = suggest(&app, &channel);
+        assert_eq!(ThemePayload::parse(job.payload()).unwrap().engine, "jev");
+
+        // Queued before the setting existed: no engine, so the default.
+        let mut older: serde_json::Value = serde_json::from_str(job.payload()).unwrap();
+        older.as_object_mut().unwrap().remove("engine");
+        let older = ThemePayload::parse(&older.to_string()).unwrap();
+        assert_eq!(
+            DecisionEngineId::from_code_or_default(&older.engine),
+            DecisionEngineId::Jev
         );
     }
 

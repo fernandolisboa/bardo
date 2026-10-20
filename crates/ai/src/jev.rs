@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use bardo_domain::{
-    Answer, ApiKey, ChoiceAnswer, Confidence, DecisionEngine, Decisions, Provider, ProviderFailure,
-    ProviderFailureKind, Question, Questions, ScoreAnswer, TokenUsage, YesNoAnswer,
+    Answer, ApiKey, ChoiceAnswer, Confidence, DecisionEngine, DecisionEngineId, Decisions,
+    Provider, ProviderFailure, ProviderFailureKind, Question, Questions, ScoreAnswer, TokenUsage,
+    YesNoAnswer,
 };
 use serde_json::{Map, Value, json};
 
@@ -216,6 +217,10 @@ impl<T: Transport> JevDecisionEngine<T> {
 }
 
 impl<T: Transport> DecisionEngine for JevDecisionEngine<T> {
+    fn id(&self) -> DecisionEngineId {
+        DecisionEngineId::Jev
+    }
+
     fn decide(
         &self,
         key: &ApiKey,
