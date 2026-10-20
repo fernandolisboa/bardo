@@ -113,7 +113,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - ffmpeg bundled with the app as sidecar executables (LGPL build, version and checksum pinned in `crates/media/ffmpeg.toml`), per ADR-0007.
 - i18n: pt-BR and en-US resource files; no hard-coded UI strings.
 - Dependency lint: only `ui` depends on GPUI.
-- Decision engine: one domain interface with three typed questions (choice, score, yes/no), each answer with probabilities and confidence. The MVP adapter is JEV (TypeSafe HTTP API). Right after the MVP, a spike compares Laya (open weights, run locally through ONNX, no Python) against JEV on Bardo's own tasks and in pt-BR; if Laya wins it becomes the default and decisions run offline. Laya's short context means long scripts are scored in chunks.
+- Decision engine: one domain interface with three typed questions (choice, score, yes/no), each answer with probabilities and confidence. The MVP adapter is JEV (TypeSafe HTTP API). The local-model spike once planned for right after the MVP is dropped: JEV stays the engine, picked in Settings (#164), where other adapters can be added later (#165). Long scripts are still scored in chunks that fit the engine's context.
 
 ## Reference machine
 

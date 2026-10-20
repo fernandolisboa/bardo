@@ -9,13 +9,13 @@ use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
 use bardo_domain::{
     ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionStyle, ChannelFieldError,
-    ContentLanguage, Country, DateOrder, Decibels, JobFailureKind, JobKind, JobState,
-    KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart, Money,
-    MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError,
-    PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError,
-    ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind,
-    TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId,
-    TransitionKind, UiLanguage, UiTheme, Visibility, VoiceCategory, VoiceFlag,
+    ContentLanguage, Country, DateOrder, Decibels, DecisionEngineId, JobFailureKind, JobKind,
+    JobState, KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart,
+    Money, MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError,
+    NicheSeedError, PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError,
+    SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind,
+    TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode,
+    TourId, TransitionKind, UiLanguage, UiTheme, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -741,7 +741,8 @@ pub enum Text {
     CutsReasonPause,
     CutsReasonScene,
     CutsReasonTopic,
-    CutsMissingKey,
+    /// Only TypeSafe has a message.
+    CutsMissingKey(Provider),
     CutsBusy,
     CutsGone,
     CutsNotSaved,
@@ -1307,6 +1308,11 @@ pub enum Text {
     PerformanceOwnerNotConnected,
     PerformanceOwnerReconnect,
     PerformanceTileEngaged,
+    DecisionEngineLabel,
+    DecisionEngineHint,
+    DecisionEngineCaption,
+    DecisionEngineNotSaved,
+    DecisionEngineName(DecisionEngineId),
     MetricsSettingsTab,
     MetricsSettingLabel,
     MetricsSettingHint,
@@ -2731,7 +2737,9 @@ impl Text {
             Text::CutsReasonPause => "editor.cuts.reason.pause",
             Text::CutsReasonScene => "editor.cuts.reason.scene_change",
             Text::CutsReasonTopic => "editor.cuts.reason.topic_shift",
-            Text::CutsMissingKey => "editor.cuts.missing_key",
+            Text::CutsMissingKey(provider) => {
+                return format!("editor.cuts.missing_key.{}", provider.code()).into();
+            }
             Text::CutsBusy => "editor.cuts.busy",
             Text::CutsGone => "editor.cuts.gone",
             Text::CutsNotSaved => "editor.cuts.not_saved",
@@ -3249,6 +3257,13 @@ impl Text {
             Text::PerformancePosts => "performance.posts",
             Text::PerformanceTracked => "performance.tracked",
             Text::PerformanceTile => "performance.tile",
+            Text::DecisionEngineLabel => "decision_engine.label",
+            Text::DecisionEngineHint => "decision_engine.hint",
+            Text::DecisionEngineCaption => "decision_engine.caption",
+            Text::DecisionEngineNotSaved => "decision_engine.not_saved",
+            Text::DecisionEngineName(engine) => {
+                return format!("decision_engine.name.{}", engine.code()).into();
+            }
             Text::MetricsSettingsTab => "metrics.settings.tab",
             Text::MetricsSettingLabel => "metrics.settings.label",
             Text::MetricsSettingHint => "metrics.settings.hint",
@@ -4590,7 +4605,7 @@ mod tests {
             Text::CutsReasonPause,
             Text::CutsReasonScene,
             Text::CutsReasonTopic,
-            Text::CutsMissingKey,
+            Text::CutsMissingKey(Provider::TypeSafe),
             Text::CutsBusy,
             Text::CutsGone,
             Text::CutsNotSaved,
@@ -5212,6 +5227,11 @@ mod tests {
         texts.push(Text::PerformancePosts);
         texts.push(Text::PerformanceTracked);
         texts.push(Text::PerformanceTile);
+        texts.push(Text::DecisionEngineLabel);
+        texts.push(Text::DecisionEngineHint);
+        texts.push(Text::DecisionEngineCaption);
+        texts.push(Text::DecisionEngineNotSaved);
+        texts.extend(DecisionEngineId::ALL.map(Text::DecisionEngineName));
         texts.push(Text::MetricsSettingsTab);
         texts.push(Text::MetricsSettingLabel);
         texts.push(Text::MetricsSettingHint);

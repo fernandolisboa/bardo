@@ -1043,7 +1043,7 @@ pub(crate) mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::clone(&self.stats) as _,
                 text: Arc::clone(&self.text) as _,
-                decisions: Arc::clone(&self.decisions) as _,
+                decisions: vec![Arc::clone(&self.decisions) as _],
                 voices: Arc::new(FakeVoiceLibrary::default()),
                 speech: Arc::clone(&self.speech) as _,
                 previews: Arc::new(crate::testing::NoPreviews),

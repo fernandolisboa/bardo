@@ -23,6 +23,13 @@ Bardo has no AI of its own and no account to sign up for. It works with your acc
 
 You do not need every key on day one. A screen that needs a missing key says so. Clips are optional: a scene without a clip keeps its still image.
 
+<a id="decision-engine"></a>
+## Decision engine
+
+The **Decision engine** at the top of the tab picks the engine that ranks video ideas on [Themes](themes-ranking.md) and scores [cut suggestions](editor.md) in the editor. The engine calls with its provider's key from this tab, its estimate counts against that provider's budget, and its costs are recorded under that provider.
+
+For now there is one engine, **JEV (TypeSafe)**, so it uses your TypeSafe key. A new choice applies to the next ranking or scoring; a job already queued finishes with the engine it started with. The choice travels in a [settings file](backup.md#settings-file) with your other preferences.
+
 <a id="step-by-step"></a>
 ## Step by step for each key
 

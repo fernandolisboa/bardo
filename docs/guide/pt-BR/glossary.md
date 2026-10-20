@@ -143,7 +143,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Orçamento**: um limite mensal de gasto por provedor. Quando chega nele, as tarefas novas desse provedor perguntam antes de começar.
 
-**Motor de decisão**: a IA que ranqueia e dá notas (ideias, cortes) com respostas tipadas e uma confiança. Nunca escreve conteúdo.
+**Motor de decisão**: a IA que ranqueia e dá notas (ideias, cortes) com respostas tipadas e uma confiança. Nunca escreve conteúdo. Você o escolhe em [Configurações › Chaves de API](api-keys.md#decision-engine).
 
 <a id="interface"></a>
 ## O app

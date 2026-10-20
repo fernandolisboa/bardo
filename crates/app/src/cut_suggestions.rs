@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     ApiKey, ChunkLimits, Confidence, CostPurpose, CutCandidate, CutChunk, CutPlace, CutReasons,
     CutRules, CutSuggestion, CutSuggestionRepository, CutSuggestions, DEFAULT_CUT_FLOOR,
-    DecisionEngine, Decisions, Job, JobFailure, JobFailureKind, JobId, JobKind, Narration,
+    DecisionEngineId, Decisions, Job, JobFailure, JobFailureKind, JobId, JobKind, Narration,
     NarrationId, NarrationRepository, ProfileId, Progress, Provider, Question, Questions,
     RepositoryError, STRONG_CUT, ScenePlan, Score, SecretStore, SuggestionStatus, Timeline,
     UserProfile, VideoProjectId, cut_candidates, cut_chunks, cut_marker, open_candidates,
@@ -31,6 +31,7 @@ use bardo_domain::{
 use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
+use crate::decision_engines::DecisionEngines;
 use crate::editor::{EditAction, Editor, EditorError};
 use crate::export::unix_millis;
 use crate::jobs::{JobContext, JobHandler};
@@ -58,8 +59,9 @@ pub enum CutSuggestionError {
     /// close to one.
     #[error("no point to suggest")]
     NoCandidates,
-    #[error("no TypeSafe key saved")]
-    MissingKey,
+    /// The decision engine's provider has no key saved.
+    #[error("no {0} key saved")]
+    MissingKey(Provider),
     /// The project's cut points are being scored.
     #[error("cut points are already being scored")]
     Busy,
@@ -82,7 +84,7 @@ impl CutSuggestionError {
         match self {
             CutSuggestionError::NothingToCut => Text::EditorNothingToCut,
             CutSuggestionError::NoCandidates => Text::CutsNoPoints,
-            CutSuggestionError::MissingKey => Text::CutsMissingKey,
+            CutSuggestionError::MissingKey(provider) => Text::CutsMissingKey(*provider),
             CutSuggestionError::Busy => Text::CutsBusy,
             CutSuggestionError::OverBudget(_) => Text::BudgetReachedTitle,
             CutSuggestionError::NoSuchSuggestion => Text::CutsGone,
@@ -228,6 +230,10 @@ struct CutPayload {
     /// after it (by a newer job) are not replaced when this one is retried.
     queued_at: u64,
     points: Vec<Point>,
+    /// The decision engine picked when the job was queued; jobs queued
+    /// before the setting existed have none and score with the default.
+    #[serde(default)]
+    engine: String,
 }
 
 impl CutPayload {
@@ -373,17 +379,22 @@ pub(crate) struct CutSuggestionHandler {
     pub(crate) owner: ProfileId,
     pub(crate) suggestions: Arc<dyn CutSuggestionRepository>,
     pub(crate) narrations: Arc<dyn NarrationRepository>,
-    pub(crate) decisions: Arc<dyn DecisionEngine>,
+    pub(crate) engines: DecisionEngines,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
 }
 
 impl CutSuggestionHandler {
-    fn key(&self) -> Result<ApiKey, JobFailure> {
+    fn key(&self, provider: Provider) -> Result<ApiKey, JobFailure> {
         self.secrets
-            .get(self.owner, Provider::TypeSafe)
+            .get(self.owner, provider)
             .map_err(|e| JobFailure::unexpected(format!("could not read the key: {e}")))?
-            .ok_or_else(|| JobFailure::new(JobFailureKind::MissingKey, "no TypeSafe key is saved"))
+            .ok_or_else(|| {
+                JobFailure::new(
+                    JobFailureKind::MissingKey,
+                    format!("no {provider} key is saved"),
+                )
+            })
     }
 }
 
@@ -437,7 +448,11 @@ impl JobHandler for CutSuggestionHandler {
         let total = chunks.len().max(1) as u64;
 
         if checkpoint.chunks < chunks.len() {
-            let key = self.key()?;
+            let engine = self
+                .engines
+                .get(DecisionEngineId::from_code_or_default(&payload.engine));
+            let provider = engine.id().provider();
+            let key = self.key(provider)?;
             for chunk in &chunks[checkpoint.chunks..] {
                 if cx.should_stop() {
                     return Ok(());
@@ -446,8 +461,7 @@ impl JobHandler for CutSuggestionHandler {
                 for &point in &chunk.cuts {
                     questions = point_questions(questions, point, &candidates[point])?;
                 }
-                let decisions = self
-                    .decisions
+                let decisions = engine
                     .decide(&key, &chunk_state(chunk), &questions)
                     .map_err(|failure| {
                         JobFailure::new(
@@ -457,7 +471,7 @@ impl JobHandler for CutSuggestionHandler {
                     })?;
                 self.costs.record_for_project(
                     PaidCall {
-                        provider: Provider::TypeSafe,
+                        provider,
                         model: &decisions.model,
                         purpose: CostPurpose::CutSuggestions,
                         usage: decisions.usage.into(),
@@ -515,10 +529,10 @@ impl JobHandler for CutSuggestionHandler {
     }
 }
 
-/// The engine calls that score `chunks` chunks.
-fn scoring_call(chunks: usize) -> PlannedCall {
+/// `engine`'s calls that score `chunks` chunks.
+fn scoring_call(engine: DecisionEngineId, chunks: usize) -> PlannedCall {
     PlannedCall::new(
-        Provider::TypeSafe,
+        engine.provider(),
         CostPurpose::CutSuggestions,
         chunks as u64,
     )
@@ -620,14 +634,14 @@ impl Bardo {
         view.open_points = points.len();
         if !points.is_empty() {
             let chunks = cut_chunks(narration, &points, &CHUNK_LIMITS).len();
-            view.estimate = Some(self.estimate(&[scoring_call(chunks)])?);
+            view.estimate = Some(self.estimate(&[scoring_call(self.decision_engine(), chunks)])?);
         }
         Ok(view)
     }
 
     /// Starts scoring the points the editor's cut lacks. The new
     /// suggestions replace the project's earlier ones, rejected ones
-    /// included. Past TypeSafe's budget it needs `consent`.
+    /// included. Past the decision engine's budget it needs `consent`.
     pub fn suggest_cuts(
         &self,
         editor: &mut Editor,
@@ -647,8 +661,9 @@ impl Bardo {
         if self.cut_jobs(project).any(|job| job.state().is_active()) {
             return Err(CutSuggestionError::Busy);
         }
-        if self.provider_key(Provider::TypeSafe).state == KeyState::NotSet {
-            return Err(CutSuggestionError::MissingKey);
+        let engine = self.decision_engine();
+        if self.provider_key(engine.provider()).state == KeyState::NotSet {
+            return Err(CutSuggestionError::MissingKey(engine.provider()));
         }
         let plan = self.scene_plans.scene_plan(project)?;
         let points = open_points(&timeline, &narration, plan.as_ref());
@@ -656,7 +671,7 @@ impl Bardo {
             return Err(CutSuggestionError::NoCandidates);
         }
         let chunks = cut_chunks(&narration, &points, &CHUNK_LIMITS).len();
-        if let Err(estimate) = self.check_budget(&[scoring_call(chunks)], consent)? {
+        if let Err(estimate) = self.check_budget(&[scoring_call(engine, chunks)], consent)? {
             return Err(CutSuggestionError::OverBudget(estimate));
         }
         let payload = CutPayload {
@@ -664,6 +679,7 @@ impl Bardo {
             narration: narration.id.to_string(),
             queued_at: unix_millis(SystemTime::now()),
             points: points.iter().map(Point::of).collect(),
+            engine: engine.code().to_owned(),
         };
         let job = self.jobs.enqueue(Job::new(
             self.profile.id,
@@ -818,6 +834,25 @@ mod tests {
     fn states(editor: &Editor) -> Vec<SuggestionState> {
         let items = &editor.view().suggestions.items;
         items.iter().map(|item| item.state).collect()
+    }
+
+    #[test]
+    fn a_job_scores_with_the_engine_picked_when_it_was_queued() {
+        let h = Harness::new();
+        let (app, project) = drawn(&h);
+        let mut editor = app.open_editor(project.id).unwrap();
+        let id = app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap();
+        let job = done(&app, id);
+        assert_eq!(CutPayload::parse(job.payload()).unwrap().engine, "jev");
+
+        // Queued before the setting existed: no engine, so the default.
+        let mut older: serde_json::Value = serde_json::from_str(job.payload()).unwrap();
+        older.as_object_mut().unwrap().remove("engine");
+        let older = CutPayload::parse(&older.to_string()).unwrap();
+        assert_eq!(
+            DecisionEngineId::from_code_or_default(&older.engine),
+            DecisionEngineId::Jev
+        );
     }
 
     #[test]
@@ -1177,7 +1212,7 @@ mod tests {
         let mut editor = app.open_editor(project.id).unwrap();
         assert!(matches!(
             app.suggest_cuts(&mut editor, BudgetConsent::Ask),
-            Err(CutSuggestionError::MissingKey)
+            Err(CutSuggestionError::MissingKey(Provider::TypeSafe))
         ));
         assert_eq!(
             editor.view().suggestions.open_points,

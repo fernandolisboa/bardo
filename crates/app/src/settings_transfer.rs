@@ -23,9 +23,9 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, AppCredentials, Budget, ChannelDraft, ClipModelRef, ConnectedIdentity,
-    ConnectionStatus, LayoutId, Meter, MetricsSyncOnStart, Money, Network, NetworkAccount,
-    NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate, Resolution, Score, TokenSet,
-    Transition, UiLanguage, UiThemePreference, VoiceFlag,
+    ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart, Money, Network,
+    NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate, Resolution,
+    Score, TokenSet, Transition, UiLanguage, UiThemePreference, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -362,6 +362,8 @@ struct PreferencesEntry {
     auto_backup: Option<bool>,
     #[serde(default)]
     update_check: Option<bool>,
+    #[serde(default)]
+    decision_engine: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -770,6 +772,7 @@ impl Bardo {
                 screen_tours: Some(profile.offer_screen_tours),
                 auto_backup: Some(profile.auto_backup),
                 update_check: Some(profile.update_check),
+                decision_engine: Some(profile.decision_engine.code().to_owned()),
             });
         }
         if has(SettingsItem::Costs) {
@@ -1143,6 +1146,15 @@ impl Bardo {
         if let Some(on) = entry.update_check {
             self.set_update_check(on).map_err(failed)?;
         }
+        // An engine this copy does not offer keeps the current one.
+        if let Some(engine) = entry
+            .decision_engine
+            .as_deref()
+            .and_then(|code| code.parse::<DecisionEngineId>().ok())
+            .filter(|engine| self.decision_engines().contains(engine))
+        {
+            self.set_decision_engine(engine).map_err(failed)?;
+        }
         Ok(())
     }
 
@@ -1494,6 +1506,8 @@ mod tests {
         let mut other = target.start();
         let file = open(&other, &path);
         assert_eq!(file.info.bardo_version, env!("CARGO_PKG_VERSION"));
+        let preferences = file.contents.preferences.as_ref().unwrap();
+        assert_eq!(preferences.decision_engine.as_deref(), Some("jev"));
         let choices = other.settings_to_import(&file);
         let channel = choices
             .iter()
@@ -1708,6 +1722,22 @@ mod tests {
                 .iter()
                 .any(|channel| channel.details.same_name("Do Futuro"))
         );
+    }
+
+    #[test]
+    fn a_decision_engine_this_copy_lacks_keeps_its_own() {
+        let json = serde_json::json!({
+            "preferences": {"layout": "studio", "decision_engine": "retired"},
+        });
+        let bytes = seal_cheaply(json.to_string().as_bytes(), &password());
+        let h = Harness::new();
+        let mut app = h.start();
+        let file = open_bytes(&bytes, &password(), PathBuf::from("x")).unwrap();
+        let choices = app.settings_to_import(&file);
+        let outcome = app.import_settings(&file, &items(&choices));
+        assert!(outcome.failed.is_empty(), "{:?}", outcome.failed);
+        assert_eq!(app.ui_layout(), LayoutId::Studio);
+        assert_eq!(app.decision_engine(), DecisionEngineId::Jev);
     }
 
     #[test]

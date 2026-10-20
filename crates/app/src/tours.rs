@@ -240,6 +240,8 @@ pub enum Control {
     JobCancel,
     /// Jobs: the first Retry.
     JobRetry,
+    /// Settings › API keys: which decision engine ranks and scores.
+    DecisionEngine,
     /// Settings › API keys: where the keys are kept.
     KeysKept,
     /// Settings › API keys: the first provider's card.
@@ -1049,19 +1051,23 @@ pub const JOBS: Tour = {
 };
 
 /// Settings › API keys: one key per provider, testing it, where it is
-/// kept, and what of it shows.
+/// kept, what of it shows, and which decision engine uses its key.
 pub const KEYS: Tour = {
     const AT: TourPlace = TourPlace::Settings(SettingsTab::Keys);
     const PAGE: &str = "api-keys";
     const CARD: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::KeyCard));
     Tour {
         id: TourId::Keys,
-        version: 2,
+        version: 3,
         place: Some(AT),
         steps: &[
             TourStep::at("tab", TourAnchor::Toolbar)
                 .on(AT)
                 .learn(PAGE, "providers"),
+            TourStep::at("engine", control(Control::DecisionEngine))
+                .on(AT)
+                .missing(WhenMissing::LightPart(TourAnchor::Content))
+                .learn(PAGE, "decision-engine"),
             TourStep::at("card", control(Control::KeyCard))
                 .on(AT)
                 .missing(WhenMissing::LightPart(TourAnchor::Content))

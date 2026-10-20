@@ -214,7 +214,7 @@ mod tests {
                 market_data: Arc::new(FakeMarketData::default()),
                 video_stats: Arc::new(crate::testing::FakeVideoStats::default()),
                 text: Arc::new(crate::testing::FakeTextGenerator::default()),
-                decisions: Arc::new(FakeDecisionEngine::default()),
+                decisions: vec![Arc::new(FakeDecisionEngine::default())],
                 voices: Arc::new(crate::testing::FakeVoiceLibrary::default()),
                 speech: Arc::new(crate::testing::FakeSpeech::default()),
                 previews: Arc::new(crate::testing::NoPreviews),

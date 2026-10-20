@@ -5,8 +5,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    DEFAULT_CUT_FLOOR, LayoutId, MetricsSyncOnStart, PrivacyConsent, RepositoryError, Score,
-    UiThemePreference,
+    DEFAULT_CUT_FLOOR, DecisionEngineId, LayoutId, MetricsSyncOnStart, PrivacyConsent,
+    RepositoryError, Score, UiThemePreference,
 };
 
 /// Identifies a user profile. Every entity carries the owning profile so more
@@ -95,6 +95,8 @@ pub struct UserProfile {
     /// The score a cut suggestion needs to show unless the user asks for
     /// all of them.
     pub cut_suggestion_floor: Score,
+    /// Which engine ranks themes and scores cut points.
+    pub decision_engine: DecisionEngineId,
     /// Whether a screen's "Tour this screen" button is marked new until its
     /// tour is completed or dismissed.
     pub offer_screen_tours: bool,
@@ -121,6 +123,7 @@ impl UserProfile {
             ui_layout: LayoutId::default(),
             metrics_sync: MetricsSyncOnStart::default(),
             cut_suggestion_floor: DEFAULT_CUT_FLOOR,
+            decision_engine: DecisionEngineId::default(),
             offer_screen_tours: true,
             background_agent: false,
             auto_backup: true,

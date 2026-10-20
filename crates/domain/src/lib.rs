@@ -135,8 +135,8 @@ pub use cut_suggestion::{
     cut_candidates, cut_chunks, cut_marker, open_candidates, place_cut,
 };
 pub use decision::{
-    Answer, ChoiceAnswer, Confidence, DecisionEngine, Decisions, InvalidQuestion, Question,
-    Questions, ScoreAnswer, YesNoAnswer,
+    Answer, ChoiceAnswer, Confidence, DecisionEngine, DecisionEngineId, Decisions, InvalidQuestion,
+    Question, Questions, ScoreAnswer, UnknownDecisionEngine, YesNoAnswer,
 };
 pub use due::{DUE_GRACE, DueStep, PREPARE_AHEAD, UNPUBLISHED_LIFETIME, due_step, prepare_at};
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};

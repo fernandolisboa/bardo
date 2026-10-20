@@ -3,13 +3,72 @@
 //! gates; it never writes content (ADR-0001).
 //!
 //! Three question kinds exist: choice (one option from a set), score (a
-//! level on an ordered scale) and yes/no. Nothing here names a provider;
-//! adapters translate questions and answers to their own protocol.
+//! level on an ordered scale) and yes/no. Questions and answers name no
+//! provider; adapters translate them to their own protocol. Which engine
+//! answers is the user's choice (`DecisionEngineId`), and the engine names
+//! the provider whose key and costs it uses.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::{ApiKey, ProviderFailure};
+use crate::{ApiKey, Provider, ProviderFailure};
+
+/// An engine the user can pick in Settings to answer the typed questions
+/// behind theme ranking and cut suggestions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum DecisionEngineId {
+    /// JEV, TypeSafe's System One model.
+    #[default]
+    Jev,
+}
+
+impl DecisionEngineId {
+    pub const ALL: [DecisionEngineId; 1] = [DecisionEngineId::Jev];
+
+    /// Stable code, used in storage and settings files. Never change one.
+    pub fn code(self) -> &'static str {
+        match self {
+            DecisionEngineId::Jev => "jev",
+        }
+    }
+
+    /// Whose key it calls with, whose budget it counts against and under
+    /// whom its costs are recorded.
+    pub fn provider(self) -> Provider {
+        match self {
+            DecisionEngineId::Jev => Provider::TypeSafe,
+        }
+    }
+
+    /// Reads the stored form; an engine this version does not know (one
+    /// removed later, a hand-edited value) gives the default.
+    pub fn from_code_or_default(code: &str) -> Self {
+        code.parse().unwrap_or_default()
+    }
+}
+
+impl fmt::Display for DecisionEngineId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown decision engine: {0}")]
+pub struct UnknownDecisionEngine(pub String);
+
+impl FromStr for DecisionEngineId {
+    type Err = UnknownDecisionEngine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        DecisionEngineId::ALL
+            .into_iter()
+            .find(|engine| engine.code() == s)
+            .ok_or_else(|| UnknownDecisionEngine(s.to_owned()))
+    }
+}
 
 /// How sure the engine is of an answer, from 0 (a coin toss) to 1 (no
 /// doubt). Derived from how concentrated the answer's probabilities are, so
@@ -246,6 +305,9 @@ impl Decisions {
 /// Calls the network and blocks, so it runs inside a job. An adapter
 /// returns an answer of the asked kind for every question, or fails.
 pub trait DecisionEngine: Send + Sync {
+    /// Which engine it is, so the one the user picked can be found.
+    fn id(&self) -> DecisionEngineId;
+
     fn decide(
         &self,
         key: &ApiKey,
@@ -255,6 +317,10 @@ pub trait DecisionEngine: Send + Sync {
 }
 
 impl<T: DecisionEngine + ?Sized> DecisionEngine for Arc<T> {
+    fn id(&self) -> DecisionEngineId {
+        (**self).id()
+    }
+
     fn decide(
         &self,
         key: &ApiKey,
@@ -282,6 +348,29 @@ mod tests {
             instructions: "Which one?".into(),
             options: options.iter().map(|o| ((*o).to_owned(), None)).collect(),
         }
+    }
+
+    #[test]
+    fn engine_codes_round_trip() {
+        for engine in DecisionEngineId::ALL {
+            assert_eq!(engine.code().parse::<DecisionEngineId>(), Ok(engine));
+        }
+        assert_eq!(DecisionEngineId::Jev.code(), "jev");
+    }
+
+    #[test]
+    fn jev_is_the_default_and_uses_the_typesafe_key() {
+        assert_eq!(DecisionEngineId::default(), DecisionEngineId::Jev);
+        assert_eq!(DecisionEngineId::Jev.provider(), Provider::TypeSafe);
+    }
+
+    #[test]
+    fn an_unknown_stored_engine_reads_as_the_default() {
+        assert_eq!(
+            DecisionEngineId::from_code_or_default("retired"),
+            DecisionEngineId::Jev
+        );
+        assert!("".parse::<DecisionEngineId>().is_err());
     }
 
     #[test]

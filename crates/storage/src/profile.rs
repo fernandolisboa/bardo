@@ -1,6 +1,6 @@
 use bardo_domain::{
-    LayoutId, MetricsSyncOnStart, PrivacyConsent, ProfileId, ProfileRepository, RepositoryError,
-    Score, UiLanguage, UiThemePreference, UserProfile,
+    DecisionEngineId, LayoutId, MetricsSyncOnStart, PrivacyConsent, ProfileId, ProfileRepository,
+    RepositoryError, Score, UiLanguage, UiThemePreference, UserProfile,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -14,7 +14,7 @@ impl ProfileRepository for Database {
             .query_row(
                 "SELECT id, ui_language, ui_theme, ui_layout, metrics_sync, cut_suggestion_floor,
                         offer_screen_tours, background_agent, auto_backup, update_check,
-                        privacy_version, privacy_accepted_at
+                        privacy_version, privacy_accepted_at, decision_engine
                  FROM user_profile
                  ORDER BY created_at, rowid LIMIT 1",
                 [],
@@ -32,6 +32,7 @@ impl ProfileRepository for Database {
                         row.get::<_, bool>(9)?,
                         row.get::<_, Option<i64>>(10)?,
                         row.get::<_, Option<i64>>(11)?,
+                        row.get::<_, String>(12)?,
                     ))
                 },
             )
@@ -51,6 +52,7 @@ impl ProfileRepository for Database {
             update_check,
             privacy_version,
             privacy_accepted_at,
+            decision_engine,
         )) = row
         else {
             return Ok(None);
@@ -62,6 +64,7 @@ impl ProfileRepository for Database {
             ui_layout: LayoutId::from_code_or_default(&ui_layout),
             metrics_sync: MetricsSyncOnStart::from_code_or_default(&metrics_sync),
             cut_suggestion_floor: Score::new(u8::try_from(cut_floor).map_err(boxed)?),
+            decision_engine: DecisionEngineId::from_code_or_default(&decision_engine),
             offer_screen_tours: screen_tours,
             background_agent,
             auto_backup,
@@ -82,8 +85,9 @@ impl ProfileRepository for Database {
                 "INSERT INTO user_profile (id, ui_language, ui_theme, ui_layout, metrics_sync,
                                            cut_suggestion_floor, offer_screen_tours,
                                            background_agent, auto_backup, update_check,
-                                           privacy_version, privacy_accepted_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                                           privacy_version, privacy_accepted_at,
+                                           decision_engine)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                  ON CONFLICT (id) DO UPDATE SET
                      ui_language = excluded.ui_language,
                      ui_theme = excluded.ui_theme,
@@ -95,7 +99,8 @@ impl ProfileRepository for Database {
                      auto_backup = excluded.auto_backup,
                      update_check = excluded.update_check,
                      privacy_version = excluded.privacy_version,
-                     privacy_accepted_at = excluded.privacy_accepted_at",
+                     privacy_accepted_at = excluded.privacy_accepted_at,
+                     decision_engine = excluded.decision_engine",
                 params![
                     profile.id.to_string(),
                     profile.ui_language.tag(),
@@ -111,6 +116,7 @@ impl ProfileRepository for Database {
                     profile
                         .privacy
                         .map(|consent| to_unix_millis(consent.accepted_at)),
+                    profile.decision_engine.code(),
                 ],
             )
             .map_err(boxed)?;
@@ -263,6 +269,26 @@ mod tests {
         assert_eq!(
             db.load_default().unwrap().unwrap().ui_layout,
             LayoutId::Workspace
+        );
+    }
+
+    #[test]
+    fn decision_engine_is_saved_and_unknown_values_read_as_jev() {
+        let db = Database::open_in_memory().unwrap();
+        let profile = UserProfile::new(UiLanguage::EnUs);
+        db.save(&profile).unwrap();
+        assert_eq!(
+            db.load_default().unwrap().unwrap().decision_engine,
+            DecisionEngineId::Jev
+        );
+        assert_eq!(db.load_default().unwrap(), Some(profile));
+
+        db.conn()
+            .execute("UPDATE user_profile SET decision_engine = 'retired'", [])
+            .unwrap();
+        assert_eq!(
+            db.load_default().unwrap().unwrap().decision_engine,
+            DecisionEngineId::Jev
         );
     }
 

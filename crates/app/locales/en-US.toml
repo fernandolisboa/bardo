@@ -293,6 +293,15 @@ testing = "Testing…"
 remove = "Remove"
 info = "Where keys are kept"
 
+[decision_engine]
+label = "Decision engine"
+hint = "The engine that ranks video ideas and scores cut suggestions."
+caption = "It calls with its provider's key, saved below, and its costs count under that provider."
+not_saved = "Couldn't save the decision engine. Try again."
+
+[decision_engine.name]
+jev = "JEV (TypeSafe)"
+
 [provider_keys.error]
 not_set = "Save a key before testing it."
 store_failed = "Could not reach Windows Credential Manager. Try again."
@@ -1072,7 +1081,7 @@ next = "Next (Tab)"
 undo = "Undo"
 accepted = "Cut"
 confidence = "{n}% sure"
-missing_key = "Save your TypeSafe key under Settings to score cuts."
+missing_key.typesafe = "Save your TypeSafe key under Settings to score cuts."
 busy = "The cut points are already being scored."
 gone = "That suggestion is no longer on the cut."
 not_saved = "Couldn't save the suggestions. Try again."
@@ -2658,6 +2667,10 @@ name = "API keys tour"
 [tour.keys.tab]
 title = "API keys"
 body = "Bardo works with your own account at each AI provider, one key per provider. You pay each one directly, at its own prices."
+
+[tour.keys.engine]
+title = "Decision engine"
+body = "Pick the engine that ranks video ideas and scores cut suggestions. It calls with its provider's key from this tab: JEV, the only engine for now, uses the TypeSafe key."
 
 [tour.keys.card]
 title = "One key per provider"
