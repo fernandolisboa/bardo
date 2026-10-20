@@ -275,4 +275,5 @@ try {
     Get-ChildItem $paths.Logs -ErrorAction SilentlyContinue | Copy-Item -Destination $Out -ErrorAction SilentlyContinue
 }
 $failed = Complete-Checks "Installer ($Scenario)" $Out
-if ($failed -gt 0) { exit 1 }
+# Explicit: Actions otherwise ends with the last native command's exit code.
+if ($failed -gt 0) { exit 1 } else { exit 0 }
