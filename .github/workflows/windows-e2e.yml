@@ -42,12 +42,18 @@ jobs:
           tool: cargo-about@0.9.2
       - name: Package
         run: cargo xtask package
+      - name: Build bardo-e2e, the harness that reads and drives Bardo's state
+        shell: pwsh
+        run: |
+          cargo build -p bardo-e2e --release --locked
+          Copy-Item target/release/bardo-e2e.exe target/package/
       - uses: actions/upload-artifact@v4
         with:
           name: bardo-build
           path: |
             target/package/Bardo-Setup-*.exe
             target/package/Bardo/bardo.exe
+            target/package/bardo-e2e.exe
           if-no-files-found: error
 
   installer:
@@ -91,4 +97,29 @@ jobs:
         if: always()
         with:
           name: installer-${{ matrix.scenario }}
+          path: e2e-out
+
+  app:
+    name: App
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: e2e
+      - uses: actions/download-artifact@v4
+        with:
+          name: bardo-build
+          path: build
+      - name: Checks
+        shell: pwsh
+        run: >
+          ./e2e/windows/app.ps1
+          -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
+          -Harness (Resolve-Path build/bardo-e2e.exe).Path
+          -Out e2e-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app
           path: e2e-out

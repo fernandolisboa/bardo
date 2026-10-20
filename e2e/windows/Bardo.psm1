@@ -122,6 +122,31 @@ function Save-Screen {
     }
 }
 
-Export-ModuleMember -Function Get-BardoPaths, Invoke-Setup, Install-Bardo, Uninstall-Bardo,
+# Runs `bardo-e2e` (the copy at `Harness`) with `Arguments`; what it
+# printed, read as JSON.
+function Invoke-Harness {
+    param([Parameter(Mandatory)][string]$Harness, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    $output = & $Harness @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "bardo-e2e $($Arguments -join ' ') failed: $($output -join "`n")" }
+    return ($output | Where-Object { $_ -is [string] }) -join "`n" | ConvertFrom-Json
+}
+
+# Credential Manager's entries for this user, as `cmdkey /list` shows
+# them: each one's target name and type.
+function Get-Credentials {
+    $entries = @()
+    $target = $null
+    foreach ($line in (cmdkey.exe /list)) {
+        if ($line -match '^\s*Target:\s*(?:[^:=]+:target=)?(.+?)\s*$') {
+            $target = $Matches[1]
+        } elseif ($line -match '^\s*Type:\s*(.+?)\s*$' -and $target) {
+            $entries += [pscustomobject]@{ Target = $target; Type = $Matches[1] }
+            $target = $null
+        }
+    }
+    return $entries
+}
+
+Export-ModuleMember -Function Invoke-Harness, Get-Credentials, Get-BardoPaths, Invoke-Setup, Install-Bardo, Uninstall-Bardo,
     Get-BardoProcesses, Start-BardoWindow, Stop-BardoWindow, Stop-BardoAll, Get-AgentTask,
     Get-FileSha256, Save-Screen
