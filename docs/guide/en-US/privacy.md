@@ -54,7 +54,7 @@ Bardo sends data only to the services you set up, with your own keys, to do what
 
 - **YouTube** (Google): your videos and their metadata when you upload, and the requests above.
 - **The AI providers you use**: Anthropic's Claude writes theme ideas and scripts, and TypeSafe's JEV ranks ideas. To do that, Bardo sends them your channel's details and a few numbers worked out from YouTube data: a niche's competition and trend scores, median views per day and upload volume, and the first-week views of your channel's earlier videos. No video, title, comment or channel read from YouTube is sent.
-- **Other providers** (ElevenLabs, Gemini, Higgsfield, Instagram, TikTok) get only what you send them for narration, images, clips and posts; none of it comes from YouTube.
+- **Other providers** (ElevenLabs, Gemini, Higgsfield, Kling, Instagram, TikTok) get only what you send them for narration, images, clips and posts; none of it comes from YouTube.
 
 Each of those services handles what it receives under its own privacy policy. Nothing goes to Bardo's makers or to anyone else. [Export diagnostics](about.md#diagnostics) makes a file only you can choose to share, with every key, token and account name masked.
 

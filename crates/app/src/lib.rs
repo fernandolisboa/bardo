@@ -422,6 +422,7 @@ impl Providers {
             music: Arc::new(bardo_ai::ElevenLabsMusic::new()),
             clips: vec![
                 Arc::new(bardo_ai::HiggsfieldClips::new()),
+                Arc::new(bardo_ai::KlingClips::new()),
                 Arc::new(bardo_ai::GoogleClips::new()),
             ],
             audio: Arc::new(bardo_media::DeviceAudio),

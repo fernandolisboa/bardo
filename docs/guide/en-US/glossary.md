@@ -60,7 +60,7 @@ The words Bardo uses, in plain terms.
 
 **Motion prompt**: how a scene's image moves in its clip: subject, action, camera.
 
-**Video model**: the model that makes clips, such as Kling through Higgsfield or Veo through Gemini. Set per channel, changeable per scene.
+**Video model**: the model that makes clips, such as Kling (through Higgsfield or straight from Kling) or Veo through Gemini. Set per channel, changeable per scene.
 
 **Generation**: the record of how something was made: provider, model, prompt and template version. Editing the result leaves it as it was.
 

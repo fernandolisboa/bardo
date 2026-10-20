@@ -15,7 +15,7 @@ A clip animates a scene's image into a short video. Clips are optional: a scene 
 
 **Animate scenes without a clip** sends every scene that has an image and no clip to the video provider in one job; **Animate** on a scene does just that one. Each clip runs as long as its scene is narrated, within the lengths the model allows. A scene that fails does not stop the others, and retrying the job sends only the scenes still without a clip.
 
-Clips are made through Higgsfield or Google, with your own key for each ([Your API keys](api-keys.md#providers)). Cancelling a run stops the waiting, not the provider: a clip already sent may still finish and be billed.
+Clips are made through Higgsfield, Kling or Google, with your own key for each ([Your API keys](api-keys.md#providers)). Cancelling a run stops the waiting, not the provider: a clip already sent may still finish and be billed.
 
 <a id="motion"></a>
 ## Motion

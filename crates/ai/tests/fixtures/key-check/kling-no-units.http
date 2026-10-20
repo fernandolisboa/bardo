@@ -1,0 +1,4 @@
+HTTP/2 429 
+content-type: application/json;charset=UTF-8
+
+{"code":1102,"message":"resource pack exhausted","request_id":"7f6e5d4c-3b2a-4198-8776-655443322110"}

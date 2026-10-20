@@ -4,7 +4,7 @@
 //! a `ChannelDraft` and errors back to fields.
 
 use bardo_app::bardo_domain::{
-    CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModelRef,
+    CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel, ClipModelRef,
     ContentLanguage, Country, PersonaId, Transition, TransitionKind, frame_time,
 };
 use std::rc::Rc;
@@ -79,25 +79,29 @@ fn persona_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<PersonaId>>> {
 }
 
 /// The provider's default model first (a channel that keeps it follows the
-/// default), then every model by name and provider.
+/// default), then every model by name and provider. The provider is always
+/// named: the same Kling model comes through Higgsfield and from Kling.
 fn clip_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef>>> {
     let models = bardo.clip_models();
+    let title = |model: &ClipModel| {
+        format!(
+            "{} · {}",
+            model.name,
+            bardo.text(Text::ProviderName(model.id.provider()))
+        )
+    };
     let default = models.first().map(|model| Choice {
         value: None,
         title: SharedString::from(
-            bardo.text_with(Text::ChannelClipModelDefault, &[("model", &model.name)]),
+            bardo.text_with(Text::ChannelClipModelDefault, &[("model", &title(model))]),
         ),
     });
     SearchableVec::new(
         default
             .into_iter()
-            .chain(models.into_iter().map(|model| Choice {
-                title: SharedString::from(format!(
-                    "{} · {}",
-                    model.name,
-                    bardo.text(Text::ProviderName(model.id.provider()))
-                )),
-                value: Some(model.id),
+            .chain(models.iter().map(|model| Choice {
+                title: SharedString::from(title(model)),
+                value: Some(model.id.clone()),
             }))
             .collect::<Vec<_>>(),
     )

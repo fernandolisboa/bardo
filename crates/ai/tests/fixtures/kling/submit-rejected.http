@@ -1,0 +1,4 @@
+HTTP/2 401 
+content-type: application/json;charset=UTF-8
+
+{"code":1002,"message":"Authentication error. The current API does not support AK/SK; please go to the console (https://kling.ai/dev/api-key) to create API key.","request_id":"2e9f60f6-2d97-425b-b1e6-650e1f9af4aa"}

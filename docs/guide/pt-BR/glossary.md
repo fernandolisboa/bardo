@@ -60,7 +60,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Prompt de movimento**: como a imagem da cena se move no clipe: o assunto, a ação, a câmera.
 
-**Modelo de vídeo**: o modelo que faz os clipes, como o Kling pela Higgsfield ou o Veo pelo Gemini. Definido por canal e trocável por cena.
+**Modelo de vídeo**: o modelo que faz os clipes, como o Kling (pela Higgsfield ou direto do Kling) ou o Veo pelo Gemini. Definido por canal e trocável por cena.
 
 **Geração**: o registro de como algo foi feito: provedor, modelo, prompt e versão do modelo de instruções. Editar o resultado não muda esse registro.
 

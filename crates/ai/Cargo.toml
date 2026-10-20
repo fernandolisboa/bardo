@@ -12,6 +12,7 @@ bardo-domain.workspace = true
 base64.workspace = true
 form_urlencoded.workspace = true
 humantime.workspace = true
+sha2 = "0.10"
 serde_json.workspace = true
 thiserror.workspace = true
 ureq.workspace = true

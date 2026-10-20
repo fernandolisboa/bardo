@@ -83,6 +83,28 @@ video_seconds = "0.042"
 [higgsfield."minimax/h3/"]
 video_seconds = "0.13"
 
+# Kling bills each clip per second of video from prepaid resource packages,
+# by model and resolution, with sound off; these are its published list
+# prices (checked on 2026-10-20, 1 unit = US$ 0.14). Kling quotes nothing
+# before a clip, so these prices are what gets recorded.
+[kling."kling-3.0/720p"]
+video_seconds = "0.084"
+
+[kling."kling-3.0/1080p"]
+video_seconds = "0.112"
+
+[kling."kling-2.6/720p"]
+video_seconds = "0.042"
+
+[kling."kling-2.6/1080p"]
+video_seconds = "0.07"
+
+[kling."kling-2.5-turbo/720p"]
+video_seconds = "0.042"
+
+[kling."kling-2.5-turbo/1080p"]
+video_seconds = "0.07"
+
 # TypeSafe charges JEV's input tokens only.
 [typesafe."jev"]
 input_tokens = "0.042"

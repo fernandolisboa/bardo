@@ -56,6 +56,17 @@ Você só precisa desta chave para clipes de vídeo dos modelos da Higgsfield.
 4. Copie as duas. O Bardo recebe as duas num campo só, unidas por dois-pontos: `KEY_ID:KEY_SECRET` (o ID, um `:` e a chave secreta, sem espaços).
 5. Cole no cartão **Higgsfield** em [Configurações › Chaves de API](bardo:go/settings/keys), escolha **Salvar chave** e depois **Testar chave**.
 
+<a id="kling"></a>
+## Kling
+
+Você só precisa desta chave para clipes de vídeo direto do Kling. Os modelos do Kling também são oferecidos pela Higgsfield; ir direto custa o mesmo em 1080p e menos em 720p, pago com os pacotes de recursos do próprio Kling.
+
+1. Abra a [plataforma de API do Kling](https://kling.ai/dev) e entre. A sua conta de desenvolvedor é a mesma da sua conta web do Kling AI.
+2. Compre um pacote de recursos de vídeo em [Pricing](https://kling.ai/dev/pricing?scrollTo=video). Cada clipe gasta unidades dele por segundo (1 unidade custa US$ 0,14; o Kling 3.0 em 720p gasta 0,6 unidade por segundo). Há um pacote de teste para a primeira vez. Os pacotes vencem e, sem unidades, o Kling recusa a chamada.
+3. Abra [API Keys](https://kling.ai/dev/api-key) e escolha **+ Create a new API Key**. Dê um nome a ela, como Bardo, e confirme.
+4. Copie a chave. Ela aparece só desta vez. Use esta chave de API, não um par **Access Key** e **Secret Key**: os endpoints novos do Kling, que são os que o Bardo chama, não aceitam o par.
+5. Cole no cartão **Kling** em [Configurações › Chaves de API](bardo:go/settings/keys), escolha **Salvar chave** e depois **Testar chave**.
+
 <a id="typesafe"></a>
 ## TypeSafe (JEV)
 
