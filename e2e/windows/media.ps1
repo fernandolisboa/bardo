@@ -58,7 +58,7 @@ function Invoke-Media {
     } { $proxies | ConvertTo-Json -Compress -Depth 4 }
 
     # S9.03, S9.13: two files, cancelled during the second, resumed.
-    $cancel = Keep 'render-cancel' (Installed render youtube,x cancel-second)
+    $cancel = Keep 'render-cancel' (Installed render 'youtube,x' cancel-second)
     $first = Get-Render $cancel.cancelled 'youtube'
     Test-Check 'S9.03' 'cancelled during the second file, the first stays rendered and the second has no file' {
         $cancel.cancelled.job.state -eq 'cancelled' -and $first -and -not (Get-Render $cancel.cancelled 'x')

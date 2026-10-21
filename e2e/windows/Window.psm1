@@ -4,15 +4,10 @@
 Set-StrictMode -Version Latest
 
 Add-Type -AssemblyName System.Drawing
-# Bitmap and Size live in different assemblies on .NET; the C# below names
-# both.
-$drawing = @([System.Drawing.Bitmap].Assembly.Location, [System.Drawing.Size].Assembly.Location) |
-    Select-Object -Unique
+# The C# names no System.Drawing type: on .NET 10 those spread over
+# assemblies Add-Type does not reference. Pictures are taken in PowerShell.
 Add-Type -TypeDefinition @'
 using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -81,18 +76,8 @@ public static class BardoWindowWin32 {
         return SendMessage(hwnd, WM_GETICON, (IntPtr)1, IntPtr.Zero) != IntPtr.Zero
             || GetClassLongPtr(hwnd, -14) != IntPtr.Zero;
     }
-
-    // Saves the inner area as a PNG.
-    public static void Shoot(IntPtr hwnd, string path) {
-        int[] area = Client(hwnd);
-        using (var bitmap = new Bitmap(area[2], area[3]))
-        using (var graphics = Graphics.FromImage(bitmap)) {
-            graphics.CopyFromScreen(area[0], area[1], 0, 0, new Size(area[2], area[3]));
-            bitmap.Save(path, ImageFormat.Png);
-        }
-    }
 }
-'@ -ReferencedAssemblies $drawing
+'@
 
 # The window of process `ProcessId`, waiting up to `Seconds` for it.
 function Get-BardoWindowHandle {
@@ -106,6 +91,21 @@ function Get-BardoWindowHandle {
     throw "no window for process $ProcessId within $Seconds s"
 }
 
+# Saves the window's inner area as a PNG.
+function Save-BardoWindow {
+    param([Parameter(Mandatory)][IntPtr]$Handle, [Parameter(Mandatory)][string]$Path)
+    $area = [BardoWindowWin32]::Client($Handle)
+    $bitmap = [System.Drawing.Bitmap]::new($area[2], $area[3])
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($area[0], $area[1], 0, 0, [System.Drawing.Size]::new($area[2], $area[3]))
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
 # The process's processor time over `Seconds`, as a share of one core.
 function Measure-IdleCpu {
     param([Parameter(Mandatory)][int]$ProcessId, [int]$Seconds = 15)
@@ -116,4 +116,4 @@ function Measure-IdleCpu {
     return ($process.TotalProcessorTime - $before).TotalSeconds / $Seconds
 }
 
-Export-ModuleMember -Function Get-BardoWindowHandle, Measure-IdleCpu
+Export-ModuleMember -Function Get-BardoWindowHandle, Save-BardoWindow, Measure-IdleCpu

@@ -51,7 +51,7 @@ function Invoke-Walk {
             Start-Sleep -Milliseconds 150
             $titles.Add([pscustomobject]@{ shot = $shot.name; language = $shot.language; expected = $shot.title; seen = [BardoWindowWin32]::Title($handle) })
             $partial = Join-Path $shots "$($shot.name).partial.png"
-            [BardoWindowWin32]::Shoot($handle, $partial)
+            Save-BardoWindow $handle $partial
             Move-Item $partial (Join-Path $shots "$($shot.name).png")
         }
         Start-Sleep -Milliseconds 100
@@ -128,7 +128,7 @@ function Invoke-Look {
     Test-Check 'S12.31' 'dragged smaller, the window stops at 640 x 600 (100%)' {
         $inner[2] -ge 640 -and $inner[3] -ge 600 -and $inner[2] -le 660 -and $inner[3] -le 620
     } { "$($inner[2]) x $($inner[3])" }
-    [BardoWindowWin32]::Shoot($handle, (Join-Path $Out 'smallest-window.png'))
+    Save-BardoWindow $handle (Join-Path $Out 'smallest-window.png')
     Stop-BardoWindow
 }
 
