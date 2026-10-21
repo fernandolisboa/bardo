@@ -164,7 +164,7 @@ impl SecretStore for MemorySecretStore {
 /// Name of the credential holding a profile's key for a provider, as
 /// Windows Credential Manager lists it (under "Generic Credentials").
 pub fn credential_target(owner: ProfileId, provider: Provider) -> String {
-    format!("Bardo/{owner}/key/{}", provider.code())
+    format!("Bardo/{owner}/{}", provider.code())
 }
 
 /// Name of the credential holding a profile's app credentials for a

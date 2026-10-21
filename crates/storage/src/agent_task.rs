@@ -112,7 +112,7 @@ pub fn task_definition(user: &str, program: &Path) -> String {
   <Triggers>
     <LogonTrigger>
       <Repetition>
-        <Interval>PT30M</Interval>
+        <Interval>PT15M</Interval>
         <StopAtDurationEnd>false</StopAtDurationEnd>
       </Repetition>
       <Enabled>true</Enabled>
