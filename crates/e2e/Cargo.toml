@@ -11,8 +11,11 @@ publish.workspace = true
 anyhow.workspace = true
 bardo-app.workspace = true
 bardo-domain.workspace = true
+bardo-media.workspace = true
 bardo-storage.workspace = true
 serde_json.workspace = true
+# Reads the look job's screenshots (`check-shots`).
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [lints]
 workspace = true

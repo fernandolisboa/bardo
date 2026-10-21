@@ -655,7 +655,9 @@ dependencies = [
  "anyhow",
  "bardo-app",
  "bardo-domain",
+ "bardo-media",
  "bardo-storage",
+ "image",
  "serde_json",
 ]
 
@@ -715,6 +717,8 @@ dependencies = [
  "embed-resource",
  "gpui-kit",
  "image",
+ "serde",
+ "serde_json",
  "sys-locale",
  "tracing",
 ]

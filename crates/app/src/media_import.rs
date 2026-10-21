@@ -127,6 +127,10 @@ impl MediaImport {
                 ));
             }
         };
+        // A picture probes with no length; the scenes hold the stills.
+        if info.duration.is_zero() && info.audio.is_none() {
+            return Err(MediaImportError::Unsupported("a still picture".into()));
+        }
         if info.duration < frame_time(1) {
             return Err(MediaImportError::TooShort);
         }
@@ -384,6 +388,15 @@ mod tests {
             import.run(&empty),
             Err(MediaImportError::Unsupported(_))
         ));
+
+        // A picture (a .jpg), which ffmpeg reads with no length.
+        let mut picture = footage(640, 360);
+        picture.duration = Duration::ZERO;
+        picture.audio = None;
+        let photo = h.file("photo.jpg", b"jpg", Some(picture));
+        let error = import.run(&photo).unwrap_err();
+        assert!(matches!(error, MediaImportError::Unsupported(_)), "{error}");
+        assert_eq!(error.message(), Text::MediaImportUnsupported);
 
         // A blip shorter than a frame.
         let mut blip = song(0);

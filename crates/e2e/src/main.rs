@@ -25,10 +25,17 @@ use bardo_domain::{
 use bardo_storage::{DataPaths, Database};
 use serde_json::{Value, json};
 
+mod media;
+mod seed;
+mod shots;
+
 const USAGE: &str = "usage: bardo-e2e <state | save-keys | save-app-credentials | seed-channel \
                      | export-settings <file> <password> | import-settings <file> <password> \
                      | diagnostics <zip> | agent <on|off|start> | backup <zip> [media] \
-                     | restore <zip> | window-lock>";
+                     | restore <zip> | window-lock | seed-showcase \
+                     | check-shots <folder> | proxies | edit-cut | cut-state \
+                     | render <networks|all> [cancel-second] | wait-jobs \
+                     | media-fixtures <folder> | import-media <file>... | export <networks|all> [title]>";
 
 /// How long a job may take before the command gives up on it.
 const JOB_PATIENCE: Duration = Duration::from_secs(300);
@@ -47,6 +54,12 @@ fn main() -> anyhow::Result<()> {
     if command == "window-lock" {
         return window_lock();
     }
+    // Reads screenshots only: no Bardo opens.
+    if let ("check-shots", [folder]) = (command.as_str(), &args[1..]) {
+        let out = shots::check_shots(Path::new(folder))?;
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
     let mut bardo = start()?;
     let out = match (command.as_str(), &args[1..]) {
         ("state", []) => state(&bardo)?,
@@ -60,6 +73,19 @@ fn main() -> anyhow::Result<()> {
         ("backup", [zip]) => backup(&bardo, zip, false)?,
         ("backup", [zip, media]) if media == "media" => backup(&bardo, zip, true)?,
         ("restore", [zip]) => restore(&bardo, zip)?,
+        ("seed-showcase", []) => seed::seed_showcase(&mut bardo)?,
+        ("proxies", []) => media::proxies(&bardo)?,
+        ("edit-cut", []) => media::edit_cut(&bardo)?,
+        ("cut-state", []) => media::cut_state(&bardo)?,
+        ("render", [list]) => media::render(&bardo, list, false)?,
+        ("render", [list, cancel]) if cancel == "cancel-second" => {
+            media::render(&bardo, list, true)?
+        }
+        ("wait-jobs", []) => media::wait_jobs(&bardo)?,
+        ("media-fixtures", [folder]) => media::media_fixtures(Path::new(folder))?,
+        ("import-media", files) if !files.is_empty() => media::import_media(&bardo, files)?,
+        ("export", [list]) => media::export(&bardo, list, None)?,
+        ("export", [list, title]) => media::export(&bardo, list, Some(title))?,
         _ => bail!("{USAGE}"),
     };
     println!("{}", serde_json::to_string_pretty(&out)?);

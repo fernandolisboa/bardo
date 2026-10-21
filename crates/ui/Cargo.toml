@@ -21,6 +21,13 @@ tracing.workspace = true
 # Preview frames become RenderImages (ADR-0007); the X11 window icon is a PNG.
 image = { version = "0.25", default-features = false, features = ["png"] }
 sys-locale = "0.3"
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+# `bardo --showcase <folder>`: the look job's walk through every screen
+# (issue #166, e2e/README.md). Never in a build a user gets.
+showcase = ["dep:serde", "dep:serde_json"]
 
 # Embeds the window and taskbar icon in bardo.exe on Windows (issue #131).
 [build-dependencies]

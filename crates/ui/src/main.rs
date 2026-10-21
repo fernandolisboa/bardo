@@ -30,6 +30,8 @@ mod research;
 mod settings;
 mod settings_transfer;
 mod shell;
+#[cfg(feature = "showcase")]
+mod showcase;
 mod spend;
 mod templates;
 mod themes;
@@ -238,7 +240,12 @@ fn main() -> anyhow::Result<()> {
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| Shell::new(bardo, window, cx))
+                let shell = cx.new(|cx| Shell::new(bardo, window, cx));
+                #[cfg(feature = "showcase")]
+                if let Some(folder) = showcase::folder() {
+                    showcase::start(folder, shell.clone(), window, cx);
+                }
+                shell
             })
             .expect("failed to open the main window");
             cx.activate(true);

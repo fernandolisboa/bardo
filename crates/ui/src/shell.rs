@@ -916,3 +916,54 @@ impl Shell {
             .into_any_element()
     }
 }
+
+/// The look job's walk through the screens ([`crate::showcase`]).
+#[cfg(feature = "showcase")]
+impl Shell {
+    pub(crate) fn bardo(&self) -> Entity<Bardo> {
+        self.bardo.clone()
+    }
+
+    /// Nothing over the screens but what a shot shows: no first-run offer
+    /// and no offer to bring settings in.
+    pub(crate) fn prepare_showcase(&mut self, cx: &mut Context<Self>) {
+        self.bardo.update(cx, |bardo, cx| {
+            bardo.decline_tour_offer(true);
+            bardo.take_settings_offer();
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// Shows `place` the way a guide link does, with the jobs panel, the
+    /// Guide's menu and its cards closed first.
+    pub(crate) fn show_place(
+        &mut self,
+        place: bardo_app::ShowcasePlace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.jobs_open = false;
+        self.guide.update(cx, |guide, cx| guide.close_cards(cx));
+        match place {
+            bardo_app::ShowcasePlace::Place(place) => self.go(place, window, cx),
+            bardo_app::ShowcasePlace::Guide => {
+                self.close_editor(window, cx);
+                self.show(Destination::Guide, window, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Whether a job still runs (the editor's proxies) or the render
+    /// review is still measuring.
+    pub(crate) fn showcase_busy(&self, cx: &App) -> bool {
+        self.projects.read(cx).is_checking_render()
+            || self
+                .bardo
+                .read(cx)
+                .jobs()
+                .iter()
+                .any(|job| job.state().is_active())
+    }
+}

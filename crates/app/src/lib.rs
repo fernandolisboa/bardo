@@ -41,6 +41,7 @@ mod selection;
 mod settings_file;
 mod settings_transfer;
 mod shortcuts;
+mod showcase;
 mod stages;
 mod templates;
 mod themes;
@@ -155,6 +156,7 @@ pub use settings_transfer::{
     inspect_settings_file, settings_file_name,
 };
 pub use shortcuts::{SHORTCUTS, Shortcut, ShortcutGroup};
+pub use showcase::{Shot, ShotReady, ShotSize, ShowcasePlace};
 pub use stages::{
     SceneState, Stage, StageNote, StageState, StageStatus, opening_stage, project_stages,
     scene_states,

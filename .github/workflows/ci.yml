@@ -36,6 +36,8 @@ jobs:
         run: cargo xtask fetch-ffmpeg
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy, the look job's showcase build
+        run: cargo clippy -p bardo-ui --all-targets --locked --features showcase -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
       - name: Build app
