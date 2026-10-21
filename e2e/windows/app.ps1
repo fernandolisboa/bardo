@@ -171,6 +171,10 @@ function Invoke-App {
     Installed agent on | Out-Null
     $agentUp = Wait-Until { @(Get-BardoProcesses Agent).Count -eq 1 } 30
     $zip = Join-Path $work 'bardo-diagnostics.zip'
+    # A log line naming the account and a file in the home folder, as a
+    # network's error or a file Bardo opened would.
+    $leakyLine = "e2e: upload for @bardo_e2e_handle failed reading $env:USERPROFILE\Videos\clip.mp4"
+    Add-Content -Encoding utf8 (Join-Path $paths.Logs 'bardo.log') "2026-01-01T00:00:00.000000Z  WARN $leakyLine"
     $diagnostics = Installed diagnostics $zip
     Test-Check 'S13.01' 'the logs folder is %LOCALAPPDATA%\Bardo\logs' { $diagnostics.logs -eq $paths.Logs }
     $entries = Get-ZipEntries $zip
@@ -184,9 +188,9 @@ function Invoke-App {
     $secretValues = $keys + @($apps.app_credentials.PSObject.Properties | ForEach-Object { $_.Value.secret })
     $secrets = $secretValues + @('Canal Único de Teste', 'bardo_e2e_handle', $env:USERNAME)
     Test-Check 'S13.04' 'no key, secret, channel name, @handle or Windows user name in the zip' { Test-NoneIn $text $secrets }
-    Test-Check 'S13.04' 'a path in the home folder shows only as %USERPROFILE%' {
-        -not $text.Contains($env:USERPROFILE)
-    } { "%USERPROFILE% appears: $($text.Contains('%USERPROFILE%'))" }
+    Test-Check 'S13.04' 'in the logs, the @handle shows as [account] and the home folder as %USERPROFILE%' {
+        $text -match 'upload for @?\[account\] failed reading %USERPROFILE%\\Videos\\clip\.mp4'
+    } { ($text -split "`n" | Where-Object { $_ -match 'e2e: upload' }) -join ' / ' }
     $before = (Get-Item $zip).LastWriteTimeUtc
     Start-Sleep -Seconds 2
     $again = Installed diagnostics $zip
