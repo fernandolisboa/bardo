@@ -133,6 +133,13 @@ impl ProjectsScreen {
         }
     }
 
+    /// Whether the render review is still trying the encoders and
+    /// measuring the mix.
+    #[cfg(feature = "showcase")]
+    pub(crate) fn is_checking_render(&self) -> bool {
+        self.render_checking.is_some()
+    }
+
     /// Tries the encoders and measures the mix off the UI thread.
     fn check_render(&mut self, cx: &mut Context<Self>) {
         let Some(review) = self.render_review.as_ref() else {

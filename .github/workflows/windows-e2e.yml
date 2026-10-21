@@ -47,6 +47,13 @@ jobs:
         run: |
           cargo build -p bardo-e2e --release --locked
           Copy-Item target/release/bardo-e2e.exe target/package/
+      # After packaging, so the installer holds the bardo.exe users get.
+      - name: Build the showcase walk the look job photographs (never shipped)
+        shell: pwsh
+        run: |
+          cargo build -p bardo-ui --release --locked --features showcase
+          New-Item -ItemType Directory -Force target/package/showcase | Out-Null
+          Copy-Item target/release/bardo.exe target/package/showcase/
       - uses: actions/upload-artifact@v4
         with:
           name: bardo-build
@@ -54,6 +61,7 @@ jobs:
             target/package/Bardo-Setup-*.exe
             target/package/Bardo/bardo.exe
             target/package/bardo-e2e.exe
+            target/package/showcase/bardo.exe
           if-no-files-found: error
 
   installer:
@@ -125,4 +133,58 @@ jobs:
         if: always()
         with:
           name: app
+          path: e2e-out
+
+  look:
+    name: Look
+    needs: build
+    runs-on: windows-latest
+    # About 250 screenshots, one after another.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: e2e
+      - uses: actions/download-artifact@v4
+        with:
+          name: bardo-build
+          path: build
+      - name: Checks
+        shell: pwsh
+        run: >
+          ./e2e/windows/look.ps1
+          -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
+          -Harness (Resolve-Path build/bardo-e2e.exe).Path
+          -Showcase (Resolve-Path build/showcase/bardo.exe).Path
+          -Out e2e-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: look
+          path: e2e-out
+
+  media:
+    name: Media
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: e2e
+      - uses: actions/download-artifact@v4
+        with:
+          name: bardo-build
+          path: build
+      - name: Checks
+        shell: pwsh
+        run: >
+          ./e2e/windows/media.ps1
+          -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
+          -Harness (Resolve-Path build/bardo-e2e.exe).Path
+          -Out e2e-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: media
           path: e2e-out

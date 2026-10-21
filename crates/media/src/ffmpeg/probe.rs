@@ -79,20 +79,37 @@ struct Disposition {
 
 #[derive(Deserialize)]
 struct Format {
+    format_name: Option<String>,
     duration: Option<String>,
+}
+
+impl Format {
+    /// Whether ffmpeg read the file as a still picture (`image2` for
+    /// JPEG and BMP, `png_pipe`, `webp_pipe`…), which it gives a one-frame
+    /// length to.
+    fn is_still(&self) -> bool {
+        self.format_name
+            .as_deref()
+            .is_some_and(|name| name == "image2" || name.ends_with("_pipe"))
+    }
 }
 
 fn parse(json: &[u8]) -> Result<MediaInfo, MediaError> {
     let probe: Probe =
         serde_json::from_slice(json).map_err(|error| MediaError::Parse(error.to_string()))?;
-    let duration = probe
-        .format
-        .duration
-        .as_deref()
-        .and_then(|seconds| seconds.parse::<f64>().ok())
-        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
-        .map(Duration::from_secs_f64)
-        .ok_or_else(|| MediaError::Parse("no duration".into()))?;
+    // A picture has no length, whatever ffmpeg says.
+    let duration = if probe.format.is_still() {
+        Duration::ZERO
+    } else {
+        probe
+            .format
+            .duration
+            .as_deref()
+            .and_then(|seconds| seconds.parse::<f64>().ok())
+            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+            .map(Duration::from_secs_f64)
+            .ok_or_else(|| MediaError::Parse("no duration".into()))?
+    };
     let video = probe
         .streams
         .iter()
@@ -191,6 +208,21 @@ mod tests {
             parse(json.as_bytes()).unwrap().video.unwrap().frame_rate,
             (25, 1)
         );
+    }
+
+    #[test]
+    fn a_still_picture_has_no_length() {
+        for (format, duration) in [("image2", r#""0.040000""#), ("png_pipe", "null")] {
+            let json = format!(
+                r#"{{"streams": [{{"codec_type": "video", "codec_name": "mjpeg",
+                "width": 640, "height": 360, "avg_frame_rate": "0/0",
+                "r_frame_rate": "25/1"}}],
+                "format": {{"format_name": "{format}", "duration": {duration}}}}}"#
+            );
+            let info = parse(json.as_bytes()).unwrap();
+            assert!(info.duration.is_zero(), "{format}");
+            assert!(info.video.is_some(), "{format}");
+        }
     }
 
     #[test]
