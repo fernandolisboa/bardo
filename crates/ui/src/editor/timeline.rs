@@ -623,21 +623,27 @@ impl EditorScreen {
                     .child(duck)
                     .child(captions)
                     .child(div().flex_1())
+                    // The zoom buttons wrap together, at the row's end.
                     .child(
-                        tool_button("zoom-out", true, false)
-                            .child(icon(IconName::Minus, TEXT_2))
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.timeline.zoom_by(1. / ZOOM_STEP);
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        tool_button("zoom-in", true, false)
-                            .child(icon(IconName::Plus, TEXT_2))
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.timeline.zoom_by(ZOOM_STEP);
-                                cx.notify();
-                            })),
+                        h_flex()
+                            .ml_auto()
+                            .gap_1()
+                            .child(
+                                tool_button("zoom-out", true, false)
+                                    .child(icon(IconName::Minus, TEXT_2))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                        this.timeline.zoom_by(1. / ZOOM_STEP);
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                tool_button("zoom-in", true, false)
+                                    .child(icon(IconName::Plus, TEXT_2))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                        this.timeline.zoom_by(ZOOM_STEP);
+                                        cx.notify();
+                                    })),
+                            ),
                     ),
             )
             .into_any_element()
