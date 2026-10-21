@@ -1,0 +1,128 @@
+name: Windows end to end
+
+# Issue #166: the checks of the Windows test script that a machine can
+# make, run against the Bardo this commit builds, installed on a clean
+# Windows runner. e2e/README.md lists every check and the script step it
+# covers.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Cache the pinned ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: .ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('crates/media/ffmpeg.toml') }}
+      - name: Install cargo-about (third-party notices)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2
+      - name: Package
+        run: cargo xtask package
+      - name: Build bardo-e2e, the harness that reads and drives Bardo's state
+        shell: pwsh
+        run: |
+          cargo build -p bardo-e2e --release --locked
+          Copy-Item target/release/bardo-e2e.exe target/package/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bardo-build
+          path: |
+            target/package/Bardo-Setup-*.exe
+            target/package/Bardo/bardo.exe
+            target/package/bardo-e2e.exe
+          if-no-files-found: error
+
+  installer:
+    name: Installer (${{ matrix.scenario }})
+    needs: build
+    runs-on: windows-latest
+    # A hung wizard or process fails the job instead of holding it for hours.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [fresh, upgrade]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: e2e
+      - uses: actions/download-artifact@v4
+        with:
+          name: bardo-build
+          path: build
+      - name: The latest published release
+        if: matrix.scenario == 'upgrade'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo $env:GITHUB_REPOSITORY --dir previous --pattern 'Bardo-Setup-*-x64.exe*'
+          $installer = Get-ChildItem previous/Bardo-Setup-*-x64.exe | Select-Object -First 1
+          $expected = ((Get-Content "$($installer.FullName).sha256") -split '\s+')[0]
+          if ((Get-FileHash -Algorithm SHA256 $installer.FullName).Hash -ne $expected) {
+            throw "$($installer.Name) does not match its published SHA-256"
+          }
+      - name: Checks
+        shell: pwsh
+        run: >
+          ./e2e/windows/installer.ps1
+          -Scenario ${{ matrix.scenario }}
+          -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
+          -Program build/Bardo/bardo.exe
+          -Previous $(if (Test-Path previous) { (Get-ChildItem previous/Bardo-Setup-*-x64.exe | Select-Object -First 1).FullName } else { '' })
+          -Out e2e-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-${{ matrix.scenario }}
+          path: e2e-out
+
+  app:
+    name: App
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: e2e
+      - uses: actions/download-artifact@v4
+        with:
+          name: bardo-build
+          path: build
+      - name: Checks
+        shell: pwsh
+        run: >
+          ./e2e/windows/app.ps1
+          -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
+          -Harness (Resolve-Path build/bardo-e2e.exe).Path
+          -Out e2e-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app
+          path: e2e-out

@@ -1,0 +1,18 @@
+[package]
+name = "bardo-e2e"
+description = "Drives the installed Bardo through its app state for the Windows end-to-end jobs (issue #166). Never shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bardo-app.workspace = true
+bardo-domain.workspace = true
+bardo-storage.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
