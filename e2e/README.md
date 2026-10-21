@@ -106,7 +106,7 @@ place that looks the same in both languages.
 | S12.07 | Look | `bardo.exe` and its window carry an icon. |
 | S12.31 | Look | Dragged smaller, the window stops at 640 × 600. |
 | S4.02 | Media | The editor builds every proxy with the bundled ffmpeg. |
-| S4.08 | Media | Without a GPU, the render review names OpenH264 on the processor. |
+| S4.08 | Media | Without a GPU, the render review names an encoder on the processor (Media Foundation's software encoder on the runner, OpenH264 where it is missing). |
 | S4.09, S4.10, S8.32 | Media | Every network renders: H.264 at 1080 × 1920 and 1280 × 720, loudness within 1 LU of the target, as long as the review said. |
 | S8.06, S8.11, S9.06 | Media | An edit to the cut and a mute in the mixer survive a restart with Undo empty; every render goes out of date. |
 | S8.36 | Media | A scene image deleted from the project folder marks its clip Media missing. |

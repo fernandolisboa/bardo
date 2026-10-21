@@ -71,8 +71,10 @@ function Invoke-Media {
         (Get-Render $cancel 'youtube').rendered_at -eq $first.rendered_at
     } { $cancel | ConvertTo-Json -Compress -Depth 5 }
     Test-Check 'S9.13' 'while a render runs, Export is refused' { $cancel.export_while_rendering -eq 'Rendering' } { $cancel.export_while_rendering }
-    Test-Check 'S4.08' 'without a GPU, the render review names OpenH264 on the processor' {
-        @($cancel.review | Where-Object { $_.encoder -ne 'OpenH264, on the processor' }).Count -eq 0
+    # Media Foundation's software encoder or OpenH264, whichever works first.
+    Test-Check 'S4.08' 'without a GPU, the render review names an encoder on the processor' {
+        @($cancel.review).Count -gt 0 -and
+        @($cancel.review | Where-Object { $_.encoder -notmatch '^(Media Foundation|OpenH264), on the processor$' }).Count -eq 0
     } { ($cancel.review | ForEach-Object encoder) -join ', ' }
 
     # S9.04: Bardo ends mid-render; the next start resumes it.
@@ -115,7 +117,7 @@ function Invoke-Media {
         Test-Check 'S9.08' "$($export.network): %USERPROFILE%\Videos\Bardo\<title> (<id8>)\<Network>\ holds <title>.mp4 and metadata.txt, no .partial" {
             $export.folder.StartsWith($videos, [StringComparison]::OrdinalIgnoreCase) -and
             (Split-Path (Split-Path $export.folder) -Leaf) -match '^The probe that never came back \([0-9a-f]{8}\)$' -and
-            (@($export.files) -join '|') -eq 'metadata.txt|The probe that never came back.mp4'
+            ((@($export.files) | Sort-Object) -join '|') -eq 'metadata.txt|The probe that never came back.mp4'
         } { "$($export.folder): $($export.files -join ', ')" }
         $bytes = [System.IO.File]::ReadAllBytes((Join-Path $export.folder 'metadata.txt'))
         $text = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
