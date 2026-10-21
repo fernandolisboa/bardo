@@ -108,7 +108,7 @@ impl Scrubber {
     fn scrub(&self, text: &str) -> String {
         let mut text = self.redactor.redact(text);
         for name in &self.accounts {
-            text = replace_whole(&text, name, name);
+            text = replace_whole(&text, name, ACCOUNT_MASK);
         }
         if let Some(home) = &self.home
             && text.contains(home.as_str())
