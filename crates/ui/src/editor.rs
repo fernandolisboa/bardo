@@ -885,17 +885,21 @@ impl EditorScreen {
                     cx.notify();
                 }))
         };
+        // In a narrow bin the tabs wrap to a second row.
         let tabs = h_flex()
+            .flex_wrap()
             .gap_1()
             .px_2()
-            .h(px(36.))
+            .py_1()
+            .min_h(px(36.))
             .items_center()
             .border_b_1()
             .border_color(color(HAIRLINE))
-            .child(tab("bin-scenes", Text::EditorBinScenes, BinTab::Scenes))
-            .child(tab("bin-media", Text::EditorBinMedia, BinTab::Media))
+            .child(tab("bin-scenes", Text::EditorBinScenes, BinTab::Scenes).flex_none())
+            .child(tab("bin-media", Text::EditorBinMedia, BinTab::Media).flex_none())
             .child(
                 tool_button("bin-styles", false, false)
+                    .flex_none()
                     .child(tr(bardo, Text::EditorBinCaptionStyles)),
             );
         if self.bin_tab == BinTab::Media {
@@ -946,6 +950,7 @@ impl EditorScreen {
                                 .child(
                                     h_flex()
                                         .justify_between()
+                                        .gap_1()
                                         .child(label(
                                             bardo.text_with(
                                                 Text::EditorSceneLabel,
@@ -963,6 +968,7 @@ impl EditorScreen {
                                         .text_size(px(11.))
                                         .text_color(color(TEXT_3))
                                         .line_clamp(2)
+                                        .text_ellipsis()
                                         .child(SharedString::from(scene.prompt.clone())),
                                 ),
                         )
@@ -1085,17 +1091,19 @@ impl EditorScreen {
                         })
                 };
                 // One button per track the domain lets this kind of media on.
-                let actions = h_flex()
-                    .gap_1()
-                    .children(asset.kind.tracks().iter().filter_map(|&track| {
-                        let (button, text) = match track {
-                            Track::Music => ("media-music", Text::EditorMediaAddMusic),
-                            Track::Sfx => ("media-sfx", Text::EditorMediaAddSfx),
-                            Track::Video => ("media-video", Text::EditorMediaAddVideo),
-                            Track::Narration | Track::Captions => return None,
-                        };
-                        Some(place(button, text, track))
-                    }));
+                let actions =
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1()
+                        .children(asset.kind.tracks().iter().filter_map(|&track| {
+                            let (button, text) = match track {
+                                Track::Music => ("media-music", Text::EditorMediaAddMusic),
+                                Track::Sfx => ("media-sfx", Text::EditorMediaAddSfx),
+                                Track::Video => ("media-video", Text::EditorMediaAddVideo),
+                                Track::Narration | Track::Captions => return None,
+                            };
+                            Some(place(button, text, track))
+                        }));
                 v_flex()
                     .id(("bin-media", row))
                     .gap_1()
@@ -1324,13 +1332,15 @@ impl EditorScreen {
                         this.with_editor(cx, |editor| editor.step(1));
                     })),
             )
+            // On the narrowest preview the length goes under the playhead.
             .child(
-                label(
-                    format!("{} / {}", timecode(playhead), timecode(duration)),
-                    TEXT_2,
-                )
-                .ml_3()
-                .font_family(mono),
+                h_flex()
+                    .flex_wrap()
+                    .justify_center()
+                    .gap_x_1()
+                    .ml_3()
+                    .child(label(timecode(playhead), TEXT_2).font_family(mono.clone()))
+                    .child(label(format!("/ {}", timecode(duration)), TEXT_2).font_family(mono)),
             );
         v_flex()
             .relative()
@@ -1730,6 +1740,7 @@ impl EditorScreen {
                 .p_6()
                 .child(
                     div()
+                        .w_full()
                         .text_size(px(12.))
                         .text_color(color(TEXT_3))
                         .text_center()
