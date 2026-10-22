@@ -1205,6 +1205,218 @@ mod tests {
         assert!(q.jobs().is_empty());
     }
 
+    /// The database, except that saving a finished job fails the first
+    /// `failures` times, as a write does when another runner's commit is
+    /// stuck on a slow disk past the busy timeout.
+    struct EndNotSaved {
+        db: Arc<Database>,
+        failures: Mutex<u32>,
+    }
+
+    impl EndNotSaved {
+        fn new(db: &Arc<Database>, failures: u32) -> Arc<Self> {
+            Arc::new(Self {
+                db: Arc::clone(db),
+                failures: Mutex::new(failures),
+            })
+        }
+
+        fn failures_left(&self) -> u32 {
+            *self.failures.lock().unwrap()
+        }
+    }
+
+    impl JobRepository for EndNotSaved {
+        fn list(&self, owner: ProfileId) -> Result<Vec<Job>, RepositoryError> {
+            JobRepository::list(&*self.db, owner)
+        }
+        fn save(&self, job: &Job) -> Result<(), RepositoryError> {
+            let failing = job.state() == JobState::Done && {
+                let mut left = self.failures.lock().unwrap();
+                let failing = *left > 0;
+                *left = left.saturating_sub(1);
+                failing
+            };
+            if failing {
+                return Err(RepositoryError("database is locked".into()));
+            }
+            JobRepository::save(&*self.db, job)
+        }
+        fn job(&self, id: JobId) -> Result<Option<Job>, RepositoryError> {
+            JobRepository::job(&*self.db, id)
+        }
+        fn lease(
+            &self,
+            id: JobId,
+            now: SystemTime,
+            until: SystemTime,
+        ) -> Result<bool, RepositoryError> {
+            JobRepository::lease(&*self.db, id, now, until)
+        }
+        fn renew(&self, ids: &[JobId], until: SystemTime) -> Result<Vec<JobId>, RepositoryError> {
+            JobRepository::renew(&*self.db, ids, until)
+        }
+        fn release(&self, id: JobId) -> Result<(), RepositoryError> {
+            JobRepository::release(&*self.db, id)
+        }
+        fn held_elsewhere(
+            &self,
+            owner: ProfileId,
+            now: SystemTime,
+        ) -> Result<std::collections::HashSet<JobId>, RepositoryError> {
+            JobRepository::held_elsewhere(&*self.db, owner, now)
+        }
+        fn heartbeat(
+            &self,
+            role: bardo_domain::RunnerRole,
+            started_at: SystemTime,
+            now: SystemTime,
+        ) -> Result<(), RepositoryError> {
+            JobRepository::heartbeat(&*self.db, role, started_at, now)
+        }
+        fn runners(
+            &self,
+            since: SystemTime,
+        ) -> Result<Vec<bardo_domain::RunnerSeen>, RepositoryError> {
+            JobRepository::runners(&*self.db, since)
+        }
+        fn leave(&self) -> Result<(), RepositoryError> {
+            JobRepository::leave(&*self.db)
+        }
+    }
+
+    fn counting(runs: &Arc<AtomicU32>) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+        let counted = Arc::clone(runs);
+        handlers(move |_, _| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_finished_run_whose_end_is_not_saved_does_not_run_again() {
+        let (db, owner) = memory_db();
+        let repository = EndNotSaved::new(&db, 1);
+        let runs = Arc::new(AtomicU32::new(0));
+        let q = JobQueue::start(
+            Arc::clone(&repository) as Arc<dyn JobRepository>,
+            owner,
+            Runner::app(),
+            counting(&runs),
+            shared_settings(),
+            Redactor::new(),
+        )
+        .unwrap();
+        let id = enqueue(&q, owner);
+
+        // The end is saved on a later tick, and the run is not started again.
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        let deadline = Instant::now() + PATIENCE;
+        while stored(&db, owner, id).state() != JobState::Done {
+            assert!(Instant::now() < deadline, "the end was never saved");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(repository.failures_left(), 0);
+        // A few more ticks: nothing runs it again.
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Done);
+        assert_eq!(
+            q.jobs().iter().find(|j| j.id() == id).unwrap().state(),
+            JobState::Done
+        );
+    }
+
+    #[test]
+    fn the_other_runner_leaves_a_finished_run_alone_until_its_end_is_saved() {
+        let (db, owner) = memory_db();
+        // The end fails to save for about 100 ticks, longer than a lease.
+        let settings = JobSettings {
+            lease: Duration::from_secs(1),
+            ..shared_settings()
+        };
+        let repository = EndNotSaved::new(&db, 100);
+        let runs = Arc::new(AtomicU32::new(0));
+        let app = JobQueue::start(
+            Arc::clone(&repository) as Arc<dyn JobRepository>,
+            owner,
+            Runner::app(),
+            counting(&runs),
+            settings,
+            Redactor::new(),
+        )
+        .unwrap();
+        let id = enqueue(&app, owner);
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Running);
+        assert!(app.busy(), "an unsaved end keeps the runner busy");
+
+        // The agent starts while storage still says running.
+        let agent_db = second_runner(&db);
+        let agent = agent_queue(&agent_db, owner, counting(&runs), settings);
+        let deadline = Instant::now() + PATIENCE;
+        while stored(&db, owner, id).state() != JobState::Done {
+            assert!(Instant::now() < deadline, "the end was never saved");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(repository.failures_left(), 0);
+        wait_for(|| agent.jobs(), id, |j| j.state() == JobState::Done);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(!app.busy());
+    }
+
+    #[test]
+    fn a_closing_runner_saves_an_unsaved_end_before_it_goes() {
+        let (db, owner) = memory_db();
+        // No tick comes before the close: only the closing queue saves it
+        // again, and its first try fails too.
+        let repository = EndNotSaved::new(&db, 3);
+        let q = JobQueue::start(
+            Arc::clone(&repository) as Arc<dyn JobRepository>,
+            owner,
+            Runner::app(),
+            handlers(|_, _| Ok(())),
+            JobSettings {
+                tick: Duration::from_secs(600),
+                ..shared_settings()
+            },
+            Redactor::new(),
+        )
+        .unwrap();
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Running);
+        drop(q);
+        assert_eq!(repository.failures_left(), 0);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Done);
+    }
+
+    #[test]
+    fn a_finished_run_whose_end_is_not_saved_cannot_be_cancelled() {
+        let (db, owner) = memory_db();
+        let repository = EndNotSaved::new(&db, u32::MAX);
+        let q = JobQueue::start(
+            Arc::clone(&repository) as Arc<dyn JobRepository>,
+            owner,
+            Runner::app(),
+            handlers(|_, _| Ok(())),
+            shared_settings(),
+            Redactor::new(),
+        )
+        .unwrap();
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        // Storage still says running; the queue keeps its own copy.
+        assert_eq!(stored(&db, owner, id).state(), JobState::Running);
+        assert!(matches!(q.cancel(id), Err(JobActionError::NotAllowed(_))));
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            q.jobs().iter().find(|j| j.id() == id).unwrap().state(),
+            JobState::Done
+        );
+    }
+
     // Use cases through `Bardo`, with the real test job.
 
     fn fast(steps: u32) -> TestJob {
