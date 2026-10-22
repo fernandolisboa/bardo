@@ -3901,7 +3901,10 @@ mod tests {
         let narration = app.narrations.narration(project.id).unwrap().unwrap();
         let (first_word, timing) = narration.words().next().unwrap();
         let line = &captions.lines[0];
-        assert_eq!(line.words.len(), line.text.split_whitespace().count());
+        assert_eq!(
+            line.words.len(),
+            bardo_domain::spoken_words(&line.text).len()
+        );
         assert!(line.text.starts_with(first_word));
         assert_eq!(line.words[0], timing.start);
         assert!(line.words.windows(2).all(|pair| pair[0] <= pair[1]));

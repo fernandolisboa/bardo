@@ -317,7 +317,9 @@ impl Captions {
     }
 
     /// When each word of caption `index` starts to light up, in narration
-    /// time: one time per word of its text, in order, within the caption.
+    /// time: one time per word of its text as the narrator reads it
+    /// (`crate::spoken_words`: a lone dash or ellipsis goes with its
+    /// word), in order, within the caption.
     ///
     /// The words are those the narration speaks inside the caption (half
     /// of the word or more, else any part of it). When the caption has as
@@ -328,7 +330,10 @@ impl Captions {
         let Some(caption) = self.lines.get(index) else {
             return Vec::new();
         };
-        let words: Vec<&str> = caption.text.split_whitespace().collect();
+        let words: Vec<&str> = crate::spoken_words(&caption.text)
+            .into_iter()
+            .map(|range| &caption.text[range])
+            .collect();
         let middle_inside = |&&(start, end): &&(Duration, Duration)| {
             let middle = start + (end.saturating_sub(start)) / 2;
             caption.start <= middle && middle < caption.end
@@ -556,6 +561,19 @@ mod tests {
                 Duration::from_nanos(time * 12 / 19),
             ]
         );
+    }
+
+    #[test]
+    fn a_lone_mark_lights_up_with_its_word() {
+        // The narration reads "Wait —" as one word, as a narrator says it.
+        let words = [
+            ("Wait —", ms(0), ms(600)),
+            ("what", ms(1_000), ms(1_400)),
+            ("now.", ms(1_500), ms(1_900)),
+        ];
+        let captions = Captions::from_words(words, ms(2_000));
+        assert_eq!(captions.lines()[0].text, "Wait — what now.");
+        assert_eq!(captions.word_starts(0), [ms(0), ms(1_000), ms(1_500)]);
     }
 
     #[test]

@@ -57,7 +57,9 @@ pub struct CaptionLine {
     pub at: Duration,
     pub duration: Duration,
     /// When each word of the text starts to light up, on the plan's
-    /// timeline: one per word, in order, or none for a line drawn whole.
+    /// timeline: one per word as the narrator reads them
+    /// (`bardo_domain::spoken_words`), in order, or none for a line drawn
+    /// whole.
     /// A word starting before `at` lights up from there; one starting at
     /// or past the line's end does not light up.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -338,7 +340,8 @@ pub(super) fn script(track: &CaptionTrack, size: FrameSize) -> String {
     };
     for line in &track.lines {
         let end = line.at + line.duration;
-        let words: Vec<&str> = line.text.split_whitespace().collect();
+        // Words as the narrator reads them, as their times were given.
+        let words = bardo_domain::spoken_words(&line.text);
         let Some(lit) = lit
             .as_ref()
             .filter(|_| !line.words.is_empty() && line.words.len() == words.len())
@@ -358,19 +361,13 @@ pub(super) fn script(track: &CaptionTrack, size: FrameSize) -> String {
             if from >= to {
                 continue;
             }
-            let text = words
-                .iter()
-                .enumerate()
-                .map(|(other, word)| {
-                    let word = ass_text(word, look.uppercase);
-                    if other == index {
-                        format!("{{\\1c{lit}}}{word}{{\\1c{unlit}}}")
-                    } else {
-                        word
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
+            let spoken = words[index].clone();
+            let text = format!(
+                "{}{{\\1c{lit}}}{}{{\\1c{unlit}}}{}",
+                ass_text(&line.text[..spoken.start], look.uppercase),
+                ass_text(&line.text[spoken.clone()], look.uppercase),
+                ass_text(&line.text[spoken.end..], look.uppercase),
+            );
             event(from, to, text);
         }
     }
@@ -716,6 +713,26 @@ mod tests {
         let events = super::tests::events(&script_of(&track(vec![lit("a b", 0, 1_000, &[0, 2])])));
         assert_eq!(events.len(), 1);
         assert!(events[0].2.ends_with("b{\\1c&HFFFFFF&}"));
+    }
+
+    #[test]
+    fn a_lone_mark_lights_up_with_its_word() {
+        let track = CaptionTrack {
+            style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Yellow,
+            lines: vec![lit("Wait — what", 0, 1_000, &[0, 500])],
+        };
+        let events = events(&script_of(&track));
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.2.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "{\\1c&H3BD4FF&}Wait —{\\1c&HFFFFFF&} what",
+                "Wait — {\\1c&H3BD4FF&}what{\\1c&HFFFFFF&}",
+            ]
+        );
     }
 
     #[test]
