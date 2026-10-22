@@ -11,15 +11,18 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use bardo_app::bardo_domain::{Channel, ChannelId, Job, PublicationId};
-use bardo_app::{Bardo, ChannelMetricsView, ChannelPost, Destination, OwnerAccess, Text};
+use bardo_app::bardo_domain::{Channel, ChannelId, Job, PublicationId, VideoProjectId};
+use bardo_app::{
+    Bardo, ChannelMetricsView, ChannelPost, CutRetention, Destination, OwnerAccess, Text,
+};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, SharedString, Subscription, Task, Window, div, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, ScrollHandle, SharedString, Subscription,
+    Task, Window, div, px,
 };
 
 use crate::appearance::look;
@@ -53,6 +56,13 @@ impl SearchableListItem for ChannelChoice {
 
 type ChannelSelect = Entity<SelectState<SearchableVec<ChannelChoice>>>;
 
+/// Opens a project's editor with its YouTube video's retention over the
+/// cut, at a drop's start when given.
+pub struct OpenRetention {
+    pub project: VideoProjectId,
+    pub at: Option<Duration>,
+}
+
 pub struct PerformanceScreen {
     bardo: Entity<Bardo>,
     channels: Vec<Channel>,
@@ -65,6 +75,11 @@ pub struct PerformanceScreen {
     revision: u64,
     /// The metrics sync as last read: the numbers change only with it.
     sync_job: Option<Job>,
+    /// The post's scroll, so the tour can bring its drops into view.
+    record_scroll: ScrollHandle,
+    /// The shown post's curve over its project's cut, worked out when the
+    /// post shown or its numbers change.
+    over: Option<(PublicationId, Option<CutRetention>)>,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -104,6 +119,8 @@ impl PerformanceScreen {
             error: None,
             revision,
             sync_job: None,
+            record_scroll: ScrollHandle::new(),
+            over: None,
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -150,6 +167,7 @@ impl PerformanceScreen {
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
+        self.over = None;
         let Some(id) = self.selected else {
             self.view = None;
             return;
@@ -201,6 +219,32 @@ impl PerformanceScreen {
     fn pick(&mut self, id: PublicationId, cx: &mut Context<Self>) {
         self.picked = Some(id);
         cx.notify();
+    }
+
+    /// Works out the shown YouTube post's curve over its project's cut
+    /// when another post shows.
+    fn refresh_over(&mut self, cx: &mut Context<Self>) {
+        let shown = self
+            .view
+            .as_ref()
+            .and_then(|view| self.shown(view))
+            .filter(|post| post.post.retention.is_some())
+            .map(|post| (post.post.publication.id, post.post.publication.project));
+        let Some((publication, project)) = shown else {
+            self.over = None;
+            return;
+        };
+        if self.over.as_ref().is_some_and(|(id, _)| *id == publication) {
+            return;
+        }
+        let over = self
+            .bardo
+            .read(cx)
+            .project_retention(project)
+            .ok()
+            .flatten()
+            .filter(|over| over.publication == publication);
+        self.over = Some((publication, over));
     }
 
     /// The post open beside the list: the picked one, else the newest.
@@ -405,12 +449,32 @@ impl PerformanceScreen {
         let mut body =
             vec![metrics::post_state(bardo, &post.post, "performance-post", cx).into_any_element()];
         body.extend(link.map(IntoElement::into_any_element));
+        let over = self.over.as_ref().and_then(|(_, over)| over.as_ref());
         body.extend(metrics::post_metrics(
             bardo,
             &post.post,
+            over,
             "performance-post",
             cx,
         ));
+        if let Some(over) = over {
+            let screen = cx.entity().downgrade();
+            let project = over.project;
+            let show: metrics::ShowDrop = Rc::new(move |at, _, cx| {
+                let _ = screen.update(cx, |_, cx| cx.emit(OpenRetention { project, at }));
+            });
+            body.push(
+                metrics::drops(
+                    bardo,
+                    over,
+                    "performance-post",
+                    Some(show),
+                    Some(&self.record_scroll),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
         body.extend(metrics::history(bardo, &post.post, cx).map(IntoElement::into_any_element));
         let mut inspector = Inspector::new(body);
         inspector.title = Some(
@@ -474,8 +538,11 @@ fn muted(cx: &App, text: SharedString) -> AnyElement {
         .into_any_element()
 }
 
+impl EventEmitter<OpenRetention> for PerformanceScreen {}
+
 impl Render for PerformanceScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.refresh_over(cx);
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Performance);
         let info = guide::info(
@@ -521,6 +588,7 @@ impl Render for PerformanceScreen {
         parts.summary = self.figures(&view, cx);
         parts.toolbar = Some(self.toolbar(&view, cx));
         parts.collection = Some(self.collection(&view, cx));
+        parts.scroll = Some(self.record_scroll.clone());
         parts.inspector = self.shown(&view).map(|post| self.inspector(post, cx));
         if !view.posts.is_empty() {
             parts.content = vec![self.history_card(&view, cx)];

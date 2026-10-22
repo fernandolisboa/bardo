@@ -21,7 +21,7 @@ use bardo_domain::{
     AspectRatio, Bitrate, CutFacts, FPS, Gate, Job, JobFailure, JobFailureKind, JobId, JobKind,
     Loudness, MaxDuration, MeasuredLoudness, Network, NetworkAccountId, ProfileId, Progress,
     ProjectFiles, Render, RenderId, RenderPreset, RenderRepository, RepositoryError, Resolution,
-    TRUE_PEAK_CEILING, VideoProjectId, cut_gates, output_gates,
+    TRUE_PEAK_CEILING, VideoProjectId, cut_gates, cut_timing, output_gates,
 };
 use bardo_media::MediaEngine;
 use bardo_media::ffmpeg::{
@@ -159,6 +159,10 @@ struct CutPlan {
     aspect: String,
     /// The plan's fingerprint: what a render records as its cut.
     cut: String,
+    /// Where the cut's clips and narration sit (`cut_timing`); `None` in a
+    /// job queued before it was recorded.
+    #[serde(default)]
+    timing: Option<String>,
     plan: RenderPlan,
 }
 
@@ -412,10 +416,18 @@ impl Bardo {
             plans.push(CutPlan {
                 aspect: aspect.code().to_owned(),
                 cut: fingerprint(&plan),
+                timing: view.timeline.as_ref().map(cut_timing),
                 plan,
             });
         }
         Ok(plans)
+    }
+
+    /// The fingerprint a render of `view`'s cut in `aspect` would record;
+    /// `None` without a cut.
+    pub(crate) fn cut_fingerprint(&self, view: &EditorView, aspect: AspectRatio) -> Option<String> {
+        timeline_plan(view, &*self.files, aspect, PlanMedia::Originals)
+            .map(|plan| fingerprint(&plan))
     }
 
     /// The review of `project`'s cut for every network account of its
@@ -845,6 +857,7 @@ impl JobHandler for RenderHandler {
                 size_bytes,
                 loudness,
                 cut: plan.cut.clone(),
+                timing: plan.timing.clone(),
                 rendered_at: SystemTime::now(),
             };
             self.renders

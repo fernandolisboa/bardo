@@ -1112,6 +1112,7 @@ split = "Split (S)"
 transition = "Transition (T)"
 snap_words = "Snap to words"
 ai_cuts = "AI cut suggestions"
+retention = "Retention"
 duck_music = "Duck music under narration"
 zoom_in = "Zoom in"
 zoom_out = "Zoom out"
@@ -2273,6 +2274,10 @@ body = "Every post linked to one of the channel's projects, newest first, with i
 title = "A post's numbers"
 body = "Pick a post to see its numbers, how they moved since the sync before, and its history. With the channel's YouTube account connected, engaged views, watch time, retention and revenue join them."
 
+[tour.performance.drops]
+title = "Where viewers leave"
+body = "The steepest drops of a YouTube post's retention curve, each with the scene and sentence of the cut playing there. Show in editor opens the project's editor at that drop."
+
 [tour.performance.sync]
 title = "Sync now"
 body = "A sync reads the latest numbers of every linked post, as a job. Bardo also syncs by itself when it opens, as set under Settings › Metrics."
@@ -2484,6 +2489,10 @@ body = "Cuts, trims and caption edges land between the narration's words, so a c
 [tour.editor.undo]
 title = "Undo and redo"
 body = "Ctrl+Z undoes any edit and Ctrl+Y redoes it, and the cut saves itself as you go. Part 2 of the tour, from the same button, covers the mix, captions, framing, motion on stills, cut suggestions and rendering."
+
+[tour.editor.retention]
+title = "Retention over the cut"
+body = "Once this video is on YouTube and the channel's account is connected, Retention draws its audience retention curve over the cut and marks where viewers leave, with the scene and the sentence playing there. Click a drop to put the playhead on it."
 
 [tour.editor-more]
 name = "Editor tour, part 2"
@@ -3261,3 +3270,21 @@ too_few = "YouTube needs at least 3 chapters."
 too_short = "Chapter {n} is shorter than 10 seconds."
 cut_away = "The cut leaves out where chapter {n} starts."
 does_not_fit = "With the chapters, the description would pass YouTube's 5,000 characters or hold a < or >. Shorten the description or the titles."
+
+[retention]
+title = "Retention on YouTube"
+none = "Retention shows once this project's YouTube video has a retention curve: connect the channel's YouTube account on Accounts, and once YouTube reports it (2 to 3 days after the video goes up) a metrics sync reads it."
+unavailable = "No retention curve for this project's YouTube video yet."
+read = "Read by the metrics sync {when}."
+drops = "Where viewers leave"
+drops_hint = "The steepest drops of the curve: where viewers leave at least twice as fast as on average in this video, the five largest at most."
+no_drops = "No steep drop: viewers leave at an even pace."
+changed = "The cut changed since this video was rendered, so its scenes and lines no longer match the curve. The times are those of the published video."
+no_length = "The file this video was posted from is no longer on record, so the drops show as a share of the video."
+lost = "{lost} of viewers leave ({before} to {after})"
+at_share = "At {percent} of the video"
+scene = "Scene {n}"
+footage = "Imported footage"
+no_picture = "No picture: the video has ended"
+no_speech = "No narration plays here."
+show_in_editor = "Show in editor"

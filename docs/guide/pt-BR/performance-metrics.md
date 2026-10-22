@@ -29,6 +29,11 @@ Escolha uma publicação para abri-la ao lado da lista: o link, os números, qua
 - **Instagram** e **TikTok**: os números da publicação, depois que a conta do canal nessa rede está conectada; sem ela, não há contagem pública para ler.
 - **X** e **Kick**: o Bardo guarda o link e não lê números.
 
+<a id="drops"></a>
+## Onde o público sai
+
+Uma publicação do YouTube com curva de retenção também lista **Onde o público sai**: as quedas mais íngremes da curva, onde o público sai pelo menos duas vezes mais rápido que a média daquele vídeo, no máximo as cinco maiores, e as barras de cada queda ficam destacadas na curva. Cada queda mostra o tempo no vídeo, quanto do público sai ali e, enquanto o corte do projeto ainda toca como foi renderizado, a cena exibida e a frase falada. **Mostrar no editor** abre o [editor](editor.md#retention) do projeto com a curva sobre o corte e o cursor de reprodução nessa queda. Quando o corte mudou desde o render, a lista avisa e mantém os tempos do vídeo publicado. As quedas são calculadas a partir da curva a cada vez e nunca ficam guardadas.
+
 <a id="sync"></a>
 ## Sincronização
 

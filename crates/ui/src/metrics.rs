@@ -9,20 +9,32 @@
 //! Publish stage and the Performance screen share them; what they show
 //! comes from `bardo_app`.
 
-use bardo_app::bardo_domain::{Insights, JobState, Network, OwnerMetrics, PostRetention};
-use bardo_app::{Bardo, MetricsStatus, OwnerAccess, PublishedPost, SetupTarget, Text, UploadState};
+use std::rc::Rc;
+use std::time::Duration;
+
+use bardo_app::bardo_domain::{
+    Insights, JobState, Network, OwnerMetrics, PostRetention, RetentionDrop,
+};
+use bardo_app::{
+    Bardo, Control, CutRetention, MetricsStatus, OwnerAccess, PublishedPost, SetupTarget, Side,
+    Text, TourAnchor, UploadState,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Div, ElementId, SharedString, Stateful, div, px};
+use gpui_kit::{
+    AnyElement, App, Div, ElementId, ScrollHandle, SharedString, Stateful, Window, div, px,
+};
 
 use crate::appearance::look;
+use crate::editor::{drop_lost, drop_place, drop_when};
 use crate::guide;
 use crate::icons::Lucide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
+use crate::tour::Anchored as _;
 
 /// The most bars a chart draws: the latest syncs.
 const MAX_BARS: usize = 30;
@@ -459,8 +471,15 @@ fn money(bardo: &Bardo, owner: &OwnerMetrics, id: &str, cx: &App) -> Div {
 }
 
 /// The post's retention curve as bars from zero, the tallest point at the
-/// top, with the share still watching at the end.
-pub fn retention(bardo: &Bardo, retention: &PostRetention, id: &str, cx: &App) -> Option<Div> {
+/// top, with the share still watching at the end. A bar that covers part
+/// of one of `drops` takes the danger color.
+pub fn retention(
+    bardo: &Bardo,
+    retention: &PostRetention,
+    drops: &[RetentionDrop],
+    id: &str,
+    cx: &App,
+) -> Option<Div> {
     let points = retention.curve.thinned(RETENTION_BARS);
     if points.is_empty() {
         return None;
@@ -479,13 +498,21 @@ pub fn retention(bardo: &Bardo, retention: &PostRetention, id: &str, cx: &App) -
         .w_full()
         .items_end()
         .gap(px(1.))
-        .children(points.iter().map(|point| {
+        .children(points.iter().enumerate().map(|(index, point)| {
             let share = point.watch.ten_thousandths() as f32 / high as f32;
+            // The bar stands for the stretch since the bar before it.
+            let since = index
+                .checked_sub(1)
+                .map(|before| points[before].elapsed)
+                .unwrap_or_default();
+            let dropping = drops
+                .iter()
+                .any(|drop| drop.from < point.elapsed && drop.to > since);
             div()
                 .flex_1()
                 .h(px((height * share).max(1.)))
                 .rounded_t(t.radius.min(px(1.)))
-                .bg(t.accent_edge)
+                .bg(if dropping { t.danger } else { t.accent_edge })
         }));
     let end = retention.curve.at_end().map(|share| {
         bardo.text_with(
@@ -1006,7 +1033,14 @@ fn insights_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
 
 /// The post's numbers on YouTube, and on Instagram and TikTok through
 /// their account; on another network, that only the link is kept.
-pub fn post_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> Vec<AnyElement> {
+/// `over`, the curve over the project's cut, tints the drops on the curve.
+pub fn post_metrics(
+    bardo: &Bardo,
+    post: &PublishedPost,
+    over: Option<&CutRetention>,
+    id: &str,
+    cx: &App,
+) -> Vec<AnyElement> {
     let network = post.publication.network();
     if network.reads_insights() {
         // An upload not yet a post (a TikTok draft, a Reel processing)
@@ -1026,11 +1060,146 @@ pub fn post_metrics(bardo: &Bardo, post: &PublishedPost, id: &str, cx: &App) -> 
         .into_iter()
         .map(IntoElement::into_any_element)
         .collect();
+    let drops: Vec<RetentionDrop> = over
+        .filter(|over| Some(over.publication) == post.retention.as_ref().map(|r| r.publication))
+        .map(|over| over.drops.iter().map(|drop| drop.drop).collect())
+        .unwrap_or_default();
     shown.extend(
         post.retention
             .as_ref()
-            .and_then(|curve| retention(bardo, curve, id, cx))
+            .and_then(|curve| retention(bardo, curve, &drops, id, cx))
             .map(IntoElement::into_any_element),
     );
     shown
+}
+
+/// Opens the project's editor with the curve over the cut, at a drop's
+/// start when given.
+pub type ShowDrop = Rc<dyn Fn(Option<Duration>, &mut Window, &mut App)>;
+
+/// Where the post's viewers leave: each drop of its curve with its time,
+/// the viewers it loses and, while the cut lines up, the scene and
+/// sentence playing there; `show` adds "Show in editor". `tour` marks it
+/// for the Performance tour, in the scroll that holds it.
+pub fn drops(
+    bardo: &Bardo,
+    over: &CutRetention,
+    id: &str,
+    show: Option<ShowDrop>,
+    tour: Option<&ScrollHandle>,
+    cx: &App,
+) -> Div {
+    let t = look(cx).tokens;
+    let warning = if over.length.is_none() {
+        Some(Text::RetentionNoLength)
+    } else if !over.lined_up {
+        Some(Text::RetentionChanged)
+    } else {
+        None
+    };
+    let opens = show.clone().filter(|_| !over.lined_up).map(|show| {
+        Button::new(SharedString::from(format!("{id}-drops-show")))
+            .xsmall()
+            .outline()
+            .label(tr(bardo, Text::RetentionShowInEditor))
+            .on_click(move |_, window, cx| show(None, window, cx))
+    });
+    let rows = over.drops.iter().enumerate().map(|(index, drop)| {
+        let place = over.lined_up.then(|| drop_place(bardo, drop));
+        let at = drop.span.map(|(start, _)| start);
+        let button = show
+            .clone()
+            .filter(|_| over.lined_up && at.is_some())
+            .map(|show| {
+                Button::new(SharedString::from(format!("{id}-drop-show-{index}")))
+                    .xsmall()
+                    .ghost()
+                    .label(tr(bardo, Text::RetentionShowInEditor))
+                    .on_click(move |_, window, cx| show(at, window, cx))
+            });
+        h_flex()
+            .gap_2()
+            .items_start()
+            .child(
+                div()
+                    .mt_0p5()
+                    .min_w(px(18.))
+                    .h(px(18.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(t.radius.min(px(4.)))
+                    .border_1()
+                    .border_color(t.danger)
+                    .text_xs()
+                    .text_color(t.danger)
+                    .child((index + 1).to_string()),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(drop_when(bardo, drop)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(t.text2)
+                            .child(drop_lost(bardo, drop)),
+                    )
+                    .children(place.map(|(scene, sentence)| {
+                        div()
+                            .text_xs()
+                            .text_color(t.text2)
+                            .line_clamp(3)
+                            .child(format!("{scene} · {sentence}"))
+                    })),
+            )
+            .children(button)
+    });
+    let list = v_flex()
+        .gap_1p5()
+        .max_w(px(420.))
+        .child(
+            h_flex()
+                .gap_0p5()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child(tr(bardo, Text::RetentionDrops)),
+                )
+                .child(guide::info(
+                    bardo,
+                    hint_id(id, "drops"),
+                    tr(bardo, Text::RetentionDropsHint),
+                    guide::refs::PERFORMANCE_DROPS,
+                )),
+        )
+        .children(warning.map(|warning| kit::notice(Tone::Warning, tr(bardo, warning), cx)))
+        .when(over.drops.is_empty(), |list| {
+            list.child(
+                div()
+                    .text_xs()
+                    .text_color(t.text2)
+                    .child(tr(bardo, Text::RetentionNoDrops)),
+            )
+        })
+        .children(rows)
+        .children(opens.map(|button| h_flex().child(button)));
+    if let Some(scroll) = tour {
+        list.tour_anchor(
+            TourAnchor::Control(Control::PerformanceDrops),
+            Side::Left,
+            Some(scroll),
+        )
+    } else {
+        list
+    }
 }

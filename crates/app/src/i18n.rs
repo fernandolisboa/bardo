@@ -739,6 +739,7 @@ pub enum Text {
     EditorToolTransition,
     EditorSnapWords,
     EditorAiCuts,
+    EditorRetention,
     CutsSuggest,
     CutsSuggestAgain,
     CutsHint,
@@ -1393,6 +1394,22 @@ pub enum Text {
     MetricsRetentionHint,
     MetricsRetentionStart,
     MetricsRetentionEnd,
+    RetentionTitle,
+    RetentionNone,
+    RetentionUnavailable,
+    RetentionRead,
+    RetentionDrops,
+    RetentionDropsHint,
+    RetentionNoDrops,
+    RetentionChanged,
+    RetentionNoLength,
+    RetentionLost,
+    RetentionAtShare,
+    RetentionScene,
+    RetentionFootage,
+    RetentionNoPicture,
+    RetentionNoSpeech,
+    RetentionShowInEditor,
     MetricsHours,
     MetricsMinutes,
     MetricsPercent,
@@ -2862,6 +2879,7 @@ impl Text {
             Text::EditorToolTransition => "editor.tool.transition",
             Text::EditorSnapWords => "editor.tool.snap_words",
             Text::EditorAiCuts => "editor.tool.ai_cuts",
+            Text::EditorRetention => "editor.tool.retention",
             Text::CutsSuggest => "editor.cuts.suggest",
             Text::CutsSuggestAgain => "editor.cuts.suggest_again",
             Text::CutsHint => "editor.cuts.hint",
@@ -3482,6 +3500,22 @@ impl Text {
             Text::MetricsRetentionHint => "metrics.retention_hint",
             Text::MetricsRetentionStart => "metrics.retention_start",
             Text::MetricsRetentionEnd => "metrics.retention_end",
+            Text::RetentionTitle => "retention.title",
+            Text::RetentionNone => "retention.none",
+            Text::RetentionUnavailable => "retention.unavailable",
+            Text::RetentionRead => "retention.read",
+            Text::RetentionDrops => "retention.drops",
+            Text::RetentionDropsHint => "retention.drops_hint",
+            Text::RetentionNoDrops => "retention.no_drops",
+            Text::RetentionChanged => "retention.changed",
+            Text::RetentionNoLength => "retention.no_length",
+            Text::RetentionLost => "retention.lost",
+            Text::RetentionAtShare => "retention.at_share",
+            Text::RetentionScene => "retention.scene",
+            Text::RetentionFootage => "retention.footage",
+            Text::RetentionNoPicture => "retention.no_picture",
+            Text::RetentionNoSpeech => "retention.no_speech",
+            Text::RetentionShowInEditor => "retention.show_in_editor",
             Text::MetricsHours => "metrics.hours",
             Text::MetricsMinutes => "metrics.minutes",
             Text::MetricsPercent => "metrics.percent",
@@ -4839,6 +4873,7 @@ mod tests {
             Text::EditorToolTransition,
             Text::EditorSnapWords,
             Text::EditorAiCuts,
+            Text::EditorRetention,
             Text::CutsSuggest,
             Text::CutsSuggestAgain,
             Text::CutsHint,
@@ -5562,6 +5597,22 @@ mod tests {
         texts.push(Text::MetricsRetentionHint);
         texts.push(Text::MetricsRetentionStart);
         texts.push(Text::MetricsRetentionEnd);
+        texts.push(Text::RetentionTitle);
+        texts.push(Text::RetentionNone);
+        texts.push(Text::RetentionUnavailable);
+        texts.push(Text::RetentionRead);
+        texts.push(Text::RetentionDrops);
+        texts.push(Text::RetentionDropsHint);
+        texts.push(Text::RetentionNoDrops);
+        texts.push(Text::RetentionChanged);
+        texts.push(Text::RetentionNoLength);
+        texts.push(Text::RetentionLost);
+        texts.push(Text::RetentionAtShare);
+        texts.push(Text::RetentionScene);
+        texts.push(Text::RetentionFootage);
+        texts.push(Text::RetentionNoPicture);
+        texts.push(Text::RetentionNoSpeech);
+        texts.push(Text::RetentionShowInEditor);
         texts.push(Text::MetricsHours);
         texts.push(Text::MetricsMinutes);
         texts.push(Text::MetricsPercent);

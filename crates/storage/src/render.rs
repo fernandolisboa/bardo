@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use bardo_domain::{
     Bitrate, Loudness, MaxDuration, MeasuredLoudness, NetworkAccountId, ProfileId, Render,
-    RenderId, RenderPreset, RenderRepository, RepositoryError, Resolution, VideoProjectId,
+    RenderId, RenderPreset, RenderRepository, RenderedCut, RepositoryError, Resolution,
+    VideoProjectId,
 };
-use rusqlite::params;
+use rusqlite::{OptionalExtension as _, params};
 use uuid::Uuid;
 
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
@@ -38,6 +39,7 @@ struct RenderRow {
     integrated_cents: Option<i64>,
     true_peak_cents: Option<i64>,
     cut: String,
+    timing: Option<String>,
     rendered_at: i64,
 }
 
@@ -81,6 +83,7 @@ impl RenderRow {
             size_bytes: u64::try_from(self.size_bytes).map_err(boxed)?,
             loudness,
             cut: self.cut,
+            timing: self.timing,
             rendered_at: from_unix_millis(self.rendered_at),
         })
     }
@@ -91,11 +94,13 @@ impl RenderRepository for Database {
         let conn = self.conn();
         let mut statement = conn
             .prepare(
-                "SELECT id, project_id, profile_id, account_id, network, aspect, resolution, codec,
-                        bitrate_kbps, max_duration_secs, loudness_tenths, file, encoder,
-                        duration_ns, size_bytes, integrated_cents, true_peak_cents, cut,
+                "SELECT render.id, render.project_id, profile_id, account_id, network,
+                        render.aspect, resolution, codec, bitrate_kbps, max_duration_secs,
+                        loudness_tenths, file, encoder, duration_ns, size_bytes,
+                        integrated_cents, true_peak_cents, render.cut, rendered_cut.timing,
                         rendered_at
-                 FROM render WHERE project_id = ?1",
+                 FROM render LEFT JOIN rendered_cut ON rendered_cut.render_id = render.id
+                 WHERE render.project_id = ?1",
             )
             .map_err(boxed)?;
         let rows = statement
@@ -119,7 +124,8 @@ impl RenderRepository for Database {
                     integrated_cents: row.get(15)?,
                     true_peak_cents: row.get(16)?,
                     cut: row.get(17)?,
-                    rendered_at: row.get(18)?,
+                    timing: row.get(18)?,
+                    rendered_at: row.get(19)?,
                 })
             })
             .map_err(boxed)?
@@ -141,49 +147,105 @@ impl RenderRepository for Database {
         let loudness = render
             .loudness
             .filter(|loudness| loudness.integrated.is_finite() && loudness.true_peak.is_finite());
-        self.conn()
-            .execute(
-                "INSERT INTO render (id, project_id, profile_id, account_id, network, aspect,
-                                     resolution, codec, bitrate_kbps, max_duration_secs,
-                                     loudness_tenths, file, encoder, duration_ns, size_bytes,
-                                     integrated_cents, true_peak_cents, cut, rendered_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                         ?17, ?18, ?19)
-                 ON CONFLICT (project_id, account_id) DO UPDATE SET
-                     id = excluded.id, network = excluded.network, aspect = excluded.aspect,
-                     resolution = excluded.resolution, codec = excluded.codec,
-                     bitrate_kbps = excluded.bitrate_kbps,
-                     max_duration_secs = excluded.max_duration_secs,
-                     loudness_tenths = excluded.loudness_tenths, file = excluded.file,
-                     encoder = excluded.encoder, duration_ns = excluded.duration_ns,
-                     size_bytes = excluded.size_bytes,
-                     integrated_cents = excluded.integrated_cents,
-                     true_peak_cents = excluded.true_peak_cents, cut = excluded.cut,
-                     rendered_at = excluded.rendered_at",
-                params![
-                    render.id.to_string(),
-                    render.project.to_string(),
-                    render.owner.to_string(),
-                    render.account.to_string(),
-                    render.network.code(),
-                    preset.aspect.code(),
-                    i64::from(preset.resolution.short_side()),
-                    preset.codec.code(),
-                    i64::from(preset.bitrate.kbps()),
-                    i64::from(preset.max_duration.seconds()),
-                    i64::from(preset.loudness.tenths()),
-                    render.file,
-                    render.encoder,
-                    duration,
-                    size,
-                    loudness.map(|loudness| cents(loudness.integrated)),
-                    loudness.map(|loudness| cents(loudness.true_peak)),
-                    render.cut,
-                    to_unix_millis(render.rendered_at),
-                ],
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        tx.execute(
+            "INSERT INTO render (id, project_id, profile_id, account_id, network, aspect,
+                                 resolution, codec, bitrate_kbps, max_duration_secs,
+                                 loudness_tenths, file, encoder, duration_ns, size_bytes,
+                                 integrated_cents, true_peak_cents, cut, rendered_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17, ?18, ?19)
+             ON CONFLICT (project_id, account_id) DO UPDATE SET
+                 id = excluded.id, network = excluded.network, aspect = excluded.aspect,
+                 resolution = excluded.resolution, codec = excluded.codec,
+                 bitrate_kbps = excluded.bitrate_kbps,
+                 max_duration_secs = excluded.max_duration_secs,
+                 loudness_tenths = excluded.loudness_tenths, file = excluded.file,
+                 encoder = excluded.encoder, duration_ns = excluded.duration_ns,
+                 size_bytes = excluded.size_bytes,
+                 integrated_cents = excluded.integrated_cents,
+                 true_peak_cents = excluded.true_peak_cents, cut = excluded.cut,
+                 rendered_at = excluded.rendered_at",
+            params![
+                render.id.to_string(),
+                render.project.to_string(),
+                render.owner.to_string(),
+                render.account.to_string(),
+                render.network.code(),
+                preset.aspect.code(),
+                i64::from(preset.resolution.short_side()),
+                preset.codec.code(),
+                i64::from(preset.bitrate.kbps()),
+                i64::from(preset.max_duration.seconds()),
+                i64::from(preset.loudness.tenths()),
+                render.file,
+                render.encoder,
+                duration,
+                size,
+                loudness.map(|loudness| cents(loudness.integrated)),
+                loudness.map(|loudness| cents(loudness.true_peak)),
+                render.cut,
+                to_unix_millis(render.rendered_at),
+            ],
+        )
+        .map_err(boxed)?;
+        tx.execute(
+            "INSERT INTO rendered_cut (render_id, project_id, length_ns, aspect, cut, timing)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (render_id) DO UPDATE SET
+                 length_ns = excluded.length_ns, aspect = excluded.aspect,
+                 cut = excluded.cut, timing = excluded.timing",
+            params![
+                render.id.to_string(),
+                render.project.to_string(),
+                duration,
+                preset.aspect.code(),
+                render.cut,
+                render.timing,
+            ],
+        )
+        .map_err(boxed)?;
+        // What earlier files were cut from goes once nothing points to them.
+        tx.execute(
+            "DELETE FROM rendered_cut
+             WHERE project_id = ?1
+               AND render_id NOT IN (SELECT id FROM render WHERE project_id = ?1)
+               AND render_id NOT IN (SELECT render_id FROM publication WHERE project_id = ?1)
+               AND render_id NOT IN (SELECT render_id FROM export WHERE project_id = ?1)",
+            [render.project.to_string()],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)
+    }
+
+    fn rendered_cut(&self, render: RenderId) -> Result<Option<RenderedCut>, RepositoryError> {
+        let row = self
+            .conn()
+            .query_row(
+                "SELECT length_ns, aspect, cut, timing FROM rendered_cut WHERE render_id = ?1",
+                [render.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
             )
+            .optional()
             .map_err(boxed)?;
-        Ok(())
+        row.map(|(length, aspect, cut, timing)| {
+            Ok(RenderedCut {
+                render,
+                length: Duration::from_nanos(u64::try_from(length).map_err(boxed)?),
+                aspect: aspect.parse().map_err(boxed)?,
+                cut,
+                timing,
+            })
+        })
+        .transpose()
     }
 }
 
@@ -194,7 +256,8 @@ mod tests {
     use bardo_domain::{
         AspectRatio, Channel, ChannelDetails, ChannelDraft, ChannelRepository, Network,
         NetworkAccount, NetworkAccountDetails, NetworkAccountDraft, NetworkAccountRepository,
-        Niche, ProfileRepository, Theme, ThemeIdea, ThemeRepository, UiLanguage, UserProfile,
+        Niche, PostLink, ProfileRepository, Publication, PublicationId, PublicationKind,
+        PublicationRepository, Theme, ThemeIdea, ThemeRepository, UiLanguage, UserProfile,
         VideoCodec, VideoProject,
     };
 
@@ -266,6 +329,7 @@ mod tests {
                 true_peak: -1.37,
             }),
             cut: "9f2c1a".into(),
+            timing: Some("0011223344556677".into()),
             rendered_at: time(at),
         }
     }
@@ -310,5 +374,112 @@ mod tests {
         };
         db.save_render(&silent).unwrap();
         assert_eq!(db.renders(project.id).unwrap()[0].loudness, None);
+    }
+
+    fn cut_of(render: &Render) -> RenderedCut {
+        RenderedCut {
+            render: render.id,
+            length: render.duration,
+            aspect: render.preset.aspect,
+            cut: render.cut.clone(),
+            timing: render.timing.clone(),
+        }
+    }
+
+    #[test]
+    fn a_render_keeps_what_it_was_cut_from() {
+        let db = Database::open_in_memory().unwrap();
+        let (project, accounts) = project(&db);
+        let first = render(&project, &accounts[1], 1_000);
+        db.save_render(&first).unwrap();
+        assert_eq!(db.rendered_cut(first.id).unwrap(), Some(cut_of(&first)));
+        assert_eq!(
+            db.renders(project.id).unwrap(),
+            std::slice::from_ref(&first)
+        );
+        let untimed = Render {
+            timing: None,
+            ..render(&project, &accounts[0], 2_000)
+        };
+        db.save_render(&untimed).unwrap();
+        assert_eq!(db.rendered_cut(untimed.id).unwrap().unwrap().timing, None);
+        assert_eq!(db.rendered_cut(RenderId::new()).unwrap(), None);
+    }
+
+    #[test]
+    fn an_earlier_files_cut_stays_while_a_post_or_an_export_points_to_it() {
+        let db = Database::open_in_memory().unwrap();
+        let (project, accounts) = project(&db);
+        let posted = render(&project, &accounts[1], 1_000);
+        db.save_render(&posted).unwrap();
+        db.save_publication(&Publication {
+            id: PublicationId::new(),
+            owner: project.owner,
+            project: project.id,
+            account: accounts[1].id,
+            network: Network::YouTube,
+            render: posted.id,
+            link: Some(PostLink::parse(Network::YouTube, "https://youtu.be/dQw4w9WgXcQ").unwrap()),
+            kind: PublicationKind::Manual,
+            posted_at: time(2_000),
+            linked_at: time(2_000),
+            checked_at: None,
+            missing_since: None,
+            insights_id: None,
+        })
+        .unwrap();
+        let exported = render(&project, &accounts[0], 1_000);
+        db.save_render(&exported).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO export (project_id, network, profile_id, account_id, package,
+                                     video_file, render_id, post, exported_at)
+                 VALUES (?1, 'tiktok', ?2, ?3, 'pkg', 'video.mp4', ?4, '{}', 0)",
+                params![
+                    project.id.to_string(),
+                    project.owner.to_string(),
+                    accounts[0].id.to_string(),
+                    exported.id.to_string()
+                ],
+            )
+            .unwrap();
+        // Both accounts render again: the posted and exported files stay.
+        let again = render(&project, &accounts[1], 5_000);
+        db.save_render(&again).unwrap();
+        db.save_render(&render(&project, &accounts[0], 5_000))
+            .unwrap();
+        assert_eq!(db.rendered_cut(posted.id).unwrap(), Some(cut_of(&posted)));
+        assert_eq!(
+            db.rendered_cut(exported.id).unwrap(),
+            Some(cut_of(&exported))
+        );
+        // A file nothing points to is let go at the next render.
+        db.save_render(&render(&project, &accounts[1], 9_000))
+            .unwrap();
+        assert_eq!(db.rendered_cut(again.id).unwrap(), None);
+        assert!(db.rendered_cut(posted.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn upgrading_keeps_what_the_files_rendered_before_were_cut_from() {
+        let db = Database::open_in_memory().unwrap();
+        let (project, accounts) = project(&db);
+        let before = render(&project, &accounts[1], 1_000);
+        db.save_render(&before).unwrap();
+        {
+            // As the database was before migration 49.
+            let mut conn = db.conn();
+            conn.execute_batch("DROP TABLE rendered_cut; PRAGMA user_version = 48;")
+                .unwrap();
+            crate::migrations::run(&mut conn).unwrap();
+        }
+        assert_eq!(
+            db.rendered_cut(before.id).unwrap(),
+            Some(RenderedCut {
+                timing: None,
+                ..cut_of(&before)
+            })
+        );
+        assert_eq!(db.renders(project.id).unwrap()[0].timing, None);
     }
 }

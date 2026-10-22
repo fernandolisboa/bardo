@@ -29,6 +29,11 @@ Pick a post to open it beside the list: its link, its numbers, how each moved si
 - **Instagram** and **TikTok**: the post's numbers, once the channel's account on that network is connected; there is no public count to read without it.
 - **X** and **Kick**: Bardo keeps the link and reads no numbers.
 
+<a id="drops"></a>
+## Where viewers leave
+
+A YouTube post with a retention curve also lists **Where viewers leave**: the curve's steepest drops, where viewers leave at least twice as fast as on average in that video, the five largest at most, and the bars of each drop are tinted on the curve. Each drop gives its time in the video, how many viewers leave there and, while the project's cut still plays as it was rendered, the scene shown and the sentence spoken. **Show in editor** opens the project's [editor](editor.md#retention) with the curve over the cut and the playhead on that drop. When the cut changed since the render, the list says so and keeps the times of the published video. The drops are worked out from the curve each time and never stored.
+
 <a id="sync"></a>
 ## Syncing
 

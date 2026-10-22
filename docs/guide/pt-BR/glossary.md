@@ -143,6 +143,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Insights do post**: os números do dono para um post do Instagram ou do TikTok, lidos pela conta conectada.
 
+**Queda de retenção**: um trecho da curva de retenção de um vídeo do YouTube onde o público sai pelo menos duas vezes mais rápido que a média daquele vídeo. O Bardo marca as cinco maiores sobre o corte.
+
 **Sincronização de métricas**: a tarefa que lê os números dos seus posts, quando você pede e quando o Bardo abre.
 
 **Tarefa**: trabalho longo (uma narração, imagens, um render, um envio) que roda em segundo plano, com progresso, cancelamento e retomada.

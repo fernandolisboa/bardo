@@ -35,6 +35,7 @@ mod proxies;
 mod publications;
 mod render;
 mod research;
+mod retention;
 mod scenes;
 mod scheduler;
 mod schedules;
@@ -146,6 +147,7 @@ pub use render::{
     render_job_files,
 };
 pub use research::{NicheResearchView, NicheResult, NicheRow, ResearchError};
+pub use retention::{CutRetention, DropView, PostedRetention};
 pub use scenes::{SceneError, ScenesView};
 pub use scheduler::{MissedPost, MissedPostError};
 pub use schedules::{ScheduleError, ScheduleResult, ScheduleUpdate};

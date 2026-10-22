@@ -104,6 +104,19 @@ impl ProjectsScreen {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let bardo = self.bardo.read(cx);
+        let key = (
+            id,
+            bardo.latest_sync_job().map(|job| (job.id(), job.state())),
+        );
+        if self
+            .post_retention
+            .as_ref()
+            .is_none_or(|(read, _)| *read != key)
+        {
+            let over = bardo.project_retention(id).ok().flatten();
+            self.post_retention = Some((key, over));
+        }
         match self.bardo.read(cx).export_view(id) {
             Ok(view) => {
                 self.export_summary = Some(view.summary());
@@ -1562,7 +1575,22 @@ impl ProjectsScreen {
             );
         }
         section = section.children(error);
-        section = section.children(metrics::post_metrics(bardo, post, "post", cx));
+        let over = self
+            .post_retention
+            .as_ref()
+            .and_then(|(_, over)| over.as_ref())
+            .filter(|over| over.publication == publication.id);
+        section = section.children(metrics::post_metrics(bardo, post, over, "post", cx));
+        if let Some(over) = over {
+            let screen = cx.entity().downgrade();
+            let project = over.project;
+            let show: metrics::ShowDrop = Rc::new(move |at, _, cx| {
+                let _ = screen.update(cx, |_, cx| {
+                    cx.emit(crate::performance::OpenRetention { project, at })
+                });
+            });
+            section = section.child(metrics::drops(bardo, over, "post", Some(show), None, cx));
+        }
         if post.is_synced() {
             let status = &view.metrics;
             section = section

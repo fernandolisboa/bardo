@@ -160,6 +160,9 @@ impl EditorScreen {
     /// Shows or hides the pins and the list; nothing is discarded.
     pub(super) fn toggle_cuts(&mut self, cx: &mut Context<Self>) {
         self.cuts.on = !self.cuts.on;
+        if self.cuts.on && self.retention.on {
+            self.toggle_retention(cx);
+        }
         if !self.cuts.on {
             self.cuts.focused = None;
             self.cuts.ask = None;

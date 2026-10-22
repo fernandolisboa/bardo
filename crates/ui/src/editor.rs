@@ -17,7 +17,10 @@
 //! the design's tokens are below, and amber marks only the playhead, the
 //! selection and the primary button.
 
+mod retention;
 mod suggestions;
+
+pub(crate) use retention::{drop_lost, drop_place, drop_when};
 mod timeline;
 
 use std::cell::Cell;
@@ -173,6 +176,7 @@ pub struct EditorScreen {
     /// Files the last import refused, by name, and why.
     import_errors: Vec<(String, Text)>,
     cuts: suggestions::CutsState,
+    retention: retention::RetentionState,
     /// The inspector's body, so a tour can scroll a control into view.
     inspector_scroll: ScrollHandle,
     _poll: Task<()>,
@@ -216,7 +220,7 @@ impl EditorScreen {
                 _ => {}
             },
         )];
-        Self {
+        let mut screen = Self {
             bardo,
             editor,
             error,
@@ -233,10 +237,13 @@ impl EditorScreen {
             import_task: None,
             import_errors: Vec::new(),
             cuts: suggestions::CutsState::default(),
+            retention: retention::RetentionState::default(),
             inspector_scroll: ScrollHandle::new(),
             _poll: poll,
             _subscriptions: subscriptions,
-        }
+        };
+        screen.load_retention(cx);
+        screen
     }
 
     /// The selected caption: its index and text.
@@ -332,7 +339,8 @@ impl EditorScreen {
         self.reload(cx);
     }
 
-    /// Reads the editor again now, for media imported meanwhile.
+    /// Reads the editor again now, for media imported meanwhile, and the
+    /// YouTube post's curve, for a metrics sync.
     fn reload(&mut self, cx: &mut Context<Self>) {
         let Self { bardo, editor, .. } = self;
         if let Some(editor) = editor.as_mut() {
@@ -342,6 +350,7 @@ impl EditorScreen {
                 .err()
                 .map(|error| error.message());
         }
+        self.load_retention(cx);
         cx.notify();
     }
 
@@ -2778,6 +2787,7 @@ impl Render for EditorScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.advance(window, cx);
         self.sync_caption_input(window, cx);
+        self.refresh_retention(cx);
         // A drag whose clip left the preview (playback moved on, the clip
         // changed) never sees its mouse-up: drop it without an edit.
         if let Some(drag) = self.crop_drag
@@ -2822,7 +2832,9 @@ impl Render for EditorScreen {
             .min_h_0()
             .child(self.render_bin(Some(&view), cx))
             .child(self.render_preview(cx))
-            .child(if self.cuts.on && view.timeline.is_some() {
+            .child(if self.retention.on && view.timeline.is_some() {
+                self.render_retention_panel(cx)
+            } else if self.cuts.on && view.timeline.is_some() {
                 self.render_cuts_panel(cx)
             } else {
                 self.render_inspector(cx)

@@ -1112,6 +1112,7 @@ split = "Dividir (S)"
 transition = "Transição (T)"
 snap_words = "Encaixar nas palavras"
 ai_cuts = "Sugestões de corte da IA"
+retention = "Retenção"
 duck_music = "Atenuar música sob a narração"
 zoom_in = "Aproximar"
 zoom_out = "Afastar"
@@ -2273,6 +2274,10 @@ body = "Cada publicação vinculada a um projeto do canal, da mais nova para a m
 title = "Os números de uma publicação"
 body = "Escolha uma publicação para ver os números dela, quanto mudaram desde a sincronização anterior e o histórico. Com a conta do YouTube do canal conectada, entram também visualizações engajadas, tempo de exibição, retenção e receita."
 
+[tour.performance.drops]
+title = "Onde o público sai"
+body = "As quedas mais íngremes da curva de retenção de uma publicação do YouTube, cada uma com a cena e a frase do corte que tocam ali. Mostrar no editor abre o editor do projeto nessa queda."
+
 [tour.performance.sync]
 title = "Sincronizar agora"
 body = "Uma sincronização lê os números mais recentes de cada publicação vinculada, como tarefa. O Bardo também sincroniza sozinho quando abre, conforme Configurações › Métricas."
@@ -2484,6 +2489,10 @@ body = "Cortes, aparas e bordas de legenda caem entre as palavras da narração,
 [tour.editor.undo]
 title = "Desfazer e refazer"
 body = "Ctrl+Z desfaz qualquer edição e Ctrl+Y refaz, e o corte se salva sozinho enquanto você edita. A parte 2 do tour, no mesmo botão, mostra a mixagem, as legendas, o enquadramento, o movimento nas imagens, as sugestões de corte e o render."
+
+[tour.editor.retention]
+title = "Retenção sobre o corte"
+body = "Quando este vídeo está no YouTube e a conta do canal está conectada, Retenção desenha a curva de retenção do público sobre o corte e marca onde o público sai, com a cena e a frase que tocam ali. Clique numa queda para levar o cursor de reprodução até ela."
 
 [tour.editor-more]
 name = "Tour do editor, parte 2"
@@ -3261,3 +3270,21 @@ too_few = "O YouTube exige pelo menos 3 capítulos."
 too_short = "O capítulo {n} tem menos de 10 segundos."
 cut_away = "O corte deixa de fora o início do capítulo {n}."
 does_not_fit = "Com os capítulos, a descrição passaria dos 5.000 caracteres do YouTube ou teria um < ou >. Encurte a descrição ou os títulos."
+
+[retention]
+title = "Retenção no YouTube"
+none = "A retenção aparece quando o vídeo deste projeto no YouTube tem uma curva de retenção: conecte a conta do YouTube do canal em Contas e, quando o YouTube a informar (2 a 3 dias depois de o vídeo subir), uma sincronização de métricas a lê."
+unavailable = "Ainda não há curva de retenção do vídeo deste projeto no YouTube."
+read = "Lida pela sincronização de métricas {when}."
+drops = "Onde o público sai"
+drops_hint = "As quedas mais íngremes da curva: onde o público sai pelo menos duas vezes mais rápido que a média deste vídeo, no máximo as cinco maiores."
+no_drops = "Nenhuma queda íngreme: o público sai em ritmo constante."
+changed = "O corte mudou desde que este vídeo foi renderizado, então as cenas e falas não batem mais com a curva. Os tempos são os do vídeo publicado."
+no_length = "O arquivo de onde este vídeo foi publicado não está mais registrado, então as quedas aparecem como parte do vídeo."
+lost = "{lost} do público sai ({before} para {after})"
+at_share = "Em {percent} do vídeo"
+scene = "Cena {n}"
+footage = "Mídia importada"
+no_picture = "Sem imagem: o vídeo já acabou"
+no_speech = "Nenhuma narração toca aqui."
+show_in_editor = "Mostrar no editor"
