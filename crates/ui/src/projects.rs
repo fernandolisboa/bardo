@@ -55,6 +55,7 @@ mod music;
 mod render;
 mod scenes;
 mod upload;
+mod versions;
 mod youtube;
 
 /// How often the screen checks the job queue for changes, and moves the
@@ -159,6 +160,11 @@ pub struct ProjectsScreen {
     scenes_ask: Option<(scenes::SceneAction, SpendEstimate)>,
     /// A script generation held back at a budget.
     script_ask: Option<SpendEstimate>,
+    /// Versions in other languages, at the Script stage.
+    versions: Option<bardo_app::VersionsView>,
+    versions_error: Option<Text>,
+    /// A version held back at a budget: the channel, and what it costs.
+    version_ask: Option<(ChannelId, SpendEstimate)>,
     /// A narration held back at a budget.
     narration_ask: Option<SpendEstimate>,
     /// Choosing or reading a recording to import; dropping it stops
@@ -447,6 +453,9 @@ impl ProjectsScreen {
             confirm_replan: false,
             scenes_ask: None,
             script_ask: None,
+            versions: None,
+            versions_error: None,
+            version_ask: None,
             narration_ask: None,
             choosing_recording: None,
             reading_recording: false,
@@ -657,6 +666,8 @@ impl ProjectsScreen {
         self.confirm_replan = false;
         self.scenes_ask = None;
         self.script_ask = None;
+        self.versions_error = None;
+        self.version_ask = None;
         self.narration_ask = None;
         self.choosing_recording = None;
         self.reading_recording = false;
@@ -936,9 +947,11 @@ impl ProjectsScreen {
             self.export_summary = None;
             self.thumbnail = None;
             self.chapters = None;
+            self.versions = None;
             return;
         };
         self.load_narration(id, cx);
+        self.load_versions(id, cx);
         self.load_scenes(id, cx);
         self.load_music(id, window, cx);
         self.load_render(id, cx);
@@ -1397,7 +1410,7 @@ impl ProjectsScreen {
             .map(|script| {
                 self.render_provenance(
                     script.source().generation(),
-                    TemplateKind::Script,
+                    view.template.body.kind(),
                     PromptShown::Source,
                     cx,
                 )
@@ -1406,6 +1419,8 @@ impl ProjectsScreen {
         let music = self
             .render_music(cx)
             .map(|music| tagged(TourAnchor::Control(Control::MusicPrompt), music));
+        let version_of = self.render_version_of(cx);
+        let versions = self.render_versions(cx);
         let bardo = self.bardo.read(cx);
         let estimate =
             estimate_note(bardo, &view.estimate, Text::EstimateCost, cx).map(|estimate| {
@@ -1548,12 +1563,14 @@ impl ProjectsScreen {
         });
 
         std::iter::once(title_row.into_any_element())
+            .chain(version_of)
             .chain(job)
             .chain(ask)
             .chain(pending)
             .chain(Some(body))
             .chain(provenance)
             .chain(music)
+            .chain(versions)
             .collect()
     }
 
@@ -1657,12 +1674,17 @@ impl ProjectsScreen {
                             })),
                     ),
             )
-            .child(self.render_provenance(
-                generation,
-                TemplateKind::Script,
-                PromptShown::Pending,
-                cx,
-            ))
+            .child(
+                self.render_provenance(
+                    generation,
+                    // A version's adaptation came from the localization template.
+                    self.view
+                        .as_ref()
+                        .map_or(TemplateKind::Script, |view| view.template.body.kind()),
+                    PromptShown::Pending,
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 

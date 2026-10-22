@@ -2342,12 +2342,12 @@ title = "Where it came from"
 body = "Details tells which model wrote the script, from which template version and with how many tokens. Show prompt shows exactly what was sent."
 
 [tour.script.music]
-title = "The music prompt"
-body = "Claude writes a prompt for the video's music from the channel, the theme and the video's length. Edit it as you like: the music is made from it, here or in a tool of your own."
+title = "The music"
+body = "Claude writes a prompt for the video's music from the channel, the theme and the video's length. Edit it, then Generate music has ElevenLabs Music compose a track to review, or make the music in a tool of your own."
 
-[tour.script.track]
-title = "Music from the prompt"
-body = "Generate music has ElevenLabs Music compose an instrumental track as long as the narration. Play it, then Use this track puts it on the music track from 0:00, or Discard drops it. A track of your own can still be imported in the editor."
+[tour.script.versions]
+title = "Versions in other languages"
+body = "Make the video again for a channel in another language or country. Claude adapts the script sentence by sentence; the version keeps these scenes and cut and gets its own narration."
 
 [tour.narration]
 name = "Narration tour"
@@ -2394,6 +2394,10 @@ body = "Pending shows only the scenes with something left, an image to draw or t
 [tour.scenes.replan]
 title = "Plan again"
 body = "When the narration is made again, the scenes are marked out of date, since their times no longer match. Plan again replaces them, and asks first when that would discard images or clips."
+
+[tour.scenes.place]
+title = "Place the scenes"
+body = "On a version, once its narration is made, Place scenes moves each scene from the original to the new time of its sentence and builds the cut as the original had it."
 
 [tour.clips]
 name = "Clips tour"

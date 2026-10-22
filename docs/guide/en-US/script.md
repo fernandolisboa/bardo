@@ -60,3 +60,18 @@ The new track waits on the card, marked **New track**, with its length and model
 **Generate another** makes a new track that takes the place of the one waiting for review; the track in use stays until you use another. A track you used is a media file of the project, so it is also in the editor's Media tab ([The editor](editor.md)), where you can place it again by hand. A track waiting for review is not.
 
 Each track keeps the prompt, the length asked for, the model and the job that made it. ElevenLabs signs it with C2PA content credentials, which say it was made by AI. A job that failed shows ElevenLabs' reason: no Music access on the plan, a key without the Music permission, credits used up, or a prompt ElevenLabs refused (for example one that names an artist; ElevenLabs suggests another wording).
+
+<a id="versions"></a>
+## Versions in other languages
+
+At the end of the Script stage, **Versions in other languages** makes the same video again for another channel of yours whose language or country differs, such as an English channel for the United States and a Portuguese one for Brazil. The video needs its narration and its scenes planned on that narration first. Each channel it can go to is listed with its language, country and narrator (the channel's default persona) and what the adaptation costs; **Make version** starts the job.
+
+Claude adapts rather than translates, from the **localization template** ([Templates](templates.md#kinds)): idioms, units, currencies, dates and references for the new country, the facts kept, each sentence about as long to say. It answers with a title and one adapted sentence for each sentence of the narration, so every scene can follow its sentence; any other answer fails the job and nothing is made. Only then does the version start as a project of that channel, with:
+
+- the adapted script and title, for you to review and edit like any script;
+- copies of the scene plan (current images and clips, prompts and video model picks) and of the project's media and generated music, each with where it came from;
+- what the cut did with them, for when its scenes are placed ([Placing the scenes on a version](scenes.md#place)).
+
+The files are copied into the version's own folder, so removing one project never touches the other. Narration, captions, metadata, thumbnail, chapters, renders and publications are not copied: the version makes its own, for its own audience, as YouTube expects of reused content. The version keeps the original's video format, Short or long. Only the adaptation is billed, on the new project ([Costs](costs.md)).
+
+A channel holds one version of a video; once made, it is listed under **Versions made** with **Open**. On the version, the Script stage says what it is a version of, and **Regenerate** adapts the original's sentences again; the new adaptation waits for review like any new script. Removing the original keeps its versions.

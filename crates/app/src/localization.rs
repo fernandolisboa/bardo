@@ -1300,7 +1300,10 @@ mod tests {
         assert_eq!(version.title, "The Probe That Never Came Home");
         // The source's channel makes long videos; the English one short.
         assert_eq!(version.format, Some(bardo_domain::VideoFormat::Long));
-        assert_eq!(app.video_projects(channel.id).unwrap(), [version.clone()]);
+        assert_eq!(
+            app.video_projects(channel.id).unwrap(),
+            std::slice::from_ref(version)
+        );
 
         let script = app.script(version.id).unwrap().script.unwrap();
         assert_eq!(script.text().as_str(), ADAPTED.join(" "));

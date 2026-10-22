@@ -773,7 +773,7 @@ mod tests {
         );
         assert_eq!(
             db.versions(setup.source.id).unwrap(),
-            [version.project.clone()]
+            std::slice::from_ref(&version.project)
         );
         assert_eq!(db.localization(setup.source.id).unwrap(), None);
     }
