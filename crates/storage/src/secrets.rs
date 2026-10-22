@@ -201,6 +201,55 @@ fn malformed(what: &str) -> SecretStoreError {
 #[error("{0}")]
 struct StoreFailure(String);
 
+/// How many times a change to a credential is made before it counts as not
+/// kept, and how many reads after each one may still show the earlier
+/// state (`kept`).
+const CHANGE_ATTEMPTS: u32 = 4;
+const SETTLE_READS: u32 = 20;
+
+/// How long to wait between those reads.
+#[cfg_attr(not(windows), allow(dead_code))]
+const SETTLE_PAUSE: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// Makes a change through `apply` and returns once `shows` reads it back,
+/// making it again when a few reads in a row (`SETTLE_READS`, `pause`
+/// between them) do not show it. False when it never shows.
+///
+/// On GitHub's Windows runners, a read right after a successful
+/// `CredWriteW` or `CredDeleteW` now and then returned the state from
+/// before it (#200): in about one run in ten of the storage tests, on some
+/// machines and not others, more often while another process wrote
+/// credentials in the same logon. Twice the change showed within 17 ms of
+/// the wrong read; once a deleted credential was still there 5 s later.
+/// The cause is in Credential Manager and not known; Bardo's calls map one
+/// to one onto the Windows API, which reported success each time.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn kept<E>(
+    mut apply: impl FnMut() -> Result<(), E>,
+    mut shows: impl FnMut() -> Result<bool, E>,
+    mut pause: impl FnMut(),
+) -> Result<bool, E> {
+    for _ in 0..CHANGE_ATTEMPTS {
+        apply()?;
+        for read in 1..=SETTLE_READS {
+            if shows()? {
+                return Ok(true);
+            }
+            if read < SETTLE_READS {
+                pause();
+            }
+        }
+    }
+    Ok(false)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn not_kept(action: &str) -> SecretStoreError {
+    SecretStoreError(Box::new(StoreFailure(format!(
+        "could not {action} the credential: Credential Manager did not keep the change"
+    ))))
+}
+
 #[cfg(windows)]
 pub use credential_manager::CredentialManager;
 
@@ -219,8 +268,8 @@ mod credential_manager {
     use zeroize::Zeroizing;
 
     use super::{
-        MAX_BLOB_BYTES, StoreFailure, app_credentials_target, credential_target, malformed,
-        tokens_target, too_long,
+        MAX_BLOB_BYTES, SETTLE_PAUSE, StoreFailure, app_credentials_target, credential_target,
+        kept, malformed, not_kept, tokens_target, too_long,
     };
 
     /// Generic credentials in Windows Credential Manager, readable only by
@@ -278,16 +327,14 @@ mod credential_manager {
             if text.len() > MAX_BLOB_BYTES {
                 return Err(too_long(text.len()));
             }
-            self.named(target, service)?
-                .set_secret(text.as_bytes())
-                .map_err(|error| failure("write", &error))
+            let entry = self.named(target, service)?;
+            write_entry(&entry, text.as_bytes(), |entry| {
+                entry.set_secret(text.as_bytes())
+            })
         }
 
         fn remove(&self, target: &str, service: &str) -> Result<(), SecretStoreError> {
-            match self.named(target, service)?.delete_credential() {
-                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-                Err(error) => Err(failure("delete", &error)),
-            }
+            delete_entry(&self.named(target, service)?)
         }
     }
 
@@ -383,17 +430,82 @@ mod credential_manager {
             provider: Provider,
             key: &ApiKey,
         ) -> Result<(), SecretStoreError> {
-            self.entry(owner, provider)?
-                .set_password(key.expose())
-                .map_err(|error| failure("write", &error))
+            // Windows keeps a password as UTF-16, little-endian.
+            let stored: Zeroizing<Vec<u8>> = Zeroizing::new(
+                key.expose()
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect(),
+            );
+            write_entry(&self.entry(owner, provider)?, &stored, |entry| {
+                entry.set_password(key.expose())
+            })
         }
 
         fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError> {
-            match self.entry(owner, provider)?.delete_credential() {
+            delete_entry(&self.entry(owner, provider)?)
+        }
+    }
+
+    /// The credential's bytes as stored, without decoding them, so a
+    /// malformed one never stops it being replaced or deleted.
+    fn stored_bytes(entry: &Entry) -> Result<Option<Zeroizing<Vec<u8>>>, SecretStoreError> {
+        match entry.get_secret() {
+            Ok(bytes) => Ok(Some(Zeroizing::new(bytes))),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(error) => Err(failure("read", &error)),
+        }
+    }
+
+    /// Writes `stored` through `set` and reads it back (`kept`). The write
+    /// is made again only while reads still show what was there before it:
+    /// a different value means another of Bardo's processes wrote after
+    /// it, and the later write wins.
+    fn write_entry(
+        entry: &Entry,
+        stored: &[u8],
+        set: impl Fn(&Entry) -> keyring_core::Result<()>,
+    ) -> Result<(), SecretStoreError> {
+        let before = stored_bytes(entry)?;
+        let written = kept(
+            || set(entry).map_err(|error| failure("write", &error)),
+            || {
+                let now = stored_bytes(entry)?;
+                Ok(now.as_deref().map(Vec::as_slice) == Some(stored) || now != before)
+            },
+            settle,
+        )?;
+        if written {
+            Ok(())
+        } else {
+            Err(not_kept("write"))
+        }
+    }
+
+    /// Deletes the credential, one already gone included, and reads it back
+    /// (`kept`): made again while reads still show it as it was.
+    fn delete_entry(entry: &Entry) -> Result<(), SecretStoreError> {
+        let before = stored_bytes(entry)?;
+        let removed = kept(
+            || match entry.delete_credential() {
                 Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
                 Err(error) => Err(failure("delete", &error)),
-            }
+            },
+            || {
+                let now = stored_bytes(entry)?;
+                Ok(now.is_none() || now != before)
+            },
+            settle,
+        )?;
+        if removed {
+            Ok(())
+        } else {
+            Err(not_kept("delete"))
         }
+    }
+
+    fn settle() {
+        std::thread::sleep(SETTLE_PAUSE);
     }
 
     /// Keeps only errors that cannot carry the secret; the rest become a
@@ -575,6 +687,136 @@ mod tests {
             credential_target(owner, Provider::YouTubeData),
             format!("Bardo/{owner}/youtube-data")
         );
+    }
+
+    // Credential Manager can show the earlier state to a read right after a
+    // change, or lose the change (#200). A fake credential plays both.
+
+    #[derive(Default)]
+    struct Settling {
+        stored: Option<&'static str>,
+        /// Changes dropped as if never made.
+        lose: u32,
+        /// Reads after a change that still show the earlier state.
+        lag: u32,
+        lagging: u32,
+        applies: u32,
+        reads: u32,
+        pauses: u32,
+    }
+
+    impl Settling {
+        fn apply(&mut self, value: Option<&'static str>) -> Result<(), &'static str> {
+            self.applies += 1;
+            if self.lose > 0 {
+                self.lose -= 1;
+            } else {
+                self.stored = value;
+            }
+            self.lagging = self.lag;
+            Ok(())
+        }
+
+        fn shows(&mut self, value: Option<&'static str>) -> Result<bool, &'static str> {
+            self.reads += 1;
+            if self.lagging > 0 {
+                self.lagging -= 1;
+                return Ok(false);
+            }
+            Ok(self.stored == value)
+        }
+
+        fn change(&mut self, value: Option<&'static str>) -> Result<bool, &'static str> {
+            let this = std::cell::RefCell::new(self);
+            kept(
+                || this.borrow_mut().apply(value),
+                || this.borrow_mut().shows(value),
+                || this.borrow_mut().pauses += 1,
+            )
+        }
+    }
+
+    #[test]
+    fn a_change_read_back_at_once_is_made_once() {
+        let mut credential = Settling::default();
+        assert_eq!(credential.change(Some("one")), Ok(true));
+        assert_eq!(credential.stored, Some("one"));
+        assert_eq!((credential.applies, credential.reads), (1, 1));
+        assert_eq!(credential.change(None), Ok(true));
+        assert_eq!(credential.stored, None);
+    }
+
+    #[test]
+    fn a_change_that_shows_late_is_waited_for_not_made_again() {
+        let mut credential = Settling {
+            lag: 3,
+            ..Settling::default()
+        };
+        assert_eq!(credential.change(Some("one")), Ok(true));
+        assert_eq!(credential.applies, 1);
+        assert_eq!((credential.reads, credential.pauses), (4, 3));
+    }
+
+    #[test]
+    fn a_lost_change_is_made_again() {
+        let mut credential = Settling {
+            stored: Some("one"),
+            lose: 1,
+            ..Settling::default()
+        };
+        // A delete that did not take.
+        assert_eq!(credential.change(None), Ok(true));
+        assert_eq!(credential.stored, None);
+        assert_eq!(credential.applies, 2);
+        assert_eq!(credential.reads, SETTLE_READS + 1);
+        // The change is made again at once after the last read.
+        assert_eq!(credential.pauses, SETTLE_READS - 1);
+    }
+
+    #[test]
+    fn a_change_that_never_shows_is_not_kept() {
+        let mut credential = Settling {
+            lose: u32::MAX,
+            ..Settling::default()
+        };
+        assert_eq!(credential.change(Some("one")), Ok(false));
+        assert_eq!(credential.applies, CHANGE_ATTEMPTS);
+        assert_eq!(credential.stored, None);
+        assert_eq!(
+            not_kept("write").to_string(),
+            "secret store failed: could not write the credential: \
+             Credential Manager did not keep the change"
+        );
+    }
+
+    #[test]
+    fn a_failing_change_or_read_is_not_tried_again() {
+        let mut applies = 0;
+        assert_eq!(
+            kept(
+                || {
+                    applies += 1;
+                    Err("access denied")
+                },
+                || Ok(true),
+                || {},
+            ),
+            Err("access denied")
+        );
+        assert_eq!(applies, 1);
+        let mut reads = 0;
+        assert_eq!(
+            kept(
+                || Ok(()),
+                || {
+                    reads += 1;
+                    Err::<bool, _>("read failed")
+                },
+                || {},
+            ),
+            Err("read failed")
+        );
+        assert_eq!(reads, 1);
     }
 
     /// Writes real credentials for a throwaway profile and removes them.
