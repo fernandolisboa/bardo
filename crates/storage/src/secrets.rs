@@ -427,28 +427,65 @@ mod tests {
         ApiKey::parse(provider, text).unwrap()
     }
 
+    /// Throwaway probe for #200; removed before merge. Like `assert_eq!`,
+    /// but with PROBE_STALE set a wrong read is read again until it is
+    /// right, and reported with how long that took.
+    macro_rules! seen {
+        ($read:expr, $want:expr) => {{
+            let want = $want;
+            let first = $read;
+            if first != want {
+                if std::env::var("PROBE_STALE").is_ok() {
+                    let t = std::time::Instant::now();
+                    let mut reads = 0u32;
+                    let converged = loop {
+                        reads += 1;
+                        if $read == want {
+                            break Some(t.elapsed());
+                        }
+                        if t.elapsed() > std::time::Duration::from_secs(5) {
+                            break None;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    };
+                    println!(
+                        "PROBE200 STALE line {} first={:?} want={:?} converged={:?} reads={}",
+                        line!(),
+                        first,
+                        want,
+                        converged,
+                        reads
+                    );
+                    assert!(converged.is_some(), "never converged");
+                } else {
+                    assert_eq!(first, want);
+                }
+            }
+        }};
+    }
+
     /// The contract every secret store keeps. Run against each adapter.
     fn contract(store: &dyn SecretStore) {
         let owner = ProfileId::new();
         let other = ProfileId::new();
         let claude = key(Provider::Claude, "sk-ant-test-0001");
 
-        assert_eq!(store.get(owner, Provider::Claude).unwrap(), None);
+        seen!(store.get(owner, Provider::Claude).unwrap(), None);
 
         store.set(owner, Provider::Claude, &claude).unwrap();
-        assert_eq!(store.get(owner, Provider::Claude).unwrap(), Some(claude));
-        assert_eq!(store.get(owner, Provider::Gemini).unwrap(), None);
-        assert_eq!(store.get(other, Provider::Claude).unwrap(), None);
+        seen!(store.get(owner, Provider::Claude).unwrap(), Some(claude));
+        seen!(store.get(owner, Provider::Gemini).unwrap(), None);
+        seen!(store.get(other, Provider::Claude).unwrap(), None);
 
         let replacement = key(Provider::Claude, "sk-ant-test-0002");
         store.set(owner, Provider::Claude, &replacement).unwrap();
-        assert_eq!(
+        seen!(
             store.get(owner, Provider::Claude).unwrap(),
             Some(replacement)
         );
 
         store.delete(owner, Provider::Claude).unwrap();
-        assert_eq!(store.get(owner, Provider::Claude).unwrap(), None);
+        seen!(store.get(owner, Provider::Claude).unwrap(), None);
         store.delete(owner, Provider::Claude).unwrap();
     }
 
@@ -483,7 +520,7 @@ mod tests {
         let other = ProfileId::new();
         let account = NetworkAccountId::new();
 
-        assert_eq!(
+        seen!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             None
         );
@@ -494,11 +531,11 @@ mod tests {
                 &credentials(concat!("GOCSPX", "-secret-0001")),
             )
             .unwrap();
-        assert_eq!(
+        seen!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             Some(credentials(concat!("GOCSPX", "-secret-0001")))
         );
-        assert_eq!(
+        seen!(
             store.app_credentials(other, Network::YouTube).unwrap(),
             None
         );
@@ -509,41 +546,41 @@ mod tests {
                 &credentials(concat!("GOCSPX", "-secret-0002")),
             )
             .unwrap();
-        assert_eq!(
+        seen!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             Some(credentials(concat!("GOCSPX", "-secret-0002")))
         );
 
-        assert_eq!(store.tokens(owner, account).unwrap(), None);
+        seen!(store.tokens(owner, account).unwrap(), None);
         let first = tokens("ya29.access-0001", Some("1//refresh-0001"));
         store.set_tokens(owner, account, &first).unwrap();
-        assert_eq!(store.tokens(owner, account).unwrap(), Some(first));
-        assert_eq!(store.tokens(other, account).unwrap(), None);
-        assert_eq!(store.tokens(owner, NetworkAccountId::new()).unwrap(), None);
+        seen!(store.tokens(owner, account).unwrap(), Some(first));
+        seen!(store.tokens(other, account).unwrap(), None);
+        seen!(store.tokens(owner, NetworkAccountId::new()).unwrap(), None);
 
         // The largest set that fits is kept whole; one byte more is refused
         // and the earlier tokens stay.
         let room = TokenSet::MAX_STORED_BYTES - "bardo-tokens-1\n1800003599\n\n".len();
         let largest = tokens(&"a".repeat(room), None);
         store.set_tokens(owner, account, &largest).unwrap();
-        assert_eq!(store.tokens(owner, account).unwrap(), Some(largest.clone()));
+        seen!(store.tokens(owner, account).unwrap(), Some(largest.clone()));
         assert!(
             store
                 .set_tokens(owner, account, &tokens(&"a".repeat(room + 1), None))
                 .is_err()
         );
-        assert_eq!(store.tokens(owner, account).unwrap(), Some(largest));
+        seen!(store.tokens(owner, account).unwrap(), Some(largest));
 
         store.delete_tokens(owner, account).unwrap();
         store.delete_tokens(owner, account).unwrap();
-        assert_eq!(store.tokens(owner, account).unwrap(), None);
+        seen!(store.tokens(owner, account).unwrap(), None);
         store
             .delete_app_credentials(owner, Network::YouTube)
             .unwrap();
         store
             .delete_app_credentials(owner, Network::YouTube)
             .unwrap();
-        assert_eq!(
+        seen!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             None
         );

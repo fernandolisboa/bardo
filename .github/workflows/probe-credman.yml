@@ -1,0 +1,42 @@
+# Throwaway probe for #200; removed before merge.
+name: Probe Credential Manager
+
+on:
+  pull_request:
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        vm: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo test -p bardo-storage --locked --no-run
+      - name: Credential store before
+        shell: bash
+        run: |
+          cmdkey //list | grep -c "Target:" || true
+          ls -la "$LOCALAPPDATA/Microsoft/Credentials" "$APPDATA/Microsoft/Credentials" 2>&1 | head -20 || true
+          systeminfo | grep -E "OS Name|OS Version|Total Physical|Available Physical" || true
+      - name: The suite, as CI runs it, reporting wrong reads
+        shell: bash
+        run: |
+          fails=0
+          for i in $(seq 1 15); do
+            if ! PROBE_STALE=1 cargo test -p bardo-storage --locked --lib -- --nocapture > run.log 2>&1; then
+              fails=$((fails+1)); echo "=== suite $i FAILED"; grep -E -A3 "panicked" run.log || true
+            fi
+            grep -E "PROBE200|test result" run.log || true
+          done
+          echo "suite failures: $fails of 15"
+      - name: Credential store after
+        shell: bash
+        run: |
+          cmdkey //list | grep -c "Target:" || true
+          cmdkey //list | grep -c "Bardo/" || true
