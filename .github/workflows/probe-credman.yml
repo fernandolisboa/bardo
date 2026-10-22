@@ -7,36 +7,47 @@ on:
 jobs:
   probe:
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo test -p bardo-storage --locked --no-run
-      - name: Contracts alone, over and over
-        shell: bash
-        run: |
-          for mode in all connection contract all; do
-            PROBE_CONTRACTS=$mode cargo test -p bardo-storage --locked --lib -- --exact secrets::tests::probe_200_contracts --nocapture > run.log 2>&1 || true
-            grep -E "PROBE200|test result" run.log || true
-            grep -E -A3 "panicked" run.log | grep -E "panicked|left|right" | sort | uniq -c | sort -rn | head -12 || true
-          done
-      - name: The three tests alone, in a loop
+      - name: The three tests alone, in a loop (fresh runner)
         shell: bash
         run: |
           fails=0
           for i in $(seq 1 60); do
             if ! cargo test -p bardo-storage --locked --lib secrets::tests::credential_manager > run.log 2>&1; then
-              fails=$((fails+1)); grep -E -A3 "panicked" run.log | grep -E "panicked|left|right" || true
+              fails=$((fails+1)); echo "=== alone $i"; grep -E -A4 "panicked" run.log || true
             fi
           done
           echo "alone failures: $fails of 60"
-      - name: Contracts over and over inside the suite
+      - name: The suite, one test at a time
         shell: bash
         run: |
-          for i in 1 2 3; do
-            PROBE_CONTRACTS=all cargo test -p bardo-storage --locked --lib -- --nocapture > run.log 2>&1 || true
-            grep -E "PROBE200 mode|test result" run.log || true
-            grep -E -A3 "panicked" run.log | grep -E "panicked|left|right" | sort | uniq -c | sort -rn | head -12 || true
+          fails=0
+          for i in $(seq 1 12); do
+            if ! cargo test -p bardo-storage --locked --lib -- --test-threads=1 > run.log 2>&1; then
+              fails=$((fails+1)); echo "=== serial suite $i"; grep -E -A4 "panicked" run.log || true
+            fi
+            grep "test result" run.log || true
           done
+          echo "serial suite failures: $fails of 12"
+      - name: The suite, as CI runs it
+        shell: bash
+        run: |
+          fails=0
+          for i in $(seq 1 20); do
+            if ! cargo test -p bardo-storage --locked --lib > run.log 2>&1; then
+              fails=$((fails+1)); echo "=== suite $i"; grep -E -A4 "panicked" run.log || true
+            fi
+          done
+          echo "suite failures: $fails of 20"
+      - name: The bodies over and over (breaks the store after a while)
+        shell: bash
+        run: |
+          PROBE_CONTRACTS=all cargo test -p bardo-storage --locked --lib -- --exact secrets::tests::probe_200_contracts --nocapture > run.log 2>&1 || true
+          grep -E "PROBE200 mode|test result" run.log || true
+          grep -E -A2 "panicked" run.log | grep -v "^--" | sed -E 's/\([0-9]+\)//; s/at [0-9.]+m?s//' | sort | uniq -c | sort -rn | head -20 || true
