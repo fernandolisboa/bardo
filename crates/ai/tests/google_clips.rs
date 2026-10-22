@@ -7,8 +7,8 @@ use bardo_ai::GoogleClips;
 use bardo_ai::google_clips::{API_URL, DEFAULT_MODEL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest, ClipStatus,
-    ImageFormat, Provider, ProviderFailureKind, StagedImage,
+    ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
+    ClipStatus, ImageFormat, Provider, ProviderFailureKind, StagedImage,
 };
 use base64::Engine as _;
 use common::{Scripted, fixture, recording_sleeper};
@@ -44,6 +44,7 @@ fn request(model: &str, seconds: u32) -> ClipRequest {
             format: ImageFormat::Png,
         },
         seconds,
+        aspect: AspectRatio::Landscape,
     }
 }
 
@@ -133,6 +134,23 @@ fn a_veo_submission_carries_the_image_inline_and_returns_the_operation() {
     assert_eq!(parameters["aspectRatio"], "16:9");
     assert_eq!(parameters["resolution"], "720p");
     assert_eq!(parameters["durationSeconds"], 6);
+}
+
+#[test]
+fn a_vertical_first_frame_asks_both_models_for_a_vertical_clip() {
+    let vertical = ClipRequest {
+        aspect: AspectRatio::Vertical,
+        ..request(DEFAULT_MODEL, 6)
+    };
+    assert_eq!(
+        bardo_ai::google_clips::veo_body(&vertical, "720p")["parameters"]["aspectRatio"],
+        "9:16"
+    );
+    assert_eq!(
+        bardo_ai::google_clips::omni_body(&vertical, "gemini-omni-1.1-flash", "720p")["response_format"]
+            ["aspect_ratio"],
+        "9:16"
+    );
 }
 
 #[test]

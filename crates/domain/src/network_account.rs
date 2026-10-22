@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::{
     AspectRatio, ChannelId, ContentLanguage, Network, PresetOverrides, ProfileId, RenderPreset,
-    RepositoryError, Resolution, VideoCodec, Visibility,
+    RepositoryError, Resolution, VideoCodec, VideoFormat, Visibility,
 };
 
 uuid_id!(
@@ -38,11 +38,11 @@ pub struct NetworkAccountDraft {
 }
 
 impl NetworkAccountDraft {
-    /// The preset a render would use if this draft were saved for
-    /// `network`, for previews while the user types. Values that do not
-    /// parse yet keep the network's built-in ones.
-    pub fn render_preset(&self, network: Network) -> RenderPreset {
-        network.render_preset().with(&PresetOverrides {
+    /// The preset a render of a `format` video would use if this draft
+    /// were saved for `network`, for previews while the user types. Values
+    /// that do not parse yet keep the network's built-in ones.
+    pub fn render_preset(&self, network: Network, format: VideoFormat) -> RenderPreset {
+        network.render_preset(format).with(&PresetOverrides {
             aspect: self.aspect,
             resolution: self.resolution,
             codec: self.codec,
@@ -296,10 +296,13 @@ impl NetworkAccount {
         }
     }
 
-    /// The network's built-in preset with this account's overrides merged
-    /// over it: what a render for this account uses.
-    pub fn render_preset(&self) -> RenderPreset {
-        self.network.render_preset().with(&self.details.overrides)
+    /// The network's built-in preset for `format` with this account's
+    /// overrides merged over it: what a render of a `format` video for this
+    /// account uses.
+    pub fn render_preset(&self, format: VideoFormat) -> RenderPreset {
+        self.network
+            .render_preset(format)
+            .with(&self.details.overrides)
     }
 
     /// The language this account's metadata is written in, given the
@@ -601,12 +604,12 @@ mod tests {
         .unwrap();
         let account =
             NetworkAccount::new(ProfileId::new(), ChannelId::new(), Network::TikTok, details);
-        let preset = account.render_preset();
+        let preset = account.render_preset(VideoFormat::Short);
         assert_eq!(preset.bitrate.kbps(), 8_000);
         assert_eq!(
             RenderPreset {
                 bitrate: preset.bitrate,
-                ..Network::TikTok.render_preset()
+                ..Network::TikTok.render_preset(VideoFormat::Short)
             },
             preset
         );
@@ -622,11 +625,11 @@ mod tests {
             ..NetworkAccountDraft::default()
         };
         assert_eq!(
-            draft.render_preset(Network::X),
+            draft.render_preset(Network::X, VideoFormat::Short),
             RenderPreset {
                 codec: VideoCodec::Hevc,
                 bitrate: "20".parse().unwrap(),
-                ..Network::X.render_preset()
+                ..Network::X.render_preset(VideoFormat::Short)
             }
         );
     }

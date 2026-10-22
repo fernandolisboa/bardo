@@ -103,9 +103,9 @@ As legendas são feitas das palavras da narração e ficam na faixa CC. Selecion
 <a id="framing"></a>
 ## Enquadramento: 16:9 ou 9:16
 
-A chave sobre a prévia define o formato do quadro do corte: 16:9 (horizontal) ou 9:16 (vertical). Trocar é uma edição que dá para desfazer.
+A chave sobre a prévia define o formato do quadro do corte: 16:9 (horizontal) ou 9:16 (vertical). Um corte novo começa no formato do [vídeo](projects.md#format): 9:16 para um Short, 16:9 para um vídeo longo. Trocar é uma edição que dá para desfazer.
 
-No 9:16, cada clipe é recortado da imagem 16:9. Selecione um clipe e deixe o cursor de reprodução nele: a prévia mostra a imagem inteira, escurecida fora da janela 9:16. Arraste a janela para escolher o que fica à vista, ou use o **Enquadramento** do inspetor: **Ajustar** mostra a imagem inteira com faixas em cima e embaixo, **Preencher** recorta no centro, e mover a janela deixa **Personalizado**. Os renders para uma rede cujo preset tem o outro formato também passam pela janela de recorte de cada clipe.
+No 9:16, um clipe cuja imagem é 16:9 é recortado dela. Selecione um clipe e deixe o cursor de reprodução nele: a prévia mostra a imagem inteira, escurecida fora da janela 9:16. Arraste a janela para escolher o que fica à vista, ou use o **Enquadramento** do inspetor: **Ajustar** mostra a imagem inteira com faixas em cima e embaixo, **Preencher** recorta no centro, e mover a janela deixa **Personalizado**. Um render 9:16 para uma rede também passa pela janela de recorte de cada clipe; um render 16:9 mostra cada imagem inteira, uma em pé com faixas nas laterais.
 
 <a id="suggestions"></a>
 ## Sugestões de corte

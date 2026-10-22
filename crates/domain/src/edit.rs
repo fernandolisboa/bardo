@@ -1033,7 +1033,11 @@ mod tests {
         second.image = Some(drawn);
         let mut third = scene(3_000, 4_000);
         third.image = Some(image("c.png"));
-        Timeline::rough_cut(&plan(vec![first, second, third]), &narration(4_000))
+        Timeline::rough_cut(
+            &plan(vec![first, second, third]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        )
     }
 
     /// Makes `edit`, checks its undo brings the timeline back and the
@@ -1723,7 +1727,11 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut other = Timeline::rough_cut(&plan(vec![scene(0, 1_000)]), &narration(1_000));
+        let mut other = Timeline::rough_cut(
+            &plan(vec![scene(0, 1_000)]),
+            &narration(1_000),
+            AspectRatio::Landscape,
+        );
         assert!(history.undo(&mut other).is_err());
         assert!(!history.can_undo() && !history.can_redo());
     }
@@ -1939,7 +1947,11 @@ mod tests {
             &[(0, 500), (1_000, 1_500), (2_000, 2_500)],
             3_000,
         );
-        Timeline::rough_cut(&plan(vec![scene(0, 3_000)]), &narration)
+        Timeline::rough_cut(
+            &plan(vec![scene(0, 3_000)]),
+            &narration,
+            AspectRatio::Landscape,
+        )
     }
 
     fn caption_times(timeline: &Timeline) -> Vec<(Duration, Duration)> {

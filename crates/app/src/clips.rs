@@ -439,11 +439,13 @@ impl ClipJob<'_> {
             .files
             .read(self.project, &run.image_file)
             .map_err(unexpected)?;
+        let first_frame = ClipImage { bytes, format };
         let request = ClipRequest {
             model: order.model.clone(),
             prompt: run.prompt.clone(),
             image: StagedImage(staged),
-            first_frame: ClipImage { bytes, format },
+            aspect: first_frame.aspect(),
+            first_frame,
             seconds: run.seconds,
         };
         let submission = format!("{}-{}-{}", self.job, order.scene, run.submission);
@@ -1051,6 +1053,7 @@ mod tests {
                     format: ImageFormat::Png,
                 },
                 seconds,
+                aspect: bardo_domain::AspectRatio::Landscape,
             }],
             "the image prompt moves the image until a motion prompt is written; \
              the image also goes inline for providers that take it so"

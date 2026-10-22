@@ -13,7 +13,7 @@ O roteiro é o que o narrador vai dizer. O Claude escreve, você edita, e todas 
 <a id="write"></a>
 ## Gere e depois edite
 
-**Gerar roteiro** pede ao Claude um roteiro montado a partir do **modelo de roteiro** ([Modelos](templates.md)), do canal (nome, nicho, temas, visual e idioma), do tema aprovado e do tom e do estilo de roteiro do narrador. A geração roda como tarefa, então você pode continuar trabalhando; é preciso uma chave do Claude ([Suas chaves de API](api-keys.md#providers)).
+**Gerar roteiro** pede ao Claude um roteiro montado a partir do **modelo de roteiro** ([Modelos](templates.md)), do canal (nome, nicho, temas, visual e idioma), do tema aprovado, do tom e do estilo de roteiro do narrador e do [formato](projects.md#format) do vídeo: de 45 a 60 segundos de narração para um Short, de 8 a 10 minutos para um vídeo longo. A geração roda como tarefa, então você pode continuar trabalhando; é preciso uma chave do Claude ([Suas chaves de API](api-keys.md#providers)).
 
 Depois que o roteiro chega aqui, ele é seu: digite direto nele. Cabem até 60.000 caracteres, e a contagem de palavras ao lado do título dá uma ideia da duração do vídeo.
 

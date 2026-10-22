@@ -25,7 +25,7 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, ChannelDraft, ClipModelRef, ConnectedIdentity,
     ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart, Money, Network,
     NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate, Resolution,
-    Score, TokenSet, Transition, UiLanguage, UiThemePreference, VoiceFlag,
+    Score, TokenSet, Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -409,6 +409,10 @@ struct ChannelEntry {
     /// Missing from files made before transitions: the default one.
     #[serde(default)]
     transition: Option<TransitionEntry>,
+    /// Missing from files made before formats: long, as those channels
+    /// made.
+    #[serde(default)]
+    format: Option<String>,
     #[serde(default)]
     accounts: Vec<AccountEntry>,
 }
@@ -508,6 +512,10 @@ impl ChannelEntry {
             transition: match &self.transition {
                 Some(entry) => Transition::new(entry.kind.parse().ok()?, entry.frames),
                 None => Transition::default(),
+            },
+            format: match &self.format {
+                Some(format) => format.parse().ok()?,
+                None => VideoFormat::Long,
             },
         })
     }
@@ -855,6 +863,7 @@ impl Bardo {
                     kind: details.transition().kind.code().to_owned(),
                     frames: details.transition().frames(),
                 }),
+                format: Some(details.format().code().to_owned()),
                 accounts,
             });
         }
@@ -1366,6 +1375,7 @@ mod tests {
                 language: ContentLanguage::Portuguese,
                 default_persona: Some(persona.id),
                 transition: Transition::new(bardo_domain::TransitionKind::WipeRight, 21),
+                format: VideoFormat::Short,
                 ..ChannelDraft::default()
             })
             .unwrap();
@@ -1403,6 +1413,13 @@ mod tests {
         )
         .unwrap();
         app
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_formats_makes_long_videos() {
+        let entry: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(entry.draft(None).unwrap().format, VideoFormat::Long);
     }
 
     fn items(choices: &[SettingsChoice]) -> Vec<SettingsItem> {
@@ -1580,6 +1597,7 @@ mod tests {
             channel.details.transition(),
             Transition::new(bardo_domain::TransitionKind::WipeRight, 21)
         );
+        assert_eq!(channel.details.format(), VideoFormat::Short);
         let accounts = other.network_accounts.list(channel.id).unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].details.handle(), "arquivos");

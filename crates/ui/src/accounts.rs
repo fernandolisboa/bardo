@@ -70,7 +70,13 @@ impl AccountsScreen {
         self.channel = id;
         let channel = id
             .and_then(|id| self.channels.iter().find(|channel| channel.id == id))
-            .map(|channel| (channel.id, channel.details.language()));
+            .map(|channel| {
+                (
+                    channel.id,
+                    channel.details.language(),
+                    channel.details.format(),
+                )
+            });
         self.panel
             .update(cx, |panel, cx| panel.set_channel(channel, window, cx));
         cx.notify();

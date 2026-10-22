@@ -188,7 +188,7 @@ pub fn veo_body(request: &ClipRequest, resolution: &str) -> Value {
             },
         }],
         "parameters": {
-            "aspectRatio": "16:9",
+            "aspectRatio": request.aspect.code(),
             "resolution": resolution,
             "durationSeconds": request.seconds,
         },
@@ -210,7 +210,7 @@ pub fn omni_body(request: &ClipRequest, model: &str, resolution: &str) -> Value 
         ],
         "response_format": {
             "type": "video",
-            "aspect_ratio": "16:9",
+            "aspect_ratio": request.aspect.code(),
             "resolution": resolution,
             "duration": format!("{}s", request.seconds),
         },

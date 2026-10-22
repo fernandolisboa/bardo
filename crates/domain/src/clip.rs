@@ -13,7 +13,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{ApiKey, ImageFormat, Money, Provider, ProviderFailure};
+use crate::{
+    ApiKey, AspectRatio, ImageFormat, Money, Provider, ProviderFailure, image_dimensions, shape_of,
+};
 
 /// Why a model reference is not valid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
@@ -121,6 +123,16 @@ pub struct ClipImage {
     pub format: ImageFormat,
 }
 
+impl ClipImage {
+    /// The frame shape of the image, which the clip keeps: landscape when
+    /// its header cannot be read.
+    pub fn aspect(&self) -> AspectRatio {
+        image_dimensions(&self.bytes).map_or(AspectRatio::Landscape, |(width, height)| {
+            shape_of(width, height)
+        })
+    }
+}
+
 /// An image handed to the provider ahead of a submission (Higgsfield reads
 /// it from a URL it gives out), as the provider refers to it. Saved with
 /// the job, so a resubmission sends the very same request. Providers that
@@ -140,6 +152,8 @@ pub struct ClipRequest {
     /// The image itself, for providers that take it inline.
     pub first_frame: ClipImage,
     pub seconds: u32,
+    /// The clip's frame shape: its first frame's (#179).
+    pub aspect: AspectRatio,
 }
 
 /// The provider's id for submitted work.

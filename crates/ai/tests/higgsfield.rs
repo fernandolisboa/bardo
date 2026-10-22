@@ -7,8 +7,8 @@ use bardo_ai::HiggsfieldClips;
 use bardo_ai::higgsfield::{API_URL, DEFAULT_MODEL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest, ClipStatus,
-    ImageFormat, Money, Provider, ProviderFailureKind, StagedImage,
+    ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
+    ClipStatus, ImageFormat, Money, Provider, ProviderFailureKind, StagedImage,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -41,6 +41,7 @@ fn request(model: &str) -> ClipRequest {
             format: ImageFormat::Png,
         },
         seconds: 8,
+        aspect: AspectRatio::Landscape,
     }
 }
 
@@ -365,4 +366,29 @@ fn offline_is_unreachable() {
     let adapter = HiggsfieldClips::with_transport(Scripted::offline()).with_sleeper(sleeper);
     let failure = adapter.status(&key(), &handle()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
+}
+
+#[test]
+fn a_model_that_takes_a_frame_shape_gets_the_first_frames() {
+    let model = "kling-video/v2.6/pro/image-to-video";
+    let vertical = ClipRequest {
+        aspect: AspectRatio::Vertical,
+        ..request(model)
+    };
+    assert_eq!(
+        bardo_ai::higgsfield::clip_body(&vertical)["aspect_ratio"],
+        "9:16"
+    );
+    assert_eq!(
+        bardo_ai::higgsfield::clip_body(&request(model))["aspect_ratio"],
+        "16:9"
+    );
+    let other = bardo_ai::higgsfield::clip_body(&ClipRequest {
+        aspect: AspectRatio::Vertical,
+        ..request(bardo_ai::higgsfield::DEFAULT_MODEL)
+    });
+    assert!(
+        other.get("aspect_ratio").is_none(),
+        "models without one get none"
+    );
 }

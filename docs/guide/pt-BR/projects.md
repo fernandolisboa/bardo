@@ -20,6 +20,13 @@ O nome do projeto abre a tela, com um menu ao lado que lista os outros projetos 
 
 O narrador é a persona que lê a narração do vídeo, e o tom e o estilo de roteiro dela dão forma ao roteiro que o Claude escreve. Um projeto usa a persona padrão do canal até você escolher outra em **Narrador**, só para este vídeo. Mude o padrão do canal em [Canais](bardo:go/channels); crie e ajuste narradores em [Personas](personas.md).
 
+<a id="format"></a>
+## Short ou longo
+
+**Formato**, ao lado do nome do projeto, diz se este vídeo é um Short (vertical, menos de um minuto) ou um vídeo longo (16:9, de 8 a 10 minutos). **Do canal** segue o [formato do vídeo](channels.md#format) do canal; escolha **Short** ou **Longo** para fazer só este vídeo do outro tipo.
+
+O formato vale para o que for feito depois: o tamanho do próximo roteiro, o formato das próximas imagens e clipes das cenas, um corte novo no editor e o [preset de render](render.md#targets) do YouTube. O que já foi feito mantém o formato, então, depois de trocar, escreva o roteiro de novo e desenhe as cenas de novo para ter um vídeo coerente.
+
 <a id="stages"></a>
 ## As etapas
 

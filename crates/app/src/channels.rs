@@ -184,6 +184,7 @@ mod tests {
             clip_model: None,
             caption_style: Default::default(),
             transition: Default::default(),
+            format: Default::default(),
         }
     }
 

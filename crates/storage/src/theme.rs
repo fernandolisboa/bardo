@@ -1,7 +1,7 @@
 use bardo_domain::{
     ChannelId, Confidence, EvidenceScope, JobId, Niche, PerformanceEvidence, PerformanceReason,
     PersonaId, ProfileId, Reason, RepositoryError, Score, Theme, ThemeId, ThemeIdea, ThemeRanking,
-    ThemeRecord, ThemeRepository, VideoProject, VideoProjectId,
+    ThemeRecord, ThemeRepository, VideoFormat, VideoProject, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -16,8 +16,8 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
         performance_videos, performance_projected, performance_basis
     FROM theme";
 
-const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id \
-     FROM video_project";
+const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
+     video_format FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored theme is invalid: {0}")]
@@ -250,6 +250,7 @@ struct ProjectRow {
     title: String,
     created_at: i64,
     persona: Option<String>,
+    format: Option<String>,
 }
 
 impl ProjectRow {
@@ -263,6 +264,7 @@ impl ProjectRow {
             title: row.get(5)?,
             created_at: row.get(6)?,
             persona: row.get(7)?,
+            format: row.get(8)?,
         })
     }
 
@@ -278,6 +280,10 @@ impl ProjectRow {
             persona: self
                 .persona
                 .map(|id| uuid(&id).map(PersonaId::from))
+                .transpose()?,
+            format: self
+                .format
+                .map(|code| code.parse::<VideoFormat>().map_err(boxed))
                 .transpose()?,
         })
     }
@@ -327,8 +333,8 @@ impl ThemeRepository for Database {
         upsert_theme(&tx, theme)?;
         tx.execute(
             "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
-                                        created_at, persona_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                        created_at, persona_id, video_format)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 project.id.to_string(),
                 project.owner.to_string(),
@@ -338,6 +344,7 @@ impl ThemeRepository for Database {
                 project.title,
                 to_unix_millis(project.created_at),
                 project.persona.map(|id| id.to_string()),
+                project.format.map(VideoFormat::code),
             ],
         )
         .map_err(boxed)?;
@@ -381,6 +388,20 @@ impl ThemeRepository for Database {
             .execute(
                 "UPDATE video_project SET persona_id = ?2 WHERE id = ?1",
                 params![id.to_string(), persona.map(|id| id.to_string())],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn set_project_format(
+        &self,
+        id: VideoProjectId,
+        format: Option<VideoFormat>,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE video_project SET video_format = ?2 WHERE id = ?1",
+                params![id.to_string(), format.map(VideoFormat::code)],
             )
             .map_err(boxed)?;
         Ok(())
@@ -569,6 +590,25 @@ mod tests {
             .map(|project| project.title)
             .collect();
         assert_eq!(titles, ["Second", "First"]);
+    }
+
+    #[test]
+    fn a_project_keeps_its_own_format_or_follows_its_channel() {
+        let (db, channel) = setup();
+        let mut approved = theme(&channel, "The lost cosmonauts", 0);
+        db.save_themes(std::slice::from_ref(&approved)).unwrap();
+        let project = approved.approve(time(1_800_000_200)).unwrap();
+        db.start_project(&approved, &project).unwrap();
+        assert_eq!(db.project(project.id).unwrap().unwrap().format, None);
+
+        db.set_project_format(project.id, Some(VideoFormat::Long))
+            .unwrap();
+        assert_eq!(
+            db.project(project.id).unwrap().unwrap().format,
+            Some(VideoFormat::Long)
+        );
+        db.set_project_format(project.id, None).unwrap();
+        assert_eq!(db.project(project.id).unwrap().unwrap().format, None);
     }
 
     #[test]

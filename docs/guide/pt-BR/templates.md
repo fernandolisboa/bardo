@@ -25,6 +25,8 @@ Há um modelo para cada tipo de geração:
 
 Cada vez que você salva, entra uma versão, numerada em ordem; a mais nova é a **Atual** e é a que as gerações usam. As versões anteriores continuam na lista: escolha uma para carregar o texto dela no editor, e salve para torná-la a atual de novo. Cada geração registra a versão que usou, então os **Detalhes** de um roteiro dizem qual versão o escreveu.
 
+Quando uma atualização do Bardo melhora um padrão que você nunca mudou, o padrão novo entra como a próxima versão. Um modelo que você editou fica como você deixou; **Carregar o padrão do Bardo** mostra o que mudou.
+
 <a id="fields"></a>
 ## Instruções e prompt
 
@@ -36,7 +38,7 @@ Um modelo tem duas partes, cada uma com até 8.000 caracteres:
 <a id="variables"></a>
 ## Variáveis
 
-Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do projeto. A lista sob o editor mostra as variáveis que este tipo de modelo pode usar e o que cada uma traz, como `{{channel_name}}`, `{{persona}}` ou `{{narration_sentences}}`. Uma variável escrita errado ou desconhecida, ou sem o `}}` de fechamento, impede que o modelo seja salvo.
+Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do projeto. A lista sob o editor mostra as variáveis que este tipo de modelo pode usar e o que cada uma traz, como `{{channel_name}}`, `{{persona}}` ou `{{narration_sentences}}`. `{{target_length}}` e `{{frame_shape}}` seguem o [formato](projects.md#format) do vídeo: o tamanho do roteiro e o formato das imagens. Uma variável escrita errado ou desconhecida, ou sem o `}}` de fechamento, impede que o modelo seja salvo.
 
 <a id="save"></a>
 ## Salvar e recomeçar

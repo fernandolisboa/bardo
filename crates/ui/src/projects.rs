@@ -18,7 +18,7 @@ use std::time::Duration;
 use bardo_app::bardo_domain::{
     Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource, Network,
     NetworkAccountId, PersonaId, SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind,
-    VideoMetadataDraft, VideoProject, VideoProjectId,
+    VideoFormat, VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, Control, Destination, ExportSummary, ExportView, MusicPromptView,
@@ -102,6 +102,8 @@ pub struct ProjectsScreen {
     channel_select: ChoiceSelect<ChannelId>,
     /// The project's narrator: the channel's default (`None`) or a persona.
     narrator_select: ChoiceSelect<Option<PersonaId>>,
+    /// The project's format: the channel's (`None`), Short or Long.
+    format_select: ChoiceSelect<Option<VideoFormat>>,
     channel: Option<ChannelId>,
     projects: Vec<VideoProject>,
     project: Option<VideoProjectId>,
@@ -274,6 +276,8 @@ impl ProjectsScreen {
         let narrator_select = cx.new(|cx| {
             SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true)
         });
+        let format_select =
+            cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
@@ -357,6 +361,19 @@ impl ProjectsScreen {
                     }
                 },
             ),
+            cx.subscribe_in(
+                &format_select,
+                window,
+                |this,
+                 _,
+                 event: &SelectEvent<SearchableVec<Choice<Option<VideoFormat>>>>,
+                 window,
+                 cx| {
+                    if let SelectEvent::Confirm(Some(format)) = event {
+                        this.set_format(*format, window, cx);
+                    }
+                },
+            ),
         ];
         let revision = bardo.read(cx).jobs_revision();
         let mut screen = Self {
@@ -364,6 +381,7 @@ impl ProjectsScreen {
             channels: Vec::new(),
             channel_select,
             narrator_select,
+            format_select,
             channel: None,
             projects: Vec::new(),
             project: None,
@@ -489,6 +507,7 @@ impl ProjectsScreen {
                 self.load(window, cx);
                 // Personas may have been added or renamed elsewhere.
                 self.fill_narrator(window, cx);
+                self.fill_format(window, cx);
             }
             Some(id) => self.select_channel(id, window, cx),
             None => {
@@ -585,6 +604,7 @@ impl ProjectsScreen {
             .map_or(Stage::Script, |stages| opening_stage(&stages));
         self.ensure_render_checked(cx);
         self.fill_narrator(window, cx);
+        self.fill_format(window, cx);
         cx.notify();
     }
 
@@ -715,6 +735,66 @@ impl ProjectsScreen {
                 select.set_selected_value(&None, window, cx);
             }
         });
+    }
+
+    /// The format choices: the channel's (named), then Short and Long;
+    /// selects the project's own format or the channel's.
+    fn fill_format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.view.as_ref().map(|view| view.project.clone()) else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let channel_format = self
+            .channels
+            .iter()
+            .find(|channel| channel.id == project.channel)
+            .map(|channel| channel.details.format())
+            .unwrap_or_default();
+        let channel_title = SharedString::from(bardo.text_with(
+            Text::ProjectFormatChannel,
+            &[(
+                "format",
+                &bardo.text(Text::VideoFormatBrief(channel_format)),
+            )],
+        ));
+        let choices = SearchableVec::new(
+            std::iter::once(Choice {
+                value: None,
+                title: channel_title,
+            })
+            .chain(VideoFormat::ALL.map(|format| Choice {
+                value: Some(format),
+                title: tr(bardo, Text::VideoFormatBrief(format)),
+            }))
+            .collect::<Vec<_>>(),
+        );
+        self.format_select.update(cx, |select, cx| {
+            select.set_items(choices, window, cx);
+            select.set_selected_value(&project.format, window, cx);
+        });
+    }
+
+    /// Saves the project's format and re-reads what depends on it.
+    fn set_format(
+        &mut self,
+        format: Option<VideoFormat>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.view.as_ref().map(|view| &view.project) else {
+            return;
+        };
+        if project.format == format {
+            return;
+        }
+        let id = project.id;
+        match self.bardo.read(cx).set_project_format(id, format) {
+            Ok(_) => self.error = None,
+            Err(error) => self.error = Some(error.message()),
+        }
+        self.load(window, cx);
+        self.fill_format(window, cx);
+        cx.notify();
     }
 
     /// Saves the project's narrator and re-reads what depends on it.
@@ -1162,6 +1242,30 @@ impl ProjectsScreen {
                         "project-narrator-info",
                         tr(bardo, Text::ProjectNarratorHint),
                         guide::refs::PROJECTS_NARRATOR,
+                    )),
+            )
+            .into_any_element(),
+            kit::anchor(
+                TourAnchor::Control(Control::ProjectFormat),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(bardo, Text::ProjectFormat)),
+                    )
+                    .child(
+                        div()
+                            .w(px(180.))
+                            .child(Select::new(&self.format_select).small()),
+                    )
+                    .child(guide::info(
+                        bardo,
+                        "project-format-info",
+                        tr(bardo, Text::ProjectFormatHint),
+                        guide::refs::PROJECTS_FORMAT,
                     )),
             )
             .into_any_element(),

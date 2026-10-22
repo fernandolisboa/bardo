@@ -25,6 +25,8 @@ There is one template per kind of generation:
 
 Every save adds a version, numbered in order; the newest is **Current** and is what generations use. Older versions stay in the list: pick one to load its text into the editor, and save it to make it current again. Each generation records the version it used, so a script's **Details** tells which one wrote it.
 
+When an update to Bardo improves a default you never changed, the new default comes in as the next version. A template you edited stays as you left it; **Load Bardo's default** shows what changed.
+
 <a id="fields"></a>
 ## Instructions and prompt
 
@@ -36,7 +38,7 @@ A template has two parts, each up to 8,000 characters:
 <a id="variables"></a>
 ## Variables
 
-Write a variable as `{{name}}`; each generation replaces it with the project's value. The list under the editor shows the variables this kind of template can use and what each holds, such as `{{channel_name}}`, `{{persona}}` or `{{narration_sentences}}`. A misspelled or unknown variable, or one missing its closing `}}`, keeps the template from being saved.
+Write a variable as `{{name}}`; each generation replaces it with the project's value. The list under the editor shows the variables this kind of template can use and what each holds, such as `{{channel_name}}`, `{{persona}}` or `{{narration_sentences}}`. `{{target_length}}` and `{{frame_shape}}` follow the video's [format](projects.md#format): how long the script runs and the shape of the pictures. A misspelled or unknown variable, or one missing its closing `}}`, keeps the template from being saved.
 
 <a id="save"></a>
 ## Saving and starting over

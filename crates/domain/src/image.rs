@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::{ApiKey, Metered, ProviderFailure};
+use crate::{ApiKey, AspectRatio, Metered, ProviderFailure};
 
 /// The file format of a generated image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,6 +53,87 @@ pub struct ImageRequest {
     /// The whole description: subject, setting, style. Providers see one
     /// prompt at a time, with no memory of earlier ones.
     pub prompt: String,
+    /// The frame shape: the video's format (#179).
+    pub aspect: AspectRatio,
+}
+
+/// The width and height of a PNG, JPEG or WebP file, read from its header;
+/// `None` for anything else or a header cut short.
+pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let be16 = |at: usize| {
+        Some(u32::from(u16::from_be_bytes([
+            *bytes.get(at)?,
+            *bytes.get(at + 1)?,
+        ])))
+    };
+    let le16 = |at: usize| {
+        Some(u32::from(u16::from_le_bytes([
+            *bytes.get(at)?,
+            *bytes.get(at + 1)?,
+        ])))
+    };
+    let le24 = |at: usize| {
+        Some(u32::from_le_bytes([
+            *bytes.get(at)?,
+            *bytes.get(at + 1)?,
+            *bytes.get(at + 2)?,
+            0,
+        ]))
+    };
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.get(12..16) == Some(b"IHDR") {
+        let be32 = |at: usize| Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+        return Some((be32(16)?, be32(20)?));
+    }
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        let mut at = 2;
+        loop {
+            if *bytes.get(at)? != 0xFF {
+                return None;
+            }
+            let marker = *bytes.get(at + 1)?;
+            match marker {
+                // Fill byte before a marker.
+                0xFF => at += 1,
+                // Markers with no length.
+                0x01 | 0xD0..=0xD9 => at += 2,
+                // Start of frame: precision, height, width.
+                0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
+                    return Some((be16(at + 7)?, be16(at + 5)?));
+                }
+                _ => at += 2 + usize::try_from(be16(at + 2)?).ok()?,
+            }
+        }
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return match bytes.get(12..16)? {
+            b"VP8 " => Some((le16(26)? & 0x3FFF, le16(28)? & 0x3FFF)),
+            b"VP8L" => {
+                let b = bytes.get(21..25)?;
+                let (b0, b1, b2, b3) = (
+                    u32::from(b[0]),
+                    u32::from(b[1]),
+                    u32::from(b[2]),
+                    u32::from(b[3]),
+                );
+                let width = 1 + (((b1 & 0x3F) << 8) | b0);
+                let height = 1 + (((b3 & 0x0F) << 10) | (b2 << 2) | ((b1 & 0xC0) >> 6));
+                Some((width, height))
+            }
+            b"VP8X" => Some((1 + le24(24)?, 1 + le24(27)?)),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// The frame shape a picture of these dimensions fits: vertical when it is
+/// taller than wide, landscape otherwise.
+pub fn shape_of(width: u32, height: u32) -> AspectRatio {
+    if height > width {
+        AspectRatio::Vertical
+    } else {
+        AspectRatio::Landscape
+    }
 }
 
 /// The drawn image.
@@ -109,5 +190,81 @@ mod tests {
         for format in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Webp] {
             assert_eq!(ImageFormat::from_mime(format.mime()), Some(format));
         }
+    }
+}
+
+#[cfg(test)]
+mod dimension_tests {
+    use super::*;
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        bytes.extend(width.to_be_bytes());
+        bytes.extend(height.to_be_bytes());
+        bytes.extend([8, 6, 0, 0, 0]);
+        bytes
+    }
+
+    fn jpeg(width: u16, height: u16) -> Vec<u8> {
+        let mut bytes = vec![0xFF, 0xD8];
+        // An APP0 segment to skip, then a fill byte and a baseline frame.
+        bytes.extend([0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46]);
+        bytes.extend([0xFF, 0xFF, 0xC0, 0x00, 0x11, 0x08]);
+        bytes.extend(height.to_be_bytes());
+        bytes.extend(width.to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn reads_png_and_jpeg_headers() {
+        assert_eq!(image_dimensions(&png(1536, 2752)), Some((1536, 2752)));
+        assert_eq!(image_dimensions(&jpeg(1920, 1080)), Some((1920, 1080)));
+    }
+
+    #[test]
+    fn reads_the_three_kinds_of_webp() {
+        let riff = |chunk: &[u8], body: &[u8]| {
+            let mut bytes = b"RIFF\0\0\0\0WEBP".to_vec();
+            bytes.extend(chunk);
+            bytes.extend([0, 0, 0, 0]);
+            bytes.extend(body);
+            bytes
+        };
+        // Lossy: frame tag and start code, then 14-bit width and height.
+        let mut lossy = vec![0, 0, 0, 0x9D, 0x01, 0x2A];
+        lossy.extend(1080u16.to_le_bytes());
+        lossy.extend(1920u16.to_le_bytes());
+        assert_eq!(image_dimensions(&riff(b"VP8 ", &lossy)), Some((1080, 1920)));
+        // Lossless: signature, then width-1 and height-1 in 14 bits each.
+        let (w, h) = (1920u32 - 1, 1080u32 - 1);
+        let packed = w | (h << 14);
+        let mut lossless = vec![0x2F];
+        lossless.extend(packed.to_le_bytes());
+        assert_eq!(
+            image_dimensions(&riff(b"VP8L", &lossless)),
+            Some((1920, 1080))
+        );
+        // Extended: flags, then width-1 and height-1 in 24 bits each.
+        let mut extended = vec![0, 0, 0, 0];
+        extended.extend(&(1080u32 - 1).to_le_bytes()[..3]);
+        extended.extend(&(1920u32 - 1).to_le_bytes()[..3]);
+        assert_eq!(
+            image_dimensions(&riff(b"VP8X", &extended)),
+            Some((1080, 1920))
+        );
+    }
+
+    #[test]
+    fn anything_else_has_no_dimensions() {
+        assert_eq!(image_dimensions(b"GIF89a"), None);
+        assert_eq!(image_dimensions(&png(10, 10)[..18]), None);
+        assert_eq!(image_dimensions(&[0xFF, 0xD8, 0xFF]), None);
+    }
+
+    #[test]
+    fn taller_than_wide_is_vertical() {
+        assert_eq!(shape_of(1080, 1920), AspectRatio::Vertical);
+        assert_eq!(shape_of(1920, 1080), AspectRatio::Landscape);
+        assert_eq!(shape_of(1024, 1024), AspectRatio::Landscape);
     }
 }

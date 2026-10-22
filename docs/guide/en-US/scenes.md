@@ -15,7 +15,7 @@ Scenes cut the narration into the shots the video shows, each with an image. The
 
 **Plan scenes** has Claude split the narration into scenes on its sentences and write an image prompt for each one, from the **image prompt template** ([Templates](templates.md)) and the channel's aesthetic notes.
 
-**Generate N images** then draws every scene still without an image, in one job. Nano Banana draws each as a 16:9 image at 2K, and Gemini bills each one; a scene the provider declines does not stop the others. The estimate under the leading button says what the run costs. Planning needs a Claude key, and drawing a Gemini key ([Your API keys](api-keys.md#providers)).
+**Generate N images** then draws every scene still without an image, in one job. Nano Banana draws each at 2K in the shape of the video's [format](projects.md#format), 9:16 for a Short and 16:9 for a long video, and Gemini bills each one; a scene the provider declines does not stop the others. The estimate under the leading button says what the run costs. Planning needs a Claude key, and drawing a Gemini key ([Your API keys](api-keys.md#providers)).
 
 <a id="list"></a>
 ## The scenes

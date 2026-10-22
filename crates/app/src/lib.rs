@@ -14,6 +14,7 @@ mod decision_engines;
 mod diagnostics;
 mod editor;
 mod export;
+mod formats;
 mod guide;
 mod guide_site;
 pub mod i18n;

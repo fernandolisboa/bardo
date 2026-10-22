@@ -7,8 +7,8 @@ use bardo_ai::KlingClips;
 use bardo_ai::http::Method;
 use bardo_ai::kling::{API_URL, DEFAULT_MODEL, external_task_id};
 use bardo_domain::{
-    ApiKey, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest, ClipStatus,
-    ImageFormat, Provider, ProviderFailureKind, StagedImage,
+    ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
+    ClipStatus, ImageFormat, Provider, ProviderFailureKind, StagedImage,
 };
 use base64::Engine as _;
 use common::{Scripted, fixture, recording_sleeper};
@@ -39,6 +39,7 @@ fn request(model: &str) -> ClipRequest {
             format: ImageFormat::Png,
         },
         seconds: 8,
+        aspect: AspectRatio::Landscape,
     }
 }
 

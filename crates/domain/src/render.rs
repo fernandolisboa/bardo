@@ -67,12 +67,16 @@ impl MeasuredLoudness {
 pub enum Gate {
     /// The cut is longer than the network takes. Blocks that output.
     TooLong { limit: MaxDuration },
+    /// YouTube takes videos over 15 minutes only from accounts verified by
+    /// phone; an unverified one refuses the upload.
+    LongForUnverified,
     /// No encoder for the preset's codec works on this machine. Blocks
     /// that output.
     NoEncoder(VideoCodec),
     /// The cut was made in one frame shape and this output is the other:
-    /// each clip fills it through its crop window, centered unless moved,
-    /// which the user may not have looked at.
+    /// a 9:16 output takes each clip through its crop window, centered
+    /// unless moved, which the user may not have looked at; a 16:9 output
+    /// shows every picture whole, a tall one with bars.
     Reframed {
         cut: AspectRatio,
         output: AspectRatio,
@@ -140,10 +144,14 @@ pub fn cut_gates(cut: &CutFacts) -> Vec<Gate> {
     gates
 }
 
-/// The gates of one output: its preset against the cut. `encoder_works` is
-/// `None` until the machine's encoders are known.
+/// How long a video YouTube takes from an account that is not verified.
+pub const YOUTUBE_UNVERIFIED_LIMIT: Duration = Duration::from_secs(15 * 60);
+
+/// The gates of one output for `network`: its preset against the cut.
+/// `encoder_works` is `None` until the machine's encoders are known.
 pub fn output_gates(
     cut: &CutFacts,
+    network: Network,
     preset: &RenderPreset,
     encoder_works: Option<bool>,
 ) -> Vec<Gate> {
@@ -151,6 +159,8 @@ pub fn output_gates(
     let limit = preset.max_duration;
     if cut.duration > Duration::from_secs(u64::from(limit.seconds())) {
         gates.push(Gate::TooLong { limit });
+    } else if network == Network::YouTube && cut.duration > YOUTUBE_UNVERIFIED_LIMIT {
+        gates.push(Gate::LongForUnverified);
     }
     if encoder_works == Some(false) {
         gates.push(Gate::NoEncoder(preset.codec));
@@ -231,6 +241,7 @@ impl<T: RenderRepository + ?Sized> RenderRepository for Arc<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::VideoFormat;
 
     fn cut() -> CutFacts {
         CutFacts {
@@ -251,7 +262,12 @@ mod tests {
         assert!(cut_gates(&cut).is_empty());
         for network in [Network::YouTube, Network::TikTok, Network::InstagramReels] {
             assert_eq!(
-                output_gates(&cut, &network.render_preset(), Some(true)),
+                output_gates(
+                    &cut,
+                    network,
+                    &network.render_preset(VideoFormat::Short),
+                    Some(true)
+                ),
                 vec![],
                 "{network}"
             );
@@ -264,7 +280,12 @@ mod tests {
             duration: Duration::from_secs(150),
             ..cut()
         };
-        let x = output_gates(&cut, &Network::X.render_preset(), Some(true));
+        let x = output_gates(
+            &cut,
+            Network::X,
+            &Network::X.render_preset(VideoFormat::Short),
+            Some(true),
+        );
         assert_eq!(
             x,
             vec![Gate::TooLong {
@@ -272,7 +293,31 @@ mod tests {
             }]
         );
         assert!(x[0].blocks());
-        assert!(output_gates(&cut, &Network::YouTube.render_preset(), Some(true)).is_empty());
+        assert!(
+            output_gates(
+                &cut,
+                Network::YouTube,
+                &Network::YouTube.render_preset(VideoFormat::Short),
+                Some(true)
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_long_youtube_video_past_15_minutes_warns_about_verification() {
+        let long = |seconds| CutFacts {
+            duration: Duration::from_secs(seconds),
+            aspect: AspectRatio::Landscape,
+            ..cut()
+        };
+        let preset = Network::YouTube.render_preset(VideoFormat::Long);
+        assert!(output_gates(&long(15 * 60), Network::YouTube, &preset, Some(true)).is_empty());
+        let gates = output_gates(&long(15 * 60 + 1), Network::YouTube, &preset, Some(true));
+        assert_eq!(gates, vec![Gate::LongForUnverified]);
+        assert!(!gates[0].blocks());
+        let kick = Network::Kick.render_preset(VideoFormat::Long);
+        assert!(output_gates(&long(20 * 60), Network::Kick, &kick, Some(true)).is_empty());
     }
 
     #[test]
@@ -281,22 +326,35 @@ mod tests {
             duration: Duration::from_secs(180),
             ..cut()
         };
-        assert!(output_gates(&cut, &Network::YouTube.render_preset(), Some(true)).is_empty());
+        assert!(
+            output_gates(
+                &cut,
+                Network::YouTube,
+                &Network::YouTube.render_preset(VideoFormat::Short),
+                Some(true)
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn a_codec_no_encoder_handles_blocks_once_encoders_are_known() {
-        let preset = Network::YouTube.render_preset();
+        let preset = Network::YouTube.render_preset(VideoFormat::Short);
         assert_eq!(
-            output_gates(&cut(), &preset, Some(false)),
+            output_gates(&cut(), Network::YouTube, &preset, Some(false)),
             vec![Gate::NoEncoder(VideoCodec::H264)]
         );
-        assert!(output_gates(&cut(), &preset, None).is_empty());
+        assert!(output_gates(&cut(), Network::YouTube, &preset, None).is_empty());
     }
 
     #[test]
     fn another_frame_shape_is_a_warning() {
-        let gates = output_gates(&cut(), &Network::Kick.render_preset(), Some(true));
+        let gates = output_gates(
+            &cut(),
+            Network::Kick,
+            &Network::Kick.render_preset(VideoFormat::Short),
+            Some(true),
+        );
         assert_eq!(
             gates,
             vec![Gate::Reframed {
@@ -330,7 +388,12 @@ mod tests {
             }),
             ..cut()
         };
-        let gates = output_gates(&cut, &Network::YouTube.render_preset(), Some(true));
+        let gates = output_gates(
+            &cut,
+            Network::YouTube,
+            &Network::YouTube.render_preset(VideoFormat::Short),
+            Some(true),
+        );
         assert_eq!(gates, vec![Gate::LoudnessFar { gain: 10.5 }]);
     }
 
@@ -345,7 +408,12 @@ mod tests {
         };
         // +4 dB takes the peak from −2 to +2 dBTP.
         assert_eq!(
-            output_gates(&cut, &Network::YouTube.render_preset(), Some(true)),
+            output_gates(
+                &cut,
+                Network::YouTube,
+                &Network::YouTube.render_preset(VideoFormat::Short),
+                Some(true)
+            ),
             vec![Gate::PeaksLimited]
         );
     }
@@ -360,7 +428,15 @@ mod tests {
             ..cut()
         };
         assert_eq!(cut_gates(&cut), vec![Gate::Silent]);
-        assert!(output_gates(&cut, &Network::YouTube.render_preset(), Some(true)).is_empty());
+        assert!(
+            output_gates(
+                &cut,
+                Network::YouTube,
+                &Network::YouTube.render_preset(VideoFormat::Short),
+                Some(true)
+            )
+            .is_empty()
+        );
     }
 
     #[test]

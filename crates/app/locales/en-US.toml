@@ -76,6 +76,8 @@ clip_model_default = "{model} (default)"
 clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield, Kling or Google. Any scene can pick another."
 caption_style = "Caption style"
 caption_style_hint = "How captions look in this channel's new projects. Each project can pick another in the editor."
+format = "Video format"
+format_hint = "Short: a vertical video of under a minute, for every network. Long: a 16:9 video of 8 to 10 minutes, for YouTube. It sets the script's length, the shape of the pictures and the cut, and YouTube's preset. Each project can pick the other."
 transition = "Default transition"
 transition_hint = "What the editor puts on a cut when you press T or pick a transition. Any cut can use another."
 transition_length = "Length"
@@ -177,6 +179,12 @@ private = "Private"
 clean = "Clean"
 boxed = "Boxed"
 punch = "Punch"
+
+[video_format]
+short = "Short (9:16, under a minute)"
+long = "Long (16:9, 8 to 10 min)"
+short_brief = "Short"
+long_brief = "Long"
 
 [transition]
 cut = "Cut"
@@ -470,6 +478,9 @@ narrator = "Narrator"
 narrator_channel = "Channel default: {name}"
 narrator_channel_none = "Channel default (none set)"
 narrator_hint = "Reads this video's narration and shapes its script. Pick a persona to use it for this video only."
+format = "Format"
+format_channel = "Channel's: {format}"
+format_hint = "Short or long video. It sets the length of the next script, the shape of the next pictures and new cuts, and YouTube's preset. What was already made stays as it is."
 
 [projects.error]
 not_loaded = "Could not load the video projects."
@@ -682,6 +693,8 @@ narration_sentences = "The narration, one numbered sentence per line with when i
 video_length = "The video's length, from its narration (\"not known yet\" before there is one)."
 script = "The approved script."
 networks = "The channel's network accounts, one per line, with each network's fields and limits, the account's language, default tags and footer."
+target_length = "How long the script runs, from the video's format: under a minute for a Short, 8 to 10 minutes for a long video."
+frame_shape = "The shape of the pictures, from the video's format: tall (9:16) for a Short, wide (16:9) for a long video."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -1415,11 +1428,13 @@ captions = "Captions"
 too_long = "Longer than this network takes ({limit}). Shorten the cut or raise the account's limit."
 no_encoder = "No {codec} encoder works on this computer. Pick another codec in the account's preset."
 reframed = "The cut is {cut}; this file is {output}, each clip through its crop window (centered unless you moved it)."
+reframed_wide = "The cut is {cut}; this file is {output}: wide pictures show whole, and tall ones whole with bars at the sides."
 captions_off = "Captions are off in the cut."
 missing_media = "{n} clips have no media and render black."
 silent = "The mix has no sound; it renders as it is."
 loudness_far = "The mix is {gain} dB from this network's target; the render changes it that much."
 peaks_limited = "At this target the peaks would clip, so the render limits them."
+long_for_unverified = "YouTube takes videos over 15 minutes only from verified accounts. Verify yours at youtube.com/verify before uploading."
 blocks = "Blocks"
 warning = "Warning"
 
@@ -2229,6 +2244,10 @@ body = "The project you are working on, with the menu that switches to another p
 title = "Who narrates it"
 body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only."
 
+[tour.projects.format]
+title = "Short or long"
+body = "A Short is a vertical video of under a minute; a long video is 16:9 and runs 8 to 10 minutes. The project follows its channel unless you pick the other here. It sets the next script's length, the shape of the next pictures and new cuts, and YouTube's preset."
+
 [tour.projects.stages]
 title = "Its stages"
 body = "Script, narration, scenes, clips, edit, render and publish, in order. The line under each stage says where it stands: done, generating, to review, out of date, or what it waits for."
@@ -2476,12 +2495,8 @@ title = "Your channels"
 body = "Each channel is one niche for one market. Pick a channel to edit it, or start one with New channel; research, ideas, projects and network accounts all belong to a channel."
 
 [tour.channels.niche]
-title = "Niche and themes"
-body = "The niche says what the channel is about, and the themes list the subjects it comes back to, one per line. Research and theme ideas start from them."
-
-[tour.channels.look]
-title = "Aesthetic notes"
-body = "How the channel's videos should look and feel: style, palette, mood. Ideas and scripts take these notes along, so every video keeps the channel's look."
+title = "Niche, themes and look"
+body = "The niche says what the channel is about, the themes list the subjects it comes back to, one per line, and the aesthetic notes say how its videos should look and feel. Research and ideas start from the niche and themes; ideas, scripts and scene prompts take the notes along."
 
 [tour.channels.market]
 title = "Language and country"
@@ -2490,6 +2505,10 @@ body = "The language scripts and narration are written in, and the country whose
 [tour.channels.persona]
 title = "Default persona"
 body = "Who narrates the channel's videos unless a project picks someone else. Personas live on their own screen, and one can narrate several channels."
+
+[tour.channels.format]
+title = "Short or long videos"
+body = "Shorts are vertical and under a minute, and fit every network. Long videos are 16:9 and run 8 to 10 minutes, for YouTube. The format sets how long scripts run, the shape of pictures and cuts, and YouTube's preset. Each project can pick the other."
 
 [tour.channels.defaults]
 title = "Video model, captions and transitions"

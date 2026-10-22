@@ -446,6 +446,7 @@ mod tests {
                 title: title.into(),
                 created_at: at(0),
                 persona: None,
+                format: None,
             };
             let id = project.id;
             self.projects.push(project);

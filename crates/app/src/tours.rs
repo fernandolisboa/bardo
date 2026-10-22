@@ -84,6 +84,8 @@ pub enum Control {
     ProjectSwitcher,
     /// Projects: who narrates the open project.
     ProjectNarrator,
+    /// Projects: whether the open project is a Short or a long video.
+    ProjectFormat,
     /// Script: the script's editor, or the button that generates it.
     ScriptBody,
     /// Script: a new version waiting beside the current one.
@@ -169,14 +171,14 @@ pub enum Control {
     RenderChecks,
     /// Render: the picked target's last file.
     RenderLast,
-    /// Channels: the niche and its themes.
+    /// Channels: the niche, its themes and the aesthetic notes.
     ChannelNiche,
-    /// Channels: the aesthetic notes.
-    ChannelLook,
     /// Channels: the language and the country.
     ChannelMarket,
     /// Channels: the default persona.
     ChannelPersona,
+    /// Channels: the video format, Short or Long.
+    ChannelFormat,
     /// Channels: the video model and the caption style.
     ChannelDefaults,
     /// Accounts: the first network account's name, handle and preset mark.
@@ -542,7 +544,7 @@ pub const PROJECTS: Tour = {
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
@@ -551,6 +553,9 @@ pub const PROJECTS: Tour = {
             on(AT, "narrator", control(Control::ProjectNarrator))
                 .missing(HEADER)
                 .learn(PAGE, "narrator"),
+            on(AT, "format", control(Control::ProjectFormat))
+                .missing(HEADER)
+                .learn(PAGE, "format"),
             on(AT, "stages", TourAnchor::Stages).learn(PAGE, "stages"),
             on(AT, "unlock", TourAnchor::Stages).learn(PAGE, "unlock"),
             on(AT, "cost", TourAnchor::Header).learn(PAGE, "cost"),
@@ -827,22 +832,22 @@ pub const CHANNELS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Channels,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),
             on(AT, "niche", control(Control::ChannelNiche))
                 .missing(FORM)
                 .learn(PAGE, "niche"),
-            on(AT, "look", control(Control::ChannelLook))
-                .missing(FORM)
-                .learn(PAGE, "look"),
             on(AT, "market", control(Control::ChannelMarket))
                 .missing(FORM)
                 .learn(PAGE, "market"),
             on(AT, "persona", control(Control::ChannelPersona))
                 .missing(FORM)
                 .learn(PAGE, "persona"),
+            on(AT, "format", control(Control::ChannelFormat))
+                .missing(FORM)
+                .learn(PAGE, "format"),
             on(AT, "defaults", control(Control::ChannelDefaults))
                 .missing(FORM)
                 .learn(PAGE, "defaults"),

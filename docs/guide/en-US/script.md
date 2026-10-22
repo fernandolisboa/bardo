@@ -13,7 +13,7 @@ The script is what the narrator will say. Claude writes it, you edit it, and eve
 <a id="write"></a>
 ## Generate, then edit
 
-**Generate script** asks Claude for a script built from the **script template** ([Templates](templates.md)), the channel (its name, niche, themes, look and language), the approved theme and the narrator's tone and script style. It runs as a job, so you can keep working meanwhile; you need a Claude key ([Your API keys](api-keys.md#providers)).
+**Generate script** asks Claude for a script built from the **script template** ([Templates](templates.md)), the channel (its name, niche, themes, look and language), the approved theme, the narrator's tone and script style, and the video's [format](projects.md#format): 45 to 60 seconds of narration for a Short, 8 to 10 minutes for a long video. It runs as a job, so you can keep working meanwhile; you need a Claude key ([Your API keys](api-keys.md#providers)).
 
 Once the script is here, it is yours: type straight into it. It holds up to 60,000 characters, and the word count beside the title gives a sense of the video's length.
 

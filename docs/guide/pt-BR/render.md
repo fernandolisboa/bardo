@@ -27,11 +27,12 @@ Um número em âmbar merece uma olhada: uma mixagem sem som, ou legendas desliga
 <a id="targets"></a>
 ## Redes e presets
 
-Cada conta de rede do canal é um destino, listado com o @, o preset, a situação e o último arquivo. Cada rede parte do próprio preset:
+Cada conta de rede do canal é um destino, listado com o @, o preset, a situação e o último arquivo. Cada rede parte do próprio preset, e o do YouTube segue o [formato](projects.md#format) do projeto:
 
 | Rede | Quadro | Tamanho | Bitrate | Duração máxima |
 | --- | --- | --- | --- | --- |
-| YouTube | 9:16 | 1080×1920 | 12 Mbps | 3 min |
+| YouTube, Short | 9:16 | 1080×1920 | 12 Mbps | 3 min |
+| YouTube, vídeo longo | 16:9 | 1920×1080 | 12 Mbps | 12 h |
 | TikTok | 9:16 | 1080×1920 | 10 Mbps | 10 min |
 | Instagram Reels | 9:16 | 1080×1920 | 10 Mbps | 15 min |
 | X | 9:16 | 720×1280 | 6 Mbps | 2 min 20 s |
@@ -47,7 +48,7 @@ Marque as redes que vão renderizar; as que ainda não têm arquivo, ou estão d
 Cada verificação vem marcada **Bloqueia** ou **Aviso**.
 
 - **Bloqueia** deixa a rede fora do render até você corrigir: um corte mais longo do que a rede aceita, ou nenhum codificador neste computador para o codec do preset. As outras redes renderizam mesmo assim.
-- **Aviso** deixa renderizar como está: legendas desligadas, clipes sem mídia (saem pretos), mixagem sem som, mixagem longe do loudness da rede (o render ajusta essa diferença), ou picos que o render precisa limitar. Quando o quadro do corte difere do da rede, cada clipe passa pela janela de recorte.
+- **Aviso** deixa renderizar como está: legendas desligadas, clipes sem mídia (saem pretos), mixagem sem som, mixagem longe do loudness da rede (o render ajusta essa diferença), picos que o render precisa limitar, ou um vídeo de YouTube com mais de 15 minutos, que o YouTube só aceita de uma [conta verificada](https://www.youtube.com/verify). Quando o quadro do corte difere do da rede, um arquivo 9:16 passa cada clipe pela janela de recorte, e um arquivo 16:9 mostra cada imagem inteira, uma em pé com faixas nas laterais.
 
 A situação de cada rede resume tudo: **Pronta**, **n para conferir** (avisos), **Bloqueada**, ou **Verificando** enquanto as verificações rodam.
 

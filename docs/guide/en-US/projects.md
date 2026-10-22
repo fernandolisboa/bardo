@@ -20,6 +20,13 @@ The project's name heads the screen, with a menu beside it that lists the channe
 
 The narrator is the persona that reads the video's narration, and its tone and script style shape the script Claude writes. A project uses its channel's default persona until you pick another one in **Narrator**, for this video only. Change the channel's default on [Channels](bardo:go/channels); create and tune narrators on [Personas](personas.md).
 
+<a id="format"></a>
+## Short or long
+
+**Format** beside the project's name says whether this video is a Short (vertical, under a minute) or a long video (16:9, 8 to 10 minutes). **Channel's** follows the channel's [video format](channels.md#format); pick **Short** or **Long** to make this one video the other kind.
+
+The format applies to what is made next: the next script's length, the shape of the next scene images and clips, a new cut in the editor and YouTube's [render preset](render.md#targets). What was already made keeps its shape, so after switching, write the script again and draw the scenes again for a video that matches.
+
 <a id="stages"></a>
 ## The stages
 
