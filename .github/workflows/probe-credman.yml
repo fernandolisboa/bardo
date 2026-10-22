@@ -11,40 +11,44 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        vm: [1, 2, 3, 4, 5, 6, 7, 8]
+        noise: [console, console, console, job, job, none, none]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo test -p bardo-storage --locked --no-run
-      - name: Logon sessions and credential files
+      - name: Start the noise
         shell: pwsh
         run: |
-          whoami
-          query user 2>&1
-          Get-CimInstance Win32_LogonSession | ForEach-Object {
-            $s = $_
-            $u = Get-CimAssociatedInstance -InputObject $s -ResultClassName Win32_Account -ErrorAction SilentlyContinue
-            "{0} type={1} start={2} user={3}" -f $s.LogonId, $s.LogonType, $s.StartTime, ($u.Name -join ',')
+          "job: pid=$PID session=$((Get-Process -Id $PID).SessionId) logon=$(whoami /logonid)"
+          $script = (Resolve-Path e2e/probe/noise.ps1).Path
+          if ("${{ matrix.noise }}" -eq "console") {
+            # Runs in the signed-in console session, a logon of its own.
+            schtasks /Create /F /TN BardoNoise /SC ONCE /ST 23:59 /IT /RU "$env:USERDOMAIN\$env:USERNAME" /TR "pwsh -NoProfile -WindowStyle Hidden -File `"$script`" -Tag console"
+            schtasks /Run /TN BardoNoise
+          } elseif ("${{ matrix.noise }}" -eq "job") {
+            Start-Process pwsh -ArgumentList "-NoProfile","-File","`"$script`"","-Tag","job" -WindowStyle Hidden
           }
-          Get-Process -IncludeUserName -ErrorAction SilentlyContinue | Where-Object UserName -like "*runneradmin*" | Select-Object -ExpandProperty Name | Sort-Object -Unique
-          foreach ($d in "$env:LOCALAPPDATA\Microsoft\Credentials", "$env:APPDATA\Microsoft\Credentials") {
-            Get-ChildItem -Force $d -ErrorAction SilentlyContinue | ForEach-Object { "{0} {1} {2:o}" -f $_.FullName, $_.Length, $_.LastWriteTimeUtc }
-          }
+          Start-Sleep 10
+          Get-Content "$env:TEMP\bardo-noise-*.log" -ErrorAction SilentlyContinue
           exit 0
-      - name: The suite, as CI runs it, logging every write and delete
+      - name: The suite, as CI runs it
         shell: bash
         run: |
           fails=0; stale=0
-          for i in $(seq 1 20); do
+          for i in $(seq 1 15); do
             failed=0
-            PROBE_STALE=1 cargo test -p bardo-storage --locked --lib -- --nocapture > run.log 2>&1 || failed=1
+            PROBE_STALE=1 cargo test -p bardo-storage --locked --lib > run.log 2>&1 || failed=1
             if [ $failed = 1 ] || grep -q "PROBE200 STALE" run.log; then
               [ $failed = 1 ] && fails=$((fails+1)); stale=$((stale+1))
-              echo "=== suite $i failed=$failed"
-              grep -E "PROBE200|panicked" run.log || true
-              pwsh -NoProfile -Command 'foreach ($d in "$env:LOCALAPPDATA\Microsoft\Credentials", "$env:APPDATA\Microsoft\Credentials") { Get-ChildItem -Force $d -ErrorAction SilentlyContinue | ForEach-Object { "{0} {1} {2:o}" -f $_.FullName, $_.Length, $_.LastWriteTimeUtc } }'
+              echo "=== suite $i failed=$failed"; grep -E "PROBE200 STALE|panicked" run.log || true
             fi
           done
-          echo "suite failures: $fails, runs with a wrong read: $stale, of 20"
+          echo "noise=${{ matrix.noise }} suite failures: $fails, runs with a wrong read: $stale, of 15"
+      - name: Noise log
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Content "$env:TEMP\bardo-noise-*.log" -ErrorAction SilentlyContinue
+          exit 0
