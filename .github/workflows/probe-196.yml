@@ -14,27 +14,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build the storage tests
         run: cargo test -p bardo-storage --lib --locked --no-run
-      - name: The backup test alone, 150 times
+      - name: The backup test alone, 100 times
         shell: bash
         run: |
           fails=0
-          for i in $(seq 1 150); do
+          for i in $(seq 1 100); do
             if ! cargo test -q -p bardo-storage --lib --locked a_backup_made_while -- --nocapture > run.log 2>&1; then
               fails=$((fails+1)); echo "=== alone run $i FAILED"; grep -E "PROBE|panicked|locked" run.log
-            elif [ $((i % 25)) -eq 0 ]; then
-              echo "=== alone run $i ok"; grep PROBE run.log
             fi
           done
-          echo "alone: $fails of 150 failed"
-      - name: The whole storage suite, 25 times (tests in parallel, as in CI)
+          echo "alone: $fails of 100 failed"; [ $fails -eq 0 ]
+      - name: The whole storage suite, 30 times (tests in parallel, as in CI)
+        if: always()
         shell: bash
         run: |
           fails=0
-          for i in $(seq 1 25); do
+          for i in $(seq 1 30); do
             if ! cargo test -q -p bardo-storage --lib --locked -- --nocapture > run.log 2>&1; then
               fails=$((fails+1)); echo "=== suite run $i FAILED"; grep -E "PROBE|panicked|locked|FAILED|failures" run.log
             else
-              echo "=== suite run $i ok"; grep -E "PROBE (backup took|agent wrote)" run.log
+              echo "=== suite run $i ok"; grep "test result" run.log
             fi
           done
-          echo "suite: $fails of 25 failed"
+          echo "suite: $fails of 30 failed"; [ $fails -eq 0 ]

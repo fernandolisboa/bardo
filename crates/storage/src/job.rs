@@ -540,6 +540,35 @@ mod tests {
     }
 
     #[test]
+    fn a_write_waits_for_another_runners_write_instead_of_failing() {
+        // The app and the agent are two processes on one file: a write
+        // while the other's is under way waits for it (up to
+        // `BUSY_TIMEOUT`), it does not fail with "database is locked".
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bardo.db");
+        let app = Database::open(&path).unwrap();
+        let agent = Database::open(&path).unwrap();
+        app.conn().execute_batch("BEGIN IMMEDIATE").unwrap();
+        let held = Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        let commit = std::thread::spawn(move || {
+            std::thread::sleep(held);
+            app.conn().execute_batch("COMMIT").unwrap();
+        });
+
+        agent
+            .heartbeat(RunnerRole::Agent, at(0), at(5_000))
+            .unwrap();
+        assert!(started.elapsed() >= held, "it waited for the other write");
+        commit.join().unwrap();
+        assert_eq!(agent.runners(at(0)).unwrap(), []);
+        assert_eq!(
+            Database::open(&path).unwrap().runners(at(0)).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
     fn runners_see_each_other_while_they_say_they_are_up() {
         let db = Database::open_in_memory().unwrap();
         let agent = db.other_runner();
