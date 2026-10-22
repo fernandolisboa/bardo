@@ -67,7 +67,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Timeline with one video track and three audio tracks (narration, music, SFX).
 - Manual cuts: split, trim, reorder, delete, with snapping to narration words.
 - Audio: per-track gain, mute/solo, fade in/out, ducking of music under narration with an adjustable amount.
-- Captions from the word timings: editable text and timing, a few burned-in styles per channel.
+- Captions from the word timings: editable text and timing, a few burned-in styles per channel, and the spoken word lit up in a color (ADR-0020).
 - Framing: 9:16 and 16:9 with per-clip crop/reframe position.
 - Preview playback from low-resolution proxies.
 - Transitions between video clips: cut, crossfade, through black or white, wipes, slides and zoom, centered on the cut so the narration stays in sync; a default per channel (ADR-0016, #167).

@@ -1317,6 +1317,7 @@ pub(crate) mod tests {
         let other = RenderPlan {
             captions: Some(bardo_media::ffmpeg::CaptionTrack {
                 style: CaptionStyle::Boxed,
+                highlight: bardo_domain::CaptionHighlight::Off,
                 lines: Vec::new(),
             }),
             ..plan.clone()

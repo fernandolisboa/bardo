@@ -95,6 +95,7 @@ Captions are made from the narration's words and sit on the CC track. Select one
 - **Text**: Enter applies it; the timing stays.
 - **In** and **Out**: drag the caption, or either of its ends, on the track; its edges snap to the words.
 - **Style**: pick one of the caption styles. The style applies to every caption in the project.
+- **Spoken word**: the color the word being said lights up in, while the rest of the line shows in white, as in most Shorts; **Off** shows each line in its style's own color. Only the color changes, so a line never moves or rewraps. Each word lights up when the narrator starts saying it. If you rewrite a caption with more or fewer words than were spoken, its time is shared out over the new words by their length; mending a word keeps the timing. It applies to every caption in the project.
 
 **Remove from the cut** takes a caption out.
 

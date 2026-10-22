@@ -9,7 +9,7 @@ use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
-     transition_frames, video_format, motion, motion_strength FROM channel";
+     transition_frames, video_format, motion, motion_strength, caption_highlight FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
@@ -18,6 +18,7 @@ struct ChannelRow {
     default_persona: Option<String>,
     clip_model: (Option<String>, Option<String>),
     caption_style: String,
+    caption_highlight: String,
     transition: (String, i64),
     format: String,
     motion: (String, String),
@@ -33,6 +34,7 @@ impl ChannelRow {
                 default_persona: row.get(7)?,
                 clip_model: (row.get(8)?, row.get(9)?),
                 caption_style: row.get(10)?,
+                caption_highlight: row.get(16)?,
                 transition: (row.get(11)?, row.get(12)?),
                 format: row.get(13)?,
                 motion: (row.get(14)?, row.get(15)?),
@@ -67,6 +69,7 @@ impl ChannelRow {
             .map_err(boxed)?;
         draft.clip_model = clip_model(self.clip_model)?;
         draft.caption_style = self.caption_style.parse().map_err(boxed)?;
+        draft.caption_highlight = self.caption_highlight.parse().map_err(boxed)?;
         draft.format = self.format.parse().map_err(boxed)?;
         let (pattern, strength) = &self.motion;
         draft.motion = MotionDefault::new(
@@ -155,8 +158,9 @@ impl ChannelRepository for Database {
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
                                   default_persona_id, clip_provider, clip_model, caption_style,
                                   transition, transition_frames, video_format, motion,
-                                  motion_strength)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                                  motion_strength, caption_highlight)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -172,6 +176,7 @@ impl ChannelRepository for Database {
                  video_format = excluded.video_format,
                  motion = excluded.motion,
                  motion_strength = excluded.motion_strength,
+                 caption_highlight = excluded.caption_highlight,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -190,6 +195,7 @@ impl ChannelRepository for Database {
                 details.format().code(),
                 details.motion().pattern.code(),
                 details.motion().strength.code(),
+                details.caption_highlight().code(),
             ],
         )
         .map_err(boxed)?;
@@ -235,6 +241,7 @@ mod tests {
                     .unwrap(),
             ),
             caption_style: CaptionStyle::Boxed,
+            caption_highlight: bardo_domain::CaptionHighlight::Green,
             transition: Transition::new(TransitionKind::SlideLeft, 24),
             format: bardo_domain::VideoFormat::Long,
             motion: MotionDefault::new(
@@ -295,6 +302,19 @@ mod tests {
         assert_eq!(
             db.get(old).unwrap().unwrap().details.motion(),
             MotionDefault::still()
+        );
+        // And captions that light no word, as its cuts had.
+        assert_eq!(
+            db.get(old).unwrap().unwrap().details.caption_highlight(),
+            bardo_domain::CaptionHighlight::Off
+        );
+        assert_eq!(
+            db.get(short.id)
+                .unwrap()
+                .unwrap()
+                .details
+                .caption_highlight(),
+            bardo_domain::CaptionHighlight::Yellow
         );
     }
 

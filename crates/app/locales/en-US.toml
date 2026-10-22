@@ -76,6 +76,8 @@ clip_model_default = "{model} (default)"
 clip_model_hint = "The model that animates this channel's scene images into clips, through Higgsfield, Kling or Google. Any scene can pick another."
 caption_style = "Caption style"
 caption_style_hint = "How captions look in this channel's new projects. Each project can pick another in the editor."
+caption_highlight = "Spoken word"
+caption_highlight_hint = "In this channel's new projects, the word being said lights up in this color while the rest of the line stays white. Each project can pick another in the editor."
 format = "Video format"
 format_hint = "Short: a vertical video of under a minute, for every network. Long: a 16:9 video of 8 to 10 minutes, for YouTube. It sets the script's length, the shape of the pictures and the cut, and YouTube's preset. Each project can pick the other."
 transition = "Default transition"
@@ -182,6 +184,14 @@ private = "Private"
 clean = "Clean"
 boxed = "Boxed"
 punch = "Punch"
+
+[caption_highlight]
+off = "Off"
+yellow = "Yellow"
+green = "Green"
+cyan = "Cyan"
+pink = "Pink"
+orange = "Orange"
 
 [video_format]
 short = "Short (9:16, under a minute)"
@@ -1040,6 +1050,8 @@ text = "Text"
 text_hint = "Enter applies the text; the timing stays."
 style = "Style"
 style_hint = "The style applies to every caption in this project."
+highlight = "Spoken word"
+highlight_hint = "The word being said lights up in this color, the rest of the line in white; the line never moves. Off shows each line in its style's own color."
 show = "Show captions"
 
 [editor.framing]
@@ -2476,7 +2488,7 @@ body = "Ducking lowers the music while the narration speaks and brings it back i
 
 [tour.editor-more.captions]
 title = "Captions"
-body = "Captions follow the narration's words. Select one to edit its text, timing and style in the inspector; this switch turns them all off."
+body = "Captions follow the narration's words. Select one to edit its text, timing, style and the color the spoken word lights up in, in the inspector; this switch turns them all off."
 
 [tour.editor-more.framing]
 title = "16:9 or 9:16"
@@ -2542,7 +2554,7 @@ body = "Shorts are vertical and under a minute, and fit every network. Long vide
 
 [tour.channels.defaults]
 title = "Video model, captions and transitions"
-body = "The model that animates the channel's scene images into clips, the look of the captions in its new projects, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
+body = "The model that animates the channel's scene images into clips, the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
 
 [tour.channels.accounts]
 title = "Network accounts"

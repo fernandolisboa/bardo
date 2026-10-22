@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use bardo_domain::{CaptionStyle, TransitionKind, VideoCodec};
+use bardo_domain::{CaptionHighlight, CaptionStyle, TransitionKind, VideoCodec};
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
     Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Motion, Output, ProxyCodec,
@@ -746,10 +746,12 @@ fn captioned_plan(style: CaptionStyle) -> RenderPlan {
         audio: Vec::new(),
         captions: Some(CaptionTrack {
             style,
+            highlight: CaptionHighlight::Off,
             lines: vec![CaptionLine {
                 text: "The keeper {lit} the lamp".into(),
                 at: secs(0.5),
                 duration: secs(1.0),
+                words: Vec::new(),
             }],
         }),
         skipped: Duration::ZERO,
@@ -811,6 +813,89 @@ fn the_preview_shows_captions_from_the_playhead() {
     assert_eq!(frames.len(), 30);
     assert!(bright_pixels(&frames[0].bgra) > 100, "at 1.0 s");
     assert_eq!(bright_pixels(&frames[20].bgra), 0, "at 1.67 s");
+}
+
+/// Two seconds of black with "Lamp glow" from 0.5 s to 1.5 s in `style`,
+/// "Lamp" lit in yellow from 0.5 s, "glow" from 1 s.
+fn highlighted_plan(style: CaptionStyle) -> RenderPlan {
+    let mut plan = captioned_plan(style);
+    plan.captions = Some(CaptionTrack {
+        style,
+        highlight: CaptionHighlight::Yellow,
+        lines: vec![CaptionLine {
+            text: "Lamp glow".into(),
+            at: secs(0.5),
+            duration: secs(1.0),
+            words: vec![secs(0.5), secs(1.0)],
+        }],
+    });
+    plan
+}
+
+/// Where a frame's yellow letters and its white letters sit: how many of
+/// each and their mean column.
+fn lit_and_white(bgra: &[u8], width: usize) -> ((usize, f64), (usize, f64)) {
+    let (mut yellow, mut white) = ((0, 0.0), (0, 0.0));
+    for (index, pixel) in bgra.chunks(4).enumerate() {
+        let (blue, green, red) = (pixel[0], pixel[1], pixel[2]);
+        let column = (index % width) as f64;
+        if red > 180 && green > 150 && blue < 110 {
+            yellow = (yellow.0 + 1, yellow.1 + column);
+        } else if red > 200 && green > 200 && blue > 200 {
+            white = (white.0 + 1, white.1 + column);
+        }
+    }
+    let mean = |(count, sum): (usize, f64)| (count, sum / count.max(1) as f64);
+    (mean(yellow), mean(white))
+}
+
+/// Whether the lit (yellow) word sits left of the white one, or right.
+fn lit_side(bgra: &[u8], width: usize) -> Option<&'static str> {
+    let ((yellow, lit), (white, unlit)) = lit_and_white(bgra, width);
+    if yellow < 20 || white < 20 {
+        return None;
+    }
+    Some(if lit < unlit { "left" } else { "right" })
+}
+
+#[test]
+fn renders_the_spoken_word_lit_in_every_style() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("highlight");
+    for style in CaptionStyle::ALL {
+        let destination = dir.join(format!("{style}.mp4"));
+        let output = vertical(VideoEncoder::OpenH264);
+        ffmpeg
+            .render(&highlighted_plan(style), &output, None, &destination, &())
+            .unwrap_or_else(|error| panic!("{style}: {error}"));
+        let side = |at: f64| {
+            let frame = ffmpeg
+                .frame_at(&destination, secs(at), output.size)
+                .unwrap();
+            lit_side(&frame.bgra, output.size.width as usize)
+        };
+        // "Lamp" lit, then "glow"; the other word white.
+        assert_eq!(side(0.75), Some("left"), "{style} at 0.75 s");
+        assert_eq!(side(1.25), Some("right"), "{style} at 1.25 s");
+        assert_eq!(side(1.75), None, "{style} after");
+    }
+}
+
+#[test]
+fn the_preview_lights_the_spoken_word_as_the_render_does() {
+    let size = FrameSize::new(304, 540);
+    let stream = ffmpeg()
+        .preview(
+            &highlighted_plan(CaptionStyle::Clean),
+            secs(0.6),
+            size,
+            (30, 1),
+        )
+        .unwrap();
+    let frames: Vec<_> = stream.collect();
+    // 0.7 s and 1.3 s.
+    assert_eq!(lit_side(&frames[3].bgra, 304), Some("left"));
+    assert_eq!(lit_side(&frames[21].bgra, 304), Some("right"));
 }
 
 /// The band of `bands-320x180.png` a column falls in: red, green or blue,

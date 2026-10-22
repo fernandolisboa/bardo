@@ -183,6 +183,7 @@ mod tests {
             default_persona: None,
             clip_model: None,
             caption_style: Default::default(),
+            caption_highlight: Default::default(),
             transition: Default::default(),
             format: Default::default(),
             motion: Default::default(),

@@ -1288,10 +1288,12 @@ mod tests {
         let mut plan = plan();
         plan.captions = Some(CaptionTrack {
             style: bardo_domain::CaptionStyle::Clean,
+            highlight: bardo_domain::CaptionHighlight::Off,
             lines: vec![super::super::CaptionLine {
                 text: "Hello".into(),
                 at: secs(1.0),
                 duration: secs(2.0),
+                words: Vec::new(),
             }],
         });
         let later = plan.starting_at(secs(2.0));

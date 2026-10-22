@@ -89,6 +89,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Legenda**: uma linha de texto na tela tirada da narração, no tempo das palavras, com um estilo por canal ou por projeto.
 
+**Destaque da palavra falada**: a palavra de uma legenda que está sendo dita, acesa em uma cor enquanto o resto da linha fica branco.
+
 **Enquadramento**: o formato do quadro (16:9 ou 9:16) e como cada clipe preenche esse quadro.
 
 **Proxy**: uma cópia leve de um clipe que a prévia reproduz, para a edição ficar fluida. O render sempre usa os originais.

@@ -89,7 +89,7 @@ pub use backup::{
 };
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
-pub use bardo_media::ffmpeg::{CaptionLook, caption_look};
+pub use bardo_media::ffmpeg::{CaptionLook, caption_look, highlight_colour};
 pub use channels::ChannelError;
 pub use clips::{ClipsView, SceneClipView};
 pub use connections::{

@@ -29,9 +29,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    AspectRatio, AudioLane, CaptionStyle, Captions, DuckEnvelope, Edge, Framing, MediaAsset,
-    MediaKind, Mix, Motion, MotionDefault, Narration, NarrationId, PlayedTransition, ProfileId,
-    RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, Transition, VideoProjectId,
+    AspectRatio, AudioLane, CaptionHighlight, CaptionStyle, Captions, DuckEnvelope, Edge, Framing,
+    MediaAsset, MediaKind, Mix, Motion, MotionDefault, Narration, NarrationId, PlayedTransition,
+    ProfileId, RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, Transition,
+    VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -246,6 +247,8 @@ pub struct CaptionSpan {
     pub index: usize,
     pub at: Duration,
     pub duration: Duration,
+    /// Where in the narration file the stretch starts.
+    pub from: Duration,
 }
 
 impl CaptionSpan {
@@ -350,6 +353,13 @@ impl Timeline {
         self
     }
 
+    /// This timeline with its captions lighting the spoken word in
+    /// `highlight` (a channel's default, for a new cut).
+    pub fn with_caption_highlight(mut self, highlight: CaptionHighlight) -> Timeline {
+        self.captions.highlight = highlight;
+        self
+    }
+
     /// This timeline with each scene's motion from `default` (a channel's,
     /// for a new cut): the scene at each place of the video track gets the
     /// pattern's motion for that place. Footage keeps none.
@@ -395,6 +405,8 @@ impl Timeline {
                 lines: saved.lines.clone(),
                 shown: saved.shown,
                 style: saved.style,
+                highlight: saved.highlight,
+                spoken: captions_of(narration).spoken,
                 length: narration.duration,
             },
             None => captions_of(narration),
@@ -491,6 +503,7 @@ impl Timeline {
                 lines: self.captions.lines.clone(),
                 shown: self.captions.shown,
                 style: self.captions.style,
+                highlight: self.captions.highlight,
             }),
             aspect: self.aspect,
             updated_at: now,
@@ -580,12 +593,28 @@ impl Timeline {
                             index,
                             at: item.at + (start - from),
                             duration: end - start,
+                            from: start,
                         })
                     })
             })
             .collect();
         spans.sort_by_key(|span| (span.at, span.index));
         spans
+    }
+
+    /// When each word of `span`'s caption starts to light up on the
+    /// timeline (`Captions::word_starts`), one per word. A word spoken
+    /// before the stretch starts is at or before its start; one spoken
+    /// after it, at or past its end: such a word does not light up there.
+    pub fn caption_word_starts(&self, span: &CaptionSpan) -> Vec<Duration> {
+        self.captions
+            .word_starts(span.index)
+            .into_iter()
+            .map(|start| match start.checked_sub(span.from) {
+                Some(after) => span.at + after,
+                None => span.at.saturating_sub(span.from - start),
+            })
+            .collect()
     }
 
     /// Where on the timeline caption `index` shows, first to last stretch.
@@ -1626,7 +1655,23 @@ pub(crate) mod tests {
         let spans = timeline.caption_spans();
         assert_eq!(spans.len(), 2);
         assert_eq!((spans[1].at, spans[1].end()), (ms(1_000), ms(1_500)));
+        assert_eq!((spans[0].from, spans[1].from), (ms(0), ms(1_500)));
         assert_eq!(timeline.caption_hull(0), Some((ms(0), ms(1_500))));
+        // "Slowly" lights the first stretch ("spoken" starts past its
+        // end); the second starts inside "spoken", which started half a
+        // second before it, so "spoken" lights it all.
+        assert_eq!(timeline.caption_word_starts(&spans[0]), [ms(0), ms(1_000)]);
+        assert_eq!(timeline.caption_word_starts(&spans[1]), [ms(0), ms(500)]);
+    }
+
+    #[test]
+    fn a_new_cut_lights_its_words_in_the_channel_s_highlight() {
+        let plan = drawn(&[(0, 2_000, "a.png")]);
+        let narration = narrated("One. Two.", &[(0, 500), (1_000, 1_500)], 2_000);
+        let timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
+        assert_eq!(timeline.captions().highlight(), CaptionHighlight::Yellow);
+        let off = timeline.with_caption_highlight(CaptionHighlight::Off);
+        assert_eq!(off.captions().highlight(), CaptionHighlight::Off);
     }
 
     #[test]
@@ -1634,7 +1679,8 @@ pub(crate) mod tests {
         let plan = drawn(&[(0, 2_000, "a.png")]);
         let narration = narrated("One. Two.", &[(0, 500), (1_000, 1_500)], 2_000);
         let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape)
-            .with_caption_style(CaptionStyle::Boxed);
+            .with_caption_style(CaptionStyle::Boxed)
+            .with_caption_highlight(CaptionHighlight::Cyan);
         timeline.captions.lines[0].text = "Uno.".into();
         timeline.captions.shown = false;
         let saved = saved(&timeline, &plan, &narration);
@@ -1642,13 +1688,13 @@ pub(crate) mod tests {
             saved
                 .captions
                 .as_ref()
-                .map(|c| (c.shown, c.style, c.lines.len())),
-            Some((false, CaptionStyle::Boxed, 2))
+                .map(|c| (c.shown, c.style, c.highlight, c.lines.len())),
+            Some((false, CaptionStyle::Boxed, CaptionHighlight::Cyan, 2))
         );
-        assert_eq!(
-            Timeline::restore(&saved, &plan, &narration, &[]),
-            Some(timeline.clone())
-        );
+        // The words' times come back from the narration.
+        let restored = Timeline::restore(&saved, &plan, &narration, &[]);
+        assert_eq!(restored, Some(timeline.clone()));
+        assert_eq!(restored.unwrap().captions().word_starts(1), [ms(1_000)]);
 
         // A cut saved before captions gets them from the words.
         let mut older = saved.clone();

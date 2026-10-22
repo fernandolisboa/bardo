@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    AspectRatio, AudioLane, Caption, CaptionStyle, CropPosition, Decibels, Ducking, Framing,
-    LaneMix, Mix, Motion, NarrationId, Picture, ProfileId, RepositoryError, SavedAudioItem,
-    SavedCaptions, SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository, Transition,
-    TransitionKind, VideoProjectId,
+    AspectRatio, AudioLane, Caption, CaptionHighlight, CaptionStyle, CropPosition, Decibels,
+    Ducking, Framing, LaneMix, Mix, Motion, NarrationId, Picture, ProfileId, RepositoryError,
+    SavedAudioItem, SavedCaptions, SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository,
+    Transition, TransitionKind, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -150,7 +150,8 @@ impl TimelineRepository for Database {
         let head = conn
             .query_row(
                 "SELECT profile_id, scene_plan_id, narration_id, updated_at, duck_music,
-                        duck_depth_tenths, has_captions, captions_shown, caption_style, aspect
+                        duck_depth_tenths, has_captions, captions_shown, caption_style, aspect,
+                        caption_highlight
                  FROM timeline WHERE project_id = ?1",
                 [&project_id],
                 |row| {
@@ -166,6 +167,7 @@ impl TimelineRepository for Database {
                             row.get::<_, bool>(6)?,
                             row.get::<_, bool>(7)?,
                             row.get::<_, String>(8)?,
+                            row.get::<_, String>(10)?,
                         ),
                         row.get::<_, String>(9)?,
                     ))
@@ -176,7 +178,7 @@ impl TimelineRepository for Database {
         let Some((
             (owner, plan, narration, updated_at),
             (duck, depth),
-            (has_captions, captions_shown, caption_style),
+            (has_captions, captions_shown, caption_style, caption_highlight),
             aspect,
         )) = head
         else {
@@ -278,6 +280,9 @@ impl TimelineRepository for Database {
                 lines,
                 shown: captions_shown,
                 style: caption_style.parse::<CaptionStyle>().map_err(boxed)?,
+                highlight: caption_highlight
+                    .parse::<CaptionHighlight>()
+                    .map_err(boxed)?,
             })
         } else {
             None
@@ -349,8 +354,8 @@ impl TimelineRepository for Database {
         tx.execute(
             "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at,
                                    duck_music, duck_depth_tenths, has_captions, captions_shown,
-                                   caption_style, aspect)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                                   caption_style, aspect, caption_highlight)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 project,
                 timeline.owner.to_string(),
@@ -370,6 +375,11 @@ impl TimelineRepository for Database {
                     .map_or(CaptionStyle::default(), |captions| captions.style)
                     .code(),
                 timeline.aspect.code(),
+                timeline
+                    .captions
+                    .as_ref()
+                    .map_or(CaptionHighlight::Off, |captions| captions.highlight)
+                    .code(),
             ],
         )
         .map_err(boxed)?;
@@ -649,6 +659,7 @@ mod tests {
                 ],
                 shown: false,
                 style: CaptionStyle::Punch,
+                highlight: CaptionHighlight::Orange,
             }),
             aspect: AspectRatio::Vertical,
             updated_at: time(1_800_000_002_000),
@@ -824,6 +835,30 @@ mod tests {
             conn.execute("UPDATE timeline SET aspect = '4:3'", [])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_cut_saved_before_the_word_highlight_lights_none() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut saved = cut(&project);
+        db.save_timeline(&saved).unwrap();
+        // As a cut saved by an older Bardo: the migration's default.
+        let default: String = db
+            .conn()
+            .query_row(
+                "SELECT dflt_value FROM pragma_table_info('timeline')
+                 WHERE name = 'caption_highlight'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(default, "'off'");
+        db.conn()
+            .execute("UPDATE timeline SET caption_highlight = 'off'", [])
+            .unwrap();
+        saved.captions.as_mut().unwrap().highlight = CaptionHighlight::Off;
+        assert_eq!(db.saved_timeline(project.id).unwrap(), Some(saved));
     }
 
     #[test]
