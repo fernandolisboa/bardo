@@ -1,0 +1,35 @@
+# Throwaway probe for #200; removed before merge.
+name: Probe Credential Manager
+
+on:
+  pull_request:
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo test -p bardo-storage --locked --no-run
+      - name: Probe
+        shell: bash
+        run: |
+          for mode in serial serial_disk concurrent concurrent_disk serial concurrent; do
+            PROBE_MODE=$mode cargo test -p bardo-storage --locked --test probe_credman -- --nocapture --test-threads=1 > probe.log 2>&1
+            grep -E "PROBE|panicked|test result" probe.log
+          done
+      - name: Suite loop
+        shell: bash
+        run: |
+          fails=0
+          for i in $(seq 1 25); do
+            if ! cargo test -p bardo-storage --locked --lib > run.log 2>&1; then
+              fails=$((fails+1)); echo "=== suite run $i FAILED"; grep -E -A6 "panicked" run.log
+            else
+              echo "=== suite run $i ok"; grep "test result" run.log
+            fi
+          done
+          echo "suite failures: $fails"

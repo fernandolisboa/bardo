@@ -245,6 +245,11 @@ struct State {
     /// to stop, and whatever their handlers return is not saved, since the
     /// job is another runner's now.
     lost: HashSet<JobId>,
+    /// Jobs whose run ended here but whose end storage refused (a busy
+    /// database, a full disk). The copy in `jobs` has the end; storage still
+    /// says running. This runner keeps their leases and saves them again
+    /// every tick, so neither it nor another runner starts them again.
+    unsaved: HashSet<JobId>,
     /// When this runner last renewed its leases. Past one lease after it
     /// (renewing keeps failing), every running job is given up.
     renewed_at: SystemTime,
@@ -359,16 +364,52 @@ impl Shared {
                 }
             };
             if ended.is_ok() {
-                // If this save fails, the job runs again from its last
-                // checkpoint after a restart; nothing is lost. Refused when
-                // another runner took the job meanwhile: its copy wins on
-                // the next tick.
-                let _ = self.repository.save(job);
+                match self.repository.save(job) {
+                    Ok(()) => {}
+                    // Another runner took the job meanwhile: its copy wins
+                    // on the next tick.
+                    Err(error) if error.is_held_elsewhere() => {}
+                    Err(error) => {
+                        // Storage still says running. Releasing the lease
+                        // now would let the next tick (here or in the other
+                        // runner) queue the job again and run it twice:
+                        // keep it, and save the end again every tick.
+                        tracing::warn!(job = %id, "could not save how a job ended: {error}");
+                        state.unsaved.insert(id);
+                        self.changed();
+                        self.wake.notify_all();
+                        return;
+                    }
+                }
             }
         }
         let _ = self.repository.release(id);
         self.changed();
         self.wake.notify_all();
+    }
+
+    /// Saves again the ends storage refused (`State::unsaved`), and gives up
+    /// each one's lease once saved.
+    fn save_unsaved(&self, state: &mut State) {
+        let unsaved: Vec<JobId> = state.unsaved.iter().copied().collect();
+        for id in unsaved {
+            let saved = match state.jobs.iter().find(|job| job.id() == id) {
+                Some(job) => match self.repository.save(job) {
+                    Ok(()) => true,
+                    Err(error) if error.is_held_elsewhere() => true,
+                    Err(error) => {
+                        tracing::warn!(job = %id, "could not save how a job ended: {error}");
+                        false
+                    }
+                },
+                None => true,
+            };
+            if saved {
+                state.unsaved.remove(&id);
+                let _ = self.repository.release(id);
+                self.changed();
+            }
+        }
     }
 
     /// Changes one job through `apply` on a copy, saves the copy and only
@@ -379,7 +420,8 @@ impl Shared {
         apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
     ) -> Result<JobState, JobActionError> {
         let mut state = self.state();
-        let running_here = state.workers.contains_key(&id);
+        // A job whose end is not saved yet is ahead of storage, too.
+        let running_here = state.workers.contains_key(&id) || state.unsaved.contains(&id);
         let job = state.job_mut(id).ok_or(JobActionError::NotFound)?;
         if !running_here && let Ok(Some(stored)) = self.repository.job(id) {
             // Another runner may have moved it on since the last tick.
@@ -394,6 +436,10 @@ impl Shared {
         }
         *job = updated;
         let new_state = job.state();
+        if state.unsaved.remove(&id) {
+            // Saved past its end (a retry by hand): nothing left to save.
+            let _ = self.repository.release(id);
+        }
         if new_state == JobState::Cancelled
             && let Some(stop) = state.workers.get(&id)
         {
@@ -458,6 +504,7 @@ impl JobQueue {
                 elsewhere,
                 others,
                 lost: HashSet::new(),
+                unsaved: HashSet::new(),
                 renewed_at: now,
                 paused,
                 held,
@@ -634,6 +681,12 @@ impl Drop for JobQueue {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .0;
         }
+        // A last try at the ends storage refused; one still refused runs
+        // again from its last checkpoint when a runner next starts.
+        self.shared.save_unsaved(&mut state);
+        for id in std::mem::take(&mut state.unsaved) {
+            let _ = self.shared.repository.release(id);
+        }
         drop(state);
         let _ = self.shared.repository.leave();
     }
@@ -690,6 +743,7 @@ fn start_due(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
             jobs,
             workers,
             elsewhere,
+            unsaved,
             held,
             ..
         } = &mut **state;
@@ -701,6 +755,7 @@ fn start_due(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
                 job.is_due(now)
                     && (!held || job.kind() == JobKind::Restore)
                     && !workers.contains_key(&job.id())
+                    && !unsaved.contains(&job.id())
                     && !elsewhere.contains(&job.id())
                     && !tried.contains(&job.id())
             })
@@ -801,7 +856,8 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
         .filter(|id| !state.lost.contains(id))
         .copied()
         .collect();
-    let lost = match repository.renew(&running, now + shared.settings.lease) {
+    let leased: Vec<JobId> = running.iter().chain(&state.unsaved).copied().collect();
+    let lost = match repository.renew(&leased, now + shared.settings.lease) {
         Ok(lost) => {
             state.renewed_at = now;
             lost
@@ -812,10 +868,19 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
             let expired = now
                 .duration_since(state.renewed_at)
                 .is_ok_and(|since| since >= shared.settings.lease);
+            // An unsaved end stays: saving it is refused once another
+            // runner holds the job, and giving it up here would queue it
+            // again on this runner's own next read.
             if expired { running } else { Vec::new() }
         }
     };
     for id in lost {
+        if state.unsaved.remove(&id) {
+            // Its end was never saved and another runner has it now: that
+            // runner's copy wins, as with any lost lease.
+            tracing::warn!(job = %id, "lost the lease on a job whose end was not saved");
+            continue;
+        }
         // Another runner took it, or may (this process slept past its
         // lease): this run stops, and that one's goes on.
         tracing::warn!(job = %id, "lost the lease on a running job");
@@ -824,6 +889,7 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
         }
         state.lost.insert(id);
     }
+    shared.save_unsaved(state);
     reconcile(shared, state, now);
 }
 
@@ -846,7 +912,7 @@ fn reconcile(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>, now: Syste
     let mut jobs = Vec::with_capacity(stored.len());
     for mut job in stored {
         let id = job.id();
-        if state.workers.contains_key(&id)
+        if (state.workers.contains_key(&id) || state.unsaved.contains(&id))
             && let Some(ours) = state.jobs.iter().find(|ours| ours.id() == id)
         {
             jobs.push(ours.clone());
