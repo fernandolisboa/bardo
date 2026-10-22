@@ -26,7 +26,7 @@ use crate::layout;
 use crate::missed::{MissedChanged, MissedPosts};
 use crate::network_accounts::OpenNetworkSettings;
 use crate::parts::{BudgetMeter, Navigation};
-use crate::performance::PerformanceScreen;
+use crate::performance::{OpenRetention, PerformanceScreen};
 use crate::personas::PersonasScreen;
 use crate::projects::{OpenEditor, ProjectsScreen};
 use crate::research::ResearchScreen;
@@ -175,6 +175,20 @@ impl Shell {
                 window,
                 |this, _, event: &OpenEditor, window, cx| {
                     this.open_editor(event.0, window, cx);
+                },
+            ),
+            cx.subscribe_in(
+                &projects,
+                window,
+                |this, _, event: &OpenRetention, window, cx| {
+                    this.open_retention(event, window, cx);
+                },
+            ),
+            cx.subscribe_in(
+                &performance,
+                window,
+                |this, _, event: &OpenRetention, window, cx| {
+                    this.open_retention(event, window, cx);
                 },
             ),
         ];
@@ -677,6 +691,21 @@ impl Shell {
         self.guide
             .update(cx, |guide, cx| guide.set_over_editor(true, cx));
         cx.notify();
+    }
+
+    /// Opens a project's editor with its YouTube video's retention over
+    /// the cut, at a drop when given.
+    fn open_retention(
+        &mut self,
+        event: &OpenRetention,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_editor(event.project, window, cx);
+        if let Some((editor, _)) = &self.editor {
+            let at = event.at;
+            editor.update(cx, |editor, cx| editor.show_retention(at, cx));
+        }
     }
 
     /// Back to the projects screen: the editor lets go of its preview.

@@ -38,6 +38,7 @@ use gpui_kit::{
     size,
 };
 
+use super::retention::RETENTION_ROW;
 use super::tokens::*;
 use super::{EditorScreen, clip_name, color, icon, label, tool_button};
 use crate::appearance::EditorColor;
@@ -283,9 +284,16 @@ fn ruler_label(seconds: u64) -> String {
 }
 
 impl EditorScreen {
-    /// The ruler's height: taller while the suggestions' pins show.
+    /// The ruler's height: taller while the suggestions' pins or the
+    /// retention curve show.
     pub(super) fn ruler_height(&self) -> f32 {
-        if self.cuts.on { RULER + PIN_ROW } else { RULER }
+        let pins = if self.cuts.on { PIN_ROW } else { 0. };
+        let retention = if self.retention.row() {
+            RETENTION_ROW
+        } else {
+            0.
+        };
+        RULER + pins + retention
     }
 
     pub(super) fn render_timeline(
@@ -360,6 +368,7 @@ impl EditorScreen {
         let mut captions = Some(self.render_captions(view, selection, cx));
         let (mut ghost, snap_line) = self.render_drag(view);
         let cut_marks = self.render_cut_marks(cx);
+        let retention_marks = self.render_retention_row(self.ruler_height(), cx);
         let lanes = Track::ALL.map(|track| {
             let lane = div()
                 .relative()
@@ -418,6 +427,7 @@ impl EditorScreen {
                     .children(snap_line)
                     .children(playhead_line)
                     .children(cut_marks)
+                    .children(retention_marks)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -480,6 +490,7 @@ impl EditorScreen {
             .as_ref()
             .is_some_and(|e| e.view().timeline.is_some());
         let cuts = self.render_cuts_toggle(editing, cx);
+        let retention = self.render_retention_toggle(editing, cx);
         let bardo = self.bardo.read(cx);
         let mono = cx.theme().mono_font_family.clone();
         let playhead = self
@@ -620,6 +631,7 @@ impl EditorScreen {
                     .child(div().w(px(1.)).h(px(18.)).mx_1().bg(color(HAIRLINE)))
                     .child(snap)
                     .child(cuts)
+                    .child(retention)
                     .child(duck)
                     .child(captions)
                     .child(div().flex_1())

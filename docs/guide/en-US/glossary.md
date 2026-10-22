@@ -143,6 +143,8 @@ The words Bardo uses, in plain terms.
 
 **Post insights**: the owner's numbers for an Instagram or TikTok post, read through the connected account.
 
+**Retention drop**: a stretch of a YouTube video's retention curve where viewers leave at least twice as fast as on average in that video. Bardo marks the five largest over the cut.
+
 **Metrics sync**: the job that reads your posts' numbers, when you ask and when Bardo opens.
 
 **Job**: long work (a narration, images, a render, an upload) that runs in the background with progress, cancel and resume.

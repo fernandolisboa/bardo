@@ -132,6 +132,7 @@ pub mod refs {
     pub const PERFORMANCE_POSTS: GuideRef = at("performance-metrics", "posts");
     pub const PERFORMANCE_NUMBERS: GuideRef = at("performance-metrics", "numbers");
     pub const PERFORMANCE_SYNC: GuideRef = at("performance-metrics", "sync");
+    pub const PERFORMANCE_DROPS: GuideRef = at("performance-metrics", "drops");
     pub const PROJECTS_NARRATOR: GuideRef = at("projects", "narrator");
     pub const PROJECTS_FORMAT: GuideRef = at("projects", "format");
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");

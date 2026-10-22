@@ -70,6 +70,13 @@ A prévia e o render desenham as transições do mesmo jeito.
 
 Com **Encaixar nas palavras** ligado, cortes, aparas e bordas de legenda caem entre as palavras da narração quando chegam perto, então um corte nunca come uma palavra; uma linha fina marca a palavra enquanto você arrasta. Segure **Alt** enquanto arrasta para posicionar livremente, ou desligue a chave.
 
+<a id="retention"></a>
+## Retenção sobre o corte
+
+Quando o vídeo do projeto está no YouTube, a conta do YouTube do canal está conectada em [Contas](bardo:go/accounts) e uma [sincronização de métricas](performance-metrics.md#sync) já leu a retenção do público (o YouTube a informa 2 a 3 dias depois de o vídeo subir), **Retenção** na barra da linha do tempo desenha a curva numa faixa abaixo da régua, nos tempos do próprio corte. As quedas mais íngremes, onde o público sai pelo menos duas vezes mais rápido que a média daquele vídeo, ficam sombreadas e numeradas, no máximo as cinco maiores. A lista de quedas toma o lugar do inspetor: cada uma mostra o tempo, quanto do público sai ali, a cena exibida e a frase falada. Clique numa queda, na faixa ou na lista, para levar o cursor de reprodução até ela. Ligar **Retenção** esconde as sugestões de corte, e vice-versa.
+
+A curva só se alinha com o corte enquanto ele toca como tocava quando o vídeo foi renderizado para o YouTube. Mixagem, legendas, enquadramento e movimento nas imagens fixas não mudam isso; uma apara, um movimento ou uma nova narração mudam. Aí a faixa fica vazia e a lista diz que o corte mudou, com o tempo de cada queda no vídeo publicado. Desfaça até voltar ao corte renderizado e a curva se alinha de novo. Nada das quedas fica guardado: elas são calculadas a partir da curva a cada vez.
+
 <a id="undo"></a>
 ## Desfazer e refazer
 

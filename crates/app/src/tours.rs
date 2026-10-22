@@ -167,6 +167,8 @@ pub enum Control {
     EditorMotion,
     /// Editor: AI cut suggestions.
     EditorSuggestions,
+    /// Editor: the YouTube video's retention over the cut.
+    EditorRetention,
     /// Editor: Review & render.
     EditorRender,
     /// Render: the picked target's checks.
@@ -230,6 +232,8 @@ pub enum Control {
     MissedCancel,
     /// Missed posts: Decide later.
     MissedLater,
+    /// Performance: where the picked post's viewers leave.
+    PerformanceDrops,
     /// Costs: the month shown and the arrows that change it.
     CostsMonth,
     /// Costs: each paid provider's month against its budget.
@@ -519,14 +523,14 @@ pub const THEMES: Tour = {
     }
 };
 
-/// Performance: the channel's posts, a post's numbers, syncing, and
-/// where posts are linked.
+/// Performance: the channel's posts, a post's numbers and where its
+/// viewers leave, syncing, and where posts are linked.
 pub const PERFORMANCE: Tour = {
     const AT: Destination = Destination::Performance;
     const PAGE: &str = "performance-metrics";
     Tour {
         id: TourId::Performance,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "channel", TourAnchor::Header).learn(PAGE, "channel"),
@@ -534,6 +538,10 @@ pub const PERFORMANCE: Tour = {
             on(AT, "numbers", TourAnchor::Inspector)
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "numbers"),
+            // Only a YouTube post with a retention curve has drops.
+            on(AT, "drops", control(Control::PerformanceDrops))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "drops"),
             on(AT, "sync", TourAnchor::Toolbar)
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "sync"),
@@ -758,14 +766,15 @@ pub const TEMPLATES: Tour = {
 };
 
 /// The editor, part one: the preview and playback, the tracks, cutting,
-/// transitions, snapping and undo. Starting it pauses playback; its steps only explain,
-/// so the cut and its undo history stay as they were.
+/// transitions, snapping, the published video's retention and undo.
+/// Starting it pauses playback; its steps only explain, so the cut and its
+/// undo history stay as they were.
 pub const EDITOR: Tour = {
     const AT: Stage = Stage::Edit;
     const PAGE: &str = "editor";
     Tour {
         id: TourId::Editor,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "preview", control(Control::EditorPreview)).learn(PAGE, "preview"),
@@ -774,6 +783,7 @@ pub const EDITOR: Tour = {
             at_stage(AT, "transitions", control(Control::EditorTransitions))
                 .learn(PAGE, "transitions"),
             at_stage(AT, "snap", control(Control::EditorSnap)).learn(PAGE, "snapping"),
+            at_stage(AT, "retention", control(Control::EditorRetention)).learn(PAGE, "retention"),
             at_stage(AT, "undo", control(Control::EditorUndo)).learn(PAGE, "undo"),
         ],
     }

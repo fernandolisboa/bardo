@@ -97,6 +97,8 @@ pub struct OpenEditor(pub VideoProjectId);
 
 impl EventEmitter<OpenEditor> for ProjectsScreen {}
 
+impl EventEmitter<crate::performance::OpenRetention> for ProjectsScreen {}
+
 pub struct ProjectsScreen {
     bardo: Entity<Bardo>,
     channels: Vec<Channel>,
@@ -219,6 +221,8 @@ pub struct ProjectsScreen {
     render_error: Option<Text>,
     /// The Publish stage: every network's metadata and export.
     export_view: Option<ExportView>,
+    /// The YouTube post's curve over the project's cut, read with it.
+    post_retention: Option<bardo_app::CutRetention>,
     /// Where the project's exports stand, for its Publish stage.
     export_summary: Option<ExportSummary>,
     export_error: Option<Text>,
@@ -470,6 +474,7 @@ impl ProjectsScreen {
             confirm_render: false,
             render_error: None,
             export_view: None,
+            post_retention: None,
             export_summary: None,
             export_error: None,
             export_load_error: None,
