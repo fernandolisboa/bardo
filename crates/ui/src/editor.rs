@@ -124,6 +124,9 @@ pub(crate) mod tokens {
 
 use tokens::*;
 
+/// What the caption style swatches draw their sample on: a dark picture.
+const CAPTION_SAMPLE_GROUND: u32 = 0x1C1C1E;
+
 /// The bin's tabs (caption styles live in the caption inspector).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BinTab {
@@ -1953,7 +1956,9 @@ impl EditorScreen {
                 .justify_center()
                 .rounded(px(4.))
                 .cursor_pointer()
-                .bg(color(VIDEO_FILL))
+                // Dark in every theme, as a picture under the captions:
+                // their white letters show on light themes too.
+                .bg(Hsla::from(rgb(CAPTION_SAMPLE_GROUND)))
                 .border_1()
                 .border_color(color(if picked { ACCENT } else { OUTLINE }))
                 .when(picked, |swatch| swatch.border_2())
