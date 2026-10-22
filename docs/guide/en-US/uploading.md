@@ -53,7 +53,7 @@ The YouTube card of a long video also has **Chapters**: named parts of YouTube's
 
 Each chapter shows its time in the cut as it is now (`m:ss`, or `h:mm:ss` from an hour). Rename one, remove it, or start it a sentence earlier or later; the first always starts at 0:00. Chapters follow the narration, so trimming the cut in the editor moves their times with it.
 
-**Add chapters to the description** puts them between the description and the account's footer, and they count toward YouTube's 5,000 characters. YouTube shows chapters only when there are at least three, each at least 10 seconds long, the first at 0:00. Chapters that break a rule, or start in a part the cut removed, are left out of the description with a warning that says why, so they never stop an upload or export. A narration made after the chapters were written asks you to write them again.
+**Add chapters to the description** puts them between the description and the account's footer, and they count toward YouTube's 5,000 characters; when they would push the description past that, or a title holds a < or >, they stay out with a warning. YouTube shows chapters only when there are at least three, each at least 10 seconds long, the first at 0:00. Chapters that break a rule, or start in a part the cut removed, are left out of the description with a warning that says why, so they never stop an upload or export. A narration made after the chapters were written asks you to write them again.
 
 <a id="disclosure"></a>
 ## Synthetic content

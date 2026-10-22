@@ -325,6 +325,16 @@ struct AnsweredPost {
     tags: Vec<String>,
 }
 
+/// Whether the export job `payload` copies the picture `file`.
+pub(crate) fn exports_thumbnail(payload: &str, file: &str) -> bool {
+    serde_json::from_str::<ExportPayload>(payload).is_ok_and(|payload| {
+        payload
+            .orders
+            .iter()
+            .any(|order| order.thumbnail.as_deref() == Some(file))
+    })
+}
+
 /// One network of an export job: what to copy and write, and what it was
 /// made from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1200,6 +1210,7 @@ impl Bardo {
         chapters: Option<&str>,
         footer: &str,
     ) -> Vec<MetadataProblem> {
+        let chapters = bardo_domain::fitting_chapters(network, draft, chapters, footer);
         problems_with(network, draft, chapters, footer)
     }
 }

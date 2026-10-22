@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{
     Cost, Job, JobState, Network, PublicationId, TagPlacement, TemplateKind, VideoMetadataDraft,
-    VideoProjectId, compose_with, text_length,
+    VideoProjectId, compose_with, fitting_chapters, text_length,
 };
 use bardo_app::{
     Bardo, BudgetConsent, Control, DraftNote, ExportBlock, ExportError, ExportSummary,
@@ -966,7 +966,8 @@ impl ProjectsScreen {
 
         if target.metadata.is_some() {
             let draft = self.metadata_draft(cx);
-            let chapters = target.chapters.as_deref();
+            let chapters =
+                fitting_chapters(network, &draft, target.chapters.as_deref(), &target.footer);
             let post = compose_with(network, &draft, chapters, &target.footer, target.visibility);
             let problems = self.bardo.read(cx).metadata_draft_problems(
                 network,
@@ -1041,7 +1042,7 @@ impl ProjectsScreen {
             let bardo = self.bardo.read(cx);
             // What the footer and the hashtags add, as the network gets it.
             let mut notes = Vec::new();
-            if target.chapters.is_some() {
+            if chapters.is_some() {
                 notes.push(tr(bardo, Text::MetadataChaptersNote));
             }
             if !target.footer.trim().is_empty() && rules.text.is_some() {

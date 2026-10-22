@@ -18,10 +18,11 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     ApiKey, Chapter, ChapterFieldError, ChapterProblem, ChapterRepository, Chapters, CostPurpose,
     Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Narration,
-    NarrationRepository, ProfileId, Provider, RenderedPrompt, RepositoryError, SecretStore,
-    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
+    NarrationRepository, Network, ProfileId, Provider, RenderedPrompt, RepositoryError,
+    SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
     TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoFormat, VideoProject,
-    VideoProjectId, chapter_lines, chapter_problems, chapter_title, place_chapters, sentences,
+    VideoProjectId, chapter_lines, chapter_problems, chapter_title, fitting_chapters,
+    place_chapters, sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -215,6 +216,14 @@ fn sentence_of(starts: &[Duration], start: Duration) -> usize {
         .iter()
         .rposition(|&sentence| sentence <= start)
         .unwrap_or(0)
+}
+
+/// Where the cut plays a project's chapters (with the cut's length), what
+/// keeps YouTube from showing them, and the description's lines.
+struct Placed {
+    at: Option<(Vec<Option<Duration>>, Duration)>,
+    problems: Vec<ChapterProblem>,
+    lines: Option<String>,
 }
 
 /// Where chapter `index` of `list` lands when it moves one sentence
@@ -411,6 +420,69 @@ impl Bardo {
         ))
     }
 
+    /// Where the cut plays `chapters`, what keeps YouTube from showing
+    /// them, and the lines the description gets: none for a Short, when
+    /// left out, out of date, breaking a rule or not fitting.
+    fn placed_lines(
+        &self,
+        project: &VideoProject,
+        chapters: &Chapters,
+        stale: bool,
+    ) -> Result<Placed, ChaptersError> {
+        let long = self.video_format(project)? == VideoFormat::Long;
+        let placed = self.placed_chapters(project.id, chapters);
+        let list = chapters.list();
+        let mut problems = placed
+            .as_ref()
+            .map(|(at, length)| chapter_problems(at, *length))
+            .unwrap_or_default();
+        let mut lines = None;
+        if let Some((at, length)) = &placed
+            && long
+            && chapters.include
+            && !stale
+            && problems.is_empty()
+        {
+            let timed: Vec<(Duration, &str)> = at
+                .iter()
+                .zip(list)
+                .filter_map(|(at, chapter)| Some(((*at)?, chapter.title.as_str())))
+                .collect();
+            let text = chapter_lines(&timed, *length);
+            if self.chapters_fit(project, &text)? {
+                lines = Some(text);
+            } else {
+                problems.push(ChapterProblem::DoesNotFit);
+            }
+        }
+        Ok(Placed {
+            at: placed,
+            problems,
+            lines,
+        })
+    }
+
+    /// Whether `lines` fit in the YouTube description as saved, with the
+    /// account's footer.
+    fn chapters_fit(&self, project: &VideoProject, lines: &str) -> Result<bool, RepositoryError> {
+        let Some(metadata) = self
+            .exports
+            .video_metadata(project.id)?
+            .into_iter()
+            .find(|metadata| metadata.network == Network::YouTube)
+        else {
+            return Ok(true);
+        };
+        let footer = self
+            .network_accounts
+            .list(project.channel)?
+            .into_iter()
+            .find(|account| account.network == Network::YouTube)
+            .map(|account| account.details.metadata().description_footer().to_owned())
+            .unwrap_or_default();
+        Ok(fitting_chapters(Network::YouTube, &metadata.draft(), Some(lines), &footer).is_some())
+    }
+
     /// The project's chapters card.
     pub fn chapters(&self, project: VideoProjectId) -> Result<ChaptersView, ChaptersError> {
         let project = self.chapters_project(project)?;
@@ -447,7 +519,7 @@ impl Bardo {
         view.stale = narration
             .as_ref()
             .is_none_or(|narration| narration.id != chapters.narration);
-        let placed = self.placed_chapters(project.id, &chapters);
+        let placed = self.placed_lines(&project, &chapters, view.stale)?;
         let list = chapters.list();
         view.rows = list
             .iter()
@@ -455,37 +527,35 @@ impl Bardo {
             .map(|(index, chapter)| ChapterRow {
                 title: chapter.title.clone(),
                 start: chapter.start,
-                at: placed.as_ref().and_then(|(at, _)| at[index]),
+                at: placed.at.as_ref().and_then(|(at, _)| at[index]),
                 can_move_earlier: !view.stale && moved(list, index, &starts, false).is_some(),
                 can_move_later: !view.stale && moved(list, index, &starts, true).is_some(),
             })
             .collect();
-        if let Some((at, length)) = &placed {
-            view.length = *length;
-            view.problems = chapter_problems(at, *length);
-        }
-        if long && chapters.include && !view.stale && view.problems.is_empty() {
-            view.lines = placed.map(|(at, length)| {
-                let lines: Vec<(Duration, &str)> = at
-                    .iter()
-                    .zip(list)
-                    .filter_map(|(at, chapter)| Some(((*at)?, chapter.title.as_str())))
-                    .collect();
-                chapter_lines(&lines, length)
-            });
-        }
+        view.length = placed
+            .at
+            .as_ref()
+            .map_or(Duration::ZERO, |(_, length)| *length);
+        view.problems = placed.problems;
+        view.lines = placed.lines;
         Ok(view)
     }
 
-    /// The chapter lines YouTube's description gets now, if any.
+    /// The chapter lines YouTube's description gets now, if any: no
+    /// template or estimate, as the export and the upload review ask often.
     pub(crate) fn chapter_text(
         &self,
         project: VideoProjectId,
     ) -> Result<Option<String>, ChaptersError> {
-        if self.chapters.chapters(project)?.is_none() {
+        let project = self.chapters_project(project)?;
+        let Some(chapters) = self.chapters.chapters(project.id)? else {
             return Ok(None);
-        }
-        Ok(self.chapters(project)?.lines)
+        };
+        let stale = self
+            .narrations
+            .narration(project.id)?
+            .is_none_or(|narration| narration.id != chapters.narration);
+        Ok(self.placed_lines(&project, &chapters, stale)?.lines)
     }
 
     /// Starts a job in which Claude splits the narration into chapters from
@@ -606,7 +676,7 @@ impl Bardo {
     /// A chapter problem as one sentence, chapters counted from 1.
     pub fn chapter_problem_text(&self, problem: ChapterProblem) -> String {
         let n = match problem {
-            ChapterProblem::TooFew => 0,
+            ChapterProblem::TooFew | ChapterProblem::DoesNotFit => 0,
             ChapterProblem::TooShort(index) | ChapterProblem::CutAway(index) => index + 1,
         };
         self.text_with(Text::ChapterProblem(problem), &[("n", &n.to_string())])
@@ -806,6 +876,83 @@ mod tests {
 
         app.include_chapters(project.id, false).unwrap();
         assert!(!text(Network::YouTube).contains("0:00"));
+    }
+
+    #[test]
+    fn chapters_that_would_break_the_description_stay_out_of_it() {
+        use bardo_domain::{Network, NetworkAccountDraft, VideoMetadataDraft};
+        let h = Harness::new();
+        *h.speech.length.lock().unwrap() = Duration::from_secs(80);
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        write(
+            &h,
+            &app,
+            project.id,
+            answer(&[(0, "Launch"), (1, "Away"), (2, "Signal")]),
+        );
+        crate::export::tests::add_account(
+            &app,
+            &project,
+            Network::YouTube,
+            NetworkAccountDraft::default(),
+        );
+        h.answer(crate::export::tests::youtube_and_tiktok());
+        done(
+            &app,
+            app.generate_metadata(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let lines = app.chapters(project.id).unwrap().lines.unwrap();
+        let saved = app
+            .export_view(project.id)
+            .unwrap()
+            .targets
+            .into_iter()
+            .find(|target| target.network == Network::YouTube)
+            .unwrap()
+            .metadata
+            .unwrap();
+        // Room for the description, not for the chapters too.
+        let long = "a".repeat(5_000 - lines.chars().count());
+        app.edit_metadata(
+            project.id,
+            Network::YouTube,
+            VideoMetadataDraft {
+                description: long.clone(),
+                ..saved.draft()
+            },
+        )
+        .unwrap();
+        let view = app.chapters(project.id).unwrap();
+        assert_eq!(view.problems, [ChapterProblem::DoesNotFit]);
+        assert_eq!(view.lines, None);
+        let export = app.export_view(project.id).unwrap();
+        let target = crate::export::tests::target(&export, Network::YouTube);
+        assert_eq!(target.problems, []);
+        assert_eq!(target.post().unwrap().text.unwrap(), long);
+        assert_eq!(
+            app.metadata_draft_problems(
+                Network::YouTube,
+                &target.metadata.as_ref().unwrap().draft(),
+                target.chapters.as_deref(),
+                "",
+            ),
+            []
+        );
+
+        // A title YouTube refuses keeps them out too.
+        app.edit_metadata(project.id, Network::YouTube, saved.draft())
+            .unwrap();
+        app.rename_chapter(project.id, 1, "Away <for good>")
+            .unwrap();
+        let view = app.chapters(project.id).unwrap();
+        assert_eq!(view.problems, [ChapterProblem::DoesNotFit]);
+        let export = app.export_view(project.id).unwrap();
+        assert_eq!(
+            crate::export::tests::target(&export, Network::YouTube).problems,
+            []
+        );
     }
 
     #[test]

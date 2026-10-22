@@ -396,19 +396,21 @@ impl ProjectsScreen {
 
         // The picture as saved, or what keeps it from going.
         let state = match (&view.picture, view.is_outdated()) {
-            (Some(_), _) => kit::status(Tone::Success, tr(bardo, Text::ThumbnailSaved), cx),
-            (None, true) => kit::status(Tone::Warning, tr(bardo, Text::ThumbnailOutdated), cx),
-            (None, false) => kit::status(Tone::Neutral, tr(bardo, Text::ThumbnailNotYetSaved), cx),
+            (Some(_), _) => kit::notice(Tone::Success, tr(bardo, Text::ThumbnailSaved), cx),
+            (None, true) => kit::notice(Tone::Warning, tr(bardo, Text::ThumbnailOutdated), cx),
+            (None, false) => kit::notice(Tone::Neutral, tr(bardo, Text::ThumbnailNotYetSaved), cx),
         };
         let preview = view.picture.clone().map(|path| {
+            // Shrinks with a narrow inspector, the whole picture in view.
             div()
-                .w(px(320.))
+                .w_full()
+                .max_w(px(320.))
                 .h(px(180.))
                 .rounded_md()
                 .overflow_hidden()
                 .border_1()
                 .border_color(theme.border)
-                .child(img(path).size_full().object_fit(ObjectFit::Cover))
+                .child(img(path).size_full().object_fit(ObjectFit::Contain))
         });
 
         let write = (!running).then(|| {
@@ -635,7 +637,7 @@ impl ProjectsScreen {
                     .id("publish-thumbnail")
                     .gap_3()
                     .child(heading)
-                    .child(h_flex().gap_2().items_center().flex_wrap().child(state))
+                    .child(state)
                     .children(preview)
                     .children(
                         self.thumbnail_notice

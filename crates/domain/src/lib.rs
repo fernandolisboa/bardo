@@ -171,7 +171,8 @@ pub use media::{
 pub use metadata::{
     DisclosureLabel, Export, ExportFiles, ExportRepository, METADATA_FILE, MetadataProblem,
     MetadataRules, Post, TagPlacement, VideoMetadata, VideoMetadataDraft, compose, compose_with,
-    normalize_tags, package_folder, problems, problems_with, text_length, video_file_name,
+    fitting_chapters, normalize_tags, package_folder, problems, problems_with, text_length,
+    video_file_name,
 };
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,

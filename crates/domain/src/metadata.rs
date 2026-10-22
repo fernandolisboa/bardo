@@ -403,8 +403,11 @@ impl VideoMetadata {
 
     /// The post with `chapters` (YouTube's chapter lines) between the
     /// description and the footer.
+    /// The post with `chapters` in, when they fit ([`fitting_chapters`]).
     pub fn post_with(&self, chapters: Option<&str>, footer: &str, visibility: Visibility) -> Post {
-        compose_with(self.network, &self.draft(), chapters, footer, visibility)
+        let draft = self.draft();
+        let chapters = fitting_chapters(self.network, &draft, chapters, footer);
+        compose_with(self.network, &draft, chapters, footer, visibility)
     }
 
     /// What breaks the network's rules, with the account's footer in
@@ -413,11 +416,31 @@ impl VideoMetadata {
         self.problems_with(None, footer)
     }
 
-    /// What breaks the network's rules with `chapters` and the footer in
-    /// place.
+    /// What breaks the network's rules with `chapters`, when they fit
+    /// ([`fitting_chapters`]), and the footer in place.
     pub fn problems_with(&self, chapters: Option<&str>, footer: &str) -> Vec<MetadataProblem> {
-        problems_with(self.network, &self.draft(), chapters, footer)
+        let draft = self.draft();
+        let chapters = fitting_chapters(self.network, &draft, chapters, footer);
+        problems_with(self.network, &draft, chapters, footer)
     }
+}
+
+/// `chapters` when the description still keeps the network's rules with
+/// them in; `None` when they would break one the description alone keeps
+/// (too long, or a `<` or `>` in a title), so chapters never keep a post
+/// from going.
+pub fn fitting_chapters<'a>(
+    network: Network,
+    draft: &VideoMetadataDraft,
+    chapters: Option<&'a str>,
+    footer: &str,
+) -> Option<&'a str> {
+    let chapters = chapters?;
+    let without = problems_with(network, draft, None, footer);
+    problems_with(network, draft, Some(chapters), footer)
+        .iter()
+        .all(|problem| without.contains(problem))
+        .then_some(chapters)
 }
 
 /// `draft` as `network` takes it: the text with the footer and, where the
@@ -912,6 +935,26 @@ mod tests {
             problems_with(Network::YouTube, &long, Some(chapters), ""),
             [MetadataProblem::TextTooLong]
         );
+    }
+
+    #[test]
+    fn chapters_that_would_break_the_description_do_not_fit() {
+        let chapters = "0:00 Start\n1:15 The dig";
+        let fitting = |description: &str, chapters: &str| {
+            fitting_chapters(
+                Network::YouTube,
+                &draft("T", description, &[]),
+                Some(chapters),
+                "",
+            )
+            .is_some()
+        };
+        assert!(fitting("What we found.", chapters));
+        assert!(!fitting(&"a".repeat(4_990), chapters));
+        assert!(!fitting("What we found.", "0:00 Start\n1:15 The <dig>"));
+        // A description already over the limit is not the chapters' doing.
+        assert!(fitting(&"a".repeat(5_100), chapters));
+        assert!(fitting("A <b> c", "0:00 Start\n1:15 The <dig>"));
     }
 
     #[test]

@@ -182,31 +182,27 @@ pub enum ChapterProblem {
     TooFew,
     /// Chapter `n` (from 0) runs less than [`MIN_CHAPTER_LENGTH`].
     TooShort(usize),
-    /// The cut no longer plays any narration from chapter `n`'s start on.
+    /// The cut left out where chapter `n` (from 0) starts.
     CutAway(usize),
+    /// With them the description would break YouTube's rules (over 5,000
+    /// characters, or a `<` or `>` in a title).
+    DoesNotFit,
 }
 
-/// Where each chapter starts in the video, as `timeline` plays the
-/// narration: the moment its start plays, or where the cut picks the
-/// narration up again after it when that moment was cut. `None` when the
-/// cut plays nothing of the narration from there on. The first chapter
-/// starts the video, at 0:00.
+/// Where each chapter starts in the video: the moment `timeline` plays its
+/// start in the narration. `None` when the cut left that moment out, so
+/// the chapter would open on something else. The first chapter starts the
+/// video, at 0:00.
 pub fn place_chapters(chapters: &[Chapter], timeline: &Timeline) -> Vec<Option<Duration>> {
     chapters
         .iter()
         .enumerate()
         .map(|(index, chapter)| {
             if index == 0 {
-                return Some(Duration::ZERO);
+                Some(Duration::ZERO)
+            } else {
+                timeline.on_narration(chapter.start)
             }
-            timeline.on_narration(chapter.start).or_else(|| {
-                timeline
-                    .narration()
-                    .iter()
-                    .filter(|item| item.start > chapter.start)
-                    .map(|item| item.at)
-                    .min()
-            })
         })
         .collect()
 }
@@ -243,7 +239,7 @@ pub fn chapter_problems(placed: &[Option<Duration>], length: Duration) -> Vec<Ch
         }
     }
     problems.sort_by_key(|problem| match problem {
-        ChapterProblem::TooFew => 0,
+        ChapterProblem::TooFew | ChapterProblem::DoesNotFit => 0,
         ChapterProblem::TooShort(index) | ChapterProblem::CutAway(index) => index + 1,
     });
     problems
@@ -440,14 +436,12 @@ mod tests {
             [
                 Some(Duration::ZERO),
                 Some(secs(20)),
-                // Cut away: where the narration picks up again.
-                Some(secs(30)),
+                // Its start was cut away.
+                None,
                 Some(secs(60)),
                 Some(secs(99)),
             ]
         );
-        timeline.narration.truncate(1);
-        assert_eq!(place_chapters(&chapters, &timeline)[3], None);
     }
 
     #[test]

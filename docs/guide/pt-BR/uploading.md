@@ -53,7 +53,7 @@ O cartão do YouTube de um vídeo longo também tem **Capítulos**: partes com n
 
 Cada capítulo mostra seu tempo no corte como está agora (`m:ss`, ou `h:mm:ss` a partir de uma hora). Renomeie, remova, ou comece um capítulo uma frase antes ou depois; o primeiro sempre começa em 0:00. Os capítulos acompanham a narração, então aparar o corte no editor move os tempos junto.
 
-**Incluir capítulos na descrição** os coloca entre a descrição e o rodapé da conta, e eles contam nos 5.000 caracteres do YouTube. O YouTube só mostra capítulos quando há pelo menos três, cada um com pelo menos 10 segundos, o primeiro em 0:00. Capítulos que quebram uma regra, ou começam num trecho que o corte removeu, ficam fora da descrição com um aviso dizendo por quê, então nunca impedem um envio ou exportação. Uma narração feita depois dos capítulos pede que você os escreva de novo.
+**Incluir capítulos na descrição** os coloca entre a descrição e o rodapé da conta, e eles contam nos 5.000 caracteres do YouTube; quando fariam a descrição passar disso, ou um título tem < ou >, eles ficam de fora com um aviso. O YouTube só mostra capítulos quando há pelo menos três, cada um com pelo menos 10 segundos, o primeiro em 0:00. Capítulos que quebram uma regra, ou começam num trecho que o corte removeu, ficam fora da descrição com um aviso dizendo por quê, então nunca impedem um envio ou exportação. Uma narração feita depois dos capítulos pede que você os escreva de novo.
 
 <a id="disclosure"></a>
 ## Conteúdo sintético

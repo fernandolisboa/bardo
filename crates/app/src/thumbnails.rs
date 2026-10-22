@@ -16,7 +16,7 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, AspectRatio, BackgroundSource, CostPurpose, DrawnBackground, Generation, GenerationId,
-    ImageGenerator, ImageRequest, Job, JobFailure, JobFailureKind, JobId, JobKind,
+    ImageGenerator, ImageRequest, Job, JobFailure, JobFailureKind, JobId, JobKind, JobState,
     MAX_THUMBNAIL_TEXT, Network, ProfileId, ProjectFiles, Provider, RenderedPrompt,
     RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
     TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextPlacement, TextRequest,
@@ -367,6 +367,8 @@ impl ThumbnailHandler {
             generated_at: now,
             job: Some(job),
         };
+        // Read again: the user may have changed the rest meanwhile.
+        let saved = self.thumbnails.thumbnail(project).map_err(unexpected)?;
         let mut thumbnail = saved.unwrap_or_else(|| {
             let look = payload.look.parse().unwrap_or_default();
             Thumbnail::new(project, self.owner, look, now)
@@ -695,7 +697,10 @@ impl Bardo {
         } else {
             thumbnail_text(&edit.text).map_err(ThumbnailError::Invalid)?
         };
+        // A background kept as it was may have left the strip (a scene
+        // image drawn again): the composer checks its file is still there.
         if let Some(background) = &edit.background
+            && edit.background != thumbnail.design.background
             && !self
                 .background_choices(project.id)?
                 .iter()
@@ -766,10 +771,10 @@ impl Bardo {
         let previous = thumbnail.file.replace(file.clone());
         thumbnail.updated_at = crate::publications::whole_millis(SystemTime::now());
         self.thumbnails.save_thumbnail(&thumbnail)?;
-        // A picture an upload still has to send stays; any other leftover
-        // only costs disk space.
+        // A picture an upload or export may still need stays; any other
+        // leftover only costs disk space.
         if let Some(previous) = previous.filter(|previous| *previous != file)
-            && !self.upload_sends(&previous)
+            && !self.job_needs(&previous)
         {
             let _ = self.files.remove(project.id, &previous);
         }
@@ -792,12 +797,18 @@ impl Bardo {
             .filter(|file| self.files.exists(project.id, file)))
     }
 
-    /// Whether an upload waiting or under way sends the picture `file`.
-    fn upload_sends(&self, file: &str) -> bool {
+    /// Whether an upload or export that has not ended for good (waiting,
+    /// under way, or failed and so resumable) takes the picture `file`.
+    fn job_needs(&self, file: &str) -> bool {
         self.jobs().iter().any(|job| {
-            job.kind() == JobKind::Upload
-                && job.state().is_active()
-                && crate::uploads::sends_thumbnail(job.payload(), file)
+            matches!(
+                job.state(),
+                JobState::Queued | JobState::Running | JobState::Failed
+            ) && match job.kind() {
+                JobKind::Upload => crate::uploads::sends_thumbnail(job.payload(), file),
+                JobKind::Export => crate::export::exports_thumbnail(job.payload(), file),
+                _ => false,
+            }
         })
     }
 }

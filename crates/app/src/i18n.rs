@@ -3101,6 +3101,7 @@ impl Text {
                 ChapterProblem::TooFew => "chapters.problem.too_few",
                 ChapterProblem::TooShort(_) => "chapters.problem.too_short",
                 ChapterProblem::CutAway(_) => "chapters.problem.cut_away",
+                ChapterProblem::DoesNotFit => "chapters.problem.does_not_fit",
             },
             Text::TextPlacementName(placement) => {
                 return format!("thumbnail.placement_name.{}", placement.code()).into();
@@ -5135,6 +5136,7 @@ mod tests {
                 ChapterProblem::TooFew,
                 ChapterProblem::TooShort(0),
                 ChapterProblem::CutAway(0),
+                ChapterProblem::DoesNotFit,
             ]
             .map(Text::ChapterProblem),
         );
