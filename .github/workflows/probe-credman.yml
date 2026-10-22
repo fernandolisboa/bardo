@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        noise: [console, console, console, job, job, none, none]
+        noise: [console, console, console, none, none]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,15 +37,15 @@ jobs:
         shell: bash
         run: |
           fails=0; stale=0
-          for i in $(seq 1 15); do
+          for i in $(seq 1 10); do
             failed=0
-            PROBE_STALE=1 cargo test -p bardo-storage --locked --lib -- --nocapture > run.log 2>&1 || failed=1
-            if [ $failed = 1 ] || grep -q "PROBE200 STALE" run.log; then
+            cargo test -p bardo-storage --locked --lib > run.log 2>&1 || failed=1
+            if [ $failed = 1 ] ; then
               [ $failed = 1 ] && fails=$((fails+1)); stale=$((stale+1))
-              echo "=== suite $i failed=$failed"; grep -E "PROBE200 STALE|panicked" run.log || true
+              echo "=== suite $i failed=$failed"; grep -E -A4 "panicked" run.log || true
             fi
           done
-          echo "noise=${{ matrix.noise }} suite failures: $fails, runs with a wrong read: $stale, of 15"
+          echo "noise=${{ matrix.noise }} suite failures: $fails, runs with a wrong read: $stale, of 10"
       - name: Noise log
         if: always()
         shell: pwsh

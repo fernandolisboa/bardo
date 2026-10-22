@@ -201,14 +201,46 @@ fn malformed(what: &str) -> SecretStoreError {
 #[error("{0}")]
 struct StoreFailure(String);
 
-/// Throwaway probe for #200; removed before merge. Wall-clock time, to
-/// line up with the credential files' times.
+/// How many times a change to a credential is made before it counts as not
+/// kept, and how many reads after each one may still show the earlier
+/// state (`kept`).
+const CHANGE_ATTEMPTS: u32 = 4;
+const SETTLE_READS: u32 = 20;
+
+/// How long to wait between those reads. Credential Manager has been seen
+/// to show a change only 3 to 17 ms after the call that made it returned.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn probe_clock() -> String {
-    let since = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}.{:03}", since.as_secs(), since.subsec_millis())
+const SETTLE_PAUSE: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// Makes a change through `apply` and returns once `shows` reads it back,
+/// so a read right after a write or delete sees it. Credential Manager can
+/// report a write or delete as done and still show the earlier state to the
+/// next read: for a few milliseconds, or, now and then, for good, as if the
+/// change were lost (#200). A change the reads do not show is made again.
+/// False when it never shows; `pause` runs between reads.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn kept<E>(
+    mut apply: impl FnMut() -> Result<(), E>,
+    mut shows: impl FnMut() -> Result<bool, E>,
+    mut pause: impl FnMut(),
+) -> Result<bool, E> {
+    for _ in 0..CHANGE_ATTEMPTS {
+        apply()?;
+        for _ in 0..SETTLE_READS {
+            if shows()? {
+                return Ok(true);
+            }
+            pause();
+        }
+    }
+    Ok(false)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn not_kept(action: &str) -> SecretStoreError {
+    SecretStoreError(Box::new(StoreFailure(format!(
+        "could not {action} the credential: Credential Manager did not keep the change"
+    ))))
 }
 
 #[cfg(windows)]
@@ -229,8 +261,8 @@ mod credential_manager {
     use zeroize::Zeroizing;
 
     use super::{
-        MAX_BLOB_BYTES, StoreFailure, app_credentials_target, credential_target, malformed,
-        tokens_target, too_long,
+        MAX_BLOB_BYTES, SETTLE_PAUSE, StoreFailure, app_credentials_target, credential_target,
+        kept, malformed, not_kept, tokens_target, too_long,
     };
 
     /// Generic credentials in Windows Credential Manager, readable only by
@@ -288,17 +320,38 @@ mod credential_manager {
             if text.len() > MAX_BLOB_BYTES {
                 return Err(too_long(text.len()));
             }
-            let result = self.named(target, service)?.set_secret(text.as_bytes());
-            probe_log("write", target, &result);
-            result.map_err(|error| failure("write", &error))
+            let entry = self.named(target, service)?;
+            let written = kept(
+                || {
+                    entry
+                        .set_secret(text.as_bytes())
+                        .map_err(|error| failure("write", &error))
+                },
+                || {
+                    Ok(self
+                        .read(target, service)?
+                        .is_some_and(|stored| stored.as_str() == text))
+                },
+                settle,
+            )?;
+            if written {
+                Ok(())
+            } else {
+                Err(not_kept("write"))
+            }
         }
 
         fn remove(&self, target: &str, service: &str) -> Result<(), SecretStoreError> {
-            let result = self.named(target, service)?.delete_credential();
-            probe_log("delete", target, &result);
-            match result {
-                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-                Err(error) => Err(failure("delete", &error)),
+            let entry = self.named(target, service)?;
+            let removed = kept(
+                || delete_entry(&entry),
+                || Ok(self.read(target, service)?.is_none()),
+                settle,
+            )?;
+            if removed {
+                Ok(())
+            } else {
+                Err(not_kept("delete"))
             }
         }
     }
@@ -378,14 +431,13 @@ mod credential_manager {
             owner: ProfileId,
             provider: Provider,
         ) -> Result<Option<ApiKey>, SecretStoreError> {
-            match self.entry(owner, provider)?.get_password() {
-                Ok(stored) => ApiKey::parse(provider, &stored).map(Some).map_err(|error| {
+            match stored_password(&self.entry(owner, provider)?)? {
+                Some(stored) => ApiKey::parse(provider, &stored).map(Some).map_err(|error| {
                     SecretStoreError(Box::new(StoreFailure(format!(
                         "the stored {provider} key is not usable: {error}"
                     ))))
                 }),
-                Err(keyring_core::Error::NoEntry) => Ok(None),
-                Err(error) => Err(failure("read", &error)),
+                None => Ok(None),
             }
         }
 
@@ -395,36 +447,60 @@ mod credential_manager {
             provider: Provider,
             key: &ApiKey,
         ) -> Result<(), SecretStoreError> {
-            let result = self.entry(owner, provider)?.set_password(key.expose());
-            probe_log("write", &credential_target(owner, provider), &result);
-            result.map_err(|error| failure("write", &error))
+            let entry = self.entry(owner, provider)?;
+            let written = kept(
+                || {
+                    entry
+                        .set_password(key.expose())
+                        .map_err(|error| failure("write", &error))
+                },
+                || {
+                    Ok(stored_password(&entry)?
+                        .is_some_and(|stored| stored.as_str() == key.expose()))
+                },
+                settle,
+            )?;
+            if written {
+                Ok(())
+            } else {
+                Err(not_kept("write"))
+            }
         }
 
         fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError> {
-            let result = self.entry(owner, provider)?.delete_credential();
-            probe_log("delete", &credential_target(owner, provider), &result);
-            match result {
-                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-                Err(error) => Err(failure("delete", &error)),
+            let entry = self.entry(owner, provider)?;
+            let removed = kept(
+                || delete_entry(&entry),
+                || Ok(stored_password(&entry)?.is_none()),
+                settle,
+            )?;
+            if removed {
+                Ok(())
+            } else {
+                Err(not_kept("delete"))
             }
         }
     }
 
-    /// Throwaway probe for #200; removed before merge.
-    pub(super) fn probe_log(action: &str, target: &str, result: &keyring_core::Result<()>) {
-        if std::env::var("PROBE_STALE").is_err() {
-            return;
+    /// The key stored in `entry`, as Windows keeps passwords (UTF-16).
+    fn stored_password(entry: &Entry) -> Result<Option<Zeroizing<String>>, SecretStoreError> {
+        match entry.get_password() {
+            Ok(stored) => Ok(Some(Zeroizing::new(stored))),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(error) => Err(failure("read", &error)),
         }
-        let outcome = match result {
-            Ok(()) => "Ok".to_owned(),
-            Err(keyring_core::Error::NoEntry) => "NoEntry".to_owned(),
-            Err(error) => format!("Err({error})"),
-        };
-        println!(
-            "PROBE200 OP {} {:?} {action} {target} {outcome}",
-            super::probe_clock(),
-            std::thread::current().name().unwrap_or("?"),
-        );
+    }
+
+    /// Deletes the credential; one already gone counts as deleted.
+    fn delete_entry(entry: &Entry) -> Result<(), SecretStoreError> {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(error) => Err(failure("delete", &error)),
+        }
+    }
+
+    fn settle() {
+        std::thread::sleep(SETTLE_PAUSE);
     }
 
     /// Keeps only errors that cannot carry the secret; the rest become a
@@ -458,67 +534,28 @@ mod tests {
         ApiKey::parse(provider, text).unwrap()
     }
 
-    /// Throwaway probe for #200; removed before merge. Like `assert_eq!`,
-    /// but with PROBE_STALE set a wrong read is read again until it is
-    /// right, and reported with how long that took.
-    macro_rules! seen {
-        ($read:expr, $want:expr) => {{
-            let want = $want;
-            let first = $read;
-            if first != want {
-                if std::env::var("PROBE_STALE").is_ok() {
-                    let t = std::time::Instant::now();
-                    let mut reads = 0u32;
-                    let converged = loop {
-                        reads += 1;
-                        if $read == want {
-                            break Some(t.elapsed());
-                        }
-                        if t.elapsed() > std::time::Duration::from_secs(5) {
-                            break None;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(1));
-                    };
-                    println!(
-                        "PROBE200 STALE {} {:?} line {} first={:?} want={:?} converged={:?} reads={}",
-                        super::probe_clock(),
-                        std::thread::current().name().unwrap_or("?"),
-                        line!(),
-                        first,
-                        want,
-                        converged,
-                        reads
-                    );
-                    assert!(converged.is_some(), "never converged");
-                } else {
-                    assert_eq!(first, want);
-                }
-            }
-        }};
-    }
-
     /// The contract every secret store keeps. Run against each adapter.
     fn contract(store: &dyn SecretStore) {
         let owner = ProfileId::new();
         let other = ProfileId::new();
         let claude = key(Provider::Claude, "sk-ant-test-0001");
 
-        seen!(store.get(owner, Provider::Claude).unwrap(), None);
+        assert_eq!(store.get(owner, Provider::Claude).unwrap(), None);
 
         store.set(owner, Provider::Claude, &claude).unwrap();
-        seen!(store.get(owner, Provider::Claude).unwrap(), Some(claude));
-        seen!(store.get(owner, Provider::Gemini).unwrap(), None);
-        seen!(store.get(other, Provider::Claude).unwrap(), None);
+        assert_eq!(store.get(owner, Provider::Claude).unwrap(), Some(claude));
+        assert_eq!(store.get(owner, Provider::Gemini).unwrap(), None);
+        assert_eq!(store.get(other, Provider::Claude).unwrap(), None);
 
         let replacement = key(Provider::Claude, "sk-ant-test-0002");
         store.set(owner, Provider::Claude, &replacement).unwrap();
-        seen!(
+        assert_eq!(
             store.get(owner, Provider::Claude).unwrap(),
             Some(replacement)
         );
 
         store.delete(owner, Provider::Claude).unwrap();
-        seen!(store.get(owner, Provider::Claude).unwrap(), None);
+        assert_eq!(store.get(owner, Provider::Claude).unwrap(), None);
         store.delete(owner, Provider::Claude).unwrap();
     }
 
@@ -553,7 +590,7 @@ mod tests {
         let other = ProfileId::new();
         let account = NetworkAccountId::new();
 
-        seen!(
+        assert_eq!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             None
         );
@@ -564,11 +601,11 @@ mod tests {
                 &credentials(concat!("GOCSPX", "-secret-0001")),
             )
             .unwrap();
-        seen!(
+        assert_eq!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             Some(credentials(concat!("GOCSPX", "-secret-0001")))
         );
-        seen!(
+        assert_eq!(
             store.app_credentials(other, Network::YouTube).unwrap(),
             None
         );
@@ -579,41 +616,41 @@ mod tests {
                 &credentials(concat!("GOCSPX", "-secret-0002")),
             )
             .unwrap();
-        seen!(
+        assert_eq!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             Some(credentials(concat!("GOCSPX", "-secret-0002")))
         );
 
-        seen!(store.tokens(owner, account).unwrap(), None);
+        assert_eq!(store.tokens(owner, account).unwrap(), None);
         let first = tokens("ya29.access-0001", Some("1//refresh-0001"));
         store.set_tokens(owner, account, &first).unwrap();
-        seen!(store.tokens(owner, account).unwrap(), Some(first));
-        seen!(store.tokens(other, account).unwrap(), None);
-        seen!(store.tokens(owner, NetworkAccountId::new()).unwrap(), None);
+        assert_eq!(store.tokens(owner, account).unwrap(), Some(first));
+        assert_eq!(store.tokens(other, account).unwrap(), None);
+        assert_eq!(store.tokens(owner, NetworkAccountId::new()).unwrap(), None);
 
         // The largest set that fits is kept whole; one byte more is refused
         // and the earlier tokens stay.
         let room = TokenSet::MAX_STORED_BYTES - "bardo-tokens-1\n1800003599\n\n".len();
         let largest = tokens(&"a".repeat(room), None);
         store.set_tokens(owner, account, &largest).unwrap();
-        seen!(store.tokens(owner, account).unwrap(), Some(largest.clone()));
+        assert_eq!(store.tokens(owner, account).unwrap(), Some(largest.clone()));
         assert!(
             store
                 .set_tokens(owner, account, &tokens(&"a".repeat(room + 1), None))
                 .is_err()
         );
-        seen!(store.tokens(owner, account).unwrap(), Some(largest));
+        assert_eq!(store.tokens(owner, account).unwrap(), Some(largest));
 
         store.delete_tokens(owner, account).unwrap();
         store.delete_tokens(owner, account).unwrap();
-        seen!(store.tokens(owner, account).unwrap(), None);
+        assert_eq!(store.tokens(owner, account).unwrap(), None);
         store
             .delete_app_credentials(owner, Network::YouTube)
             .unwrap();
         store
             .delete_app_credentials(owner, Network::YouTube)
             .unwrap();
-        seen!(
+        assert_eq!(
             store.app_credentials(owner, Network::YouTube).unwrap(),
             None
         );
@@ -645,6 +682,134 @@ mod tests {
             credential_target(owner, Provider::YouTubeData),
             format!("Bardo/{owner}/youtube-data")
         );
+    }
+
+    // Credential Manager can show the earlier state to a read right after a
+    // change, or lose the change (#200). A fake credential plays both.
+
+    #[derive(Default)]
+    struct Settling {
+        stored: Option<&'static str>,
+        /// Changes dropped as if never made.
+        lose: u32,
+        /// Reads after a change that still show the earlier state.
+        lag: u32,
+        lagging: u32,
+        applies: u32,
+        reads: u32,
+        pauses: u32,
+    }
+
+    impl Settling {
+        fn apply(&mut self, value: Option<&'static str>) -> Result<(), &'static str> {
+            self.applies += 1;
+            if self.lose > 0 {
+                self.lose -= 1;
+            } else {
+                self.stored = value;
+            }
+            self.lagging = self.lag;
+            Ok(())
+        }
+
+        fn shows(&mut self, value: Option<&'static str>) -> Result<bool, &'static str> {
+            self.reads += 1;
+            if self.lagging > 0 {
+                self.lagging -= 1;
+                return Ok(false);
+            }
+            Ok(self.stored == value)
+        }
+
+        fn change(&mut self, value: Option<&'static str>) -> Result<bool, &'static str> {
+            let this = std::cell::RefCell::new(self);
+            kept(
+                || this.borrow_mut().apply(value),
+                || this.borrow_mut().shows(value),
+                || this.borrow_mut().pauses += 1,
+            )
+        }
+    }
+
+    #[test]
+    fn a_change_read_back_at_once_is_made_once() {
+        let mut credential = Settling::default();
+        assert_eq!(credential.change(Some("one")), Ok(true));
+        assert_eq!(credential.stored, Some("one"));
+        assert_eq!((credential.applies, credential.reads), (1, 1));
+        assert_eq!(credential.change(None), Ok(true));
+        assert_eq!(credential.stored, None);
+    }
+
+    #[test]
+    fn a_change_that_shows_late_is_waited_for_not_made_again() {
+        let mut credential = Settling {
+            lag: 3,
+            ..Settling::default()
+        };
+        assert_eq!(credential.change(Some("one")), Ok(true));
+        assert_eq!(credential.applies, 1);
+        assert_eq!((credential.reads, credential.pauses), (4, 3));
+    }
+
+    #[test]
+    fn a_lost_change_is_made_again() {
+        let mut credential = Settling {
+            stored: Some("one"),
+            lose: 1,
+            ..Settling::default()
+        };
+        // A delete that did not take.
+        assert_eq!(credential.change(None), Ok(true));
+        assert_eq!(credential.stored, None);
+        assert_eq!(credential.applies, 2);
+        assert_eq!(credential.reads, SETTLE_READS + 1);
+    }
+
+    #[test]
+    fn a_change_that_never_shows_is_not_kept() {
+        let mut credential = Settling {
+            lose: u32::MAX,
+            ..Settling::default()
+        };
+        assert_eq!(credential.change(Some("one")), Ok(false));
+        assert_eq!(credential.applies, CHANGE_ATTEMPTS);
+        assert_eq!(credential.stored, None);
+        assert_eq!(
+            not_kept("write").to_string(),
+            "secret store failed: could not write the credential: \
+             Credential Manager did not keep the change"
+        );
+    }
+
+    #[test]
+    fn a_failing_change_or_read_is_not_tried_again() {
+        let mut applies = 0;
+        assert_eq!(
+            kept(
+                || {
+                    applies += 1;
+                    Err("access denied")
+                },
+                || Ok(true),
+                || {},
+            ),
+            Err("access denied")
+        );
+        assert_eq!(applies, 1);
+        let mut reads = 0;
+        assert_eq!(
+            kept(
+                || Ok(()),
+                || {
+                    reads += 1;
+                    Err::<bool, _>("read failed")
+                },
+                || {},
+            ),
+            Err("read failed")
+        );
+        assert_eq!(reads, 1);
     }
 
     /// Writes real credentials for a throwaway profile and removes them.
