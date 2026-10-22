@@ -86,6 +86,9 @@ impl Runner {
 /// the next runner finds their jobs free at once.
 const CLOSING_WAIT: Duration = Duration::from_secs(2);
 
+/// How often a closing queue saves again the ends storage refused.
+const CLOSING_RETRY: Duration = Duration::from_millis(50);
+
 /// Why a cancel or retry did not happen.
 #[derive(Debug, thiserror::Error)]
 pub enum JobActionError {
@@ -584,9 +587,11 @@ impl JobQueue {
         }
     }
 
-    /// Whether a job runs in this process now.
+    /// Whether a job runs in this process now, or ended here and waits for
+    /// its end to be saved.
     pub(crate) fn busy(&self) -> bool {
-        !self.shared.state().workers.is_empty()
+        let state = self.shared.state();
+        !state.workers.is_empty() || !state.unsaved.is_empty()
     }
 
     #[cfg(test)]
@@ -666,24 +671,31 @@ impl Drop for JobQueue {
         }
         // Stopped handlers give up their leases as they return (`finish`):
         // wait for them a little, so the next runner resumes their jobs at
-        // once. One still busy keeps its lease until it runs out.
+        // once. One still busy keeps its lease until it runs out. Ends
+        // storage refused are saved again meanwhile.
         let deadline = Instant::now() + CLOSING_WAIT;
         let mut state = self.shared.state();
-        while !state.workers.is_empty() {
+        loop {
+            self.shared.save_unsaved(&mut state);
             let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
+            if (state.workers.is_empty() && state.unsaved.is_empty()) || left.is_zero() {
                 break;
             }
+            let wait = if state.unsaved.is_empty() {
+                left
+            } else {
+                left.min(CLOSING_RETRY)
+            };
             state = self
                 .shared
                 .wake
-                .wait_timeout(state, left)
+                .wait_timeout(state, wait)
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .0;
         }
-        // A last try at the ends storage refused; one still refused runs
-        // again from its last checkpoint when a runner next starts.
-        self.shared.save_unsaved(&mut state);
+        // An end still refused stays running in storage: the next runner to
+        // read it (the other one, if it is up) runs it again from its last
+        // checkpoint.
         for id in std::mem::take(&mut state.unsaved) {
             let _ = self.shared.repository.release(id);
         }
@@ -868,9 +880,10 @@ fn tick(shared: &Arc<Shared>, state: &mut MutexGuard<'_, State>) {
             let expired = now
                 .duration_since(state.renewed_at)
                 .is_ok_and(|since| since >= shared.settings.lease);
-            // An unsaved end stays: saving it is refused once another
-            // runner holds the job, and giving it up here would queue it
-            // again on this runner's own next read.
+            // An unsaved end stays: giving it up here would queue it again
+            // on this runner's own next read. Its lease runs out all the
+            // same, and the other runner may then run the job again; once
+            // that runner holds it, saving the end here is refused.
             if expired { running } else { Vec::new() }
         }
     };

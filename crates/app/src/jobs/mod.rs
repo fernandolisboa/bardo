@@ -1330,30 +1330,66 @@ mod tests {
     #[test]
     fn the_other_runner_leaves_a_finished_run_alone_until_its_end_is_saved() {
         let (db, owner) = memory_db();
-        // The end fails to save for many ticks, longer than a lease.
-        let repository = EndNotSaved::new(&db, 40);
+        // The end fails to save for about 100 ticks, longer than a lease.
+        let settings = JobSettings {
+            lease: Duration::from_secs(1),
+            ..shared_settings()
+        };
+        let repository = EndNotSaved::new(&db, 100);
         let runs = Arc::new(AtomicU32::new(0));
         let app = JobQueue::start(
             Arc::clone(&repository) as Arc<dyn JobRepository>,
             owner,
             Runner::app(),
             counting(&runs),
-            shared_settings(),
+            settings,
             Redactor::new(),
         )
         .unwrap();
-        let agent_db = second_runner(&db);
-        let agent = agent_queue(&agent_db, owner, counting(&runs), shared_settings());
         let id = enqueue(&app, owner);
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Running);
+        assert!(app.busy(), "an unsaved end keeps the runner busy");
 
+        // The agent starts while storage still says running.
+        let agent_db = second_runner(&db);
+        let agent = agent_queue(&agent_db, owner, counting(&runs), settings);
         let deadline = Instant::now() + PATIENCE;
         while stored(&db, owner, id).state() != JobState::Done {
             assert!(Instant::now() < deadline, "the end was never saved");
             std::thread::sleep(Duration::from_millis(5));
         }
+        assert_eq!(repository.failures_left(), 0);
         wait_for(|| agent.jobs(), id, |j| j.state() == JobState::Done);
         std::thread::sleep(Duration::from_millis(200));
         assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(!app.busy());
+    }
+
+    #[test]
+    fn a_closing_runner_saves_an_unsaved_end_before_it_goes() {
+        let (db, owner) = memory_db();
+        // No tick comes before the close: only the closing queue saves it
+        // again, and its first try fails too.
+        let repository = EndNotSaved::new(&db, 3);
+        let q = JobQueue::start(
+            Arc::clone(&repository) as Arc<dyn JobRepository>,
+            owner,
+            Runner::app(),
+            handlers(|_, _| Ok(())),
+            JobSettings {
+                tick: Duration::from_secs(600),
+                ..shared_settings()
+            },
+            Redactor::new(),
+        )
+        .unwrap();
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Running);
+        drop(q);
+        assert_eq!(repository.failures_left(), 0);
+        assert_eq!(stored(&db, owner, id).state(), JobState::Done);
     }
 
     #[test]
