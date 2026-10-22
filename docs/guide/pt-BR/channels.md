@@ -55,6 +55,7 @@ O formato define o tamanho do roteiro que o Claude escreve, o formato em que as 
 - **Palavra falada**: a cor em que acende a palavra sendo dita, nos projetos novos do canal. **Amarelo** é o padrão de um canal novo; **Desligado** é onde começam os canais criados antes disso existir, para que seus cortes e renders fiquem como estavam. Cada projeto pode escolher outra cor no [editor](editor.md#captions).
 - **Transição padrão** e a **Duração** dela: o que o editor põe num corte quando você aperta **T** ou escolhe uma transição para um clipe; uma fusão de 0,5 s, a menos que você mude. Cada corte pode usar outra ([Transições](editor.md#transitions)).
 - **Movimento nas imagens** e a **Intensidade** dele: como a câmera passeia por cada imagem parada num corte novo, o efeito Ken Burns. **Variado** (o padrão de um canal novo, com intensidade **Média**) dá a cada cena um zoom ou pan diferente do anterior; **Nenhum** deixa as imagens paradas, e é onde começam os canais criados antes de existir movimento, para os cortes e renders deles ficarem como estavam; ou escolha um movimento para todas as cenas. Cortes já feitos guardam os movimentos que têm, e cada imagem pode usar outro ([Movimento nas imagens](editor.md#motion)).
+- **Estilo da miniatura**: como fica o texto das miniaturas novas do canal no YouTube, Forte a menos que você mude. Cada vídeo pode escolher outro ([Miniatura](uploading.md#thumbnail)).
 
 <a id="accounts"></a>
 ## Depois: as contas de rede

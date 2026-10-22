@@ -507,6 +507,12 @@ pub enum CostPurpose {
     VoiceSample,
     /// A post Bardo made on a network that bills each one (X).
     Post,
+    /// Claude writing a YouTube thumbnail's text and background prompt.
+    Thumbnail,
+    /// The image provider drawing a YouTube thumbnail's background.
+    ThumbnailImage,
+    /// Claude writing a long video's YouTube chapters.
+    Chapters,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -557,7 +563,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 14] = [
+    pub const ALL: [CostPurpose; 17] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -572,6 +578,9 @@ impl CostPurpose {
         CostPurpose::CutSuggestions,
         CostPurpose::VoiceSample,
         CostPurpose::Post,
+        CostPurpose::Thumbnail,
+        CostPurpose::ThumbnailImage,
+        CostPurpose::Chapters,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -591,6 +600,9 @@ impl CostPurpose {
             CostPurpose::CutSuggestions => "cut_suggestions",
             CostPurpose::VoiceSample => "voice_sample",
             CostPurpose::Post => "post",
+            CostPurpose::Thumbnail => "thumbnail",
+            CostPurpose::ThumbnailImage => "thumbnail_image",
+            CostPurpose::Chapters => "chapters",
         }
     }
 }

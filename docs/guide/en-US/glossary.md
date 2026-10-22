@@ -116,6 +116,10 @@ The words Bardo uses, in plain terms.
 
 **Video metadata**: a network's post text for a video: title, description and tags, kept within the network's limits.
 
+**Thumbnail**: the 1280 × 720 picture YouTube shows before a long video plays: a background with big text, saved in Bardo and sent with the upload.
+
+**Chapters**: named parts of a long video's YouTube progress bar, from timestamps in the description. Each starts at a sentence of the narration.
+
 **Export**: a folder per network with the rendered file and a text file to copy from, for posting by hand.
 
 **Upload review**: what you confirm before an upload: the file, the post text, the account, the visibility and the AI disclosure.

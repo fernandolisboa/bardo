@@ -21,11 +21,11 @@ use bardo_app::bardo_domain::{
     VideoFormat, VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
-    Bardo, BudgetConsent, Control, Destination, ExportSummary, ExportView, MusicPromptView,
-    MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer, NarrationView, Recording,
-    RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage,
-    StageState, StageStatus, Text, TourAnchor, UploadChoices, UploadReview, opening_stage,
-    project_stages,
+    Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
+    MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer,
+    NarrationView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView,
+    SpendEstimate, Stage, StageState, StageStatus, Text, ThumbnailView, TourAnchor, UploadChoices,
+    UploadReview, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -55,6 +55,7 @@ mod music;
 mod render;
 mod scenes;
 mod upload;
+mod youtube;
 
 /// How often the screen checks the job queue for changes, and moves the
 /// highlighted word while the narration plays.
@@ -176,6 +177,27 @@ pub struct ProjectsScreen {
     track_notice: Option<Text>,
     /// A track waiting on a budget answer.
     track_ask: Option<SpendEstimate>,
+    /// A long video's YouTube thumbnail, and its text and background
+    /// prompt as typed.
+    thumbnail: Option<ThumbnailView>,
+    thumbnail_text: Entity<InputState>,
+    thumbnail_prompt: Entity<TextareaState>,
+    /// The text and prompt the fields were last filled with.
+    thumbnail_loaded: Option<(String, String)>,
+    thumbnail_error: Option<Text>,
+    thumbnail_notice: Option<Text>,
+    /// Writing or drawing waiting on a budget answer.
+    thumbnail_ask: Option<(youtube::ThumbnailCall, SpendEstimate)>,
+    /// The picture being made off the UI thread; dropping it stops
+    /// waiting for it.
+    thumbnail_saving: Option<Task<()>>,
+    /// A long video's YouTube chapters.
+    chapters: Option<ChaptersView>,
+    chapters_error: Option<Text>,
+    chapters_ask: Option<SpendEstimate>,
+    /// The chapter whose title is being typed, and its field.
+    chapter_editing: Option<usize>,
+    chapter_title: Entity<InputState>,
     /// The Render stage's review of the project's cut.
     render_review: Option<RenderReview>,
     /// Where the project's renders stand, for its Render stage.
@@ -281,6 +303,9 @@ impl ProjectsScreen {
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+        let thumbnail_text = cx.new(|cx| InputState::new(window, cx));
+        let thumbnail_prompt = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6));
+        let chapter_title = cx.new(|cx| InputState::new(window, cx));
         let metadata_title = cx.new(|cx| InputState::new(window, cx));
         let metadata_description = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 12));
         let metadata_tags = cx.new(|cx| InputState::new(window, cx));
@@ -422,6 +447,19 @@ impl ProjectsScreen {
             track_error: None,
             track_notice: None,
             track_ask: None,
+            thumbnail: None,
+            thumbnail_text,
+            thumbnail_prompt,
+            thumbnail_loaded: None,
+            thumbnail_error: None,
+            thumbnail_notice: None,
+            thumbnail_ask: None,
+            thumbnail_saving: None,
+            chapters: None,
+            chapters_error: None,
+            chapters_ask: None,
+            chapter_editing: None,
+            chapter_title,
             render_review: None,
             render_summary: None,
             render_found: None,
@@ -580,6 +618,14 @@ impl ProjectsScreen {
         self.track_error = None;
         self.track_notice = None;
         self.track_ask = None;
+        self.thumbnail_loaded = None;
+        self.thumbnail_error = None;
+        self.thumbnail_notice = None;
+        self.thumbnail_ask = None;
+        self.thumbnail_saving = None;
+        self.chapters_error = None;
+        self.chapters_ask = None;
+        self.chapter_editing = None;
         self.render_found = None;
         self.render_checking = None;
         self.render_check_failed = false;
@@ -836,6 +882,8 @@ impl ProjectsScreen {
             self.render_summary = None;
             self.export_view = None;
             self.export_summary = None;
+            self.thumbnail = None;
+            self.chapters = None;
             return;
         };
         self.load_narration(id, cx);
@@ -843,6 +891,7 @@ impl ProjectsScreen {
         self.load_music(id, window, cx);
         self.load_render(id, cx);
         self.load_export(id, window, cx);
+        self.load_youtube(id, window, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view

@@ -31,6 +31,7 @@ mod secrets;
 mod setup_choices;
 mod template;
 mod theme;
+mod thumbnail;
 mod timeline;
 mod tour;
 mod voice_samples;

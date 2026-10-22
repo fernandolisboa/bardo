@@ -19,6 +19,8 @@ Há um modelo para cada tipo de geração:
 - **Prompts de imagem**: o plano de cenas e o prompt de imagem de cada cena ([Cenas e imagens](scenes.md#plan)).
 - **Prompt de música**: o prompt para a sua ferramenta de música ([Roteiro](script.md#music)).
 - **Metadados**: o título, a descrição e as tags de cada rede, na etapa Publicação.
+- **Miniatura**: o texto da miniatura do YouTube de um vídeo longo e o prompt do fundo dela ([Miniatura](uploading.md#thumbnail)).
+- **Capítulos**: os capítulos do YouTube de um vídeo longo, a partir das frases da narração ([Capítulos](uploading.md#chapters)).
 
 <a id="versions"></a>
 ## Versões
@@ -38,7 +40,7 @@ Um modelo tem duas partes, cada uma com até 8.000 caracteres:
 <a id="variables"></a>
 ## Variáveis
 
-Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do projeto. A lista sob o editor mostra as variáveis que este tipo de modelo pode usar e o que cada uma traz, como `{{channel_name}}`, `{{persona}}` ou `{{narration_sentences}}`. `{{target_length}}` e `{{frame_shape}}` seguem o [formato](projects.md#format) do vídeo: o tamanho do roteiro e o formato das imagens. Uma variável escrita errado ou desconhecida, ou sem o `}}` de fechamento, impede que o modelo seja salvo.
+Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do projeto. A lista sob o editor mostra as variáveis que este tipo de modelo pode usar e o que cada uma traz, como `{{channel_name}}`, `{{persona}}` ou `{{narration_sentences}}`. `{{video_title}}` é o título do YouTube quando já foi escrito, senão o do projeto. `{{target_length}}` e `{{frame_shape}}` seguem o [formato](projects.md#format) do vídeo: o tamanho do roteiro e o formato das imagens. Uma variável escrita errado ou desconhecida, ou sem o `}}` de fechamento, impede que o modelo seja salvo.
 
 <a id="save"></a>
 ## Salvar e recomeçar

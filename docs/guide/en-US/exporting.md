@@ -24,14 +24,15 @@ Each network's row has a box: tick the networks to export. Networks not exported
 Each project's export has a folder, with one folder per network inside, named after the network. Each holds:
 
 - the rendered video, in the network's preset;
-- `metadata.txt`, in the interface language: the title, description or caption and tags to paste in each field, the visibility to pick, and, when the voice is synthetic, where to set the network's label.
+- `metadata.txt`, in the interface language: the title, description or caption and tags to paste in each field, the visibility to pick, and, when the voice is synthetic, where to set the network's label;
+- in the YouTube folder, `thumbnail.jpg` when the project has a saved [thumbnail](uploading.md#thumbnail), to set in YouTube Studio.
 
 **Show in folder** opens it, and **Details** shows its path. The inspector also has **Copy** beside each field, to paste straight from Bardo.
 
 <a id="outdated"></a>
 ## Out of date
 
-A network's last export reads **Exported** while it matches the render and the metadata, **Out of date** once either changed after it, and **Not exported** before the first one. Export again to bring the folder up to date. A file whose render is out of date exports as it is; render again at the [Render](render.md) stage to include the changes.
+A network's last export reads **Exported** while it matches the render, the metadata and the YouTube thumbnail, **Out of date** once one of them changed after it, and **Not exported** before the first one. Export again to bring the folder up to date. A file whose render is out of date exports as it is; render again at the [Render](render.md) stage to include the changes.
 
 <a id="post"></a>
 ## After posting by hand

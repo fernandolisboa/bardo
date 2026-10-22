@@ -236,7 +236,7 @@ const FONTS: [(&str, &[u8]); 2] = [
 const SIDE_MARGIN: f32 = 0.06;
 
 /// An ASS colour: `&HAABBGGRR`, alpha 0 opaque.
-fn ass_colour(rgb: u32, opacity: f32) -> String {
+pub(super) fn ass_colour(rgb: u32, opacity: f32) -> String {
     let alpha = ((1.0 - opacity.clamp(0.0, 1.0)) * 255.0).round() as u32;
     let (r, g, b) = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
     format!("&H{alpha:02X}{b:02X}{g:02X}{r:02X}")
@@ -263,7 +263,7 @@ fn ass_time(time: Duration) -> String {
 /// A caption's text as libass draws it literally: braces would open an
 /// override block and a backslash an escape (`\N`, `\h`), so braces are
 /// escaped and every backslash is followed by an invisible word joiner.
-fn ass_text(text: &str, uppercase: bool) -> String {
+pub(super) fn ass_text(text: &str, uppercase: bool) -> String {
     let text = if uppercase {
         text.to_uppercase()
     } else {
@@ -379,7 +379,7 @@ pub(super) fn script(track: &CaptionTrack, size: FrameSize) -> String {
 pub(super) struct TempFile(PathBuf);
 
 impl TempFile {
-    fn write(name: &str, contents: &[u8]) -> io::Result<TempFile> {
+    pub(super) fn write(name: &str, contents: &[u8]) -> io::Result<TempFile> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "bardo-{}-{}-{name}",
@@ -395,7 +395,7 @@ impl TempFile {
         Ok(TempFile(path))
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -408,7 +408,7 @@ impl Drop for TempFile {
 
 /// Writes the shipped fonts to a folder of their own, once per run (and
 /// again only when a file there is not byte for byte the one shipped).
-fn fonts_dir() -> Result<&'static Path, MediaError> {
+pub(super) fn fonts_dir() -> Result<&'static Path, MediaError> {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     // The preview and a render may both start first.
     static WRITING: Mutex<()> = Mutex::new(());

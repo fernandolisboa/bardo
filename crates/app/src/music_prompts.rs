@@ -221,7 +221,7 @@ fn music_prompt_call(rendered: &RenderedPrompt) -> PlannedCall {
 }
 
 /// A length as a music tool reads it: "8 min 05 s", or "45 s".
-fn length_text(length: Duration) -> String {
+pub(crate) fn length_text(length: Duration) -> String {
     let seconds = length.as_secs_f64().round() as u64;
     match (seconds / 60, seconds % 60) {
         (0, seconds) => format!("{seconds} s"),

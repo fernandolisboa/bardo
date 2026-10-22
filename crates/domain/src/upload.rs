@@ -94,6 +94,49 @@ impl UploadFailure {
     }
 }
 
+/// How sending a YouTube thumbnail with an upload ended (#182). It never
+/// fails the upload: the video stays up with YouTube's own thumbnail.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ThumbnailOutcome {
+    /// The video shows the thumbnail.
+    Set,
+    /// The channel may not use custom thumbnails (YouTube's 403
+    /// `forbidden`): it is not verified.
+    NotAllowed,
+    /// YouTube did not take it, with its reason.
+    Failed(String),
+}
+
+impl ThumbnailOutcome {
+    /// Stable text for storage.
+    pub fn code(&self) -> String {
+        match self {
+            ThumbnailOutcome::Set => "set".to_owned(),
+            ThumbnailOutcome::NotAllowed => "not_allowed".to_owned(),
+            ThumbnailOutcome::Failed(reason) => format!("failed:{reason}"),
+        }
+    }
+
+    /// Reads a stored code; an unknown one reads as a failure, so a newer
+    /// version's outcome still shows.
+    pub fn from_code(code: &str) -> Self {
+        match code {
+            "set" => ThumbnailOutcome::Set,
+            "not_allowed" => ThumbnailOutcome::NotAllowed,
+            _ => ThumbnailOutcome::Failed(code.strip_prefix("failed:").unwrap_or(code).to_owned()),
+        }
+    }
+
+    /// The outcome of a `set_thumbnail` call.
+    pub fn of(result: &Result<(), UploadError>) -> Self {
+        match result {
+            Ok(()) => ThumbnailOutcome::Set,
+            Err(error) if error.kind == UploadErrorKind::NotAllowed => ThumbnailOutcome::NotAllowed,
+            Err(error) => ThumbnailOutcome::Failed(error.detail.clone()),
+        }
+    }
+}
+
 /// Where an uploaded publication stands.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UploadStatus {
@@ -206,6 +249,9 @@ pub struct Upload {
     /// network Bardo publishes on at a time (`crate::due`). `None` until
     /// then, and for every other upload.
     pub claimed_at: Option<SystemTime>,
+    /// How sending the thumbnail went, once it was sent; `None` before and
+    /// for an upload without one.
+    pub thumbnail: Option<ThumbnailOutcome>,
 }
 
 impl Upload {
@@ -219,6 +265,7 @@ impl Upload {
             issue: None,
             network_id: None,
             claimed_at: None,
+            thumbnail: None,
         }
     }
 
@@ -718,6 +765,21 @@ pub trait VideoUploader: Send + Sync {
         ))
     }
 
+    /// Sets the custom thumbnail of the uploaded video `id` to `image`, a
+    /// JPEG (YouTube's `thumbnails.set`).
+    fn set_thumbnail(
+        &self,
+        access_token: &SecretText,
+        id: &str,
+        image: &[u8],
+    ) -> Result<(), UploadError> {
+        let _ = (access_token, id, image);
+        Err(UploadError::new(
+            UploadErrorKind::NotAllowed,
+            "the network takes no thumbnail",
+        ))
+    }
+
     /// How many times a job checks on a video being processed before it
     /// stops waiting: about an hour with the default `poll_delay`.
     fn processing_polls(&self) -> u32 {
@@ -759,6 +821,29 @@ mod tests {
 
     fn upload(visibility: Visibility) -> Upload {
         Upload::queued(visibility, JobId::new())
+    }
+
+    #[test]
+    fn a_thumbnail_outcome_reads_back_and_comes_from_the_call() {
+        for outcome in [
+            ThumbnailOutcome::Set,
+            ThumbnailOutcome::NotAllowed,
+            ThumbnailOutcome::Failed("HTTP 400: invalidImage".into()),
+        ] {
+            assert_eq!(ThumbnailOutcome::from_code(&outcome.code()), outcome);
+        }
+        assert_eq!(
+            ThumbnailOutcome::from_code("later"),
+            ThumbnailOutcome::Failed("later".into())
+        );
+        assert_eq!(ThumbnailOutcome::of(&Ok(())), ThumbnailOutcome::Set);
+        let refused = Err(UploadError::new(UploadErrorKind::NotAllowed, "forbidden"));
+        assert_eq!(ThumbnailOutcome::of(&refused), ThumbnailOutcome::NotAllowed);
+        let busy = Err(UploadError::new(UploadErrorKind::RateLimited, "HTTP 429"));
+        assert_eq!(
+            ThumbnailOutcome::of(&busy),
+            ThumbnailOutcome::Failed("HTTP 429".into())
+        );
     }
 
     #[test]

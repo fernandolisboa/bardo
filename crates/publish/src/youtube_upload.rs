@@ -18,6 +18,9 @@
 //! - A scheduled upload goes `private` with `status.publishAt` (ISO 8601);
 //!   YouTube makes it public at that time, and publishes a past time at
 //!   once, so a session never starts once the time passed.
+//! - A custom thumbnail goes with `thumbnails.set` once the video exists:
+//!   the image is the whole body of a media upload. A channel that may not
+//!   use custom thumbnails (not verified) is answered 403 `forbidden`.
 //! - `videos.update` with `part=status` replaces the whole status: every
 //!   settable property left out is cleared. A schedule change reads the
 //!   status first and sends all of it back, changing only the privacy and
@@ -27,7 +30,8 @@
 //! Docs checked 2026-10-03: <https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol>,
 //! <https://developers.google.com/youtube/v3/docs/videos/insert>,
 //! <https://developers.google.com/youtube/v3/docs/videos>,
-//! <https://developers.google.com/youtube/v3/docs/videos/update>.
+//! <https://developers.google.com/youtube/v3/docs/videos/update>;
+//! 2026-10-22: <https://developers.google.com/youtube/v3/docs/thumbnails/set>.
 
 use std::time::{Duration, SystemTime};
 
@@ -310,6 +314,23 @@ impl<T: Transport> VideoUploader for YouTubeUploader<T> {
         })
     }
 
+    fn set_thumbnail(
+        &self,
+        access_token: &SecretText,
+        id: &str,
+        image: &[u8],
+    ) -> Result<(), UploadError> {
+        let response = self.send(&self.thumbnail_request(access_token, id, image))?;
+        match response.status {
+            200..=299 => Ok(()),
+            404 => Err(UploadError::new(
+                UploadErrorKind::NotFound,
+                "the video is no longer on YouTube",
+            )),
+            _ => Err(failure(&response)),
+        }
+    }
+
     fn reschedule(
         &self,
         access_token: &SecretText,
@@ -359,6 +380,23 @@ impl<T: Transport> VideoUploader for YouTubeUploader<T> {
 }
 
 impl<T: Transport> YouTubeUploader<T> {
+    fn thumbnail_request(&self, access_token: &SecretText, id: &str, image: &[u8]) -> HttpRequest {
+        let query = form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([("videoId", id), ("uploadType", "media")])
+            .finish();
+        HttpRequest {
+            method: Method::Post,
+            url: format!(
+                "{}/upload/youtube/v3/thumbnails/set?{query}",
+                self.endpoints.api
+            ),
+            headers: Vec::new(),
+            body: Some(image.to_vec()),
+        }
+        .header("authorization", format!("Bearer {}", access_token.expose()))
+        .header("content-type", "image/jpeg")
+    }
+
     /// The video `id` with its snippet and status, as its owner sees it;
     /// `None` when YouTube no longer has it.
     fn video(&self, access_token: &SecretText, id: &str) -> Result<Option<Value>, UploadError> {

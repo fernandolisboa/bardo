@@ -50,7 +50,7 @@ use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, ClickEvent, SharedString, Window, div, px};
+use gpui_kit::{AnyElement, ClickEvent, ObjectFit, SharedString, Window, div, img, px};
 
 use super::{ProjectsScreen, clock, muted};
 use crate::appearance::look;
@@ -1031,6 +1031,49 @@ impl ProjectsScreen {
                         tr(bardo, Text::UploadMadeForKidsHint),
                         guide::refs::YOUTUBE_UPLOAD,
                     )),
+            );
+        }
+        if let Some((file, path)) = review.thumbnail.as_ref().filter(|_| !reel && !draft) {
+            let send = Checkbox::new("upload-thumbnail")
+                .label(tr(bardo, Text::UploadThumbnail))
+                .checked(choices.thumbnail)
+                .on_click({
+                    let screen = screen.clone();
+                    move |checked: &bool, _, cx| {
+                        let checked = *checked;
+                        let _ = screen.update(cx, |this, cx| {
+                            this.change_upload(|choices| choices.thumbnail = checked, cx)
+                        });
+                    }
+                });
+            card = card.child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(send)
+                            .child(guide::info(
+                                bardo,
+                                "upload-thumbnail-info",
+                                tr(bardo, Text::UploadThumbnailHint),
+                                guide::refs::UPLOADING_THUMBNAIL,
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                img(path.clone())
+                                    .w(px(128.))
+                                    .h(px(72.))
+                                    .object_fit(ObjectFit::Cover)
+                                    .rounded_sm(),
+                            )
+                            .child(muted(cx, SharedString::from(file.clone()))),
+                    ),
             );
         }
         let (synthetic_label, synthetic_hint) = if reel {

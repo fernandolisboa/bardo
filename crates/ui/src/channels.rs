@@ -6,7 +6,7 @@
 use bardo_app::bardo_domain::{
     CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel,
     ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength,
-    PersonaId, Transition, TransitionKind, VideoFormat, frame_time,
+    PersonaId, ThumbnailLook, Transition, TransitionKind, VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -122,6 +122,13 @@ fn caption_highlight_choices(bardo: &Bardo) -> SearchableVec<Choice<CaptionHighl
     }))
 }
 
+fn thumbnail_look_choices(bardo: &Bardo) -> SearchableVec<Choice<ThumbnailLook>> {
+    SearchableVec::new(ThumbnailLook::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::ThumbnailLookName(value)),
+    }))
+}
+
 fn format_choices(bardo: &Bardo) -> SearchableVec<Choice<VideoFormat>> {
     SearchableVec::new(VideoFormat::ALL.map(|value| Choice {
         value,
@@ -219,6 +226,7 @@ pub struct ChannelsScreen {
     clip_model: ChoiceSelect<Option<ClipModelRef>>,
     caption_style: ChoiceSelect<CaptionStyle>,
     caption_highlight: ChoiceSelect<CaptionHighlight>,
+    thumbnail_look: ChoiceSelect<ThumbnailLook>,
     format: ChoiceSelect<VideoFormat>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
@@ -255,6 +263,7 @@ impl ChannelsScreen {
             )
         };
         let caption_highlights = caption_highlight_choices(bardo.read(cx));
+        let thumbnail_looks = thumbnail_look_choices(bardo.read(cx));
         let (transitions, transition_lengths_list, formats, motions, strengths) = {
             let bardo = bardo.read(cx);
             (
@@ -285,6 +294,10 @@ impl ChannelsScreen {
         let caption_highlight = cx.new(|cx| {
             let selected = index_of(&CaptionHighlight::ALL, &defaults.caption_highlight);
             SelectState::new(caption_highlights, selected, window, cx)
+        });
+        let thumbnail_look = cx.new(|cx| {
+            let selected = index_of(&ThumbnailLook::ALL, &defaults.thumbnail_look);
+            SelectState::new(thumbnail_looks, selected, window, cx)
         });
         let format = cx.new(|cx| {
             let selected = index_of(&VideoFormat::ALL, &defaults.format);
@@ -340,6 +353,7 @@ impl ChannelsScreen {
             clip_model,
             caption_style,
             caption_highlight,
+            thumbnail_look,
             format,
             transition,
             transition_length,
@@ -381,6 +395,7 @@ impl ChannelsScreen {
         let clip_models = clip_model_choices(bardo);
         let caption_styles = caption_style_choices(bardo);
         let caption_highlights = caption_highlight_choices(bardo);
+        let thumbnail_looks = thumbnail_look_choices(bardo);
         let transitions = transition_choices(bardo);
         let lengths = transition_length_choices(bardo);
         let formats = format_choices(bardo);
@@ -425,6 +440,13 @@ impl ChannelsScreen {
         self.caption_highlight.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(caption_highlights, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.thumbnail_look.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(thumbnail_looks, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -529,6 +551,9 @@ impl ChannelsScreen {
         self.caption_highlight.update(cx, |select, cx| {
             select.set_selected_value(&draft.caption_highlight, window, cx)
         });
+        self.thumbnail_look.update(cx, |select, cx| {
+            select.set_selected_value(&draft.thumbnail_look, window, cx)
+        });
         self.format.update(cx, |select, cx| {
             select.set_selected_value(&draft.format, window, cx)
         });
@@ -580,6 +605,12 @@ impl ChannelsScreen {
                 .unwrap_or_default(),
             caption_highlight: self
                 .caption_highlight
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
+            thumbnail_look: self
+                .thumbnail_look
                 .read(cx)
                 .selected_value()
                 .copied()
@@ -904,6 +935,13 @@ impl ChannelsScreen {
                                     None,
                                 ))),
                         )
+                        .child(explained(
+                            "channel-thumbnail-look-info",
+                            Text::ChannelThumbnailLook,
+                            Text::ChannelThumbnailLookHint,
+                            guide::refs::CHANNELS_DEFAULTS,
+                            Select::new(&self.thumbnail_look).into_any_element(),
+                        ))
                         .into_any_element(),
                 ))
                 .child(

@@ -167,6 +167,8 @@ pub mod refs {
     pub const CREDENTIALS_KEPT: GuideRef = at("app-credentials", "kept");
     pub const UPLOADING_NETWORKS: GuideRef = at("uploading", "networks");
     pub const UPLOADING_METADATA: GuideRef = at("uploading", "metadata");
+    pub const UPLOADING_CHAPTERS: GuideRef = at("uploading", "chapters");
+    pub const UPLOADING_THUMBNAIL: GuideRef = at("uploading", "thumbnail");
     pub const UPLOADING_DISCLOSURE: GuideRef = at("uploading", "disclosure");
     pub const UPLOADING_REVIEW: GuideRef = at("uploading", "review");
     pub const UPLOAD_STATES: GuideRef = at("uploading", "states");
@@ -192,7 +194,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 65] = [
+    pub const ALL: [GuideRef; 67] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -235,6 +237,8 @@ pub mod refs {
         CREDENTIALS_KEPT,
         UPLOADING_NETWORKS,
         UPLOADING_METADATA,
+        UPLOADING_CHAPTERS,
+        UPLOADING_THUMBNAIL,
         UPLOADING_DISCLOSURE,
         UPLOADING_REVIEW,
         UPLOAD_STATES,

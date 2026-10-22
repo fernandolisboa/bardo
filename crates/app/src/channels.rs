@@ -151,6 +151,8 @@ mod tests {
             media_assets: Arc::clone(db) as _,
             music_prompts: Arc::clone(db) as _,
             music_tracks: Arc::clone(db) as _,
+            thumbnails: Arc::clone(db) as _,
+            chapters: Arc::clone(db) as _,
             network_accounts: Arc::clone(db) as _,
             connections: Arc::clone(db) as _,
             renders: Arc::clone(db) as _,
@@ -187,6 +189,7 @@ mod tests {
             transition: Default::default(),
             format: Default::default(),
             motion: Default::default(),
+            thumbnail_look: Default::default(),
         }
     }
 
@@ -376,6 +379,8 @@ mod tests {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             music_tracks: Arc::clone(&db) as _,
+            thumbnails: Arc::clone(&db) as _,
+            chapters: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,

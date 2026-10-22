@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use bardo_app::bardo_domain::{
     Cost, Job, JobState, Network, PublicationId, TagPlacement, TemplateKind, VideoMetadataDraft,
-    VideoProjectId, compose, text_length,
+    VideoProjectId, compose_with, fitting_chapters, text_length,
 };
 use bardo_app::{
     Bardo, BudgetConsent, Control, DraftNote, ExportBlock, ExportError, ExportSummary,
@@ -966,11 +966,15 @@ impl ProjectsScreen {
 
         if target.metadata.is_some() {
             let draft = self.metadata_draft(cx);
-            let post = compose(network, &draft, &target.footer, target.visibility);
-            let problems =
-                self.bardo
-                    .read(cx)
-                    .metadata_draft_problems(network, &draft, &target.footer);
+            let chapters =
+                fitting_chapters(network, &draft, target.chapters.as_deref(), &target.footer);
+            let post = compose_with(network, &draft, chapters, &target.footer, target.visibility);
+            let problems = self.bardo.read(cx).metadata_draft_problems(
+                network,
+                &draft,
+                chapters,
+                &target.footer,
+            );
             let count = |text: &str| text.chars().count();
             let text_count = |text: &str| text_length(network, text);
             if let (Some(limit), Some(title)) = (rules.title, post.title.as_ref()) {
@@ -1038,6 +1042,9 @@ impl ProjectsScreen {
             let bardo = self.bardo.read(cx);
             // What the footer and the hashtags add, as the network gets it.
             let mut notes = Vec::new();
+            if chapters.is_some() {
+                notes.push(tr(bardo, Text::MetadataChaptersNote));
+            }
             if !target.footer.trim().is_empty() && rules.text.is_some() {
                 notes.push(tr(bardo, Text::MetadataFooterNote));
             }
@@ -1117,6 +1124,11 @@ impl ProjectsScreen {
             .into_any_element(),
         );
 
+        // A long video's YouTube post: its chapters and thumbnail.
+        if network == Network::YouTube {
+            body.extend(self.render_chapters(cx));
+            body.extend(self.render_thumbnail(cx));
+        }
         let bardo = self.bardo.read(cx);
         if view.disclosure {
             body.push(
@@ -1455,6 +1467,7 @@ impl ProjectsScreen {
         let id = publication.id;
         section = section
             .child(metrics::post_state(bardo, post, "post", cx))
+            .children(super::youtube::thumbnail_outcome(bardo, publication, cx))
             .children(note)
             .children(url.map(|url| {
                 let open = url.clone();

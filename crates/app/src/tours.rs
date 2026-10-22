@@ -209,6 +209,10 @@ pub enum Control {
     PublishMetadata,
     /// Publish: the synthetic-content disclosure reminder.
     PublishDisclosure,
+    /// Publish: a long video's YouTube thumbnail.
+    PublishThumbnail,
+    /// Publish: a long video's YouTube chapters.
+    PublishChapters,
     /// Publish: the picked network's upload, or its review.
     PublishUpload,
     /// Publish: when the reviewed upload goes (or, for a TikTok draft,
@@ -938,32 +942,33 @@ pub const NETWORKS: Tour = {
     }
 };
 
-/// Publish: the networks, each one's metadata and limits, the synthetic
-/// content disclosure, the upload review, scheduling, export, and the post.
-/// Its steps only explain: nothing is uploaded, exported or linked.
+/// Publish: the networks, each one's metadata and limits, a long video's
+/// YouTube thumbnail and chapters, the synthetic content disclosure, the
+/// upload review and when it goes, export, and the post. Its steps only
+/// explain: nothing is uploaded, exported or linked.
 pub const PUBLISH: Tour = {
     const AT: Stage = Stage::Publish;
     const PAGE: &str = "uploading";
     const NETWORK: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Publish,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "networks", TourAnchor::Collection).learn(PAGE, "networks"),
             at_stage(AT, "metadata", control(Control::PublishMetadata))
                 .missing(NETWORK)
                 .learn(PAGE, "metadata"),
+            // Another network picked, or a Short: the inspector stands in.
+            at_stage(AT, "youtube", control(Control::PublishThumbnail))
+                .missing(NETWORK)
+                .learn(PAGE, "thumbnail"),
             // No realistic voice: the review's disclosure stands in.
             at_stage(AT, "disclosure", control(Control::PublishDisclosure))
                 .missing(WhenMissing::LightPart(control(Control::PublishUpload)))
                 .learn(PAGE, "disclosure"),
             // Kick: exported only, so the card says it in the middle.
             at_stage(AT, "upload", control(Control::PublishUpload)).learn(PAGE, "review"),
-            // The review closed: the upload stands in.
-            at_stage(AT, "schedule", control(Control::UploadWhen))
-                .missing(WhenMissing::LightPart(control(Control::PublishUpload)))
-                .learn(PAGE, "schedule"),
             at_stage(AT, "export", TourAnchor::Toolbar).learn(PAGE, "export"),
             at_stage(AT, "post", control(Control::PublishPost))
                 .missing(NETWORK)
@@ -2716,15 +2721,16 @@ mod tests {
     #[test]
     fn the_publish_tour_falls_back_where_a_network_does_not_upload() {
         let mut run = TourRun::new(&PUBLISH, 2, Destination::Projects);
+        let inspector = TourAnchor::Inspector;
+        // Another network or a Short: no thumbnail card, so the inspector.
+        assert_eq!(run.spot(|anchor| anchor == inspector), Spot::Lit(inspector));
         let upload = control(Control::PublishUpload);
         // No realistic voice: the upload, where the review asks.
+        run.next();
         assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
         // X or Kick: nothing to upload, so the card says it in the middle.
         run.next();
         assert_eq!(run.spot(|_| false), Spot::Center);
-        // The review is closed: its "When" row gives way to the upload.
-        run.next();
-        assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
     }
 
     #[test]

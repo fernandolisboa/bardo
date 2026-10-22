@@ -48,3 +48,14 @@ during the publishing regression pass if an upload misbehaves):
   publish time; `update-invalid-publish-at.http`: a publish time it does
   not take (`invalidPublishAt`); `update-not-found.http`: the video is gone
   (`videoNotFound`).
+
+Written from the documented shapes of
+[thumbnails.set](https://developers.google.com/youtube/v3/docs/thumbnails/set)
+(checked 2026-10-22; re-record during the publishing regression pass):
+
+- `thumbnail-set.http`: the thumbnail is set (`youtube#thumbnailSetResponse`).
+- `thumbnail-forbidden.http`: 403 `forbidden`, a channel that may not use
+  custom thumbnails (not verified).
+- `thumbnail-rate-limit.http`: 429 `uploadRateLimitExceeded`, too many
+  thumbnails lately.
+- `thumbnail-invalid-image.http`: 400 `invalidImage`.

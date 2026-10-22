@@ -63,10 +63,11 @@ use bardo_domain::{
     NetworkAccountId, NetworkAccountRepository, Post, Progress, ProjectFiles, Provider,
     Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem,
     Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText, SignInFailureKind,
-    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, TikTokFile, TikTokSpecProblem, Upload, UploadError,
-    UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId,
-    VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time, check_reel,
-    check_tiktok, draft_room, due_step, mp4_layout, prepare_at, video_container, x_post_model,
+    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, ThumbnailOutcome, TikTokFile, TikTokSpecProblem,
+    Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
+    VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time,
+    check_reel, check_tiktok, draft_room, due_step, mp4_layout, prepare_at, video_container,
+    x_post_model,
 };
 use serde::{Deserialize, Serialize};
 
@@ -182,6 +183,9 @@ pub struct UploadReview {
     pub drafts_free_at: Option<SystemTime>,
     /// The account's default visibility, picked until the user changes it.
     pub visibility: Visibility,
+    /// The saved thumbnail picture that can go with a long video's YouTube
+    /// upload, and where it is.
+    pub thumbnail: Option<(String, std::path::PathBuf)>,
     /// The narration was read with a realistic voice: the disclosure
     /// starts on.
     pub synthetic: bool,
@@ -257,6 +261,7 @@ impl UploadReview {
             share_to_feed: true,
             cover: Duration::ZERO,
             budget: BudgetConsent::Ask,
+            thumbnail: self.thumbnail.is_some(),
         }
     }
 
@@ -301,6 +306,8 @@ pub struct UploadChoices {
     /// Whether the user confirmed a post that reaches the network's
     /// monthly budget (X bills each post).
     pub budget: BudgetConsent,
+    /// The review's thumbnail goes with the upload (YouTube).
+    pub thumbnail: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -587,6 +594,16 @@ struct UploadPayload {
     /// a job refuses to send to another one. Empty in jobs from before.
     #[serde(default)]
     destination: String,
+    /// The thumbnail picture in the project folder, set once the network
+    /// has the video (YouTube).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thumbnail: Option<String>,
+}
+
+/// Whether an upload job's payload sends the thumbnail picture `file`.
+pub(crate) fn sends_thumbnail(payload: &str, file: &str) -> bool {
+    serde_json::from_str::<UploadPayload>(payload)
+        .is_ok_and(|payload| payload.thumbnail.as_deref() == Some(file))
 }
 
 fn shown_in_feed() -> bool {
@@ -1017,6 +1034,41 @@ impl UploadHandler {
                 .files
                 .size(project, &payload.file)
                 .is_ok_and(|size| size == payload.size))
+    }
+
+    /// Sets the video's thumbnail (YouTube) and records how it went. It
+    /// never fails the upload: the video is up either way, and the user
+    /// can set the picture in the network's own studio.
+    #[allow(clippy::too_many_arguments)]
+    fn send_thumbnail(
+        &self,
+        uploader: &dyn VideoUploader,
+        account: &NetworkAccount,
+        payload: &UploadPayload,
+        file: &str,
+        video: &str,
+        publication: PublicationId,
+        job: JobId,
+    ) -> Result<(), JobFailure> {
+        let project: VideoProjectId = id(&payload.project)?;
+        let result = match self.files.read(project, file) {
+            Ok(image) => access_token(&self.connections, account)
+                .and_then(|token| uploader.set_thumbnail(&token, video, &image)),
+            Err(error) => Err(UploadError::new(
+                UploadErrorKind::Local,
+                format!("the picture could not be read: {error}"),
+            )),
+        };
+        if let Err(error) = &result {
+            tracing::warn!("the thumbnail was not set: {error}");
+        }
+        let outcome = ThumbnailOutcome::of(&result);
+        self.update(publication, job, |p| {
+            if let Some(upload) = p.upload_mut() {
+                upload.thumbnail = Some(outcome);
+            }
+            Ok(())
+        })
     }
 
     /// Records why the upload failed and hands the failure to the queue.
@@ -1515,6 +1567,19 @@ impl JobHandler for UploadHandler {
         if !claim_due()? {
             return Ok(());
         }
+        if let Some(file) = &payload.thumbnail
+            && upload.thumbnail.is_none()
+        {
+            self.send_thumbnail(
+                uploader.as_ref(),
+                &account,
+                &payload,
+                file,
+                &video,
+                publication_id,
+                job,
+            )?;
+        }
 
         // Wait for the network to process it, for a while: the job holds a
         // place in the queue meanwhile. Past that the video shows as still
@@ -1877,6 +1942,7 @@ impl Bardo {
         } else {
             ConnectionState::Unavailable
         };
+        let post = target.post();
         let replaces = target.posted.map(|post| post.publication);
         let uploading = replaces
             .as_ref()
@@ -1885,10 +1951,10 @@ impl Bardo {
         let rendering = self
             .latest_job_of(JobKind::Render, project)
             .is_some_and(|job| job.state().is_active());
-        let post = target
-            .metadata
-            .as_ref()
-            .map(|metadata| metadata.post(&target.footer, target.visibility));
+        let thumbnail = target
+            .thumbnail
+            .clone()
+            .map(|file| (file.clone(), self.files.path(project, &file)));
         let size = target
             .render
             .as_ref()
@@ -1925,7 +1991,7 @@ impl Bardo {
             false => None,
         };
         let stamp = format!(
-            "{}|{}|{}|{}|{synthetic}|{channel}|{destination}",
+            "{}|{}|{}|{}|{synthetic}|{channel}|{destination}|{}",
             target
                 .render
                 .as_ref()
@@ -1936,6 +2002,10 @@ impl Bardo {
             replaces
                 .as_ref()
                 .map(|publication| publication.id.to_string())
+                .unwrap_or_default(),
+            thumbnail
+                .as_ref()
+                .map(|(file, _)| file.as_str())
                 .unwrap_or_default(),
         );
         let cost = match (&post, network.bills_posts()) {
@@ -1956,6 +2026,7 @@ impl Bardo {
             post,
             problems: target.problems,
             visibility: target.visibility,
+            thumbnail,
             synthetic,
             replaces,
             cost,
@@ -2148,6 +2219,11 @@ impl Bardo {
                 0
             },
             destination: now.destination.clone(),
+            thumbnail: now
+                .thumbnail
+                .as_ref()
+                .filter(|_| choices.thumbnail)
+                .map(|(file, _)| file.clone()),
         };
         let job = match starts_at {
             Some(at) => Job::scheduled(self.profile.id, JobKind::Upload, to_json(&payload), at),
@@ -2358,6 +2434,10 @@ pub(crate) mod testing {
         pub(crate) stall_publish: AtomicBool,
         /// A publish is hanging.
         pub(crate) stalled: AtomicBool,
+        /// Every thumbnail set: the video and the picture.
+        pub(crate) thumbnails: Mutex<Vec<(String, Vec<u8>)>>,
+        /// Answers to setting a thumbnail; when empty, it is set.
+        pub(crate) thumbnail_answers: Mutex<VecDeque<UploadErrorKind>>,
     }
 
     /// The address of the Reel the fake makes.
@@ -2417,6 +2497,26 @@ pub(crate) mod testing {
     }
 
     impl VideoUploader for FakeUploader {
+        fn set_thumbnail(
+            &self,
+            access_token: &SecretText,
+            id: &str,
+            image: &[u8],
+        ) -> Result<(), UploadError> {
+            self.tokens
+                .lock()
+                .unwrap()
+                .push(access_token.expose().to_owned());
+            self.thumbnails
+                .lock()
+                .unwrap()
+                .push((id.to_owned(), image.to_vec()));
+            match self.thumbnail_answers.lock().unwrap().pop_front() {
+                Some(kind) => Err(UploadError::new(kind, "the network refused the picture")),
+                None => Ok(()),
+            }
+        }
+
         fn network(&self) -> Network {
             if self.drafts {
                 Network::TikTok
@@ -2902,6 +3002,71 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_saved_thumbnail_is_set_once_the_video_is_up() {
+        let s = ready();
+        let before = review(&s);
+        assert_eq!(before.thumbnail, None);
+        assert!(!before.choices().thumbnail);
+        let file = crate::thumbnails::tests::saved_thumbnail(&s.app, s.project.id);
+        // The review before the thumbnail was saved no longer matches.
+        assert!(matches!(
+            s.app.start_upload(&before, before.choices()),
+            Err(UploadReviewError::Changed)
+        ));
+        let review = review(&s);
+        assert_eq!(
+            review.thumbnail,
+            Some((file.clone(), s.h.files.path(s.project.id, &file)))
+        );
+        // A check that fails once makes the job run again: the picture is
+        // sent once.
+        s.h.uploader.answer(Err(UploadErrorKind::NetworkDown));
+        done(
+            &s.app,
+            s.app.start_upload(&review, review.choices()).unwrap(),
+        );
+        let sent = s.h.uploader.thumbnails.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].1, b"jpeg");
+        let publication = upload(&s);
+        assert_eq!(
+            publication.upload().unwrap().thumbnail,
+            Some(ThumbnailOutcome::Set)
+        );
+        assert!(publication.post_id().is_some_and(|id| id == sent[0].0));
+    }
+
+    #[test]
+    fn a_thumbnail_the_network_refuses_leaves_the_video_up() {
+        let s = ready();
+        crate::thumbnails::tests::saved_thumbnail(&s.app, s.project.id);
+        s.h.uploader
+            .thumbnail_answers
+            .lock()
+            .unwrap()
+            .push_back(UploadErrorKind::NotAllowed);
+        done(&s.app, start(&s, review(&s).choices()));
+        let publication = upload(&s);
+        let sent = publication.upload().unwrap();
+        assert!(sent.status.is_on_network(), "{:?}", sent.status);
+        assert_eq!(sent.thumbnail, Some(ThumbnailOutcome::NotAllowed));
+    }
+
+    #[test]
+    fn an_unticked_thumbnail_stays_home() {
+        let s = ready();
+        crate::thumbnails::tests::saved_thumbnail(&s.app, s.project.id);
+        let review = review(&s);
+        let choices = UploadChoices {
+            thumbnail: false,
+            ..review.choices()
+        };
+        done(&s.app, s.app.start_upload(&review, choices).unwrap());
+        assert!(s.h.uploader.thumbnails.lock().unwrap().is_empty());
+        assert_eq!(upload(&s).upload().unwrap().thumbnail, None);
+    }
+
+    #[test]
     fn a_confirmed_upload_sends_the_file_with_the_choices_and_is_published() {
         let mut s = ready();
         let review = review(&s);
@@ -2914,6 +3079,7 @@ pub(crate) mod tests {
             share_to_feed: true,
             cover: Duration::ZERO,
             budget: BudgetConsent::Ask,
+            thumbnail: false,
         };
         let job = s.app.start_upload(&review, choices).unwrap();
         done(&s.app, job);

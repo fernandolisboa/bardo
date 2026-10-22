@@ -9,7 +9,7 @@ use bardo_domain::{CaptionHighlight, CaptionStyle, TransitionKind, VideoCodec};
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
     Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Motion, Output, ProxyCodec,
-    ProxySettings, RenderPlan, Transition, VideoClip, VideoEncoder, View,
+    ProxySettings, RenderPlan, ThumbnailSpec, Transition, VideoClip, VideoEncoder, View,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -1280,4 +1280,97 @@ fn a_moving_still_renders_into_a_video_of_its_length() {
         .unwrap();
     let info = ffmpeg().probe(&destination).unwrap();
     assert!(close(info.duration, 2.0, 0.05), "{:?}", info.duration);
+}
+
+/// The thumbnail's pixels, RGB.
+fn thumbnail_pixels(ffmpeg: &Ffmpeg, path: &Path) -> Vec<u8> {
+    let output = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(path)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
+        .output()
+        .unwrap();
+    assert_eq!(output.stdout.len(), 1280 * 720 * 3);
+    output.stdout
+}
+
+fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
+    let at = ((y * 1280 + x) * 3) as usize;
+    [pixels[at], pixels[at + 1], pixels[at + 2]]
+}
+
+#[test]
+fn a_thumbnail_covers_the_frame_and_draws_its_text() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("thumbnail");
+    // A plain blue picture, so the letters stand out.
+    let blue = dir.join("blue.png");
+    let made = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg("color=c=0x204060:s=640x360")
+        .args(["-frames:v", "1"])
+        .arg(&blue)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let plain = dir.join("plain.jpg");
+    let spec = ThumbnailSpec {
+        background: blue,
+        text: String::new(),
+        placement: bardo_domain::TextPlacement::TopLeft,
+        look: bardo_domain::ThumbnailLook::Bold,
+    };
+    ffmpeg.compose_thumbnail(&spec, &plain).unwrap();
+    let bytes = std::fs::read(&plain).unwrap();
+    assert_eq!(bardo_domain::image_dimensions(&bytes), Some((1280, 720)));
+    assert!(bytes.len() as u64 <= bardo_domain::MAX_THUMBNAIL_BYTES);
+    assert!(!dir.join("plain.partial.jpg").exists());
+
+    // A tall picture is cropped, not squeezed or barred.
+    let bands = dir.join("bands.jpg");
+    ffmpeg
+        .compose_thumbnail(
+            &ThumbnailSpec {
+                background: fixture("bands-320x180.png"),
+                ..spec.clone()
+            },
+            &bands,
+        )
+        .unwrap();
+    assert_eq!(
+        bardo_domain::image_dimensions(&std::fs::read(&bands).unwrap()),
+        Some((1280, 720))
+    );
+
+    // Yellow letters in the top-left corner, none in the bottom-right.
+    let texted = dir.join("texted.jpg");
+    ffmpeg
+        .compose_thumbnail(
+            &ThumbnailSpec {
+                text: "LOST".into(),
+                look: bardo_domain::ThumbnailLook::Yellow,
+                ..spec.clone()
+            },
+            &texted,
+        )
+        .unwrap();
+    let (texted, plain) = (
+        thumbnail_pixels(&ffmpeg, &texted),
+        thumbnail_pixels(&ffmpeg, &plain),
+    );
+    let yellowish = |[r, g, b]: [u8; 3]| r > 200 && g > 160 && b < 120;
+    let lit = |pixels: &[u8]| {
+        (60..230)
+            .step_by(4)
+            .any(|y| (60..420).step_by(4).any(|x| yellowish(pixel(pixels, x, y))))
+    };
+    assert!(lit(&texted), "no yellow letters top left");
+    assert!(!lit(&plain), "the picture itself is yellow there");
+    // Away from the text, the picture is the same.
+    let corner = pixel(&texted, 1200, 680);
+    let bare = pixel(&plain, 1200, 680);
+    assert!(
+        corner.iter().zip(bare).all(|(a, b)| a.abs_diff(b) <= 6),
+        "{corner:?} vs {bare:?}"
+    );
 }

@@ -267,7 +267,7 @@ fn clock(duration: Duration) -> String {
 
 /// The narration as the planner reads it: one sentence per line, with its
 /// number and when it is spoken.
-fn sentence_lines(narration: &Narration) -> String {
+pub(crate) fn sentence_lines(narration: &Narration) -> String {
     let text = narration.text.as_str();
     sentences(narration)
         .iter()

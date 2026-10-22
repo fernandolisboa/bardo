@@ -25,8 +25,8 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipModelRef,
     ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
     Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
-    Provider, Rate, Resolution, Score, TokenSet, Transition, UiLanguage, UiThemePreference,
-    VideoFormat, VoiceFlag,
+    Provider, Rate, Resolution, Score, ThumbnailLook, TokenSet, Transition, UiLanguage,
+    UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -422,6 +422,9 @@ struct ChannelEntry {
     /// channels' captions were.
     #[serde(default)]
     caption_highlight: Option<String>,
+    /// Missing from files made before thumbnails: the default look.
+    #[serde(default)]
+    thumbnail_look: Option<String>,
     #[serde(default)]
     accounts: Vec<AccountEntry>,
 }
@@ -527,6 +530,10 @@ impl ChannelEntry {
             caption_highlight: match &self.caption_highlight {
                 Some(highlight) => highlight.parse().ok()?,
                 None => CaptionHighlight::Off,
+            },
+            thumbnail_look: match &self.thumbnail_look {
+                Some(look) => look.parse().ok()?,
+                None => ThumbnailLook::default(),
             },
             transition: match &self.transition {
                 Some(entry) => Transition::new(entry.kind.parse().ok()?, entry.frames),
@@ -885,6 +892,7 @@ impl Bardo {
                 }),
                 caption_style: Some(details.caption_style().code().to_owned()),
                 caption_highlight: Some(details.caption_highlight().code().to_owned()),
+                thumbnail_look: Some(details.thumbnail_look().code().to_owned()),
                 transition: Some(TransitionEntry {
                     kind: details.transition().kind.code().to_owned(),
                     frames: details.transition().frames(),
@@ -1406,6 +1414,7 @@ mod tests {
                 default_persona: Some(persona.id),
                 transition: Transition::new(bardo_domain::TransitionKind::WipeRight, 21),
                 caption_highlight: CaptionHighlight::Cyan,
+                thumbnail_look: ThumbnailLook::Banner,
                 motion: MotionDefault::new(
                     bardo_domain::MotionPattern::Same(bardo_domain::MotionKind::PanLeft),
                     bardo_domain::MotionStrength::Subtle,
@@ -1455,6 +1464,16 @@ mod tests {
         let entry: ChannelEntry =
             serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
         assert_eq!(entry.draft(None).unwrap().format, VideoFormat::Long);
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_thumbnails_gets_the_default_look() {
+        let entry: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(
+            entry.draft(None).unwrap().thumbnail_look,
+            ThumbnailLook::Bold
+        );
     }
 
     #[test]
@@ -1651,6 +1670,7 @@ mod tests {
         );
         assert_eq!(channel.details.format(), VideoFormat::Short);
         assert_eq!(channel.details.caption_highlight(), CaptionHighlight::Cyan);
+        assert_eq!(channel.details.thumbnail_look(), ThumbnailLook::Banner);
         assert_eq!(
             channel.details.motion(),
             MotionDefault::new(
