@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    AspectRatio, MaxDuration, Network, NetworkAccountId, ProfileId, RenderPreset, RepositoryError,
-    VideoCodec, VideoProjectId,
+    AspectRatio, MaxDuration, Network, NetworkAccountId, ProfileId, RenderPreset, RenderedCut,
+    RepositoryError, VideoCodec, VideoProjectId,
 };
 
 uuid_id!(
@@ -205,6 +205,10 @@ pub struct Render {
     /// What the cut looked like when rendered (a fingerprint of the render
     /// plan), to tell when the cut has changed since.
     pub cut: String,
+    /// Where the cut's clips and narration sat when rendered
+    /// (`crate::cut_timing`), to line its post's retention curve up with
+    /// the cut; `None` for a file rendered before it was recorded.
+    pub timing: Option<String>,
     pub rendered_at: SystemTime,
 }
 
@@ -224,8 +228,13 @@ pub trait RenderRepository: Send + Sync {
     fn renders(&self, project: VideoProjectId) -> Result<Vec<Render>, RepositoryError>;
 
     /// Saves a render, replacing the project's earlier one for the same
-    /// account.
+    /// account. What it was cut from is kept (`RenderedCut`), and that of
+    /// earlier files no render, post or export points to any more is let go.
     fn save_render(&self, render: &Render) -> Result<(), RepositoryError>;
+
+    /// What the file `render` was cut from, while the project's render, a
+    /// post or an export points to it.
+    fn rendered_cut(&self, render: RenderId) -> Result<Option<RenderedCut>, RepositoryError>;
 }
 
 impl<T: RenderRepository + ?Sized> RenderRepository for Arc<T> {
@@ -235,6 +244,10 @@ impl<T: RenderRepository + ?Sized> RenderRepository for Arc<T> {
 
     fn save_render(&self, render: &Render) -> Result<(), RepositoryError> {
         (**self).save_render(render)
+    }
+
+    fn rendered_cut(&self, render: RenderId) -> Result<Option<RenderedCut>, RepositoryError> {
+        (**self).rendered_cut(render)
     }
 }
 

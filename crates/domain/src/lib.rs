@@ -49,6 +49,7 @@ mod chapters;
 mod clip;
 mod connection;
 mod cost;
+mod cut_retention;
 mod cut_suggestion;
 mod decision;
 mod due;
@@ -137,6 +138,10 @@ pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
     Rate, RateFieldError, RateTable, Spend, UnknownCostPurpose, UnknownMeter, X_POST,
     X_POST_WITH_LINK, x_post_model,
+};
+pub use cut_retention::{
+    MAX_DROPS, MIN_STEP_LOSS, PlacedDrop, RenderedCut, RetentionDrop, STEEP_TIMES, cut_timing,
+    place_drops, retention_drops, time_at,
 };
 pub use cut_suggestion::{
     ChunkLimits, CutCandidate, CutChunk, CutPlace, CutReasons, CutRules, CutSuggestion,
