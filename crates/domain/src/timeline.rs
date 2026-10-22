@@ -30,8 +30,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     AspectRatio, AudioLane, CaptionStyle, Captions, DuckEnvelope, Edge, Framing, MediaAsset,
-    MediaKind, Mix, Narration, NarrationId, PlayedTransition, ProfileId, RepositoryError,
-    SavedCaptions, Scene, ScenePlan, ScenePlanId, Transition, VideoProjectId,
+    MediaKind, Mix, Motion, MotionDefault, Narration, NarrationId, PlayedTransition, ProfileId,
+    RepositoryError, SavedCaptions, Scene, ScenePlan, ScenePlanId, Transition, VideoProjectId,
 };
 
 /// The timeline's frame rate.
@@ -125,6 +125,9 @@ pub struct VideoItem {
     /// How the picture goes into it from the item before, as the user set
     /// it; `None` for a cut. The first item has none to play.
     pub transition: Option<Transition>,
+    /// How the view moves over its picture while it shows; played on
+    /// stills only ([`VideoItem::played_motion`]).
+    pub motion: Option<Motion>,
 }
 
 impl VideoItem {
@@ -148,6 +151,18 @@ impl VideoItem {
             AspectRatio::Landscape => Framing::Fit,
             AspectRatio::Vertical => self.framing,
         }
+    }
+
+    /// Its motion, when its picture is a still: a clip has its own motion,
+    /// and black has none to show.
+    pub fn played_motion(&self) -> Option<Motion> {
+        self.motion
+            .filter(|_| matches!(self.source, VideoSource::Still(_)))
+    }
+
+    /// Whether it shows a still picture.
+    pub fn is_still(&self) -> bool {
+        matches!(self.source, VideoSource::Still(_))
     }
 
     /// Whether its source plays through time (a clip), so cutting into it
@@ -181,6 +196,7 @@ impl VideoItem {
             duration,
             framing: Framing::default(),
             transition: None,
+            motion: None,
         })
     }
 }
@@ -302,6 +318,7 @@ impl Timeline {
                     duration: frame_time(end) - at,
                     framing: Framing::default(),
                     transition: None,
+                    motion: None,
                 }
             })
             .collect();
@@ -330,6 +347,18 @@ impl Timeline {
     /// a new cut).
     pub fn with_caption_style(mut self, style: CaptionStyle) -> Timeline {
         self.captions.style = style;
+        self
+    }
+
+    /// This timeline with each scene's motion from `default` (a channel's,
+    /// for a new cut): the scene at each place of the video track gets the
+    /// pattern's motion for that place. Footage keeps none.
+    pub fn with_motion(mut self, default: MotionDefault) -> Timeline {
+        for (position, item) in self.video.iter_mut().enumerate() {
+            if item.scene().is_some() {
+                item.motion = default.at(position);
+            }
+        }
         self
     }
 
@@ -400,6 +429,7 @@ impl Timeline {
                     duration: item.duration,
                     framing: item.framing,
                     transition: item.transition,
+                    motion: item.motion,
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -450,6 +480,7 @@ impl Timeline {
                     duration: item.duration,
                     framing: item.framing,
                     transition: item.transition,
+                    motion: item.motion,
                 })
                 .collect(),
             narration_items: self.narration.iter().map(SavedAudioItem::of).collect(),
@@ -778,6 +809,7 @@ pub struct SavedVideoItem {
     pub duration: Duration,
     pub framing: Framing,
     pub transition: Option<Transition>,
+    pub motion: Option<Motion>,
 }
 
 /// An audio item as saved.
@@ -1690,6 +1722,43 @@ pub(crate) mod tests {
             Timeline::restore(&saved, &plan, &narration, &[]),
             Some(timeline)
         );
+    }
+
+    #[test]
+    fn a_new_cut_moves_its_scenes_as_the_channel_says_and_keeps_them() {
+        let plan = drawn(&[
+            (0, 1_000, "a.png"),
+            (1_000, 2_000, "b.png"),
+            (2_000, 3_000, "c.png"),
+        ]);
+        let narration = narration(3_000);
+        let rough = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
+        assert!(rough.video().iter().all(|item| item.motion.is_none()));
+        let varied = rough.with_motion(crate::MotionDefault::default());
+        let kinds: Vec<_> = varied
+            .video()
+            .iter()
+            .map(|item| item.played_motion().map(|motion| motion.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                Some(crate::MotionKind::ZoomIn),
+                Some(crate::MotionKind::PanRight),
+                Some(crate::MotionKind::ZoomOut)
+            ]
+        );
+        let saved = saved(&varied, &plan, &narration);
+        assert_eq!(saved.video[1].motion, varied.video()[1].motion);
+        assert_eq!(
+            Timeline::restore(&saved, &plan, &narration, &[]),
+            Some(varied.clone())
+        );
+        let none = varied.with_motion(crate::MotionDefault::new(
+            crate::MotionPattern::None,
+            crate::MotionStrength::Medium,
+        ));
+        assert!(none.video().iter().all(|item| item.motion.is_none()));
     }
 
     #[test]

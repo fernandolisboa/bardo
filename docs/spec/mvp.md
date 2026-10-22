@@ -71,11 +71,12 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Framing: 9:16 and 16:9 with per-clip crop/reframe position.
 - Preview playback from low-resolution proxies.
 - Transitions between video clips: cut, crossfade, through black or white, wipes, slides and zoom, centered on the cut so the narration stays in sync; a default per channel (ADR-0016, #167).
+- Motion on stills (Ken Burns): a slow zoom or pan over each still while it shows, varied from scene to scene in a new cut, set per clip and per channel (ADR-0019, #180).
 - AI suggestions: the decision engine scores candidate cut points (sentence ends, pauses, scene changes) from the script and word timings, in stretches that fit its context; the user accepts or rejects each. Accepting is a manual cut, undoable like any other; suggestions under the profile's floor are hidden until asked for.
 - Render presets per network (YouTube's follows the video format, ADR-0018); final render as a job after a review screen (duration, resolution, loudness, captions on/off, target networks).
 
 **Not in the MVP**
-- Keyframed effects, color grading. Transitions since brought in (ADR-0016, #167).
+- Keyframed effects, color grading. Transitions (ADR-0016, #167) and motion on stills (ADR-0019, #180) since brought in.
 - Multiple video tracks / picture-in-picture.
 
 **Acceptance**

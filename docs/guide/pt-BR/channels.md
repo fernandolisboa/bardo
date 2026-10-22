@@ -48,11 +48,12 @@ A [persona](personas.md) que narra os vídeos do canal: a voz, o tom e o estilo 
 O formato define o tamanho do roteiro que o Claude escreve, o formato em que as imagens e os clipes das cenas são feitos, o formato de um corte novo no editor e qual [preset de render](render.md#targets) o YouTube usa. Cada projeto segue o formato do canal, a não ser que escolha o outro ([Projetos](projects.md#format)). A mudança vale para o que for feito depois; roteiros, imagens e cortes já feitos mantêm o formato.
 
 <a id="defaults"></a>
-## Modelo de vídeo, legendas e transições
+## Modelo de vídeo, legendas, transições e movimento
 
 - **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google. Manter o padrão do provedor acompanha esse padrão quando ele muda. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
 - **Estilo de legenda**: o visual das legendas nos projetos novos do canal. Cada projeto pode escolher outro estilo no [editor](editor.md#captions).
 - **Transição padrão** e a **Duração** dela: o que o editor põe num corte quando você aperta **T** ou escolhe uma transição para um clipe; uma fusão de 0,5 s, a menos que você mude. Cada corte pode usar outra ([Transições](editor.md#transitions)).
+- **Movimento nas imagens** e a **Intensidade** dele: como um corte novo move a vista sobre cada imagem parada, o efeito Ken Burns. **Variado** (o padrão, com intensidade **Média**) dá a cada cena um zoom ou pan diferente do anterior; **Nenhum** deixa as imagens paradas; ou escolha um movimento para todas as cenas. Cortes já feitos guardam os movimentos que têm, e cada imagem pode usar outro ([Movimento nas imagens](editor.md#motion)).
 
 <a id="accounts"></a>
 ## Depois: as contas de rede

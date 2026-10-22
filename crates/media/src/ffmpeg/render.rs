@@ -3,8 +3,9 @@
 //! the output frame, mixed, and normalized to a loudness target. Audio
 //! clips fade in and out, and a track can duck under a level envelope (the
 //! music under the narration). Video clips join with a cut or a transition
-//! (`xfade`) centered on the cut. Captions are burned in over the joined
-//! picture (`captions`).
+//! (`xfade`) centered on the cut. A still can move: a slow zoom or pan
+//! over its framed picture (`zoompan`). Captions are burned in over the
+//! joined picture (`captions`).
 //!
 //! The same filter graph feeds preview (raw frames on a pipe, from the
 //! playhead on) and the final render (an MP4 file), so what the preview
@@ -55,7 +56,52 @@ pub struct VideoClip {
     /// a cut (and on the first clip).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<Transition>,
+    /// How the view moves over a still's framed picture; ignored on video
+    /// and black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<Motion>,
 }
+
+/// A view moving over a still's framed picture, from `from` to `to` over
+/// `length` of the clip's own time: from the first frame the clip makes
+/// (the start of the transition into it, when there is one) on. `elapsed`
+/// is how much of the move came before that frame: a plan starting inside
+/// the clip moves on from where it was. Before the move and after it the
+/// view holds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Motion {
+    pub from: View,
+    pub to: View,
+    pub length: Duration,
+    #[serde(default, skip_serializing_if = "Duration::is_zero")]
+    pub elapsed: Duration,
+}
+
+/// A window of the frame's shape, `zoom` times smaller than the framed
+/// picture (1.0 and up), placed `x` across (0.0 at the left edge, 1.0 at
+/// the right) and `y` down the room it leaves.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct View {
+    pub zoom: f64,
+    pub x: f64,
+    pub y: f64,
+}
+
+impl View {
+    fn holds_together(&self) -> bool {
+        (1.0..=10.0).contains(&self.zoom)
+            && (0.0..=1.0).contains(&self.x)
+            && (0.0..=1.0).contains(&self.y)
+    }
+}
+
+/// How many times larger than the output a moving still is drawn before
+/// the view is taken from it. `zoompan` places and sizes its window in
+/// whole pixels of what it is given (in 4:4:4, so not in pairs), so a slow
+/// move steps by up to a third of an output pixel times the zoom instead
+/// of a whole one: smooth to the eye at about twice the cost of 2× in
+/// the render (ADR-0019).
+const MOTION_OVERSAMPLE: u32 = 3;
 
 /// A transition into a clip, around the cut: the clip starts `before`
 /// ahead of the cut, and the clip before it plays on `after` past the cut.
@@ -265,16 +311,27 @@ impl RenderPlan {
             .map_or(made_from, |(_, start, _)| start);
         let mut video = Vec::new();
         let mut clip_start = Duration::ZERO;
-        for clip in &self.video {
+        for (index, clip) in self.video.iter().enumerate() {
             let clip_end = clip_start + clip.duration;
             if clip_end > video_from {
                 let skip = video_from.saturating_sub(clip_start);
                 // The clip before it is gone, and its transition with it.
                 let first = video.is_empty();
+                let transition = clip.transition.filter(|_| !first);
+                // The clip makes its first frame later: by what it skips,
+                // and by the lead-in of a transition it no longer plays.
+                let dropped = match clip.transition.filter(|_| index > 0 && first) {
+                    Some(dropped) => dropped.before,
+                    None => Duration::ZERO,
+                };
                 video.push(VideoClip {
                     start: clip.start + skip,
                     duration: clip.duration - skip,
-                    transition: clip.transition.filter(|_| !first),
+                    transition,
+                    motion: clip.motion.map(|motion| Motion {
+                        elapsed: motion.elapsed + dropped + skip,
+                        ..motion
+                    }),
                     ..clip.clone()
                 });
             }
@@ -345,6 +402,18 @@ impl RenderPlan {
         if bad_crop {
             return Err(MediaError::InvalidPlan("crop window outside the picture"));
         }
+        let bad_motion = self
+            .video
+            .iter()
+            .filter_map(|clip| clip.motion)
+            .any(|motion| {
+                motion.length.is_zero()
+                    || !motion.from.holds_together()
+                    || !motion.to.holds_together()
+            });
+        if bad_motion {
+            return Err(MediaError::InvalidPlan("a motion goes outside the picture"));
+        }
         // A clip's own time holds the end of the transition into it and
         // the start of the one out of it, and they must not overlap.
         let overlapping = self.video.iter().enumerate().any(|(index, clip)| {
@@ -389,6 +458,8 @@ enum InputSource<'a> {
     File(&'a Path),
     /// An image repeated at the rate given.
     Still(&'a Path, (u32, u32)),
+    /// An image, once: a moving still makes all its frames from it.
+    Picture(&'a Path),
     /// A black picture at the rate given.
     Black((u32, u32)),
 }
@@ -405,6 +476,46 @@ fn frame_count(duration: Duration, (numerator, denominator): (u32, u32)) -> u64 
 fn frame_seconds(frames: u64, (numerator, denominator): (u32, u32)) -> String {
     let seconds = frames as f64 * f64::from(denominator) / f64::from(numerator.max(1));
     format!("{seconds:.6}")
+}
+
+/// The filters that make a picture of `width` × `height` from a source
+/// of any shape, as `framing` says.
+fn framing_filter(framing: Framing, width: u32, height: u32) -> String {
+    match framing {
+        Framing::Crop { x, y } => format!(
+            "crop=w='min(iw,ih*{width}/{height})':h='min(ih,iw*{height}/{width})':\
+             x='(iw-ow)*{x}':y='(ih-oh)*{y}',scale={width}:{height}:flags=bicubic"
+        ),
+        Framing::Fit => format!(
+            "scale={width}:{height}:force_original_aspect_ratio=decrease:flags=bicubic,\
+             pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+        ),
+    }
+}
+
+/// The `zoompan` that makes `frames` frames of `size` from one framed
+/// picture, the view following `motion`: its zoom changes by the same
+/// ratio each frame and its place moves at an even pace (as
+/// `bardo_domain::MotionView::toward` does). `on` counts the frames made.
+fn zoompan(motion: &Motion, frames: u64, size: FrameSize, fps: (u32, u32)) -> String {
+    let (numerator, denominator) = fps;
+    let FrameSize { width, height } = size;
+    let (from, to) = (motion.from, motion.to);
+    let span = frame_count(motion.length, fps).saturating_sub(1);
+    let progress = if span == 0 {
+        "0".to_owned()
+    } else {
+        format!("clip((on+{})/{span},0,1)", frame_count(motion.elapsed, fps))
+    };
+    let ratio = to.zoom / from.zoom;
+    let zoom = format!("{:.6}*pow({ratio:.6},{progress})", from.zoom);
+    let place = |from: f64, to: f64| format!("{from:.6}+{:.6}*{progress}", to - from);
+    format!(
+        "zoompan=z='{zoom}':x='(iw-iw/zoom)*({})':y='(ih-ih/zoom)*({})':d={frames}:\
+         s={width}x{height}:fps={numerator}/{denominator}",
+        place(from.x, to.x),
+        place(from.y, to.y),
+    )
 }
 
 /// Inputs and the filter graph that turns them into `[vout]`: each clip
@@ -444,6 +555,28 @@ fn video_graph<'a>(
             ),
             ClipSource::Still(_) | ClipSource::Black => (clip.start, 0),
         };
+        let frames = frame_count(clip.duration, fps).max(1)
+            + frame_count(before, fps)
+            + frame_count(after, fps);
+        // A moving still: its picture once, framed larger than the output,
+        // then the view taken from it frame by frame.
+        if let (ClipSource::Still(path), Some(motion)) = (&clip.source, clip.motion) {
+            inputs.push(Input {
+                source: InputSource::Picture(path),
+                start: Duration::ZERO,
+                duration: before + clip.duration + after,
+            });
+            let large = framing_filter(
+                clip.framing,
+                width * MOTION_OVERSAMPLE,
+                height * MOTION_OVERSAMPLE,
+            );
+            chains.push(format!(
+                "[{index}:v:0]{large},setsar=1,format=yuv444p,{},setsar=1,format=yuv420p[v{index}]",
+                zoompan(&motion, frames, size, fps),
+            ));
+            continue;
+        }
         inputs.push(Input {
             source: match &clip.source {
                 ClipSource::Video(path) => InputSource::File(path),
@@ -453,24 +586,12 @@ fn video_graph<'a>(
             start,
             duration: before + clip.duration + after,
         });
-        let framing = match clip.framing {
-            Framing::Crop { x, y } => format!(
-                "crop=w='min(iw,ih*{width}/{height})':h='min(ih,iw*{height}/{width})':\
-                 x='(iw-ow)*{x}':y='(ih-oh)*{y}',scale={width}:{height}:flags=bicubic"
-            ),
-            Framing::Fit => format!(
-                "scale={width}:{height}:force_original_aspect_ratio=decrease:flags=bicubic,\
-                 pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
-            ),
-        };
+        let framing = framing_filter(clip.framing, width, height);
         let held = if held > 0 {
             format!("start={held}:start_mode=clone:")
         } else {
             String::new()
         };
-        let frames = frame_count(clip.duration, fps).max(1)
-            + frame_count(before, fps)
-            + frame_count(after, fps);
         // A source that ends early holds its last frame (`tpad`), so every
         // clip is exactly as many frames long as asked and the clips after
         // it stay in time with the audio.
@@ -678,6 +799,9 @@ fn push_inputs(command: &mut std::process::Command, inputs: &[Input<'_>]) {
                     .arg(format!("{numerator}/{denominator}"))
                     .args(["-t", &length, "-i"])
                     .arg(path_arg(path));
+            }
+            InputSource::Picture(path) => {
+                command.arg("-i").arg(path_arg(path));
             }
             InputSource::Black((numerator, denominator)) => {
                 command
@@ -912,6 +1036,7 @@ mod tests {
             duration: secs(duration),
             framing: Framing::Crop { x: 0.5, y: 0.5 },
             transition: None,
+            motion: None,
         }
     }
 
@@ -1114,6 +1239,7 @@ mod tests {
         let json = serde_json::to_value(plan()).unwrap();
         assert!(json.get("skipped").is_none());
         assert!(!json.to_string().contains("transition"));
+        assert!(!json.to_string().contains("motion"));
         let written = serde_json::to_string(&crossfaded()).unwrap();
         assert!(written.contains("\"kind\":\"crossfade\""));
         let back: RenderPlan = serde_json::from_str(&written).unwrap();
@@ -1202,6 +1328,116 @@ mod tests {
             ]
         );
         assert!(graph.contains("trim=end_frame=90,"));
+    }
+
+    /// A pan to the right at 1.25×, over `length` seconds of the clip.
+    fn pan(length: f64) -> Option<Motion> {
+        Some(Motion {
+            from: View {
+                zoom: 1.25,
+                x: 0.0,
+                y: 0.5,
+            },
+            to: View {
+                zoom: 1.25,
+                x: 1.0,
+                y: 0.5,
+            },
+            length: secs(length),
+            elapsed: Duration::ZERO,
+        })
+    }
+
+    #[test]
+    fn a_moving_still_is_framed_large_once_and_its_view_taken_frame_by_frame() {
+        let mut plan = plan();
+        plan.video[0].source = ClipSource::Still(PathBuf::from("scene.png"));
+        plan.video[0].motion = pan(2.0);
+        let (inputs, graph) =
+            video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "yuv420p", None);
+        let mut command = std::process::Command::new("ffmpeg");
+        push_inputs(&mut command, &inputs[..1]);
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["-i", "scene.png"], "read once, not looped");
+        assert!(
+            graph.starts_with(
+                "[0:v:0]crop=w='min(iw,ih*3240/5760)':h='min(ih,iw*5760/3240)':\
+                 x='(iw-ow)*0.5':y='(ih-oh)*0.5',scale=3240:5760:flags=bicubic,\
+                 setsar=1,format=yuv444p,\
+                 zoompan=z='1.250000*pow(1.000000,clip((on+0)/59,0,1))':\
+                 x='(iw-iw/zoom)*(0.000000+1.000000*clip((on+0)/59,0,1))':\
+                 y='(ih-ih/zoom)*(0.500000+0.000000*clip((on+0)/59,0,1))':\
+                 d=60:s=1080x1920:fps=30/1,setsar=1,format=yuv420p[v0];"
+            ),
+            "{graph}"
+        );
+    }
+
+    #[test]
+    fn a_moving_still_moves_through_its_transitions_and_holds_outside_its_move() {
+        let mut plan = crossfaded();
+        plan.video[1].source = ClipSource::Still(PathBuf::from("scene.png"));
+        // The whole time it shows: 0.2 s in, 3 s, 0.3 s out (none here).
+        plan.video[1].motion = pan(3.2);
+        let (_, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert!(graph.contains("clip((on+0)/95,0,1)"), "{graph}");
+        assert!(graph.contains(":d=96:s=960x540:"), "{graph}");
+        // A move of one frame holds its first view.
+        plan.video[1].motion = pan(0.01);
+        let (_, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert!(
+            graph.contains("zoompan=z='1.250000*pow(1.000000,0)'"),
+            "{graph}"
+        );
+    }
+
+    #[test]
+    fn video_and_black_ignore_a_motion() {
+        let mut plan = plan();
+        plan.video[0].motion = pan(2.0);
+        plan.video[1].source = ClipSource::Black;
+        plan.video[1].motion = pan(3.0);
+        let (_, graph) = video_graph(&plan, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert!(!graph.contains("zoompan"), "{graph}");
+    }
+
+    #[test]
+    fn a_preview_starting_inside_a_moving_still_moves_on_from_there() {
+        let mut plan = crossfaded();
+        plan.video[1].source = ClipSource::Still(PathBuf::from("scene.png"));
+        plan.video[1].motion = pan(3.2);
+        // Inside the crossfade: the clip still starts with it, unmoved.
+        let inside = plan.starting_at(secs(2.1));
+        assert_eq!(inside.video[1].motion, plan.video[1].motion);
+        // Past it: 1 s into the clip, plus the 0.2 s lead-in it no longer
+        // makes.
+        let later = plan.starting_at(secs(3.0));
+        assert_eq!(later.video[0].motion.unwrap().elapsed, secs(1.2));
+        let (_, graph) = video_graph(&later, FrameSize::new(960, 540), (30, 1), "bgra", None);
+        assert!(graph.contains("clip((on+36)/95,0,1)"), "{graph}");
+        // From a playhead already moved on, further on.
+        let further = later.starting_at(secs(0.5));
+        assert_eq!(further.video[0].motion.unwrap().elapsed, secs(1.7));
+    }
+
+    #[test]
+    fn a_motion_outside_the_picture_is_refused() {
+        let mut plan = plan();
+        plan.video[0].source = ClipSource::Still(PathBuf::from("scene.png"));
+        plan.video[0].motion = pan(2.0);
+        assert!(plan.check().is_ok());
+        let mut far = plan.clone();
+        far.video[0].motion.as_mut().unwrap().to.x = 1.5;
+        assert!(far.check().is_err());
+        let mut wide = plan.clone();
+        wide.video[0].motion.as_mut().unwrap().from.zoom = 0.5;
+        assert!(wide.check().is_err());
+        let mut still = plan;
+        still.video[0].motion.as_mut().unwrap().length = Duration::ZERO;
+        assert!(still.check().is_err());
     }
 
     #[test]

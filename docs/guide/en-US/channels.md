@@ -48,11 +48,12 @@ The [persona](personas.md) that narrates the channel's videos: its voice, tone a
 The format decides how long Claude writes the script, the shape the scene images and clips are made in, the shape of a new cut in the editor and which [render preset](render.md#targets) YouTube uses. Each project follows its channel's format unless it picks the other ([Projects](projects.md#format)). Changing it applies to what is made next; scripts, images and cuts already made keep their shape.
 
 <a id="defaults"></a>
-## Video model, captions and transitions
+## Video model, captions, transitions and motion
 
 - **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield, Kling or Google. Keeping the provider's default follows it when it changes. Any scene can pick another model at the [Clips](clips.md#model) stage.
 - **Caption style**: how captions look in the channel's new projects. Each project can pick another style in the [editor](editor.md#captions).
 - **Default transition** and its **Length**: what the editor puts on a cut when you press **T** or pick a transition for a clip, a crossfade of 0.5 s unless you change it. Every cut can use another one ([Transitions](editor.md#transitions)).
+- **Motion on stills** and its **Strength**: how a new cut moves the view over each still, the Ken Burns effect. **Varied** (the default, at **Medium**) gives each scene a different zoom or pan from the one before; **None** keeps stills still; or pick one motion for every scene. Cuts already made keep their motions, and every still can use another one ([Motion on stills](editor.md#motion)).
 
 <a id="accounts"></a>
 ## Next: network accounts

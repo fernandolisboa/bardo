@@ -1333,6 +1333,7 @@ pub(crate) mod tests {
                 duration: Duration::from_secs(2),
                 framing: bardo_media::ffmpeg::Framing::Fit,
                 transition: None,
+                motion: None,
             }],
             audio: vec![bardo_media::ffmpeg::AudioTrack {
                 clips: vec![bardo_media::ffmpeg::AudioClip {

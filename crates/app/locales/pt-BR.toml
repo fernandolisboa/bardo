@@ -81,6 +81,9 @@ format_hint = "Short: vídeo vertical de menos de um minuto, para todas as redes
 transition = "Transição padrão"
 transition_hint = "O que o editor põe num corte quando você aperta T ou escolhe uma transição. Qualquer corte pode usar outra."
 transition_length = "Duração"
+motion = "Movimento nas imagens"
+motion_hint = "Como os novos cortes movem a vista sobre cada imagem parada, o efeito Ken Burns. Variado dá outro movimento à cena seguinte. Qualquer clipe pode usar outro no editor."
+motion_strength = "Intensidade"
 
 [channel.error]
 name_required = "Dê um nome ao canal."
@@ -198,6 +201,21 @@ slide_right = "Deslizar →"
 slide_up = "Deslizar ↑"
 slide_down = "Deslizar ↓"
 zoom_in = "Zoom"
+
+[motion]
+none = "Nenhum"
+varied = "Variado"
+zoom_in = "Aproximar"
+zoom_out = "Afastar"
+pan_left = "Pan ←"
+pan_right = "Pan →"
+pan_up = "Pan ↑"
+pan_down = "Pan ↓"
+
+[motion_strength]
+subtle = "Sutil"
+medium = "Média"
+strong = "Forte"
 
 [aspect_ratio]
 vertical = "Vertical (9:16)"
@@ -1059,6 +1077,14 @@ everywhere = "Usar em todos os cortes"
 first = "O primeiro clipe abre o vídeo, então não tem transição de entrada."
 hint = "Centrada no corte: o corte e a narração ficam onde estão."
 short = "Toca por {length}: um clipe vizinho é mais curto."
+
+[editor.motion]
+title = "Movimento"
+strength = "Intensidade"
+everywhere = "Usar em todas as imagens"
+vary = "Variar em todas as imagens"
+hint = "Um zoom ou pan lento sobre a imagem como está enquadrada, enquanto o clipe aparece."
+clip = "Este clipe já tem movimento próprio. O movimento vale para imagens paradas."
 
 [editor.tool]
 select = "Selecionar (V)"
@@ -2435,7 +2461,7 @@ body = "Cortes, aparas e bordas de legenda caem entre as palavras da narração,
 
 [tour.editor.undo]
 title = "Desfazer e refazer"
-body = "Ctrl+Z desfaz qualquer edição e Ctrl+Y refaz, e o corte se salva sozinho enquanto você edita. A parte 2 do tour, no mesmo botão, mostra a mixagem, as legendas, o enquadramento, as sugestões de corte e o render."
+body = "Ctrl+Z desfaz qualquer edição e Ctrl+Y refaz, e o corte se salva sozinho enquanto você edita. A parte 2 do tour, no mesmo botão, mostra a mixagem, as legendas, o enquadramento, o movimento nas imagens, as sugestões de corte e o render."
 
 [tour.editor-more]
 name = "Tour do editor, parte 2"
@@ -2455,6 +2481,10 @@ body = "As legendas seguem as palavras da narração. Selecione uma para editar 
 [tour.editor-more.framing]
 title = "16:9 ou 9:16"
 body = "O formato do quadro do corte inteiro. Em 9:16, o clipe selecionado mostra a janela de recorte sobre a imagem: arraste-a para escolher o que fica à vista, ou escolha Ajustar ou Preencher no inspetor."
+
+[tour.editor-more.motion]
+title = "Movimento nas imagens"
+body = "Uma imagem parada se move: um zoom ou pan lento enquanto aparece, para o vídeo não virar um slideshow. Selecione uma imagem para escolher o movimento e a intensidade no inspetor, ou varie todas de uma vez."
 
 [tour.editor-more.suggestions]
 title = "Sugestões de corte"

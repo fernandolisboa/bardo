@@ -81,6 +81,8 @@ The words Bardo uses, in plain terms.
 
 **Transition**: how the picture goes from one clip to the next around a cut: a crossfade, a pass through black or white, a wipe, a slide or a zoom. Centered on the cut, so the cut and the narration stay where they are.
 
+**Motion (Ken Burns)**: a slow zoom or pan over a still picture while it shows, so a video of stills does not play as a slideshow. Set per still, with a strength; a channel's new cuts vary it from scene to scene.
+
 **Mix**: how loud each audio track plays, with mute and solo.
 
 **Ducking**: lowering the music while the narrator speaks, by an amount you choose.

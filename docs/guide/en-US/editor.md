@@ -8,7 +8,7 @@ tour: editor
 
 # The editor
 
-The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/projects/edit) stage of a project, once the scenes are planned and narrated, and **Projects** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing and cut suggestions.
+The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/projects/edit) stage of a project, once the scenes are planned and narrated, and **Projects** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills and cut suggestions.
 
 F1 opens this guide over the editor, and **Back to the editor** returns to it as you left it. Esc closes a tour; the **Editor tour** button in the top bar (Shift+F1) takes it back to the step it closed on.
 
@@ -73,7 +73,7 @@ With **Snap to words** on, cuts, trims and caption edges land between the narrat
 <a id="undo"></a>
 ## Undo and redo
 
-Every edit, including transitions, the mix, captions and framing, can be undone with **Ctrl+Z** and redone with **Ctrl+Y** (or **Ctrl+Shift+Z**), or with the arrows at the top. The history lasts while the editor is open. If the scenes or the narration change after you edited, the editor says so and the cut starts over from the rough cut.
+Every edit, including transitions, the mix, captions, framing and motion, can be undone with **Ctrl+Z** and redone with **Ctrl+Y** (or **Ctrl+Shift+Z**), or with the arrows at the top. The history lasts while the editor is open. If the scenes or the narration change after you edited, the editor says so and the cut starts over from the rough cut.
 
 <a id="mix"></a>
 ## The mix
@@ -106,6 +106,23 @@ Captions are made from the narration's words and sit on the CC track. Select one
 The switch over the preview sets the cut's frame shape: 16:9 (landscape) or 9:16 (vertical). A new cut starts in the shape of the video's [format](projects.md#format): 9:16 for a Short, 16:9 for a long video. Changing it is an edit you can undo.
 
 In 9:16, a clip whose picture is 16:9 is cropped from it. Select a clip and keep the playhead on it: the preview shows the whole picture, dimmed outside the 9:16 window. Drag the window to choose what stays in view, or use the inspector's **Framing**: **Fit** shows the whole picture with bars above and below, **Fill** crops at the center, and moving the window makes it **Custom**. A 9:16 render for a network goes through each clip's crop window too; a 16:9 render shows each picture whole, a tall one with bars at the sides.
+
+<a id="motion"></a>
+## Motion on stills
+
+A still picture does not have to sit still. Its **Motion** moves the view over it while it shows, the effect known as Ken Burns, so a video made mostly of stills does not play as a slideshow:
+
+| Motion | What it does |
+| --- | --- |
+| Zoom in | From the whole picture in toward its middle |
+| Zoom out | From the middle out to the whole picture |
+| Pan ← → ↑ ↓ | Closer in, the view travels across the picture from one edge to the other |
+
+Select a still and pick its motion in the inspector, or **None** to keep it still, and its **Strength**: **Subtle** (8% closer), **Medium** (15%) or **Strong** (25%). **Use on every still** puts the same motion on all of them, and **Vary every still** gives them zooms and pans in turn, so no still moves the way the one before it did. A new cut starts with the channel's motions, varied unless you set otherwise on the [channel](channels.md#defaults).
+
+The motion moves over the picture as it is framed: the 9:16 window in a vertical cut, the whole picture in a 16:9 one (with **Fit**, the bars move with it). It lasts the clip's whole time on screen, transitions included, so the picture never stops while it shows. Splitting a still gives each piece the whole motion. Clips move on their own, so motion plays on stills only: a scene that gets a clip keeps its still's motion unplayed, and plays it again if the scene shows its still once more.
+
+The preview and the render draw the motion the same way, smoothly to a fraction of a pixel; a moving still takes a little longer to render than one that stays still.
 
 <a id="suggestions"></a>
 ## Cut suggestions

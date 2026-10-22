@@ -27,8 +27,9 @@ use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
     AspectRatio, AudioLane, CaptionStyle, CropPosition, DUCK_RANGE, Decibels, Ducking, Edge, FPS,
-    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, PictureSize, Track, Transition,
-    TransitionKind, VideoProjectId, crop_window, frame_time, timecode,
+    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, Motion, MotionKind,
+    MotionStrength, PictureSize, Track, Transition, TransitionKind, VideoProjectId, crop_window,
+    frame_time, timecode,
 };
 use bardo_app::{
     Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, Control, EditAction, Editor, EditorView,
@@ -1802,6 +1803,12 @@ impl EditorScreen {
                         self.editor
                             .as_ref()
                             .and_then(Editor::selected_clip)
+                            .and_then(|index| self.render_motion_controls(index, cx)),
+                    )
+                    .children(
+                        self.editor
+                            .as_ref()
+                            .and_then(Editor::selected_clip)
                             .and_then(|index| self.render_framing_controls(index, cx)),
                     )
                     .children(clip.file.clone().map(|file| {
@@ -2251,6 +2258,113 @@ impl EditorScreen {
                 .children(short)
                 .child(hint(tr(bardo, Text::EditorTransitionHint)))
                 .child(everywhere)
+                .into_any_element(),
+        )
+    }
+
+    /// How the view moves over a selected still: none or one of the
+    /// motions, its strength, and putting it (or a varied pattern) on every
+    /// still. A clip only says it moves on its own; a clip with no picture
+    /// shows nothing.
+    fn render_motion_controls(&self, index: usize, cx: &Context<Self>) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let editor = self.editor.as_ref()?;
+        let item = editor.view().timeline.as_ref()?.video().get(index)?;
+        if editor.view().clips.get(index)?.media == ClipMedia::Missing {
+            return None;
+        }
+        let hint = |text: SharedString| {
+            div()
+                .text_size(px(11.))
+                .text_color(color(TEXT_3))
+                .child(text)
+        };
+        let section = v_flex()
+            .id("motion")
+            .gap_1p5()
+            .child(label(tr(bardo, Text::EditorMotion), TEXT_3));
+        if !item.is_still() {
+            return Some(
+                section
+                    .child(hint(tr(bardo, Text::EditorMotionClip)))
+                    .into_any_element(),
+            );
+        }
+        let set = item.motion;
+        let target = move |motion: Option<Motion>| EditAction::SetMotion { index, motion };
+        // A motion picked on a still that has none takes the channel's
+        // strength; on one that moves, the strength it has.
+        let strength = set.map_or(editor.view().motion.strength, |motion| motion.strength);
+        let chip = |id: usize, name: SharedString, choice: Option<Motion>, active: bool| {
+            tool_button(("motion", id), true, active)
+                .h(px(24.))
+                .border_1()
+                .border_color(color(OUTLINE))
+                .child(name)
+                .when(!active, |button| {
+                    button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.edit(target(choice), cx);
+                    }))
+                })
+        };
+        let kinds = h_flex()
+            .flex_wrap()
+            .gap_1()
+            .child(chip(0, tr(bardo, Text::MotionNone), None, set.is_none()))
+            .children(MotionKind::ALL.into_iter().enumerate().map(|(n, kind)| {
+                chip(
+                    n + 1,
+                    tr(bardo, Text::MotionName(kind)),
+                    Some(Motion::new(kind, strength)),
+                    set.map(|motion| motion.kind) == Some(kind),
+                )
+            }));
+        let strengths = h_flex()
+            .gap_1()
+            .children(
+                MotionStrength::ALL
+                    .into_iter()
+                    .enumerate()
+                    .map(|(n, choice)| {
+                        let active = set.is_some_and(|motion| motion.strength == choice);
+                        let target = set
+                            .filter(|_| !active)
+                            .map(|motion| target(Some(motion.with_strength(choice))));
+                        tool_button(("motion-strength", n), target.is_some() || active, active)
+                            .h(px(24.))
+                            .flex_1()
+                            .border_1()
+                            .border_color(color(OUTLINE))
+                            .child(tr(bardo, Text::MotionStrengthName(choice)))
+                            .when_some(target, |button, action| {
+                                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.edit(action, cx);
+                                }))
+                            })
+                    }),
+            );
+        let everywhere = tool_button("motion-everywhere", true, false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(tr(bardo, Text::EditorMotionEverywhere))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.edit(EditAction::MotionEverywhere(set), cx);
+            }));
+        let vary = tool_button("motion-vary", true, false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(tr(bardo, Text::EditorMotionVary))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.edit(EditAction::VaryMotion(strength), cx);
+            }));
+        Some(
+            section
+                .child(kinds)
+                .child(label(tr(bardo, Text::EditorMotionStrength), TEXT_3))
+                .child(strengths)
+                .child(hint(tr(bardo, Text::EditorMotionHint)))
+                .child(h_flex().flex_wrap().gap_1().child(everywhere).child(vary))
+                .tour_anchor(TourAnchor::Control(Control::EditorMotion), Side::Left, None)
                 .into_any_element(),
         )
     }

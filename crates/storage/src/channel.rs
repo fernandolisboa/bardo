@@ -1,6 +1,6 @@
 use bardo_domain::{
-    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipModelRef, PersonaId,
-    ProfileId, Provider, RepositoryError, Transition, TransitionKind,
+    Channel, ChannelDetails, ChannelDraft, ChannelId, ChannelRepository, ClipModelRef,
+    MotionDefault, PersonaId, ProfileId, Provider, RepositoryError, Transition, TransitionKind,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -9,7 +9,7 @@ use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
-     transition_frames, video_format FROM channel";
+     transition_frames, video_format, motion, motion_strength FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
@@ -20,6 +20,7 @@ struct ChannelRow {
     caption_style: String,
     transition: (String, i64),
     format: String,
+    motion: (String, String),
     draft: ChannelDraft,
 }
 
@@ -34,6 +35,7 @@ impl ChannelRow {
                 caption_style: row.get(10)?,
                 transition: (row.get(11)?, row.get(12)?),
                 format: row.get(13)?,
+                motion: (row.get(14)?, row.get(15)?),
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -66,6 +68,11 @@ impl ChannelRow {
         draft.clip_model = clip_model(self.clip_model)?;
         draft.caption_style = self.caption_style.parse().map_err(boxed)?;
         draft.format = self.format.parse().map_err(boxed)?;
+        let (pattern, strength) = &self.motion;
+        draft.motion = MotionDefault::new(
+            pattern.parse().map_err(boxed)?,
+            strength.parse().map_err(boxed)?,
+        );
         let (kind, frames) = self.transition;
         draft.transition = Transition::new(
             kind.parse::<TransitionKind>().map_err(boxed)?,
@@ -147,8 +154,9 @@ impl ChannelRepository for Database {
         tx.execute(
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
                                   default_persona_id, clip_provider, clip_model, caption_style,
-                                  transition, transition_frames, video_format)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                                  transition, transition_frames, video_format, motion,
+                                  motion_strength)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -162,6 +170,8 @@ impl ChannelRepository for Database {
                  transition = excluded.transition,
                  transition_frames = excluded.transition_frames,
                  video_format = excluded.video_format,
+                 motion = excluded.motion,
+                 motion_strength = excluded.motion_strength,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -178,6 +188,8 @@ impl ChannelRepository for Database {
                 details.transition().kind.code(),
                 details.transition().frames(),
                 details.format().code(),
+                details.motion().pattern.code(),
+                details.motion().strength.code(),
             ],
         )
         .map_err(boxed)?;
@@ -225,6 +237,10 @@ mod tests {
             caption_style: CaptionStyle::Boxed,
             transition: Transition::new(TransitionKind::SlideLeft, 24),
             format: bardo_domain::VideoFormat::Long,
+            motion: MotionDefault::new(
+                bardo_domain::MotionPattern::Same(bardo_domain::MotionKind::ZoomOut),
+                bardo_domain::MotionStrength::Subtle,
+            ),
         })
         .unwrap();
         Channel::new(owner, details)
@@ -274,6 +290,11 @@ mod tests {
         assert_eq!(
             db.get(old).unwrap().unwrap().details.format(),
             bardo_domain::VideoFormat::Long
+        );
+        // And with varied motions for its new cuts, as every channel.
+        assert_eq!(
+            db.get(old).unwrap().unwrap().details.motion(),
+            MotionDefault::default()
         );
     }
 

@@ -81,6 +81,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Transição**: como a imagem passa de um clipe para o seguinte em volta de um corte: uma fusão, uma passagem pelo preto ou pelo branco, uma cortina, um deslize ou um zoom. Fica centrada no corte, então o corte e a narração ficam onde estão.
 
+**Movimento (Ken Burns)**: um zoom ou pan lento sobre uma imagem parada enquanto ela aparece, para um vídeo de imagens não virar um slideshow. Definido por imagem, com uma intensidade; os cortes novos de um canal variam o movimento de cena em cena.
+
 **Mixagem**: o volume de cada trilha de áudio, com mudo e solo.
 
 **Ducking**: abaixar a música enquanto o narrador fala, na medida que você escolher.

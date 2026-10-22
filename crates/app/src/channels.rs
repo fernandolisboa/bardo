@@ -185,6 +185,7 @@ mod tests {
             caption_style: Default::default(),
             transition: Default::default(),
             format: Default::default(),
+            motion: Default::default(),
         }
     }
 

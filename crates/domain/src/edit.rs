@@ -6,7 +6,8 @@
 //! caption changes (stories 65, 66: a caption's text and ends, deleting
 //! one, showing them or not, their style), and so is framing (story 67:
 //! the frame's shape, each clip's crop), and so are video transitions
-//! (issue #167: the transition into a clip, or into every clip at once).
+//! (issue #167: the transition into a clip, or into every clip at once),
+//! and so is motion on stills (issue #180: one clip's, or every still's).
 //!
 //! Edits are exact: they cut where they are told, and the caller snaps the
 //! time first (to a frame, and to a word when snapping is on). Trims and
@@ -27,8 +28,8 @@ use std::time::Duration;
 
 use crate::{
     AspectRatio, AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, Framing,
-    GAIN_RANGE, LaneMix, MediaAsset, Timeline, Transition, VideoItem, VideoSource, caption_text,
-    min_length,
+    GAIN_RANGE, LaneMix, MediaAsset, Motion, MotionDefault, Timeline, Transition, VideoItem,
+    VideoSource, caption_text, min_length,
 };
 
 /// A track of the timeline that edits reach.
@@ -266,6 +267,15 @@ pub enum Edit {
     /// Sets the transition into every video item, in order: how a
     /// transition goes on every cut at once, and its undo.
     SetTransitions(Vec<Option<Transition>>),
+    /// Sets how the view moves over a video item's picture (`None`: it
+    /// stays still).
+    SetMotion {
+        index: usize,
+        motion: Option<Motion>,
+    },
+    /// Sets the motion of every video item, in order: how one motion, or a
+    /// varied pattern, goes on every still at once, and its undo.
+    SetMotions(Vec<Option<Motion>>),
 }
 
 /// Why an edit was not made. The timeline is left as it was.
@@ -553,6 +563,8 @@ impl Timeline {
                 self.set_transition(*index, *transition)?
             }
             Edit::SetTransitions(transitions) => self.set_transitions(transitions)?,
+            Edit::SetMotion { index, motion } => self.set_motion(*index, *motion)?,
+            Edit::SetMotions(motions) => self.set_motions(motions)?,
         };
         self.relayout();
         Ok(undo)
@@ -611,11 +623,12 @@ impl Timeline {
         let at = match track {
             Track::Video => {
                 let (first, second) = (&self.video[index], &self.video[index + 1]);
-                // A framing set on one half alone, or a transition between
-                // them, would be lost.
+                // A framing or motion set on one half alone, or a
+                // transition between them, would be lost.
                 if first.picture != second.picture
                     || first.source != second.source
                     || first.framing != second.framing
+                    || first.motion != second.motion
                     || second.transition.is_some()
                     || second.start != first.start + first.duration
                 {
@@ -919,6 +932,63 @@ impl Timeline {
             item.transition = *transition;
         }
         Ok(Edit::SetTransitions(before))
+    }
+
+    fn set_motion(&mut self, index: usize, motion: Option<Motion>) -> Result<Edit, EditError> {
+        let item = self.video.get_mut(index).ok_or(EditError::NoSuchItem)?;
+        if item.motion == motion {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut item.motion, motion);
+        Ok(Edit::SetMotion {
+            index,
+            motion: before,
+        })
+    }
+
+    fn set_motions(&mut self, motions: &[Option<Motion>]) -> Result<Edit, EditError> {
+        if motions.len() != self.video.len() {
+            return Err(EditError::NoSuchItem);
+        }
+        let before: Vec<Option<Motion>> = self.video.iter().map(|item| item.motion).collect();
+        if before == motions {
+            return Err(EditError::NoChange);
+        }
+        for (item, motion) in self.video.iter_mut().zip(motions) {
+            item.motion = *motion;
+        }
+        Ok(Edit::SetMotions(before))
+    }
+
+    /// The edit that puts `motion` (`None`: none) on every still of the
+    /// video track, leaving clips and black as they are.
+    pub fn motion_everywhere(&self, motion: Option<Motion>) -> Edit {
+        self.motions_on_stills(|_| motion)
+    }
+
+    /// The edit that gives the stills of the video track the motions of
+    /// `default`'s pattern, in turn: the n-th still the pattern's n-th
+    /// motion, so no still moves the way the one before it did.
+    pub fn motion_pattern(&self, default: MotionDefault) -> Edit {
+        self.motions_on_stills(|position| default.at(position))
+    }
+
+    /// Every item's motion, the stills' from `motion` by their place among
+    /// the stills.
+    fn motions_on_stills(&self, motion: impl Fn(usize) -> Option<Motion>) -> Edit {
+        let mut stills = 0;
+        Edit::SetMotions(
+            self.video
+                .iter()
+                .map(|item| {
+                    if !item.is_still() {
+                        return item.motion;
+                    }
+                    stills += 1;
+                    motion(stills - 1)
+                })
+                .collect(),
+        )
     }
 
     /// The edit that puts `transition` (`None`: a plain cut) on every cut
@@ -2704,5 +2774,133 @@ mod tests {
         })
         .unwrap();
         assert_eq!(one.cut_near(ms(500)), None);
+    }
+
+    fn motion(kind: crate::MotionKind) -> Option<Motion> {
+        Some(Motion::new(kind, crate::MotionStrength::Medium))
+    }
+
+    #[test]
+    fn a_motion_goes_on_a_clip_and_undoes() {
+        let before = timeline();
+        let edited = round_trip(
+            &before,
+            Edit::SetMotion {
+                index: 2,
+                motion: motion(crate::MotionKind::PanUp),
+            },
+        );
+        assert_eq!(edited.video()[2].motion, motion(crate::MotionKind::PanUp));
+        assert_eq!(
+            edited.video()[2].played_motion(),
+            motion(crate::MotionKind::PanUp)
+        );
+        assert_eq!(spans(&edited, Track::Video), spans(&before, Track::Video));
+        assert_unchanged(
+            Edit::SetMotion {
+                index: 0,
+                motion: None,
+            },
+            EditError::NoChange,
+        );
+        assert_unchanged(
+            Edit::SetMotion {
+                index: 3,
+                motion: None,
+            },
+            EditError::NoSuchItem,
+        );
+    }
+
+    #[test]
+    fn a_clip_keeps_a_motion_it_does_not_play() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::SetMotion {
+                index: 1,
+                motion: motion(crate::MotionKind::ZoomIn),
+            })
+            .unwrap();
+        assert!(timeline.video()[1].has_source_time());
+        assert_eq!(timeline.video()[1].played_motion(), None);
+    }
+
+    #[test]
+    fn one_motion_or_a_varied_pattern_goes_on_every_still_and_undoes() {
+        let before = timeline();
+        let clip = before.video()[1].motion;
+        let zoomed = round_trip(
+            &before,
+            before.motion_everywhere(motion(crate::MotionKind::ZoomOut)),
+        );
+        let set: Vec<_> = zoomed.video().iter().map(|item| item.motion).collect();
+        assert_eq!(
+            set,
+            [
+                motion(crate::MotionKind::ZoomOut),
+                clip,
+                motion(crate::MotionKind::ZoomOut)
+            ],
+            "the clip keeps its own"
+        );
+        // The stills take the pattern in turn, the clip between them
+        // skipped: the second still moves the second way.
+        let varied = round_trip(
+            &zoomed,
+            zoomed.motion_pattern(crate::MotionDefault::new(
+                crate::MotionPattern::Varied,
+                crate::MotionStrength::Strong,
+            )),
+        );
+        let strong = |kind| Some(Motion::new(kind, crate::MotionStrength::Strong));
+        let set: Vec<_> = varied.video().iter().map(|item| item.motion).collect();
+        assert_eq!(
+            set,
+            [
+                strong(crate::MotionKind::ZoomIn),
+                clip,
+                strong(crate::MotionKind::PanRight)
+            ]
+        );
+        let still = round_trip(&varied, varied.motion_everywhere(None));
+        assert_eq!(still.video()[0].motion, None);
+        assert_eq!(
+            varied.clone().apply(&Edit::SetMotions(vec![None])),
+            Err(EditError::NoSuchItem)
+        );
+    }
+
+    #[test]
+    fn a_split_still_moves_in_each_piece_and_joins_only_with_the_same_motion() {
+        let mut timeline = timeline();
+        timeline
+            .apply(&Edit::SetMotion {
+                index: 0,
+                motion: motion(crate::MotionKind::PanLeft),
+            })
+            .unwrap();
+        let split = round_trip(
+            &timeline,
+            Edit::Split {
+                track: Track::Video,
+                index: 0,
+                at: ms(400),
+            },
+        );
+        assert_eq!(split.video()[0].motion, split.video()[1].motion);
+        let mut changed = split.clone();
+        changed
+            .apply(&Edit::SetMotion {
+                index: 1,
+                motion: None,
+            })
+            .unwrap();
+        assert_eq!(
+            changed.apply(&Edit::Join {
+                track: Track::Video,
+                index: 0,
+            }),
+            Err(EditError::CannotJoin)
+        );
     }
 }

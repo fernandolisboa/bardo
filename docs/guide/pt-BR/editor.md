@@ -8,7 +8,7 @@ tour: editor
 
 # O editor
 
-É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/projects/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Projetos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento e as sugestões de corte.
+É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/projects/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Projetos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens e as sugestões de corte.
 
 F1 abre este guia sobre o editor, e **Voltar ao editor** devolve você a ele como estava. Esc fecha um tour; o botão **Tour do editor** na barra de cima (Shift+F1) volta ao passo em que ele fechou.
 
@@ -73,7 +73,7 @@ Com **Encaixar nas palavras** ligado, cortes, aparas e bordas de legenda caem en
 <a id="undo"></a>
 ## Desfazer e refazer
 
-Toda edição, inclusive de transições, mixagem, legendas e enquadramento, se desfaz com **Ctrl+Z** e se refaz com **Ctrl+Y** (ou **Ctrl+Shift+Z**), ou pelas setas no topo. O histórico vale enquanto o editor está aberto. Se as cenas ou a narração mudarem depois que você editou, o editor avisa e o corte recomeça do corte bruto.
+Toda edição, inclusive de transições, mixagem, legendas, enquadramento e movimento, se desfaz com **Ctrl+Z** e se refaz com **Ctrl+Y** (ou **Ctrl+Shift+Z**), ou pelas setas no topo. O histórico vale enquanto o editor está aberto. Se as cenas ou a narração mudarem depois que você editou, o editor avisa e o corte recomeça do corte bruto.
 
 <a id="mix"></a>
 ## A mixagem
@@ -106,6 +106,23 @@ As legendas são feitas das palavras da narração e ficam na faixa CC. Selecion
 A chave sobre a prévia define o formato do quadro do corte: 16:9 (horizontal) ou 9:16 (vertical). Um corte novo começa no formato do [vídeo](projects.md#format): 9:16 para um Short, 16:9 para um vídeo longo. Trocar é uma edição que dá para desfazer.
 
 No 9:16, um clipe cuja imagem é 16:9 é recortado dela. Selecione um clipe e deixe o cursor de reprodução nele: a prévia mostra a imagem inteira, escurecida fora da janela 9:16. Arraste a janela para escolher o que fica à vista, ou use o **Enquadramento** do inspetor: **Ajustar** mostra a imagem inteira com faixas em cima e embaixo, **Preencher** recorta no centro, e mover a janela deixa **Personalizado**. Um render 9:16 para uma rede também passa pela janela de recorte de cada clipe; um render 16:9 mostra cada imagem inteira, uma em pé com faixas nas laterais.
+
+<a id="motion"></a>
+## Movimento nas imagens
+
+Uma imagem parada não precisa ficar parada. O **Movimento** dela move a vista sobre a imagem enquanto ela aparece, o efeito conhecido como Ken Burns, para um vídeo feito quase só de imagens não virar um slideshow:
+
+| Movimento | O que faz |
+| --- | --- |
+| Aproximar | Da imagem inteira para perto do meio dela |
+| Afastar | Do meio de volta para a imagem inteira |
+| Pan ← → ↑ ↓ | Mais perto, a vista atravessa a imagem de uma borda à outra |
+
+Selecione uma imagem e escolha o movimento dela no inspetor, ou **Nenhum** para deixá-la parada, e a **Intensidade**: **Sutil** (8% mais perto), **Média** (15%) ou **Forte** (25%). **Usar em todas as imagens** põe o mesmo movimento em todas, e **Variar em todas as imagens** alterna zooms e pans, para nenhuma imagem se mover como a anterior. Um corte novo começa com os movimentos do canal, variados a menos que você mude no [canal](channels.md#defaults).
+
+O movimento acontece sobre a imagem como ela está enquadrada: a janela 9:16 num corte vertical, a imagem inteira num 16:9 (com **Ajustar**, as faixas se movem junto). Ele dura todo o tempo do clipe na tela, transições incluídas, então a imagem nunca para enquanto aparece. Dividir uma imagem dá o movimento inteiro a cada pedaço. Clipes têm movimento próprio, então o movimento vale só para imagens: uma cena que ganha um clipe guarda o movimento da imagem sem tocá-lo, e volta a tocá-lo se a cena mostrar a imagem de novo.
+
+A prévia e o render desenham o movimento do mesmo jeito, suave a uma fração de pixel; uma imagem em movimento leva um pouco mais para renderizar do que uma parada.
 
 <a id="suggestions"></a>
 ## Sugestões de corte

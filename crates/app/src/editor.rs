@@ -46,10 +46,11 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     AspectRatio, AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit,
     EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
-    MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, Picture,
-    PlayedTransition, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
-    Shift, ThemeRepository, Timeline, TimelineRepository, Track, Transition, VideoFormat,
-    VideoProject, VideoProjectId, VideoSource, frame_at, frame_time, nearest_frame, snap,
+    MediaAsset, MediaAssetId, MediaKind, Motion, MotionDefault, MotionPattern, MotionStrength,
+    MotionView, NarrationId, NarrationRepository, Picture, PlayedTransition, ProjectFiles,
+    RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
+    TimelineRepository, Track, Transition, VideoFormat, VideoProject, VideoProjectId, VideoSource,
+    frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -247,6 +248,9 @@ pub struct EditorView {
     /// The channel's default transition: what goes on a cut unless the
     /// user picks another.
     pub transition: Transition,
+    /// The channel's motions for new cuts; its strength is what a motion
+    /// picked for a still takes.
+    pub motion: MotionDefault,
     /// `None` until the project has a narration and a scene plan.
     pub timeline: Option<Timeline>,
     /// What the timeline is cut on, when there is one.
@@ -410,6 +414,17 @@ pub enum EditAction {
     /// Puts `transition` on every cut between clips (`None` makes them
     /// all cuts).
     TransitionEverywhere(Option<Transition>),
+    /// Sets how the view moves over video clip `index`'s still (`None`:
+    /// it stays still).
+    SetMotion {
+        index: usize,
+        motion: Option<Motion>,
+    },
+    /// Puts `motion` on every still (`None`: they all stay still).
+    MotionEverywhere(Option<Motion>),
+    /// Gives the stills a varied pattern of motions at `strength`, so no
+    /// still moves the way the one before it did.
+    VaryMotion(MotionStrength),
     Undo,
     Redo,
 }
@@ -778,6 +793,12 @@ impl Editor {
                 }
                 (timeline.transition_everywhere(transition), None)
             }
+            EditAction::SetMotion { index, motion } => (Edit::SetMotion { index, motion }, None),
+            EditAction::MotionEverywhere(motion) => (timeline.motion_everywhere(motion), None),
+            EditAction::VaryMotion(strength) => (
+                timeline.motion_pattern(MotionDefault::new(MotionPattern::Varied, strength)),
+                None,
+            ),
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
     }
@@ -1127,12 +1148,26 @@ pub(crate) fn timeline_plan(
                 Some((_, path)) => ClipSource::Still(path),
                 None => ClipSource::Black,
             };
+            let into = timeline.transition_into(index);
+            // A still moves for its whole time on screen: from the start
+            // of the transition into it to the end of the one out of it.
+            let shown_for = into.map_or(Duration::ZERO, |t| t.cut - t.start)
+                + item.duration
+                + (index + 1 < timeline.video().len())
+                    .then(|| timeline.transition_into(index + 1))
+                    .flatten()
+                    .map_or(Duration::ZERO, |t| t.end - t.cut);
+            let motion = item
+                .played_motion()
+                .filter(|_| matches!(source, ClipSource::Still(_)))
+                .map(|motion| media_motion(motion, shown_for));
             VideoClip {
                 source,
                 start: item.source_start(),
                 duration: item.duration,
                 framing: media_framing(item.framing_in(aspect)),
-                transition: timeline.transition_into(index).map(media_transition),
+                transition: into.map(media_transition),
+                motion,
             }
         })
         .collect();
@@ -1145,6 +1180,7 @@ pub(crate) fn timeline_plan(
             duration: end - timeline.video_end(),
             framing: ffmpeg::Framing::Fit,
             transition: None,
+            motion: None,
         });
     }
     let mix = timeline.mix();
@@ -1207,6 +1243,23 @@ fn media_transition(played: PlayedTransition) -> ffmpeg::Transition {
         kind: played.kind,
         before: played.cut - played.start,
         after: played.end - played.cut,
+    }
+}
+
+/// A still's motion as the media engine plays it, over `length` of the
+/// clip's time on screen.
+fn media_motion(motion: Motion, length: Duration) -> ffmpeg::Motion {
+    let view = |view: MotionView| ffmpeg::View {
+        zoom: view.zoom,
+        x: view.x,
+        y: view.y,
+    };
+    let (from, to) = motion.views();
+    ffmpeg::Motion {
+        from: view(from),
+        to: view(to),
+        length,
+        elapsed: Duration::ZERO,
     }
 }
 
@@ -1273,6 +1326,10 @@ impl Bardo {
         let transition = channel.as_ref().map_or(Transition::default(), |channel| {
             channel.details.transition()
         });
+        // A new cut's stills move as the channel says.
+        let motion = channel
+            .as_ref()
+            .map_or(MotionDefault::default(), |channel| channel.details.motion());
         // A new cut's captions take the channel's style.
         let caption_style = channel.as_ref().map_or(CaptionStyle::default(), |channel| {
             channel.details.caption_style()
@@ -1326,6 +1383,7 @@ impl Bardo {
                 let timeline = restored.unwrap_or_else(|| {
                     let cut = Timeline::rough_cut(plan, narration, aspect)
                         .with_caption_style(caption_style)
+                        .with_motion(motion)
                         .with_aspect(saved.as_ref().map_or(aspect, |saved| saved.aspect));
                     match &music {
                         Some(music) => cut.use_music(None, music).unwrap_or(cut),
@@ -1488,6 +1546,7 @@ impl Bardo {
             suggestions,
             channel_name,
             transition,
+            motion,
             stale: plan
                 .as_ref()
                 .is_some_and(|plan| plan.is_stale(narration.as_ref())),
@@ -2608,6 +2667,107 @@ mod tests {
         )
         .unwrap();
         assert_eq!(editor.preview_plan().unwrap().video[1].transition, None);
+    }
+
+    #[test]
+    fn stills_move_as_the_channel_says_and_the_plan_moves_them_while_they_show() {
+        use bardo_domain::{ChannelDetails, ChannelDraft, MotionKind, TransitionKind};
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        let strong = MotionDefault::new(MotionPattern::Varied, MotionStrength::Strong);
+        channel.details = ChannelDetails::validate(ChannelDraft {
+            motion: strong,
+            ..ChannelDraft::from(&channel.details)
+        })
+        .unwrap();
+        app.channels.save(&channel).unwrap();
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        assert_eq!(editor.view().motion, strong, "the channel's default");
+        let motions = |editor: &Editor| -> Vec<Option<Motion>> {
+            editor
+                .view()
+                .timeline
+                .as_ref()
+                .unwrap()
+                .video()
+                .iter()
+                .map(|clip| clip.motion)
+                .collect()
+        };
+        // The new cut varies its stills' motions.
+        let set = motions(&editor);
+        assert_eq!(
+            set[0],
+            Some(Motion::new(MotionKind::ZoomIn, MotionStrength::Strong))
+        );
+        assert_eq!(
+            set[1],
+            Some(Motion::new(MotionKind::PanRight, MotionStrength::Strong))
+        );
+
+        // A still moves for its whole time on screen: into it, through
+        // it, and out of it.
+        app.edit(
+            &mut editor,
+            EditAction::SetTransition {
+                index: 2,
+                transition: Some(Transition::new(TransitionKind::Crossfade, 12)),
+            },
+        )
+        .unwrap();
+        let timeline = editor.view().timeline.clone().unwrap();
+        let plan = editor.preview_plan().unwrap();
+        let out = plan.video[2].transition.unwrap();
+        let moving = plan.video[1].motion.unwrap();
+        assert_eq!(moving.length, timeline.video()[1].duration + out.after);
+        assert_eq!(
+            (moving.from.x, moving.to.x),
+            (0.0, 1.0),
+            "a pan to the right"
+        );
+        assert_eq!(moving.from.zoom, 1.25);
+        let into = plan.video[2].motion.unwrap();
+        assert_eq!(into.length, out.before + timeline.video()[2].duration);
+
+        // One motion on every still, or none, or a varied pattern: each
+        // one step to undo, and kept with the cut.
+        let zoom_out = Motion::new(MotionKind::ZoomOut, MotionStrength::Subtle);
+        app.edit(&mut editor, EditAction::MotionEverywhere(Some(zoom_out)))
+            .unwrap();
+        assert!(motions(&editor).iter().all(|m| *m == Some(zoom_out)));
+        let reopened = app.open_editor(project.id).unwrap();
+        assert_eq!(motions(&reopened), motions(&editor), "saved with the cut");
+        app.edit(&mut editor, EditAction::MotionEverywhere(None))
+            .unwrap();
+        assert!(
+            editor
+                .preview_plan()
+                .unwrap()
+                .video
+                .iter()
+                .all(|clip| clip.motion.is_none())
+        );
+        app.edit(&mut editor, EditAction::VaryMotion(MotionStrength::Medium))
+            .unwrap();
+        assert_eq!(
+            motions(&editor)[2],
+            Some(Motion::new(MotionKind::ZoomOut, MotionStrength::Medium))
+        );
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert!(motions(&editor).iter().all(|m| *m == Some(zoom_out)));
+        app.edit(
+            &mut editor,
+            EditAction::SetMotion {
+                index: 0,
+                motion: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(editor.preview_plan().unwrap().video[0].motion, None);
     }
 
     #[test]
