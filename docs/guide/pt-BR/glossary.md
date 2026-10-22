@@ -44,6 +44,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Projeto de vídeo**: um vídeo em produção, do roteiro aos posts. Começa quando você aprova uma ideia.
 
+**Formato do vídeo**: Short (vertical, menos de um minuto, para todas as redes) ou longo (16:9, de 8 a 10 minutos, para o YouTube). Definido por canal e trocável por projeto; define o tamanho do roteiro, o formato das imagens e dos cortes, e o preset do YouTube.
+
 **Modelo**: as instruções que o Bardo manda para a IA escrever um tipo de texto (o roteiro, os prompts de imagem, os textos dos posts). Salvar uma mudança cria uma versão nova, e as antigas continuam legíveis.
 
 **Roteiro**: o que o narrador fala. O Claude escreve, e você edita como quiser.

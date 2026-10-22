@@ -36,9 +36,9 @@ Video niche: {{niche}}
 Video title: {{theme_title}}
 Angle: {{theme_angle}}
 
-Write the narration script for this video, about 1,200 to 1,500 words (8 to 10 minutes spoken). \
-Hook the viewer in the first two sentences, keep the tension through the middle, and end with a \
-payoff that delivers on the title's promise.";
+Write the narration script for this video, {{target_length}}. Hook the viewer in the first two \
+sentences, keep the tension through the middle, and end with a payoff that delivers on the title's \
+promise.";
 
 const IMAGE_PROMPT_INSTRUCTIONS: &str = "\
 You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of still \
@@ -51,8 +51,8 @@ about every 4 to 8 seconds of narration; a long sentence may hold a scene on its
 
 Each prompt stands alone, because the image model sees one prompt at a time and remembers none \
 of the others. Describe the subject, setting, period, composition, lighting and mood, and repeat \
-the channel's visual style in every prompt so the images look like one video. Frames are wide \
-(16:9). Write the prompts in English, whatever the narration's language ({{language}}).
+the channel's visual style in every prompt so the images look like one video. Frames are \
+{{frame_shape}}. Write the prompts in English, whatever the narration's language ({{language}}).
 
 The images are original: no recognizable real people, logos, brands or copyrighted characters, \
 and no text, captions or watermarks in the image. Keep them safe for advertisers.";
@@ -133,6 +133,51 @@ The script:
 Write the title, description and tags for each network listed. Leave a field empty where the \
 network does not take it.";
 
+/// Bardo's earlier default texts, before the video format (#179): one
+/// fixed script length and wide frames. A profile whose current version is
+/// still one of these, untouched, moves on to today's default.
+const RETIRED_SCRIPT_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Recurring channel themes: {{channel_themes}}
+Aesthetic notes: {{aesthetic_notes}}
+Narrator: {{persona}}
+
+Video niche: {{niche}}
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+
+Write the narration script for this video, about 1,200 to 1,500 words (8 to 10 minutes spoken). \
+Hook the viewer in the first two sentences, keep the tension through the middle, and end with a \
+payoff that delivers on the title's promise.";
+
+const RETIRED_IMAGE_PROMPT_INSTRUCTIONS: &str = "\
+You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of still \
+images, one per scene. You split the narration into scenes and write one image prompt per scene \
+for an image model.
+
+Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
+and runs until the next scene starts. Change scene when the subject, place or moment changes, \
+about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own.
+
+Each prompt stands alone, because the image model sees one prompt at a time and remembers none \
+of the others. Describe the subject, setting, period, composition, lighting and mood, and repeat \
+the channel's visual style in every prompt so the images look like one video. Frames are wide \
+(16:9). Write the prompts in English, whatever the narration's language ({{language}}).
+
+The images are original: no recognizable real people, logos, brands or copyrighted characters, \
+and no text, captions or watermarks in the image. Keep them safe for advertisers.";
+
+/// Bardo's earlier defaults for `kind`, oldest first.
+fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
+    let (instructions, prompt) = match kind {
+        TemplateKind::Script => (SCRIPT_INSTRUCTIONS, RETIRED_SCRIPT_PROMPT),
+        TemplateKind::ImagePrompt => (RETIRED_IMAGE_PROMPT_INSTRUCTIONS, IMAGE_PROMPT_PROMPT),
+        TemplateKind::MusicPrompt | TemplateKind::Metadata => return Vec::new(),
+    };
+    vec![TemplateBody::new(kind, instructions, prompt).expect("the retired templates are valid")]
+}
+
 /// Bardo's own text for `kind`: every profile's version 1.
 pub fn default_template(kind: TemplateKind) -> TemplateBody {
     let (instructions, prompt) = match kind {
@@ -204,6 +249,16 @@ impl Bardo {
             // templates existed get it too.
             seed_templates(&*self.templates, self.profile.id)?;
             versions = self.templates.template_versions(self.profile.id, kind)?;
+        }
+        // A current version that is one of Bardo's earlier defaults, never
+        // edited, moves on to today's default as the next version.
+        let next = versions
+            .last()
+            .filter(|current| retired_defaults(kind).contains(&current.body))
+            .and_then(|current| current.revise(default_template(kind), SystemTime::now()));
+        if let Some(next) = next {
+            self.templates.add_template_version(&next)?;
+            versions.push(next);
         }
         versions.reverse();
         Ok(versions)
@@ -306,6 +361,57 @@ mod tests {
             versions[0].body,
             default_template(TemplateKind::ImagePrompt)
         );
+    }
+
+    #[test]
+    fn an_untouched_earlier_default_moves_on_to_the_format_aware_one() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let app = start(&db);
+        let kinds = [TemplateKind::Script, TemplateKind::ImagePrompt];
+        for kind in kinds {
+            db.add_template_version(&TemplateVersion::first(
+                app.profile().id,
+                retired_defaults(kind).remove(0),
+                SystemTime::now(),
+            ))
+            .unwrap();
+        }
+        for kind in kinds {
+            let retired = retired_defaults(kind).remove(0);
+            let versions = app.template_versions(kind).unwrap();
+            assert_eq!(versions.len(), 2);
+            assert_eq!(versions[0].number, 2);
+            assert_eq!(versions[0].body, default_template(kind));
+            assert_eq!(versions[1].body, retired, "the old version stays readable");
+            assert_eq!(app.template_versions(kind).unwrap().len(), 2, "once");
+        }
+    }
+
+    #[test]
+    fn an_edited_template_is_left_as_the_user_wrote_it() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let app = start(&db);
+        let edited = app
+            .save_template(
+                TemplateKind::Script,
+                "Rules.",
+                "A 9-minute script about {{niche}}.",
+            )
+            .unwrap();
+        assert_eq!(
+            app.current_template(TemplateKind::Script).unwrap().id,
+            edited.id
+        );
+    }
+
+    #[test]
+    fn the_defaults_take_their_length_and_frame_from_the_format() {
+        let script = default_template(TemplateKind::Script);
+        assert!(script.prompt().contains("{{target_length}}"));
+        assert!(!script.prompt().contains("minutes spoken"));
+        let scenes = default_template(TemplateKind::ImagePrompt);
+        assert!(scenes.instructions().contains("{{frame_shape}}"));
+        assert!(!scenes.instructions().contains("16:9"));
     }
 
     #[test]

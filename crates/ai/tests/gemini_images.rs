@@ -4,10 +4,11 @@
 mod common;
 
 use bardo_ai::GeminiImages;
-use bardo_ai::gemini::{ASPECT_RATIO, IMAGE_MODEL, IMAGE_SIZE, MODELS_URL};
+use bardo_ai::gemini::{IMAGE_MODEL, IMAGE_SIZE, MODELS_URL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ImageFormat, ImageGenerator, ImageRequest, Metered, Provider, ProviderFailureKind,
+    ApiKey, AspectRatio, ImageFormat, ImageGenerator, ImageRequest, Metered, Provider,
+    ProviderFailureKind,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -22,6 +23,7 @@ fn key() -> ApiKey {
 fn request() -> ImageRequest {
     ImageRequest {
         prompt: PROMPT.into(),
+        aspect: AspectRatio::Landscape,
     }
 }
 
@@ -49,9 +51,23 @@ fn sends_the_prompt_for_one_wide_image_with_the_key_in_a_header() {
     assert_eq!(sent.body["contents"][0]["parts"][0]["text"], PROMPT);
     let config = &sent.body["generationConfig"];
     assert_eq!(config["responseModalities"], serde_json::json!(["IMAGE"]));
-    assert_eq!(config["imageConfig"]["aspectRatio"], ASPECT_RATIO);
+    assert_eq!(config["imageConfig"]["aspectRatio"], "16:9");
     assert_eq!(config["imageConfig"]["imageSize"], IMAGE_SIZE);
-    assert_eq!(ASPECT_RATIO, "16:9");
+}
+
+#[test]
+fn a_short_asks_for_a_tall_image() {
+    let adapter = images(&["generate-image"]);
+    let tall = ImageRequest {
+        aspect: AspectRatio::Vertical,
+        ..request()
+    };
+    adapter.generate(&key(), &tall).unwrap();
+    let sent = &adapter.transport().sent()[0];
+    assert_eq!(
+        sent.body["generationConfig"]["imageConfig"]["aspectRatio"],
+        "9:16"
+    );
 }
 
 #[test]

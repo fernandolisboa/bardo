@@ -5,7 +5,7 @@
 
 use bardo_app::bardo_domain::{
     CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel, ClipModelRef,
-    ContentLanguage, Country, PersonaId, Transition, TransitionKind, frame_time,
+    ContentLanguage, Country, PersonaId, Transition, TransitionKind, VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -114,6 +114,13 @@ fn caption_style_choices(bardo: &Bardo) -> SearchableVec<Choice<CaptionStyle>> {
     }))
 }
 
+fn format_choices(bardo: &Bardo) -> SearchableVec<Choice<VideoFormat>> {
+    SearchableVec::new(VideoFormat::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::VideoFormatName(value)),
+    }))
+}
+
 fn transition_choices(bardo: &Bardo) -> SearchableVec<Choice<TransitionKind>> {
     SearchableVec::new(TransitionKind::ALL.map(|value| Choice {
         value,
@@ -177,6 +184,7 @@ pub struct ChannelsScreen {
     persona: ChoiceSelect<Option<PersonaId>>,
     clip_model: ChoiceSelect<Option<ClipModelRef>>,
     caption_style: ChoiceSelect<CaptionStyle>,
+    format: ChoiceSelect<VideoFormat>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
     field_errors: Vec<ChannelFieldError>,
@@ -209,9 +217,13 @@ impl ChannelsScreen {
                 caption_style_choices(bardo),
             )
         };
-        let (transitions, transition_lengths_list) = {
+        let (transitions, transition_lengths_list, formats) = {
             let bardo = bardo.read(cx);
-            (transition_choices(bardo), transition_length_choices(bardo))
+            (
+                transition_choices(bardo),
+                transition_length_choices(bardo),
+                format_choices(bardo),
+            )
         };
         let language = cx.new(|cx| {
             let selected = index_of(&ContentLanguage::ALL, &defaults.language);
@@ -229,6 +241,10 @@ impl ChannelsScreen {
         let caption_style = cx.new(|cx| {
             let selected = index_of(&CaptionStyle::ALL, &defaults.caption_style);
             SelectState::new(caption_styles, selected, window, cx)
+        });
+        let format = cx.new(|cx| {
+            let selected = index_of(&VideoFormat::ALL, &defaults.format);
+            SelectState::new(formats, selected, window, cx)
         });
         let transition = cx.new(|cx| {
             let selected = index_of(&TransitionKind::ALL, &defaults.transition.kind);
@@ -271,6 +287,7 @@ impl ChannelsScreen {
             persona,
             clip_model,
             caption_style,
+            format,
             transition,
             transition_length,
             field_errors: Vec::new(),
@@ -310,6 +327,7 @@ impl ChannelsScreen {
         let caption_styles = caption_style_choices(bardo);
         let transitions = transition_choices(bardo);
         let lengths = transition_length_choices(bardo);
+        let formats = format_choices(bardo);
 
         self.name
             .update(cx, |input, cx| input.set_placeholder(name, window, cx));
@@ -342,6 +360,13 @@ impl ChannelsScreen {
         self.caption_style.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(caption_styles, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.format.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(formats, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -422,6 +447,9 @@ impl ChannelsScreen {
         self.caption_style.update(cx, |select, cx| {
             select.set_selected_value(&draft.caption_style, window, cx)
         });
+        self.format.update(cx, |select, cx| {
+            select.set_selected_value(&draft.format, window, cx)
+        });
         self.transition.update(cx, |select, cx| {
             select.set_selected_value(&draft.transition.kind, window, cx)
         });
@@ -458,6 +486,12 @@ impl ChannelsScreen {
             clip_model: self.clip_model.read(cx).selected_value().cloned().flatten(),
             caption_style: self
                 .caption_style
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
+            format: self
+                .format
                 .read(cx)
                 .selected_value()
                 .copied()
@@ -647,16 +681,12 @@ impl ChannelsScreen {
                             Textarea::new(&self.themes).into_any_element(),
                             error_for(THEME_ERRORS).or_else(|| Some(hint(Text::ChannelThemesHint))),
                         ))
+                        .child(field(
+                            Text::ChannelAestheticNotes,
+                            Textarea::new(&self.aesthetic_notes).into_any_element(),
+                            error_for(AESTHETIC_NOTES_ERRORS),
+                        ))
                         .into_any_element(),
-                ))
-                .child(tagged(
-                    TourAnchor::Control(Control::ChannelLook),
-                    field(
-                        Text::ChannelAestheticNotes,
-                        Textarea::new(&self.aesthetic_notes).into_any_element(),
-                        error_for(AESTHETIC_NOTES_ERRORS),
-                    )
-                    .into_any_element(),
                 ))
                 .child(tagged(
                     TourAnchor::Control(Control::ChannelMarket),
@@ -688,6 +718,17 @@ impl ChannelsScreen {
                         Select::new(&self.persona)
                             .search_placeholder(tr(bardo, Text::PersonasTitle))
                             .into_any_element(),
+                    )
+                    .into_any_element(),
+                ))
+                .child(tagged(
+                    TourAnchor::Control(Control::ChannelFormat),
+                    explained(
+                        "channel-format-info",
+                        Text::ChannelFormat,
+                        Text::ChannelFormatHint,
+                        guide::refs::CHANNELS_FORMAT,
+                        Select::new(&self.format).into_any_element(),
                     )
                     .into_any_element(),
                 ))

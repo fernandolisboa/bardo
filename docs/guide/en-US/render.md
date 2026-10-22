@@ -27,11 +27,12 @@ A figure in amber deserves a look: a silent mix, or captions turned off. **Check
 <a id="targets"></a>
 ## Networks and presets
 
-Each network account of the channel is a target, listed with its handle, its preset, its state and its last file. Each network starts from its own preset:
+Each network account of the channel is a target, listed with its handle, its preset, its state and its last file. Each network starts from its own preset, and YouTube's follows the project's [format](projects.md#format):
 
 | Network | Frame | Size | Bitrate | Longest |
 | --- | --- | --- | --- | --- |
-| YouTube | 9:16 | 1080×1920 | 12 Mbps | 3 min |
+| YouTube, Short | 9:16 | 1080×1920 | 12 Mbps | 3 min |
+| YouTube, long video | 16:9 | 1920×1080 | 12 Mbps | 12 h |
 | TikTok | 9:16 | 1080×1920 | 10 Mbps | 10 min |
 | Instagram Reels | 9:16 | 1080×1920 | 10 Mbps | 15 min |
 | X | 9:16 | 720×1280 | 6 Mbps | 2 min 20 s |
@@ -47,7 +48,7 @@ Tick the networks to render; those not rendered yet, or out of date, come ticked
 Each check is marked **Blocks** or **Warning**.
 
 - **Blocks** keeps that network out of the render until you fix it: a cut longer than the network takes, or no encoder on this computer for the preset's codec. The other networks still render.
-- **Warning** lets it render as it is: captions off, clips with no media (they render black), a silent mix, a mix far from the network's loudness (the render changes it that much), or peaks the render has to limit. When the cut's frame differs from the network's, each clip goes through its crop window.
+- **Warning** lets it render as it is: captions off, clips with no media (they render black), a silent mix, a mix far from the network's loudness (the render changes it that much), peaks the render has to limit, or a YouTube video over 15 minutes, which YouTube takes only from a [verified account](https://www.youtube.com/verify). When the cut's frame differs from the network's, each clip goes through its crop window.
 
 A network's state sums it up: **Ready**, **n to check** (warnings), **Blocked**, or **Checking** while the checks run.
 

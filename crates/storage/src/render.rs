@@ -255,7 +255,7 @@ mod tests {
             preset: RenderPreset {
                 codec: VideoCodec::Hevc,
                 aspect: AspectRatio::Landscape,
-                ..account.render_preset()
+                ..account.render_preset(bardo_domain::VideoFormat::Short)
             },
             file: format!("render-{}.mp4", account.network.code()),
             encoder: "libopenh264".into(),

@@ -37,7 +37,7 @@ O Claude escreve o título, a descrição e as tags de cada post a partir desses
 <a id="preset"></a>
 ## Preset de render
 
-Cada rede renderiza no seu próprio preset: o quadro (16:9 ou 9:16), a resolução, o codec, o bitrate, a duração máxima que ela aceita e a loudness que ela busca. Os padrões estão em [Redes e presets](render.md#targets). Em **Editar**, mude qualquer um deles ou mantenha o **padrão da rede**; a linha embaixo dos campos mostra o preset resultante. Um preset alterado deixa o último render da rede desatualizado.
+Cada rede renderiza no seu próprio preset: o quadro (16:9 ou 9:16), a resolução, o codec, o bitrate, a duração máxima que ela aceita e a loudness que ela busca. Os padrões estão em [Redes e presets](render.md#targets); o do YouTube depende do [formato do vídeo](channels.md#format), 9:16 para Shorts e 16:9 para vídeos longos. Em **Editar**, mude qualquer um deles ou mantenha o **padrão da rede**; a linha embaixo dos campos mostra o preset resultante. Um preset alterado deixa o último render da rede desatualizado.
 
 <a id="connect"></a>
 ## Conectar uma conta

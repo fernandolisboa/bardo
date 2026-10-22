@@ -492,7 +492,7 @@ mod tests {
     fn one_shot() -> Timeline {
         let mut first = scene(0, 5_000);
         first.image = Some(crate::timeline::tests::image("a.png"));
-        Timeline::rough_cut(&plan(vec![first]), &story())
+        Timeline::rough_cut(&plan(vec![first]), &story(), crate::AspectRatio::Landscape)
     }
 
     #[test]

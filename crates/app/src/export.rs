@@ -1525,7 +1525,8 @@ pub(crate) mod tests {
             "{text}"
         );
         assert!(text.contains("space history, nasa"), "{text}");
-        assert!(text.contains("1080×1920"), "{text}");
+        // The channel makes long videos, so YouTube's file is 16:9.
+        assert!(text.contains("1920×1080, 16:9"), "{text}");
         assert!(!text.contains('\u{26a0}') && !text.to_lowercase().contains("synthetic"));
         let caption = String::from_utf8(
             s.exports

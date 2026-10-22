@@ -2,11 +2,13 @@
 //! unless a network account overrides it.
 //!
 //! Built-in presets are data, checked against each network's published
-//! upload rules on 2026-10-02. The MVP aims at short vertical videos
-//! (Shorts, TikTok, Reels), so every network but Kick defaults to 9:16.
+//! upload rules on 2026-10-02. Short videos are vertical on every network
+//! but Kick; a long video is landscape on YouTube (issue #179).
 
 use std::fmt;
 use std::str::FromStr;
+
+use crate::VideoFormat;
 
 /// A network a channel can have an account on (ADR-0003).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -118,8 +120,11 @@ impl Network {
     /// The preset a render for this network uses unless the account
     /// overrides it.
     ///
-    /// - YouTube: a Short, 9:16 1080×1920, up to 3 minutes. 12 Mbps is
-    ///   YouTube's recommended upload bitrate for 1080p at 60 fps.
+    /// - YouTube: for a Short, 9:16 1080×1920, up to 3 minutes; for a long
+    ///   video, 16:9 1920×1080 up to YouTube's 12 hours (accounts that are
+    ///   not verified are held to 15 minutes, which the review warns
+    ///   about). 12 Mbps is YouTube's recommended upload bitrate for 1080p
+    ///   at 60 fps.
     /// - TikTok: 9:16 1080×1920, up to 10 minutes (the app's limit; the web
     ///   uploader takes longer videos).
     /// - Instagram Reels: 9:16 1080×1920, up to 15 minutes (the Content
@@ -131,7 +136,11 @@ impl Network {
     ///
     /// No network publishes an official loudness target; −14 LUFS
     /// integrated is the level they are widely measured to normalize to.
-    pub fn render_preset(self) -> RenderPreset {
+    ///
+    /// Only YouTube takes both formats; the other networks keep one preset
+    /// whatever the format, and a long video over their limit is blocked
+    /// for them alone.
+    pub fn render_preset(self, format: VideoFormat) -> RenderPreset {
         let short = |bitrate_kbps: u32, max_seconds: u32| RenderPreset {
             aspect: AspectRatio::Vertical,
             resolution: Resolution::FullHd1080,
@@ -141,7 +150,13 @@ impl Network {
             loudness: Loudness(-140),
         };
         match self {
-            Network::YouTube => short(12_000, 3 * 60),
+            Network::YouTube => match format {
+                VideoFormat::Short => short(12_000, 3 * 60),
+                VideoFormat::Long => RenderPreset {
+                    aspect: AspectRatio::Landscape,
+                    ..short(12_000, MaxDuration::MAX_SECONDS)
+                },
+            },
             Network::TikTok => short(10_000, 10 * 60),
             Network::InstagramReels => short(10_000, 15 * 60),
             Network::X => RenderPreset {
@@ -636,14 +651,20 @@ mod tests {
             Network::InstagramReels,
             Network::X,
         ] {
-            assert_eq!(network.render_preset().aspect, AspectRatio::Vertical);
+            assert_eq!(
+                network.render_preset(VideoFormat::Short).aspect,
+                AspectRatio::Vertical
+            );
         }
-        assert_eq!(Network::Kick.render_preset().aspect, AspectRatio::Landscape);
+        assert_eq!(
+            Network::Kick.render_preset(VideoFormat::Short).aspect,
+            AspectRatio::Landscape
+        );
     }
 
     #[test]
     fn built_in_presets_follow_each_networks_upload_rules() {
-        let youtube = Network::YouTube.render_preset();
+        let youtube = Network::YouTube.render_preset(VideoFormat::Short);
         assert_eq!(youtube.dimensions(), (1080, 1920));
         assert_eq!(
             youtube.max_duration.seconds(),
@@ -651,27 +672,58 @@ mod tests {
             "Shorts are up to 3 min"
         );
 
-        assert_eq!(Network::TikTok.render_preset().max_duration.seconds(), 600);
+        assert_eq!(
+            Network::TikTok
+                .render_preset(VideoFormat::Short)
+                .max_duration
+                .seconds(),
+            600
+        );
 
-        let reels = Network::InstagramReels.render_preset();
+        let reels = Network::InstagramReels.render_preset(VideoFormat::Short);
         assert_eq!(reels.max_duration.seconds(), 900);
         assert!(reels.bitrate.kbps() <= 25_000, "Reels take up to 25 Mbps");
 
-        let x = Network::X.render_preset();
+        let x = Network::X.render_preset(VideoFormat::Short);
         let (width, height) = x.dimensions();
         assert!(width <= 1200 && height <= 1900, "X takes up to 1200×1900");
         assert_eq!(x.max_duration.seconds(), 140);
         assert!(x.bitrate.kbps() <= 25_000);
 
-        let kick = Network::Kick.render_preset();
+        let kick = Network::Kick.render_preset(VideoFormat::Short);
         assert_eq!(kick.dimensions(), (1920, 1080));
         assert!(kick.bitrate.kbps() <= 8_000, "Kick ingests up to 8 Mbps");
     }
 
     #[test]
+    fn a_long_video_is_landscape_on_youtube_and_unchanged_elsewhere() {
+        let youtube = Network::YouTube.render_preset(VideoFormat::Long);
+        assert_eq!(youtube.dimensions(), (1920, 1080));
+        assert_eq!(youtube.max_duration, MaxDuration(MaxDuration::MAX_SECONDS));
+        assert_eq!(
+            youtube.bitrate,
+            Network::YouTube.render_preset(VideoFormat::Short).bitrate
+        );
+        for network in [
+            Network::TikTok,
+            Network::InstagramReels,
+            Network::X,
+            Network::Kick,
+        ] {
+            assert_eq!(
+                network.render_preset(VideoFormat::Long),
+                network.render_preset(VideoFormat::Short)
+            );
+        }
+    }
+
+    #[test]
     fn built_in_presets_are_within_the_accepted_ranges() {
-        for network in Network::ALL {
-            let preset = network.render_preset();
+        for (network, format) in Network::ALL
+            .into_iter()
+            .flat_map(|network| VideoFormat::ALL.map(|format| (network, format)))
+        {
+            let preset = network.render_preset(format);
             assert_eq!(
                 Bitrate::from_kbps(preset.bitrate.kbps()),
                 Ok(preset.bitrate)
@@ -750,7 +802,7 @@ mod tests {
     #[test]
     fn no_overrides_keep_the_built_in_preset() {
         for network in Network::ALL {
-            let built_in = network.render_preset();
+            let built_in = network.render_preset(VideoFormat::Short);
             assert_eq!(built_in.with(&PresetOverrides::default()), built_in);
         }
         assert!(PresetOverrides::default().is_empty());
@@ -758,7 +810,7 @@ mod tests {
 
     #[test]
     fn each_override_replaces_only_its_own_value() {
-        let built_in = Network::YouTube.render_preset();
+        let built_in = Network::YouTube.render_preset(VideoFormat::Short);
         let cases = [
             PresetOverrides {
                 aspect: Some(AspectRatio::Landscape),
@@ -819,10 +871,12 @@ mod tests {
 
     #[test]
     fn overriding_the_aspect_keeps_the_resolution_class() {
-        let merged = Network::YouTube.render_preset().with(&PresetOverrides {
-            aspect: Some(AspectRatio::Landscape),
-            ..PresetOverrides::default()
-        });
+        let merged = Network::YouTube
+            .render_preset(VideoFormat::Short)
+            .with(&PresetOverrides {
+                aspect: Some(AspectRatio::Landscape),
+                ..PresetOverrides::default()
+            });
         assert_eq!(merged.dimensions(), (1920, 1080));
     }
 
@@ -832,10 +886,14 @@ mod tests {
             bitrate: Some(Bitrate(4_000)),
             ..PresetOverrides::default()
         };
-        let x = Network::X.render_preset().with(&overrides);
+        let x = Network::X
+            .render_preset(VideoFormat::Short)
+            .with(&overrides);
         assert_eq!(x.bitrate, Bitrate(4_000));
         assert_eq!(x.resolution, Resolution::Hd720);
-        let kick = Network::Kick.render_preset().with(&overrides);
+        let kick = Network::Kick
+            .render_preset(VideoFormat::Short)
+            .with(&overrides);
         assert_eq!(kick.aspect, AspectRatio::Landscape);
     }
 

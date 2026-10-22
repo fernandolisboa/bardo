@@ -133,6 +133,7 @@ pub mod refs {
     pub const PERFORMANCE_NUMBERS: GuideRef = at("performance-metrics", "numbers");
     pub const PERFORMANCE_SYNC: GuideRef = at("performance-metrics", "sync");
     pub const PROJECTS_NARRATOR: GuideRef = at("projects", "narrator");
+    pub const PROJECTS_FORMAT: GuideRef = at("projects", "format");
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
     pub const SCRIPT_MUSIC: GuideRef = at("script", "music");
@@ -158,6 +159,7 @@ pub mod refs {
     pub const RENDER_TARGETS: GuideRef = at("render", "targets");
     pub const RENDER_LAST: GuideRef = at("render", "last");
     pub const CHANNELS_PERSONA: GuideRef = at("channels", "persona");
+    pub const CHANNELS_FORMAT: GuideRef = at("channels", "format");
     pub const CHANNELS_DEFAULTS: GuideRef = at("channels", "defaults");
     pub const ACCOUNTS_ONE: GuideRef = at("network-accounts", "accounts");
     pub const ACCOUNTS_METADATA: GuideRef = at("network-accounts", "metadata");

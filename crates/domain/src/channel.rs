@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, PersonaId, ProfileId,
-    RepositoryError, Transition,
+    RepositoryError, Transition, VideoFormat,
 };
 
 /// Identifies a channel.
@@ -50,6 +50,8 @@ pub struct ChannelDraft {
     pub aesthetic_notes: String,
     pub language: ContentLanguage,
     pub country: Country,
+    /// Short or long videos, unless a video picks the other.
+    pub format: VideoFormat,
     /// The persona the channel's videos use unless a video overrides it.
     pub default_persona: Option<PersonaId>,
     /// The video model the channel's clips use unless a scene picks
@@ -95,6 +97,7 @@ pub struct ChannelDetails {
     aesthetic_notes: String,
     language: ContentLanguage,
     country: Country,
+    format: VideoFormat,
     default_persona: Option<PersonaId>,
     clip_model: Option<ClipModelRef>,
     caption_style: CaptionStyle,
@@ -153,6 +156,7 @@ impl ChannelDetails {
             aesthetic_notes,
             language: draft.language,
             country: draft.country,
+            format: draft.format,
             default_persona: draft.default_persona,
             clip_model: draft.clip_model,
             caption_style: draft.caption_style,
@@ -182,6 +186,11 @@ impl ChannelDetails {
 
     pub fn country(&self) -> Country {
         self.country
+    }
+
+    /// Short or long videos, unless a video picks the other.
+    pub fn format(&self) -> VideoFormat {
+        self.format
     }
 
     /// Whether the persona exists for this owner is the app's to check.
@@ -225,6 +234,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             aesthetic_notes: details.aesthetic_notes.clone(),
             language: details.language,
             country: details.country,
+            format: details.format,
             default_persona: details.default_persona,
             clip_model: details.clip_model.clone(),
             caption_style: details.caption_style,
@@ -313,6 +323,7 @@ mod tests {
         assert!(details.themes().is_empty());
         assert_eq!(details.language(), ContentLanguage::English);
         assert_eq!(details.country(), Country::UnitedStates);
+        assert_eq!(details.format(), VideoFormat::Short);
     }
 
     #[test]
@@ -413,6 +424,7 @@ mod tests {
             aesthetic_notes: "escuro, imagens de arquivo".into(),
             language: ContentLanguage::Portuguese,
             country: Country::Brazil,
+            format: VideoFormat::Long,
             default_persona: Some(PersonaId::new()),
             clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
             caption_style: crate::CaptionStyle::Punch,

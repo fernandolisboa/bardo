@@ -290,6 +290,7 @@ impl Bardo {
         let persona = self
             .narrator(project)?
             .map(|persona| persona.details.describe());
+        let format = project.format(details.format());
         Ok(TemplateValues::from([
             (TemplateVariable::ChannelName, details.name().to_owned()),
             (TemplateVariable::ChannelNiche, or_not_set(details.niche())),
@@ -320,6 +321,14 @@ impl Bardo {
             (TemplateVariable::Niche, project.niche.label().to_owned()),
             (TemplateVariable::ThemeTitle, project.title.clone()),
             (TemplateVariable::ThemeAngle, or_not_set(&angle)),
+            (
+                TemplateVariable::TargetLength,
+                format.target_length().to_owned(),
+            ),
+            (
+                TemplateVariable::FrameShape,
+                format.frame_shape().to_owned(),
+            ),
         ]))
     }
 

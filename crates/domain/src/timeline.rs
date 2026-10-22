@@ -259,9 +259,10 @@ impl Timeline {
     /// as the scenes when they run longer; the last scene fills to the
     /// end. Scenes too short to fill a frame are left out, and the scene
     /// before them runs on. The narration's words come captioned
-    /// (`crate::caption_lines`), in the default style. The cut is 16:9,
-    /// each clip filling a 9:16 frame from the middle.
-    pub fn rough_cut(plan: &ScenePlan, narration: &Narration) -> Timeline {
+    /// (`crate::caption_lines`), in the default style. The cut is in
+    /// `aspect` (the project's format), each clip filling the other shape
+    /// from the middle.
+    pub fn rough_cut(plan: &ScenePlan, narration: &Narration, aspect: AspectRatio) -> Timeline {
         let end_frame = plan
             .scenes()
             .iter()
@@ -321,7 +322,7 @@ impl Timeline {
             sfx: Vec::new(),
             mix: Mix::default(),
             captions,
-            aspect: AspectRatio::Landscape,
+            aspect,
         }
     }
 
@@ -977,12 +978,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn rough_cut_starts_in_the_shape_it_is_given() {
+        for aspect in AspectRatio::ALL {
+            let timeline =
+                Timeline::rough_cut(&plan(vec![scene(0, 2_000)]), &narration(2_000), aspect);
+            assert_eq!(timeline.aspect(), aspect);
+        }
+    }
+
+    #[test]
     fn rough_cut_places_each_scene_at_its_times() {
         let mut first = scene(0, 2_000);
         first.image = Some(image("scene-a.png"));
         let mut second = scene(2_000, 5_500);
         second.image = Some(image("scene-b.png"));
-        let timeline = Timeline::rough_cut(&plan(vec![first, second]), &narration(5_500));
+        let timeline = Timeline::rough_cut(
+            &plan(vec![first, second]),
+            &narration(5_500),
+            AspectRatio::Landscape,
+        );
 
         let video = timeline.video();
         assert_eq!(video.len(), 2);
@@ -1009,7 +1023,8 @@ pub(crate) mod tests {
     #[test]
     fn cuts_move_to_the_nearest_frame_and_leave_no_gaps() {
         let scenes = vec![scene(0, 1_010), scene(1_010, 2_049), scene(2_049, 3_333)];
-        let timeline = Timeline::rough_cut(&plan(scenes), &narration(3_333));
+        let timeline =
+            Timeline::rough_cut(&plan(scenes), &narration(3_333), AspectRatio::Landscape);
         let video = timeline.video();
         assert_eq!(video[1].at, frame_time(30));
         assert_eq!(video[2].at, frame_time(61));
@@ -1038,7 +1053,11 @@ pub(crate) mod tests {
         redrawn.image = Some(image("scene-b.png"));
         clip.file = "clip-b.mp4".into();
         redrawn.clip = Some(clip);
-        let timeline = Timeline::rough_cut(&plan(vec![animated, redrawn]), &narration(2_000));
+        let timeline = Timeline::rough_cut(
+            &plan(vec![animated, redrawn]),
+            &narration(2_000),
+            AspectRatio::Landscape,
+        );
         assert_eq!(
             timeline.video()[0].source,
             VideoSource::Clip {
@@ -1056,23 +1075,36 @@ pub(crate) mod tests {
     fn a_scene_without_an_image_is_missing_media() {
         let mut failed = scene(0, 1_000);
         failed.failure = Some(JobFailureKind::Declined);
-        let timeline = Timeline::rough_cut(&plan(vec![failed]), &narration(1_000));
+        let timeline = Timeline::rough_cut(
+            &plan(vec![failed]),
+            &narration(1_000),
+            AspectRatio::Landscape,
+        );
         assert_eq!(timeline.video()[0].source, VideoSource::Missing);
         assert_eq!(timeline.files(), vec!["narration-1.mp3"]);
     }
 
     #[test]
     fn the_last_scene_runs_to_the_end_of_the_narration() {
-        let timeline = Timeline::rough_cut(&plan(vec![scene(0, 1_000)]), &narration(4_000));
+        let timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 1_000)]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        );
         assert_eq!(timeline.duration(), ms(4_000));
-        let timeline = Timeline::rough_cut(&plan(vec![scene(0, 6_000)]), &narration(4_000));
+        let timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 6_000)]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        );
         assert_eq!(timeline.duration(), ms(6_000));
     }
 
     #[test]
     fn scenes_shorter_than_a_frame_are_left_out() {
         let scenes = vec![scene(0, 1_000), scene(1_000, 1_010), scene(1_010, 2_000)];
-        let timeline = Timeline::rough_cut(&plan(scenes), &narration(2_000));
+        let timeline =
+            Timeline::rough_cut(&plan(scenes), &narration(2_000), AspectRatio::Landscape);
         let shown: Vec<usize> = timeline
             .video()
             .iter()
@@ -1085,7 +1117,8 @@ pub(crate) mod tests {
     #[test]
     fn video_at_finds_the_item_under_the_playhead() {
         let scenes = vec![scene(0, 1_000), scene(1_000, 2_000)];
-        let timeline = Timeline::rough_cut(&plan(scenes), &narration(2_000));
+        let timeline =
+            Timeline::rough_cut(&plan(scenes), &narration(2_000), AspectRatio::Landscape);
         assert_eq!(timeline.video_at(ms(0)), Some(0));
         assert_eq!(timeline.video_at(ms(999)), Some(0));
         assert_eq!(timeline.video_at(ms(1_000)), Some(1));
@@ -1099,13 +1132,21 @@ pub(crate) mod tests {
         first.image = Some(image("scene-a.png"));
         let mut second = scene(1_000, 2_000);
         second.image = Some(image("scene-a.png"));
-        let timeline = Timeline::rough_cut(&plan(vec![first, second]), &narration(2_000));
+        let timeline = Timeline::rough_cut(
+            &plan(vec![first, second]),
+            &narration(2_000),
+            AspectRatio::Landscape,
+        );
         assert_eq!(timeline.files(), vec!["scene-a.png", "narration-1.mp3"]);
     }
 
     #[test]
     fn the_timeline_lasts_until_its_last_item_ends() {
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 1_000)]), &narration(1_000));
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 1_000)]),
+            &narration(1_000),
+            AspectRatio::Landscape,
+        );
         assert_eq!(timeline.duration(), ms(1_000));
         timeline.narration[0].at = ms(500);
         assert_eq!(timeline.video_end(), ms(1_000));
@@ -1122,7 +1163,11 @@ pub(crate) mod tests {
 
     #[test]
     fn narration_times_follow_the_cut() {
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 4_000)]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        );
         // Two pieces of the file: 0-1 s plays at 0, 2-4 s plays at 1 s.
         timeline.narration = vec![
             AudioItem {
@@ -1204,7 +1249,7 @@ pub(crate) mod tests {
     fn a_saved_timeline_comes_back_as_it_was_cut() {
         let plan = drawn(&[(0, 2_000, "a.png"), (2_000, 4_000, "b.png")]);
         let narration = narration(4_000);
-        let mut timeline = Timeline::rough_cut(&plan, &narration);
+        let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
         timeline.video.swap(0, 1);
         timeline.video[0].duration = ms(1_500);
         timeline.relayout();
@@ -1223,7 +1268,7 @@ pub(crate) mod tests {
     fn a_restored_timeline_shows_each_scene_as_it_is_now() {
         let plan = drawn(&[(0, 2_000, "a.png"), (2_000, 4_000, "b.png")]);
         let narration = narration(4_000);
-        let timeline = Timeline::rough_cut(&plan, &narration);
+        let timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
         let saved = saved(&timeline, &plan, &narration);
 
         let mut redrawn = plan.clone();
@@ -1246,7 +1291,11 @@ pub(crate) mod tests {
     fn a_saved_timeline_on_another_plan_or_narration_is_left_behind() {
         let plan = drawn(&[(0, 2_000, "a.png")]);
         let narration = narration(2_000);
-        let saved = saved(&Timeline::rough_cut(&plan, &narration), &plan, &narration);
+        let saved = saved(
+            &Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape),
+            &plan,
+            &narration,
+        );
         let replanned = drawn(&[(0, 2_000, "a.png")]);
         assert_eq!(Timeline::restore(&saved, &replanned, &narration, &[]), None);
         let renarrated = self::narration(2_000);
@@ -1257,7 +1306,11 @@ pub(crate) mod tests {
     fn a_saved_timeline_that_does_not_hold_together_is_left_behind() {
         let plan = drawn(&[(0, 2_000, "a.png")]);
         let narration = narration(2_000);
-        let mut saved = saved(&Timeline::rough_cut(&plan, &narration), &plan, &narration);
+        let mut saved = saved(
+            &Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape),
+            &plan,
+            &narration,
+        );
         saved.narration_items[0].duration = ms(2_500);
         assert_eq!(
             Timeline::restore(&saved, &plan, &narration, &[]),
@@ -1286,7 +1339,11 @@ pub(crate) mod tests {
 
     #[test]
     fn fades_are_cut_short_on_an_item_shorter_than_them() {
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 4_000)]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        );
         let item = &mut timeline.narration[0];
         item.fade_in = ms(1_000);
         item.fade_out = ms(2_000);
@@ -1303,7 +1360,11 @@ pub(crate) mod tests {
 
     #[test]
     fn speech_is_where_the_cut_plays_each_word() {
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 4_000)]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        );
         // 0-1 s of the file at 0, 2-4 s of it at 1 s.
         timeline.narration = vec![
             AudioItem {
@@ -1345,7 +1406,11 @@ pub(crate) mod tests {
 
     #[test]
     fn the_music_ducks_under_the_words_while_ducking_is_on() {
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 4_000)]), &narration(4_000));
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 4_000)]),
+            &narration(4_000),
+            AspectRatio::Landscape,
+        );
         let words = [(ms(1_000), ms(1_500)), (ms(1_600), ms(2_000))];
         let envelope = timeline.ducking(words).unwrap();
         assert_eq!(envelope.depth, crate::DEFAULT_DUCK);
@@ -1392,7 +1457,7 @@ pub(crate) mod tests {
             [(0, 500), (600, 900), (900, 1_200), (1_200, 2_100)],
         ] {
             let narration = narrated("Oh. Then the rest.", &words, 2_000);
-            let timeline = Timeline::rough_cut(&plan, &narration);
+            let timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
             assert!(
                 timeline.captions().holds_together(min_length()),
                 "{words:?}"
@@ -1421,7 +1486,11 @@ pub(crate) mod tests {
             ],
             2_500,
         );
-        let timeline = Timeline::rough_cut(&plan(vec![scene(0, 2_500)]), &narration);
+        let timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 2_500)]),
+            &narration,
+            AspectRatio::Landscape,
+        );
         let captions = timeline.captions();
         assert!(captions.shown());
         assert_eq!(captions.style(), CaptionStyle::Clean);
@@ -1451,7 +1520,11 @@ pub(crate) mod tests {
             &[(0, 500), (1_000, 1_500), (2_000, 2_500)],
             3_000,
         );
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 3_000)]), &narration);
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 3_000)]),
+            &narration,
+            AspectRatio::Landscape,
+        );
         let spans = |timeline: &Timeline| -> Vec<(usize, Duration, Duration)> {
             timeline
                 .caption_spans()
@@ -1500,7 +1573,11 @@ pub(crate) mod tests {
     #[test]
     fn a_caption_over_a_cut_shows_on_both_sides_of_it() {
         let narration = narrated("Slowly spoken", &[(0, 1_000), (1_000, 2_000)], 2_000);
-        let mut timeline = Timeline::rough_cut(&plan(vec![scene(0, 2_000)]), &narration);
+        let mut timeline = Timeline::rough_cut(
+            &plan(vec![scene(0, 2_000)]),
+            &narration,
+            AspectRatio::Landscape,
+        );
         let item = timeline.narration[0].clone();
         timeline.narration = vec![
             AudioItem {
@@ -1524,8 +1601,8 @@ pub(crate) mod tests {
     fn a_saved_timeline_keeps_its_captions() {
         let plan = drawn(&[(0, 2_000, "a.png")]);
         let narration = narrated("One. Two.", &[(0, 500), (1_000, 1_500)], 2_000);
-        let mut timeline =
-            Timeline::rough_cut(&plan, &narration).with_caption_style(CaptionStyle::Boxed);
+        let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape)
+            .with_caption_style(CaptionStyle::Boxed);
         timeline.captions.lines[0].text = "Uno.".into();
         timeline.captions.shown = false;
         let saved = saved(&timeline, &plan, &narration);
@@ -1565,7 +1642,7 @@ pub(crate) mod tests {
     fn a_saved_timeline_keeps_its_mix_and_fades() {
         let plan = drawn(&[(0, 2_000, "a.png")]);
         let narration = narration(2_000);
-        let mut timeline = Timeline::rough_cut(&plan, &narration);
+        let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
         timeline.narration[0].fade_in = ms(300);
         timeline.narration[0].fade_out = ms(700);
         timeline.mix.lane_mut(crate::AudioLane::Music).gain = crate::Decibels::from_tenths(-60);
@@ -1593,7 +1670,7 @@ pub(crate) mod tests {
     fn a_saved_timeline_keeps_its_frame_shape_and_crops() {
         let plan = drawn(&[(0, 2_000, "a.png"), (2_000, 4_000, "b.png")]);
         let narration = narration(4_000);
-        let rough = Timeline::rough_cut(&plan, &narration);
+        let rough = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
         assert_eq!(rough.aspect(), AspectRatio::Landscape);
         assert!(
             rough
@@ -1618,7 +1695,8 @@ pub(crate) mod tests {
     #[test]
     fn a_16_9_frame_takes_every_picture_whole() {
         let plan = drawn(&[(0, 2_000, "a.png")]);
-        let mut item = Timeline::rough_cut(&plan, &narration(2_000)).video[0].clone();
+        let mut item =
+            Timeline::rough_cut(&plan, &narration(2_000), AspectRatio::Landscape).video[0].clone();
         item.framing = Framing::Crop(crate::CropPosition::new(0, 0));
         assert_eq!(item.framing_in(AspectRatio::Landscape), Framing::Fit);
         assert_eq!(item.framing_in(AspectRatio::Vertical), item.framing);
@@ -1646,7 +1724,7 @@ pub(crate) mod tests {
         let music = asset(MediaKind::Audio, "media-1.mp3", 30_000);
         let boom = asset(MediaKind::Audio, "media-2.wav", 800);
         let footage = asset(MediaKind::Video, "media-3.mov", 1_500);
-        let mut timeline = Timeline::rough_cut(&plan, &narration);
+        let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
         for (asset, track, at) in [
             (&music, crate::Track::Music, 0),
             (&boom, crate::Track::Sfx, 1_000),

@@ -320,11 +320,11 @@ mod tests {
         assert_eq!(updated.network, Network::YouTube);
         assert_eq!(updated.details.metadata().tags(), ["space", "apollo"]);
         assert_eq!(
-            updated.render_preset(),
+            updated.render_preset(bardo_domain::VideoFormat::Short),
             RenderPreset {
                 aspect: AspectRatio::Landscape,
                 max_duration: "20:00".parse().unwrap(),
-                ..Network::YouTube.render_preset()
+                ..Network::YouTube.render_preset(bardo_domain::VideoFormat::Short)
             }
         );
         assert_eq!(app.network_accounts(channel).unwrap(), [updated]);
@@ -496,7 +496,7 @@ mod tests {
         let mut app = app();
         let preset = RenderPreset {
             bitrate: "7.5".parse().unwrap(),
-            ..Network::YouTube.render_preset()
+            ..Network::YouTube.render_preset(bardo_domain::VideoFormat::Short)
         };
         let summary = app.preset_summary(&preset);
         assert!(summary.contains("9:16"), "{summary}");

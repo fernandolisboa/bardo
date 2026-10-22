@@ -53,6 +53,7 @@ mod decision;
 mod due;
 mod edit;
 mod files;
+mod format;
 mod framing;
 mod generation;
 mod image;
@@ -141,9 +142,12 @@ pub use decision::{
 pub use due::{DUE_GRACE, DueStep, PREPARE_AHEAD, UNPUBLISHED_LIFETIME, due_step, prepare_at};
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
 pub use files::{ProjectFileError, ProjectFiles};
+pub use format::{UnknownVideoFormat, VideoFormat};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
 pub use generation::{Generation, GenerationId, TemplateUsed};
-pub use image::{GeneratedImage, ImageFormat, ImageGenerator, ImageRequest};
+pub use image::{
+    GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, image_dimensions, shape_of,
+};
 pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
     JobRecord, JobRepository, JobState, Progress, RetryPolicy, UnknownJobFailureKind,

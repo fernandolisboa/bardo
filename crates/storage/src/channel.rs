@@ -9,7 +9,7 @@ use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
-     transition_frames FROM channel";
+     transition_frames, video_format FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
@@ -19,6 +19,7 @@ struct ChannelRow {
     clip_model: (Option<String>, Option<String>),
     caption_style: String,
     transition: (String, i64),
+    format: String,
     draft: ChannelDraft,
 }
 
@@ -32,6 +33,7 @@ impl ChannelRow {
                 clip_model: (row.get(8)?, row.get(9)?),
                 caption_style: row.get(10)?,
                 transition: (row.get(11)?, row.get(12)?),
+                format: row.get(13)?,
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -63,6 +65,7 @@ impl ChannelRow {
             .map_err(boxed)?;
         draft.clip_model = clip_model(self.clip_model)?;
         draft.caption_style = self.caption_style.parse().map_err(boxed)?;
+        draft.format = self.format.parse().map_err(boxed)?;
         let (kind, frames) = self.transition;
         draft.transition = Transition::new(
             kind.parse::<TransitionKind>().map_err(boxed)?,
@@ -144,8 +147,8 @@ impl ChannelRepository for Database {
         tx.execute(
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
                                   default_persona_id, clip_provider, clip_model, caption_style,
-                                  transition, transition_frames)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                                  transition, transition_frames, video_format)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -158,6 +161,7 @@ impl ChannelRepository for Database {
                  caption_style = excluded.caption_style,
                  transition = excluded.transition,
                  transition_frames = excluded.transition_frames,
+                 video_format = excluded.video_format,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -173,6 +177,7 @@ impl ChannelRepository for Database {
                 details.caption_style().code(),
                 details.transition().kind.code(),
                 details.transition().frames(),
+                details.format().code(),
             ],
         )
         .map_err(boxed)?;
@@ -219,6 +224,7 @@ mod tests {
             ),
             caption_style: CaptionStyle::Boxed,
             transition: Transition::new(TransitionKind::SlideLeft, 24),
+            format: bardo_domain::VideoFormat::Long,
         })
         .unwrap();
         Channel::new(owner, details)
@@ -232,6 +238,43 @@ mod tests {
 
         assert_eq!(db.get(saved.id).unwrap(), Some(saved.clone()));
         assert_eq!(db.list(owner).unwrap(), [saved]);
+    }
+
+    #[test]
+    fn a_channel_from_before_formats_makes_long_videos() {
+        let (db, owner) = database_with_profile();
+        let short = Channel::new(
+            owner,
+            ChannelDetails::validate(ChannelDraft {
+                name: "Shorts".into(),
+                ..ChannelDraft::default()
+            })
+            .unwrap(),
+        );
+        ChannelRepository::save(&db, &short).unwrap();
+        assert_eq!(
+            db.get(short.id).unwrap().unwrap().details.format(),
+            bardo_domain::VideoFormat::Short
+        );
+
+        // A row as an older version wrote it, with no format of its own.
+        let old = ChannelId::new();
+        db.conn()
+            .execute(
+                "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country)
+                 VALUES (?1, ?2, 'Old', '', '', ?3, ?4)",
+                params![
+                    old.to_string(),
+                    owner.to_string(),
+                    ContentLanguage::English.code(),
+                    Country::UnitedStates.code(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            db.get(old).unwrap().unwrap().details.format(),
+            bardo_domain::VideoFormat::Long
+        );
     }
 
     #[test]

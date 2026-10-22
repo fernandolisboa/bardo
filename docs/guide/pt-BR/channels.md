@@ -39,6 +39,14 @@ Cada conta de rede do canal ainda pode postar em outro idioma; veja os [padrões
 
 A [persona](personas.md) que narra os vídeos do canal: a voz, o tom e o estilo de roteiro. Um projeto novo começa com ela, e o projeto pode escolher outro narrador. Uma persona pode narrar vários canais; **Sem persona padrão** deixa a escolha para cada projeto.
 
+<a id="format"></a>
+## Formato do vídeo
+
+- **Short (9:16, menos de um minuto)**: um vídeo vertical de 45 a 60 segundos, que todas as redes aceitam. Canais novos começam assim.
+- **Longo (16:9, 8 a 10 min)**: um vídeo deitado de 8 a 10 minutos, para o YouTube. As outras redes mantêm os presets verticais, e um corte mais longo do que uma delas aceita fica [bloqueado](render.md#gates) só para ela, então um vídeo longo é, na prática, um vídeo de YouTube.
+
+O formato define o tamanho do roteiro que o Claude escreve, o formato em que as imagens e os clipes das cenas são feitos, o formato de um corte novo no editor e qual [preset de render](render.md#targets) o YouTube usa. Cada projeto segue o formato do canal, a não ser que escolha o outro ([Projetos](projects.md#format)). A mudança vale para o que for feito depois; roteiros, imagens e cortes já feitos mantêm o formato.
+
 <a id="defaults"></a>
 ## Modelo de vídeo, legendas e transições
 

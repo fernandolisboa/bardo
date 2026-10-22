@@ -43,7 +43,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Personas (ADR-0005): library with four default personas, two per language (en-US, pt-BR): a sober documentary narrator and a dramatic storyteller, one male and one female voice, using ElevenLabs default voices available to every account; create/edit; pick the voice from the user's ElevenLabs voices (including clones made there); export/import persona packages.
 - Templates: versioned, editable templates for script, title, description, image prompt, video prompt, narration direction and music prompt. Each generation records the template version used.
 - Generation, each step reviewable and editable before the next:
-  1. Script (Claude) from niche + theme + persona + channel aesthetic.
+  1. Script (Claude) from niche + theme + persona + channel aesthetic, as long as the video format asks: a Short or a long video, a channel default with a per-project override (ADR-0018, #179).
   2. Narration (ElevenLabs) from the approved script with the persona's voice. The same call returns the word timings of the script text, so generated narration needs no speech-to-text.
   3. Scene plan and prompts (Claude), one per scene.
   4. Images (Nano Banana) and video clips through two video adapters: Higgsfield first (it aggregates Kling, Seedance, Wan, MiniMax and its own models), then Google through the Gemini API (Veo 3.1 and Gemini Omni Flash, sharing the Nano Banana key); since then also Kling's own API (Kling 3.0, 2.6 and 2.5 Turbo at 720p or 1080p, on a Kling key; ADR-0017). Provider and model are a setting per channel with a per-scene override, and the scene screen shows the estimated cost before generating.
@@ -72,7 +72,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Preview playback from low-resolution proxies.
 - Transitions between video clips: cut, crossfade, through black or white, wipes, slides and zoom, centered on the cut so the narration stays in sync; a default per channel (ADR-0016, #167).
 - AI suggestions: the decision engine scores candidate cut points (sentence ends, pauses, scene changes) from the script and word timings, in stretches that fit its context; the user accepts or rejects each. Accepting is a manual cut, undoable like any other; suggestions under the profile's floor are hidden until asked for.
-- Render presets per network; final render as a job after a review screen (duration, resolution, loudness, captions on/off, target networks).
+- Render presets per network (YouTube's follows the video format, ADR-0018); final render as a job after a review screen (duration, resolution, loudness, captions on/off, target networks).
 
 **Not in the MVP**
 - Keyframed effects, color grading. Transitions since brought in (ADR-0016, #167).

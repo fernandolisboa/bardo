@@ -22,16 +22,15 @@ use crate::retry::{Backoff, Sleeper, thread_sleeper};
 pub const MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 /// Nano Banana 2: Google's stable image model for everyday generation.
 pub const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
-pub const ASPECT_RATIO: &str = "16:9";
 pub const IMAGE_SIZE: &str = "2K";
 
-/// The request that draws `request.prompt`.
+/// The request that draws `request.prompt` in `request.aspect`.
 pub fn image_request(key: &ApiKey, request: &ImageRequest) -> HttpRequest {
     let body = json!({
         "contents": [{ "role": "user", "parts": [{ "text": request.prompt }] }],
         "generationConfig": {
             "responseModalities": ["IMAGE"],
-            "imageConfig": { "aspectRatio": ASPECT_RATIO, "imageSize": IMAGE_SIZE },
+            "imageConfig": { "aspectRatio": request.aspect.code(), "imageSize": IMAGE_SIZE },
         },
     });
     HttpRequest::post_json(

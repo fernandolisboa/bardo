@@ -15,7 +15,7 @@ use bardo_domain::{
     NicheSeedError, PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError,
     SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind,
     TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode,
-    TourId, TransitionKind, UiLanguage, UiTheme, Visibility, VoiceCategory, VoiceFlag,
+    TourId, TransitionKind, UiLanguage, UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -64,6 +64,8 @@ pub enum Text {
     ChannelClipModelHint,
     ChannelCaptionStyle,
     ChannelCaptionStyleHint,
+    ChannelFormat,
+    ChannelFormatHint,
     ChannelTransition,
     ChannelTransitionHint,
     ChannelTransitionLength,
@@ -131,6 +133,7 @@ pub enum Text {
     AspectRatioName(AspectRatio),
     CaptionStyleName(CaptionStyle),
     TransitionName(TransitionKind),
+    VideoFormatName(VideoFormat),
     /// No transition: a hard cut.
     TransitionCut,
     NetworkAccountFieldError(NetworkAccountFieldError),
@@ -238,6 +241,10 @@ pub enum Text {
     ProjectNarratorChannel,
     ProjectNarratorChannelNone,
     ProjectNarratorHint,
+    ProjectFormat,
+    /// Placeholder: `{format}`.
+    ProjectFormatChannel,
+    ProjectFormatHint,
     JobsTitle,
     JobsEmpty,
     JobsRunning,
@@ -1093,6 +1100,7 @@ pub enum Text {
     GateSilent,
     GateLoudnessFar,
     GatePeaksLimited,
+    GateLongForUnverified,
     GateBlocks,
     GateWarning,
     RenderStateReady,
@@ -1887,6 +1895,8 @@ impl Text {
             Text::ChannelClipModelHint => "channel.clip_model_hint",
             Text::ChannelCaptionStyle => "channel.caption_style",
             Text::ChannelCaptionStyleHint => "channel.caption_style_hint",
+            Text::ChannelFormat => "channel.format",
+            Text::ChannelFormatHint => "channel.format_hint",
             Text::ChannelTransition => "channel.transition",
             Text::ChannelTransitionHint => "channel.transition_hint",
             Text::ChannelTransitionLength => "channel.transition_length",
@@ -1974,6 +1984,10 @@ impl Text {
                 TransitionKind::ZoomIn => "transition.zoom_in",
             },
             Text::TransitionCut => "transition.cut",
+            Text::VideoFormatName(format) => match format {
+                VideoFormat::Short => "video_format.short",
+                VideoFormat::Long => "video_format.long",
+            },
             Text::NetworkAccountFieldError(error) => match error {
                 NetworkAccountFieldError::HandleRequired => "network_account.error.handle_required",
                 NetworkAccountFieldError::HandleTooLong => "network_account.error.handle_too_long",
@@ -2098,6 +2112,9 @@ impl Text {
             Text::ProjectNarratorChannel => "projects.narrator_channel",
             Text::ProjectNarratorChannelNone => "projects.narrator_channel_none",
             Text::ProjectNarratorHint => "projects.narrator_hint",
+            Text::ProjectFormat => "projects.format",
+            Text::ProjectFormatChannel => "projects.format_channel",
+            Text::ProjectFormatHint => "projects.format_hint",
             Text::PersonaFieldError(error) => match error {
                 PersonaFieldError::NameRequired => "persona.error.name_required",
                 PersonaFieldError::NameTooLong => "persona.error.name_too_long",
@@ -3043,6 +3060,7 @@ impl Text {
             Text::GateSilent => "render.gate.silent",
             Text::GateLoudnessFar => "render.gate.loudness_far",
             Text::GatePeaksLimited => "render.gate.peaks_limited",
+            Text::GateLongForUnverified => "render.gate.long_for_unverified",
             Text::GateBlocks => "render.gate.blocks",
             Text::GateWarning => "render.gate.warning",
             Text::RenderStateReady => "render.state.ready",
@@ -4048,6 +4066,8 @@ mod tests {
             Text::ChannelClipModelHint,
             Text::ChannelCaptionStyle,
             Text::ChannelCaptionStyleHint,
+            Text::ChannelFormat,
+            Text::ChannelFormatHint,
             Text::ChannelTransition,
             Text::ChannelTransitionHint,
             Text::ChannelTransitionLength,
@@ -4190,6 +4210,9 @@ mod tests {
             Text::ProjectNarratorChannel,
             Text::ProjectNarratorChannelNone,
             Text::ProjectNarratorHint,
+            Text::ProjectFormat,
+            Text::ProjectFormatChannel,
+            Text::ProjectFormatHint,
             Text::JobsTitle,
             Text::JobsEmpty,
             Text::JobsRunning,
@@ -4772,6 +4795,7 @@ mod tests {
         texts.extend(AspectRatio::ALL.map(Text::AspectRatioName));
         texts.extend(CaptionStyle::ALL.map(Text::CaptionStyleName));
         texts.extend(TransitionKind::ALL.map(Text::TransitionName));
+        texts.extend(VideoFormat::ALL.map(Text::VideoFormatName));
         texts.push(Text::TransitionCut);
         texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
@@ -5014,6 +5038,7 @@ mod tests {
         texts.push(Text::GateSilent);
         texts.push(Text::GateLoudnessFar);
         texts.push(Text::GatePeaksLimited);
+        texts.push(Text::GateLongForUnverified);
         texts.push(Text::GateBlocks);
         texts.push(Text::GateWarning);
         texts.push(Text::RenderStateReady);

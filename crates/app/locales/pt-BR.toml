@@ -76,6 +76,8 @@ clip_model_default = "{model} (padrão)"
 clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield, pelo Kling ou pelo Google. Qualquer cena pode escolher outro."
 caption_style = "Estilo de legenda"
 caption_style_hint = "Como as legendas aparecem nos novos projetos deste canal. Cada projeto pode escolher outro no editor."
+format = "Formato do vídeo"
+format_hint = "Short: vídeo vertical de menos de um minuto, para todas as redes. Longo: vídeo 16:9 de 8 a 10 minutos, para o YouTube. Define o tamanho do roteiro, o formato das imagens e do corte, e o preset do YouTube. Cada projeto pode escolher o outro."
 transition = "Transição padrão"
 transition_hint = "O que o editor põe num corte quando você aperta T ou escolhe uma transição. Qualquer corte pode usar outra."
 transition_length = "Duração"
@@ -177,6 +179,10 @@ private = "Privado"
 clean = "Limpa"
 boxed = "Tarja"
 punch = "Impacto"
+
+[video_format]
+short = "Short (9:16, menos de um minuto)"
+long = "Longo (16:9, 8 a 10 min)"
 
 [transition]
 cut = "Corte"
@@ -470,6 +476,9 @@ narrator = "Narrador"
 narrator_channel = "Padrão do canal: {name}"
 narrator_channel_none = "Padrão do canal (nenhuma definida)"
 narrator_hint = "Lê a narração deste vídeo e molda o roteiro dele. Escolha uma persona para usá-la só neste vídeo."
+format = "Formato"
+format_channel = "Do canal: {format}"
+format_hint = "Short ou vídeo longo. Define o tamanho do próximo roteiro, o formato das próximas imagens e dos novos cortes, e o preset do YouTube. O que já foi feito fica como está."
 
 [projects.error]
 not_loaded = "Não foi possível carregar os projetos de vídeo."
@@ -682,6 +691,8 @@ narration_sentences = "A narração, uma frase numerada por linha com o momento 
 video_length = "A duração do vídeo, pela narração (\"not known yet\" enquanto não houver uma)."
 script = "O roteiro aprovado."
 networks = "As contas de rede do canal, uma por linha, com os campos e limites de cada rede, o idioma, as tags padrão e o rodapé da conta."
+target_length = "O tamanho do roteiro, pelo formato do vídeo: menos de um minuto para um Short, de 8 a 10 minutos para um vídeo longo."
+frame_shape = "O formato das imagens, pelo formato do vídeo: em pé (9:16) para um Short, deitado (16:9) para um vídeo longo."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -1420,6 +1431,7 @@ missing_media = "{n} clipes estão sem mídia e saem pretos."
 silent = "A mixagem não tem som; ela sai como está."
 loudness_far = "A mixagem está a {gain} dB do alvo desta rede; o render muda isso tudo."
 peaks_limited = "Neste alvo os picos estourariam, então o render os limita."
+long_for_unverified = "O YouTube só aceita vídeos de mais de 15 minutos de contas verificadas. Verifique a sua em youtube.com/verify antes de enviar."
 blocks = "Bloqueia"
 warning = "Aviso"
 
@@ -2229,6 +2241,10 @@ body = "O projeto em que você está trabalhando, com o menu que troca para outr
 title = "Quem narra"
 body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo."
 
+[tour.projects.format]
+title = "Short ou longo"
+body = "Um Short é um vídeo vertical de menos de um minuto; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o tamanho do próximo roteiro, o formato das próximas imagens e dos novos cortes, e o preset do YouTube."
+
 [tour.projects.stages]
 title = "As etapas"
 body = "Roteiro, narração, cenas, clipes, edição, render e publicação, nessa ordem. A linha sob cada etapa diz como ela está: pronta, gerando, para revisar, desatualizada ou o que ela espera."
@@ -2476,12 +2492,8 @@ title = "Seus canais"
 body = "Cada canal é um nicho para um mercado. Escolha um canal para editá-lo, ou crie um em Novo canal; pesquisas, ideias, projetos e contas de rede pertencem sempre a um canal."
 
 [tour.channels.niche]
-title = "Nicho e temas"
-body = "O nicho diz do que o canal trata, e os temas listam os assuntos a que ele volta, um por linha. A pesquisa e as ideias de temas partem deles."
-
-[tour.channels.look]
-title = "Notas de estética"
-body = "Como os vídeos do canal devem parecer: estilo, paleta, clima. Ideias e roteiros levam essas notas junto, para todo vídeo manter a cara do canal."
+title = "Nicho, temas e estética"
+body = "O nicho diz do que o canal trata, os temas listam os assuntos a que ele volta, um por linha, e as notas de estética dizem como os vídeos dele devem parecer. A pesquisa e as ideias partem do nicho e dos temas; ideias, roteiros e prompts de cena levam as notas junto."
 
 [tour.channels.market]
 title = "Idioma e país"
@@ -2490,6 +2502,10 @@ body = "O idioma em que roteiros e narração são escritos, e o país cujo púb
 [tour.channels.persona]
 title = "Persona padrão"
 body = "Quem narra os vídeos do canal, a menos que um projeto escolha outra persona. As personas ficam numa tela própria, e uma pode narrar vários canais."
+
+[tour.channels.format]
+title = "Shorts ou vídeos longos"
+body = "Shorts são verticais, têm menos de um minuto e servem para todas as redes. Vídeos longos são 16:9 e têm de 8 a 10 minutos, para o YouTube. O formato define o tamanho dos roteiros, o formato das imagens e dos cortes, e o preset do YouTube. Cada projeto pode escolher o outro."
 
 [tour.channels.defaults]
 title = "Modelo de vídeo, legendas e transições"

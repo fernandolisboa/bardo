@@ -48,8 +48,8 @@ use bardo_domain::{
     EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
     MediaAsset, MediaAssetId, MediaKind, NarrationId, NarrationRepository, Picture,
     PlayedTransition, ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository,
-    Shift, ThemeRepository, Timeline, TimelineRepository, Track, Transition, VideoProject,
-    VideoProjectId, VideoSource, frame_at, frame_time, nearest_frame, snap,
+    Shift, ThemeRepository, Timeline, TimelineRepository, Track, Transition, VideoFormat,
+    VideoProject, VideoProjectId, VideoSource, frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -1277,6 +1277,14 @@ impl Bardo {
         let caption_style = channel.as_ref().map_or(CaptionStyle::default(), |channel| {
             channel.details.caption_style()
         });
+        // A new cut starts in the shape of the project's format.
+        let aspect = project
+            .format(
+                channel
+                    .as_ref()
+                    .map_or(VideoFormat::default(), |channel| channel.details.format()),
+            )
+            .aspect();
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
         let job = self.latest_proxies_job(project.id);
@@ -1316,13 +1324,9 @@ impl Bardo {
                 };
                 // A cut that starts over keeps the frame shape it had.
                 let timeline = restored.unwrap_or_else(|| {
-                    let cut = Timeline::rough_cut(plan, narration)
+                    let cut = Timeline::rough_cut(plan, narration, aspect)
                         .with_caption_style(caption_style)
-                        .with_aspect(
-                            saved
-                                .as_ref()
-                                .map_or(AspectRatio::Landscape, |saved| saved.aspect),
-                        );
+                        .with_aspect(saved.as_ref().map_or(aspect, |saved| saved.aspect));
                     match &music {
                         Some(music) => cut.use_music(None, music).unwrap_or(cut),
                         None => cut,

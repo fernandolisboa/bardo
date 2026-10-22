@@ -135,6 +135,10 @@ pub fn clip_body(request: &ClipRequest) -> Value {
     body.insert("prompt".into(), json!(prompt));
     body.insert("image_url".into(), json!(request.image.0));
     body.insert("duration".into(), json!(request.seconds));
+    // Models that take a frame shape get the first frame's.
+    if body.contains_key("aspect_ratio") {
+        body.insert("aspect_ratio".into(), json!(request.aspect.code()));
+    }
     Value::Object(body)
 }
 

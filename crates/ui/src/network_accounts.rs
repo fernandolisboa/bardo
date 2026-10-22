@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use bardo_app::bardo_domain::{
     AspectRatio, ChannelId, ContentLanguage, Network, NetworkAccount, NetworkAccountDraft,
     NetworkAccountFieldError, NetworkAccountId, Resolution, SignInFailureKind, SignInMethod,
-    VideoCodec, Visibility,
+    VideoCodec, VideoFormat, Visibility,
 };
 use bardo_app::{
     AccountChoice, Bardo, ConnectionError, ConnectionState, Control, GuideRef, NetworkAccountError,
@@ -200,6 +200,8 @@ struct ConnectionNotice {
 struct ChannelRef {
     id: ChannelId,
     language: ContentLanguage,
+    /// The channel's videos' format: the presets shown are for it.
+    format: VideoFormat,
 }
 
 pub struct NetworkAccountsPanel {
@@ -358,6 +360,11 @@ impl NetworkAccountsPanel {
         self.scroll.clone()
     }
 
+    /// The format of the channel's videos, whose presets the accounts show.
+    fn format(&self) -> VideoFormat {
+        self.channel.map(|c| c.format).unwrap_or_default()
+    }
+
     /// Whether the channel shown has accounts: the screen offers its tour
     /// only then.
     pub fn has_accounts(&self) -> bool {
@@ -365,15 +372,19 @@ impl NetworkAccountsPanel {
     }
 
     /// Shows the accounts of `channel` (with its content language, which
-    /// the language default names), or none while a channel is being
-    /// created. Closes any open form.
+    /// the language default names, and its format, whose presets show), or
+    /// none while a channel is being created. Closes any open form.
     pub fn set_channel(
         &mut self,
-        channel: Option<(ChannelId, ContentLanguage)>,
+        channel: Option<(ChannelId, ContentLanguage, VideoFormat)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let channel = channel.map(|(id, language)| ChannelRef { id, language });
+        let channel = channel.map(|(id, language, format)| ChannelRef {
+            id,
+            language,
+            format,
+        });
         let same = self.channel.map(|c| c.id) == channel.map(|c| c.id);
         self.channel = channel;
         if !same {
@@ -444,7 +455,7 @@ impl NetworkAccountsPanel {
             .map(Editing::network)
             .unwrap_or(Network::YouTube);
         let channel_language = self.channel.map(|c| c.language).unwrap_or_default();
-        let preset = network.render_preset();
+        let preset = network.render_preset(self.format());
         let bardo = self.bardo.read(cx);
 
         let handle = tr(bardo, Text::AccountHandlePlaceholder);
@@ -1464,7 +1475,7 @@ impl NetworkAccountsPanel {
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(SharedString::from(
-                                bardo.preset_summary(&account.render_preset()),
+                                bardo.preset_summary(&account.render_preset(self.format())),
                             ))
                             .into_any_element(),
                     ))
@@ -1582,7 +1593,7 @@ impl NetworkAccountsPanel {
             Text::RenderPresetEffective,
             &[(
                 "summary",
-                &bardo.preset_summary(&draft.render_preset(network)),
+                &bardo.preset_summary(&draft.render_preset(network, self.format())),
             )],
         ));
 

@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use crate::{
     ChannelId, Confidence, JobId, Niche, PerformanceReason, PersonaId, ProfileId, RepositoryError,
-    Score,
+    Score, VideoFormat,
 };
 
 uuid_id!(
@@ -357,6 +357,7 @@ impl Theme {
             title: self.idea.title.clone(),
             created_at: now,
             persona: None,
+            format: None,
         })
     }
 }
@@ -389,12 +390,20 @@ pub struct VideoProject {
     /// The persona that narrates this video instead of the channel's
     /// default; `None` follows the channel.
     pub persona: Option<PersonaId>,
+    /// Short or long, instead of the channel's default; `None` follows the
+    /// channel.
+    pub format: Option<VideoFormat>,
 }
 
 impl VideoProject {
     /// Who narrates the video: its own persona, else the channel's default.
     pub fn narrator(&self, channel_default: Option<PersonaId>) -> Option<PersonaId> {
         self.persona.or(channel_default)
+    }
+
+    /// What kind of video it is: its own format, else the channel's.
+    pub fn format(&self, channel_default: VideoFormat) -> VideoFormat {
+        self.format.unwrap_or(channel_default)
     }
 }
 
@@ -422,6 +431,13 @@ pub trait ThemeRepository: Send + Sync {
         &self,
         id: VideoProjectId,
         persona: Option<PersonaId>,
+    ) -> Result<(), RepositoryError>;
+
+    /// Sets or clears (`None`, the channel's) the project's format.
+    fn set_project_format(
+        &self,
+        id: VideoProjectId,
+        format: Option<VideoFormat>,
     ) -> Result<(), RepositoryError>;
 }
 
@@ -456,6 +472,14 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
         persona: Option<PersonaId>,
     ) -> Result<(), RepositoryError> {
         (**self).set_project_persona(id, persona)
+    }
+
+    fn set_project_format(
+        &self,
+        id: VideoProjectId,
+        format: Option<VideoFormat>,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_project_format(id, format)
     }
 }
 

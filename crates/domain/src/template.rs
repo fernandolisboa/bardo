@@ -64,6 +64,7 @@ impl TemplateKind {
                 TemplateVariable::Niche,
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::ThemeAngle,
+                TemplateVariable::TargetLength,
             ],
             TemplateKind::ImagePrompt => &[
                 TemplateVariable::ChannelName,
@@ -74,6 +75,7 @@ impl TemplateKind {
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::ThemeAngle,
                 TemplateVariable::NarrationSentences,
+                TemplateVariable::FrameShape,
             ],
             TemplateKind::MusicPrompt => &[
                 TemplateVariable::ChannelName,
@@ -152,10 +154,14 @@ pub enum TemplateVariable {
     /// The networks to write for, one per line: each one's fields and
     /// limits, its language and the account's default tags.
     Networks,
+    /// How long the script runs, from the video's format (Short or Long).
+    TargetLength,
+    /// The shape of the pictures, from the video's format.
+    FrameShape,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 14] = [
+    pub const ALL: [TemplateVariable; 16] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -170,6 +176,8 @@ impl TemplateVariable {
         TemplateVariable::VideoLength,
         TemplateVariable::Script,
         TemplateVariable::Networks,
+        TemplateVariable::TargetLength,
+        TemplateVariable::FrameShape,
     ];
 
     /// The name written between the braces.
@@ -189,6 +197,8 @@ impl TemplateVariable {
             TemplateVariable::VideoLength => "video_length",
             TemplateVariable::Script => "script",
             TemplateVariable::Networks => "networks",
+            TemplateVariable::TargetLength => "target_length",
+            TemplateVariable::FrameShape => "frame_shape",
         }
     }
 

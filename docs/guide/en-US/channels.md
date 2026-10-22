@@ -39,6 +39,14 @@ Each network account of the channel can still post in another language; see [met
 
 The [persona](personas.md) that narrates the channel's videos: its voice, tone and script style. A new project starts with it, and a project can pick another narrator. One persona can narrate several channels; **No default persona** leaves the choice to each project.
 
+<a id="format"></a>
+## Video format
+
+- **Short (9:16, under a minute)**: a vertical video of 45 to 60 seconds, which every network takes. New channels start here.
+- **Long (16:9, 8 to 10 min)**: a wide video of 8 to 10 minutes, for YouTube. The other networks keep their vertical presets, and a cut longer than one of them takes is [blocked](render.md#gates) for that network alone, so a long video is really a YouTube video.
+
+The format decides how long Claude writes the script, the shape the scene images and clips are made in, the shape of a new cut in the editor and which [render preset](render.md#targets) YouTube uses. Each project follows its channel's format unless it picks the other ([Projects](projects.md#format)). Changing it applies to what is made next; scripts, images and cuts already made keep their shape.
+
 <a id="defaults"></a>
 ## Video model, captions and transitions
 

@@ -15,7 +15,7 @@ As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma im
 
 **Planejar cenas** faz o Claude dividir a narração em cenas pelas frases e escrever um prompt de imagem para cada uma, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)) e das notas de estética do canal.
 
-**Gerar N imagens** então desenha, numa só tarefa, cada cena que ainda não tem imagem. O Nano Banana desenha cada uma em 16:9 a 2K, e o Gemini cobra cada imagem; uma cena que o provedor recusa não para as outras. A estimativa sob o botão principal diz quanto a rodada custa. Planejar exige uma chave do Claude, e desenhar uma chave do Gemini ([Suas chaves de API](api-keys.md#providers)).
+**Gerar N imagens** então desenha, numa só tarefa, cada cena que ainda não tem imagem. O Nano Banana desenha cada uma a 2K no formato do [vídeo](projects.md#format), 9:16 para um Short e 16:9 para um vídeo longo, e o Gemini cobra cada imagem; uma cena que o provedor recusa não para as outras. A estimativa sob o botão principal diz quanto a rodada custa. Planejar exige uma chave do Claude, e desenhar uma chave do Gemini ([Suas chaves de API](api-keys.md#providers)).
 
 <a id="list"></a>
 ## As cenas

@@ -18,13 +18,13 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, CostPurpose, Generation, GenerationId, ImageGenerator, ImageRequest, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingClip,
-    NoPendingImage, NoSuchScene, ProfileId, Progress, ProjectFiles, Provider, RenderedPrompt,
-    RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRepository, ScenePrompt, SecretStore, TemplateKind, TemplateUsed, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject,
-    VideoProjectId, sentences,
+    ApiKey, AspectRatio, CostPurpose, Generation, GenerationId, ImageGenerator, ImageRequest, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository,
+    NoPendingClip, NoPendingImage, NoSuchScene, ProfileId, Progress, ProjectFiles, Provider,
+    RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan,
+    ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, TemplateKind, TemplateUsed,
+    TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest,
+    VideoProject, VideoProjectId, sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -226,6 +226,14 @@ struct ImagesPayload {
     project: String,
     plan: String,
     scenes: Vec<usize>,
+    /// The frame shape, from the project's format when the job was
+    /// started; jobs from before formats drew wide images.
+    #[serde(default = "landscape")]
+    aspect: String,
+}
+
+fn landscape() -> String {
+    AspectRatio::Landscape.code().to_owned()
 }
 
 /// The field both payloads share, to find a project's jobs.
@@ -442,6 +450,10 @@ impl SceneHandler {
         let payload: ImagesPayload = parse(payload)?;
         let project: VideoProjectId = id(&payload.project)?;
         let plan_id: ScenePlanId = id(&payload.plan)?;
+        let aspect: AspectRatio = payload
+            .aspect
+            .parse()
+            .map_err(|_| unexpected(format!("unknown frame shape {}", payload.aspect)))?;
         let total = payload.scenes.len();
         let mut failed: Vec<JobFailure> = Vec::new();
         let mut key = None;
@@ -471,6 +483,7 @@ impl SceneHandler {
             let prompt = scene.prompt().as_str().to_owned();
             let request = ImageRequest {
                 prompt: prompt.clone(),
+                aspect,
             };
             match self.images.generate(key, &request) {
                 Ok(image) => {
@@ -744,10 +757,15 @@ impl Bardo {
         self.scenes_idle(plan.project)?;
         self.require_key(Provider::Gemini)?;
         self.scenes_budget(images_call(scenes.len()), consent)?;
+        let project = self
+            .themes
+            .project(plan.project)?
+            .ok_or(SceneError::ProjectNotFound)?;
         let payload = ImagesPayload {
             project: plan.project.to_string(),
             plan: plan.id.to_string(),
             scenes,
+            aspect: self.video_format(&project)?.aspect().code().to_owned(),
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1139,8 +1157,8 @@ pub(crate) mod tests {
         job
     }
 
-    /// A channel whose default persona is the documentary narrator, and a
-    /// project on one of its themes.
+    /// A channel of long videos whose default persona is the documentary
+    /// narrator, and a project on one of its themes.
     pub(crate) fn project(app: &Bardo) -> VideoProject {
         let persona = app
             .personas()
@@ -1156,6 +1174,7 @@ pub(crate) mod tests {
                 language: ContentLanguage::Portuguese,
                 country: Country::Brazil,
                 default_persona: Some(persona.id),
+                format: bardo_domain::VideoFormat::Long,
                 ..ChannelDraft::default()
             })
             .unwrap();

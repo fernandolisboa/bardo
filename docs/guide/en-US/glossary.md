@@ -44,6 +44,8 @@ The words Bardo uses, in plain terms.
 
 **Video project**: one video in production, from the script to its posts. It starts when you approve an idea.
 
+**Video format**: Short (vertical, under a minute, for every network) or long (16:9, 8 to 10 minutes, for YouTube). Set per channel, changeable per project; it sets the script's length, the shape of pictures and cuts, and YouTube's preset.
+
 **Template**: the instructions Bardo sends the AI for one kind of text (the script, the image prompts, the post texts). Saving a change makes a new version; old ones stay readable.
 
 **Script**: what the narrator says. Claude writes it, and you edit it as you like.

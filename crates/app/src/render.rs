@@ -217,7 +217,7 @@ impl RenderReview {
                 .as_ref()
                 .and_then(|encoders| encoders.best(target.preset.codec).ok());
             let works = self.encoders.as_ref().map(|_| target.encoder.is_some());
-            target.gates = output_gates(&self.cut, &target.preset, works);
+            target.gates = output_gates(&self.cut, target.network, &target.preset, works);
         }
     }
 }
@@ -424,9 +424,10 @@ impl Bardo {
         let view = self.editor_view(project)?;
         let accounts = self.network_accounts.list(view.project.channel)?;
         let renders = self.renders.renders(project)?;
+        let format = self.video_format(&view.project)?;
         let presets: Vec<RenderPreset> = accounts
             .iter()
-            .map(|account| account.render_preset())
+            .map(|account| account.render_preset(format))
             .collect();
         let timeline = view
             .timeline
@@ -656,6 +657,7 @@ impl Bardo {
                 self.text_with(Text::GateLoudnessFar, &[("gain", &self.tenths(*gain))])
             }
             Gate::PeaksLimited => self.text(Text::GatePeaksLimited).into_owned(),
+            Gate::LongForUnverified => self.text(Text::GateLongForUnverified).into_owned(),
         }
     }
 
@@ -886,12 +888,23 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    /// A drawn project with a YouTube and a Kick account.
+    /// A drawn Short, cut 16:9, with a YouTube and a Kick account.
     fn rendered_project(
         h: &Harness,
         app: &Bardo,
     ) -> (VideoProject, NetworkAccount, NetworkAccount) {
         let (project, _) = h.drawn_project(app);
+        let project = app
+            .set_project_format(project.id, Some(bardo_domain::VideoFormat::Short))
+            .unwrap();
+        let mut editor = app.open_editor(project.id).unwrap();
+        assert_eq!(
+            editor.aspect(),
+            AspectRatio::Vertical,
+            "a Short starts 9:16"
+        );
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Landscape))
+            .unwrap();
         let youtube = account(
             app,
             &project,
@@ -939,7 +952,10 @@ pub(crate) mod tests {
             [Network::YouTube, Network::Kick]
         );
         let shown = target(&review, youtube.id);
-        assert_eq!(shown.preset, youtube.render_preset());
+        assert_eq!(
+            shown.preset,
+            youtube.render_preset(bardo_domain::VideoFormat::Short)
+        );
         assert_eq!(shown.handle, "archives");
         assert_eq!(shown.last, None);
         assert!(review.cut.duration > Duration::ZERO);
@@ -1084,7 +1100,10 @@ pub(crate) mod tests {
         assert_eq!(renders[0].account, youtube.id);
         assert_eq!(renders[0].file, "render-youtube.mp4");
         assert_eq!(renders[0].encoder, "libopenh264");
-        assert_eq!(renders[0].preset, youtube.render_preset());
+        assert_eq!(
+            renders[0].preset,
+            youtube.render_preset(bardo_domain::VideoFormat::Short)
+        );
         assert_eq!(renders[0].loudness_on_target(), Some(true));
         assert_eq!(renders[1].network, Network::Kick);
 
@@ -1352,7 +1371,10 @@ pub(crate) mod tests {
             max_duration_secs: 140,
             loudness_tenths: -140,
         };
-        assert_eq!(order.preset().unwrap(), Network::X.render_preset());
+        assert_eq!(
+            order.preset().unwrap(),
+            Network::X.render_preset(bardo_domain::VideoFormat::Short)
+        );
         let payload = RenderPayload {
             project: VideoProjectId::new().to_string(),
             outputs: vec![order],
