@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use bardo_app::bardo_domain::{Share, Timeline, time_at};
+use bardo_app::bardo_domain::{JobId, JobState, Share, Timeline, time_at};
 use bardo_app::{
     Bardo, Control, CutRetention, DropView, Editor, PostedRetention, Side, Text, TourAnchor,
 };
@@ -35,6 +35,9 @@ pub(super) struct RetentionState {
     pub(super) on: bool,
     /// The project's YouTube post and its curve, as last read.
     posted: Option<PostedRetention>,
+    /// The latest metrics sync and its state when the curve was read: the
+    /// curve is read again only once it moves.
+    sync: Option<Option<(JobId, JobState)>>,
     /// The curve over the cut, with the timeline it was lined up with.
     over: Option<(Option<Timeline>, CutRetention)>,
     /// The focused drop, by index.
@@ -46,9 +49,15 @@ impl RetentionState {
         self.over.as_ref().map(|(_, over)| over)
     }
 
-    /// Whether the row shows under the ruler: on, with the curve lined up
-    /// with the cut.
+    /// Whether the row shows under the ruler: on, with a curve. It keeps
+    /// its height while the cut does not line up, so the tracks never jump
+    /// under the pointer; it is empty then.
     pub(super) fn row(&self) -> bool {
+        self.on && self.posted.is_some()
+    }
+
+    /// Whether the curve lines up with the cut, so the row draws it.
+    fn lined_up(&self) -> bool {
         self.on
             && self
                 .over()
@@ -84,12 +93,13 @@ pub(crate) fn drop_lost(bardo: &Bardo, drop: &DropView) -> String {
     )
 }
 
-/// What plays where a drop is, when lined up: the scene (or footage) and
-/// the sentence.
+/// What plays where a drop is, when lined up: the scene (footage, or
+/// black past the video's end) and the sentence.
 pub(crate) fn drop_place(bardo: &Bardo, drop: &DropView) -> (String, String) {
     let scene = match drop.scene {
         Some(scene) => bardo.text_with(Text::RetentionScene, &[("n", &(scene + 1).to_string())]),
-        None => bardo.text(Text::RetentionFootage).into_owned(),
+        None if drop.picture => bardo.text(Text::RetentionFootage).into_owned(),
+        None => bardo.text(Text::RetentionNoPicture).into_owned(),
     };
     let sentence = match &drop.sentence {
         Some(sentence) => format!("“{}”", sentence.trim()),
@@ -99,17 +109,33 @@ pub(crate) fn drop_place(bardo: &Bardo, drop: &DropView) -> (String, String) {
 }
 
 impl EditorScreen {
-    /// Reads the project's YouTube post and its curve again: a metrics
-    /// sync may have read a newer one.
+    /// Reads the project's YouTube post and its curve when the editor
+    /// opens, and again once a metrics sync moved, since it may have read a
+    /// newer one. A curve read again unchanged keeps its lining up.
     pub(super) fn load_retention(&mut self, cx: &mut Context<Self>) {
-        let project = self.editor.as_ref().map(Editor::project);
-        self.retention.posted = project
-            .and_then(|project| self.bardo.read(cx).posted_retention(project).ok().flatten());
-        self.retention.over = None;
+        let bardo = self.bardo.read(cx);
+        let sync = bardo.latest_sync_job().map(|job| (job.id(), job.state()));
+        if self.retention.sync.as_ref() == Some(&sync) {
+            return;
+        }
+        self.retention.sync = Some(sync);
+        let posted = self
+            .editor
+            .as_ref()
+            .map(Editor::project)
+            .and_then(|project| bardo.posted_retention(project).ok().flatten());
+        if posted != self.retention.posted {
+            self.retention.posted = posted;
+            self.retention.over = None;
+        }
     }
 
-    /// Lines the curve up with the cut again once the cut changed.
+    /// Lines the curve up with the cut again once the cut changed, while
+    /// it shows.
     pub(super) fn refresh_retention(&mut self, cx: &mut Context<Self>) {
+        if !self.retention.on {
+            return;
+        }
         let (Some(posted), Some(editor)) = (&self.retention.posted, &self.editor) else {
             self.retention.over = None;
             self.retention.focused = None;
@@ -189,8 +215,10 @@ impl EditorScreen {
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
         let on = self.retention.on;
-        let lined = self.retention.row();
-        tool_button("toggle-retention", editing, on)
+        let lined = self.retention.lined_up();
+        let enabled = editing && self.retention.posted.is_some();
+        let unavailable = (editing && !enabled).then(|| bardo.text(Text::RetentionUnavailable));
+        tool_button("toggle-retention", enabled, on)
             .relative()
             .when(!on, |button| {
                 button.border_1().border_color(color(HAIRLINE))
@@ -202,9 +230,15 @@ impl EditorScreen {
                     .bg(color(if lined { ERROR } else { OUTLINE })),
             )
             .child(tr(bardo, Text::EditorRetention))
-            .when(editing, |button| {
+            .when(enabled, |button| {
                 button
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_retention(cx)))
+            })
+            .when_some(unavailable, |button, hint| {
+                let hint = gpui_kit::SharedString::from(hint.into_owned());
+                button.tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(hint.clone()).build(window, cx)
+                })
             })
             .tour_anchor(
                 TourAnchor::Control(Control::EditorRetention),
@@ -222,7 +256,7 @@ impl EditorScreen {
         ruler: f32,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        if !self.retention.row() {
+        if !self.retention.lined_up() {
             return Vec::new();
         }
         let Some(over) = self.retention.over() else {
@@ -427,10 +461,15 @@ impl EditorScreen {
                 if let Some(warning) = warning {
                     body.push(
                         h_flex()
+                            .w_full()
                             .gap_1p5()
                             .items_start()
                             .child(icon(IconName::TriangleAlert, ACCENT).size_3().mt_0p5())
-                            .child(small(bardo.text(warning).into_owned(), TEXT_2).flex_1())
+                            .child(
+                                small(bardo.text(warning).into_owned(), TEXT_2)
+                                    .flex_1()
+                                    .min_w_0(),
+                            )
                             .into_any_element(),
                     );
                 }

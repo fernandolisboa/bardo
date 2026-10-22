@@ -673,19 +673,27 @@ impl Shell {
         let bardo = self.bardo.clone();
         let editor = cx.new(|cx| EditorScreen::new(bardo, project, window, cx));
         let subscription =
-            cx.subscribe_in(&editor, window, |this, _, event, window, cx| match event {
-                EditorEvent::Close => this.close_editor(window, cx),
-                EditorEvent::Render => {
-                    this.close_editor(window, cx);
-                    this.projects.update(cx, |projects, cx| {
-                        projects.show_stage(Stage::Render, window, cx)
-                    });
-                }
-                EditorEvent::ToggleJobs => {
-                    this.jobs_open = !this.jobs_open;
-                    cx.notify();
-                }
-            });
+            cx.subscribe_in(
+                &editor,
+                window,
+                move |this, _, event, window, cx| match event {
+                    EditorEvent::Close => this.close_editor(window, cx),
+                    // The editor may have been opened from elsewhere (a drop on
+                    // Performance): its project's Render stage is on Projects.
+                    EditorEvent::Render => {
+                        this.close_editor(window, cx);
+                        this.pick(Destination::Projects, window, cx);
+                        this.projects.update(cx, |projects, cx| {
+                            projects.show_project(project, window, cx);
+                            projects.show_stage(Stage::Render, window, cx)
+                        });
+                    }
+                    EditorEvent::ToggleJobs => {
+                        this.jobs_open = !this.jobs_open;
+                        cx.notify();
+                    }
+                },
+            );
         self.editor = Some((editor, subscription));
         self.guide_over_editor = false;
         self.guide
@@ -717,9 +725,12 @@ impl Shell {
         self.guide_over_editor = false;
         self.guide
             .update(cx, |guide, cx| guide.set_over_editor(false, cx));
-        // The editor may have queued jobs or removed old proxies.
+        // The editor may have queued jobs or removed old proxies, and a
+        // changed cut no longer lines up with a post's retention.
         self.projects
             .update(cx, |projects, cx| projects.reload(window, cx));
+        self.performance
+            .update(cx, |performance, cx| performance.reload(window, cx));
         cx.notify();
     }
 

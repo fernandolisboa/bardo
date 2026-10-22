@@ -79,7 +79,9 @@ pub fn retention_drops(curve: &RetentionCurve) -> Vec<RetentionDrop> {
     let watch = |index: usize| points[index].watch.ten_thousandths();
     let steps = (points.len() - 1) as u32;
     let average = watch(0).saturating_sub(watch(points.len() - 1)) / steps;
-    let floor = (average * STEEP_TIMES).max(MIN_STEP_LOSS.ten_thousandths());
+    let floor = average
+        .saturating_mul(STEEP_TIMES)
+        .max(MIN_STEP_LOSS.ten_thousandths());
     let steep = |index: usize| watch(index).saturating_sub(watch(index + 1)) >= floor;
     let mut drops = Vec::new();
     let mut index = 0;
@@ -116,6 +118,9 @@ pub struct PlacedDrop {
     /// The scene shown, by index in the scene plan; `None` over footage or
     /// past the video's end.
     pub scene: Option<usize>,
+    /// Whether a picture shows there: `false` past the video's end, where
+    /// the narration or music plays on over black.
+    pub picture: bool,
     /// The sentence spoken, by index in `crate::sentences`, or the last one
     /// said before it when a pause plays there; `None` with no narration
     /// playing.
@@ -134,9 +139,8 @@ pub fn place_drops(
         .iter()
         .map(|drop| {
             let middle = time_at(drop.middle(), length);
-            let scene = timeline
-                .video_at(middle)
-                .and_then(|index| timeline.video()[index].scene());
+            let shown = timeline.video_at(middle);
+            let scene = shown.and_then(|index| timeline.video()[index].scene());
             let sentence = timeline.narration_at(middle).and_then(|index| {
                 let item = &timeline.narration()[index];
                 let source = item.start + (middle - item.at);
@@ -149,24 +153,45 @@ pub fn place_drops(
                 start: time_at(drop.from, length),
                 end: time_at(drop.to, length),
                 scene,
+                picture: shown.is_some(),
                 sentence,
             }
         })
         .collect()
 }
 
-/// A fingerprint of the cut's timing (FNV-1a): what the video shows when,
-/// and which part of which narration file plays when. Pieces that play on
-/// from each other count as one, so a split alone leaves it as it is.
-/// Equal timings, equal fingerprints, on any machine.
+/// A fingerprint of the cut's timing (FNV-1a): what the video shows when
+/// (and from where in a clip), and which part of which narration file plays
+/// when. Pieces that play on from each other count as one, so a split alone
+/// leaves it as it is. Equal timings, equal fingerprints, on any machine.
 pub fn cut_timing(timeline: &Timeline) -> String {
-    let mut pictures: Vec<(Duration, Duration, &Picture)> = Vec::new();
+    // Where in its source each stretch starts and would play on from; a
+    // still has no source time.
+    let source = |item: &crate::VideoItem, at: Duration| {
+        if item.has_source_time() {
+            at
+        } else {
+            Duration::ZERO
+        }
+    };
+    let mut pictures: Vec<(Duration, Duration, &Picture, Duration, Duration)> = Vec::new();
     for item in &timeline.video {
         match pictures.last_mut() {
-            Some((_, end, picture)) if *picture == &item.picture && *end == item.at => {
+            Some((_, end, picture, _, next))
+                if *picture == &item.picture
+                    && *end == item.at
+                    && *next == source(item, item.start) =>
+            {
                 *end = item.end();
+                *next = source(item, item.start + item.duration);
             }
-            _ => pictures.push((item.at, item.end(), &item.picture)),
+            _ => pictures.push((
+                item.at,
+                item.end(),
+                &item.picture,
+                source(item, item.start),
+                source(item, item.start + item.duration),
+            )),
         }
     }
     let mut speech: Vec<(Duration, Duration, Duration, &str)> = Vec::new();
@@ -181,15 +206,16 @@ pub fn cut_timing(timeline: &Timeline) -> String {
         }
     }
     let mut text = String::new();
-    for (at, end, picture) in pictures {
+    for (at, end, picture, start, _) in pictures {
         let picture = match picture {
             Picture::Scene(index) => format!("s{index}"),
             Picture::Footage(file) => format!("f{file}"),
         };
         text.push_str(&format!(
-            "v {} {} {picture}\n",
+            "v {} {} {} {picture}\n",
             at.as_nanos(),
-            end.as_nanos()
+            end.as_nanos(),
+            start.as_nanos()
         ));
     }
     for (at, end, start, file) in speech {
@@ -467,5 +493,61 @@ mod tests {
             })
             .unwrap();
         assert_ne!(cut_timing(&moved), timing, "moved narration changes it");
+    }
+
+    #[test]
+    fn a_drop_past_the_last_picture_shows_nothing() {
+        let plan = plan(vec![scene(0, 4_000), scene(4_000, 10_000)]);
+        let mut timeline =
+            Timeline::rough_cut(&plan, &narration(10_000), crate::AspectRatio::Landscape);
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 1,
+                edge: crate::Edge::End,
+                by: crate::Shift::earlier(ms(3_000)),
+            })
+            .unwrap();
+        let placed = place_drops(
+            &[drop_at(40.0, 50.0), drop_at(80.0, 90.0)],
+            ms(10_000),
+            &timeline,
+            &[sentence(0, 9_000)],
+        );
+        assert_eq!((placed[0].scene, placed[0].picture), (Some(1), true));
+        assert_eq!((placed[1].scene, placed[1].picture), (None, false));
+        assert_eq!(placed[1].sentence, Some(0), "the narration plays on");
+    }
+
+    #[test]
+    fn the_timing_follows_where_a_clip_plays_from() {
+        let plan = plan(vec![scene(0, 4_000), scene(4_000, 10_000)]);
+        let mut timeline =
+            Timeline::rough_cut(&plan, &narration(10_000), crate::AspectRatio::Landscape);
+        timeline.video[0].source = crate::VideoSource::Clip {
+            file: "clip.mp4".into(),
+            length: ms(8_000),
+        };
+        let timing = cut_timing(&timeline);
+
+        let mut split = timeline.clone();
+        split
+            .apply(&Edit::Split {
+                track: Track::Video,
+                index: 0,
+                at: ms(2_000),
+            })
+            .unwrap();
+        assert_eq!(cut_timing(&split), timing, "a split plays the same");
+
+        let mut swapped = split.clone();
+        let (first, second) = (swapped.video[0].start, swapped.video[1].start);
+        swapped.video[0].start = second;
+        swapped.video[1].start = first;
+        assert_ne!(cut_timing(&swapped), timing, "its halves swapped");
+
+        let mut slipped = timeline.clone();
+        slipped.video[0].start = ms(1_000);
+        assert_ne!(cut_timing(&slipped), timing, "played from later");
     }
 }

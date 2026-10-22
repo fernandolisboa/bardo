@@ -50,6 +50,9 @@ pub struct DropView {
     /// The scene shown in its middle, by index in the scene plan; only
     /// when lined up.
     pub scene: Option<usize>,
+    /// Whether a picture shows there (footage when no scene), or the
+    /// video ended and black plays on; only when lined up.
+    pub picture: bool,
     /// The sentence spoken there, or the last one said before a pause;
     /// only when lined up.
     pub sentence: Option<String>,
@@ -86,8 +89,9 @@ impl CutRetention {
 
 impl Bardo {
     /// `project`'s YouTube post with the retention curve its last sync
-    /// read; `None` without such a post, before YouTube reports the curve,
-    /// or when the channel's account is not connected.
+    /// read; `None` without such a post or before YouTube reports the
+    /// curve. Disconnecting the account or *Delete YouTube data* deletes
+    /// the curve, so it is `None` after those too.
     pub fn posted_retention(
         &self,
         project: VideoProjectId,
@@ -173,6 +177,7 @@ impl Bardo {
                         drop: placed.drop,
                         span: Some((placed.start, placed.end)),
                         scene: placed.scene,
+                        picture: placed.picture,
                         sentence: placed
                             .sentence
                             .and_then(|index| posted.sentences.get(index))
@@ -187,6 +192,7 @@ impl Bardo {
                     span: length
                         .map(|length| (time_at(drop.from, length), time_at(drop.to, length))),
                     scene: None,
+                    picture: false,
                     sentence: None,
                 })
                 .collect(),
@@ -329,6 +335,7 @@ mod tests {
         assert_eq!(start, time_at(Share::from_ten_thousandths(3_000), length));
         assert_eq!(end, time_at(Share::from_ten_thousandths(3_100), length));
         assert!(drop.scene.is_some(), "a scene plays there");
+        assert!(drop.picture);
         let sentence = drop
             .sentence
             .as_deref()

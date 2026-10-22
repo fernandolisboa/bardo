@@ -393,7 +393,10 @@ mod tests {
         let first = render(&project, &accounts[1], 1_000);
         db.save_render(&first).unwrap();
         assert_eq!(db.rendered_cut(first.id).unwrap(), Some(cut_of(&first)));
-        assert_eq!(db.renders(project.id).unwrap(), std::slice::from_ref(&first));
+        assert_eq!(
+            db.renders(project.id).unwrap(),
+            std::slice::from_ref(&first)
+        );
         let untimed = Render {
             timing: None,
             ..render(&project, &accounts[0], 2_000)

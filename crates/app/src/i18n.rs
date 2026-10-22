@@ -1396,6 +1396,7 @@ pub enum Text {
     MetricsRetentionEnd,
     RetentionTitle,
     RetentionNone,
+    RetentionUnavailable,
     RetentionRead,
     RetentionDrops,
     RetentionDropsHint,
@@ -1406,6 +1407,7 @@ pub enum Text {
     RetentionAtShare,
     RetentionScene,
     RetentionFootage,
+    RetentionNoPicture,
     RetentionNoSpeech,
     RetentionShowInEditor,
     MetricsHours,
@@ -3500,6 +3502,7 @@ impl Text {
             Text::MetricsRetentionEnd => "metrics.retention_end",
             Text::RetentionTitle => "retention.title",
             Text::RetentionNone => "retention.none",
+            Text::RetentionUnavailable => "retention.unavailable",
             Text::RetentionRead => "retention.read",
             Text::RetentionDrops => "retention.drops",
             Text::RetentionDropsHint => "retention.drops_hint",
@@ -3510,6 +3513,7 @@ impl Text {
             Text::RetentionAtShare => "retention.at_share",
             Text::RetentionScene => "retention.scene",
             Text::RetentionFootage => "retention.footage",
+            Text::RetentionNoPicture => "retention.no_picture",
             Text::RetentionNoSpeech => "retention.no_speech",
             Text::RetentionShowInEditor => "retention.show_in_editor",
             Text::MetricsHours => "metrics.hours",
@@ -5595,6 +5599,7 @@ mod tests {
         texts.push(Text::MetricsRetentionEnd);
         texts.push(Text::RetentionTitle);
         texts.push(Text::RetentionNone);
+        texts.push(Text::RetentionUnavailable);
         texts.push(Text::RetentionRead);
         texts.push(Text::RetentionDrops);
         texts.push(Text::RetentionDropsHint);
@@ -5605,6 +5610,7 @@ mod tests {
         texts.push(Text::RetentionAtShare);
         texts.push(Text::RetentionScene);
         texts.push(Text::RetentionFootage);
+        texts.push(Text::RetentionNoPicture);
         texts.push(Text::RetentionNoSpeech);
         texts.push(Text::RetentionShowInEditor);
         texts.push(Text::MetricsHours);

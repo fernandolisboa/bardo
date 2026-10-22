@@ -82,6 +82,16 @@ impl<T: Clone + PartialEq> SearchableListItem for Choice<T> {
 
 type ChoiceSelect<T> = Entity<SelectState<SearchableVec<Choice<T>>>>;
 
+/// What the Publish stage's retention was read for: the project and the
+/// latest metrics sync, with its state.
+type PostRetentionKey = (
+    VideoProjectId,
+    Option<(
+        bardo_app::bardo_domain::JobId,
+        bardo_app::bardo_domain::JobState,
+    )>,
+);
+
 /// Which generation's prompt is open.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PromptShown {
@@ -221,8 +231,10 @@ pub struct ProjectsScreen {
     render_error: Option<Text>,
     /// The Publish stage: every network's metadata and export.
     export_view: Option<ExportView>,
-    /// The YouTube post's curve over the project's cut, read with it.
-    post_retention: Option<bardo_app::CutRetention>,
+    /// The YouTube post's curve over the project's cut, with the project
+    /// and the latest metrics sync it was read for: read again only when
+    /// either moves, or on `reload` (the editor closed, the cut may differ).
+    post_retention: Option<(PostRetentionKey, Option<bardo_app::CutRetention>)>,
     /// Where the project's exports stand, for its Publish stage.
     export_summary: Option<ExportSummary>,
     export_error: Option<Text>,
@@ -522,6 +534,7 @@ impl ProjectsScreen {
     /// Re-reads channels and projects (themes approved elsewhere start new
     /// ones), keeping the selection when it still exists.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.post_retention = None;
         self.error = None;
         self.notice = None;
         self.channels = self.bardo.read(cx).channels().unwrap_or_default();
@@ -561,6 +574,40 @@ impl ProjectsScreen {
             }
         }
         cx.notify();
+    }
+
+    /// Selects `project` on its channel, for an editor opened from
+    /// elsewhere (Performance's "Show in editor").
+    pub fn show_project(
+        &mut self,
+        project: VideoProjectId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.project == Some(project) {
+            return;
+        }
+        let bardo = self.bardo.read(cx);
+        let Some(channel) = self
+            .channels
+            .iter()
+            .map(|channel| channel.id)
+            .find(|channel| {
+                bardo
+                    .video_projects(*channel)
+                    .is_ok_and(|projects| projects.iter().any(|p| p.id == project))
+            })
+        else {
+            return;
+        };
+        if self.channel != Some(channel) {
+            self.channel = Some(channel);
+            self.channel_select.update(cx, |select, cx| {
+                select.set_selected_value(&channel, window, cx)
+            });
+            self.load_projects(cx);
+        }
+        self.select_project(Some(project), window, cx);
     }
 
     fn select_channel(&mut self, id: ChannelId, window: &mut Window, cx: &mut Context<Self>) {

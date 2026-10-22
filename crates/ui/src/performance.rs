@@ -21,8 +21,8 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Entity, EventEmitter, SharedString, Subscription, Task, Window,
-    div, px,
+    AnyElement, App, ClickEvent, Entity, EventEmitter, ScrollHandle, SharedString, Subscription,
+    Task, Window, div, px,
 };
 
 use crate::appearance::look;
@@ -75,6 +75,8 @@ pub struct PerformanceScreen {
     revision: u64,
     /// The metrics sync as last read: the numbers change only with it.
     sync_job: Option<Job>,
+    /// The post's scroll, so the tour can bring its drops into view.
+    record_scroll: ScrollHandle,
     /// The shown post's curve over its project's cut, worked out when the
     /// post shown or its numbers change.
     over: Option<(PublicationId, Option<CutRetention>)>,
@@ -117,6 +119,7 @@ impl PerformanceScreen {
             error: None,
             revision,
             sync_job: None,
+            record_scroll: ScrollHandle::new(),
             over: None,
             _poll: poll,
             _subscriptions: subscriptions,
@@ -461,8 +464,15 @@ impl PerformanceScreen {
                 let _ = screen.update(cx, |_, cx| cx.emit(OpenRetention { project, at }));
             });
             body.push(
-                metrics::drops(bardo, over, "performance-post", Some(show), true, cx)
-                    .into_any_element(),
+                metrics::drops(
+                    bardo,
+                    over,
+                    "performance-post",
+                    Some(show),
+                    Some(&self.record_scroll),
+                    cx,
+                )
+                .into_any_element(),
             );
         }
         body.extend(metrics::history(bardo, &post.post, cx).map(IntoElement::into_any_element));
@@ -578,6 +588,7 @@ impl Render for PerformanceScreen {
         parts.summary = self.figures(&view, cx);
         parts.toolbar = Some(self.toolbar(&view, cx));
         parts.collection = Some(self.collection(&view, cx));
+        parts.scroll = Some(self.record_scroll.clone());
         parts.inspector = self.shown(&view).map(|post| self.inspector(post, cx));
         if !view.posts.is_empty() {
             parts.content = vec![self.history_card(&view, cx)];

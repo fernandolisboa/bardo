@@ -24,7 +24,9 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Div, ElementId, SharedString, Stateful, Window, div, px};
+use gpui_kit::{
+    AnyElement, App, Div, ElementId, ScrollHandle, SharedString, Stateful, Window, div, px,
+};
 
 use crate::appearance::look;
 use crate::editor::{drop_lost, drop_place, drop_when};
@@ -1077,14 +1079,14 @@ pub type ShowDrop = Rc<dyn Fn(Option<Duration>, &mut Window, &mut App)>;
 
 /// Where the post's viewers leave: each drop of its curve with its time,
 /// the viewers it loses and, while the cut lines up, the scene and
-/// sentence playing there; `show` adds "Show in editor". `anchored` marks
-/// it for the Performance tour.
+/// sentence playing there; `show` adds "Show in editor". `tour` marks it
+/// for the Performance tour, in the scroll that holds it.
 pub fn drops(
     bardo: &Bardo,
     over: &CutRetention,
     id: &str,
     show: Option<ShowDrop>,
-    anchored: bool,
+    tour: Option<&ScrollHandle>,
     cx: &App,
 ) -> Div {
     let t = look(cx).tokens;
@@ -1154,6 +1156,7 @@ pub fn drops(
                         div()
                             .text_xs()
                             .text_color(t.text2)
+                            .line_clamp(3)
                             .child(format!("{scene} · {sentence}"))
                     })),
             )
@@ -1190,11 +1193,11 @@ pub fn drops(
         })
         .children(rows)
         .children(opens.map(|button| h_flex().child(button)));
-    if anchored {
+    if let Some(scroll) = tour {
         list.tour_anchor(
             TourAnchor::Control(Control::PerformanceDrops),
             Side::Left,
-            None,
+            Some(scroll),
         )
     } else {
         list
