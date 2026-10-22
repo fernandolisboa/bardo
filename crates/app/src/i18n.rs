@@ -134,6 +134,8 @@ pub enum Text {
     CaptionStyleName(CaptionStyle),
     TransitionName(TransitionKind),
     VideoFormatName(VideoFormat),
+    /// The format in one word, where the full name does not fit.
+    VideoFormatBrief(VideoFormat),
     /// No transition: a hard cut.
     TransitionCut,
     NetworkAccountFieldError(NetworkAccountFieldError),
@@ -1095,6 +1097,8 @@ pub enum Text {
     GateTooLong,
     GateNoEncoder,
     GateReframed,
+    /// A 16:9 file of a 9:16 cut: tall pictures show whole, with bars.
+    GateReframedWide,
     GateCaptionsOff,
     GateMissingMedia,
     GateSilent,
@@ -1987,6 +1991,10 @@ impl Text {
             Text::VideoFormatName(format) => match format {
                 VideoFormat::Short => "video_format.short",
                 VideoFormat::Long => "video_format.long",
+            },
+            Text::VideoFormatBrief(format) => match format {
+                VideoFormat::Short => "video_format.short_brief",
+                VideoFormat::Long => "video_format.long_brief",
             },
             Text::NetworkAccountFieldError(error) => match error {
                 NetworkAccountFieldError::HandleRequired => "network_account.error.handle_required",
@@ -3055,6 +3063,7 @@ impl Text {
             Text::GateTooLong => "render.gate.too_long",
             Text::GateNoEncoder => "render.gate.no_encoder",
             Text::GateReframed => "render.gate.reframed",
+            Text::GateReframedWide => "render.gate.reframed_wide",
             Text::GateCaptionsOff => "render.gate.captions_off",
             Text::GateMissingMedia => "render.gate.missing_media",
             Text::GateSilent => "render.gate.silent",
@@ -4796,6 +4805,7 @@ mod tests {
         texts.extend(CaptionStyle::ALL.map(Text::CaptionStyleName));
         texts.extend(TransitionKind::ALL.map(Text::TransitionName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatName));
+        texts.extend(VideoFormat::ALL.map(Text::VideoFormatBrief));
         texts.push(Text::TransitionCut);
         texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
@@ -5033,6 +5043,7 @@ mod tests {
         texts.push(Text::GateTooLong);
         texts.push(Text::GateNoEncoder);
         texts.push(Text::GateReframed);
+        texts.push(Text::GateReframedWide);
         texts.push(Text::GateCaptionsOff);
         texts.push(Text::GateMissingMedia);
         texts.push(Text::GateSilent);

@@ -37,7 +37,7 @@ Claude writes each post's title, description and tags on top of these, and you c
 <a id="preset"></a>
 ## Render preset
 
-Each network renders in its own preset: the frame (16:9 or 9:16), the size, the codec, the bitrate, the longest video it takes and the loudness it aims at. The defaults are in [Networks and presets](render.md#targets); YouTube's depends on the [video format](channels.md#format), 9:16 for Shorts and 16:9 for long videos. Under **Edit**, change any of them, or keep **network default**; the line under the fields shows the preset that results. A changed preset marks the network's last render out of date.
+Each network renders in its own preset: the frame (16:9 or 9:16), the size, the codec, the bitrate, the longest video it takes and the loudness it aims at. The defaults are in [Networks and presets](render.md#targets); YouTube's depends on the [video format](channels.md#format), 9:16 for Shorts and 16:9 for long videos. The preset shown here is the one for the channel's format; a project that picks the other format renders with the other YouTube preset. Under **Edit**, change any of them, or keep **network default**; the line under the fields shows the preset that results. A changed preset marks the network's last render out of date.
 
 <a id="connect"></a>
 ## Connecting an account

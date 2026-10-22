@@ -140,9 +140,9 @@ impl VideoItem {
         }
     }
 
-    /// How its picture fills a frame of `aspect`: scene pictures are 16:9,
-    /// so a 16:9 frame takes them whole and only 9:16 applies its framing.
-    /// Footage of another shape fits a 16:9 frame whole too, with bars.
+    /// How its picture fills a frame of `aspect`: only 9:16 applies its
+    /// framing. A 16:9 frame shows every picture whole: a wide one fills
+    /// it, and a tall one (a Short's scene, or vertical footage) gets bars.
     pub fn framing_in(&self, aspect: AspectRatio) -> Framing {
         match aspect {
             AspectRatio::Landscape => Framing::Fit,

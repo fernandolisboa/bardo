@@ -43,7 +43,7 @@ The [persona](personas.md) that narrates the channel's videos: its voice, tone a
 ## Video format
 
 - **Short (9:16, under a minute)**: a vertical video of 45 to 60 seconds, which every network takes. New channels start here.
-- **Long (16:9, 8 to 10 min)**: a wide video of 8 to 10 minutes, for YouTube. The other networks keep their vertical presets, and a cut longer than one of them takes is [blocked](render.md#gates) for that network alone, so a long video is really a YouTube video.
+- **Long (16:9, 8 to 10 min)**: a wide video of 8 to 10 minutes, for YouTube. The other networks keep their presets (vertical, except Kick's 16:9), and a cut longer than one of them takes is [blocked](render.md#gates) for that network alone, so a long video is really a YouTube video.
 
 The format decides how long Claude writes the script, the shape the scene images and clips are made in, the shape of a new cut in the editor and which [render preset](render.md#targets) YouTube uses. Each project follows its channel's format unless it picks the other ([Projects](projects.md#format)). Changing it applies to what is made next; scripts, images and cuts already made keep their shape.
 

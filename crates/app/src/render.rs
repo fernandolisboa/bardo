@@ -645,7 +645,10 @@ impl Bardo {
                 self.text_with(Text::GateNoEncoder, &[("codec", codec.name())])
             }
             Gate::Reframed { cut, output } => self.text_with(
-                Text::GateReframed,
+                match output {
+                    AspectRatio::Vertical => Text::GateReframed,
+                    AspectRatio::Landscape => Text::GateReframedWide,
+                },
                 &[("cut", cut.code()), ("output", output.code())],
             ),
             Gate::CaptionsOff => self.text(Text::GateCaptionsOff).into_owned(),

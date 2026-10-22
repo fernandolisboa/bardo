@@ -74,8 +74,9 @@ pub enum Gate {
     /// that output.
     NoEncoder(VideoCodec),
     /// The cut was made in one frame shape and this output is the other:
-    /// each clip fills it through its crop window, centered unless moved,
-    /// which the user may not have looked at.
+    /// a 9:16 output takes each clip through its crop window, centered
+    /// unless moved, which the user may not have looked at; a 16:9 output
+    /// shows every picture whole, a tall one with bars.
     Reframed {
         cut: AspectRatio,
         output: AspectRatio,

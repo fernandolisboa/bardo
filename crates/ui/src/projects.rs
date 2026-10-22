@@ -752,7 +752,10 @@ impl ProjectsScreen {
             .unwrap_or_default();
         let channel_title = SharedString::from(bardo.text_with(
             Text::ProjectFormatChannel,
-            &[("format", &bardo.text(Text::VideoFormatName(channel_format)))],
+            &[(
+                "format",
+                &bardo.text(Text::VideoFormatBrief(channel_format)),
+            )],
         ));
         let choices = SearchableVec::new(
             std::iter::once(Choice {
@@ -761,7 +764,7 @@ impl ProjectsScreen {
             })
             .chain(VideoFormat::ALL.map(|format| Choice {
                 value: Some(format),
-                title: tr(bardo, Text::VideoFormatName(format)),
+                title: tr(bardo, Text::VideoFormatBrief(format)),
             }))
             .collect::<Vec<_>>(),
         );
@@ -1255,7 +1258,7 @@ impl ProjectsScreen {
                     )
                     .child(
                         div()
-                            .w(px(220.))
+                            .w(px(180.))
                             .child(Select::new(&self.format_select).small()),
                     )
                     .child(guide::info(

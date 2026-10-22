@@ -183,6 +183,8 @@ punch = "Punch"
 [video_format]
 short = "Short (9:16, under a minute)"
 long = "Long (16:9, 8 to 10 min)"
+short_brief = "Short"
+long_brief = "Long"
 
 [transition]
 cut = "Cut"
@@ -1426,6 +1428,7 @@ captions = "Captions"
 too_long = "Longer than this network takes ({limit}). Shorten the cut or raise the account's limit."
 no_encoder = "No {codec} encoder works on this computer. Pick another codec in the account's preset."
 reframed = "The cut is {cut}; this file is {output}, each clip through its crop window (centered unless you moved it)."
+reframed_wide = "The cut is {cut}; this file is {output}: wide pictures show whole, and tall ones whole with bars at the sides."
 captions_off = "Captions are off in the cut."
 missing_media = "{n} clips have no media and render black."
 silent = "The mix has no sound; it renders as it is."

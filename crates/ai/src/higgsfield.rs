@@ -41,7 +41,7 @@ const MAX_PROMPT_CHARS: usize = 2_500;
 
 /// An image-to-video model Bardo offers, and the fixed fields its request
 /// needs. Narration is the soundtrack, so models that can make sound are
-/// told not to; the output stays 16:9 like the image.
+/// told not to; the output takes the shape of the request (the image's).
 struct Spec {
     model: &'static str,
     name: &'static str,

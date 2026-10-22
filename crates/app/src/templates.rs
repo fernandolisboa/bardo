@@ -178,6 +178,41 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
     vec![TemplateBody::new(kind, instructions, prompt).expect("the retired templates are valid")]
 }
 
+/// The current body with each part still at one of Bardo's earlier
+/// defaults moved on to today's, or `None` when nothing moves. The
+/// instructions and the prompt move apart, so editing one keeps the other's
+/// upgrade. A part moves once: when some version already holds today's
+/// default for it, an earlier default there is the user's own choice.
+fn upgraded(
+    kind: TemplateKind,
+    current: &TemplateBody,
+    versions: &[TemplateVersion],
+) -> Option<TemplateBody> {
+    let today = default_template(kind);
+    let retired = retired_defaults(kind);
+    let moves = |part: fn(&TemplateBody) -> &str| {
+        retired.iter().any(|old| part(old) == part(current))
+            && part(&today) != part(current)
+            && versions
+                .iter()
+                .all(|version| part(&version.body) != part(&today))
+    };
+    let instructions = moves(TemplateBody::instructions);
+    let prompt = moves(TemplateBody::prompt);
+    if !instructions && !prompt {
+        return None;
+    }
+    let pick = |moved: bool, part: fn(&TemplateBody) -> &str| {
+        if moved { part(&today) } else { part(current) }
+    };
+    TemplateBody::new(
+        kind,
+        pick(instructions, TemplateBody::instructions),
+        pick(prompt, TemplateBody::prompt),
+    )
+    .ok()
+}
+
 /// Bardo's own text for `kind`: every profile's version 1.
 pub fn default_template(kind: TemplateKind) -> TemplateBody {
     let (instructions, prompt) = match kind {
@@ -250,12 +285,9 @@ impl Bardo {
             seed_templates(&*self.templates, self.profile.id)?;
             versions = self.templates.template_versions(self.profile.id, kind)?;
         }
-        // A current version that is one of Bardo's earlier defaults, never
-        // edited, moves on to today's default as the next version.
-        let next = versions
-            .last()
-            .filter(|current| retired_defaults(kind).contains(&current.body))
-            .and_then(|current| current.revise(default_template(kind), SystemTime::now()));
+        let next = versions.last().and_then(|current| {
+            current.revise(upgraded(kind, &current.body, &versions)?, SystemTime::now())
+        });
         if let Some(next) = next {
             self.templates.add_template_version(&next)?;
             versions.push(next);
@@ -385,6 +417,45 @@ mod tests {
             assert_eq!(versions[1].body, retired, "the old version stays readable");
             assert_eq!(app.template_versions(kind).unwrap().len(), 2, "once");
         }
+    }
+
+    #[test]
+    fn each_part_still_at_an_earlier_default_moves_on_by_itself() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let app = start(&db);
+        let kind = TemplateKind::Script;
+        let retired = retired_defaults(kind).remove(0);
+        let edited = TemplateBody::new(kind, "My own rules.", retired.prompt()).unwrap();
+        db.add_template_version(&TemplateVersion::first(
+            app.profile().id,
+            edited,
+            SystemTime::now(),
+        ))
+        .unwrap();
+        let current = app.current_template(kind).unwrap();
+        assert_eq!(current.number, 2);
+        assert_eq!(current.body.instructions(), "My own rules.");
+        assert_eq!(current.body.prompt(), default_template(kind).prompt());
+    }
+
+    #[test]
+    fn an_earlier_default_put_back_by_hand_stays() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let app = start(&db);
+        let kind = TemplateKind::Script;
+        let retired = retired_defaults(kind).remove(0);
+        db.add_template_version(&TemplateVersion::first(
+            app.profile().id,
+            retired.clone(),
+            SystemTime::now(),
+        ))
+        .unwrap();
+        assert_eq!(app.current_template(kind).unwrap().number, 2);
+        let restored = app
+            .save_template(kind, retired.instructions(), retired.prompt())
+            .unwrap();
+        assert_eq!(restored.number, 3);
+        assert_eq!(app.current_template(kind).unwrap().id, restored.id);
     }
 
     #[test]

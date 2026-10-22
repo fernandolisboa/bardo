@@ -105,7 +105,7 @@ Captions are made from the narration's words and sit on the CC track. Select one
 
 The switch over the preview sets the cut's frame shape: 16:9 (landscape) or 9:16 (vertical). A new cut starts in the shape of the video's [format](projects.md#format): 9:16 for a Short, 16:9 for a long video. Changing it is an edit you can undo.
 
-In 9:16, a clip whose picture is 16:9 is cropped from it. Select a clip and keep the playhead on it: the preview shows the whole picture, dimmed outside the 9:16 window. Drag the window to choose what stays in view, or use the inspector's **Framing**: **Fit** shows the whole picture with bars above and below, **Fill** crops at the center, and moving the window makes it **Custom**. Renders for a network whose preset has the other shape go through each clip's crop window too.
+In 9:16, a clip whose picture is 16:9 is cropped from it. Select a clip and keep the playhead on it: the preview shows the whole picture, dimmed outside the 9:16 window. Drag the window to choose what stays in view, or use the inspector's **Framing**: **Fit** shows the whole picture with bars above and below, **Fill** crops at the center, and moving the window makes it **Custom**. A 9:16 render for a network goes through each clip's crop window too; a 16:9 render shows each picture whole, a tall one with bars at the sides.
 
 <a id="suggestions"></a>
 ## Cut suggestions

@@ -21,14 +21,17 @@ YouTube takes Shorts of up to 3 minutes (vertical or square) and long videos of 
    - the shape of a new rough cut;
    - YouTube's built-in render preset: Short is 9:16, 1080×1920, up to 3 minutes; Long is 16:9, 1920×1080, 12 Mbps, up to 12 hours.
    Scripts, images, clips and cuts already made keep their shape; the user generates them again to switch.
-4. **Only YouTube's preset changes with the format.** TikTok, Reels and X stay vertical and Kick stays 16:9. A long project still targets every account of its channel: each network renders through the clips' crop windows, and a cut longer than a network takes is blocked for that network alone, as before. An account's own preset values still win over the built-in for either format.
+4. **Only YouTube's preset changes with the format.** TikTok, Reels and X stay vertical and Kick stays 16:9. A long project still targets every account of its channel: a 9:16 network renders through the clips' crop windows, a 16:9 one shows the pictures whole (point 7), and a cut longer than a network takes is blocked for that network alone, as before. An account's own preset values still win over the built-in for either format.
 5. **A warning, not a block, for long YouTube videos.** A cut over 15 minutes for YouTube gets the `LongForUnverified` warning pointing at YouTube's verification page; Bardo cannot see whether the account is verified.
-6. **Untouched default templates are upgraded.** The script and image-prompt defaults gain the new variables. When a profile's current version is exactly a retired default, the next read of that template adds today's default as the next version; a template the user edited stays as it is, and the variables are optional in it.
-7. **Scene cadence and caption placement do not change with the format.** Scenes still change every 4 to 8 seconds of narration, and captions are already sized and lifted from each rendered frame's own size.
+6. **Untouched default templates are upgraded, part by part, once.** The script and image-prompt defaults gain the new variables. When the instructions or the prompt of a profile's current version are still a retired default, the next read of that template adds a version with that part moved to today's default and the other part kept. A part moves only if no version has held today's default for it yet, so an old text the user puts back by hand stays. Text the user wrote stays as it is, and the variables are optional in it.
+7. **A 16:9 frame shows every picture whole.** A tall picture (a Short's scene, or vertical footage) in a 16:9 cut or file gets bars at the sides; crop windows apply to 9:16 frames only, as before.
+8. **Scene cadence and caption placement do not change with the format.** Scenes still change every 4 to 8 seconds of narration, and captions are already sized and lifted from each rendered frame's own size.
 
 ## Consequences
 
 - A new channel makes YouTube Shorts end to end with no preset override, and every network takes its render.
 - Long videos are a channel or project choice, and their YouTube render is 16:9 with no Short limit.
 - Migration 0045 adds `channel.video_format` (default `long` for existing rows) and a nullable `video_project.video_format`.
+- A channel that was making Shorts before this change, with an edited script template and YouTube's built-in preset, becomes Long and renders 16:9 for YouTube until it is switched to Short; the render shows as out of date.
+- Accounts shows each account's preset for the channel's format; the Render stage uses the project's.
 - Two template variables are added; edited templates without them keep working and get no length or shape hint.

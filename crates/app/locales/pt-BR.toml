@@ -183,6 +183,8 @@ punch = "Impacto"
 [video_format]
 short = "Short (9:16, menos de um minuto)"
 long = "Longo (16:9, 8 a 10 min)"
+short_brief = "Short"
+long_brief = "Longo"
 
 [transition]
 cut = "Corte"
@@ -1426,6 +1428,7 @@ captions = "Legendas"
 too_long = "Mais longo do que esta rede aceita ({limit}). Encurte o corte ou aumente o limite da conta."
 no_encoder = "Nenhum codificador {codec} funciona neste computador. Escolha outro codec no preset da conta."
 reframed = "O corte é {cut}; este arquivo é {output}, cada clipe pela sua janela de corte (centralizada, a menos que você a tenha movido)."
+reframed_wide = "O corte é {cut}; este arquivo é {output}: imagens deitadas aparecem inteiras, e as em pé inteiras com faixas nas laterais."
 captions_off = "As legendas estão desligadas no corte."
 missing_media = "{n} clipes estão sem mídia e saem pretos."
 silent = "A mixagem não tem som; ela sai como está."
