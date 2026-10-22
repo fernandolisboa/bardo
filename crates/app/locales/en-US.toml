@@ -280,6 +280,7 @@ update_download = "Update download"
 thumbnail = "Thumbnail text"
 thumbnail_image = "Thumbnail background"
 chapters = "Chapters"
+localization = "Version in another language"
 
 [job.state]
 queued = "Queued"
@@ -712,6 +713,7 @@ music_prompt = "Music prompt"
 metadata = "Metadata"
 thumbnail = "Thumbnail"
 chapters = "Chapters"
+localization = "Localized version"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -731,6 +733,8 @@ networks = "The channel's network accounts, one per line, with each network's fi
 target_length = "How long the script runs, from the video's format: under a minute for a Short, 8 to 10 minutes for a long video."
 frame_shape = "The shape of the pictures, from the video's format: tall (9:16) for a Short, wide (16:9) for a long video."
 video_title = "The video's title on YouTube once the metadata is written, else its working title."
+source_language = "The language the version is adapted from: the source channel's."
+source_country = "The audience country the version is adapted from: the source channel's."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -1314,6 +1318,7 @@ narration_missing = "Not recorded yet"
 narration_stale = "Out of date"
 scenes_missing = "Not planned yet"
 scenes_stale = "Out of date"
+scenes_to_place = "Scenes to place"
 to_review = "{n} to review"
 images = "{done} of {total} images"
 clips = "{done} of {total} clips"
@@ -3288,3 +3293,44 @@ footage = "Imported footage"
 no_picture = "No picture: the video has ended"
 no_speech = "No narration plays here."
 show_in_editor = "Show in editor"
+
+[versions]
+title = "Versions in other languages"
+hint = "Make this video again for a channel in another language or country. Claude adapts the script sentence by sentence; the new project keeps these scenes, images, clips, media and cut, and gets its own narration, captions and metadata."
+channel = "Channel"
+target = "{language} · {country} · narrated by {narrator}"
+target_no_narrator = "{language} · {country} · no default narrator"
+make = "Make version"
+make_hint = "Claude adapts the narration's sentences with localization template version {n}; then the version starts in that channel with copies of these files. Only the adaptation is billed, on the new project."
+making = "Making the version for {channel}…"
+stopped = "The last version stopped:"
+made = "Versions made"
+made_line = "{channel} · {language} · {country}"
+open = "Open"
+of = "Version of “{title}” ({language}, {country})."
+of_channel = "Made from the channel {channel}."
+source_gone = "The original project was removed."
+open_source = "Open the original"
+adapt_hint = "Regenerate adapts the original's sentences again; the new adaptation waits for review here."
+
+[versions.error]
+same_audience = "Choose a channel in another language or country."
+already_made = "That channel already has a version of this video."
+no_narration = "Make the narration first: a version adapts its sentences."
+no_plan = "Plan the scenes on the current narration first: the version keeps them."
+no_channel = "No other channel speaks another language or to another country. Create one on the Channels screen."
+busy = "A version of this video is already being made."
+not_saved = "Could not load or save the versions. Try again."
+
+[scenes.place]
+title = "Scenes from the original"
+hint = "This version has its own narration. Placing the scenes moves each one, with its image and clip, to the new time of the sentence it started at, and builds the cut as the original had it."
+button = "Place scenes on this narration"
+nothing = "There are no scenes from the original to place on this narration."
+done = "Scenes placed on the narration; the cut follows the original's."
+
+[scenes.placed]
+title = "Worth a look"
+past_clip = "Now longer than its {clip} s clip, which holds its last frame. Make a new clip or recut it."
+stretched = "Was {was} s, now {now} s."
+dropped = "This version does not narrate it; it is left out of the cut."

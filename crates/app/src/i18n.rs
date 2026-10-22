@@ -454,6 +454,49 @@ pub enum Text {
     ScriptBusy,
     ScriptNotSaved,
     ScriptFieldError(ScriptFieldError),
+    VersionsTitle,
+    VersionsHint,
+    VersionChannel,
+    /// Placeholders: `{language}`, `{country}`, `{narrator}`.
+    VersionTargetLine,
+    /// Placeholders: `{language}`, `{country}`.
+    VersionTargetNoNarrator,
+    MakeVersion,
+    /// Placeholder: `{n}` (template version).
+    MakeVersionHint,
+    /// Placeholder: `{channel}`.
+    VersionMaking,
+    VersionStopped,
+    VersionsMade,
+    /// Placeholders: `{channel}`, `{language}`, `{country}`.
+    VersionMadeLine,
+    OpenVersion,
+    /// Placeholders: `{title}`, `{language}`, `{country}`.
+    VersionOf,
+    /// Placeholder: `{channel}`.
+    VersionOfChannel,
+    VersionSourceGone,
+    OpenVersionSource,
+    VersionAdaptHint,
+    VersionSameAudience,
+    VersionAlreadyMade,
+    VersionNoNarration,
+    VersionNoPlan,
+    VersionNoChannel,
+    VersionBusy,
+    VersionNotSaved,
+    PlaceScenesTitle,
+    PlaceScenesHint,
+    PlaceScenes,
+    PlaceScenesNothing,
+    ScenesPlaced,
+    PlacedScenesTitle,
+    /// Placeholder: `{clip}` (seconds).
+    PlacedScenePastClip,
+    /// Placeholders: `{was}`, `{now}` (seconds).
+    PlacedSceneStretched,
+    PlacedSceneDropped,
+    StageScenesToPlace,
     NarrationTitle,
     NarrationEmpty,
     GenerateNarration,
@@ -3226,6 +3269,40 @@ impl Text {
             Text::StageNarrationStale => "stage.note.narration_stale",
             Text::StageScenesMissing => "stage.note.scenes_missing",
             Text::StageScenesStale => "stage.note.scenes_stale",
+            Text::VersionsTitle => "versions.title",
+            Text::VersionsHint => "versions.hint",
+            Text::VersionChannel => "versions.channel",
+            Text::VersionTargetLine => "versions.target",
+            Text::VersionTargetNoNarrator => "versions.target_no_narrator",
+            Text::MakeVersion => "versions.make",
+            Text::MakeVersionHint => "versions.make_hint",
+            Text::VersionMaking => "versions.making",
+            Text::VersionStopped => "versions.stopped",
+            Text::VersionsMade => "versions.made",
+            Text::VersionMadeLine => "versions.made_line",
+            Text::OpenVersion => "versions.open",
+            Text::VersionOf => "versions.of",
+            Text::VersionOfChannel => "versions.of_channel",
+            Text::VersionSourceGone => "versions.source_gone",
+            Text::OpenVersionSource => "versions.open_source",
+            Text::VersionAdaptHint => "versions.adapt_hint",
+            Text::VersionSameAudience => "versions.error.same_audience",
+            Text::VersionAlreadyMade => "versions.error.already_made",
+            Text::VersionNoNarration => "versions.error.no_narration",
+            Text::VersionNoPlan => "versions.error.no_plan",
+            Text::VersionNoChannel => "versions.error.no_channel",
+            Text::VersionBusy => "versions.error.busy",
+            Text::VersionNotSaved => "versions.error.not_saved",
+            Text::PlaceScenesTitle => "scenes.place.title",
+            Text::PlaceScenesHint => "scenes.place.hint",
+            Text::PlaceScenes => "scenes.place.button",
+            Text::PlaceScenesNothing => "scenes.place.nothing",
+            Text::ScenesPlaced => "scenes.place.done",
+            Text::PlacedScenesTitle => "scenes.placed.title",
+            Text::PlacedScenePastClip => "scenes.placed.past_clip",
+            Text::PlacedSceneStretched => "scenes.placed.stretched",
+            Text::PlacedSceneDropped => "scenes.placed.dropped",
+            Text::StageScenesToPlace => "stage.note.scenes_to_place",
             Text::StageToReview => "stage.note.to_review",
             Text::StageImages => "stage.note.images",
             Text::StageClips => "stage.note.clips",
@@ -5339,6 +5416,40 @@ mod tests {
         texts.push(Text::StageNarrationStale);
         texts.push(Text::StageScenesMissing);
         texts.push(Text::StageScenesStale);
+        texts.push(Text::VersionsTitle);
+        texts.push(Text::VersionsHint);
+        texts.push(Text::VersionChannel);
+        texts.push(Text::VersionTargetLine);
+        texts.push(Text::VersionTargetNoNarrator);
+        texts.push(Text::MakeVersion);
+        texts.push(Text::MakeVersionHint);
+        texts.push(Text::VersionMaking);
+        texts.push(Text::VersionStopped);
+        texts.push(Text::VersionsMade);
+        texts.push(Text::VersionMadeLine);
+        texts.push(Text::OpenVersion);
+        texts.push(Text::VersionOf);
+        texts.push(Text::VersionOfChannel);
+        texts.push(Text::VersionSourceGone);
+        texts.push(Text::OpenVersionSource);
+        texts.push(Text::VersionAdaptHint);
+        texts.push(Text::VersionSameAudience);
+        texts.push(Text::VersionAlreadyMade);
+        texts.push(Text::VersionNoNarration);
+        texts.push(Text::VersionNoPlan);
+        texts.push(Text::VersionNoChannel);
+        texts.push(Text::VersionBusy);
+        texts.push(Text::VersionNotSaved);
+        texts.push(Text::PlaceScenesTitle);
+        texts.push(Text::PlaceScenesHint);
+        texts.push(Text::PlaceScenes);
+        texts.push(Text::PlaceScenesNothing);
+        texts.push(Text::ScenesPlaced);
+        texts.push(Text::PlacedScenesTitle);
+        texts.push(Text::PlacedScenePastClip);
+        texts.push(Text::PlacedSceneStretched);
+        texts.push(Text::PlacedSceneDropped);
+        texts.push(Text::StageScenesToPlace);
         texts.push(Text::StageToReview);
         texts.push(Text::StageImages);
         texts.push(Text::StageClips);

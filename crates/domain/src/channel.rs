@@ -308,7 +308,7 @@ impl Channel {
 }
 
 /// Persistence port for channels.
-pub trait ChannelRepository {
+pub trait ChannelRepository: Send + Sync {
     /// The owner's channels, ordered by name.
     fn list(&self, owner: ProfileId) -> Result<Vec<Channel>, RepositoryError>;
 

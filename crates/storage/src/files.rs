@@ -124,6 +124,16 @@ impl ProjectFiles for LocalProjectFiles {
         copied.map_err(|e| error(name, e))
     }
 
+    fn copy_from(
+        &self,
+        from: VideoProjectId,
+        name: &str,
+        project: VideoProjectId,
+    ) -> Result<(), ProjectFileError> {
+        let name = checked(name)?;
+        self.copy_in(project, name, &self.folder(from).join(name))
+    }
+
     fn exists(&self, project: VideoProjectId, name: &str) -> bool {
         checked(name).is_ok_and(|name| self.folder(project).join(name).is_file())
     }
@@ -208,6 +218,16 @@ impl ProjectFiles for MemoryProjectFiles {
         source: &Path,
     ) -> Result<(), ProjectFileError> {
         let bytes = std::fs::read(source).map_err(|e| error(name, e))?;
+        self.write(project, name, &bytes)
+    }
+
+    fn copy_from(
+        &self,
+        from: VideoProjectId,
+        name: &str,
+        project: VideoProjectId,
+    ) -> Result<(), ProjectFileError> {
+        let bytes = self.read(from, name)?;
         self.write(project, name, &bytes)
     }
 

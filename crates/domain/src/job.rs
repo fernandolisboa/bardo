@@ -103,6 +103,11 @@ pub enum JobKind {
     /// Has Claude write a long video's YouTube chapters from its narration
     /// (#182).
     Chapters,
+    /// Makes a version of a video project for another channel's language
+    /// and country (#184): Claude adapts the script, then the new project
+    /// is saved with copies of the source's pictures and media. Or, for a
+    /// version, adapts its script again for review.
+    Localization,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -131,7 +136,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 25] = [
+    pub const ALL: [JobKind; 26] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -157,6 +162,7 @@ impl JobKind {
         JobKind::Thumbnail,
         JobKind::ThumbnailImage,
         JobKind::Chapters,
+        JobKind::Localization,
     ];
 
     /// Stable name stored in the database.
@@ -187,6 +193,7 @@ impl JobKind {
             JobKind::Thumbnail => "thumbnail",
             JobKind::ThumbnailImage => "thumbnail_image",
             JobKind::Chapters => "chapters",
+            JobKind::Localization => "localization",
         }
     }
 }

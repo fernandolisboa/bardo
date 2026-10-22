@@ -6,7 +6,7 @@ use bardo_domain::{
     SavedAudioItem, SavedCaptions, SavedTimeline, SavedVideoItem, ScenePlanId, TimelineRepository,
     Transition, TransitionKind, VideoProjectId,
 };
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
@@ -23,11 +23,11 @@ fn uuid(text: &str) -> Result<Uuid, RepositoryError> {
     Uuid::parse_str(text).map_err(boxed)
 }
 
-fn nanos(duration: Duration) -> Result<i64, RepositoryError> {
+pub(crate) fn nanos(duration: Duration) -> Result<i64, RepositoryError> {
     i64::try_from(duration.as_nanos()).map_err(boxed)
 }
 
-fn duration(nanos: i64) -> Result<Duration, RepositoryError> {
+pub(crate) fn duration(nanos: i64) -> Result<Duration, RepositoryError> {
     u64::try_from(nanos)
         .map(Duration::from_nanos)
         .map_err(boxed)
@@ -35,7 +35,7 @@ fn duration(nanos: i64) -> Result<Duration, RepositoryError> {
 
 const VIDEO: &str = "video";
 
-fn lane_name(lane: AudioLane) -> &'static str {
+pub(crate) fn lane_name(lane: AudioLane) -> &'static str {
     match lane {
         AudioLane::Narration => "narration",
         AudioLane::Music => "music",
@@ -43,7 +43,7 @@ fn lane_name(lane: AudioLane) -> &'static str {
     }
 }
 
-fn lane_named(name: &str) -> Result<AudioLane, RepositoryError> {
+pub(crate) fn lane_named(name: &str) -> Result<AudioLane, RepositoryError> {
     AudioLane::ALL
         .into_iter()
         .find(|lane| lane_name(*lane) == name)
@@ -54,14 +54,14 @@ const CROP: &str = "crop";
 const FIT: &str = "fit";
 
 /// A framing as stored: its kind and, for a crop, its position.
-fn framing_columns(framing: Framing) -> (&'static str, u16, u16) {
+pub(crate) fn framing_columns(framing: Framing) -> (&'static str, u16, u16) {
     match framing {
         Framing::Crop(position) => (CROP, position.x(), position.y()),
         Framing::Fit => (FIT, CropPosition::CENTER.x(), CropPosition::CENTER.y()),
     }
 }
 
-fn framing(kind: &str, x: i64, y: i64) -> Result<Framing, RepositoryError> {
+pub(crate) fn framing(kind: &str, x: i64, y: i64) -> Result<Framing, RepositoryError> {
     let step = |value: i64| u16::try_from(value).map_err(boxed);
     match kind {
         CROP => Ok(Framing::Crop(CropPosition::new(step(x)?, step(y)?))),
@@ -72,14 +72,16 @@ fn framing(kind: &str, x: i64, y: i64) -> Result<Framing, RepositoryError> {
 
 /// A transition as stored: its kind and length in frames, both NULL for a
 /// cut.
-fn transition_columns(transition: Option<Transition>) -> (Option<&'static str>, Option<u32>) {
+pub(crate) fn transition_columns(
+    transition: Option<Transition>,
+) -> (Option<&'static str>, Option<u32>) {
     match transition {
         Some(transition) => (Some(transition.kind.code()), Some(transition.frames())),
         None => (None, None),
     }
 }
 
-fn transition(
+pub(crate) fn transition(
     kind: Option<String>,
     frames: Option<i64>,
 ) -> Result<Option<Transition>, RepositoryError> {
@@ -94,14 +96,16 @@ fn transition(
 }
 
 /// A motion as stored: its kind and strength, both NULL for none.
-fn motion_columns(motion: Option<Motion>) -> (Option<&'static str>, Option<&'static str>) {
+pub(crate) fn motion_columns(
+    motion: Option<Motion>,
+) -> (Option<&'static str>, Option<&'static str>) {
     match motion {
         Some(motion) => (Some(motion.kind.code()), Some(motion.strength.code())),
         None => (None, None),
     }
 }
 
-fn motion(
+pub(crate) fn motion(
     kind: Option<String>,
     strength: Option<String>,
 ) -> Result<Option<Motion>, RepositoryError> {
@@ -115,7 +119,7 @@ fn motion(
     }
 }
 
-fn tenths(value: i64) -> Result<Decibels, RepositoryError> {
+pub(crate) fn tenths(value: i64) -> Result<Decibels, RepositoryError> {
     i16::try_from(value)
         .map(Decibels::from_tenths)
         .map_err(boxed)
@@ -347,155 +351,164 @@ impl TimelineRepository for Database {
     fn save_timeline(&self, timeline: &SavedTimeline) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
-        let project = timeline.project.to_string();
-        // Its items go with it (ON DELETE CASCADE).
-        tx.execute("DELETE FROM timeline WHERE project_id = ?1", [&project])
+        write_timeline(&tx, timeline)?;
+        tx.commit().map_err(boxed)
+    }
+}
+
+/// Makes `timeline` its project's saved cut, inside `tx`.
+pub(crate) fn write_timeline(
+    tx: &Transaction<'_>,
+    timeline: &SavedTimeline,
+) -> Result<(), RepositoryError> {
+    let project = timeline.project.to_string();
+    // Its items go with it (ON DELETE CASCADE).
+    tx.execute("DELETE FROM timeline WHERE project_id = ?1", [&project])
+        .map_err(boxed)?;
+    tx.execute(
+        "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at,
+                               duck_music, duck_depth_tenths, has_captions, captions_shown,
+                               caption_style, aspect, caption_highlight)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            project,
+            timeline.owner.to_string(),
+            timeline.scene_plan.to_string(),
+            timeline.narration.to_string(),
+            to_unix_millis(timeline.updated_at),
+            timeline.mix.ducking.on,
+            timeline.mix.ducking.depth.tenths(),
+            timeline.captions.is_some(),
+            timeline
+                .captions
+                .as_ref()
+                .is_none_or(|captions| captions.shown),
+            timeline
+                .captions
+                .as_ref()
+                .map_or(CaptionStyle::default(), |captions| captions.style)
+                .code(),
+            timeline.aspect.code(),
+            timeline
+                .captions
+                .as_ref()
+                .map_or(CaptionHighlight::Off, |captions| captions.highlight)
+                .code(),
+        ],
+    )
+    .map_err(boxed)?;
+    if let Some(captions) = &timeline.captions {
+        let mut insert = tx
+            .prepare(
+                "INSERT INTO timeline_caption (project_id, position, text, start_ns, end_ns)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
             .map_err(boxed)?;
+        for (position, caption) in captions.lines.iter().enumerate() {
+            insert
+                .execute(params![
+                    project,
+                    i64::try_from(position).map_err(boxed)?,
+                    caption.text,
+                    nanos(caption.start)?,
+                    nanos(caption.end)?,
+                ])
+                .map_err(boxed)?;
+        }
+    }
+    for lane in AudioLane::ALL {
+        let mix = timeline.mix.lane(lane);
         tx.execute(
-            "INSERT INTO timeline (project_id, profile_id, scene_plan_id, narration_id, updated_at,
-                                   duck_music, duck_depth_tenths, has_captions, captions_shown,
-                                   caption_style, aspect, caption_highlight)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO timeline_lane (project_id, lane, gain_tenths, muted, solo)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 project,
-                timeline.owner.to_string(),
-                timeline.scene_plan.to_string(),
-                timeline.narration.to_string(),
-                to_unix_millis(timeline.updated_at),
-                timeline.mix.ducking.on,
-                timeline.mix.ducking.depth.tenths(),
-                timeline.captions.is_some(),
-                timeline
-                    .captions
-                    .as_ref()
-                    .is_none_or(|captions| captions.shown),
-                timeline
-                    .captions
-                    .as_ref()
-                    .map_or(CaptionStyle::default(), |captions| captions.style)
-                    .code(),
-                timeline.aspect.code(),
-                timeline
-                    .captions
-                    .as_ref()
-                    .map_or(CaptionHighlight::Off, |captions| captions.highlight)
-                    .code(),
+                lane_name(lane),
+                mix.gain.tenths(),
+                mix.muted,
+                mix.solo
             ],
         )
         .map_err(boxed)?;
-        if let Some(captions) = &timeline.captions {
-            let mut insert = tx
-                .prepare(
-                    "INSERT INTO timeline_caption (project_id, position, text, start_ns, end_ns)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                )
-                .map_err(boxed)?;
-            for (position, caption) in captions.lines.iter().enumerate() {
-                insert
-                    .execute(params![
-                        project,
-                        i64::try_from(position).map_err(boxed)?,
-                        caption.text,
-                        nanos(caption.start)?,
-                        nanos(caption.end)?,
-                    ])
-                    .map_err(boxed)?;
-            }
-        }
-        for lane in AudioLane::ALL {
-            let mix = timeline.mix.lane(lane);
-            tx.execute(
-                "INSERT INTO timeline_lane (project_id, lane, gain_tenths, muted, solo)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    project,
-                    lane_name(lane),
-                    mix.gain.tenths(),
-                    mix.muted,
-                    mix.solo
-                ],
+    }
+    {
+        let mut insert = tx
+            .prepare(
+                "INSERT INTO timeline_item
+                     (project_id, track, position, scene, file, start_ns, at_ns, duration_ns,
+                      fade_in_ns, fade_out_ns, framing, crop_x, crop_y, transition,
+                      transition_frames, motion, motion_strength)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                         ?16, ?17)",
             )
             .map_err(boxed)?;
-        }
-        {
-            let mut insert = tx
-                .prepare(
-                    "INSERT INTO timeline_item
-                         (project_id, track, position, scene, file, start_ns, at_ns, duration_ns,
-                          fade_in_ns, fade_out_ns, framing, crop_x, crop_y, transition,
-                          transition_frames, motion, motion_strength)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                             ?16, ?17)",
-                )
+        let mut at = Duration::ZERO;
+        for (position, item) in timeline.video.iter().enumerate() {
+            let (framing, crop_x, crop_y) = framing_columns(item.framing);
+            let (transition, transition_frames) = transition_columns(item.transition);
+            let (motion, motion_strength) = motion_columns(item.motion);
+            let (scene, file) = match &item.picture {
+                Picture::Scene(scene) => (Some(i64::try_from(*scene).map_err(boxed)?), None),
+                Picture::Footage(file) => (None, Some(file)),
+            };
+            insert
+                .execute(params![
+                    project,
+                    VIDEO,
+                    i64::try_from(position).map_err(boxed)?,
+                    scene,
+                    file,
+                    nanos(item.start)?,
+                    nanos(at)?,
+                    nanos(item.duration)?,
+                    0i64,
+                    0i64,
+                    framing,
+                    crop_x,
+                    crop_y,
+                    transition,
+                    transition_frames,
+                    motion,
+                    motion_strength,
+                ])
                 .map_err(boxed)?;
-            let mut at = Duration::ZERO;
-            for (position, item) in timeline.video.iter().enumerate() {
-                let (framing, crop_x, crop_y) = framing_columns(item.framing);
-                let (transition, transition_frames) = transition_columns(item.transition);
-                let (motion, motion_strength) = motion_columns(item.motion);
-                let (scene, file) = match &item.picture {
-                    Picture::Scene(scene) => (Some(i64::try_from(*scene).map_err(boxed)?), None),
-                    Picture::Footage(file) => (None, Some(file)),
-                };
-                insert
-                    .execute(params![
-                        project,
-                        VIDEO,
-                        i64::try_from(position).map_err(boxed)?,
-                        scene,
-                        file,
-                        nanos(item.start)?,
-                        nanos(at)?,
-                        nanos(item.duration)?,
-                        0i64,
-                        0i64,
-                        framing,
-                        crop_x,
-                        crop_y,
-                        transition,
-                        transition_frames,
-                        motion,
-                        motion_strength,
-                    ])
-                    .map_err(boxed)?;
-                at += item.duration;
-            }
-            let audio = [
-                (AudioLane::Narration, &timeline.narration_items),
-                (AudioLane::Music, &timeline.music_items),
-                (AudioLane::Sfx, &timeline.sfx_items),
-            ];
-            for (lane, item, position) in audio.into_iter().flat_map(|(lane, items)| {
-                items
-                    .iter()
-                    .enumerate()
-                    .map(move |(position, item)| (lane, item, position))
-            }) {
-                insert
-                    .execute(params![
-                        project,
-                        lane_name(lane),
-                        i64::try_from(position).map_err(boxed)?,
-                        None::<i64>,
-                        Some(&item.file),
-                        nanos(item.start)?,
-                        nanos(item.at)?,
-                        nanos(item.duration)?,
-                        nanos(item.fade_in)?,
-                        nanos(item.fade_out)?,
-                        CROP,
-                        CropPosition::CENTER.x(),
-                        CropPosition::CENTER.y(),
-                        None::<&str>,
-                        None::<u32>,
-                        None::<&str>,
-                        None::<&str>,
-                    ])
-                    .map_err(boxed)?;
-            }
+            at += item.duration;
         }
-        tx.commit().map_err(boxed)
+        let audio = [
+            (AudioLane::Narration, &timeline.narration_items),
+            (AudioLane::Music, &timeline.music_items),
+            (AudioLane::Sfx, &timeline.sfx_items),
+        ];
+        for (lane, item, position) in audio.into_iter().flat_map(|(lane, items)| {
+            items
+                .iter()
+                .enumerate()
+                .map(move |(position, item)| (lane, item, position))
+        }) {
+            insert
+                .execute(params![
+                    project,
+                    lane_name(lane),
+                    i64::try_from(position).map_err(boxed)?,
+                    None::<i64>,
+                    Some(&item.file),
+                    nanos(item.start)?,
+                    nanos(item.at)?,
+                    nanos(item.duration)?,
+                    nanos(item.fade_in)?,
+                    nanos(item.fade_out)?,
+                    CROP,
+                    CropPosition::CENTER.x(),
+                    CropPosition::CENTER.y(),
+                    None::<&str>,
+                    None::<u32>,
+                    None::<&str>,
+                    None::<&str>,
+                ])
+                .map_err(boxed)?;
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]

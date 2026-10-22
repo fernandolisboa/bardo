@@ -16,7 +16,7 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
         performance_videos, performance_projected, performance_basis
     FROM theme";
 
-const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
+pub(crate) const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
      video_format FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
@@ -241,7 +241,7 @@ fn upsert_theme(tx: &Transaction<'_>, theme: &Theme) -> Result<(), RepositoryErr
 }
 
 /// A video project row as stored.
-struct ProjectRow {
+pub(crate) struct ProjectRow {
     id: String,
     owner: String,
     channel: String,
@@ -254,7 +254,7 @@ struct ProjectRow {
 }
 
 impl ProjectRow {
-    fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
+    pub(crate) fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
             owner: row.get(1)?,
@@ -268,7 +268,7 @@ impl ProjectRow {
         })
     }
 
-    fn into_project(self) -> Result<VideoProject, RepositoryError> {
+    pub(crate) fn into_project(self) -> Result<VideoProject, RepositoryError> {
         Ok(VideoProject {
             id: VideoProjectId::from(uuid(&self.id)?),
             owner: ProfileId::from(uuid(&self.owner)?),
@@ -287,6 +287,33 @@ impl ProjectRow {
                 .transpose()?,
         })
     }
+}
+
+/// Saves the approved theme and the project it starts, inside `tx`.
+pub(crate) fn insert_project(
+    tx: &Transaction<'_>,
+    theme: &Theme,
+    project: &VideoProject,
+) -> Result<(), RepositoryError> {
+    upsert_theme(tx, theme)?;
+    tx.execute(
+        "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
+                                    created_at, persona_id, video_format)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            project.id.to_string(),
+            project.owner.to_string(),
+            project.channel.to_string(),
+            project.niche.label(),
+            project.theme.to_string(),
+            project.title,
+            to_unix_millis(project.created_at),
+            project.persona.map(|id| id.to_string()),
+            project.format.map(VideoFormat::code),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
 }
 
 impl ThemeRepository for Database {
@@ -330,24 +357,7 @@ impl ThemeRepository for Database {
     fn start_project(&self, theme: &Theme, project: &VideoProject) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
-        upsert_theme(&tx, theme)?;
-        tx.execute(
-            "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
-                                        created_at, persona_id, video_format)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                project.id.to_string(),
-                project.owner.to_string(),
-                project.channel.to_string(),
-                project.niche.label(),
-                project.theme.to_string(),
-                project.title,
-                to_unix_millis(project.created_at),
-                project.persona.map(|id| id.to_string()),
-                project.format.map(VideoFormat::code),
-            ],
-        )
-        .map_err(boxed)?;
+        insert_project(&tx, theme, project)?;
         tx.commit().map_err(boxed)
     }
 

@@ -261,11 +261,14 @@ impl Bardo {
             .ok_or(ScriptError::ProjectNotFound)
     }
 
+    /// The project's latest script job; for a version, adapting it again
+    /// counts too.
     fn latest_script_job(&self, project: VideoProjectId) -> Option<Job> {
-        let project = project.to_string();
+        let id = project.to_string();
         self.jobs().into_iter().rev().find(|job| {
-            job.kind() == JobKind::ScriptGeneration
-                && ScriptPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+            (job.kind() == JobKind::ScriptGeneration
+                && ScriptPayload::parse(job.payload()).is_ok_and(|p| p.project == id))
+                || crate::localization::adapts_again(job, &id)
         })
     }
 
@@ -345,12 +348,20 @@ impl Bardo {
     /// The project's script screen.
     pub fn script(&self, project: VideoProjectId) -> Result<ScriptView, ScriptError> {
         let project = self.own_project(project)?;
-        let template = self.current_template(TemplateKind::Script)?;
-        let rendered = self.render_script(&project, &template)?;
+        // A version is adapted again from what it carried.
+        let (template, estimate) = match self.localizations.localization(project.id)? {
+            Some(localization) => self.adaptation_estimate(&project, &localization)?,
+            None => {
+                let template = self.current_template(TemplateKind::Script)?;
+                let rendered = self.render_script(&project, &template)?;
+                let estimate = self.estimate(&[script_call(&rendered)])?;
+                (template, estimate)
+            }
+        };
         Ok(ScriptView {
             script: self.scripts.script(project.id)?,
             job: self.latest_script_job(project.id),
-            estimate: self.estimate(&[script_call(&rendered)])?,
+            estimate,
             spent: self.project_spend(project.id)?,
             template,
             project,
@@ -389,6 +400,9 @@ impl Bardo {
         }
         if self.provider_key(Provider::Claude).state == KeyState::NotSet {
             return Err(ScriptError::MissingKey(Provider::Claude));
+        }
+        if let Some(localization) = self.localizations.localization(project.id)? {
+            return self.adapt_version_again(&project, &localization, consent);
         }
         let template = self.current_template(TemplateKind::Script)?;
         let rendered = self.render_script(&project, &template)?;

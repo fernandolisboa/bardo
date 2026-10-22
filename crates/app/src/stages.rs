@@ -94,6 +94,8 @@ pub enum StageNote {
     NarrationLength(Duration),
     ScenesMissing,
     ScenesStale,
+    /// A version's carried scenes wait to be placed on its narration.
+    ScenesToPlace,
     ImagesToReview(usize),
     Images {
         done: usize,
@@ -215,6 +217,16 @@ pub fn project_stages(
         StageStatus::working(Stage::Scenes)
     } else if plan.is_none() {
         StageStatus::new(Stage::Scenes, StageState::Open, StageNote::ScenesMissing)
+    } else if scenes
+        .version
+        .as_ref()
+        .is_some_and(|version| version.can_place)
+    {
+        StageStatus::new(
+            Stage::Scenes,
+            StageState::Attention,
+            StageNote::ScenesToPlace,
+        )
     } else if scenes.stale {
         StageStatus::new(Stage::Scenes, StageState::Attention, StageNote::ScenesStale)
     } else {
@@ -365,6 +377,7 @@ impl Bardo {
             }
             StageNote::ScenesMissing => self.text(Text::StageScenesMissing).into_owned(),
             StageNote::ScenesStale => self.text(Text::StageScenesStale).into_owned(),
+            StageNote::ScenesToPlace => self.text(Text::StageScenesToPlace).into_owned(),
             StageNote::ImagesToReview(count) | StageNote::ClipsToReview(count) => {
                 n(Text::StageToReview, count)
             }

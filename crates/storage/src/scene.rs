@@ -258,6 +258,45 @@ fn insert_scene(
     write_clips(tx, plan, position(index)?, scene)
 }
 
+/// Makes `plan` its project's plan with all its scenes, inside `tx`.
+pub(crate) fn write_scene_plan(
+    tx: &Transaction<'_>,
+    plan: &ScenePlan,
+) -> Result<(), RepositoryError> {
+    let id = plan.id.to_string();
+    insert_generation(tx, &plan.generation)?;
+    // Another plan of the project goes, its scenes with it (ON DELETE
+    // CASCADE); this plan's scenes are written again below.
+    tx.execute(
+        "DELETE FROM scene_plan WHERE project_id = ?1 AND id <> ?2",
+        params![plan.project.to_string(), id],
+    )
+    .map_err(boxed)?;
+    tx.execute(
+        "INSERT INTO scene_plan (project_id, id, profile_id, narration_id, generation_id,
+             updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (project_id) DO UPDATE SET
+             narration_id = excluded.narration_id,
+             updated_at = excluded.updated_at",
+        params![
+            plan.project.to_string(),
+            id,
+            plan.owner.to_string(),
+            plan.narration.to_string(),
+            plan.generation.id.to_string(),
+            to_unix_millis(plan.updated_at),
+        ],
+    )
+    .map_err(boxed)?;
+    tx.execute("DELETE FROM scene WHERE plan_id = ?1", [&id])
+        .map_err(boxed)?;
+    for (index, scene) in plan.scenes().iter().enumerate() {
+        insert_scene(tx, &id, index, scene)?;
+    }
+    Ok(())
+}
+
 impl ScenePlanRepository for Database {
     fn scene_plan(&self, project: VideoProjectId) -> Result<Option<ScenePlan>, RepositoryError> {
         let conn = self.conn();
@@ -295,35 +334,7 @@ impl ScenePlanRepository for Database {
     fn save_scene_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
-        let id = plan.id.to_string();
-        insert_generation(&tx, &plan.generation)?;
-        // Another plan of the project goes, its scenes with it (ON DELETE
-        // CASCADE); this plan's scenes are written again below.
-        tx.execute(
-            "DELETE FROM scene_plan WHERE project_id = ?1 AND id <> ?2",
-            params![plan.project.to_string(), id],
-        )
-        .map_err(boxed)?;
-        tx.execute(
-            "INSERT INTO scene_plan (project_id, id, profile_id, narration_id, generation_id,
-                 updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT (project_id) DO UPDATE SET updated_at = excluded.updated_at",
-            params![
-                plan.project.to_string(),
-                id,
-                plan.owner.to_string(),
-                plan.narration.to_string(),
-                plan.generation.id.to_string(),
-                to_unix_millis(plan.updated_at),
-            ],
-        )
-        .map_err(boxed)?;
-        tx.execute("DELETE FROM scene WHERE plan_id = ?1", [&id])
-            .map_err(boxed)?;
-        for (index, scene) in plan.scenes().iter().enumerate() {
-            insert_scene(&tx, &id, index, scene)?;
-        }
+        write_scene_plan(&tx, plan)?;
         tx.commit().map_err(boxed)
     }
 
