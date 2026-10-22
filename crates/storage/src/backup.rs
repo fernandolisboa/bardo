@@ -1321,10 +1321,11 @@ mod tests {
     fn a_backup_made_while_the_agent_writes_is_whole_and_checked() {
         let (install, profile) = Install::with_profile();
         let to = install.out("backup.zip");
-        // The app has written and holds a lease. Its writes come before the
-        // agent's: two writers racing each other only measure how long one
-        // waits for the other's commit (up to `BUSY_TIMEOUT`, which a slow
-        // disk can exceed, #196), and the backup is not a writer.
+        // The app has written and holds a lease. It writes before the agent
+        // starts: a write waits for the other runner's commits only up to
+        // `BUSY_TIMEOUT`, which a slow disk can use up, and what this test
+        // checks is that the backup, which only reads, keeps no writer
+        // waiting.
         let leased = Job::new(profile.id, JobKind::Countdown, "{}");
         JobRepository::save(&*install.db, &leased).unwrap();
         let now = SystemTime::now();
