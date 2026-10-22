@@ -27,9 +27,9 @@
 use std::time::Duration;
 
 use crate::{
-    AspectRatio, AudioItem, AudioLane, Caption, CaptionStyle, DUCK_RANGE, Ducking, Framing,
-    GAIN_RANGE, LaneMix, MediaAsset, Motion, MotionDefault, Timeline, Transition, VideoItem,
-    VideoSource, caption_text, min_length,
+    AspectRatio, AudioItem, AudioLane, Caption, CaptionHighlight, CaptionStyle, DUCK_RANGE,
+    Ducking, Framing, GAIN_RANGE, LaneMix, MediaAsset, Motion, MotionDefault, Timeline, Transition,
+    VideoItem, VideoSource, caption_text, min_length,
 };
 
 /// A track of the timeline that edits reach.
@@ -250,6 +250,8 @@ pub enum Edit {
     /// Burns the captions in, or not.
     ShowCaptions(bool),
     SetCaptionStyle(CaptionStyle),
+    /// Lights the spoken word in a colour, or not.
+    SetCaptionHighlight(CaptionHighlight),
     /// Cuts for a frame of another shape.
     SetAspect(AspectRatio),
     /// Sets how a video item's picture fills the frame.
@@ -557,6 +559,7 @@ impl Timeline {
             Edit::SetCaptionText { index, text } => self.set_caption_text(*index, text)?,
             Edit::ShowCaptions(shown) => self.show_captions(*shown)?,
             Edit::SetCaptionStyle(style) => self.set_caption_style(*style)?,
+            Edit::SetCaptionHighlight(highlight) => self.set_caption_highlight(*highlight)?,
             Edit::SetAspect(aspect) => self.set_aspect(*aspect)?,
             Edit::SetFraming { index, framing } => self.set_framing(*index, *framing)?,
             Edit::SetTransition { index, transition } => {
@@ -881,6 +884,14 @@ impl Timeline {
         }
         let before = std::mem::replace(&mut self.captions.style, style);
         Ok(Edit::SetCaptionStyle(before))
+    }
+
+    fn set_caption_highlight(&mut self, highlight: CaptionHighlight) -> Result<Edit, EditError> {
+        if self.captions.highlight == highlight {
+            return Err(EditError::NoChange);
+        }
+        let before = std::mem::replace(&mut self.captions.highlight, highlight);
+        Ok(Edit::SetCaptionHighlight(before))
     }
 
     fn set_aspect(&mut self, aspect: AspectRatio) -> Result<Edit, EditError> {
@@ -2175,6 +2186,11 @@ mod tests {
         assert!(!hidden.captions().shown());
         let styled = round_trip(&captioned(), Edit::SetCaptionStyle(CaptionStyle::Punch));
         assert_eq!(styled.captions().style(), CaptionStyle::Punch);
+        let lit = round_trip(
+            &captioned(),
+            Edit::SetCaptionHighlight(CaptionHighlight::Green),
+        );
+        assert_eq!(lit.captions().highlight(), CaptionHighlight::Green);
         let mut timeline = captioned();
         assert_eq!(
             timeline.apply(&Edit::ShowCaptions(true)),
@@ -2182,6 +2198,10 @@ mod tests {
         );
         assert_eq!(
             timeline.apply(&Edit::SetCaptionStyle(CaptionStyle::Clean)),
+            Err(EditError::NoChange)
+        );
+        assert_eq!(
+            timeline.apply(&Edit::SetCaptionHighlight(CaptionHighlight::Yellow)),
             Err(EditError::NoChange)
         );
     }

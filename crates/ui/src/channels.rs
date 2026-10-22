@@ -4,9 +4,9 @@
 //! a `ChannelDraft` and errors back to fields.
 
 use bardo_app::bardo_domain::{
-    CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel, ClipModelRef,
-    ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength, PersonaId, Transition,
-    TransitionKind, VideoFormat, frame_time,
+    CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel,
+    ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength,
+    PersonaId, Transition, TransitionKind, VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -115,6 +115,13 @@ fn caption_style_choices(bardo: &Bardo) -> SearchableVec<Choice<CaptionStyle>> {
     }))
 }
 
+fn caption_highlight_choices(bardo: &Bardo) -> SearchableVec<Choice<CaptionHighlight>> {
+    SearchableVec::new(CaptionHighlight::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::CaptionHighlightName(value)),
+    }))
+}
+
 fn format_choices(bardo: &Bardo) -> SearchableVec<Choice<VideoFormat>> {
     SearchableVec::new(VideoFormat::ALL.map(|value| Choice {
         value,
@@ -211,6 +218,7 @@ pub struct ChannelsScreen {
     persona: ChoiceSelect<Option<PersonaId>>,
     clip_model: ChoiceSelect<Option<ClipModelRef>>,
     caption_style: ChoiceSelect<CaptionStyle>,
+    caption_highlight: ChoiceSelect<CaptionHighlight>,
     format: ChoiceSelect<VideoFormat>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
@@ -246,6 +254,7 @@ impl ChannelsScreen {
                 caption_style_choices(bardo),
             )
         };
+        let caption_highlights = caption_highlight_choices(bardo.read(cx));
         let (transitions, transition_lengths_list, formats, motions, strengths) = {
             let bardo = bardo.read(cx);
             (
@@ -272,6 +281,10 @@ impl ChannelsScreen {
         let caption_style = cx.new(|cx| {
             let selected = index_of(&CaptionStyle::ALL, &defaults.caption_style);
             SelectState::new(caption_styles, selected, window, cx)
+        });
+        let caption_highlight = cx.new(|cx| {
+            let selected = index_of(&CaptionHighlight::ALL, &defaults.caption_highlight);
+            SelectState::new(caption_highlights, selected, window, cx)
         });
         let format = cx.new(|cx| {
             let selected = index_of(&VideoFormat::ALL, &defaults.format);
@@ -326,6 +339,7 @@ impl ChannelsScreen {
             persona,
             clip_model,
             caption_style,
+            caption_highlight,
             format,
             transition,
             transition_length,
@@ -366,6 +380,7 @@ impl ChannelsScreen {
         let personas = persona_choices(bardo);
         let clip_models = clip_model_choices(bardo);
         let caption_styles = caption_style_choices(bardo);
+        let caption_highlights = caption_highlight_choices(bardo);
         let transitions = transition_choices(bardo);
         let lengths = transition_length_choices(bardo);
         let formats = format_choices(bardo);
@@ -403,6 +418,13 @@ impl ChannelsScreen {
         self.caption_style.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(caption_styles, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.caption_highlight.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(caption_highlights, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -504,6 +526,9 @@ impl ChannelsScreen {
         self.caption_style.update(cx, |select, cx| {
             select.set_selected_value(&draft.caption_style, window, cx)
         });
+        self.caption_highlight.update(cx, |select, cx| {
+            select.set_selected_value(&draft.caption_highlight, window, cx)
+        });
         self.format.update(cx, |select, cx| {
             select.set_selected_value(&draft.format, window, cx)
         });
@@ -549,6 +574,12 @@ impl ChannelsScreen {
             clip_model: self.clip_model.read(cx).selected_value().cloned().flatten(),
             caption_style: self
                 .caption_style
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
+            caption_highlight: self
+                .caption_highlight
                 .read(cx)
                 .selected_value()
                 .copied()
@@ -818,13 +849,25 @@ impl ChannelsScreen {
                             guide::refs::CHANNELS_DEFAULTS,
                             Select::new(&self.clip_model).into_any_element(),
                         ))
-                        .child(explained(
-                            "channel-caption-style-info",
-                            Text::ChannelCaptionStyle,
-                            Text::ChannelCaptionStyleHint,
-                            guide::refs::CHANNELS_DEFAULTS,
-                            Select::new(&self.caption_style).into_any_element(),
-                        ))
+                        .child(
+                            h_flex()
+                                .gap_4()
+                                .items_start()
+                                .child(div().flex_1().min_w_0().child(explained(
+                                    "channel-caption-style-info",
+                                    Text::ChannelCaptionStyle,
+                                    Text::ChannelCaptionStyleHint,
+                                    guide::refs::CHANNELS_DEFAULTS,
+                                    Select::new(&self.caption_style).into_any_element(),
+                                )))
+                                .child(div().w(px(160.)).flex_none().child(explained(
+                                    "channel-caption-highlight-info",
+                                    Text::ChannelCaptionHighlight,
+                                    Text::ChannelCaptionHighlightHint,
+                                    guide::refs::CHANNELS_DEFAULTS,
+                                    Select::new(&self.caption_highlight).into_any_element(),
+                                ))),
+                        )
                         .child(
                             h_flex()
                                 .gap_4()

@@ -44,13 +44,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
-    AspectRatio, AudioLane, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking, Edge, Edit,
-    EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState, LaneMix,
-    MediaAsset, MediaAssetId, MediaKind, Motion, MotionDefault, MotionPattern, MotionStrength,
-    MotionView, NarrationId, NarrationRepository, Picture, PlayedTransition, ProjectFiles,
-    RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline,
-    TimelineRepository, Track, Transition, VideoFormat, VideoProject, VideoProjectId, VideoSource,
-    frame_at, frame_time, nearest_frame, snap,
+    AspectRatio, AudioLane, CaptionHighlight, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking,
+    Edge, Edit, EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState,
+    LaneMix, MediaAsset, MediaAssetId, MediaKind, Motion, MotionDefault, MotionPattern,
+    MotionStrength, MotionView, NarrationId, NarrationRepository, Picture, PlayedTransition,
+    ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository,
+    Timeline, TimelineRepository, Track, Transition, VideoFormat, VideoProject, VideoProjectId,
+    VideoSource, frame_at, frame_time, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -384,6 +384,8 @@ pub enum EditAction {
     /// Burns the captions in, or not.
     ShowCaptions(bool),
     SetCaptionStyle(CaptionStyle),
+    /// Lights the spoken word in a colour, or not.
+    SetCaptionHighlight(CaptionHighlight),
     /// Cuts for a frame of another shape.
     SetAspect(AspectRatio),
     /// Sets how video clip `index` fills a 9:16 frame.
@@ -745,6 +747,9 @@ impl Editor {
             }
             EditAction::ShowCaptions(shown) => (Edit::ShowCaptions(shown), None),
             EditAction::SetCaptionStyle(style) => (Edit::SetCaptionStyle(style), None),
+            EditAction::SetCaptionHighlight(highlight) => {
+                (Edit::SetCaptionHighlight(highlight), None)
+            }
             EditAction::SetAspect(aspect) => (Edit::SetAspect(aspect), None),
             EditAction::SetFraming { index, framing } => {
                 (Edit::SetFraming { index, framing }, None)
@@ -1219,6 +1224,7 @@ pub(crate) fn timeline_plan(
     let captions = timeline.captions();
     let captions = captions.shown().then(|| CaptionTrack {
         style: captions.style(),
+        highlight: captions.highlight(),
         lines: view
             .captions
             .iter()
@@ -1226,6 +1232,13 @@ pub(crate) fn timeline_plan(
                 text: captions.lines()[span.index].text.clone(),
                 at: span.at,
                 duration: span.duration,
+                // Times only for a highlight, so a plan without one is
+                // written down as before.
+                words: if captions.highlight().is_on() {
+                    timeline.caption_word_starts(span)
+                } else {
+                    Vec::new()
+                },
             })
             .collect(),
     });
@@ -1330,10 +1343,15 @@ impl Bardo {
         let motion = channel
             .as_ref()
             .map_or(MotionDefault::default(), |channel| channel.details.motion());
-        // A new cut's captions take the channel's style.
+        // A new cut's captions take the channel's style and highlight.
         let caption_style = channel.as_ref().map_or(CaptionStyle::default(), |channel| {
             channel.details.caption_style()
         });
+        let caption_highlight = channel
+            .as_ref()
+            .map_or(CaptionHighlight::default(), |channel| {
+                channel.details.caption_highlight()
+            });
         // A new cut starts in the shape of the project's format.
         let aspect = project
             .format(
@@ -1369,7 +1387,9 @@ impl Bardo {
                     let timeline = Timeline::restore(saved, plan, narration, &assets)?;
                     // A cut saved before captions existed gets them now.
                     Some(if saved.captions.is_none() {
-                        timeline.with_caption_style(caption_style)
+                        timeline
+                            .with_caption_style(caption_style)
+                            .with_caption_highlight(caption_highlight)
                     } else {
                         timeline
                     })
@@ -1383,6 +1403,7 @@ impl Bardo {
                 let timeline = restored.unwrap_or_else(|| {
                     let cut = Timeline::rough_cut(plan, narration, aspect)
                         .with_caption_style(caption_style)
+                        .with_caption_highlight(caption_highlight)
                         .with_motion(motion)
                         .with_aspect(saved.as_ref().map_or(aspect, |saved| saved.aspect));
                     match &music {
@@ -3853,6 +3874,61 @@ mod tests {
                 .style(),
             CaptionStyle::Boxed
         );
+    }
+
+    #[test]
+    fn a_new_cut_lights_the_spoken_word_in_its_channel_s_colour() {
+        use bardo_domain::{ChannelDetails, ChannelDraft};
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let mut channel = app.channels.get(project.channel).unwrap().unwrap();
+        channel.details = ChannelDetails::validate(ChannelDraft {
+            caption_highlight: CaptionHighlight::Green,
+            ..ChannelDraft::from(&channel.details)
+        })
+        .unwrap();
+        app.channels.save(&channel).unwrap();
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        let timeline = editor.view().timeline.clone().unwrap();
+        assert_eq!(timeline.captions().highlight(), CaptionHighlight::Green);
+
+        // Every line carries when each of its words lights up.
+        let plan = playing_plan(&h, &mut editor);
+        let captions = plan.captions.unwrap();
+        assert_eq!(captions.highlight, CaptionHighlight::Green);
+        let narration = app.narrations.narration(project.id).unwrap().unwrap();
+        let (first_word, timing) = narration.words().next().unwrap();
+        let line = &captions.lines[0];
+        assert_eq!(line.words.len(), line.text.split_whitespace().count());
+        assert!(line.text.starts_with(first_word));
+        assert_eq!(line.words[0], timing.start);
+        assert!(line.words.windows(2).all(|pair| pair[0] <= pair[1]));
+
+        // Turned off, it is undone as one step, and the plan has no times.
+        app.edit(
+            &mut editor,
+            EditAction::SetCaptionHighlight(CaptionHighlight::Off),
+        )
+        .unwrap();
+        let plan = playing_plan(&h, &mut editor);
+        let captions = plan.captions.unwrap();
+        assert_eq!(captions.highlight, CaptionHighlight::Off);
+        assert!(captions.lines.iter().all(|line| line.words.is_empty()));
+        let reopened = app.open_editor(project.id).unwrap();
+        let highlight = |editor: &Editor| {
+            editor
+                .view()
+                .timeline
+                .as_ref()
+                .unwrap()
+                .captions()
+                .highlight()
+        };
+        assert_eq!(highlight(&reopened), CaptionHighlight::Off);
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(highlight(&editor), CaptionHighlight::Green);
     }
 
     #[test]

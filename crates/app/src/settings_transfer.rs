@@ -22,10 +22,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AppCredentials, Budget, ChannelDraft, ClipModelRef, ConnectedIdentity,
-    ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart, Money, MotionDefault,
-    Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate,
-    Resolution, Score, TokenSet, Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
+    ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipModelRef,
+    ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
+    Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
+    Provider, Rate, Resolution, Score, TokenSet, Transition, UiLanguage, UiThemePreference,
+    VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -417,6 +418,10 @@ struct ChannelEntry {
     /// channels had.
     #[serde(default)]
     motion: Option<MotionEntry>,
+    /// Missing from files made before the word highlight: off, as those
+    /// channels' captions were.
+    #[serde(default)]
+    caption_highlight: Option<String>,
     #[serde(default)]
     accounts: Vec<AccountEntry>,
 }
@@ -518,6 +523,10 @@ impl ChannelEntry {
             caption_style: match &self.caption_style {
                 Some(style) => style.parse().ok()?,
                 None => Default::default(),
+            },
+            caption_highlight: match &self.caption_highlight {
+                Some(highlight) => highlight.parse().ok()?,
+                None => CaptionHighlight::Off,
             },
             transition: match &self.transition {
                 Some(entry) => Transition::new(entry.kind.parse().ok()?, entry.frames),
@@ -875,6 +884,7 @@ impl Bardo {
                     model: model.model().to_owned(),
                 }),
                 caption_style: Some(details.caption_style().code().to_owned()),
+                caption_highlight: Some(details.caption_highlight().code().to_owned()),
                 transition: Some(TransitionEntry {
                     kind: details.transition().kind.code().to_owned(),
                     frames: details.transition().frames(),
@@ -1395,6 +1405,7 @@ mod tests {
                 language: ContentLanguage::Portuguese,
                 default_persona: Some(persona.id),
                 transition: Transition::new(bardo_domain::TransitionKind::WipeRight, 21),
+                caption_highlight: CaptionHighlight::Cyan,
                 motion: MotionDefault::new(
                     bardo_domain::MotionPattern::Same(bardo_domain::MotionKind::PanLeft),
                     bardo_domain::MotionStrength::Subtle,
@@ -1444,6 +1455,16 @@ mod tests {
         let entry: ChannelEntry =
             serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
         assert_eq!(entry.draft(None).unwrap().format, VideoFormat::Long);
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_the_highlight_lights_no_word() {
+        let entry: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(
+            entry.draft(None).unwrap().caption_highlight,
+            CaptionHighlight::Off
+        );
     }
 
     #[test]
@@ -1629,6 +1650,7 @@ mod tests {
             Transition::new(bardo_domain::TransitionKind::WipeRight, 21)
         );
         assert_eq!(channel.details.format(), VideoFormat::Short);
+        assert_eq!(channel.details.caption_highlight(), CaptionHighlight::Cyan);
         assert_eq!(
             channel.details.motion(),
             MotionDefault::new(

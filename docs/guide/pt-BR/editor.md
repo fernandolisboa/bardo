@@ -95,6 +95,7 @@ As legendas são feitas das palavras da narração e ficam na faixa CC. Selecion
 - **Texto**: Enter aplica; o tempo de exibição não muda.
 - **Entrada** e **Saída**: arraste a legenda, ou qualquer ponta dela, na faixa; as bordas encaixam nas palavras.
 - **Estilo**: escolha um dos estilos de legenda. O estilo vale para todas as legendas do projeto.
+- **Palavra falada**: a cor em que acende a palavra sendo dita, enquanto o resto da linha fica branco, como na maioria dos Shorts; **Desligado** mostra cada linha na cor do próprio estilo. Só a cor muda, então a linha nunca se mexe nem quebra diferente. Cada palavra acende quando o narrador começa a dizê-la. Se você reescrever uma legenda com mais ou menos palavras do que as faladas, o tempo dela é dividido entre as novas palavras pelo tamanho de cada uma; corrigir uma palavra mantém o tempo. Vale para todas as legendas do projeto.
 
 **Remover do corte** tira uma legenda.
 

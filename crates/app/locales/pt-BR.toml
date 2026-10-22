@@ -76,6 +76,8 @@ clip_model_default = "{model} (padrão)"
 clip_model_hint = "O modelo que anima as imagens das cenas deste canal em clipes, pelo Higgsfield, pelo Kling ou pelo Google. Qualquer cena pode escolher outro."
 caption_style = "Estilo de legenda"
 caption_style_hint = "Como as legendas aparecem nos novos projetos deste canal. Cada projeto pode escolher outro no editor."
+caption_highlight = "Palavra falada"
+caption_highlight_hint = "Nos novos projetos deste canal, a palavra sendo dita acende nesta cor enquanto o resto da linha fica branco. Cada projeto pode escolher outra no editor."
 format = "Formato do vídeo"
 format_hint = "Short: vídeo vertical de menos de um minuto, para todas as redes. Longo: vídeo 16:9 de 8 a 10 minutos, para o YouTube. Define o tamanho do roteiro, o formato das imagens e do corte, e o preset do YouTube. Cada projeto pode escolher o outro."
 transition = "Transição padrão"
@@ -182,6 +184,14 @@ private = "Privado"
 clean = "Limpa"
 boxed = "Tarja"
 punch = "Impacto"
+
+[caption_highlight]
+off = "Desligado"
+yellow = "Amarelo"
+green = "Verde"
+cyan = "Ciano"
+pink = "Rosa"
+orange = "Laranja"
 
 [video_format]
 short = "Short (9:16, menos de um minuto)"
@@ -1040,6 +1050,8 @@ text = "Texto"
 text_hint = "Enter aplica o texto; o tempo de exibição não muda."
 style = "Estilo"
 style_hint = "O estilo vale para todas as legendas deste projeto."
+highlight = "Palavra falada"
+highlight_hint = "A palavra sendo dita acende nesta cor, e o resto da linha fica branco; a linha não se mexe. Desligado mostra cada linha na cor do próprio estilo."
 show = "Mostrar legendas"
 
 [editor.framing]
@@ -2476,7 +2488,7 @@ body = "A atenuação abaixa a música enquanto a narração fala e a devolve na
 
 [tour.editor-more.captions]
 title = "Legendas"
-body = "As legendas seguem as palavras da narração. Selecione uma para editar o texto, o tempo e o estilo no inspetor; esta chave desliga todas."
+body = "As legendas seguem as palavras da narração. Selecione uma para editar no inspetor o texto, o tempo, o estilo e a cor em que acende a palavra falada; esta chave desliga todas."
 
 [tour.editor-more.framing]
 title = "16:9 ou 9:16"
@@ -2542,7 +2554,7 @@ body = "Shorts são verticais, têm menos de um minuto e servem para todas as re
 
 [tour.channels.defaults]
 title = "Modelo de vídeo, legendas e transições"
-body = "O modelo que anima as imagens das cenas do canal em clipes, o visual das legendas nos projetos novos e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
+body = "O modelo que anima as imagens das cenas do canal em clipes, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
 
 [tour.channels.accounts]
 title = "Contas de rede"

@@ -89,6 +89,8 @@ The words Bardo uses, in plain terms.
 
 **Caption**: one line of on-screen text from the narration, timed to its words, with a style per channel or project.
 
+**Spoken word highlight**: the word of a caption being said, lit up in a color while the rest of the line shows in white.
+
 **Framing**: the frame's shape (16:9 or 9:16) and how each clip fills it.
 
 **Proxy**: a light copy of a clip that the preview plays, so editing stays smooth. The render always uses the originals.

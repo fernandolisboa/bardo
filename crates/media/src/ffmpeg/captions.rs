@@ -6,6 +6,11 @@
 //!
 //! Sizes are fractions of the frame, so a 540-line preview and a 1080x1920
 //! render lay a caption out alike.
+//!
+//! A highlighted line is drawn as one event per word spoken: the whole
+//! line each time, the spoken word in the highlight colour. Only colours
+//! change between them, so libass lays every one out alike and the line
+//! never moves. (Karaoke tags would keep a word lit after it is spoken.)
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -13,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use bardo_domain::CaptionStyle;
+use bardo_domain::{CaptionHighlight, CaptionStyle};
 use serde::{Deserialize, Serialize};
 
 use super::MediaError;
@@ -24,8 +29,24 @@ use super::frames::FrameSize;
 pub struct CaptionTrack {
     #[serde(with = "style_code")]
     pub style: CaptionStyle,
+    /// The colour the spoken word lights up in, if any. Left out of a plan
+    /// with none, so plans from before read the same.
+    #[serde(
+        default = "highlight_off",
+        skip_serializing_if = "highlight_is_off",
+        with = "highlight_code"
+    )]
+    pub highlight: CaptionHighlight,
     /// In order; lines may touch but not overlap.
     pub lines: Vec<CaptionLine>,
+}
+
+fn highlight_off() -> CaptionHighlight {
+    CaptionHighlight::Off
+}
+
+fn highlight_is_off(highlight: &CaptionHighlight) -> bool {
+    !highlight.is_on()
 }
 
 /// One caption as the plan shows it: its text and where on the plan's
@@ -35,6 +56,32 @@ pub struct CaptionLine {
     pub text: String,
     pub at: Duration,
     pub duration: Duration,
+    /// When each word of the text starts to light up, on the plan's
+    /// timeline: one per word, in order, or none for a line drawn whole.
+    /// A word starting before `at` lights up from there; one starting at
+    /// or past the line's end does not light up.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Duration>,
+}
+
+/// A highlight by its stored code, so a plan can be written down.
+mod highlight_code {
+    use bardo_domain::CaptionHighlight;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        highlight: &CaptionHighlight,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(highlight.code())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<CaptionHighlight, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        code.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 /// A caption style by its stored code, so a plan can be written down.
@@ -62,6 +109,7 @@ impl CaptionTrack {
     pub(super) fn starting_at(&self, from: Duration) -> CaptionTrack {
         CaptionTrack {
             style: self.style,
+            highlight: self.highlight,
             lines: self
                 .lines
                 .iter()
@@ -72,6 +120,11 @@ impl CaptionTrack {
                         text: line.text.clone(),
                         at: line.at.saturating_sub(from),
                         duration: line.duration - skip,
+                        words: line
+                            .words
+                            .iter()
+                            .map(|start| start.saturating_sub(from))
+                            .collect(),
                     }
                 })
                 .collect(),
@@ -99,6 +152,31 @@ pub struct CaptionLook {
     /// How far up the frame the text's bottom sits, as a fraction of its
     /// height.
     pub lift: f32,
+}
+
+/// The colour (`0xRRGGBB`) the spoken word lights up in; `None` when off.
+pub fn highlight_colour(highlight: CaptionHighlight) -> Option<u32> {
+    match highlight {
+        CaptionHighlight::Off => None,
+        CaptionHighlight::Yellow => Some(0xFFD43B),
+        CaptionHighlight::Green => Some(0x4ADE80),
+        CaptionHighlight::Cyan => Some(0x38D9F5),
+        CaptionHighlight::Pink => Some(0xFF5FA2),
+        CaptionHighlight::Orange => Some(0xFF9F1C),
+    }
+}
+
+impl CaptionLook {
+    /// The colour of the words not being spoken: the style's own, or white
+    /// when a word lights up, so the lit word stands out in every style
+    /// (Punch's letters are yellow).
+    pub fn words_fill(&self, highlight: CaptionHighlight) -> u32 {
+        if highlight.is_on() {
+            0xFFFFFF
+        } else {
+            self.fill
+        }
+    }
 }
 
 /// How each caption style looks.
@@ -162,6 +240,12 @@ fn ass_colour(rgb: u32, opacity: f32) -> String {
     format!("&H{alpha:02X}{b:02X}{g:02X}{r:02X}")
 }
 
+/// A colour for an override tag (`\\1c`): `&HBBGGRR&`.
+fn ass_tag_colour(rgb: u32) -> String {
+    let (r, g, b) = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    format!("&H{b:02X}{g:02X}{r:02X}&")
+}
+
 /// An ASS time, `H:MM:SS.CC`, to the nearest hundredth.
 fn ass_time(time: Duration) -> String {
     let centis = (time.as_millis() + 5) / 10;
@@ -216,7 +300,7 @@ pub(super) fn script(track: &CaptionTrack, size: FrameSize) -> String {
         }
         (None, None) => (1, ass_colour(0, 0.0), 0.0, ass_colour(0, 0.5)),
     };
-    let fill = ass_colour(look.fill, 1.0);
+    let fill = ass_colour(look.words_fill(track.highlight), 1.0);
     let side = (SIDE_MARGIN * width).round();
     let lift = (look.lift * height).round();
     let mut script = format!(
@@ -243,13 +327,52 @@ pub(super) fn script(track: &CaptionTrack, size: FrameSize) -> String {
         if look.bold { -1 } else { 0 },
         px(look.shadow),
     );
+    let lit = highlight_colour(track.highlight).map(ass_tag_colour);
+    let unlit = ass_tag_colour(look.words_fill(track.highlight));
+    let mut event = |from: Duration, to: Duration, text: String| {
+        // Times as drawn: a stretch under a hundredth draws nothing.
+        let (from, to) = (ass_time(from), ass_time(to));
+        if from != to {
+            script.push_str(&format!("Dialogue: 0,{from},{to},Caption,,0,0,0,,{text}\n"));
+        }
+    };
     for line in &track.lines {
-        script.push_str(&format!(
-            "Dialogue: 0,{},{},Caption,,0,0,0,,{}\n",
-            ass_time(line.at),
-            ass_time(line.at + line.duration),
-            ass_text(&line.text, look.uppercase)
-        ));
+        let end = line.at + line.duration;
+        let words: Vec<&str> = line.text.split_whitespace().collect();
+        let Some(lit) = lit
+            .as_ref()
+            .filter(|_| !line.words.is_empty() && line.words.len() == words.len())
+        else {
+            event(line.at, end, ass_text(&line.text, look.uppercase));
+            continue;
+        };
+        // The line whole until its first word lights up.
+        let first = line.words[0].clamp(line.at, end);
+        event(line.at, first, ass_text(&line.text, look.uppercase));
+        for (index, start) in line.words.iter().enumerate() {
+            let from = (*start).clamp(line.at, end);
+            let to = line
+                .words
+                .get(index + 1)
+                .map_or(end, |next| (*next).clamp(from, end));
+            if from >= to {
+                continue;
+            }
+            let text = words
+                .iter()
+                .enumerate()
+                .map(|(other, word)| {
+                    let word = ass_text(word, look.uppercase);
+                    if other == index {
+                        format!("{{\\1c{lit}}}{word}{{\\1c{unlit}}}")
+                    } else {
+                        word
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            event(from, to, text);
+        }
     }
     script
 }
@@ -395,7 +518,31 @@ mod tests {
             text: text.into(),
             at: ms(at),
             duration: ms(duration),
+            words: Vec::new(),
         }
+    }
+
+    fn lit(text: &str, at: u64, duration: u64, words: &[u64]) -> CaptionLine {
+        CaptionLine {
+            words: words.iter().map(|&start| ms(start)).collect(),
+            ..line(text, at, duration)
+        }
+    }
+
+    /// The script's events: start, end and text.
+    fn events(script: &str) -> Vec<(String, String, String)> {
+        script
+            .lines()
+            .filter_map(|line| line.strip_prefix("Dialogue: 0,"))
+            .map(|event| {
+                let fields: Vec<&str> = event.splitn(9, ',').collect();
+                (
+                    fields[0].to_owned(),
+                    fields[1].to_owned(),
+                    fields[8].to_owned(),
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -425,6 +572,7 @@ mod tests {
     fn the_script_sizes_its_style_to_the_frame() {
         let track = CaptionTrack {
             style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Off,
             lines: vec![
                 line("The keeper {woke}.", 0, 1_000),
                 line("Then", 1_000, 500),
@@ -446,12 +594,14 @@ mod tests {
     fn a_banded_style_pads_a_band_and_drops_the_outline() {
         let track = CaptionTrack {
             style: CaptionStyle::Boxed,
+            highlight: CaptionHighlight::Off,
             lines: vec![line("Boxed", 0, 1_000)],
         };
         let script = script(&track, FrameSize::new(960, 540));
         assert!(script.contains(",&HFF000000,&H40000000,-1,0,0,0,100,100,0,0,4,9,0,2,"));
         let punch = CaptionTrack {
             style: CaptionStyle::Punch,
+            highlight: CaptionHighlight::Off,
             lines: vec![line("Loud", 0, 1_000)],
         };
         let script = super::script(&punch, FrameSize::new(960, 540));
@@ -460,9 +610,142 @@ mod tests {
     }
 
     #[test]
+    fn the_spoken_word_lights_up_in_one_event_each() {
+        let track = CaptionTrack {
+            style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Yellow,
+            // Lit from 1.2 s: shown whole until then.
+            lines: vec![lit(
+                "The {keeper} woke",
+                1_000,
+                1_500,
+                &[1_200, 1_500, 2_000],
+            )],
+        };
+        let script = script(&track, FrameSize::new(1080, 1920));
+        let (lit, white) = ("{\\1c&H3BD4FF&}", "{\\1c&HFFFFFF&}");
+        assert_eq!(
+            events(&script),
+            [
+                (
+                    "0:00:01.00",
+                    "0:00:01.20",
+                    "The \\{keeper\\} woke".to_owned()
+                ),
+                (
+                    "0:00:01.20",
+                    "0:00:01.50",
+                    format!("{lit}The{white} \\{{keeper\\}} woke")
+                ),
+                (
+                    "0:00:01.50",
+                    "0:00:02.00",
+                    format!("The {lit}\\{{keeper\\}}{white} woke")
+                ),
+                (
+                    "0:00:02.00",
+                    "0:00:02.50",
+                    format!("The \\{{keeper\\}} {lit}woke{white}")
+                ),
+            ]
+            .map(|(from, to, text)| (from.to_owned(), to.to_owned(), text))
+        );
+    }
+
+    #[test]
+    fn a_highlight_turns_the_other_words_white_in_every_style() {
+        let track = |style, highlight| CaptionTrack {
+            style,
+            highlight,
+            lines: vec![lit("Loud now", 0, 1_000, &[0, 500])],
+        };
+        let script = script(
+            &track(CaptionStyle::Punch, CaptionHighlight::Green),
+            FrameSize::new(960, 540),
+        );
+        // White letters, the spoken word green, in capitals.
+        assert!(script.contains("Style: Caption,Anton,49,&H00FFFFFF,"));
+        assert_eq!(
+            events(&script)[0].2,
+            "{\\1c&H80DE4A&}LOUD{\\1c&HFFFFFF&} NOW"
+        );
+        // Off, the same line is drawn whole in the style's own yellow.
+        let script = script_of(&track(CaptionStyle::Punch, CaptionHighlight::Off));
+        assert!(script.contains("Style: Caption,Anton,49,&H003BD4FF,"));
+        assert_eq!(events(&script).len(), 1);
+    }
+
+    fn script_of(track: &CaptionTrack) -> String {
+        script(track, FrameSize::new(960, 540))
+    }
+
+    #[test]
+    fn words_outside_the_line_and_mismatched_times_draw_it_whole() {
+        let track = |lines| CaptionTrack {
+            style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Cyan,
+            lines,
+        };
+        // A line after a cut: "a" was spoken before it, "c" after it.
+        let events = events(&script_of(&track(vec![lit(
+            "a b c",
+            1_000,
+            1_000,
+            &[500, 1_400, 2_000],
+        )])));
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            (events[0].0.as_str(), events[0].1.as_str()),
+            ("0:00:01.00", "0:00:01.40")
+        );
+        assert!(events[0].2.starts_with("{\\1c&HF5D938&}a{"));
+        assert_eq!(
+            (events[1].0.as_str(), events[1].1.as_str()),
+            ("0:00:01.40", "0:00:02.00")
+        );
+        // Times for two words of three, or none: the line whole.
+        for words in [&[1_000, 1_500][..], &[]] {
+            let events =
+                super::tests::events(&script_of(&track(vec![lit("a b c", 1_000, 1_000, words)])));
+            assert_eq!(
+                events,
+                [("0:00:01.00".into(), "0:00:02.00".into(), "a b c".into())]
+            );
+        }
+        // A word lit for less than a hundredth draws nothing of its own.
+        let events = super::tests::events(&script_of(&track(vec![lit("a b", 0, 1_000, &[0, 2])])));
+        assert_eq!(events.len(), 1);
+        assert!(events[0].2.ends_with("b{\\1c&HFFFFFF&}"));
+    }
+
+    #[test]
+    fn a_plan_with_no_highlight_writes_down_as_before() {
+        let track = CaptionTrack {
+            style: CaptionStyle::Boxed,
+            highlight: CaptionHighlight::Off,
+            lines: vec![line("a", 0, 1_000)],
+        };
+        let json = serde_json::to_string(&track).unwrap();
+        assert_eq!(
+            json,
+            r#"{"style":"boxed","lines":[{"text":"a","at":{"secs":0,"nanos":0},"duration":{"secs":1,"nanos":0}}]}"#
+        );
+        assert_eq!(serde_json::from_str::<CaptionTrack>(&json).unwrap(), track);
+        let lit = CaptionTrack {
+            highlight: CaptionHighlight::Pink,
+            lines: vec![super::tests::lit("a", 0, 1_000, &[0])],
+            ..track
+        };
+        let json = serde_json::to_string(&lit).unwrap();
+        assert!(json.contains(r#""highlight":"pink""#));
+        assert_eq!(serde_json::from_str::<CaptionTrack>(&json).unwrap(), lit);
+    }
+
+    #[test]
     fn a_track_from_a_point_keeps_what_is_left() {
         let track = CaptionTrack {
             style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Off,
             lines: vec![
                 line("a", 0, 1_000),
                 line("b", 1_000, 1_000),
@@ -471,6 +754,14 @@ mod tests {
         };
         let later = track.starting_at(ms(1_500));
         assert_eq!(later.lines, vec![line("b", 0, 500), line("c", 1_000, 500)]);
+        let words = CaptionTrack {
+            lines: vec![lit("b c", 1_000, 1_000, &[1_000, 1_800])],
+            ..track
+        };
+        assert_eq!(
+            words.starting_at(ms(1_500)).lines[0].words,
+            [ms(0), ms(300)]
+        );
     }
 
     #[test]
@@ -489,6 +780,7 @@ mod tests {
     fn no_lines_write_no_files() {
         let empty = CaptionTrack {
             style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Off,
             lines: Vec::new(),
         };
         assert!(
@@ -507,6 +799,7 @@ mod tests {
     fn the_script_file_goes_with_its_run() {
         let track = CaptionTrack {
             style: CaptionStyle::Clean,
+            highlight: CaptionHighlight::Off,
             lines: vec![line("a", 0, 1_000)],
         };
         let files = CaptionFiles::write(Some(&track), FrameSize::new(960, 540))

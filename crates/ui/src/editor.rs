@@ -26,14 +26,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
-    AspectRatio, AudioLane, CaptionStyle, CropPosition, DUCK_RANGE, Decibels, Ducking, Edge, FPS,
-    Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, Motion, MotionKind,
-    MotionStrength, PictureSize, Track, Transition, TransitionKind, VideoProjectId, crop_window,
-    frame_time, timecode,
+    AspectRatio, AudioLane, CaptionHighlight, CaptionStyle, CropPosition, DUCK_RANGE, Decibels,
+    Ducking, Edge, FPS, Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, Motion,
+    MotionKind, MotionStrength, PictureSize, Track, Transition, TransitionKind, VideoProjectId,
+    crop_window, frame_time, timecode,
 };
 use bardo_app::{
     Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, Control, EditAction, Editor, EditorView,
-    PREVIEW_LANDSCAPE, Side, Stage, Text, TourAnchor, caption_look,
+    PREVIEW_LANDSCAPE, Side, Stage, Text, TourAnchor, caption_look, highlight_colour,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -1922,6 +1922,7 @@ impl EditorScreen {
                 .child(tr(bardo, text))
         };
         let section = |text: Text| label(tr(bardo, text), TEXT_3);
+        let highlight = captions.highlight();
         let swatches = h_flex().gap_2().children(CaptionStyle::ALL.map(|style| {
             let look = caption_look(style);
             let picked = captions.style() == style;
@@ -1939,7 +1940,7 @@ impl EditorScreen {
                 } else {
                     gpui_kit::FontWeight::NORMAL
                 })
-                .text_color(Hsla::from(rgb(look.fill)))
+                .text_color(Hsla::from(rgb(look.words_fill(highlight))))
                 .when_some(look.band, |text, (band, opacity, _)| {
                     text.bg(Hsla::from(rgb(band)).opacity(opacity))
                 })
@@ -1962,6 +1963,43 @@ impl EditorScreen {
                     this.edit(EditAction::SetCaptionStyle(style), cx);
                 }))
         }));
+        // The spoken word's colour: off, or one of the highlight colours.
+        let highlights = h_flex()
+            .flex_wrap()
+            .gap_1p5()
+            .children(CaptionHighlight::ALL.map(|choice| {
+                let picked = highlight == choice;
+                let name = tr(bardo, Text::CaptionHighlightName(choice));
+                let chip = div()
+                    .id(("caption-highlight", choice as usize))
+                    .h(px(28.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.))
+                    .cursor_pointer()
+                    .bg(color(VIDEO_FILL))
+                    .border_1()
+                    .border_color(color(if picked { ACCENT } else { OUTLINE }))
+                    .when(picked, |chip| chip.border_2())
+                    .hover(|style| style.border_color(color(TEXT_2)));
+                let chip = match highlight_colour(choice) {
+                    Some(lit) => chip
+                        .w(px(28.))
+                        .child(div().size(px(14.)).rounded_full().bg(Hsla::from(rgb(lit)))),
+                    None => chip
+                        .px_2()
+                        .text_size(px(11.))
+                        .text_color(color(TEXT_2))
+                        .child(name.clone()),
+                };
+                chip.tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
+                })
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::SetCaptionHighlight(choice), cx);
+                }))
+            }));
         let remove = tool_button("inspector-remove", true, false)
             .border_1()
             .border_color(color(OUTLINE))
@@ -2014,6 +2052,13 @@ impl EditorScreen {
                     .child(section(Text::EditorCaptionStyle))
                     .child(swatches)
                     .child(hint(Text::EditorCaptionStyleHint)),
+            )
+            .child(
+                v_flex()
+                    .gap_1p5()
+                    .child(section(Text::EditorCaptionHighlight))
+                    .child(highlights)
+                    .child(hint(Text::EditorCaptionHighlightHint)),
             )
             .child(self.switch_row(
                 "captions-shown-row",

@@ -109,8 +109,8 @@ pub use backup::{
 };
 pub use budget::{Budget, BudgetLevel, Month};
 pub use caption::{
-    Caption, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS, SavedCaptions,
-    UnknownCaptionStyle, caption_lines, caption_text,
+    Caption, CaptionHighlight, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS,
+    SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_lines, caption_text,
 };
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,

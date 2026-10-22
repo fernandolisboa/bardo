@@ -8,6 +8,11 @@
 //! removes its captions with it, moving narration moves them, and undoing
 //! the cut brings them back. The user edits a caption's text and its two
 //! ends; every change is an edit that can be undone (`crate::Edit`).
+//!
+//! Captions can light up the word being spoken (`CaptionHighlight`). The
+//! words' times are not kept on the captions: they come from the
+//! narration's word timings, so they follow the narration a cut plays
+//! (`Captions::word_starts`).
 
 use std::fmt;
 use std::str::FromStr;
@@ -61,6 +66,69 @@ impl FromStr for CaptionStyle {
 }
 
 impl fmt::Display for CaptionStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+/// Whether captions light up the word being spoken, and in which colour.
+/// The highlight only colours: the line keeps its shape and place. Each
+/// channel picks one for its new projects; a project can change its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CaptionHighlight {
+    /// The whole line in the style's own colour.
+    Off,
+    #[default]
+    Yellow,
+    Green,
+    Cyan,
+    Pink,
+    Orange,
+}
+
+impl CaptionHighlight {
+    pub const ALL: [CaptionHighlight; 6] = [
+        CaptionHighlight::Off,
+        CaptionHighlight::Yellow,
+        CaptionHighlight::Green,
+        CaptionHighlight::Cyan,
+        CaptionHighlight::Pink,
+        CaptionHighlight::Orange,
+    ];
+
+    /// The stable code it is stored under.
+    pub fn code(self) -> &'static str {
+        match self {
+            CaptionHighlight::Off => "off",
+            CaptionHighlight::Yellow => "yellow",
+            CaptionHighlight::Green => "green",
+            CaptionHighlight::Cyan => "cyan",
+            CaptionHighlight::Pink => "pink",
+            CaptionHighlight::Orange => "orange",
+        }
+    }
+
+    pub fn is_on(self) -> bool {
+        self != CaptionHighlight::Off
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown caption highlight: {0}")]
+pub struct UnknownCaptionHighlight(pub String);
+
+impl FromStr for CaptionHighlight {
+    type Err = UnknownCaptionHighlight;
+
+    fn from_str(code: &str) -> Result<Self, Self::Err> {
+        CaptionHighlight::ALL
+            .into_iter()
+            .find(|highlight| highlight.code() == code)
+            .ok_or_else(|| UnknownCaptionHighlight(code.to_owned()))
+    }
+}
+
+impl fmt::Display for CaptionHighlight {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.code())
     }
@@ -203,21 +271,29 @@ pub struct Captions {
     pub(crate) lines: Vec<Caption>,
     pub(crate) shown: bool,
     pub(crate) style: CaptionStyle,
+    pub(crate) highlight: CaptionHighlight,
+    /// When the narration speaks each of its words (start, end), in order:
+    /// where a caption's words light up. Read from the narration, not
+    /// saved.
+    pub(crate) spoken: Vec<(Duration, Duration)>,
     /// How long the narration file is: no caption ends past it.
     pub(crate) length: Duration,
 }
 
 impl Captions {
     /// Captions for a narration of `length` that reads `words`, made with
-    /// [`LINE_RULES`], shown, in the default style.
+    /// [`LINE_RULES`], shown, in the default style and highlight.
     pub(crate) fn from_words<'a>(
         words: impl IntoIterator<Item = (&'a str, Duration, Duration)>,
         length: Duration,
     ) -> Self {
+        let words: Vec<_> = words.into_iter().collect();
         Captions {
+            spoken: words.iter().map(|&(_, start, end)| (start, end)).collect(),
             lines: settled(caption_lines(words, LINE_RULES), length),
             shown: true,
             style: CaptionStyle::default(),
+            highlight: CaptionHighlight::default(),
             length,
         }
     }
@@ -234,6 +310,57 @@ impl Captions {
 
     pub fn style(&self) -> CaptionStyle {
         self.style
+    }
+
+    pub fn highlight(&self) -> CaptionHighlight {
+        self.highlight
+    }
+
+    /// When each word of caption `index` starts to light up, in narration
+    /// time: one time per word of its text, in order, within the caption.
+    ///
+    /// The words are those the narration speaks inside the caption (half
+    /// of the word or more, else any part of it). When the caption has as
+    /// many words as that (its text as made, or a word mended), each keeps
+    /// its spoken time; when the user wrote more or fewer, the caption's
+    /// time is shared out over its words by their length.
+    pub fn word_starts(&self, index: usize) -> Vec<Duration> {
+        let Some(caption) = self.lines.get(index) else {
+            return Vec::new();
+        };
+        let words: Vec<&str> = caption.text.split_whitespace().collect();
+        let middle_inside = |&&(start, end): &&(Duration, Duration)| {
+            let middle = start + (end.saturating_sub(start)) / 2;
+            caption.start <= middle && middle < caption.end
+        };
+        let touching = |&&(start, end): &&(Duration, Duration)| {
+            start < caption.end && caption.start < end.max(start + Duration::from_nanos(1))
+        };
+        let heard: [Vec<&(Duration, Duration)>; 2] = [
+            self.spoken.iter().filter(middle_inside).collect(),
+            self.spoken.iter().filter(touching).collect(),
+        ];
+        if let Some(heard) = heard.iter().find(|heard| heard.len() == words.len()) {
+            return heard
+                .iter()
+                .map(|(start, _)| (*start).clamp(caption.start, caption.end))
+                .collect();
+        }
+        let lengths: Vec<u128> = words
+            .iter()
+            .map(|word| word.chars().count() as u128)
+            .collect();
+        let total: u128 = lengths.iter().sum::<u128>().max(1);
+        let time = (caption.end - caption.start).as_nanos();
+        let mut before = 0;
+        lengths
+            .iter()
+            .map(|length| {
+                let start = caption.start + Duration::from_nanos((time * before / total) as u64);
+                before += length;
+                start
+            })
+            .collect()
     }
 
     /// Every line with text, at least `min_length` long, in order, apart and
@@ -258,6 +385,7 @@ pub struct SavedCaptions {
     pub lines: Vec<Caption>,
     pub shown: bool,
     pub style: CaptionStyle,
+    pub highlight: CaptionHighlight,
 }
 
 #[cfg(test)]
@@ -387,6 +515,60 @@ mod tests {
         }
         assert!("comic".parse::<CaptionStyle>().is_err());
         assert_eq!(CaptionStyle::default(), CaptionStyle::Clean);
+    }
+
+    #[test]
+    fn highlights_round_trip_through_their_codes() {
+        for highlight in CaptionHighlight::ALL {
+            assert_eq!(highlight.code().parse::<CaptionHighlight>(), Ok(highlight));
+        }
+        assert!("purple".parse::<CaptionHighlight>().is_err());
+        assert_eq!(CaptionHighlight::default(), CaptionHighlight::Yellow);
+        assert!(!CaptionHighlight::Off.is_on());
+        assert!(CaptionHighlight::Pink.is_on());
+    }
+
+    #[test]
+    fn each_word_lights_up_when_it_is_spoken() {
+        // Words 300 ms apart: "One two three." then "Four five."
+        let captions = Captions::from_words(timed("One two three. Four five."), ms(2_000));
+        assert_eq!(captions.lines().len(), 2);
+        assert_eq!(captions.word_starts(0), [ms(0), ms(300), ms(600)]);
+        assert_eq!(captions.word_starts(1), [ms(900), ms(1_200)]);
+        assert!(captions.word_starts(2).is_empty());
+    }
+
+    #[test]
+    fn a_mended_word_keeps_its_time_and_a_rewritten_line_shares_its_time_out() {
+        let mut captions = Captions::from_words(timed("One two three."), ms(2_000));
+        // 0 to 850 ms.
+        captions.lines[0].text = "One too three.".into();
+        assert_eq!(captions.word_starts(0), [ms(0), ms(300), ms(600)]);
+        // Four words where three were spoken: by length, 3 + 3 + 6 + 7.
+        captions.lines[0].text = "One two three, really.".into();
+        let time = 850_000_000u64;
+        assert_eq!(
+            captions.word_starts(0),
+            [
+                ms(0),
+                Duration::from_nanos(time * 3 / 19),
+                Duration::from_nanos(time * 6 / 19),
+                Duration::from_nanos(time * 12 / 19),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_trimmed_caption_keeps_its_words_times_within_it() {
+        let mut captions = Captions::from_words(timed("One two three."), ms(2_000));
+        // Cut into the first word (0-250 ms): its middle is out, it still
+        // touches, so the three words keep their times, the first from
+        // the caption's new start.
+        captions.lines[0].start = ms(200);
+        assert_eq!(captions.word_starts(0), [ms(200), ms(300), ms(600)]);
+        // A caption stretched over a pause starts its first word on time.
+        captions.lines[0].end = ms(1_500);
+        assert_eq!(captions.word_starts(0), [ms(200), ms(300), ms(600)]);
     }
 
     #[test]

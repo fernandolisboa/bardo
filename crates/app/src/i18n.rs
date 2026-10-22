@@ -8,15 +8,15 @@ use std::time::Duration;
 use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
 use bardo_domain::{
-    ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionStyle, ChannelFieldError,
-    ContentLanguage, Country, DateOrder, Decibels, DecisionEngineId, JobFailureKind, JobKind,
-    JobState, KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart,
-    Money, MoneyError, Month, MotionKind, MotionStrength, MusicPromptFieldError, Network,
-    NetworkAccountFieldError, NicheSeedError, PastedTokenError, PersonaFieldError, PostLinkError,
-    Provider, RateFieldError, SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share,
-    SignInFailureKind, TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily,
-    ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage, UiTheme, VideoFormat,
-    Visibility, VoiceCategory, VoiceFlag,
+    ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionHighlight, CaptionStyle,
+    ChannelFieldError, ContentLanguage, Country, DateOrder, Decibels, DecisionEngineId,
+    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem,
+    Meter, MetricsSyncOnStart, Money, MoneyError, Month, MotionKind, MotionStrength,
+    MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError, PastedTokenError,
+    PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError, ScheduleProblem,
+    Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind, TemplateProblem,
+    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage,
+    UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -65,6 +65,8 @@ pub enum Text {
     ChannelClipModelHint,
     ChannelCaptionStyle,
     ChannelCaptionStyleHint,
+    ChannelCaptionHighlight,
+    ChannelCaptionHighlightHint,
     ChannelFormat,
     ChannelFormatHint,
     ChannelTransition,
@@ -136,6 +138,7 @@ pub enum Text {
     VisibilityName(Visibility),
     AspectRatioName(AspectRatio),
     CaptionStyleName(CaptionStyle),
+    CaptionHighlightName(CaptionHighlight),
     TransitionName(TransitionKind),
     VideoFormatName(VideoFormat),
     /// The format in one word, where the full name does not fit.
@@ -849,6 +852,8 @@ pub enum Text {
     EditorCaptionTextHint,
     EditorCaptionStyle,
     EditorCaptionStyleHint,
+    EditorCaptionHighlight,
+    EditorCaptionHighlightHint,
     EditorShowCaptions,
     EditorFraming,
     EditorFramingFit,
@@ -1915,6 +1920,8 @@ impl Text {
             Text::ChannelClipModelHint => "channel.clip_model_hint",
             Text::ChannelCaptionStyle => "channel.caption_style",
             Text::ChannelCaptionStyleHint => "channel.caption_style_hint",
+            Text::ChannelCaptionHighlight => "channel.caption_highlight",
+            Text::ChannelCaptionHighlightHint => "channel.caption_highlight_hint",
             Text::ChannelFormat => "channel.format",
             Text::ChannelFormatHint => "channel.format_hint",
             Text::ChannelTransition => "channel.transition",
@@ -1993,6 +2000,14 @@ impl Text {
                 CaptionStyle::Clean => "caption_style.clean",
                 CaptionStyle::Boxed => "caption_style.boxed",
                 CaptionStyle::Punch => "caption_style.punch",
+            },
+            Text::CaptionHighlightName(highlight) => match highlight {
+                CaptionHighlight::Off => "caption_highlight.off",
+                CaptionHighlight::Yellow => "caption_highlight.yellow",
+                CaptionHighlight::Green => "caption_highlight.green",
+                CaptionHighlight::Cyan => "caption_highlight.cyan",
+                CaptionHighlight::Pink => "caption_highlight.pink",
+                CaptionHighlight::Orange => "caption_highlight.orange",
             },
             Text::TransitionName(kind) => match kind {
                 TransitionKind::Crossfade => "transition.crossfade",
@@ -2879,6 +2894,8 @@ impl Text {
             Text::EditorCaptionTextHint => "editor.captions.text_hint",
             Text::EditorCaptionStyle => "editor.captions.style",
             Text::EditorCaptionStyleHint => "editor.captions.style_hint",
+            Text::EditorCaptionHighlight => "editor.captions.highlight",
+            Text::EditorCaptionHighlightHint => "editor.captions.highlight_hint",
             Text::EditorShowCaptions => "editor.captions.show",
             Text::EditorFraming => "editor.framing.title",
             Text::EditorFramingFit => "editor.framing.fit",
@@ -4115,6 +4132,8 @@ mod tests {
             Text::ChannelClipModelHint,
             Text::ChannelCaptionStyle,
             Text::ChannelCaptionStyleHint,
+            Text::ChannelCaptionHighlight,
+            Text::ChannelCaptionHighlightHint,
             Text::ChannelFormat,
             Text::ChannelFormatHint,
             Text::ChannelTransition,
@@ -4761,6 +4780,8 @@ mod tests {
             Text::EditorCaptionTextHint,
             Text::EditorCaptionStyle,
             Text::EditorCaptionStyleHint,
+            Text::EditorCaptionHighlight,
+            Text::EditorCaptionHighlightHint,
             Text::EditorShowCaptions,
             Text::EditorFraming,
             Text::EditorFramingFit,
@@ -4852,6 +4873,7 @@ mod tests {
         texts.extend(Visibility::ALL.map(Text::VisibilityName));
         texts.extend(AspectRatio::ALL.map(Text::AspectRatioName));
         texts.extend(CaptionStyle::ALL.map(Text::CaptionStyleName));
+        texts.extend(CaptionHighlight::ALL.map(Text::CaptionHighlightName));
         texts.extend(TransitionKind::ALL.map(Text::TransitionName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatBrief));
