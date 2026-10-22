@@ -591,6 +591,69 @@ mod tests {
         connection_contract(&CredentialManager::new().unwrap());
     }
 
+    /// Throwaway probe for #200; removed before merge. Runs alongside the
+    /// rest of the suite and reports every read that does not match the
+    /// write or delete just before it, and how long until it does.
+    #[cfg(windows)]
+    #[test]
+    fn probe_200_in_suite() {
+        use std::time::{Duration, Instant};
+        if std::env::var("PROBE_IN_SUITE").is_err() {
+            return;
+        }
+        let store = CredentialManager::new().unwrap();
+        let started = Instant::now();
+        let mut cycles = 0u32;
+        let mut anomalies = 0u32;
+        let settle = |what: &str, cycle: u32, want: Option<&AppCredentials>, owner: ProfileId| {
+            let first = store.app_credentials(owner, Network::YouTube);
+            let ok = |r: &Result<Option<AppCredentials>, SecretStoreError>| matches!(r, Ok(v) if v.as_ref() == want);
+            if ok(&first) {
+                return false;
+            }
+            let t = Instant::now();
+            let mut reads = 0;
+            let mut last: String;
+            let converged = loop {
+                reads += 1;
+                let r = store.app_credentials(owner, Network::YouTube);
+                last = format!("{r:?}");
+                if ok(&r) {
+                    break Some(t.elapsed());
+                }
+                if t.elapsed() > Duration::from_secs(5) {
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            println!(
+                "PROBE200 ANOMALY cycle={cycle} at={:?} after={what} first={first:?} converged={converged:?} reads={reads} last={last}",
+                started.elapsed()
+            );
+            true
+        };
+        while started.elapsed() < Duration::from_secs(40) {
+            cycles += 1;
+            let owner = ProfileId::new();
+            let one = credentials(concat!("GOCSPX", "-secret-0001"));
+            let two = credentials(concat!("GOCSPX", "-secret-0002"));
+            store
+                .set_app_credentials(owner, Network::YouTube, &one)
+                .unwrap();
+            anomalies += u32::from(settle("set one", cycles, Some(&one), owner));
+            store
+                .set_app_credentials(owner, Network::YouTube, &two)
+                .unwrap();
+            anomalies += u32::from(settle("set two", cycles, Some(&two), owner));
+            store
+                .delete_app_credentials(owner, Network::YouTube)
+                .unwrap();
+            anomalies += u32::from(settle("delete", cycles, None, owner));
+            let _ = store.delete_app_credentials(owner, Network::YouTube);
+        }
+        println!("PROBE200 cycles={cycles} anomalies={anomalies}");
+    }
+
     #[cfg(windows)]
     #[test]
     fn credential_manager_round_trips_a_compound_key() {
