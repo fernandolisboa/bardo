@@ -62,6 +62,7 @@ mod market;
 mod media;
 mod metadata;
 mod mix;
+mod motion;
 mod music_prompt;
 mod music_track;
 mod narration;
@@ -168,6 +169,10 @@ pub use metadata::{
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,
     DuckEnvelope, Ducking, GAIN_RANGE, LaneMix, Mix,
+};
+pub use motion::{
+    MOTION_VARIED, Motion, MotionDefault, MotionKind, MotionPattern, MotionStrength, MotionView,
+    UnknownMotion,
 };
 pub use music_prompt::{MusicPrompt, MusicPromptFieldError, MusicPromptRepository};
 pub use music_track::{

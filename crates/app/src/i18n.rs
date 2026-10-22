@@ -11,11 +11,12 @@ use bardo_domain::{
     ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionStyle, ChannelFieldError,
     ContentLanguage, Country, DateOrder, Decibels, DecisionEngineId, JobFailureKind, JobKind,
     JobState, KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem, Meter, MetricsSyncOnStart,
-    Money, MoneyError, Month, MusicPromptFieldError, Network, NetworkAccountFieldError,
-    NicheSeedError, PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError,
-    SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind,
-    TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode,
-    TourId, TransitionKind, UiLanguage, UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
+    Money, MoneyError, Month, MotionKind, MotionStrength, MusicPromptFieldError, Network,
+    NetworkAccountFieldError, NicheSeedError, PastedTokenError, PersonaFieldError, PostLinkError,
+    Provider, RateFieldError, SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share,
+    SignInFailureKind, TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily,
+    ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage, UiTheme, VideoFormat,
+    Visibility, VoiceCategory, VoiceFlag,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -69,6 +70,9 @@ pub enum Text {
     ChannelTransition,
     ChannelTransitionHint,
     ChannelTransitionLength,
+    ChannelMotion,
+    ChannelMotionHint,
+    ChannelMotionStrength,
     ChannelClipModelNotOffered,
     ChannelAccountsTitle,
     ChannelAccountsHint,
@@ -138,6 +142,12 @@ pub enum Text {
     VideoFormatBrief(VideoFormat),
     /// No transition: a hard cut.
     TransitionCut,
+    MotionName(MotionKind),
+    /// No motion: the still stays still.
+    MotionNone,
+    /// A different motion from one scene to the next.
+    MotionVaried,
+    MotionStrengthName(MotionStrength),
     NetworkAccountFieldError(NetworkAccountFieldError),
     PersonasTitle,
     PersonasHint,
@@ -823,6 +833,12 @@ pub enum Text {
     EditorTransitionHint,
     /// Placeholder: `{length}`.
     EditorTransitionShort,
+    EditorMotion,
+    EditorMotionStrength,
+    EditorMotionEverywhere,
+    EditorMotionVary,
+    EditorMotionHint,
+    EditorMotionClip,
     /// Placeholder: `{n}`.
     EditorSeconds,
     /// Placeholder: `{n}`, signed, with the decimal separator.
@@ -1904,6 +1920,9 @@ impl Text {
             Text::ChannelTransition => "channel.transition",
             Text::ChannelTransitionHint => "channel.transition_hint",
             Text::ChannelTransitionLength => "channel.transition_length",
+            Text::ChannelMotion => "channel.motion",
+            Text::ChannelMotionHint => "channel.motion_hint",
+            Text::ChannelMotionStrength => "channel.motion_strength",
             Text::ChannelClipModelNotOffered => "channel.error.clip_model_not_offered",
             Text::ChannelAccountsTitle => "network_accounts.title",
             Text::ChannelAccountsHint => "network_accounts.hint",
@@ -1988,6 +2007,21 @@ impl Text {
                 TransitionKind::ZoomIn => "transition.zoom_in",
             },
             Text::TransitionCut => "transition.cut",
+            Text::MotionName(kind) => match kind {
+                MotionKind::ZoomIn => "motion.zoom_in",
+                MotionKind::ZoomOut => "motion.zoom_out",
+                MotionKind::PanLeft => "motion.pan_left",
+                MotionKind::PanRight => "motion.pan_right",
+                MotionKind::PanUp => "motion.pan_up",
+                MotionKind::PanDown => "motion.pan_down",
+            },
+            Text::MotionNone => "motion.none",
+            Text::MotionVaried => "motion.varied",
+            Text::MotionStrengthName(strength) => match strength {
+                MotionStrength::Subtle => "motion_strength.subtle",
+                MotionStrength::Medium => "motion_strength.medium",
+                MotionStrength::Strong => "motion_strength.strong",
+            },
             Text::VideoFormatName(format) => match format {
                 VideoFormat::Short => "video_format.short",
                 VideoFormat::Long => "video_format.long",
@@ -2831,6 +2865,12 @@ impl Text {
             Text::EditorTransitionFirst => "editor.transition.first",
             Text::EditorTransitionHint => "editor.transition.hint",
             Text::EditorTransitionShort => "editor.transition.short",
+            Text::EditorMotion => "editor.motion.title",
+            Text::EditorMotionStrength => "editor.motion.strength",
+            Text::EditorMotionEverywhere => "editor.motion.everywhere",
+            Text::EditorMotionVary => "editor.motion.vary",
+            Text::EditorMotionHint => "editor.motion.hint",
+            Text::EditorMotionClip => "editor.motion.clip",
             Text::EditorSeconds => "editor.seconds",
             Text::EditorDecibels => "editor.mix.decibels",
             Text::EditorLaneHint => "editor.mix.lane_hint",
@@ -4080,6 +4120,9 @@ mod tests {
             Text::ChannelTransition,
             Text::ChannelTransitionHint,
             Text::ChannelTransitionLength,
+            Text::ChannelMotion,
+            Text::ChannelMotionHint,
+            Text::ChannelMotionStrength,
             Text::ChannelClipModelNotOffered,
             Text::ChannelAccountsTitle,
             Text::ChannelAccountsHint,
@@ -4704,6 +4747,12 @@ mod tests {
             Text::EditorTransitionFirst,
             Text::EditorTransitionHint,
             Text::EditorTransitionShort,
+            Text::EditorMotion,
+            Text::EditorMotionStrength,
+            Text::EditorMotionEverywhere,
+            Text::EditorMotionVary,
+            Text::EditorMotionHint,
+            Text::EditorMotionClip,
             Text::EditorSeconds,
             Text::EditorDecibels,
             Text::EditorLaneHint,
@@ -4807,6 +4856,10 @@ mod tests {
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatBrief));
         texts.push(Text::TransitionCut);
+        texts.extend(MotionKind::ALL.map(Text::MotionName));
+        texts.extend(MotionStrength::ALL.map(Text::MotionStrengthName));
+        texts.push(Text::MotionNone);
+        texts.push(Text::MotionVaried);
         texts.extend(NetworkAccountFieldError::ALL.map(Text::NetworkAccountFieldError));
         texts.extend(VoiceCategory::ALL.map(Text::VoiceCategoryName));
         for flag in [VoiceFlag::Unchecked, VoiceFlag::Unavailable] {

@@ -81,6 +81,9 @@ format_hint = "Short: a vertical video of under a minute, for every network. Lon
 transition = "Default transition"
 transition_hint = "What the editor puts on a cut when you press T or pick a transition. Any cut can use another."
 transition_length = "Length"
+motion = "Motion on stills"
+motion_hint = "How new cuts move the view over each still picture, the Ken Burns effect. Varied gives the next scene another motion. Any still can use another in the editor."
+motion_strength = "Strength"
 
 [channel.error]
 name_required = "Give the channel a name."
@@ -198,6 +201,21 @@ slide_right = "Slide →"
 slide_up = "Slide ↑"
 slide_down = "Slide ↓"
 zoom_in = "Zoom"
+
+[motion]
+none = "None"
+varied = "Varied"
+zoom_in = "Zoom in"
+zoom_out = "Zoom out"
+pan_left = "Pan ←"
+pan_right = "Pan →"
+pan_up = "Pan ↑"
+pan_down = "Pan ↓"
+
+[motion_strength]
+subtle = "Subtle"
+medium = "Medium"
+strong = "Strong"
 
 [aspect_ratio]
 vertical = "Vertical (9:16)"
@@ -1059,6 +1077,14 @@ everywhere = "Use on every cut"
 first = "The first clip opens the video, so it has no transition in."
 hint = "Centered on the cut: the cut and the narration stay where they are."
 short = "Plays for {length}: a clip beside it is shorter."
+
+[editor.motion]
+title = "Motion"
+strength = "Strength"
+everywhere = "Use on every still"
+vary = "Vary every still"
+hint = "A slow zoom or pan over the picture as framed, for as long as the clip shows."
+clip = "This clip has motion of its own. Motion plays on stills."
 
 [editor.tool]
 select = "Select (V)"
@@ -2435,7 +2461,7 @@ body = "Cuts, trims and caption edges land between the narration's words, so a c
 
 [tour.editor.undo]
 title = "Undo and redo"
-body = "Ctrl+Z undoes any edit and Ctrl+Y redoes it, and the cut saves itself as you go. Part 2 of the tour, from the same button, covers the mix, captions, framing, cut suggestions and rendering."
+body = "Ctrl+Z undoes any edit and Ctrl+Y redoes it, and the cut saves itself as you go. Part 2 of the tour, from the same button, covers the mix, captions, framing, motion on stills, cut suggestions and rendering."
 
 [tour.editor-more]
 name = "Editor tour, part 2"
@@ -2455,6 +2481,10 @@ body = "Captions follow the narration's words. Select one to edit its text, timi
 [tour.editor-more.framing]
 title = "16:9 or 9:16"
 body = "The frame shape of the whole cut. In 9:16, the selected clip shows its crop window over the picture: drag it to choose what stays in view, or pick Fit or Fill in the inspector."
+
+[tour.editor-more.motion]
+title = "Motion on stills"
+body = "A still moves: a slow zoom or pan over its picture while it shows, so the video does not play as a slideshow. Select a still to pick its motion and strength in the inspector, or vary every still at once."
 
 [tour.editor-more.suggestions]
 title = "Cut suggestions"

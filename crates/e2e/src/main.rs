@@ -280,6 +280,7 @@ fn seed_channel(bardo: &Bardo) -> anyhow::Result<Value> {
             caption_style: Default::default(),
             transition: Default::default(),
             format: Default::default(),
+            motion: Default::default(),
         })
         .map_err(|error| anyhow!("creating the channel: {error:?}"))?;
     bardo

@@ -265,6 +265,7 @@ fn plan(clips: &[PathBuf], sources: &Sources) -> RenderPlan {
                 duration: Duration::from_secs(CLIP_SECONDS),
                 framing: Framing::Crop { x: 0.5, y: 0.5 },
                 transition: None,
+                motion: None,
             })
             .collect(),
         audio: vec![audio(&sources.voice, 0.0), audio(&sources.music, -12.0)],

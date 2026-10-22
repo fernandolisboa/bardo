@@ -163,6 +163,8 @@ pub enum Control {
     EditorCaptions,
     /// Editor: the 16:9 and 9:16 switch over the preview.
     EditorAspect,
+    /// Editor: the inspector's motion of a selected still.
+    EditorMotion,
     /// Editor: AI cut suggestions.
     EditorSuggestions,
     /// Editor: Review & render.
@@ -773,20 +775,26 @@ pub const EDITOR: Tour = {
     }
 };
 
-/// The editor, part two: the mix, captions, framing, cut suggestions and
-/// leaving to render. Offered once part one is completed or dismissed.
+/// The editor, part two: the mix, captions, framing, motion on stills,
+/// cut suggestions and leaving to render. Offered once part one is
+/// completed or dismissed.
 pub const EDITOR_MORE: Tour = {
     const AT: Stage = Stage::Edit;
     const PAGE: &str = "editor";
     Tour {
         id: TourId::EditorMore,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "mix", control(Control::EditorMix)).learn(PAGE, "mix"),
             at_stage(AT, "duck", control(Control::EditorDuck)).learn(PAGE, "ducking"),
             at_stage(AT, "captions", control(Control::EditorCaptions)).learn(PAGE, "captions"),
             at_stage(AT, "framing", control(Control::EditorAspect)).learn(PAGE, "framing"),
+            // Shown with a still selected, scrolled into view; else the
+            // editor's inspector, which says to select a clip.
+            at_stage(AT, "motion", control(Control::EditorMotion))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "motion"),
             at_stage(AT, "suggestions", control(Control::EditorSuggestions))
                 .learn(PAGE, "suggestions"),
             // Hidden while the cut is empty.

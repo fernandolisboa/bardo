@@ -5,7 +5,8 @@
 
 use bardo_app::bardo_domain::{
     CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel, ClipModelRef,
-    ContentLanguage, Country, PersonaId, Transition, TransitionKind, VideoFormat, frame_time,
+    ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength, PersonaId, Transition,
+    TransitionKind, VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -128,6 +129,32 @@ fn transition_choices(bardo: &Bardo) -> SearchableVec<Choice<TransitionKind>> {
     }))
 }
 
+fn motion_choices(bardo: &Bardo) -> SearchableVec<Choice<MotionPattern>> {
+    SearchableVec::new(
+        MotionPattern::all()
+            .into_iter()
+            .map(|value| Choice {
+                value,
+                title: tr(
+                    bardo,
+                    match value {
+                        MotionPattern::None => Text::MotionNone,
+                        MotionPattern::Varied => Text::MotionVaried,
+                        MotionPattern::Same(kind) => Text::MotionName(kind),
+                    },
+                ),
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn motion_strength_choices(bardo: &Bardo) -> SearchableVec<Choice<MotionStrength>> {
+    SearchableVec::new(MotionStrength::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::MotionStrengthName(value)),
+    }))
+}
+
 /// Every length a transition can be set to, in frames.
 fn transition_lengths() -> Vec<u32> {
     (Transition::MIN_FRAMES..=Transition::MAX_FRAMES)
@@ -187,6 +214,8 @@ pub struct ChannelsScreen {
     format: ChoiceSelect<VideoFormat>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
+    motion: ChoiceSelect<MotionPattern>,
+    motion_strength: ChoiceSelect<MotionStrength>,
     field_errors: Vec<ChannelFieldError>,
     notice: Option<Notice>,
     /// The form's scroll, so the tour brings its fields into view.
@@ -217,12 +246,14 @@ impl ChannelsScreen {
                 caption_style_choices(bardo),
             )
         };
-        let (transitions, transition_lengths_list, formats) = {
+        let (transitions, transition_lengths_list, formats, motions, strengths) = {
             let bardo = bardo.read(cx);
             (
                 transition_choices(bardo),
                 transition_length_choices(bardo),
                 format_choices(bardo),
+                motion_choices(bardo),
+                motion_strength_choices(bardo),
             )
         };
         let language = cx.new(|cx| {
@@ -253,6 +284,14 @@ impl ChannelsScreen {
         let transition_length = cx.new(|cx| {
             let selected = index_of(&transition_lengths(), &defaults.transition.frames());
             SelectState::new(transition_lengths_list, selected, window, cx)
+        });
+        let motion = cx.new(|cx| {
+            let selected = index_of(&MotionPattern::all(), &defaults.motion.pattern);
+            SelectState::new(motions, selected, window, cx)
+        });
+        let motion_strength = cx.new(|cx| {
+            let selected = index_of(&MotionStrength::ALL, &defaults.motion.strength);
+            SelectState::new(strengths, selected, window, cx)
         });
 
         let subscriptions = vec![
@@ -290,6 +329,8 @@ impl ChannelsScreen {
             format,
             transition,
             transition_length,
+            motion,
+            motion_strength,
             field_errors: Vec::new(),
             notice: None,
             form_scroll: ScrollHandle::new(),
@@ -328,6 +369,8 @@ impl ChannelsScreen {
         let transitions = transition_choices(bardo);
         let lengths = transition_length_choices(bardo);
         let formats = format_choices(bardo);
+        let motions = motion_choices(bardo);
+        let strengths = motion_strength_choices(bardo);
 
         self.name
             .update(cx, |input, cx| input.set_placeholder(name, window, cx));
@@ -381,6 +424,20 @@ impl ChannelsScreen {
         self.transition_length.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(lengths, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.motion.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(motions, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.motion_strength.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(strengths, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -456,6 +513,12 @@ impl ChannelsScreen {
         self.transition_length.update(cx, |select, cx| {
             select.set_selected_value(&draft.transition.frames(), window, cx)
         });
+        self.motion.update(cx, |select, cx| {
+            select.set_selected_value(&draft.motion.pattern, window, cx)
+        });
+        self.motion_strength.update(cx, |select, cx| {
+            select.set_selected_value(&draft.motion.strength, window, cx)
+        });
     }
 
     fn draft(&self, cx: &App) -> ChannelDraft {
@@ -507,6 +570,18 @@ impl ChannelsScreen {
                     .selected_value()
                     .copied()
                     .unwrap_or(Transition::DEFAULT_FRAMES),
+            ),
+            motion: MotionDefault::new(
+                self.motion
+                    .read(cx)
+                    .selected_value()
+                    .copied()
+                    .unwrap_or_default(),
+                self.motion_strength
+                    .read(cx)
+                    .selected_value()
+                    .copied()
+                    .unwrap_or_default(),
             ),
         }
     }
@@ -765,6 +840,24 @@ impl ChannelsScreen {
                                     tr(bardo, Text::ChannelTransitionLength),
                                     None,
                                     Select::new(&self.transition_length).into_any_element(),
+                                    None,
+                                ))),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_4()
+                                .items_start()
+                                .child(div().flex_1().min_w_0().child(explained(
+                                    "channel-motion-info",
+                                    Text::ChannelMotion,
+                                    Text::ChannelMotionHint,
+                                    guide::refs::CHANNELS_DEFAULTS,
+                                    Select::new(&self.motion).into_any_element(),
+                                )))
+                                .child(div().w(px(112.)).flex_none().child(kit::field(
+                                    tr(bardo, Text::ChannelMotionStrength),
+                                    None,
+                                    Select::new(&self.motion_strength).into_any_element(),
                                     None,
                                 ))),
                         )

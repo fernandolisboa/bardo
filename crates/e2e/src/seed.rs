@@ -678,7 +678,9 @@ fn render_ready(
         4,
         Some(PictureSize::new(1080, 1920)),
     )?;
-    let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape);
+    // Its stills move as a new channel's do, so the render draws them.
+    let mut timeline = Timeline::rough_cut(&plan, &narration, AspectRatio::Landscape)
+        .with_motion(MotionDefault::default());
     for (asset, track, at) in [
         (&music, Track::Music, Duration::from_secs(2)),
         (&hit, Track::Sfx, Duration::from_millis(9_600)),

@@ -8,8 +8,8 @@ use std::time::Duration;
 use bardo_domain::{CaptionStyle, TransitionKind, VideoCodec};
 use bardo_media::ffmpeg::{
     AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
-    Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Output, ProxyCodec, ProxySettings,
-    RenderPlan, Transition, VideoClip, VideoEncoder,
+    Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Motion, Output, ProxyCodec,
+    ProxySettings, RenderPlan, Transition, VideoClip, VideoEncoder, View,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -65,6 +65,7 @@ fn short_plan() -> RenderPlan {
                 duration: secs(1.5),
                 framing: Framing::Crop { x: 0.5, y: 0.5 },
                 transition: None,
+                motion: None,
             },
             VideoClip {
                 source: ClipSource::Video(fixture("clip-b.mp4")),
@@ -72,6 +73,7 @@ fn short_plan() -> RenderPlan {
                 duration: secs(2.0),
                 framing: Framing::Crop { x: 0.0, y: 0.5 },
                 transition: None,
+                motion: None,
             },
         ],
         audio: vec![
@@ -469,6 +471,7 @@ fn music_plan() -> RenderPlan {
             duration: secs(4.0),
             framing: Framing::Fit,
             transition: None,
+            motion: None,
         }],
         audio: vec![AudioTrack {
             clips: vec![AudioClip {
@@ -654,6 +657,7 @@ fn rough_cut_plan() -> RenderPlan {
                 duration: secs(1.0),
                 framing: Framing::Fit,
                 transition: None,
+                motion: None,
             },
             VideoClip {
                 source: ClipSource::Video(fixture("clip-b.mp4")),
@@ -661,6 +665,7 @@ fn rough_cut_plan() -> RenderPlan {
                 duration: secs(3.0),
                 framing: Framing::Fit,
                 transition: None,
+                motion: None,
             },
             VideoClip {
                 source: ClipSource::Black,
@@ -668,6 +673,7 @@ fn rough_cut_plan() -> RenderPlan {
                 duration: secs(0.5),
                 framing: Framing::Fit,
                 transition: None,
+                motion: None,
             },
         ],
         audio: vec![AudioTrack {
@@ -735,6 +741,7 @@ fn captioned_plan(style: CaptionStyle) -> RenderPlan {
             duration: secs(2.0),
             framing: Framing::Fit,
             transition: None,
+            motion: None,
         }],
         audio: Vec::new(),
         captions: Some(CaptionTrack {
@@ -840,6 +847,7 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
                 duration: secs(0.5),
                 framing: Framing::Crop { x, y },
                 transition: None,
+                motion: None,
             }
         })
         .collect();
@@ -849,6 +857,7 @@ fn renders_each_clip_through_its_crop_window_at_the_output_size() {
         duration: secs(0.5),
         framing: Framing::Fit,
         transition: None,
+        motion: None,
     });
     let plan = RenderPlan {
         video,
@@ -924,6 +933,7 @@ fn transition_plan(kind: TransitionKind) -> RenderPlan {
                 duration: secs(1.0),
                 framing: Framing::Fit,
                 transition: None,
+                motion: None,
             },
             VideoClip {
                 source: ClipSource::Black,
@@ -935,6 +945,7 @@ fn transition_plan(kind: TransitionKind) -> RenderPlan {
                     before: secs(0.25),
                     after: secs(0.25),
                 }),
+                motion: None,
             },
         ],
         audio: Vec::new(),
@@ -1022,6 +1033,165 @@ fn a_clip_without_picture_before_its_start_holds_its_first_frame_into_a_transiti
     let destination = dir.join("out.mp4");
     ffmpeg()
         .render(&plan, &output, None, &destination, &Recorder::default())
+        .unwrap();
+    let info = ffmpeg().probe(&destination).unwrap();
+    assert!(close(info.duration, 2.0, 0.05), "{:?}", info.duration);
+}
+
+/// The bands still for two seconds, the view panning right across them at
+/// 1.25× over the whole clip.
+fn panning_plan() -> RenderPlan {
+    RenderPlan {
+        video: vec![VideoClip {
+            source: ClipSource::Still(fixture("bands-320x180.png")),
+            start: Duration::ZERO,
+            duration: secs(2.0),
+            framing: Framing::Fit,
+            transition: None,
+            motion: Some(Motion {
+                from: View {
+                    zoom: 1.25,
+                    x: 0.0,
+                    y: 0.5,
+                },
+                to: View {
+                    zoom: 1.25,
+                    x: 1.0,
+                    y: 0.5,
+                },
+                length: secs(2.0),
+                elapsed: Duration::ZERO,
+            }),
+        }],
+        audio: Vec::new(),
+        captions: None,
+        skipped: Duration::ZERO,
+    }
+}
+
+const PAN_SIZE: FrameSize = FrameSize::new(320, 180);
+
+/// Where the edge between the red and green bands is across the middle
+/// row of a frame, to a fraction of a pixel: where the brightness (luma,
+/// which 4:2:0 keeps for every pixel) crosses half way.
+fn red_green_edge(bgra: &[u8]) -> f64 {
+    let row = (PAN_SIZE.height / 2 * PAN_SIZE.width * 4) as usize;
+    let green = |x: u32| {
+        let pixel = &bgra[row + x as usize * 4..];
+        0.114 * f64::from(pixel[0]) + 0.587 * f64::from(pixel[1]) + 0.299 * f64::from(pixel[2])
+    };
+    // Red at the left edge and green at 160 all along the pan.
+    let (low, high) = (green(5), green(160));
+    let half = (low + high) / 2.0;
+    let x = (1..PAN_SIZE.width)
+        .find(|&x| green(x) >= half)
+        .expect("an edge");
+    let (before, after) = (green(x - 1), green(x));
+    f64::from(x - 1) + (half - before) / (after - before) - 0.5
+}
+
+fn pan_edges(plan: &RenderPlan, from: Duration) -> Vec<f64> {
+    ffmpeg()
+        .preview(plan, from, PAN_SIZE, (30, 1))
+        .unwrap()
+        .map(|frame| red_green_edge(&frame.bgra))
+        .collect()
+}
+
+#[test]
+fn a_moving_still_pans_at_an_even_pace_across_its_picture() {
+    let edges = pan_edges(&panning_plan(), Duration::ZERO);
+    assert_eq!(edges.len(), 60, "the clip keeps its length");
+    // The edge is 107 pixels into the picture; the view, 256 wide, moves
+    // from 0 to 64 and is drawn 1.25× larger.
+    let expected = |frame: usize| (107.0 - 64.0 * frame as f64 / 59.0) * 1.25;
+    for (frame, edge) in edges.iter().enumerate() {
+        assert!(
+            (edge - expected(frame)).abs() < 1.0,
+            "frame {frame}: {edge:.2}, not {:.2}; {edges:?}",
+            expected(frame)
+        );
+    }
+    // Every step about as long as the next: no frame stands still and
+    // none jumps.
+    let step = (edges[0] - edges[59]) / 59.0;
+    for pair in edges.windows(2) {
+        let moved = pair[0] - pair[1];
+        assert!(
+            (moved - step).abs() < 0.6,
+            "a step of {moved:.2} where {step:.2} is even: {edges:?}"
+        );
+    }
+}
+
+#[test]
+fn a_moving_still_zooms_in_smoothly_about_its_middle() {
+    let mut plan = panning_plan();
+    plan.video[0].motion = Some(Motion {
+        from: View {
+            zoom: 1.0,
+            x: 0.5,
+            y: 0.5,
+        },
+        to: View {
+            zoom: 1.25,
+            x: 0.5,
+            y: 0.5,
+        },
+        length: secs(2.0),
+        elapsed: Duration::ZERO,
+    });
+    let edges = pan_edges(&plan, Duration::ZERO);
+    assert_eq!(edges.len(), 60);
+    // The edge, 107 pixels in, moves away from the middle (160) as the
+    // zoom grows by the same ratio each frame.
+    let expected = |frame: usize| 160.0 - 53.0 * 1.25_f64.powf(frame as f64 / 59.0);
+    for (frame, edge) in edges.iter().enumerate() {
+        assert!(
+            (edge - expected(frame)).abs() < 1.0,
+            "frame {frame}: {edge:.2}, not {:.2}; {edges:?}",
+            expected(frame)
+        );
+    }
+    for (frame, pair) in edges.windows(2).enumerate() {
+        let (moved, step) = (pair[0] - pair[1], expected(frame) - expected(frame + 1));
+        assert!(
+            (moved - step).abs() < 0.6,
+            "frame {frame}: a step of {moved:.2} where {step:.2} is even: {edges:?}"
+        );
+    }
+}
+
+#[test]
+fn a_preview_from_inside_a_moving_still_shows_the_same_frames() {
+    let plan = panning_plan();
+    let whole = pan_edges(&plan, Duration::ZERO);
+    let later = pan_edges(&plan, secs(1.0));
+    assert_eq!(later.len(), 30);
+    for (later, frame) in later.iter().zip(&whole[30..]) {
+        assert!((later - frame).abs() < 0.05, "{later} {frame}");
+    }
+}
+
+#[test]
+fn a_moving_still_renders_into_a_video_of_its_length() {
+    let mut plan = panning_plan();
+    plan.video[0].framing = Framing::Crop { x: 0.5, y: 0.5 };
+    // The graph reads the picture by name: quotes, brackets, separators
+    // and a pattern-like percent sign stay part of it.
+    let dir = scratch("motion-render");
+    let picture = dir.join("it's [scene], 1; 100%d.png");
+    std::fs::copy(fixture("bands-320x180.png"), &picture).unwrap();
+    plan.video[0].source = ClipSource::Still(picture);
+    let destination = dir.join("out.mp4");
+    ffmpeg()
+        .render(
+            &plan,
+            &vertical(VideoEncoder::OpenH264),
+            None,
+            &destination,
+            &(),
+        )
         .unwrap();
     let info = ffmpeg().probe(&destination).unwrap();
     assert!(close(info.duration, 2.0, 0.05), "{:?}", info.duration);

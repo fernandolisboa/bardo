@@ -314,7 +314,7 @@ fn fonts_dir() -> Result<&'static Path, MediaError> {
 }
 
 /// Escapes a value for a filter option (`key=value`): `\`, `'` and `:`.
-fn escape_option(value: &str) -> String {
+pub(super) fn escape_option(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for c in value.chars() {
         if matches!(c, '\\' | '\'' | ':') {
@@ -327,7 +327,7 @@ fn escape_option(value: &str) -> String {
 
 /// Escapes a filter's arguments for a filter graph: `\`, `'`, `[`, `]`,
 /// `,` and `;`.
-fn escape_graph(arguments: &str) -> String {
+pub(super) fn escape_graph(arguments: &str) -> String {
     let mut escaped = String::with_capacity(arguments.len());
     for c in arguments.chars() {
         if matches!(c, '\\' | '\'' | '[' | ']' | ',' | ';') {
@@ -340,7 +340,7 @@ fn escape_graph(arguments: &str) -> String {
 
 /// A path as a filter option reads it: forward slashes (Windows takes
 /// them too), escaped for both levels.
-fn path_option(path: &Path) -> String {
+pub(super) fn path_option(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 

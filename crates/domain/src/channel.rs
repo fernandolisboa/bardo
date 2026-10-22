@@ -5,8 +5,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, PersonaId, ProfileId,
-    RepositoryError, Transition, VideoFormat,
+    CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, MotionDefault, PersonaId,
+    ProfileId, RepositoryError, Transition, VideoFormat,
 };
 
 /// Identifies a channel.
@@ -62,6 +62,8 @@ pub struct ChannelDraft {
     /// The transition the editor puts on a cut, unless the user picks
     /// another.
     pub transition: Transition,
+    /// The motions a new rough cut gives its scenes.
+    pub motion: MotionDefault,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -102,6 +104,7 @@ pub struct ChannelDetails {
     clip_model: Option<ClipModelRef>,
     caption_style: CaptionStyle,
     transition: Transition,
+    motion: MotionDefault,
 }
 
 impl ChannelDetails {
@@ -161,6 +164,7 @@ impl ChannelDetails {
             clip_model: draft.clip_model,
             caption_style: draft.caption_style,
             transition: draft.transition,
+            motion: draft.motion,
         })
     }
 
@@ -214,6 +218,11 @@ impl ChannelDetails {
         self.transition
     }
 
+    /// The motions a new rough cut gives its scenes.
+    pub fn motion(&self) -> MotionDefault {
+        self.motion
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -239,6 +248,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             clip_model: details.clip_model.clone(),
             caption_style: details.caption_style,
             transition: details.transition,
+            motion: details.motion,
         }
     }
 }
@@ -429,6 +439,10 @@ mod tests {
             clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
             caption_style: crate::CaptionStyle::Punch,
             transition: crate::Transition::new(crate::TransitionKind::ZoomIn, 30),
+            motion: crate::MotionDefault::new(
+                crate::MotionPattern::Same(crate::MotionKind::PanUp),
+                crate::MotionStrength::Strong,
+            ),
         })
         .unwrap();
         assert_eq!(

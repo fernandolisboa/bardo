@@ -23,9 +23,9 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, AppCredentials, Budget, ChannelDraft, ClipModelRef, ConnectedIdentity,
-    ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart, Money, Network,
-    NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate, Resolution,
-    Score, TokenSet, Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
+    ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart, Money, MotionDefault,
+    Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona, Provider, Rate,
+    Resolution, Score, TokenSet, Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -413,6 +413,10 @@ struct ChannelEntry {
     /// made.
     #[serde(default)]
     format: Option<String>,
+    /// Missing from files made before motion on stills: none, as those
+    /// channels had.
+    #[serde(default)]
+    motion: Option<MotionEntry>,
     #[serde(default)]
     accounts: Vec<AccountEntry>,
 }
@@ -427,6 +431,12 @@ struct ClipEntry {
 struct TransitionEntry {
     kind: String,
     frames: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MotionEntry {
+    pattern: String,
+    strength: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -516,6 +526,12 @@ impl ChannelEntry {
             format: match &self.format {
                 Some(format) => format.parse().ok()?,
                 None => VideoFormat::Long,
+            },
+            motion: match &self.motion {
+                Some(entry) => {
+                    MotionDefault::new(entry.pattern.parse().ok()?, entry.strength.parse().ok()?)
+                }
+                None => MotionDefault::still(),
             },
         })
     }
@@ -864,6 +880,10 @@ impl Bardo {
                     frames: details.transition().frames(),
                 }),
                 format: Some(details.format().code().to_owned()),
+                motion: Some(MotionEntry {
+                    pattern: details.motion().pattern.code().to_owned(),
+                    strength: details.motion().strength.code().to_owned(),
+                }),
                 accounts,
             });
         }
@@ -1375,6 +1395,10 @@ mod tests {
                 language: ContentLanguage::Portuguese,
                 default_persona: Some(persona.id),
                 transition: Transition::new(bardo_domain::TransitionKind::WipeRight, 21),
+                motion: MotionDefault::new(
+                    bardo_domain::MotionPattern::Same(bardo_domain::MotionKind::PanLeft),
+                    bardo_domain::MotionStrength::Subtle,
+                ),
                 format: VideoFormat::Short,
                 ..ChannelDraft::default()
             })
@@ -1420,6 +1444,13 @@ mod tests {
         let entry: ChannelEntry =
             serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
         assert_eq!(entry.draft(None).unwrap().format, VideoFormat::Long);
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_motion_keeps_its_stills_still() {
+        let entry: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(entry.draft(None).unwrap().motion, MotionDefault::still());
     }
 
     fn items(choices: &[SettingsChoice]) -> Vec<SettingsItem> {
@@ -1598,6 +1629,13 @@ mod tests {
             Transition::new(bardo_domain::TransitionKind::WipeRight, 21)
         );
         assert_eq!(channel.details.format(), VideoFormat::Short);
+        assert_eq!(
+            channel.details.motion(),
+            MotionDefault::new(
+                bardo_domain::MotionPattern::Same(bardo_domain::MotionKind::PanLeft),
+                bardo_domain::MotionStrength::Subtle,
+            )
+        );
         let accounts = other.network_accounts.list(channel.id).unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].details.handle(), "arquivos");
