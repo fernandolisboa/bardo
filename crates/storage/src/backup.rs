@@ -1318,28 +1318,14 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_made_while_the_app_and_the_agent_write_is_whole_and_checked() {
+    fn a_backup_made_while_the_agent_writes_is_whole_and_checked() {
         let (install, profile) = Install::with_profile();
         let to = install.out("backup.zip");
-        // The agent: its own process, with its own connection to the file.
-        let agent = Database::open(&install.paths.database).unwrap();
-        let stop = Arc::new(AtomicBool::new(false));
-        let writer = {
-            let stop = Arc::clone(&stop);
-            let owner = profile.id;
-            std::thread::spawn(move || {
-                let mut written = 0;
-                while !stop.load(Ordering::Relaxed) {
-                    let now = SystemTime::now();
-                    agent.heartbeat(RunnerRole::Agent, now, now).unwrap();
-                    JobRepository::save(&agent, &Job::new(owner, JobKind::Countdown, "{}"))
-                        .unwrap();
-                    written += 1;
-                }
-                written
-            })
-        };
-        // The app keeps writing too, and holds a lease.
+        // The app has written and holds a lease. It writes before the agent
+        // starts: a write waits for the other runner's commits only up to
+        // `BUSY_TIMEOUT`, which a slow disk can use up, and what this test
+        // checks is that the backup, which only reads, keeps no writer
+        // waiting.
         let leased = Job::new(profile.id, JobKind::Countdown, "{}");
         JobRepository::save(&*install.db, &leased).unwrap();
         let now = SystemTime::now();
@@ -1350,13 +1336,38 @@ mod tests {
                 .unwrap()
         );
         install.db.heartbeat(RunnerRole::App, now, now).unwrap();
+        // The agent: its own process, with its own connection to the file,
+        // writing without a pause for the whole backup.
+        let agent = Database::open(&install.paths.database).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (first, wrote) = std::sync::mpsc::channel();
+        let writer = {
+            let stop = Arc::clone(&stop);
+            let owner = profile.id;
+            std::thread::spawn(move || {
+                let mut first = Some(first);
+                while !stop.load(Ordering::Relaxed) {
+                    let now = SystemTime::now();
+                    agent.heartbeat(RunnerRole::Agent, now, now).unwrap();
+                    JobRepository::save(&agent, &Job::new(owner, JobKind::Countdown, "{}"))
+                        .unwrap();
+                    if let Some(first) = first.take() {
+                        let _ = first.send(());
+                    }
+                }
+            })
+        };
+        // The backup starts once the agent is writing.
+        wrote.recv().expect("the agent writes");
 
         let info = install
             .backups()
             .write(&to, DATABASE_ONLY, &mut go_on())
             .unwrap();
         stop.store(true, Ordering::Relaxed);
-        assert!(writer.join().unwrap() > 0, "the agent wrote meanwhile");
+        writer
+            .join()
+            .expect("every write of the agent went through during the backup");
 
         assert_eq!(entries(&to), [MANIFEST, DATABASE_ENTRY]);
         assert_eq!(info.schema_version as usize, SCHEMA_VERSION);
