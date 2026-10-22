@@ -207,17 +207,22 @@ struct StoreFailure(String);
 const CHANGE_ATTEMPTS: u32 = 4;
 const SETTLE_READS: u32 = 20;
 
-/// How long to wait between those reads. Credential Manager has been seen
-/// to show a change only 3 to 17 ms after the call that made it returned.
+/// How long to wait between those reads.
 #[cfg_attr(not(windows), allow(dead_code))]
 const SETTLE_PAUSE: std::time::Duration = std::time::Duration::from_millis(5);
 
 /// Makes a change through `apply` and returns once `shows` reads it back,
-/// so a read right after a write or delete sees it. Credential Manager can
-/// report a write or delete as done and still show the earlier state to the
-/// next read: for a few milliseconds, or, now and then, for good, as if the
-/// change were lost (#200). A change the reads do not show is made again.
-/// False when it never shows; `pause` runs between reads.
+/// making it again when a few reads in a row (`SETTLE_READS`, `pause`
+/// between them) do not show it. False when it never shows.
+///
+/// On GitHub's Windows runners, a read right after a successful
+/// `CredWriteW` or `CredDeleteW` now and then returned the state from
+/// before it (#200): in about one run in ten of the storage tests, on some
+/// machines and not others, more often while another process wrote
+/// credentials in the same logon. Twice the change showed within 17 ms of
+/// the wrong read; once a deleted credential was still there 5 s later.
+/// The cause is in Credential Manager and not known; Bardo's calls map one
+/// to one onto the Windows API, which reported success each time.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn kept<E>(
     mut apply: impl FnMut() -> Result<(), E>,
@@ -226,11 +231,13 @@ fn kept<E>(
 ) -> Result<bool, E> {
     for _ in 0..CHANGE_ATTEMPTS {
         apply()?;
-        for _ in 0..SETTLE_READS {
+        for read in 1..=SETTLE_READS {
             if shows()? {
                 return Ok(true);
             }
-            pause();
+            if read < SETTLE_READS {
+                pause();
+            }
         }
     }
     Ok(false)
@@ -321,38 +328,13 @@ mod credential_manager {
                 return Err(too_long(text.len()));
             }
             let entry = self.named(target, service)?;
-            let written = kept(
-                || {
-                    entry
-                        .set_secret(text.as_bytes())
-                        .map_err(|error| failure("write", &error))
-                },
-                || {
-                    Ok(self
-                        .read(target, service)?
-                        .is_some_and(|stored| stored.as_str() == text))
-                },
-                settle,
-            )?;
-            if written {
-                Ok(())
-            } else {
-                Err(not_kept("write"))
-            }
+            write_entry(&entry, text.as_bytes(), |entry| {
+                entry.set_secret(text.as_bytes())
+            })
         }
 
         fn remove(&self, target: &str, service: &str) -> Result<(), SecretStoreError> {
-            let entry = self.named(target, service)?;
-            let removed = kept(
-                || delete_entry(&entry),
-                || Ok(self.read(target, service)?.is_none()),
-                settle,
-            )?;
-            if removed {
-                Ok(())
-            } else {
-                Err(not_kept("delete"))
-            }
+            delete_entry(&self.named(target, service)?)
         }
     }
 
@@ -431,13 +413,14 @@ mod credential_manager {
             owner: ProfileId,
             provider: Provider,
         ) -> Result<Option<ApiKey>, SecretStoreError> {
-            match stored_password(&self.entry(owner, provider)?)? {
-                Some(stored) => ApiKey::parse(provider, &stored).map(Some).map_err(|error| {
+            match self.entry(owner, provider)?.get_password() {
+                Ok(stored) => ApiKey::parse(provider, &stored).map(Some).map_err(|error| {
                     SecretStoreError(Box::new(StoreFailure(format!(
                         "the stored {provider} key is not usable: {error}"
                     ))))
                 }),
-                None => Ok(None),
+                Err(keyring_core::Error::NoEntry) => Ok(None),
+                Err(error) => Err(failure("read", &error)),
             }
         }
 
@@ -447,55 +430,77 @@ mod credential_manager {
             provider: Provider,
             key: &ApiKey,
         ) -> Result<(), SecretStoreError> {
-            let entry = self.entry(owner, provider)?;
-            let written = kept(
-                || {
-                    entry
-                        .set_password(key.expose())
-                        .map_err(|error| failure("write", &error))
-                },
-                || {
-                    Ok(stored_password(&entry)?
-                        .is_some_and(|stored| stored.as_str() == key.expose()))
-                },
-                settle,
-            )?;
-            if written {
-                Ok(())
-            } else {
-                Err(not_kept("write"))
-            }
+            // Windows keeps a password as UTF-16, little-endian.
+            let stored: Zeroizing<Vec<u8>> = Zeroizing::new(
+                key.expose()
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect(),
+            );
+            write_entry(&self.entry(owner, provider)?, &stored, |entry| {
+                entry.set_password(key.expose())
+            })
         }
 
         fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError> {
-            let entry = self.entry(owner, provider)?;
-            let removed = kept(
-                || delete_entry(&entry),
-                || Ok(stored_password(&entry)?.is_none()),
-                settle,
-            )?;
-            if removed {
-                Ok(())
-            } else {
-                Err(not_kept("delete"))
-            }
+            delete_entry(&self.entry(owner, provider)?)
         }
     }
 
-    /// The key stored in `entry`, as Windows keeps passwords (UTF-16).
-    fn stored_password(entry: &Entry) -> Result<Option<Zeroizing<String>>, SecretStoreError> {
-        match entry.get_password() {
-            Ok(stored) => Ok(Some(Zeroizing::new(stored))),
+    /// The credential's bytes as stored, without decoding them, so a
+    /// malformed one never stops it being replaced or deleted.
+    fn stored_bytes(entry: &Entry) -> Result<Option<Zeroizing<Vec<u8>>>, SecretStoreError> {
+        match entry.get_secret() {
+            Ok(bytes) => Ok(Some(Zeroizing::new(bytes))),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(error) => Err(failure("read", &error)),
         }
     }
 
-    /// Deletes the credential; one already gone counts as deleted.
+    /// Writes `stored` through `set` and reads it back (`kept`). The write
+    /// is made again only while reads still show what was there before it:
+    /// a different value means another of Bardo's processes wrote after
+    /// it, and the later write wins.
+    fn write_entry(
+        entry: &Entry,
+        stored: &[u8],
+        set: impl Fn(&Entry) -> keyring_core::Result<()>,
+    ) -> Result<(), SecretStoreError> {
+        let before = stored_bytes(entry)?;
+        let written = kept(
+            || set(entry).map_err(|error| failure("write", &error)),
+            || {
+                let now = stored_bytes(entry)?;
+                Ok(now.as_deref().map(Vec::as_slice) == Some(stored) || now != before)
+            },
+            settle,
+        )?;
+        if written {
+            Ok(())
+        } else {
+            Err(not_kept("write"))
+        }
+    }
+
+    /// Deletes the credential, one already gone included, and reads it back
+    /// (`kept`): made again while reads still show it as it was.
     fn delete_entry(entry: &Entry) -> Result<(), SecretStoreError> {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-            Err(error) => Err(failure("delete", &error)),
+        let before = stored_bytes(entry)?;
+        let removed = kept(
+            || match entry.delete_credential() {
+                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+                Err(error) => Err(failure("delete", &error)),
+            },
+            || {
+                let now = stored_bytes(entry)?;
+                Ok(now.is_none() || now != before)
+            },
+            settle,
+        )?;
+        if removed {
+            Ok(())
+        } else {
+            Err(not_kept("delete"))
         }
     }
 
@@ -764,6 +769,8 @@ mod tests {
         assert_eq!(credential.stored, None);
         assert_eq!(credential.applies, 2);
         assert_eq!(credential.reads, SETTLE_READS + 1);
+        // The change is made again at once after the last read.
+        assert_eq!(credential.pauses, SETTLE_READS - 1);
     }
 
     #[test]
