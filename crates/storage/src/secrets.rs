@@ -201,6 +201,16 @@ fn malformed(what: &str) -> SecretStoreError {
 #[error("{0}")]
 struct StoreFailure(String);
 
+/// Throwaway probe for #200; removed before merge. Wall-clock time, to
+/// line up with the credential files' times.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn probe_clock() -> String {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}.{:03}", since.as_secs(), since.subsec_millis())
+}
+
 #[cfg(windows)]
 pub use credential_manager::CredentialManager;
 
@@ -278,13 +288,15 @@ mod credential_manager {
             if text.len() > MAX_BLOB_BYTES {
                 return Err(too_long(text.len()));
             }
-            self.named(target, service)?
-                .set_secret(text.as_bytes())
-                .map_err(|error| failure("write", &error))
+            let result = self.named(target, service)?.set_secret(text.as_bytes());
+            probe_log("write", target, &result);
+            result.map_err(|error| failure("write", &error))
         }
 
         fn remove(&self, target: &str, service: &str) -> Result<(), SecretStoreError> {
-            match self.named(target, service)?.delete_credential() {
+            let result = self.named(target, service)?.delete_credential();
+            probe_log("delete", target, &result);
+            match result {
                 Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
                 Err(error) => Err(failure("delete", &error)),
             }
@@ -383,17 +395,36 @@ mod credential_manager {
             provider: Provider,
             key: &ApiKey,
         ) -> Result<(), SecretStoreError> {
-            self.entry(owner, provider)?
-                .set_password(key.expose())
-                .map_err(|error| failure("write", &error))
+            let result = self.entry(owner, provider)?.set_password(key.expose());
+            probe_log("write", &credential_target(owner, provider), &result);
+            result.map_err(|error| failure("write", &error))
         }
 
         fn delete(&self, owner: ProfileId, provider: Provider) -> Result<(), SecretStoreError> {
-            match self.entry(owner, provider)?.delete_credential() {
+            let result = self.entry(owner, provider)?.delete_credential();
+            probe_log("delete", &credential_target(owner, provider), &result);
+            match result {
                 Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
                 Err(error) => Err(failure("delete", &error)),
             }
         }
+    }
+
+    /// Throwaway probe for #200; removed before merge.
+    pub(super) fn probe_log(action: &str, target: &str, result: &keyring_core::Result<()>) {
+        if std::env::var("PROBE_STALE").is_err() {
+            return;
+        }
+        let outcome = match result {
+            Ok(()) => "Ok".to_owned(),
+            Err(keyring_core::Error::NoEntry) => "NoEntry".to_owned(),
+            Err(error) => format!("Err({error})"),
+        };
+        println!(
+            "PROBE200 OP {} {:?} {action} {target} {outcome}",
+            super::probe_clock(),
+            std::thread::current().name().unwrap_or("?"),
+        );
     }
 
     /// Keeps only errors that cannot carry the secret; the rest become a
@@ -449,7 +480,9 @@ mod tests {
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     };
                     println!(
-                        "PROBE200 STALE line {} first={:?} want={:?} converged={:?} reads={}",
+                        "PROBE200 STALE {} {:?} line {} first={:?} want={:?} converged={:?} reads={}",
+                        super::probe_clock(),
+                        std::thread::current().name().unwrap_or("?"),
                         line!(),
                         first,
                         want,
