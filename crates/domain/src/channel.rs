@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     CaptionHighlight, CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, MotionDefault,
-    PersonaId, ProfileId, RepositoryError, Transition, VideoFormat,
+    PersonaId, ProfileId, RepositoryError, ThumbnailLook, Transition, VideoFormat,
 };
 
 /// Identifies a channel.
@@ -62,6 +62,8 @@ pub struct ChannelDraft {
     /// Whether the captions of the channel's new projects light the
     /// spoken word, and in which colour.
     pub caption_highlight: CaptionHighlight,
+    /// How the text of the channel's YouTube thumbnails looks.
+    pub thumbnail_look: ThumbnailLook,
     /// The transition the editor puts on a cut, unless the user picks
     /// another.
     pub transition: Transition,
@@ -107,6 +109,7 @@ pub struct ChannelDetails {
     clip_model: Option<ClipModelRef>,
     caption_style: CaptionStyle,
     caption_highlight: CaptionHighlight,
+    thumbnail_look: ThumbnailLook,
     transition: Transition,
     motion: MotionDefault,
 }
@@ -168,6 +171,7 @@ impl ChannelDetails {
             clip_model: draft.clip_model,
             caption_style: draft.caption_style,
             caption_highlight: draft.caption_highlight,
+            thumbnail_look: draft.thumbnail_look,
             transition: draft.transition,
             motion: draft.motion,
         })
@@ -223,6 +227,11 @@ impl ChannelDetails {
         self.caption_highlight
     }
 
+    /// How the text of the channel's YouTube thumbnails looks.
+    pub fn thumbnail_look(&self) -> ThumbnailLook {
+        self.thumbnail_look
+    }
+
     /// The transition the editor puts on a cut unless the user picks
     /// another.
     pub fn transition(&self) -> Transition {
@@ -259,6 +268,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             clip_model: details.clip_model.clone(),
             caption_style: details.caption_style,
             caption_highlight: details.caption_highlight,
+            thumbnail_look: details.thumbnail_look,
             transition: details.transition,
             motion: details.motion,
         }
@@ -451,6 +461,7 @@ mod tests {
             clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
             caption_style: crate::CaptionStyle::Punch,
             caption_highlight: crate::CaptionHighlight::Pink,
+            thumbnail_look: crate::ThumbnailLook::Banner,
             transition: crate::Transition::new(crate::TransitionKind::ZoomIn, 30),
             motion: crate::MotionDefault::new(
                 crate::MotionPattern::Same(crate::MotionKind::PanUp),

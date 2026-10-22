@@ -4,7 +4,7 @@ use bardo_domain::{
     ChannelId, Earnings, Insights, JobId, MetricsSnapshot, Money, MoneyReport, Network,
     NetworkAccountId, OwnerMetrics, PostLink, PostRetention, ProfileId, Publication, PublicationId,
     PublicationKind, PublicationRepository, RenderId, RepositoryError, RetentionCurve,
-    RetentionPoint, Share, Upload, UploadStatus, VideoProjectId, Visibility,
+    RetentionPoint, Share, ThumbnailOutcome, Upload, UploadStatus, VideoProjectId, Visibility,
 };
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
@@ -21,7 +21,8 @@ const PUBLICATION_COLUMNS: &str = "publication.id, publication.project_id, publi
      publication.checked_at, publication.missing_since, publication.kind,
      publication.upload_status, publication.upload_failure, publication.upload_visibility,
      publication.upload_job, publication.upload_publish_at, publication.upload_issue,
-     publication.upload_network_id, publication.upload_claimed_at, publication.insights_id";
+     publication.upload_network_id, publication.upload_claimed_at, publication.insights_id,
+     publication.upload_thumbnail";
 
 /// A publication row as SQLite returns it.
 struct PublicationRow {
@@ -47,6 +48,7 @@ struct PublicationRow {
     upload_network_id: Option<String>,
     upload_claimed_at: Option<i64>,
     insights_id: Option<String>,
+    upload_thumbnail: Option<String>,
 }
 
 impl PublicationRow {
@@ -74,6 +76,7 @@ impl PublicationRow {
             upload_network_id: row.get(19)?,
             upload_claimed_at: row.get(20)?,
             insights_id: row.get(21)?,
+            upload_thumbnail: row.get(22)?,
         })
     }
 
@@ -106,6 +109,10 @@ impl PublicationRow {
                 issue: self.upload_issue,
                 network_id: self.upload_network_id,
                 claimed_at: self.upload_claimed_at.map(from_unix_millis),
+                thumbnail: self
+                    .upload_thumbnail
+                    .as_deref()
+                    .map(ThumbnailOutcome::from_code),
             }),
             other => return Err(broken(&format!("unknown kind {other}"))),
         };
@@ -392,9 +399,9 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                                       missing_since, kind, upload_status, upload_failure,
                                       upload_visibility, upload_job, upload_publish_at,
                                       upload_issue, upload_network_id, upload_claimed_at,
-                                      insights_id)
+                                      insights_id, upload_thumbnail)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22)
+                     ?18, ?19, ?20, ?21, ?22, ?23)
              ON CONFLICT (id) DO UPDATE SET
                  account_id = excluded.account_id,
                  render_id = excluded.render_id,
@@ -409,6 +416,7 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
                  upload_issue = excluded.upload_issue,
                  upload_network_id = excluded.upload_network_id,
                  upload_claimed_at = excluded.upload_claimed_at,
+                 upload_thumbnail = excluded.upload_thumbnail,
                  insights_id = COALESCE(excluded.insights_id, publication.insights_id),
                  posted_at = CASE WHEN excluded.upload_status IN {SETS_POSTED_AT}
                                        AND publication.upload_status NOT IN {LIVE}
@@ -437,6 +445,7 @@ fn upsert(conn: &Connection, publication: &Publication) -> Result<(), Repository
             upload.and_then(|upload| upload.network_id.as_deref()),
             upload.and_then(|upload| upload.claimed_at.map(to_unix_millis)),
             publication.insights_id.as_deref(),
+            upload.and_then(|upload| upload.thumbnail.as_ref().map(ThumbnailOutcome::code)),
         ],
     )
     .map_err(boxed)?;
@@ -767,6 +776,7 @@ fn update_upload(
                      upload_publish_at = ?9,
                      upload_issue = ?11,
                      upload_network_id = ?12,
+                     upload_thumbnail = ?13,
                      posted_at = CASE WHEN ?5 IN {SETS_POSTED_AT}
                                            AND upload_status NOT IN {LIVE}
                                       THEN ?7 ELSE posted_at END
@@ -787,6 +797,7 @@ fn update_upload(
                 scheduled_at.map(to_unix_millis),
                 upload.issue.as_deref(),
                 upload.network_id.as_deref(),
+                upload.thumbnail.as_ref().map(ThumbnailOutcome::code),
             ],
         )
         .map_err(boxed)?;

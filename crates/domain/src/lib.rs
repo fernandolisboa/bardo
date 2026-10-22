@@ -45,6 +45,7 @@ mod backup;
 mod budget;
 mod caption;
 mod channel;
+mod chapters;
 mod clip;
 mod connection;
 mod cost;
@@ -88,6 +89,7 @@ mod speech;
 mod template;
 mod text;
 mod theme;
+mod thumbnail;
 mod tiktok;
 mod timeline;
 mod tour;
@@ -114,6 +116,11 @@ pub use caption::{
 };
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
+};
+pub use chapters::{
+    Chapter, ChapterFieldError, ChapterProblem, ChapterRepository, Chapters, InvalidChapter,
+    MAX_CHAPTER_TITLE, MIN_CHAPTER_LENGTH, MIN_CHAPTERS, chapter_lines, chapter_problems,
+    chapter_title, place_chapters, timestamp,
 };
 pub use clip::{
     ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelError, ClipModelRef,
@@ -163,8 +170,8 @@ pub use media::{
 };
 pub use metadata::{
     DisclosureLabel, Export, ExportFiles, ExportRepository, METADATA_FILE, MetadataProblem,
-    MetadataRules, Post, TagPlacement, VideoMetadata, VideoMetadataDraft, compose, normalize_tags,
-    package_folder, problems, text_length, video_file_name,
+    MetadataRules, Post, TagPlacement, VideoMetadata, VideoMetadataDraft, compose, compose_with,
+    normalize_tags, package_folder, problems, problems_with, text_length, video_file_name,
 };
 pub use mix::{
     AudioLane, DEFAULT_DUCK, DUCK_ATTACK, DUCK_HOLD, DUCK_RANGE, DUCK_RELEASE, Decibels, Dip,
@@ -267,6 +274,12 @@ pub use theme::{
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,
     rank_themes,
 };
+pub use thumbnail::{
+    BackgroundSource, DrawnBackground, MAX_THUMBNAIL_BYTES, MAX_THUMBNAIL_TEXT, THUMBNAIL_HEIGHT,
+    THUMBNAIL_WIDTH, TextPlacement, Thumbnail, ThumbnailBackground, ThumbnailDesign,
+    ThumbnailFieldError, ThumbnailLook, ThumbnailRepository, UnknownBackgroundSource,
+    UnknownTextPlacement, UnknownThumbnailLook, thumbnail_text,
+};
 pub use tiktok::{
     ChunkPlan, ChunkPlanError, DraftRoom, TIKTOK_CHUNK, TIKTOK_DRAFT_WINDOW, TIKTOK_FPS,
     TIKTOK_MAX_BYTES, TIKTOK_MAX_CHUNK, TIKTOK_MAX_CHUNKS, TIKTOK_MAX_DURATION,
@@ -288,7 +301,7 @@ pub use update::{
 pub use upload::{
     InvalidUploadTransition, NetworkPost, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK,
     UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
-    UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
+    ThumbnailOutcome, UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef};
 pub use voice_sample::{

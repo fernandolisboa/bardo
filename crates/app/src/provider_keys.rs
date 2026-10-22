@@ -382,6 +382,8 @@ mod tests {
                 media_assets: Arc::clone(&self.db) as _,
                 music_prompts: Arc::clone(&self.db) as _,
                 music_tracks: Arc::clone(&self.db) as _,
+                thumbnails: Arc::clone(&self.db) as _,
+                chapters: Arc::clone(&self.db) as _,
                 network_accounts: Arc::clone(&self.db) as _,
                 connections: Arc::clone(&self.db) as _,
                 renders: Arc::clone(&self.db) as _,

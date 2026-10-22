@@ -133,6 +133,55 @@ The script:
 Write the title, description and tags for each network listed. Leave a field empty where the \
 network does not take it.";
 
+const THUMBNAIL_INSTRUCTIONS: &str = "\
+You write the YouTube thumbnail of a faceless long-form video: a short text that Bardo draws in \
+big letters over a background picture, and the prompt an image model draws that background from.
+
+The text is a hook of one to five words, at most 40 characters, in {{language}}. It adds to the \
+video's title instead of repeating it: a question, a stake or a contradiction that makes people \
+want to know more. No hashtags, emoji or quotes, and no claim the video does not pay off.
+
+The background prompt is in English, whatever the video's language. Describe one strong subject \
+with high contrast and a clear, uncluttered side where the text can sit, in the channel's visual \
+style, wide (16:9). The picture is original: no recognizable real people, logos, brands or \
+copyrighted characters, and no text, letters or watermarks in it. Keep it safe for advertisers.";
+
+const THUMBNAIL_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Visual style (aesthetic notes): {{aesthetic_notes}}
+
+Video niche: {{niche}}
+Video title on YouTube: {{video_title}}
+Working title: {{theme_title}}
+Angle: {{theme_angle}}
+
+Write the thumbnail's text and the prompt for its background.";
+
+const CHAPTERS_INSTRUCTIONS: &str = "\
+You split a faceless long-form YouTube video into chapters, which YouTube shows as named parts \
+of the progress bar. You are given the narration, one numbered sentence per line with when it is \
+spoken.
+
+Start a chapter where the story moves to a new part: a new question, place, period or turn. The \
+first chapter starts at sentence 0. Give between 3 and 12 chapters, each at least 30 seconds \
+long, so every chapter is worth jumping to.
+
+Each title names what the part is about in two to six words, in {{language}}, with no numbers, \
+timestamps or emoji. Keep titles true to the narration: no spoilers in the first chapters' titles \
+and no clickbait.";
+
+const CHAPTERS_PROMPT: &str = "\
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+Video length: {{video_length}}
+
+The narration, one sentence per line: its number, when it is spoken, and its text.
+{{narration_sentences}}
+
+Split the video into chapters. For each chapter give the number of the sentence it starts at and \
+its title.";
+
 /// Bardo's earlier default texts, before the video format (#179): one
 /// fixed script length and wide frames. A profile whose current version is
 /// still one of these, untouched, moves on to today's default.
@@ -173,7 +222,10 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
     let (instructions, prompt) = match kind {
         TemplateKind::Script => (SCRIPT_INSTRUCTIONS, RETIRED_SCRIPT_PROMPT),
         TemplateKind::ImagePrompt => (RETIRED_IMAGE_PROMPT_INSTRUCTIONS, IMAGE_PROMPT_PROMPT),
-        TemplateKind::MusicPrompt | TemplateKind::Metadata => return Vec::new(),
+        TemplateKind::MusicPrompt
+        | TemplateKind::Metadata
+        | TemplateKind::Thumbnail
+        | TemplateKind::Chapters => return Vec::new(),
     };
     vec![TemplateBody::new(kind, instructions, prompt).expect("the retired templates are valid")]
 }
@@ -220,6 +272,8 @@ pub fn default_template(kind: TemplateKind) -> TemplateBody {
         TemplateKind::ImagePrompt => (IMAGE_PROMPT_INSTRUCTIONS, IMAGE_PROMPT_PROMPT),
         TemplateKind::MusicPrompt => (MUSIC_PROMPT_INSTRUCTIONS, MUSIC_PROMPT_PROMPT),
         TemplateKind::Metadata => (METADATA_INSTRUCTIONS, METADATA_PROMPT),
+        TemplateKind::Thumbnail => (THUMBNAIL_INSTRUCTIONS, THUMBNAIL_PROMPT),
+        TemplateKind::Chapters => (CHAPTERS_INSTRUCTIONS, CHAPTERS_PROMPT),
     };
     TemplateBody::new(kind, instructions, prompt).expect("the default templates are valid")
 }

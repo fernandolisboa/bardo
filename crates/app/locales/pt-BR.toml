@@ -86,6 +86,8 @@ transition_length = "Duração"
 motion = "Movimento nas imagens"
 motion_hint = "Como a câmera passeia por cada imagem parada nos cortes novos, o efeito Ken Burns. Variado dá outro movimento à cena seguinte. Qualquer imagem pode usar outro no editor."
 motion_strength = "Intensidade"
+thumbnail_look = "Estilo da miniatura"
+thumbnail_look_hint = "Como fica o texto das novas miniaturas deste canal. Cada vídeo pode escolher outro."
 
 [channel.error]
 name_required = "Dê um nome ao canal."
@@ -275,6 +277,9 @@ upload = "Envio"
 backup = "Backup"
 restore = "Restauração"
 update_download = "Download de atualização"
+thumbnail = "Texto da miniatura"
+thumbnail_image = "Fundo da miniatura"
+chapters = "Capítulos"
 
 [job.state]
 queued = "Na fila"
@@ -705,6 +710,8 @@ script = "Roteiro"
 image_prompt = "Prompts de imagem"
 music_prompt = "Prompt de música"
 metadata = "Metadados"
+thumbnail = "Miniatura"
+chapters = "Capítulos"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -723,6 +730,7 @@ script = "O roteiro aprovado."
 networks = "As contas de rede do canal, uma por linha, com os campos e limites de cada rede, o idioma, as tags padrão e o rodapé da conta."
 target_length = "O tamanho do roteiro, pelo formato do vídeo: menos de um minuto para um Short, de 8 a 10 minutos para um vídeo longo."
 frame_shape = "O formato das imagens, pelo formato do vídeo: em pé (9:16) para um Short, deitado (16:9) para um vídeo longo."
+video_title = "O título do vídeo no YouTube depois que os metadados forem escritos; antes disso, o título provisório."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -1522,6 +1530,7 @@ description = "Descrição"
 caption = "Legenda"
 tags = "Tags"
 visibility = "Visibilidade: {visibility}"
+thumbnail = "Miniatura: {file} (1280×720), para o campo Miniatura"
 
 [disclosure]
 reminder = "Voz sintética: marque este vídeo como conteúdo alterado ou sintético."
@@ -1593,6 +1602,7 @@ copy = "Copiar"
 copied = "Copiado. Cole no formulário de upload da rede."
 preview = "Como será postado"
 cost_unpriced = "Sem tarifa ainda"
+chapters_note = "Os capítulos entram depois da descrição."
 
 [disclosure.how]
 youtube = "No YouTube, responda Sim em \"Conteúdo alterado ou sintético\" nos Detalhes do upload."
@@ -2629,17 +2639,17 @@ body = "Cada conta de rede do canal ganha seu próprio post, a partir do arquivo
 title = "Metadados e limites"
 body = "Escrever metadados faz o Claude escrever o título, a descrição e as tags de cada rede a partir do roteiro e dos padrões da conta. Edite aqui: os contadores mostram os limites de cada rede, e um post acima deles não vai."
 
+[tour.publish.youtube]
+title = "Miniatura e capítulos"
+body = "O post de um vídeo longo no YouTube também leva miniatura e capítulos. O Claude escreve o texto da miniatura e um prompt de fundo; escolha o fundo, posicione o texto e salve a imagem. Escrever capítulos divide a narração em partes nomeadas da barra de progresso."
+
 [tour.publish.disclosure]
 title = "Conteúdo sintético"
 body = "Quando a voz do narrador é sintética e realista, cada rede pede que você declare isso. O Bardo lembra você aqui e marca a declaração na revisão do envio."
 
 [tour.publish.upload]
 title = "A revisão do envio"
-body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram, o TikTok ou o X: o arquivo, a conta, o texto e suas escolhas. Nada é enviado até você confirmar."
-
-[tour.publish.schedule]
-title = "Quando vai ao ar"
-body = "O YouTube aceita um horário de publicação e publica sozinho. O Instagram e o X são publicados pelo Bardo no horário, então deixe o Bardo aberto; o TikTok recebe um rascunho na caixa de entrada, que você termina e agenda no app do TikTok."
+body = "Revisar envio mostra exatamente o que vai para o YouTube, o Instagram, o TikTok ou o X: o arquivo, a conta, o texto, a miniatura, suas escolhas e quando vai ao ar. Nada é enviado até você confirmar."
 
 [tour.publish.export]
 title = "Exportar"
@@ -3153,3 +3163,100 @@ first = "Vindo de outra cópia do Bardo? Importe as configurações dela de um a
 file = "O instalador recebeu um arquivo de configurações: {file}. Digite a senha dele para escolher o que importar."
 open = "Escolher o que importar"
 not_now = "Agora não"
+
+[thumbnail]
+title = "Miniatura"
+hint = "A imagem que o YouTube mostra antes do vídeo começar. A imagem salva vai junto com o envio e a exportação para o YouTube."
+short_note = "Shorts usam um quadro do próprio vídeo: o YouTube não aceita miniatura personalizada para eles."
+write = "Escrever com o Claude"
+write_hint = "O Claude escreve o texto e o prompt do fundo a partir do modelo de miniatura."
+rewrite = "Escrever de novo"
+writing = "O Claude está escrevendo a miniatura…"
+text = "Texto"
+text_hint = "Até 40 caracteres, em letras grandes. Deixe vazio para usar só a imagem."
+placement = "Posição do texto"
+look = "Estilo"
+background = "Fundo"
+background_hint = "Escolha uma imagem de cena ou desenhe uma a partir do prompt abaixo."
+backgrounds_empty = "Ainda não há imagens: desenhe um fundo ou gere as imagens das cenas antes."
+background_drawn = "Fundo desenhado"
+background_scene = "Imagem de cena"
+prompt = "Prompt do fundo"
+prompt_hint = "O que o provedor de imagens desenha. Deixe espaço para o texto."
+draw = "Desenhar um fundo"
+drawing = "Desenhando o fundo…"
+save = "Salvar miniatura"
+saving = "Gerando a imagem…"
+saved = "Salva: esta imagem vai junto com o envio e a exportação para o YouTube."
+outdated = "Mudou desde que foi salva: salve de novo para enviar a nova."
+not_yet_saved = "Ainda não salva: o YouTube usa um quadro do vídeo até você salvar uma."
+apply = "Aplicar"
+write_stopped = "A miniatura não foi escrita."
+draw_stopped = "O fundo não foi desenhado."
+
+[thumbnail.error]
+missing_key = "Salve uma chave do Claude em Configurações para escrever a miniatura."
+draw_missing_key = "Salve uma chave do Gemini em Configurações para desenhar o fundo."
+busy = "A miniatura já está sendo escrita ou desenhada."
+no_prompt = "Escreva um prompt de fundo antes."
+no_background = "Escolha um fundo antes."
+background_missing = "Essa imagem não está mais na pasta do projeto."
+not_composed = "Não foi possível gerar a imagem. Tente de novo ou escolha outro fundo."
+not_saved = "Não foi possível salvar a miniatura. Tente de novo."
+text_too_long = "Use no máximo 40 caracteres no texto."
+
+[chapters]
+title = "Capítulos"
+hint = "Partes nomeadas da barra de progresso, a partir dos tempos que o Bardo coloca na descrição."
+short_note = "Shorts não têm capítulos."
+write = "Escrever capítulos"
+write_hint = "O Claude divide a narração em capítulos a partir do modelo de capítulos."
+rewrite = "Escrever de novo"
+writing = "O Claude está escrevendo os capítulos…"
+empty = "Ainda não há capítulos."
+include = "Incluir capítulos na descrição"
+edited = "Editado"
+earlier = "Começar uma frase antes"
+later = "Começar uma frase depois"
+remove = "Remover capítulo"
+cut_away = "Fora do corte"
+stale = "A narração mudou depois que os capítulos foram escritos: escreva-os de novo."
+left_out = "Fora da descrição até cumprirem as regras do YouTube:"
+no_cut = "Os tempos vêm do corte: abra o editor para montá-lo."
+rename = "Renomear capítulo"
+stopped = "Os capítulos não foram escritos."
+
+[chapters.error]
+no_narration = "Gere a narração antes: os capítulos começam nas frases dela."
+missing = "Escreva os capítulos antes."
+cannot_move = "O capítulo não pode ir para lá: o primeiro fica no início e os capítulos mantêm a ordem."
+missing_key = "Salve uma chave do Claude em Configurações para escrever os capítulos."
+busy = "Os capítulos já estão sendo escritos para este projeto."
+not_saved = "Não foi possível salvar os capítulos. Tente de novo."
+title_required = "O capítulo precisa de um título."
+title_too_long = "Use no máximo 100 caracteres no título."
+
+[upload.thumbnail]
+send = "Enviar esta miniatura"
+send_hint = "O YouTube aplica a miniatura depois que o vídeo sobe. Miniaturas personalizadas exigem canal verificado."
+set = "Miniatura aplicada."
+not_allowed = "O YouTube não aceitou a miniatura: verifique o canal em youtube.com/verify para usar miniaturas personalizadas e depois aplique-a no YouTube Studio."
+failed = "A miniatura não foi aplicada ({reason}). O vídeo já subiu: aplique-a no YouTube Studio."
+
+[thumbnail.placement_name]
+top_left = "Em cima, à esquerda"
+top = "Em cima, no centro"
+top_right = "Em cima, à direita"
+bottom_left = "Embaixo, à esquerda"
+bottom = "Embaixo, no centro"
+bottom_right = "Embaixo, à direita"
+
+[thumbnail.look_name]
+bold = "Forte: branco com contorno preto"
+yellow = "Amarelo: amarelo com contorno preto"
+banner = "Faixa: branco sobre faixa escura"
+
+[chapters.problem]
+too_few = "O YouTube exige pelo menos 3 capítulos."
+too_short = "O capítulo {n} tem menos de 10 segundos."
+cut_away = "O corte deixa de fora o início do capítulo {n}."

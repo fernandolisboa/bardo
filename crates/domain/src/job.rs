@@ -94,6 +94,15 @@ pub enum JobKind {
     /// Has Claude write each network's title, description and tags for a
     /// video project, from the metadata template.
     Metadata,
+    /// Has Claude write the text of a long video's YouTube thumbnail and
+    /// the prompt for its background (#182).
+    Thumbnail,
+    /// Has the image provider draw a background for a long video's YouTube
+    /// thumbnail (#182); it joins the backgrounds to pick from.
+    ThumbnailImage,
+    /// Has Claude write a long video's YouTube chapters from its narration
+    /// (#182).
+    Chapters,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -122,7 +131,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 22] = [
+    pub const ALL: [JobKind; 25] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -145,6 +154,9 @@ impl JobKind {
         JobKind::Backup,
         JobKind::Restore,
         JobKind::UpdateDownload,
+        JobKind::Thumbnail,
+        JobKind::ThumbnailImage,
+        JobKind::Chapters,
     ];
 
     /// Stable name stored in the database.
@@ -172,6 +184,9 @@ impl JobKind {
             JobKind::Backup => "backup",
             JobKind::Restore => "restore",
             JobKind::UpdateDownload => "update_download",
+            JobKind::Thumbnail => "thumbnail",
+            JobKind::ThumbnailImage => "thumbnail_image",
+            JobKind::Chapters => "chapters",
         }
     }
 }

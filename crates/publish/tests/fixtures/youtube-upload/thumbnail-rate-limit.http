@@ -1,0 +1,16 @@
+HTTP/2 429 
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": 429,
+    "message": "The channel has uploaded too many thumbnails recently. Please try the request again later.",
+    "errors": [
+      {
+        "message": "The channel has uploaded too many thumbnails recently. Please try the request again later.",
+        "domain": "youtube.thumbnail",
+        "reason": "uploadRateLimitExceeded"
+      }
+    ]
+  }
+}

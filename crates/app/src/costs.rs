@@ -244,6 +244,17 @@ fn first_guess(purpose: CostPurpose) -> Metered {
         // The default sample sentence.
         CostPurpose::VoiceSample => Metered::characters(80),
         CostPurpose::Post => Metered::posts(1),
+        // A few words and a paragraph of prompt.
+        CostPurpose::Thumbnail => tokens(600, 300),
+        // A 2K image, as a scene's.
+        CostPurpose::ThumbnailImage => Metered {
+            input_tokens: 40,
+            output_tokens: 250,
+            image_tokens: 1_680,
+            ..Metered::default()
+        },
+        // The narration's sentences in, a dozen short titles out.
+        CostPurpose::Chapters => tokens(4_000, 600),
     }
 }
 

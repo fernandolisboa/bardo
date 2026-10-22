@@ -30,14 +30,21 @@ pub enum TemplateKind {
     MusicPrompt,
     /// Each network's title, description and tags for a video.
     Metadata,
+    /// The text of a long video's YouTube thumbnail and the prompt its
+    /// background is drawn from (#182).
+    Thumbnail,
+    /// Where a long video's YouTube chapters start and their titles (#182).
+    Chapters,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 4] = [
+    pub const ALL: [TemplateKind; 6] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
         TemplateKind::Metadata,
+        TemplateKind::Thumbnail,
+        TemplateKind::Chapters,
     ];
 
     /// Stable name stored in the database.
@@ -47,6 +54,8 @@ impl TemplateKind {
             TemplateKind::ImagePrompt => "image_prompt",
             TemplateKind::MusicPrompt => "music_prompt",
             TemplateKind::Metadata => "metadata",
+            TemplateKind::Thumbnail => "thumbnail",
+            TemplateKind::Chapters => "chapters",
         }
     }
 
@@ -97,6 +106,23 @@ impl TemplateKind {
                 TemplateVariable::ThemeAngle,
                 TemplateVariable::Script,
                 TemplateVariable::Networks,
+            ],
+            TemplateKind::Thumbnail => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::AestheticNotes,
+                TemplateVariable::Language,
+                TemplateVariable::Niche,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::VideoTitle,
+            ],
+            TemplateKind::Chapters => &[
+                TemplateVariable::Language,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::VideoLength,
+                TemplateVariable::NarrationSentences,
             ],
         }
     }
@@ -158,10 +184,13 @@ pub enum TemplateVariable {
     TargetLength,
     /// The shape of the pictures, from the video's format.
     FrameShape,
+    /// The video's title on YouTube, as its metadata has it (the working
+    /// title until there is one).
+    VideoTitle,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 16] = [
+    pub const ALL: [TemplateVariable; 17] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -178,6 +207,7 @@ impl TemplateVariable {
         TemplateVariable::Networks,
         TemplateVariable::TargetLength,
         TemplateVariable::FrameShape,
+        TemplateVariable::VideoTitle,
     ];
 
     /// The name written between the braces.
@@ -199,6 +229,7 @@ impl TemplateVariable {
             TemplateVariable::Networks => "networks",
             TemplateVariable::TargetLength => "target_length",
             TemplateVariable::FrameShape => "frame_shape",
+            TemplateVariable::VideoTitle => "video_title",
         }
     }
 

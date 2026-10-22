@@ -398,13 +398,25 @@ impl VideoMetadata {
     /// The post as the network takes it, with the account's description
     /// footer and visibility.
     pub fn post(&self, footer: &str, visibility: Visibility) -> Post {
-        compose(self.network, &self.draft(), footer, visibility)
+        self.post_with(None, footer, visibility)
+    }
+
+    /// The post with `chapters` (YouTube's chapter lines) between the
+    /// description and the footer.
+    pub fn post_with(&self, chapters: Option<&str>, footer: &str, visibility: Visibility) -> Post {
+        compose_with(self.network, &self.draft(), chapters, footer, visibility)
     }
 
     /// What breaks the network's rules, with the account's footer in
     /// place. An export holds only metadata with none.
     pub fn problems(&self, footer: &str) -> Vec<MetadataProblem> {
-        problems(self.network, &self.draft(), footer)
+        self.problems_with(None, footer)
+    }
+
+    /// What breaks the network's rules with `chapters` and the footer in
+    /// place.
+    pub fn problems_with(&self, chapters: Option<&str>, footer: &str) -> Vec<MetadataProblem> {
+        problems_with(self.network, &self.draft(), chapters, footer)
     }
 }
 
@@ -416,11 +428,24 @@ pub fn compose(
     footer: &str,
     visibility: Visibility,
 ) -> Post {
+    compose_with(network, draft, None, footer, visibility)
+}
+
+/// [`compose`] with `chapters`, YouTube's chapter lines, as a block of
+/// their own between the description and the footer.
+pub fn compose_with(
+    network: Network,
+    draft: &VideoMetadataDraft,
+    chapters: Option<&str>,
+    footer: &str,
+    visibility: Visibility,
+) -> Post {
     let rules = network.metadata_rules();
     let tags = normalize_tags(network, &draft.tags);
     let text = rules.text.map(|_| {
         let mut blocks = vec![
             draft.description.trim().to_owned(),
+            chapters.unwrap_or_default().trim().to_owned(),
             footer.trim().to_owned(),
         ];
         if rules.tags == TagPlacement::Hashtags && !tags.is_empty() {
@@ -455,8 +480,19 @@ pub fn problems(
     draft: &VideoMetadataDraft,
     footer: &str,
 ) -> Vec<MetadataProblem> {
+    problems_with(network, draft, None, footer)
+}
+
+/// [`problems`] with `chapters` in the text, as [`compose_with`] places
+/// them.
+pub fn problems_with(
+    network: Network,
+    draft: &VideoMetadataDraft,
+    chapters: Option<&str>,
+    footer: &str,
+) -> Vec<MetadataProblem> {
     let rules = network.metadata_rules();
-    let post = compose(network, draft, footer, Visibility::Public);
+    let post = compose_with(network, draft, chapters, footer, Visibility::Public);
     let tags = normalize_tags(network, &draft.tags);
     let mut problems = Vec::new();
     if let (Some(limit), Some(title)) = (rules.title, &post.title) {
@@ -849,6 +885,33 @@ mod tests {
         assert_eq!(kick.title.as_deref(), Some("The Moon"));
         assert_eq!(kick.text, None);
         assert_eq!(kick.tags, ["space", "moon landing"]);
+    }
+
+    #[test]
+    fn chapters_go_between_the_description_and_the_footer_and_count() {
+        let input = draft("The Moon", "What we found.", &[]);
+        let chapters = "0:00 Start\n1:15 The dig";
+        let post = compose_with(
+            Network::YouTube,
+            &input,
+            Some(chapters),
+            "More: link",
+            Visibility::Public,
+        );
+        assert_eq!(
+            post.text.as_deref(),
+            Some("What we found.\n\n0:00 Start\n1:15 The dig\n\nMore: link")
+        );
+        assert_ne!(
+            post.fingerprint(),
+            compose(Network::YouTube, &input, "More: link", Visibility::Public).fingerprint()
+        );
+        let long = draft("T", &"a".repeat(4_990), &[]);
+        assert!(problems(Network::YouTube, &long, "").is_empty());
+        assert_eq!(
+            problems_with(Network::YouTube, &long, Some(chapters), ""),
+            [MetadataProblem::TextTooLong]
+        );
     }
 
     #[test]

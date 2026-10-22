@@ -1879,7 +1879,7 @@ pub(crate) mod testing {
     use bardo_domain::{ProjectFiles, VideoProjectId};
     use bardo_media::ffmpeg::{
         Encoders, FrameSize, FrameStream, Loudness, LoudnessTarget, MediaError, MediaInfo, Monitor,
-        Output, RenderPlan, VideoEncoder, VideoFrame, Waveform,
+        Output, RenderPlan, ThumbnailSpec, VideoEncoder, VideoFrame, Waveform,
     };
     use bardo_media::{MediaEngine, PcmStream};
     use bardo_storage::MemoryProjectFiles;
@@ -1939,6 +1939,8 @@ pub(crate) mod testing {
         /// Holds renders (they wait to be cancelled) while set.
         pub(crate) render_hold: AtomicBool,
         pub(crate) renders: Mutex<Vec<RenderCall>>,
+        /// The thumbnails composed, with where they went.
+        pub(crate) thumbnails: Mutex<Vec<(ThumbnailSpec, PathBuf)>>,
     }
 
     impl FakeMedia {
@@ -2161,6 +2163,21 @@ pub(crate) mod testing {
         ) -> Result<Loudness, MediaError> {
             self.check(path)?;
             Ok(loudness(-14.2, -1.6))
+        }
+
+        fn compose_thumbnail(
+            &self,
+            spec: &ThumbnailSpec,
+            destination: &Path,
+        ) -> Result<(), MediaError> {
+            self.check(&spec.background)?;
+            self.thumbnails
+                .lock()
+                .unwrap()
+                .push((spec.clone(), destination.to_owned()));
+            // Composed into a scratch file on disk, as ffmpeg does.
+            std::fs::write(destination, b"jpeg")?;
+            Ok(())
         }
     }
 }

@@ -19,6 +19,8 @@ use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
 use crate::music_prompts::MusicPromptHandler;
 use crate::music_tracks::MusicHandler;
+use crate::chapters::ChaptersHandler;
+use crate::thumbnails::ThumbnailHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::proxies::ProxyHandler;
@@ -43,6 +45,8 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) proxies: ProxyHandler,
     pub(crate) music_prompts: MusicPromptHandler,
     pub(crate) music: MusicHandler,
+    pub(crate) thumbnails: ThumbnailHandler,
+    pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
     pub(crate) exports: ExportHandler,
@@ -69,6 +73,8 @@ pub(crate) fn built_in_handlers(
         proxies,
         music_prompts,
         music,
+        thumbnails,
+        chapters,
         renders,
         metadata,
         exports,
@@ -95,6 +101,10 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Proxies, Arc::new(proxies));
     handlers.insert(JobKind::MusicPrompt, Arc::new(music_prompts));
     handlers.insert(JobKind::Music, Arc::new(music));
+    let thumbnails = Arc::new(thumbnails);
+    handlers.insert(JobKind::Thumbnail, Arc::clone(&thumbnails) as _);
+    handlers.insert(JobKind::ThumbnailImage, thumbnails);
+    handlers.insert(JobKind::Chapters, Arc::new(chapters));
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
     handlers.insert(JobKind::Export, Arc::new(exports));
@@ -1448,6 +1458,8 @@ mod tests {
             media_assets: Arc::clone(db) as _,
             music_prompts: Arc::clone(db) as _,
             music_tracks: Arc::clone(db) as _,
+            thumbnails: Arc::clone(db) as _,
+            chapters: Arc::clone(db) as _,
             network_accounts: Arc::clone(db) as _,
             connections: Arc::clone(db) as _,
             renders: Arc::clone(db) as _,

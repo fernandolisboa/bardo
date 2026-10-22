@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::PcmStream;
 use crate::ffmpeg::{
     Encoders, Ffmpeg, FrameSize, FrameStream, Loudness, LoudnessTarget, MediaError, MediaInfo,
-    Monitor, Output, ProxySettings, RenderPlan, Waveform,
+    Monitor, Output, ProxySettings, RenderPlan, ThumbnailSpec, Waveform,
 };
 
 /// The media work the editor and the render need: probing, proxies,
@@ -65,6 +65,10 @@ pub trait MediaEngine: Send + Sync {
 
     /// The loudness of a file's sound.
     fn measure_loudness(&self, path: &Path, monitor: &dyn Monitor) -> Result<Loudness, MediaError>;
+
+    /// Composes a YouTube thumbnail into the JPEG at `destination`.
+    fn compose_thumbnail(&self, spec: &ThumbnailSpec, destination: &Path)
+    -> Result<(), MediaError>;
 }
 
 /// The bundled ffmpeg, located the first time it is needed. A failed
@@ -157,5 +161,13 @@ impl MediaEngine for BundledFfmpeg {
 
     fn measure_loudness(&self, path: &Path, monitor: &dyn Monitor) -> Result<Loudness, MediaError> {
         self.ffmpeg()?.measure_loudness(path, monitor)
+    }
+
+    fn compose_thumbnail(
+        &self,
+        spec: &ThumbnailSpec,
+        destination: &Path,
+    ) -> Result<(), MediaError> {
+        self.ffmpeg()?.compose_thumbnail(spec, destination)
     }
 }

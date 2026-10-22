@@ -9,7 +9,8 @@ use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
-     transition_frames, video_format, motion, motion_strength, caption_highlight FROM channel";
+     transition_frames, video_format, motion, motion_strength, caption_highlight, thumbnail_look \
+     FROM channel";
 
 /// A channel row before its themes are attached.
 struct ChannelRow {
@@ -19,6 +20,7 @@ struct ChannelRow {
     clip_model: (Option<String>, Option<String>),
     caption_style: String,
     caption_highlight: String,
+    thumbnail_look: String,
     transition: (String, i64),
     format: String,
     motion: (String, String),
@@ -35,6 +37,7 @@ impl ChannelRow {
                 clip_model: (row.get(8)?, row.get(9)?),
                 caption_style: row.get(10)?,
                 caption_highlight: row.get(16)?,
+                thumbnail_look: row.get(17)?,
                 transition: (row.get(11)?, row.get(12)?),
                 format: row.get(13)?,
                 motion: (row.get(14)?, row.get(15)?),
@@ -70,6 +73,7 @@ impl ChannelRow {
         draft.clip_model = clip_model(self.clip_model)?;
         draft.caption_style = self.caption_style.parse().map_err(boxed)?;
         draft.caption_highlight = self.caption_highlight.parse().map_err(boxed)?;
+        draft.thumbnail_look = self.thumbnail_look.parse().map_err(boxed)?;
         draft.format = self.format.parse().map_err(boxed)?;
         let (pattern, strength) = &self.motion;
         draft.motion = MotionDefault::new(
@@ -158,9 +162,9 @@ impl ChannelRepository for Database {
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
                                   default_persona_id, clip_provider, clip_model, caption_style,
                                   transition, transition_frames, video_format, motion,
-                                  motion_strength, caption_highlight)
+                                  motion_strength, caption_highlight, thumbnail_look)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17)
+                     ?17, ?18)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -177,6 +181,7 @@ impl ChannelRepository for Database {
                  motion = excluded.motion,
                  motion_strength = excluded.motion_strength,
                  caption_highlight = excluded.caption_highlight,
+                 thumbnail_look = excluded.thumbnail_look,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -196,6 +201,7 @@ impl ChannelRepository for Database {
                 details.motion().pattern.code(),
                 details.motion().strength.code(),
                 details.caption_highlight().code(),
+                details.thumbnail_look().code(),
             ],
         )
         .map_err(boxed)?;
@@ -242,6 +248,7 @@ mod tests {
             ),
             caption_style: CaptionStyle::Boxed,
             caption_highlight: bardo_domain::CaptionHighlight::Green,
+            thumbnail_look: bardo_domain::ThumbnailLook::Yellow,
             transition: Transition::new(TransitionKind::SlideLeft, 24),
             format: bardo_domain::VideoFormat::Long,
             motion: MotionDefault::new(

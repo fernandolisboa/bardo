@@ -86,6 +86,8 @@ transition_length = "Length"
 motion = "Motion on stills"
 motion_hint = "How new cuts move the view over each still picture, the Ken Burns effect. Varied gives the next scene another motion. Any still can use another in the editor."
 motion_strength = "Strength"
+thumbnail_look = "Thumbnail look"
+thumbnail_look_hint = "How the text of this channel's new thumbnails looks. Each video can pick another."
 
 [channel.error]
 name_required = "Give the channel a name."
@@ -275,6 +277,9 @@ upload = "Upload"
 backup = "Backup"
 restore = "Restore"
 update_download = "Update download"
+thumbnail = "Thumbnail text"
+thumbnail_image = "Thumbnail background"
+chapters = "Chapters"
 
 [job.state]
 queued = "Queued"
@@ -705,6 +710,8 @@ script = "Script"
 image_prompt = "Image prompts"
 music_prompt = "Music prompt"
 metadata = "Metadata"
+thumbnail = "Thumbnail"
+chapters = "Chapters"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -723,6 +730,7 @@ script = "The approved script."
 networks = "The channel's network accounts, one per line, with each network's fields and limits, the account's language, default tags and footer."
 target_length = "How long the script runs, from the video's format: under a minute for a Short, 8 to 10 minutes for a long video."
 frame_shape = "The shape of the pictures, from the video's format: tall (9:16) for a Short, wide (16:9) for a long video."
+video_title = "The video's title on YouTube once the metadata is written, else its working title."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -1522,6 +1530,7 @@ description = "Description"
 caption = "Caption"
 tags = "Tags"
 visibility = "Visibility: {visibility}"
+thumbnail = "Thumbnail: {file} (1280×720), for the Thumbnail field"
 
 [disclosure]
 reminder = "Synthetic voice: label this video as altered or synthetic content."
@@ -1593,6 +1602,7 @@ copy = "Copy"
 copied = "Copied. Paste it in the network's upload form."
 preview = "As posted"
 cost_unpriced = "No rate yet"
+chapters_note = "The chapters go after the description."
 
 [disclosure.how]
 youtube = "On YouTube, answer Yes to \"Altered or synthetic content\" in the upload's Details."
@@ -2629,17 +2639,17 @@ body = "Each network account of the channel gets its own post from its rendered 
 title = "Metadata and its limits"
 body = "Write metadata has Claude write each network's title, description and tags from the script and the account's defaults. Edit them here: the counters show each network's limits, and a post over them can't go."
 
+[tour.publish.youtube]
+title = "Thumbnail and chapters"
+body = "A long video's YouTube post also takes a thumbnail and chapters. Claude writes the thumbnail's text and a background prompt; pick a background, place the text and save the picture. Write chapters splits the narration into named parts of the progress bar."
+
 [tour.publish.disclosure]
 title = "Synthetic content"
 body = "When the narrator's voice is a realistic synthetic one, each network asks you to say so. Bardo reminds you here and ticks the disclosure in the upload review."
 
 [tour.publish.upload]
 title = "The upload review"
-body = "Review upload shows exactly what goes to YouTube, Instagram, TikTok or X: the file, the account, the text and your choices. Nothing is sent until you confirm it."
-
-[tour.publish.schedule]
-title = "When it goes"
-body = "YouTube takes a publish time and publishes by itself. Instagram and X are posted by Bardo at their time, so keep Bardo open then; TikTok gets a draft in its inbox that you finish and schedule in the TikTok app."
+body = "Review upload shows exactly what goes to YouTube, Instagram, TikTok or X: the file, the account, the text, the thumbnail, your choices and when it goes. Nothing is sent until you confirm it."
 
 [tour.publish.export]
 title = "Export"
@@ -3153,3 +3163,100 @@ first = "Moving from another copy of Bardo? Import its settings from a settings 
 file = "The installer was given a settings file: {file}. Type its password to choose what to import."
 open = "Choose what to import"
 not_now = "Not now"
+
+[thumbnail]
+title = "Thumbnail"
+hint = "The picture YouTube shows before the video plays. The saved picture goes with the YouTube upload and export."
+short_note = "Shorts take their thumbnail from the video: YouTube has no custom thumbnail for them."
+write = "Write with Claude"
+write_hint = "Claude writes the text and the prompt of the background from the thumbnail template."
+rewrite = "Write again"
+writing = "Claude is writing the thumbnail…"
+text = "Text"
+text_hint = "Up to 40 characters, drawn in big letters. Leave it empty for the picture alone."
+placement = "Text position"
+look = "Look"
+background = "Background"
+background_hint = "Pick a scene image, or draw one from the prompt below."
+backgrounds_empty = "No pictures yet: draw a background, or make the scene images first."
+background_drawn = "Drawn background"
+background_scene = "Scene image"
+prompt = "Background prompt"
+prompt_hint = "What the image provider draws. Leave room for the text."
+draw = "Draw a background"
+drawing = "Drawing the background…"
+save = "Save thumbnail"
+saving = "Making the picture…"
+saved = "Saved: this picture goes with the YouTube upload and export."
+outdated = "Changed since it was saved: save it again to send the new one."
+not_yet_saved = "Not saved yet: YouTube picks a frame of the video until you save one."
+apply = "Apply"
+write_stopped = "The thumbnail was not written."
+draw_stopped = "The background was not drawn."
+
+[thumbnail.error]
+missing_key = "Save a Claude key under Settings to write the thumbnail."
+draw_missing_key = "Save a Gemini key under Settings to draw the background."
+busy = "The thumbnail is already being written or drawn."
+no_prompt = "Write a background prompt first."
+no_background = "Pick a background first."
+background_missing = "That picture is no longer in the project folder."
+not_composed = "Could not make the picture. Try again, or pick another background."
+not_saved = "Could not save the thumbnail. Try again."
+text_too_long = "Keep the text to at most 40 characters."
+
+[chapters]
+title = "Chapters"
+hint = "Named parts of the progress bar, from timestamps Bardo adds to the description."
+short_note = "Shorts have no chapters."
+write = "Write chapters"
+write_hint = "Claude splits the narration into chapters from the chapters template."
+rewrite = "Write again"
+writing = "Claude is writing the chapters…"
+empty = "No chapters yet."
+include = "Add chapters to the description"
+edited = "Edited"
+earlier = "Start a sentence earlier"
+later = "Start a sentence later"
+remove = "Remove chapter"
+cut_away = "Cut away"
+stale = "The narration changed since the chapters were written: write them again."
+left_out = "Left out of the description until they meet YouTube's rules:"
+no_cut = "Times come from the cut: open the editor to make it."
+rename = "Rename chapter"
+stopped = "The chapters were not written."
+
+[chapters.error]
+no_narration = "Make the narration first: chapters start at its sentences."
+missing = "Write the chapters first."
+cannot_move = "The chapter cannot move there: the first stays at the start, and chapters keep their order."
+missing_key = "Save a Claude key under Settings to write the chapters."
+busy = "The chapters are already being written for this project."
+not_saved = "Could not save the chapters. Try again."
+title_required = "A chapter needs a title."
+title_too_long = "Keep the title to at most 100 characters."
+
+[upload.thumbnail]
+send = "Send this thumbnail"
+send_hint = "YouTube sets it once the video is up. Custom thumbnails need a verified channel."
+set = "Thumbnail set."
+not_allowed = "YouTube did not take the thumbnail: verify the channel at youtube.com/verify to use custom thumbnails, then set it in YouTube Studio."
+failed = "The thumbnail was not set ({reason}). The video is up: set it in YouTube Studio."
+
+[thumbnail.placement_name]
+top_left = "Top left"
+top = "Top"
+top_right = "Top right"
+bottom_left = "Bottom left"
+bottom = "Bottom"
+bottom_right = "Bottom right"
+
+[thumbnail.look_name]
+bold = "Bold: white, black outline"
+yellow = "Yellow: yellow, black outline"
+banner = "Banner: white on a dark band"
+
+[chapters.problem]
+too_few = "YouTube needs at least 3 chapters."
+too_short = "Chapter {n} is shorter than 10 seconds."
+cut_away = "The cut leaves out where chapter {n} starts."

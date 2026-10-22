@@ -6,6 +6,7 @@ mod agent;
 mod appearance;
 mod backup;
 mod channels;
+mod chapters;
 mod clips;
 mod connections;
 mod costs;
@@ -46,6 +47,7 @@ mod showcase;
 mod stages;
 mod templates;
 mod themes;
+mod thumbnails;
 mod tours;
 mod updates;
 mod uploads;
@@ -66,7 +68,7 @@ use bardo_domain::{
     ProjectFiles, PublicationRepository, RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError,
     RunnerRole, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
     SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
-    TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
+    ChapterRepository, ThumbnailRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
     VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
@@ -91,6 +93,7 @@ pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look, highlight_colour};
 pub use channels::ChannelError;
+pub use chapters::{ChapterRow, ChaptersError, ChaptersView};
 pub use clips::{ClipsView, SceneClipView};
 pub use connections::{
     AccountChoice, AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult,
@@ -125,6 +128,9 @@ pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
+pub use thumbnails::{
+    BackgroundChoice, ThumbnailComposer, ThumbnailEdit, ThumbnailError, ThumbnailView,
+};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
@@ -238,6 +244,11 @@ pub struct Repositories {
     pub music_prompts: Arc<dyn MusicPromptRepository>,
     /// Each project's generated music. Shared with the job queue.
     pub music_tracks: Arc<dyn MusicTrackRepository>,
+    /// Each project's YouTube thumbnail and drawn backgrounds. Shared with
+    /// the job queue.
+    pub thumbnails: Arc<dyn ThumbnailRepository>,
+    /// Each project's YouTube chapters. Shared with the job queue.
+    pub chapters: Arc<dyn ChapterRepository>,
     /// Each channel's network accounts.
     pub network_accounts: Arc<dyn NetworkAccountRepository>,
     /// Each network account's connection state. Never its tokens.
@@ -337,6 +348,8 @@ impl Repositories {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             music_tracks: Arc::clone(&db) as _,
+            thumbnails: Arc::clone(&db) as _,
+            chapters: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,
@@ -490,6 +503,8 @@ pub struct Bardo {
     media_assets: Arc<dyn MediaAssetRepository>,
     music_prompts: Arc<dyn MusicPromptRepository>,
     music_tracks: Arc<dyn MusicTrackRepository>,
+    thumbnails: Arc<dyn ThumbnailRepository>,
+    chapters: Arc<dyn ChapterRepository>,
     network_accounts: Arc<dyn NetworkAccountRepository>,
     renders: Arc<dyn RenderRepository>,
     exports: Arc<dyn ExportRepository>,
@@ -602,6 +617,8 @@ impl Bardo {
             media_assets,
             music_prompts,
             music_tracks,
+            thumbnails,
+            chapters,
             network_accounts,
             connections,
             renders,
@@ -728,6 +745,23 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let thumbnail_handler = crate::thumbnails::ThumbnailHandler {
+            owner: profile.id,
+            thumbnails: Arc::clone(&thumbnails),
+            files: Arc::clone(&files),
+            text: Arc::clone(&providers.text),
+            images: Arc::clone(&providers.images),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
+        let chapters_handler = crate::chapters::ChaptersHandler {
+            owner: profile.id,
+            chapters: Arc::clone(&chapters),
+            narrations: Arc::clone(&narrations),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let metadata_handler = MetadataHandler {
             owner: profile.id,
             exports: Arc::clone(&exports),
@@ -820,6 +854,8 @@ impl Bardo {
                 proxies: proxy_handler,
                 music_prompts: music_prompt_handler,
                 music: music_handler,
+                thumbnails: thumbnail_handler,
+                chapters: chapters_handler,
                 renders: render_handler,
                 metadata: metadata_handler,
                 exports: export_handler,
@@ -850,6 +886,8 @@ impl Bardo {
             media_assets,
             music_prompts,
             music_tracks,
+            thumbnails,
+            chapters,
             network_accounts,
             renders,
             exports,
@@ -2236,6 +2274,8 @@ mod tests {
             media_assets: Arc::clone(&db) as _,
             music_prompts: Arc::clone(&db) as _,
             music_tracks: Arc::clone(&db) as _,
+            thumbnails: Arc::clone(&db) as _,
+            chapters: Arc::clone(&db) as _,
             network_accounts: Arc::clone(&db) as _,
             connections: Arc::clone(&db) as _,
             renders: Arc::clone(&db) as _,

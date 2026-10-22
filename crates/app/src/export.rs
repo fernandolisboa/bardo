@@ -29,7 +29,7 @@ use bardo_domain::{
     SecretStore, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
     TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, UiLanguage,
     VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility, package_folder,
-    problems, video_file_name,
+    problems_with, video_file_name,
 };
 use serde::{Deserialize, Serialize};
 
@@ -166,6 +166,12 @@ pub struct ExportTarget {
     pub visibility: Visibility,
     /// The account's description footer, added to the text.
     pub footer: String,
+    /// The chapter lines the description gets (a long video's YouTube
+    /// post), between the text and the footer.
+    pub chapters: Option<String>,
+    /// The thumbnail picture in the project folder that goes with the
+    /// post (a long video's YouTube post).
+    pub thumbnail: Option<String>,
     /// The file last rendered for this account.
     pub render: Option<Render>,
     /// Whether `render` was made from the cut and preset as they are now.
@@ -184,9 +190,9 @@ pub struct ExportTarget {
 impl ExportTarget {
     /// The post as the network would take it now.
     pub fn post(&self) -> Option<Post> {
-        self.metadata
-            .as_ref()
-            .map(|metadata| metadata.post(&self.footer, self.visibility))
+        self.metadata.as_ref().map(|metadata| {
+            metadata.post_with(self.chapters.as_deref(), &self.footer, self.visibility)
+        })
     }
 
     /// What keeps the network from exporting, first thing first.
@@ -335,7 +341,14 @@ struct ExportOrder {
     /// The video file of the network's last export, removed when the new
     /// one has another name.
     previous: Option<String>,
+    /// The thumbnail picture in the project folder, copied in as
+    /// `thumbnail.jpg`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thumbnail: Option<String>,
 }
+
+/// The thumbnail's name in a network's export folder.
+const THUMBNAIL_FILE: &str = "thumbnail.jpg";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ExportPayload {
@@ -379,15 +392,18 @@ pub(crate) fn unix_millis(time: SystemTime) -> u64 {
         })
 }
 
-/// What an export was made from, besides its render: the post, and
-/// whether the disclosure reminder was written with it.
-fn export_stamp(post: &Post, disclosure: bool) -> String {
-    let fingerprint = post.fingerprint();
+/// What an export was made from, besides its render: the post, whether
+/// the disclosure reminder was written with it, and the thumbnail.
+fn export_stamp(post: &Post, disclosure: bool, thumbnail: Option<&str>) -> String {
+    let mut stamp = post.fingerprint();
     if disclosure {
-        format!("{fingerprint}+disclosure")
-    } else {
-        fingerprint
+        stamp.push_str("+disclosure");
     }
+    if let Some(thumbnail) = thumbnail {
+        stamp.push_str("+thumbnail:");
+        stamp.push_str(thumbnail);
+    }
+    stamp
 }
 
 /// Whether two file names name the same file on Windows, whose names
@@ -658,6 +674,23 @@ impl ExportHandler {
         self.export_files
             .write(package, network, METADATA_FILE, order.metadata.as_bytes())
             .map_err(file_failure)?;
+        match &order.thumbnail {
+            Some(thumbnail) => {
+                let mut picture = self
+                    .files
+                    .open(project, thumbnail)
+                    .map_err(file_failure)?;
+                self.export_files
+                    .copy_from(package, network, THUMBNAIL_FILE, &mut picture)
+                    .map_err(file_failure)?;
+            }
+            // One left from an earlier export would not match the post.
+            None => {
+                if let Err(error) = self.export_files.remove(package, network, THUMBNAIL_FILE) {
+                    tracing::warn!("could not remove the last export's thumbnail: {error}");
+                }
+            }
+        }
         if let Some(previous) = order
             .previous
             .as_ref()
@@ -813,6 +846,20 @@ impl Bardo {
         let metadata = self.exports.video_metadata(project.id)?;
         let exports = self.exports.exports(project.id)?;
         let disclosure = self.needs_disclosure(project.id)?;
+        let youtube = accounts
+            .iter()
+            .any(|account| account.network == Network::YouTube);
+        // A long video's YouTube post takes chapters and a thumbnail.
+        let (chapters, thumbnail) = if youtube {
+            let chapters = match self.chapter_text(project.id) {
+                Ok(chapters) => chapters,
+                Err(crate::ChaptersError::Repository(error)) => return Err(error.into()),
+                Err(_) => None,
+            };
+            (chapters, self.thumbnail_picture(&project)?)
+        } else {
+            (None, None)
+        };
         let mut posted = self.published_posts(project.id)?;
         let metrics = self.metrics_status(
             &posted
@@ -826,6 +873,10 @@ impl Bardo {
                 let defaults = account.details.metadata();
                 let footer = defaults.description_footer().to_owned();
                 let visibility = defaults.visibility();
+                let (chapters, thumbnail) = match account.network {
+                    Network::YouTube => (chapters.clone(), thumbnail.clone()),
+                    _ => (None, None),
+                };
                 let render = renders
                     .iter()
                     .find(|render| render.account == account.id)
@@ -836,11 +887,11 @@ impl Bardo {
                     .cloned();
                 let problems = metadata
                     .as_ref()
-                    .map(|metadata| metadata.problems(&footer))
+                    .map(|metadata| metadata.problems_with(chapters.as_deref(), &footer))
                     .unwrap_or_default();
                 let post = metadata
                     .as_ref()
-                    .map(|metadata| metadata.post(&footer, visibility));
+                    .map(|metadata| metadata.post_with(chapters.as_deref(), &footer, visibility));
                 let last = exports
                     .iter()
                     .find(|export| export.network == account.network)
@@ -849,9 +900,9 @@ impl Bardo {
                     render
                         .as_ref()
                         .is_some_and(|render| render.id == last.render)
-                        && post
-                            .as_ref()
-                            .is_some_and(|post| export_stamp(post, disclosure) == last.post)
+                        && post.as_ref().is_some_and(|post| {
+                            export_stamp(post, disclosure, thumbnail.as_deref()) == last.post
+                        })
                 });
                 ExportTarget {
                     account: account.id,
@@ -859,6 +910,8 @@ impl Bardo {
                     handle: account.details.handle().to_owned(),
                     visibility,
                     footer,
+                    chapters,
+                    thumbnail,
                     render_current: current.contains(&account.id),
                     render,
                     metadata,
@@ -1018,7 +1071,8 @@ impl Bardo {
                         &video_file,
                         now.disclosure,
                     ),
-                    post: export_stamp(&post, now.disclosure),
+                    post: export_stamp(&post, now.disclosure, target.thumbnail.as_deref()),
+                    thumbnail: target.thumbnail.clone(),
                     previous: target
                         .last
                         .as_ref()
@@ -1096,6 +1150,9 @@ impl Bardo {
         if !post.tags.is_empty() {
             blocks.push(field(Text::ExportFileTags, &post.tags.join(", ")));
         }
+        if target.thumbnail.is_some() {
+            blocks.push(self.text_with(Text::ExportFileThumbnail, &[("file", THUMBNAIL_FILE)]));
+        }
         blocks.push(self.text_with(
             Text::ExportFileVisibility,
             &[(
@@ -1143,9 +1200,10 @@ impl Bardo {
         &self,
         network: Network,
         draft: &VideoMetadataDraft,
+        chapters: Option<&str>,
         footer: &str,
     ) -> Vec<MetadataProblem> {
-        problems(network, draft, footer)
+        problems_with(network, draft, chapters, footer)
     }
 }
 
@@ -1364,6 +1422,57 @@ pub(crate) mod tests {
             .iter()
             .find(|target| target.network == network)
             .unwrap()
+    }
+
+    #[test]
+    fn a_long_videos_youtube_export_carries_its_saved_thumbnail() {
+        let s = rendered();
+        generated(&s);
+        let view = s.app.export_view(s.project.id).unwrap();
+        assert_eq!(target(&view, Network::YouTube).thumbnail, None);
+        let file = crate::thumbnails::tests::saved_thumbnail(&s.app, s.project.id);
+        let view = s.app.export_view(s.project.id).unwrap();
+        assert_eq!(target(&view, Network::YouTube).thumbnail, Some(file));
+        assert_eq!(target(&view, Network::TikTok).thumbnail, None);
+        done(
+            &s.app,
+            s.app
+                .start_export(&view, &[Network::YouTube, Network::TikTok])
+                .unwrap(),
+        );
+        let package = &view.package;
+        assert_eq!(
+            s.exports
+                .read(package, Network::YouTube, THUMBNAIL_FILE)
+                .unwrap(),
+            b"jpeg"
+        );
+        assert!(!s.exports.exists(package, Network::TikTok, THUMBNAIL_FILE));
+        let text = String::from_utf8(
+            s.exports
+                .read(package, Network::YouTube, METADATA_FILE)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(text.contains("Thumbnail: thumbnail.jpg (1280×720)"), "{text}");
+        let view = s.app.export_view(s.project.id).unwrap();
+        assert!(view.targets.iter().all(|t| t.last_current));
+
+        // A thumbnail changed since makes the export outdated.
+        let thumbnail = s.app.thumbnail(s.project.id).unwrap().thumbnail;
+        let mut edit = crate::ThumbnailEdit::of(&thumbnail);
+        edit.text = "Found".into();
+        s.app.edit_thumbnail(s.project.id, edit).unwrap();
+        let view = s.app.export_view(s.project.id).unwrap();
+        let youtube = target(&view, Network::YouTube);
+        assert_eq!(youtube.thumbnail, None);
+        assert!(!youtube.last_current);
+        assert!(target(&view, Network::TikTok).last_current);
+        done(
+            &s.app,
+            s.app.start_export(&view, &[Network::YouTube]).unwrap(),
+        );
+        assert!(!s.exports.exists(package, Network::YouTube, THUMBNAIL_FILE));
     }
 
     #[test]

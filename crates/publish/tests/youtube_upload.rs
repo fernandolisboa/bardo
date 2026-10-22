@@ -662,3 +662,55 @@ fn schedule_changes_name_what_youtube_refused() {
     let (outcome, _) = reschedule(&["videos-invalid-token"], &change(None));
     assert_eq!(outcome.unwrap_err().kind, UploadErrorKind::Refused);
 }
+
+fn set_thumbnail(name: &str) -> Result<(), UploadError> {
+    let uploader = uploader(&[name]);
+    let image = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3];
+    let result = uploader.set_thumbnail(
+        &SecretText::new("ya29.fixture-access"),
+        "Xb7kQ2mN9pA",
+        &image,
+    );
+    let sent = uploader.transport().sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].method, Method::Post);
+    assert_eq!(
+        sent[0].url,
+        "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=Xb7kQ2mN9pA&uploadType=media"
+    );
+    assert_eq!(
+        sent[0].header("authorization"),
+        Some("Bearer ya29.fixture-access")
+    );
+    assert_eq!(sent[0].header("content-type"), Some("image/jpeg"));
+    assert_eq!(sent[0].bytes, image);
+    result
+}
+
+#[test]
+fn a_thumbnail_goes_as_the_whole_body_of_a_media_upload() {
+    assert_eq!(set_thumbnail("thumbnail-set"), Ok(()));
+}
+
+#[test]
+fn a_channel_without_custom_thumbnails_is_not_allowed() {
+    let error = set_thumbnail("thumbnail-forbidden").unwrap_err();
+    assert_eq!(error.kind, UploadErrorKind::NotAllowed);
+    assert!(error.detail.contains("forbidden"), "{}", error.detail);
+}
+
+#[test]
+fn too_many_thumbnails_wait_and_a_bad_image_is_invalid() {
+    let busy = set_thumbnail("thumbnail-rate-limit").unwrap_err();
+    assert_eq!(busy.kind, UploadErrorKind::RateLimited);
+    assert!(busy.detail.contains("uploadRateLimitExceeded"));
+    let invalid = set_thumbnail("thumbnail-invalid-image").unwrap_err();
+    assert_eq!(invalid.kind, UploadErrorKind::Invalid);
+    assert!(invalid.detail.contains("invalidImage"));
+}
+
+#[test]
+fn a_thumbnail_for_a_video_gone_is_not_found() {
+    let gone = set_thumbnail("session-gone").unwrap_err();
+    assert_eq!(gone.kind, UploadErrorKind::NotFound);
+}
