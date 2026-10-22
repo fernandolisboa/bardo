@@ -39,7 +39,7 @@ jobs:
           fails=0; stale=0
           for i in $(seq 1 15); do
             failed=0
-            PROBE_STALE=1 cargo test -p bardo-storage --locked --lib > run.log 2>&1 || failed=1
+            PROBE_STALE=1 cargo test -p bardo-storage --locked --lib -- --nocapture > run.log 2>&1 || failed=1
             if [ $failed = 1 ] || grep -q "PROBE200 STALE" run.log; then
               [ $failed = 1 ] && fails=$((fails+1)); stale=$((stale+1))
               echo "=== suite $i failed=$failed"; grep -E "PROBE200 STALE|panicked" run.log || true
