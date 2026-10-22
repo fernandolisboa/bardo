@@ -1210,19 +1210,19 @@ mod tests {
     /// stuck on a slow disk past the busy timeout.
     struct EndNotSaved {
         db: Arc<Database>,
-        failures: AtomicU32,
+        failures: Mutex<u32>,
     }
 
     impl EndNotSaved {
         fn new(db: &Arc<Database>, failures: u32) -> Arc<Self> {
             Arc::new(Self {
                 db: Arc::clone(db),
-                failures: AtomicU32::new(failures),
+                failures: Mutex::new(failures),
             })
         }
 
         fn failures_left(&self) -> u32 {
-            self.failures.load(Ordering::SeqCst)
+            *self.failures.lock().unwrap()
         }
     }
 
@@ -1231,13 +1231,12 @@ mod tests {
             JobRepository::list(&*self.db, owner)
         }
         fn save(&self, job: &Job) -> Result<(), RepositoryError> {
-            let failing = job.state() == JobState::Done
-                && self
-                    .failures
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
-                        left.checked_sub(1)
-                    })
-                    .is_ok();
+            let failing = job.state() == JobState::Done && {
+                let mut left = self.failures.lock().unwrap();
+                let failing = *left > 0;
+                *left = left.saturating_sub(1);
+                failing
+            };
             if failing {
                 return Err(RepositoryError("database is locked".into()));
             }
