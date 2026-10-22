@@ -34,6 +34,27 @@ Edite o post de cada rede no inspetor. Cada campo conta contra o limite da rede,
 
 O YouTube também não aceita < nem > no título nem na descrição. O rodapé da conta e as hashtags são adicionados do jeito que a rede os recebe, e a contagem os inclui; **Como será postado**, embaixo dos campos, mostra o resultado. **Salvar** guarda suas edições e **Reverter** volta ao que estava salvo.
 
+<a id="thumbnail"></a>
+## Miniatura
+
+O post do YouTube de um vídeo longo tem um cartão **Miniatura** no inspetor: a imagem que o YouTube mostra antes do vídeo tocar, em 1280 × 720. Um Short não tem, porque o YouTube tira a miniatura de um Short do próprio vídeo.
+
+- **Escrever com o Claude** escreve o texto da miniatura (um gancho curto que acrescenta ao título) e um prompt para o fundo, a partir do [template](templates.md) Miniatura. O botão mostra quanto a chamada custa.
+- O **Texto** sai em letras grandes, com até 40 caracteres; deixe vazio para só a imagem. Escolha a **Posição do texto** (em cima ou embaixo, à esquerda, no meio ou à direita) e o **Estilo**: Forte (branco com contorno preto), Amarelo (amarelo com contorno preto) ou Faixa (branco sobre faixa escura). Cada canal tem um estilo padrão no [formulário](channels.md#defaults).
+- O **Fundo** é uma faixa de imagens: as imagens das cenas do projeto, sem custo, e todos os fundos já desenhados. **Desenhar um fundo** faz o modelo de imagem do canal desenhar um a partir do **Prompt do fundo**, depois de mostrar o custo; desenhar de novo acrescenta à faixa e nunca troca a imagem em uso.
+- **Salvar miniatura** monta a imagem, em segundo plano para o Bardo continuar respondendo, e a mostra. Mudanças depois disso a marcam como **Mudou desde que foi salva** até você salvar de novo.
+
+A imagem salva vai junto com o envio para o YouTube (veja [a revisão](#review)) e na pasta do YouTube de uma [exportação](exporting.md#folder).
+
+<a id="chapters"></a>
+## Capítulos
+
+O cartão do YouTube de um vídeo longo também tem **Capítulos**: partes com nome na barra de progresso do YouTube, a partir de marcações de tempo que o Bardo põe na descrição. **Escrever capítulos** faz o Claude dividir a narração em capítulos com o template Capítulos, cada um começando numa frase, com um título curto.
+
+Cada capítulo mostra seu tempo no corte como está agora (`m:ss`, ou `h:mm:ss` a partir de uma hora). Renomeie, remova, ou comece um capítulo uma frase antes ou depois; o primeiro sempre começa em 0:00. Os capítulos acompanham a narração, então aparar o corte no editor move os tempos junto.
+
+**Incluir capítulos na descrição** os coloca entre a descrição e o rodapé da conta, e eles contam nos 5.000 caracteres do YouTube. O YouTube só mostra capítulos quando há pelo menos três, cada um com pelo menos 10 segundos, o primeiro em 0:00. Capítulos que quebram uma regra, ou começam num trecho que o corte removeu, ficam fora da descrição com um aviso dizendo por quê, então nunca impedem um envio ou exportação. Uma narração feita depois dos capítulos pede que você os escreva de novo.
+
 <a id="disclosure"></a>
 ## Conteúdo sintético
 
@@ -53,12 +74,13 @@ O arquivo de metadados de uma exportação diz onde ativar o rótulo em cada red
 Uma conta conectada oferece **Revisar envio**. O botão fica desligado, com o motivo embaixo, enquanto a conta não está conectada, o render está em andamento ou desatualizado, os metadados faltam ou passam dos limites da rede, ou o arquivo não atende aos requisitos da rede. A revisão mostra exatamente o que vai:
 
 - o arquivo, a conta e o título, a descrição e as tags (ou a legenda) do jeito que a rede os recebe;
+- no YouTube, a [miniatura](#thumbnail) salva com **Enviar esta miniatura**, marcado;
 - suas escolhas: visibilidade e conteúdo para crianças no YouTube, a capa e Mostrar também no Feed no Instagram, o rótulo de conteúdo sintético;
 - no X, quanto o X cobra pelo post, e uma pergunta antes quando ele chegaria ao orçamento do X;
 - quando vai (veja [abaixo](#schedule));
 - se o projeto já tem um post nessa rede, uma caixa para substituí-lo no Bardo (o post continua na rede).
 
-Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. Se o render, o corte ou os metadados mudarem com a revisão aberta, o Bardo fecha a revisão e pede que você revise de novo. O guia de cada rede tem os detalhes: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft), [X](connect-x.md#upload).
+Confirmar inicia o envio como tarefa, com o progresso aqui e em Tarefas. O YouTube aplica a miniatura assim que tem o vídeo; se recusar, o vídeo continua no ar e o post diz por quê. O mais comum é o canal não estar verificado para miniaturas personalizadas: verifique em youtube.com/verify. Em qualquer caso você pode aplicar a imagem no YouTube Studio a partir do arquivo exportado. Se o render, o corte, os metadados ou a miniatura mudarem com a revisão aberta, o Bardo fecha a revisão e pede que você revise de novo. O guia de cada rede tem os detalhes: [YouTube](connect-youtube.md#upload), [Instagram](connect-instagram.md#upload), [TikTok](connect-tiktok.md#draft), [X](connect-x.md#upload).
 
 <a id="states"></a>
 ## Estados do envio

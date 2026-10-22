@@ -16,12 +16,12 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, AspectRatio, BackgroundSource, CostPurpose, DrawnBackground, Generation, GenerationId,
-    ImageGenerator, ImageRequest, Job, JobFailure, JobFailureKind, JobId, JobKind, Network,
-    ProfileId, ProjectFiles, Provider, RenderedPrompt, RepositoryError, SecretStore, TemplateKind,
-    TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId,
-    TextFormat, TextGenerator, TextPlacement, TextRequest, Thumbnail, ThumbnailBackground,
-    ThumbnailDesign, ThumbnailFieldError, ThumbnailLook, ThumbnailRepository, VideoFormat,
-    VideoProject, VideoProjectId, thumbnail_text, MAX_THUMBNAIL_TEXT,
+    ImageGenerator, ImageRequest, Job, JobFailure, JobFailureKind, JobId, JobKind,
+    MAX_THUMBNAIL_TEXT, Network, ProfileId, ProjectFiles, Provider, RenderedPrompt,
+    RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextPlacement, TextRequest,
+    Thumbnail, ThumbnailBackground, ThumbnailDesign, ThumbnailFieldError, ThumbnailLook,
+    ThumbnailRepository, VideoFormat, VideoProject, VideoProjectId, thumbnail_text,
 };
 use bardo_media::MediaEngine;
 use bardo_media::ffmpeg::{MediaError, ThumbnailSpec};

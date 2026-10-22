@@ -18,7 +18,9 @@ use bardo_domain::{
     TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage,
     UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
 };
-use bardo_domain::{ChapterFieldError, ChapterProblem, TextPlacement, ThumbnailFieldError, ThumbnailLook};
+use bardo_domain::{
+    ChapterFieldError, ChapterProblem, TextPlacement, ThumbnailFieldError, ThumbnailLook,
+};
 
 /// Every string the UI shows. Adding a variant without adding its key to all
 /// resource files fails the catalog tests.

@@ -19,6 +19,8 @@ There is one template per kind of generation:
 - **Image prompts**: the scene plan and each scene's image prompt ([Scenes and images](scenes.md#plan)).
 - **Music prompt**: the prompt for your music tool ([Script](script.md#music)).
 - **Metadata**: each network's title, description and tags at the Publish stage.
+- **Thumbnail**: a long video's YouTube thumbnail text and the prompt for its background ([Thumbnail](uploading.md#thumbnail)).
+- **Chapters**: a long video's YouTube chapters, from the narration's sentences ([Chapters](uploading.md#chapters)).
 
 <a id="versions"></a>
 ## Versions
@@ -38,7 +40,7 @@ A template has two parts, each up to 8,000 characters:
 <a id="variables"></a>
 ## Variables
 
-Write a variable as `{{name}}`; each generation replaces it with the project's value. The list under the editor shows the variables this kind of template can use and what each holds, such as `{{channel_name}}`, `{{persona}}` or `{{narration_sentences}}`. `{{target_length}}` and `{{frame_shape}}` follow the video's [format](projects.md#format): how long the script runs and the shape of the pictures. A misspelled or unknown variable, or one missing its closing `}}`, keeps the template from being saved.
+Write a variable as `{{name}}`; each generation replaces it with the project's value. The list under the editor shows the variables this kind of template can use and what each holds, such as `{{channel_name}}`, `{{persona}}` or `{{narration_sentences}}`. `{{video_title}}` is the YouTube title when written, else the project's. `{{target_length}}` and `{{frame_shape}}` follow the video's [format](projects.md#format): how long the script runs and the shape of the pictures. A misspelled or unknown variable, or one missing its closing `}}`, keeps the template from being saved.
 
 <a id="save"></a>
 ## Saving and starting over

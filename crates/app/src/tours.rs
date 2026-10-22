@@ -2721,15 +2721,16 @@ mod tests {
     #[test]
     fn the_publish_tour_falls_back_where_a_network_does_not_upload() {
         let mut run = TourRun::new(&PUBLISH, 2, Destination::Projects);
+        let inspector = TourAnchor::Inspector;
+        // Another network or a Short: no thumbnail card, so the inspector.
+        assert_eq!(run.spot(|anchor| anchor == inspector), Spot::Lit(inspector));
         let upload = control(Control::PublishUpload);
         // No realistic voice: the upload, where the review asks.
+        run.next();
         assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
         // X or Kick: nothing to upload, so the card says it in the middle.
         run.next();
         assert_eq!(run.spot(|_| false), Spot::Center);
-        // The review is closed: its "When" row gives way to the upload.
-        run.next();
-        assert_eq!(run.spot(|anchor| anchor == upload), Spot::Lit(upload));
     }
 
     #[test]

@@ -324,7 +324,9 @@ impl ChaptersHandler {
             })
             .collect();
         if list.is_empty() {
-            return Err(not_usable("no chapter at a sentence of the narration".into()));
+            return Err(not_usable(
+                "no chapter at a sentence of the narration".into(),
+            ));
         }
         let now = SystemTime::now();
         let generation = Generation {
@@ -564,7 +566,11 @@ impl Bardo {
     }
 
     /// Removes chapter `index` (from 0).
-    pub fn remove_chapter(&self, project: VideoProjectId, index: usize) -> Result<(), ChaptersError> {
+    pub fn remove_chapter(
+        &self,
+        project: VideoProjectId,
+        index: usize,
+    ) -> Result<(), ChaptersError> {
         self.change_chapters(project, |list, _| {
             if index >= list.len() {
                 return Err(ChaptersError::NotFound);
@@ -591,7 +597,8 @@ impl Bardo {
             if index >= list.len() {
                 return Err(ChaptersError::NotFound);
             }
-            list[index].start = moved(list, index, &starts, later).ok_or(ChaptersError::CannotMove)?;
+            list[index].start =
+                moved(list, index, &starts, later).ok_or(ChaptersError::CannotMove)?;
             Ok(())
         })
     }
@@ -668,7 +675,11 @@ mod tests {
         let request = h.text.requests().pop().unwrap();
         assert!(matches!(request.format, TextFormat::Json { .. }));
         assert!(request.prompt.contains("[0] 0:00-"), "{}", request.prompt);
-        assert!(request.prompt.contains("Video title: The probe that never came home"));
+        assert!(
+            request
+                .prompt
+                .contains("Video title: The probe that never came home")
+        );
         assert!(request.instructions.contains("in Portuguese"));
 
         let view = app.chapters(project.id).unwrap();
@@ -729,7 +740,10 @@ mod tests {
         assert_eq!(placed[0], Some(Duration::ZERO));
         assert_eq!(
             chapter_lines(
-                &[(Duration::ZERO, "Launch"), (Duration::from_secs(75), "Away")],
+                &[
+                    (Duration::ZERO, "Launch"),
+                    (Duration::from_secs(75), "Away")
+                ],
                 Duration::from_secs(200)
             ),
             "0:00 Launch\n1:15 Away"
@@ -860,7 +874,12 @@ mod tests {
         let h = Harness::new();
         let app = h.start();
         let project = h.narrated_project(&app);
-        write(&h, &app, project.id, answer(&[(0, "Launch"), (2, "Signal")]));
+        write(
+            &h,
+            &app,
+            project.id,
+            answer(&[(0, "Launch"), (2, "Signal")]),
+        );
         assert!(!app.chapters(project.id).unwrap().stale);
         done(
             &app,
@@ -888,7 +907,12 @@ mod tests {
         let h = Harness::new();
         let app = h.start();
         let project = h.narrated_project(&app);
-        let job = write(&h, &app, project.id, answer(&[(0, "Launch"), (2, "Signal")]));
+        let job = write(
+            &h,
+            &app,
+            project.id,
+            answer(&[(0, "Launch"), (2, "Signal")]),
+        );
         let handler = ChaptersHandler {
             owner: app.profile().id,
             chapters: Arc::clone(&h.db) as _,

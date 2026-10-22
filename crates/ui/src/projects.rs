@@ -22,11 +22,10 @@ use bardo_app::bardo_domain::{
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
-    MusicPromptView, ThumbnailView,
-    MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer, NarrationView, Recording,
-    RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage,
-    StageState, StageStatus, Text, TourAnchor, UploadChoices, UploadReview, opening_stage,
-    project_stages,
+    MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer,
+    NarrationView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView,
+    SpendEstimate, Stage, StageState, StageStatus, Text, ThumbnailView, TourAnchor, UploadChoices,
+    UploadReview, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};

@@ -59,17 +59,18 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AgentTask, BackupStore, ChannelRepository, ClipGenerator, ConnectionSecrets, ConsentReceiver,
-    CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles, ExportRepository,
-    ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId, MarketData,
-    MediaAssetRepository, MusicGenerator, MusicPromptRepository, MusicTrackRepository,
+    AgentTask, BackupStore, ChannelRepository, ChapterRepository, ClipGenerator, ConnectionSecrets,
+    ConsentReceiver, CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles,
+    ExportRepository, ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId,
+    MarketData, MediaAssetRepository, MusicGenerator, MusicPromptRepository, MusicTrackRepository,
     NarrationRepository, NetworkAccountRepository, NetworkConnectionRepository, NetworkSignIn,
     NicheResearchRepository, OwnerAnalytics, Persona, PersonaRepository, ProfileRepository,
     ProjectFiles, PublicationRepository, RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError,
     RunnerRole, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
-    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, TimelineRepository,
-    ChapterRepository, ThumbnailRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
-    VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore, Zone, running_since,
+    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, ThumbnailRepository,
+    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
+    VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
+    Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -128,9 +129,6 @@ pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
 pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
-pub use thumbnails::{
-    BackgroundChoice, ThumbnailComposer, ThumbnailEdit, ThumbnailError, ThumbnailView,
-};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
@@ -170,6 +168,9 @@ pub use stages::{
 };
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
+pub use thumbnails::{
+    BackgroundChoice, ThumbnailComposer, ThumbnailEdit, ThumbnailError, ThumbnailView,
+};
 pub use tours::{
     CLIPS, Control, GuideRef, NARRATION, PERFORMANCE, PERSONAS, PROJECTS, RESEARCH, SCENES, SCRIPT,
     ScreenTour, Side, Spot, TEMPLATES, THEMES, Tour, TourAnchor, TourError, TourMove, TourPlace,

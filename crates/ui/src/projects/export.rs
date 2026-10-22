@@ -968,10 +968,12 @@ impl ProjectsScreen {
             let draft = self.metadata_draft(cx);
             let chapters = target.chapters.as_deref();
             let post = compose_with(network, &draft, chapters, &target.footer, target.visibility);
-            let problems =
-                self.bardo
-                    .read(cx)
-                    .metadata_draft_problems(network, &draft, chapters, &target.footer);
+            let problems = self.bardo.read(cx).metadata_draft_problems(
+                network,
+                &draft,
+                chapters,
+                &target.footer,
+            );
             let count = |text: &str| text.chars().count();
             let text_count = |text: &str| text_length(network, text);
             if let (Some(limit), Some(title)) = (rules.title, post.title.as_ref()) {

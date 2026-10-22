@@ -14,13 +14,12 @@ pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
 pub(crate) use queue::{JobQueue, Runner};
 
 use crate::backup::{BackupHandler, RestoreHandler};
+use crate::chapters::ChaptersHandler;
 use crate::clips::ClipHandler;
 use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
 use crate::music_prompts::MusicPromptHandler;
 use crate::music_tracks::MusicHandler;
-use crate::chapters::ChaptersHandler;
-use crate::thumbnails::ThumbnailHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
 use crate::proxies::ProxyHandler;
@@ -30,6 +29,7 @@ use crate::research::NicheResearchHandler;
 use crate::scenes::SceneHandler;
 use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
+use crate::thumbnails::ThumbnailHandler;
 use crate::uploads::UploadHandler;
 use crate::{AppError, Bardo, Text};
 

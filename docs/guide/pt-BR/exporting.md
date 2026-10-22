@@ -24,14 +24,15 @@ A linha de cada rede tem uma caixa: marque as redes a exportar. Redes ainda não
 A exportação de cada projeto tem uma pasta, com uma pasta por rede dentro, com o nome da rede. Cada uma tem:
 
 - o vídeo renderizado, no preset da rede;
-- o `metadata.txt`, no idioma da interface: o título, a descrição ou legenda e as tags para colar em cada campo, a visibilidade a escolher e, quando a voz é sintética, onde ativar o rótulo da rede.
+- o `metadata.txt`, no idioma da interface: o título, a descrição ou legenda e as tags para colar em cada campo, a visibilidade a escolher e, quando a voz é sintética, onde ativar o rótulo da rede;
+- na pasta do YouTube, o `thumbnail.jpg` quando o projeto tem uma [miniatura](uploading.md#thumbnail) salva, para aplicar no YouTube Studio.
 
 **Mostrar na pasta** abre a pasta, e **Detalhes** mostra o caminho dela. O inspetor também tem **Copiar** ao lado de cada campo, para colar direto do Bardo.
 
 <a id="outdated"></a>
 ## Desatualizada
 
-A última exportação de uma rede aparece como **Exportada** enquanto bate com o render e os metadados, **Desatualizada** quando um dos dois mudou depois dela e **Não exportada** antes da primeira. Exporte de novo para atualizar a pasta. Um arquivo com render desatualizado exporta como está; renderize de novo na etapa [Render](render.md) para incluir as mudanças.
+A última exportação de uma rede aparece como **Exportada** enquanto bate com o render, os metadados e a miniatura do YouTube, **Desatualizada** quando um deles mudou depois dela e **Não exportada** antes da primeira. Exporte de novo para atualizar a pasta. Um arquivo com render desatualizado exporta como está; renderize de novo na etapa [Render](render.md) para incluir as mudanças.
 
 <a id="post"></a>
 ## Depois de postar à mão

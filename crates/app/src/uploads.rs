@@ -63,10 +63,11 @@ use bardo_domain::{
     NetworkAccountId, NetworkAccountRepository, Post, Progress, ProjectFiles, Provider,
     Publication, PublicationId, PublicationKind, PublicationRepository, ReelFile, ReelSpecProblem,
     Render, RenderRepository, RepositoryError, ScheduleProblem, SecretText, SignInFailureKind,
-    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, TikTokFile, TikTokSpecProblem, Upload, UploadError,
-    UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus, VideoProjectId,
-    ThumbnailOutcome, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time, check_reel,
-    check_tiktok, draft_room, due_step, mp4_layout, prepare_at, video_container, x_post_model,
+    TIKTOK_DRAFT_WINDOW, TIKTOK_PENDING_DRAFTS, ThumbnailOutcome, TikTokFile, TikTokSpecProblem,
+    Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome, UploadRun, UploadStatus,
+    VideoProjectId, VideoState, VideoUpload, VideoUploader, Visibility, check_publish_time,
+    check_reel, check_tiktok, draft_room, due_step, mp4_layout, prepare_at, video_container,
+    x_post_model,
 };
 use serde::{Deserialize, Serialize};
 
@@ -3020,7 +3021,10 @@ pub(crate) mod tests {
         // A check that fails once makes the job run again: the picture is
         // sent once.
         s.h.uploader.answer(Err(UploadErrorKind::NetworkDown));
-        done(&s.app, s.app.start_upload(&review, review.choices()).unwrap());
+        done(
+            &s.app,
+            s.app.start_upload(&review, review.choices()).unwrap(),
+        );
         let sent = s.h.uploader.thumbnails.lock().unwrap().clone();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].1, b"jpeg");

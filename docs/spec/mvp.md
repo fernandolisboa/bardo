@@ -93,6 +93,7 @@ One user can go from "which niche?" to a published Short on YouTube, TikTok and 
 - Upload adapters, with resumable uploads in the job queue: YouTube (`videos.insert`), Instagram Reels (Facebook Login for Business with a linked Facebook Page, resumable local upload), TikTok (draft to the creator's inbox, finished in the TikTok app).
 - Scheduling per ADR-0006: YouTube native `publishAt`; Instagram via the in-app scheduler; TikTok drafts are scheduled in the TikTok app.
 - Export for all five networks: file in the network preset plus a metadata text file.
+- YouTube thumbnail and chapters for long videos: a thumbnail composed in Bardo from a scene image or a drawn background with editable text, sent with the upload; chapters from the narration in the description (ADR-0021, #182).
 - Clear status when a network restricts posts to private (unaudited app).
 - Posting limits enforced before queuing: Instagram's publishing limit as `content_publishing_limit` reports it, TikTok's 5 pending drafts per 24 h, YouTube's daily uploads bucket.
 

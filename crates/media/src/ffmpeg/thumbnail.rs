@@ -33,9 +33,9 @@ const MARGIN: u32 = 56;
 /// The letters' height for `text`: the shorter the text, the bigger.
 fn font_size(text: &str, look: ThumbnailLook) -> u32 {
     let size = match text.chars().count() {
-        0..=12 => 150,
-        13..=24 => 118,
-        _ => 92,
+        0..=12 => 190,
+        13..=24 => 150,
+        _ => 112,
     };
     match look {
         // Poppins is wider than Anton.
@@ -196,7 +196,7 @@ mod tests {
         );
         assert!(script.contains("PlayResX: 1280\nPlayResY: 720"));
         assert!(
-            script.contains("Style: Thumb,Anton,118,&H003BD4FF,"),
+            script.contains("Style: Thumb,Anton,150,&H003BD4FF,"),
             "{script}"
         );
         assert!(script.contains(",1,10,4,2,56,56,56,1\n"), "{script}");
@@ -207,7 +207,7 @@ mod tests {
             ThumbnailLook::Banner,
         );
         assert!(
-            banner.contains("Style: Thumb,Poppins,105,&H00FFFFFF,"),
+            banner.contains("Style: Thumb,Poppins,133,&H00FFFFFF,"),
             "{banner}"
         );
         assert!(

@@ -299,9 +299,9 @@ pub use update::{
     installer_version, is_sha256,
 };
 pub use upload::{
-    InvalidUploadTransition, NetworkPost, ScheduleChange, ScheduleOutcome, UPLOAD_CHUNK,
-    UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure, UploadOutcome,
-    ThumbnailOutcome, UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
+    InvalidUploadTransition, NetworkPost, ScheduleChange, ScheduleOutcome, ThumbnailOutcome,
+    UPLOAD_CHUNK, UPLOAD_CHUNK_UNIT, Upload, UploadError, UploadErrorKind, UploadFailure,
+    UploadOutcome, UploadRun, UploadStatus, UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
 pub use voice::{InvalidVoiceRef, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef};
 pub use voice_sample::{

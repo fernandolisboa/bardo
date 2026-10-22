@@ -254,12 +254,7 @@ pub fn chapter_problems(placed: &[Option<Duration>], length: Duration) -> Vec<Ch
 pub fn timestamp(time: Duration, length: Duration) -> String {
     let total = seconds(time);
     if seconds(length) >= 3_600 {
-        format!(
-            "{}:{:02}:{:02}",
-            total / 3_600,
-            total / 60 % 60,
-            total % 60
-        )
+        format!("{}:{:02}:{:02}", total / 3_600, total / 60 % 60, total % 60)
     } else {
         format!("{}:{:02}", total / 60, total % 60)
     }
@@ -311,7 +306,10 @@ mod tests {
 
     #[test]
     fn titles_are_one_line_and_present() {
-        assert_eq!(chapter_title(" The  dig\nbegins "), Ok("The dig begins".into()));
+        assert_eq!(
+            chapter_title(" The  dig\nbegins "),
+            Ok("The dig begins".into())
+        );
         assert_eq!(chapter_title(" "), Err(ChapterFieldError::TitleRequired));
         assert_eq!(
             chapter_title(&"a".repeat(101)),
@@ -323,7 +321,11 @@ mod tests {
     fn written_chapters_are_in_order_one_per_start() {
         let chapters = Chapters::generated(
             NarrationId::new(),
-            vec![chapter(40, "Later"), chapter(0, "Start"), chapter(40, "Twice")],
+            vec![
+                chapter(40, "Later"),
+                chapter(0, "Start"),
+                chapter(40, "Twice"),
+            ],
             generation(),
             SystemTime::UNIX_EPOCH,
         )

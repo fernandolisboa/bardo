@@ -39,7 +39,9 @@ pub(super) fn thumbnail_outcome(
 ) -> Option<AnyElement> {
     let outcome = publication.upload()?.thumbnail.as_ref()?;
     let notice = match outcome {
-        ThumbnailOutcome::Set => kit::notice(Tone::Success, tr(bardo, Text::UploadThumbnailSet), cx),
+        ThumbnailOutcome::Set => {
+            kit::notice(Tone::Success, tr(bardo, Text::UploadThumbnailSet), cx)
+        }
         ThumbnailOutcome::NotAllowed => kit::notice(
             Tone::Warning,
             tr(bardo, Text::UploadThumbnailNotAllowed),
@@ -121,7 +123,13 @@ impl ProjectsScreen {
             .is_some_and(|loaded| *loaded != self.thumbnail_typed(cx))
     }
 
-    fn thumbnail_call(&mut self, call: ThumbnailCall, consent: BudgetConsent, window: &mut Window, cx: &mut Context<Self>) {
+    fn thumbnail_call(
+        &mut self,
+        call: ThumbnailCall,
+        consent: BudgetConsent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.thumbnail_ask = None;
         self.thumbnail_notice = None;
         let Some(id) = self.project else {
@@ -237,7 +245,12 @@ impl ProjectsScreen {
             .is_some_and(|job| job.state().is_active())
     }
 
-    fn write_chapters(&mut self, consent: BudgetConsent, window: &mut Window, cx: &mut Context<Self>) {
+    fn write_chapters(
+        &mut self,
+        consent: BudgetConsent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.chapters_ask = None;
         let Some(id) = self.project else {
             return;
@@ -385,9 +398,7 @@ impl ProjectsScreen {
         let state = match (&view.picture, view.is_outdated()) {
             (Some(_), _) => kit::status(Tone::Success, tr(bardo, Text::ThumbnailSaved), cx),
             (None, true) => kit::status(Tone::Warning, tr(bardo, Text::ThumbnailOutdated), cx),
-            (None, false) => {
-                kit::status(Tone::Neutral, tr(bardo, Text::ThumbnailNotYetSaved), cx)
-            }
+            (None, false) => kit::status(Tone::Neutral, tr(bardo, Text::ThumbnailNotYetSaved), cx),
         };
         let preview = view.picture.clone().map(|path| {
             div()
@@ -432,28 +443,51 @@ impl ProjectsScreen {
         });
 
         // Where the text sits: a 3 × 2 grid laid out like the frame.
-        let placements = v_flex().gap_1().children([TextPlacement::ALL[..3].to_vec(), TextPlacement::ALL[3..].to_vec()].into_iter().map(|row| {
-            h_flex().gap_1().children(row.into_iter().map(|placement| {
-                let picked = thumbnail.design.placement == placement;
-                let button = Button::new(("thumbnail-placement", placement as usize))
+        let placements = v_flex().gap_1().children(
+            [
+                TextPlacement::ALL[..3].to_vec(),
+                TextPlacement::ALL[3..].to_vec(),
+            ]
+            .into_iter()
+            .map(|row| {
+                h_flex().gap_1().children(row.into_iter().map(|placement| {
+                    let picked = thumbnail.design.placement == placement;
+                    let button = Button::new(("thumbnail-placement", placement as usize))
+                        .xsmall()
+                        .label(tr(bardo, Text::TextPlacementName(placement)))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.change_thumbnail(
+                                |edit| edit.placement = placement,
+                                false,
+                                window,
+                                cx,
+                            )
+                        }));
+                    if picked {
+                        button.primary()
+                    } else {
+                        button.ghost()
+                    }
+                }))
+            }),
+        );
+        let looks = h_flex()
+            .gap_1()
+            .flex_wrap()
+            .children(ThumbnailLook::ALL.into_iter().map(|look| {
+                let picked = thumbnail.design.look == look;
+                let button = Button::new(("thumbnail-look", look as usize))
                     .xsmall()
-                    .label(tr(bardo, Text::TextPlacementName(placement)))
+                    .label(tr(bardo, Text::ThumbnailLookName(look)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.change_thumbnail(|edit| edit.placement = placement, false, window, cx)
+                        this.change_thumbnail(|edit| edit.look = look, false, window, cx)
                     }));
-                if picked { button.primary() } else { button.ghost() }
-            }))
-        }));
-        let looks = h_flex().gap_1().flex_wrap().children(ThumbnailLook::ALL.into_iter().map(|look| {
-            let picked = thumbnail.design.look == look;
-            let button = Button::new(("thumbnail-look", look as usize))
-                .xsmall()
-                .label(tr(bardo, Text::ThumbnailLookName(look)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.change_thumbnail(|edit| edit.look = look, false, window, cx)
-                }));
-            if picked { button.primary() } else { button.outline() }
-        }));
+                if picked {
+                    button.primary()
+                } else {
+                    button.outline()
+                }
+            }));
 
         // The pictures it can sit on.
         let strip: AnyElement = if view.backgrounds.is_empty() {
@@ -485,7 +519,11 @@ impl ProjectsScreen {
                             gpui_kit::component::tooltip::Tooltip::new(label.clone())
                                 .build(window, cx)
                         })
-                        .child(img(choice.path.clone()).size_full().object_fit(ObjectFit::Cover))
+                        .child(
+                            img(choice.path.clone())
+                                .size_full()
+                                .object_fit(ObjectFit::Cover),
+                        )
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             let background = background.clone();
                             this.change_thumbnail(
@@ -538,7 +576,12 @@ impl ProjectsScreen {
                     .small()
                     .primary()
                     .label(tr(bardo, Text::ThumbnailSave))
-                    .disabled(saving || dirty || thumbnail.design.background.is_none())
+                    .disabled(
+                        saving
+                            || dirty
+                            || thumbnail.design.background.is_none()
+                            || view.picture.is_some(),
+                    )
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.save_thumbnail(window, cx)
                     })),
@@ -623,8 +666,16 @@ impl ProjectsScreen {
                         Some(Text::ThumbnailTextHint),
                         Input::new(&self.thumbnail_text).into_any_element(),
                     ))
-                    .child(field(Text::ThumbnailPlacement, None, placements.into_any_element()))
-                    .child(field(Text::ThumbnailLookLabel, None, looks.into_any_element()))
+                    .child(field(
+                        Text::ThumbnailPlacement,
+                        None,
+                        placements.into_any_element(),
+                    ))
+                    .child(field(
+                        Text::ThumbnailLookLabel,
+                        None,
+                        looks.into_any_element(),
+                    ))
                     .child(field(
                         Text::ThumbnailBackground,
                         Some(Text::ThumbnailBackgroundHint),
@@ -755,7 +806,12 @@ impl ProjectsScreen {
                     .gap_1()
                     .flex_1()
                     .min_w_0()
-                    .child(div().flex_1().min_w_0().child(Input::new(&self.chapter_title)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Input::new(&self.chapter_title)),
+                    )
                     .child(
                         Button::new(("save-chapter-title", index))
                             .xsmall()
@@ -859,7 +915,11 @@ impl ProjectsScreen {
                 )
                 .child(title)
                 .when(row.at.is_none() && !view.stale, |row| {
-                    row.child(kit::status(Tone::Warning, tr(bardo, Text::ChapterCutAway), cx))
+                    row.child(kit::status(
+                        Tone::Warning,
+                        tr(bardo, Text::ChapterCutAway),
+                        cx,
+                    ))
                 })
                 .children(actions)
                 .into_any_element()

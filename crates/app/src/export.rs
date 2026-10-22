@@ -676,10 +676,7 @@ impl ExportHandler {
             .map_err(file_failure)?;
         match &order.thumbnail {
             Some(thumbnail) => {
-                let mut picture = self
-                    .files
-                    .open(project, thumbnail)
-                    .map_err(file_failure)?;
+                let mut picture = self.files.open(project, thumbnail).map_err(file_failure)?;
                 self.export_files
                     .copy_from(package, network, THUMBNAIL_FILE, &mut picture)
                     .map_err(file_failure)?;
@@ -1454,7 +1451,10 @@ pub(crate) mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert!(text.contains("Thumbnail: thumbnail.jpg (1280×720)"), "{text}");
+        assert!(
+            text.contains("Thumbnail: thumbnail.jpg (1280×720)"),
+            "{text}"
+        );
         let view = s.app.export_view(s.project.id).unwrap();
         assert!(view.targets.iter().all(|t| t.last_current));
 

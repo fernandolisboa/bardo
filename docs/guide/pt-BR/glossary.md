@@ -116,6 +116,10 @@ As palavras que o Bardo usa, em termos simples.
 
 **Metadados do vídeo**: o texto do post de um vídeo numa rede: título, descrição e tags, dentro dos limites da rede.
 
+**Miniatura**: a imagem de 1280 × 720 que o YouTube mostra antes de um vídeo longo tocar: um fundo com texto grande, salva no Bardo e enviada com o envio.
+
+**Capítulos**: partes com nome na barra de progresso do YouTube de um vídeo longo, a partir de marcações de tempo na descrição. Cada um começa numa frase da narração.
+
 **Exportação**: uma pasta por rede com o arquivo renderizado e um texto para copiar, para postar à mão.
 
 **Revisão do envio**: o que você confirma antes de um envio: o arquivo, o texto do post, a conta, a visibilidade e o aviso de IA.

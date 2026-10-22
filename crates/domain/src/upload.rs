@@ -123,9 +123,7 @@ impl ThumbnailOutcome {
         match code {
             "set" => ThumbnailOutcome::Set,
             "not_allowed" => ThumbnailOutcome::NotAllowed,
-            _ => ThumbnailOutcome::Failed(
-                code.strip_prefix("failed:").unwrap_or(code).to_owned(),
-            ),
+            _ => ThumbnailOutcome::Failed(code.strip_prefix("failed:").unwrap_or(code).to_owned()),
         }
     }
 
@@ -133,9 +131,7 @@ impl ThumbnailOutcome {
     pub fn of(result: &Result<(), UploadError>) -> Self {
         match result {
             Ok(()) => ThumbnailOutcome::Set,
-            Err(error) if error.kind == UploadErrorKind::NotAllowed => {
-                ThumbnailOutcome::NotAllowed
-            }
+            Err(error) if error.kind == UploadErrorKind::NotAllowed => ThumbnailOutcome::NotAllowed,
             Err(error) => ThumbnailOutcome::Failed(error.detail.clone()),
         }
     }

@@ -391,17 +391,11 @@ mod tests {
         drawn.background.as_mut().unwrap().source = BackgroundSource::Drawn;
         let mut bare = base.clone();
         bare.background = None;
-        let names: std::collections::HashSet<String> = [
-            &base,
-            &design("Found"),
-            &moved,
-            &looked,
-            &drawn,
-            &bare,
-        ]
-        .iter()
-        .map(|design| design.file_name())
-        .collect();
+        let names: std::collections::HashSet<String> =
+            [&base, &design("Found"), &moved, &looked, &drawn, &bare]
+                .iter()
+                .map(|design| design.file_name())
+                .collect();
         assert_eq!(names.len(), 6);
     }
 

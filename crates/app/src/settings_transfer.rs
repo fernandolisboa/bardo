@@ -25,8 +25,8 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipModelRef,
     ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
     Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
-    Provider, Rate, Resolution, Score, ThumbnailLook, TokenSet, Transition, UiLanguage, UiThemePreference,
-    VideoFormat, VoiceFlag,
+    Provider, Rate, Resolution, Score, ThumbnailLook, TokenSet, Transition, UiLanguage,
+    UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
