@@ -6,7 +6,9 @@
 ALTER TABLE timeline_item ADD COLUMN motion TEXT;
 ALTER TABLE timeline_item ADD COLUMN motion_strength TEXT;
 
--- Every channel, old ones too, varies its new cuts' motions: cuts already
--- saved keep their items' NULLs.
-ALTER TABLE channel ADD COLUMN motion TEXT NOT NULL DEFAULT 'varied';
+-- Channels from before keep their stills still: a rough cut nobody edited
+-- is rebuilt from its channel, so motion there would change cuts and
+-- outdate renders made before. New channels get varied motions from the
+-- domain's default.
+ALTER TABLE channel ADD COLUMN motion TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE channel ADD COLUMN motion_strength TEXT NOT NULL DEFAULT 'medium';

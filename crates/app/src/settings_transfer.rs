@@ -413,7 +413,8 @@ struct ChannelEntry {
     /// made.
     #[serde(default)]
     format: Option<String>,
-    /// Missing from files made before motion on stills: the default.
+    /// Missing from files made before motion on stills: none, as those
+    /// channels had.
     #[serde(default)]
     motion: Option<MotionEntry>,
     #[serde(default)]
@@ -530,7 +531,7 @@ impl ChannelEntry {
                 Some(entry) => {
                     MotionDefault::new(entry.pattern.parse().ok()?, entry.strength.parse().ok()?)
                 }
-                None => MotionDefault::default(),
+                None => MotionDefault::still(),
             },
         })
     }
@@ -1443,6 +1444,13 @@ mod tests {
         let entry: ChannelEntry =
             serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
         assert_eq!(entry.draft(None).unwrap().format, VideoFormat::Long);
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_motion_keeps_its_stills_still() {
+        let entry: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(entry.draft(None).unwrap().motion, MotionDefault::still());
     }
 
     fn items(choices: &[SettingsChoice]) -> Vec<SettingsItem> {

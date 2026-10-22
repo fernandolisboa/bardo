@@ -82,7 +82,7 @@ transition = "Transição padrão"
 transition_hint = "O que o editor põe num corte quando você aperta T ou escolhe uma transição. Qualquer corte pode usar outra."
 transition_length = "Duração"
 motion = "Movimento nas imagens"
-motion_hint = "Como os novos cortes movem a vista sobre cada imagem parada, o efeito Ken Burns. Variado dá outro movimento à cena seguinte. Qualquer clipe pode usar outro no editor."
+motion_hint = "Como a câmera passeia por cada imagem parada nos cortes novos, o efeito Ken Burns. Variado dá outro movimento à cena seguinte. Qualquer imagem pode usar outro no editor."
 motion_strength = "Intensidade"
 
 [channel.error]

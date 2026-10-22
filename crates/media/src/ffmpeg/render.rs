@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::captions::{CaptionFiles, CaptionTrack};
+use super::captions::{CaptionFiles, CaptionTrack, escape_graph, escape_option, path_option};
 use super::frames::{FrameSize, FrameStream};
 use super::process::{self, Span};
 use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, seconds};
@@ -98,10 +98,10 @@ impl View {
 /// How many times larger than the output a moving still is drawn before
 /// the view is taken from it. `zoompan` places and sizes its window in
 /// whole pixels of what it is given (in 4:4:4, so not in pairs), so a slow
-/// move steps by up to a third of an output pixel times the zoom instead
-/// of a whole one: smooth to the eye at about twice the cost of 2× in
-/// the render (ADR-0019).
-const MOTION_OVERSAMPLE: u32 = 3;
+/// move steps by up to half an output pixel times the zoom instead of a
+/// whole one: smooth to the eye, where 3× costs twice the time and half
+/// again the memory of 2× for a step hardly anyone sees (ADR-0019).
+const MOTION_OVERSAMPLE: u32 = 2;
 
 /// A transition into a clip, around the cut: the clip starts `before`
 /// ahead of the cut, and the clip before it plays on `after` past the cut.
@@ -458,8 +458,6 @@ enum InputSource<'a> {
     File(&'a Path),
     /// An image repeated at the rate given.
     Still(&'a Path, (u32, u32)),
-    /// An image, once: a moving still makes all its frames from it.
-    Picture(&'a Path),
     /// A black picture at the rate given.
     Black((u32, u32)),
 }
@@ -518,6 +516,12 @@ fn zoompan(motion: &Motion, frames: u64, size: FrameSize, fps: (u32, u32)) -> St
     )
 }
 
+/// The `movie` source reading `path`, escaped for the filter graph.
+fn movie(path: &Path) -> String {
+    let arguments = format!("filename={}", escape_option(&path_option(path)));
+    format!("movie={}", escape_graph(&arguments))
+}
+
 /// Inputs and the filter graph that turns them into `[vout]`: each clip
 /// trimmed, framed and set to the output rate, then joined with a cut or
 /// its transition, with the captions (`overlay`: a filter such as
@@ -558,25 +562,27 @@ fn video_graph<'a>(
         let frames = frame_count(clip.duration, fps).max(1)
             + frame_count(before, fps)
             + frame_count(after, fps);
-        // A moving still: its picture once, framed larger than the output,
-        // then the view taken from it frame by frame.
+        // A moving still: its picture once (the first frame of an animated
+        // one), framed larger than the output, then the view taken from it
+        // frame by frame. Read by `movie` rather than as an input, so it is
+        // opened when its clip plays: an input's first frame goes through
+        // the graph as ffmpeg starts, and every moving still would be
+        // drawn large before the first frame came out.
         if let (ClipSource::Still(path), Some(motion)) = (&clip.source, clip.motion) {
-            inputs.push(Input {
-                source: InputSource::Picture(path),
-                start: Duration::ZERO,
-                duration: before + clip.duration + after,
-            });
             let large = framing_filter(
                 clip.framing,
                 width * MOTION_OVERSAMPLE,
                 height * MOTION_OVERSAMPLE,
             );
             chains.push(format!(
-                "[{index}:v:0]{large},setsar=1,format=yuv444p,{},setsar=1,format=yuv420p[v{index}]",
+                "{},trim=end_frame=1,{large},setsar=1,format=yuv444p,{},setsar=1,\
+                 format=yuv420p[v{index}]",
+                movie(path),
                 zoompan(&motion, frames, size, fps),
             ));
             continue;
         }
+        let input = inputs.len();
         inputs.push(Input {
             source: match &clip.source {
                 ClipSource::Video(path) => InputSource::File(path),
@@ -596,7 +602,7 @@ fn video_graph<'a>(
         // clip is exactly as many frames long as asked and the clips after
         // it stay in time with the audio.
         chains.push(format!(
-            "[{index}:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps={numerator}/{denominator},\
+            "[{input}:v:0]settb=AVTB,setpts=PTS-STARTPTS,fps={numerator}/{denominator},\
              tpad={held}stop=-1:stop_mode=clone,trim=end_frame={frames},{framing},setsar=1,format=yuv420p[v{index}]"
         ));
     }
@@ -799,9 +805,6 @@ fn push_inputs(command: &mut std::process::Command, inputs: &[Input<'_>]) {
                     .arg(format!("{numerator}/{denominator}"))
                     .args(["-t", &length, "-i"])
                     .arg(path_arg(path));
-            }
-            InputSource::Picture(path) => {
-                command.arg("-i").arg(path_arg(path));
             }
             InputSource::Black((numerator, denominator)) => {
                 command
@@ -1355,17 +1358,15 @@ mod tests {
         plan.video[0].motion = pan(2.0);
         let (inputs, graph) =
             video_graph(&plan, FrameSize::new(1080, 1920), (30, 1), "yuv420p", None);
-        let mut command = std::process::Command::new("ffmpeg");
-        push_inputs(&mut command, &inputs[..1]);
-        let args: Vec<String> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(args, ["-i", "scene.png"], "read once, not looped");
+        // Read by the graph when its clip plays, not as an input: the clip
+        // after it is input 0.
+        assert_eq!(inputs.len(), 1);
+        assert!(graph.contains("[0:v:0]settb=AVTB"), "{graph}");
         assert!(
             graph.starts_with(
-                "[0:v:0]crop=w='min(iw,ih*3240/5760)':h='min(ih,iw*5760/3240)':\
-                 x='(iw-ow)*0.5':y='(ih-oh)*0.5',scale=3240:5760:flags=bicubic,\
+                "movie=filename=scene.png,trim=end_frame=1,\
+                 crop=w='min(iw,ih*2160/3840)':h='min(ih,iw*3840/2160)':\
+                 x='(iw-ow)*0.5':y='(ih-oh)*0.5',scale=2160:3840:flags=bicubic,\
                  setsar=1,format=yuv444p,\
                  zoompan=z='1.250000*pow(1.000000,clip((on+0)/59,0,1))':\
                  x='(iw-iw/zoom)*(0.000000+1.000000*clip((on+0)/59,0,1))':\
@@ -1373,6 +1374,11 @@ mod tests {
                  d=60:s=1080x1920:fps=30/1,setsar=1,format=yuv420p[v0];"
             ),
             "{graph}"
+        );
+        // A path as the graph reads it: both levels escaped.
+        assert_eq!(
+            movie(Path::new(r"C:\Media\it's [a],b;c.png")),
+            r"movie=filename=C\\:/Media/it\\\'s \[a\]\,b\;c.png"
         );
     }
 

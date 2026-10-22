@@ -277,6 +277,12 @@ impl MotionDefault {
         MotionDefault { pattern, strength }
     }
 
+    /// No motion: what a channel made before motions existed keeps, so its
+    /// cuts and renders stay as they were.
+    pub fn still() -> MotionDefault {
+        MotionDefault::new(MotionPattern::None, MotionStrength::default())
+    }
+
     /// The motion the scene at `position` of a new cut gets.
     pub fn at(self, position: usize) -> Option<Motion> {
         self.pattern

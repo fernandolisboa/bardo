@@ -41,8 +41,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, Bounds, ClickEvent, Entity, EventEmitter, FocusHandle, Focusable as _, Hsla,
     ImageSource, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, PathPromptOptions, Pixels, RenderImage, SharedString, Subscription, Task, Window,
-    canvas, div, img, px, relative, rgb,
+    ObjectFit, PathPromptOptions, Pixels, RenderImage, ScrollHandle, SharedString, Subscription,
+    Task, Window, canvas, div, img, px, relative, rgb,
 };
 
 use crate::appearance::{self, EditorColor};
@@ -170,6 +170,8 @@ pub struct EditorScreen {
     /// Files the last import refused, by name, and why.
     import_errors: Vec<(String, Text)>,
     cuts: suggestions::CutsState,
+    /// The inspector's body, so a tour can scroll a control into view.
+    inspector_scroll: ScrollHandle,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -228,6 +230,7 @@ impl EditorScreen {
             import_task: None,
             import_errors: Vec::new(),
             cuts: suggestions::CutsState::default(),
+            inspector_scroll: ScrollHandle::new(),
             _poll: poll,
             _subscriptions: subscriptions,
         }
@@ -1880,8 +1883,11 @@ impl EditorScreen {
                     .flex()
                     .flex_col()
                     .overflow_y_scroll()
+                    .track_scroll(&self.inspector_scroll)
                     .child(body),
             )
+            // The editor covers the layout, so it tags its own inspector.
+            .tour_anchor(TourAnchor::Inspector, Side::Left, None)
             .into_any_element()
     }
 
@@ -2326,7 +2332,8 @@ impl EditorScreen {
                     .into_iter()
                     .enumerate()
                     .map(|(n, choice)| {
-                        let active = set.is_some_and(|motion| motion.strength == choice);
+                        // Without a motion, the strength a picked kind takes.
+                        let active = choice == strength;
                         let target = set
                             .filter(|_| !active)
                             .map(|motion| target(Some(motion.with_strength(choice))));
@@ -2364,7 +2371,11 @@ impl EditorScreen {
                 .child(strengths)
                 .child(hint(tr(bardo, Text::EditorMotionHint)))
                 .child(h_flex().flex_wrap().gap_1().child(everywhere).child(vary))
-                .tour_anchor(TourAnchor::Control(Control::EditorMotion), Side::Left, None)
+                .tour_anchor(
+                    TourAnchor::Control(Control::EditorMotion),
+                    Side::Left,
+                    Some(&self.inspector_scroll),
+                )
                 .into_any_element(),
         )
     }

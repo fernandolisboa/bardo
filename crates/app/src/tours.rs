@@ -790,8 +790,8 @@ pub const EDITOR_MORE: Tour = {
             at_stage(AT, "duck", control(Control::EditorDuck)).learn(PAGE, "ducking"),
             at_stage(AT, "captions", control(Control::EditorCaptions)).learn(PAGE, "captions"),
             at_stage(AT, "framing", control(Control::EditorAspect)).learn(PAGE, "framing"),
-            // Shown with a still selected; else the inspector, which says
-            // to select one.
+            // Shown with a still selected, scrolled into view; else the
+            // editor's inspector, which says to select a clip.
             at_stage(AT, "motion", control(Control::EditorMotion))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "motion"),

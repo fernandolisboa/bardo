@@ -960,32 +960,34 @@ impl Timeline {
         Ok(Edit::SetMotions(before))
     }
 
-    /// The edit that puts `motion` (`None`: none) on every still of the
-    /// video track, leaving clips and black as they are.
+    /// The edit that puts `motion` (`None`: none) on every scene of the
+    /// video track, leaving footage and black as they are. Scenes showing a
+    /// clip or no picture yet get it too, unplayed, so a scene that shows
+    /// its still again moves as the others do.
     pub fn motion_everywhere(&self, motion: Option<Motion>) -> Edit {
-        self.motions_on_stills(|_| motion)
+        self.motions_on_scenes(|_| motion)
     }
 
-    /// The edit that gives the stills of the video track the motions of
-    /// `default`'s pattern, in turn: the n-th still the pattern's n-th
+    /// The edit that gives the scenes of the video track the motions of
+    /// `default`'s pattern, in turn: the n-th scene the pattern's n-th
     /// motion, so no still moves the way the one before it did.
     pub fn motion_pattern(&self, default: MotionDefault) -> Edit {
-        self.motions_on_stills(|position| default.at(position))
+        self.motions_on_scenes(|position| default.at(position))
     }
 
-    /// Every item's motion, the stills' from `motion` by their place among
-    /// the stills.
-    fn motions_on_stills(&self, motion: impl Fn(usize) -> Option<Motion>) -> Edit {
-        let mut stills = 0;
+    /// Every item's motion, the scenes' from `motion` by their place among
+    /// the scenes.
+    fn motions_on_scenes(&self, motion: impl Fn(usize) -> Option<Motion>) -> Edit {
+        let mut scenes = 0;
         Edit::SetMotions(
             self.video
                 .iter()
                 .map(|item| {
-                    if !item.is_still() {
+                    if item.scene().is_none() {
                         return item.motion;
                     }
-                    stills += 1;
-                    motion(stills - 1)
+                    scenes += 1;
+                    motion(scenes - 1)
                 })
                 .collect(),
         )
@@ -2826,25 +2828,18 @@ mod tests {
     }
 
     #[test]
-    fn one_motion_or_a_varied_pattern_goes_on_every_still_and_undoes() {
+    fn one_motion_or_a_varied_pattern_goes_on_every_scene_and_undoes() {
         let before = timeline();
-        let clip = before.video()[1].motion;
         let zoomed = round_trip(
             &before,
             before.motion_everywhere(motion(crate::MotionKind::ZoomOut)),
         );
         let set: Vec<_> = zoomed.video().iter().map(|item| item.motion).collect();
-        assert_eq!(
-            set,
-            [
-                motion(crate::MotionKind::ZoomOut),
-                clip,
-                motion(crate::MotionKind::ZoomOut)
-            ],
-            "the clip keeps its own"
-        );
-        // The stills take the pattern in turn, the clip between them
-        // skipped: the second still moves the second way.
+        assert_eq!(set, [motion(crate::MotionKind::ZoomOut); 3]);
+        // The scene showing a clip keeps it unplayed, for when it shows its
+        // still again.
+        assert_eq!(zoomed.video()[1].played_motion(), None);
+        // The scenes take the pattern in turn, so neighbours differ.
         let varied = round_trip(
             &zoomed,
             zoomed.motion_pattern(crate::MotionDefault::new(
@@ -2858,12 +2853,12 @@ mod tests {
             set,
             [
                 strong(crate::MotionKind::ZoomIn),
-                clip,
-                strong(crate::MotionKind::PanRight)
+                strong(crate::MotionKind::PanRight),
+                strong(crate::MotionKind::ZoomOut)
             ]
         );
         let still = round_trip(&varied, varied.motion_everywhere(None));
-        assert_eq!(still.video()[0].motion, None);
+        assert!(still.video().iter().all(|item| item.motion.is_none()));
         assert_eq!(
             varied.clone().apply(&Edit::SetMotions(vec![None])),
             Err(EditError::NoSuchItem)

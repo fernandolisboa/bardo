@@ -82,7 +82,7 @@ transition = "Default transition"
 transition_hint = "What the editor puts on a cut when you press T or pick a transition. Any cut can use another."
 transition_length = "Length"
 motion = "Motion on stills"
-motion_hint = "How new cuts move the view over each still picture, the Ken Burns effect. Varied gives the next scene another motion. Any clip can use another in the editor."
+motion_hint = "How new cuts move the view over each still picture, the Ken Burns effect. Varied gives the next scene another motion. Any still can use another in the editor."
 motion_strength = "Strength"
 
 [channel.error]

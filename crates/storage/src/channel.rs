@@ -291,10 +291,10 @@ mod tests {
             db.get(old).unwrap().unwrap().details.format(),
             bardo_domain::VideoFormat::Long
         );
-        // And with varied motions for its new cuts, as every channel.
+        // And with still stills, as its cuts had.
         assert_eq!(
             db.get(old).unwrap().unwrap().details.motion(),
-            MotionDefault::default()
+            MotionDefault::still()
         );
     }
 

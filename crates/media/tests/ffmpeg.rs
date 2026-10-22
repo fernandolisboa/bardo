@@ -1125,6 +1125,44 @@ fn a_moving_still_pans_at_an_even_pace_across_its_picture() {
 }
 
 #[test]
+fn a_moving_still_zooms_in_smoothly_about_its_middle() {
+    let mut plan = panning_plan();
+    plan.video[0].motion = Some(Motion {
+        from: View {
+            zoom: 1.0,
+            x: 0.5,
+            y: 0.5,
+        },
+        to: View {
+            zoom: 1.25,
+            x: 0.5,
+            y: 0.5,
+        },
+        length: secs(2.0),
+        elapsed: Duration::ZERO,
+    });
+    let edges = pan_edges(&plan, Duration::ZERO);
+    assert_eq!(edges.len(), 60);
+    // The edge, 107 pixels in, moves away from the middle (160) as the
+    // zoom grows by the same ratio each frame.
+    let expected = |frame: usize| 160.0 - 53.0 * 1.25_f64.powf(frame as f64 / 59.0);
+    for (frame, edge) in edges.iter().enumerate() {
+        assert!(
+            (edge - expected(frame)).abs() < 1.0,
+            "frame {frame}: {edge:.2}, not {:.2}; {edges:?}",
+            expected(frame)
+        );
+    }
+    for (frame, pair) in edges.windows(2).enumerate() {
+        let (moved, step) = (pair[0] - pair[1], expected(frame) - expected(frame + 1));
+        assert!(
+            (moved - step).abs() < 0.6,
+            "frame {frame}: a step of {moved:.2} where {step:.2} is even: {edges:?}"
+        );
+    }
+}
+
+#[test]
 fn a_preview_from_inside_a_moving_still_shows_the_same_frames() {
     let plan = panning_plan();
     let whole = pan_edges(&plan, Duration::ZERO);
@@ -1139,7 +1177,13 @@ fn a_preview_from_inside_a_moving_still_shows_the_same_frames() {
 fn a_moving_still_renders_into_a_video_of_its_length() {
     let mut plan = panning_plan();
     plan.video[0].framing = Framing::Crop { x: 0.5, y: 0.5 };
-    let destination = scratch("motion-render").join("out.mp4");
+    // The graph reads the picture by name: quotes, brackets, separators
+    // and a pattern-like percent sign stay part of it.
+    let dir = scratch("motion-render");
+    let picture = dir.join("it's [scene], 1; 100%d.png");
+    std::fs::copy(fixture("bands-320x180.png"), &picture).unwrap();
+    plan.video[0].source = ClipSource::Still(picture);
+    let destination = dir.join("out.mp4");
     ffmpeg()
         .render(
             &plan,
