@@ -526,6 +526,8 @@ fn zip_time(at: SystemTime) -> zip::DateTime {
 /// not keep, takes it out of WAL, vacuums it (no page of deleted data
 /// survives) and checks it.
 fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
+    let probe = Instant::now();
+    eprintln!("PROBE snapshot start");
     let _ = fs::remove_file(to);
     let mut copy = Connection::open(to).map_err(database_error)?;
     {
@@ -544,11 +546,14 @@ fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
                 &shared
             }
         };
+        eprintln!("PROBE source open {:?}", probe.elapsed());
         let backup = Backup::new(source, &mut copy).map_err(database_error)?;
         // All pages in one step: the copy is one moment of the database.
         let deadline = Instant::now() + BUSY_TIMEOUT;
         loop {
-            match backup.step(-1).map_err(database_error)? {
+            let step = backup.step(-1).map_err(database_error)?;
+            eprintln!("PROBE step {step:?} at {:?}", probe.elapsed());
+            match step {
                 StepResult::Done => break,
                 StepResult::More => {}
                 StepResult::Busy | StepResult::Locked if Instant::now() < deadline => {
@@ -558,12 +563,14 @@ fn snapshot(db: &Database, to: &Path) -> Result<(), BackupError> {
             }
         }
     }
+    eprintln!("PROBE source closed {:?}", probe.elapsed());
     clean(&copy, None)?;
     crate::youtube_data::strip_for_backup(&copy).map_err(database_error)?;
     copy.pragma_update(None, "journal_mode", "DELETE")
         .map_err(database_error)?;
     copy.execute_batch("VACUUM").map_err(database_error)?;
     check_integrity(&copy)?;
+    eprintln!("PROBE snapshot done {:?}", probe.elapsed());
     copy.close().map_err(|(_, error)| database_error(error))
 }
 
@@ -1328,14 +1335,39 @@ mod tests {
             let stop = Arc::clone(&stop);
             let owner = profile.id;
             std::thread::spawn(move || {
+                let begun = Instant::now();
                 let mut written = 0;
+                let mut slowest = Duration::ZERO;
                 while !stop.load(Ordering::Relaxed) {
                     let now = SystemTime::now();
-                    agent.heartbeat(RunnerRole::Agent, now, now).unwrap();
-                    JobRepository::save(&agent, &Job::new(owner, JobKind::Countdown, "{}"))
-                        .unwrap();
+                    let call = Instant::now();
+                    if let Err(error) = agent.heartbeat(RunnerRole::Agent, now, now) {
+                        eprintln!(
+                            "PROBE agent heartbeat failed after {:?} in the call, {:?} since start, {written} written, slowest earlier {slowest:?}: {error}",
+                            call.elapsed(),
+                            begun.elapsed()
+                        );
+                        panic!("heartbeat: {error}");
+                    }
+                    slowest = slowest.max(call.elapsed());
+                    let call = Instant::now();
+                    if let Err(error) =
+                        JobRepository::save(&agent, &Job::new(owner, JobKind::Countdown, "{}"))
+                    {
+                        eprintln!(
+                            "PROBE agent save failed after {:?} in the call, {:?} since start, {written} written, slowest earlier {slowest:?}: {error}",
+                            call.elapsed(),
+                            begun.elapsed()
+                        );
+                        panic!("save: {error}");
+                    }
+                    slowest = slowest.max(call.elapsed());
                     written += 1;
                 }
+                eprintln!(
+                    "PROBE agent wrote {written} in {:?}, slowest call {slowest:?}",
+                    begun.elapsed()
+                );
                 written
             })
         };
@@ -1351,10 +1383,21 @@ mod tests {
         );
         install.db.heartbeat(RunnerRole::App, now, now).unwrap();
 
+        let wal = with_suffix(&install.paths.database, "-wal");
+        eprintln!(
+            "PROBE wal before {:?}",
+            fs::metadata(&wal).map(|m| m.len()).ok()
+        );
+        let started = Instant::now();
         let info = install
             .backups()
             .write(&to, DATABASE_ONLY, &mut go_on())
             .unwrap();
+        eprintln!(
+            "PROBE backup took {:?}, wal after {:?}",
+            started.elapsed(),
+            fs::metadata(&wal).map(|m| m.len()).ok()
+        );
         stop.store(true, Ordering::Relaxed);
         assert!(writer.join().unwrap() > 0, "the agent wrote meanwhile");
 

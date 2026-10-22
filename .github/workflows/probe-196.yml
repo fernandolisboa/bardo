@@ -1,0 +1,40 @@
+name: Probe 196 (throwaway)
+
+on:
+  pull_request:
+
+jobs:
+  probe:
+    name: Backup under concurrent writes, in a loop (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the storage tests
+        run: cargo test -p bardo-storage --lib --locked --no-run
+      - name: The backup test alone, 150 times
+        shell: bash
+        run: |
+          fails=0
+          for i in $(seq 1 150); do
+            if ! cargo test -q -p bardo-storage --lib --locked a_backup_made_while -- --nocapture > run.log 2>&1; then
+              fails=$((fails+1)); echo "=== alone run $i FAILED"; grep -E "PROBE|panicked|locked" run.log
+            elif [ $((i % 25)) -eq 0 ]; then
+              echo "=== alone run $i ok"; grep PROBE run.log
+            fi
+          done
+          echo "alone: $fails of 150 failed"
+      - name: The whole storage suite, 25 times (tests in parallel, as in CI)
+        shell: bash
+        run: |
+          fails=0
+          for i in $(seq 1 25); do
+            if ! cargo test -q -p bardo-storage --lib --locked -- --nocapture > run.log 2>&1; then
+              fails=$((fails+1)); echo "=== suite run $i FAILED"; grep -E "PROBE|panicked|locked|FAILED|failures" run.log
+            else
+              echo "=== suite run $i ok"; grep -E "PROBE (backup took|agent wrote)" run.log
+            fi
+          done
+          echo "suite: $fails of 25 failed"
