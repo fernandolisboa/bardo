@@ -540,8 +540,7 @@ impl EditorScreen {
                         cx,
                     );
                 }))
-            })
-            .tour_anchor(TourAnchor::Control(Control::EditorDuck), Side::Above, None);
+            });
         let shown = self
             .editor
             .as_ref()

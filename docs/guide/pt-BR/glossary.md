@@ -105,7 +105,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Movimento (Ken Burns)**: um zoom ou pan lento sobre uma imagem parada enquanto ela aparece, para um vídeo de imagens não virar um slideshow. Definido por imagem, com uma intensidade; os cortes novos de um canal variam o movimento de cena em cena.
 
-**Em sincronia**: um clipe interpretado cujo primeiro quadro toca onde o corte toca o início da narração da tomada. Um corte ou uma movimentação antes dele o deixa adiantado ou atrasado; **Voltar à sincronia** o traz de volta.
+**Em sincronia**: um clipe interpretado que toca onde o corte toca a narração que ele interpreta, quadro a quadro. Aparar, mover ou remover um clipe antes dele o deixa adiantado ou atrasado; **Voltar à sincronia** o traz de volta.
 
 **Cobertura (B-roll)**: a imagem de uma cena mostrada sobre parte de um clipe interpretado, a partir do cursor de reprodução, enquanto o resto da tomada segue em sincronia.
 

@@ -1319,6 +1319,7 @@ source_clip = "Animated with {provider} · {model}"
 source_still = "Still image"
 source_none = "No image yet"
 source_footage = "Imported footage. Its picture plays without its sound: put sound on the music or SFX track."
+source_performed = "Performed clip: your take, performed by the persona. Its picture plays without its sound; the narration on A1 is its voice."
 in = "In"
 out = "Out"
 length = "Duration"
@@ -1490,8 +1491,8 @@ audio = "Audio"
 video = "Video"
 take = "Take {n}"
 put_on_cut = "Put on the cut"
-performed_rough_cut = "Use performed clips in a new rough cut"
-performed_rough_cut_hint = "When the cut starts over, each take plays its performed clip in sync with the narration, with scene pictures between. Put on the cut places one on the cut you have now."
+performed_rough_cut = "Performed clips in rough cuts"
+performed_rough_cut_hint = "A new rough cut plays each take's latest performed clip in sync, with scene pictures between. A cut you edited stays as it is; Put on the cut places one there."
 
 [editor.media.error]
 unreadable = "The file could not be read. Check that it is still there."
@@ -1507,7 +1508,8 @@ late = "{time} late"
 unheard = "Its narration is cut away"
 put_back = "Put back in sync"
 put_back_hint = "Moves it, and the cut after it, by lengthening or shortening the clip before it."
-cannot_sync = "Nothing before it can take the difference: trim the clips before it by hand."
+cannot_sync = "No clip before it can take the difference: trim or move the clips around it by hand."
+unheard_hint = "The cut leaves out the narration this clip performs: put that narration back on A1, or remove the clip."
 cover = "Cover with a scene picture"
 cover_hint = "Shows a scene over the performance from the playhead; the rest of the take plays on in sync. Undo brings the take back whole."
 cover_scene = "Scene"
@@ -2845,11 +2847,7 @@ name = "Editor tour, part 2"
 
 [tour.editor-more.mix]
 title = "The mix"
-body = "Click an audio track's header to set its level, or use M and S to mute it or play it solo. Select an audio piece to fade it in or out."
-
-[tour.editor-more.duck]
-title = "Ducking"
-body = "Ducking lowers the music while the narration speaks and brings it back in the pauses. Pick the music track to set how deep it goes."
+body = "Click an audio track's header to set its level, or use M and S to mute it or play it solo. Select an audio piece to fade it in or out. Duck music under narration lowers the music while the narrator speaks; the music track's header sets how deep."
 
 [tour.editor-more.captions]
 title = "Captions"

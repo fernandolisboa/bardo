@@ -19,8 +19,8 @@
 use std::time::Duration;
 
 use crate::{
-    Edit, EditError, Framing, ItemRef, Picture, ScenePlan, Shift, Timeline, Track, VideoItem,
-    VideoSource, frame_at, frame_time, min_length, nearest_frame,
+    Edit, EditError, Framing, ItemRef, Picture, ScenePlan, Shift, Timeline, VideoItem, VideoSource,
+    frame_at, frame_time, min_length, nearest_frame,
 };
 
 /// Where a performed clip belongs: the take it performs, as a stretch of
@@ -135,15 +135,29 @@ impl Timeline {
     pub fn sync(&self, index: usize) -> Option<PerformedSync> {
         let place = self.performed_at(index)?;
         let item = &self.video[index];
-        let Some(heard) = self.on_narration(place.start + item.start) else {
+        let Some(heard) = self.heard_at(place.start + item.start) else {
             return Some(PerformedSync::Unheard);
         };
-        let target = frame_time(nearest_frame(heard));
-        Some(if target == item.at {
+        // In whole frames: times summed along the track drift by a
+        // nanosecond or so.
+        let (target, at) = (nearest_frame(heard), nearest_frame(item.at));
+        Some(if target == at {
             PerformedSync::InSync
         } else {
-            PerformedSync::Off(Shift::between(target, item.at))
+            PerformedSync::Off(Shift::between(frame_time(target), frame_time(at)))
         })
+    }
+
+    /// Where on the timeline the moment `source` of the narration file
+    /// plays: in the narration item that plays on from it, else in one
+    /// that ends there. A take often starts where the user split the
+    /// narration, and the piece after the split is the one heard then.
+    fn heard_at(&self, source: Duration) -> Option<Duration> {
+        self.narration()
+            .iter()
+            .find(|item| item.start <= source && source < item.start + item.duration)
+            .map(|item| item.at + (source - item.start))
+            .or_else(|| self.on_narration(source))
     }
 
     /// The edit that puts `place`'s clip on the video track where the cut
@@ -151,13 +165,13 @@ impl Timeline {
     /// [`PerformedPlace::covers`], and the item it becomes. Refused when
     /// the cut has cut that moment of the narration away.
     pub fn put_performed(&self, place: &PerformedPlace) -> Result<(Edit, ItemRef), EditError> {
-        let heard = self.on_narration(place.start).ok_or(EditError::NotHeard)?;
+        let heard = self.heard_at(place.start).ok_or(EditError::NotHeard)?;
         let length = place.covers();
         if length < min_length() {
             return Err(EditError::TooShort);
         }
-        let from = frame_time(nearest_frame(heard));
-        self.overwrite(from, from + length, place.item(length))
+        let from = nearest_frame(heard);
+        self.overwrite(from, from + nearest_frame(length), place.item(length))
     }
 
     /// The edit that covers the video track from `from` for `length` with
@@ -171,61 +185,64 @@ impl Timeline {
         item: VideoItem,
     ) -> Result<(Edit, ItemRef), EditError> {
         let under = self.video_at(from).ok_or(EditError::NoSuchItem)?;
-        let to = (from + length).min(self.video[under].end());
+        let from = nearest_frame(from);
+        let to = (from + nearest_frame(length)).min(nearest_frame(self.video[under].end()));
         self.overwrite(from, to, item)
     }
 
-    /// The edit that puts `item` from `from` to `to` on the video track,
-    /// cutting the items at both ends and replacing what lies between; the
-    /// track's last item runs on to `from` when the track ends before it.
+    /// The edit that puts `item` from frame `from` to frame `to` on the
+    /// video track, cutting the items at both ends and replacing what lies
+    /// between; the track's last item runs on to `from` when the track ends
+    /// before it. Items are compared by the frames they start and end on.
     fn overwrite(
         &self,
-        from: Duration,
-        to: Duration,
+        from: u64,
+        to: u64,
         mut item: VideoItem,
     ) -> Result<(Edit, ItemRef), EditError> {
-        if to < from + min_length() {
+        if to <= from {
             return Err(EditError::OutsideItem);
         }
         if self.video.is_empty() {
             return Err(EditError::NoSuchItem);
         }
-        item.duration = to - from;
+        item.duration = frame_time(to) - frame_time(from);
         item.transition = None;
-        let first = self.video_at(from).unwrap_or(self.video.len() - 1);
+        let first = self
+            .video
+            .iter()
+            .position(|video| from < nearest_frame(video.end()))
+            .unwrap_or(self.video.len() - 1);
         let last = self
             .video
             .iter()
-            .rposition(|video| video.at < to)
+            .rposition(|video| nearest_frame(video.at) < to)
             .unwrap_or(first)
             .max(first);
         let mut items = Vec::with_capacity(3);
         let head = &self.video[first];
         // What the first item keeps before the cover (a last item running
         // on to it when the track ends first).
-        if from > head.at {
+        if from > nearest_frame(head.at) {
             let mut kept = head.clone();
-            kept.duration = from - head.at;
-            if kept.duration < min_length() {
-                return Err(EditError::OutsideItem);
-            }
+            kept.duration = frame_time(from).saturating_sub(head.at);
             items.push(kept);
         }
         let index = first + items.len();
         items.push(item);
         let tail = &self.video[last];
-        if to < tail.end() {
+        if to < nearest_frame(tail.end()) {
             // As a split leaves it: further into its source, no
             // transition into it.
             let mut kept = tail.clone();
-            let cut = to.saturating_sub(tail.at);
+            let cut = frame_time(to).saturating_sub(tail.at);
             kept.start += cut;
-            kept.duration = tail.end() - to;
+            kept.duration = tail.end().saturating_sub(frame_time(to));
             kept.transition = None;
-            if kept.duration < min_length() {
-                return Err(EditError::OutsideItem);
-            }
             items.push(kept);
+        }
+        if items.iter().any(|item| item.duration < min_length()) {
+            return Err(EditError::OutsideItem);
         }
         Ok((
             Edit::Replace {
@@ -238,11 +255,13 @@ impl Timeline {
     }
 
     /// The edit that puts performed piece `index` back in sync: the item
-    /// before it gets longer or shorter by how far off it is, so it (and
-    /// the cut after it) moves to its narration. Refused when it is in
-    /// sync (`NoChange`), when its narration is not heard (`NotHeard`), and
-    /// when there is no item before it or that item would end up shorter
-    /// than a frame (`OutsideItem`).
+    /// before it gets longer or shorter by how far off it is, so it moves
+    /// to its narration, and the item after it the other way, so the cut
+    /// after that stays where it was (else the cut after it moves too).
+    /// Refused when it is in sync (`NoChange`), when its narration is not
+    /// heard (`NotHeard`), and when there is no item before it, that item
+    /// would end up shorter than a frame or would run past the end of its
+    /// clip (`OutsideItem`).
     pub fn back_in_sync(&self, index: usize) -> Result<Edit, EditError> {
         let off = match self.sync(index).ok_or(EditError::NoSuchItem)? {
             PerformedSync::InSync => return Err(EditError::NoChange),
@@ -250,18 +269,41 @@ impl Timeline {
             PerformedSync::Off(off) => off,
         };
         let before = index.checked_sub(1).ok_or(EditError::OutsideItem)?;
-        let shortened = (-off)
-            .move_time(self.video[before].duration)
-            .ok_or(EditError::OutsideItem)?;
-        if shortened < min_length() {
-            return Err(EditError::OutsideItem);
+        let mut items = vec![
+            self.resized(before, -off).ok_or(EditError::OutsideItem)?,
+            self.video[index].clone(),
+        ];
+        // The item after takes the difference back, unless it is another
+        // performed clip, which moves with this one.
+        if let Some(after) = (index + 1 < self.video.len())
+            .then(|| index + 1)
+            .filter(|&after| self.performed_at(after).is_none())
+            .and_then(|after| self.resized(after, off))
+        {
+            items.push(after);
         }
-        Ok(Edit::Trim {
-            track: Track::Video,
+        Ok(Edit::Replace {
             index: before,
-            edge: crate::Edge::End,
-            by: -off,
+            count: items.len(),
+            items,
         })
+    }
+
+    /// Video item `index` with its end moved by `by`, when that leaves it
+    /// at least a frame long and within its clip.
+    fn resized(&self, index: usize, by: Shift) -> Option<VideoItem> {
+        let mut item = self.video.get(index)?.clone();
+        item.duration = by.move_time(item.duration)?;
+        if item.duration < min_length() {
+            return None;
+        }
+        if let VideoSource::Clip { length, .. } = &item.source
+            && by > Shift::ZERO
+            && item.start + item.duration > *length
+        {
+            return None;
+        }
+        Some(item)
     }
 
     /// This timeline with each of `places`' clips put on the cut, in turn
@@ -302,7 +344,7 @@ impl Timeline {
 mod tests {
     use super::*;
     use crate::timeline::tests::{image, ms, narration, plan, scene};
-    use crate::{AspectRatio, CropPosition, History};
+    use crate::{AspectRatio, CropPosition, History, Track};
 
     /// Four stills over an 8 s narration, 2 s each.
     fn cut() -> (ScenePlan, Timeline) {
@@ -691,5 +733,140 @@ mod tests {
             Some(3),
             "past the last"
         );
+    }
+
+    #[test]
+    fn a_take_ending_on_a_scene_off_the_frame_grid_still_goes_on() {
+        let (_, timeline) = cut();
+        // 2.033 s is between frames 60 and 61: the clip starts on frame 61
+        // and ends where scene 1 ends, a frame summed along the track.
+        let timeline = put(&timeline, &take("p1.mp4", 2_033, 4_000, 2_000));
+        let index = (0..timeline.video().len())
+            .find(|&index| timeline.performed_at(index).is_some())
+            .unwrap();
+        assert_eq!(timeline.sync(index), Some(PerformedSync::InSync));
+        assert!(
+            timeline
+                .video()
+                .iter()
+                .all(|item| item.duration >= min_length())
+        );
+    }
+
+    #[test]
+    fn takes_back_to_back_both_go_on_a_rough_cut_in_sync() {
+        let (_, timeline) = cut();
+        let first = take("p1.mp4", 1_033, 2_500, 1_467);
+        let second = take("p2.mp4", 2_500, 3_500, 1_000);
+        let timeline = timeline
+            .with_performed(vec![first.clone(), second.clone()])
+            .with_performed_takes(&[first, second]);
+        let pieces: Vec<usize> = (0..timeline.video().len())
+            .filter(|&index| timeline.performed_at(index).is_some())
+            .collect();
+        assert_eq!(pieces.len(), 2);
+        for index in pieces {
+            assert_eq!(timeline.sync(index), Some(PerformedSync::InSync));
+        }
+    }
+
+    #[test]
+    fn a_take_starting_where_the_narration_was_split_goes_with_the_part_after() {
+        let (_, mut timeline) = cut();
+        // The narration is split at 4 s and its second part starts a
+        // second later: the take from 4 s is heard at 5 s.
+        timeline
+            .apply(&Edit::Split {
+                track: Track::Narration,
+                index: 0,
+                at: ms(4_000),
+            })
+            .unwrap();
+        timeline
+            .apply(&Edit::Move {
+                track: Track::Narration,
+                index: 1,
+                to: ms(5_000),
+            })
+            .unwrap();
+        let timeline = put(&timeline, &take("p1.mp4", 4_000, 6_000, 1_000));
+        let index = (0..timeline.video().len())
+            .find(|&index| timeline.performed_at(index).is_some())
+            .unwrap();
+        assert_eq!(timeline.video()[index].at, ms(5_000));
+        assert_eq!(timeline.sync(index), Some(PerformedSync::InSync));
+    }
+
+    #[test]
+    fn putting_one_back_in_sync_keeps_the_cut_after_it_where_it_was() {
+        let (_, timeline) = cut();
+        let first = take("p1.mp4", 2_000, 3_000, 1_000);
+        let second = take("p2.mp4", 6_000, 7_000, 1_000);
+        let mut timeline = put(&timeline, &first);
+        timeline = timeline.with_performed(vec![first.clone(), second.clone()]);
+        let (edit, _) = timeline.put_performed(&second).unwrap();
+        timeline.apply(&edit).unwrap();
+        // S0 p1 S1' S2 p2 S3': S0 runs half a second longer and the scene
+        // after p1 half a second shorter, so p1 is late and p2 in sync.
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 0,
+                edge: crate::Edge::End,
+                by: Shift::later(ms(500)),
+            })
+            .unwrap();
+        timeline
+            .apply(&Edit::Trim {
+                track: Track::Video,
+                index: 2,
+                edge: crate::Edge::End,
+                by: Shift::earlier(ms(500)),
+            })
+            .unwrap();
+        assert_eq!(
+            timeline.sync(1),
+            Some(PerformedSync::Off(Shift::later(ms(500))))
+        );
+        assert_eq!(timeline.sync(4), Some(PerformedSync::InSync));
+        let edit = timeline.back_in_sync(1).unwrap();
+        timeline.apply(&edit).unwrap();
+        assert_eq!(timeline.sync(1), Some(PerformedSync::InSync));
+        assert_eq!(timeline.sync(4), Some(PerformedSync::InSync));
+    }
+
+    #[test]
+    fn a_clip_before_is_not_stretched_past_its_end() {
+        let (_, timeline) = cut();
+        let first = take("p1.mp4", 0, 2_000, 2_000);
+        let second = take("p2.mp4", 6_000, 8_000, 2_000);
+        let mut timeline = put(&timeline, &first);
+        timeline = timeline.with_performed(vec![first.clone(), second.clone()]);
+        let (edit, _) = timeline.put_performed(&second).unwrap();
+        timeline.apply(&edit).unwrap();
+        // p1 S1 S2 p2: without S1 and S2, p2 plays four seconds early,
+        // and p1, a two-second clip, cannot run on to make it up.
+        for _ in 0..2 {
+            timeline
+                .apply(&Edit::Delete {
+                    track: Track::Video,
+                    index: 1,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            timeline.sync(1),
+            Some(PerformedSync::Off(Shift::earlier(ms(4_000))))
+        );
+        assert_eq!(timeline.back_in_sync(1), Err(EditError::OutsideItem));
+    }
+
+    #[test]
+    fn knowing_where_clips_belong_leaves_the_cut_as_it_was() {
+        let (_, timeline) = cut();
+        let known = timeline
+            .clone()
+            .with_performed(vec![take("p1.mp4", 2_000, 4_000, 2_000)]);
+        assert_eq!(known, timeline, "the editor keeps its undo history");
     }
 }

@@ -824,7 +824,7 @@ impl Bardo {
             .is_some_and(|persona| persona.details.realistic_voice()))
     }
 
-    /// Whether the project's cut, as the editor keeps it, shows a performed
+    /// Whether the project's cut, as the editor shows it, shows a performed
     /// clip of a look that reads as a real person: when it was made, or
     /// now (a drawn look marked realistic later still asks for it).
     fn cut_performs_realistic_look(
@@ -840,24 +840,32 @@ impl Bardo {
         let realistic_now = self
             .performer_look(project)
             .map_or(true, |look| look.is_some_and(|(_, look)| look.realistic));
-        let realistic: Vec<bardo_domain::MediaAssetId> = clips
+        let realistic: Vec<bardo_domain::PerformedClip> = clips
             .into_iter()
             .filter(|clip| clip.realistic || realistic_now)
-            .map(|clip| clip.asset)
             .collect();
         if realistic.is_empty() {
             return Ok(false);
         }
-        let Some(saved) = self.timelines.saved_timeline(project)? else {
-            return Ok(false);
-        };
-        // A cut left behind by a new plan or narration starts over without
-        // the footage.
         let plan = self.scene_plans.scene_plan(project)?.map(|plan| plan.id);
         let narration = self.narrations.narration(project)?.map(|n| n.id);
-        if plan != Some(saved.scene_plan) || narration != Some(saved.narration) {
-            return Ok(false);
-        }
+        // A cut never saved, or left behind by a new plan or narration,
+        // is the rough cut: it plays the performed clips of the narration
+        // when the project's rough cut puts them on (#193).
+        let saved = self
+            .timelines
+            .saved_timeline(project)?
+            .filter(|saved| plan == Some(saved.scene_plan) && narration == Some(saved.narration));
+        let Some(saved) = saved else {
+            return Ok(plan.is_some()
+                && self.media_assets.performed_in_rough_cut(project)?
+                && realistic.iter().any(|clip| {
+                    clip.stretch
+                        .is_some_and(|stretch| Some(stretch.narration) == narration)
+                }));
+        };
+        let realistic: Vec<bardo_domain::MediaAssetId> =
+            realistic.into_iter().map(|clip| clip.asset).collect();
         let files: Vec<String> = self
             .media_assets
             .media_assets(project)?

@@ -258,8 +258,10 @@ impl CaptionSpan {
 }
 
 /// A video project's edit: the video track, the three audio tracks, the
-/// mix, the captions and the frame's shape.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// mix, the captions and the frame's shape. Two timelines are equal when
+/// their cuts are: where the performed clips belong is read with the cut,
+/// not part of it.
+#[derive(Debug, Clone)]
 pub struct Timeline {
     pub(crate) video: Vec<VideoItem>,
     pub(crate) narration: Vec<AudioItem>,
@@ -272,6 +274,30 @@ pub struct Timeline {
     /// (`crate::PerformedPlace`): not saved with the cut, read with it.
     pub(crate) performed: Vec<crate::PerformedPlace>,
 }
+
+impl PartialEq for Timeline {
+    fn eq(&self, other: &Self) -> bool {
+        let Timeline {
+            video,
+            narration,
+            music,
+            sfx,
+            mix,
+            captions,
+            aspect,
+            performed: _,
+        } = self;
+        *video == other.video
+            && *narration == other.narration
+            && *music == other.music
+            && *sfx == other.sfx
+            && *mix == other.mix
+            && *captions == other.captions
+            && *aspect == other.aspect
+    }
+}
+
+impl Eq for Timeline {}
 
 impl Timeline {
     /// The first cut of a project: every scene of `plan` in order, each at

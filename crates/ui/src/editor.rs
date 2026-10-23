@@ -461,11 +461,14 @@ impl EditorScreen {
     }
 
     pub(crate) fn select(&mut self, item: Option<ItemRef>, cx: &mut Context<Self>) {
+        self.cover_scene = None;
         self.with_editor(cx, |editor| editor.select(item));
     }
 
     /// Makes an edit and shows why when it is not made.
     pub(crate) fn edit(&mut self, action: EditAction, cx: &mut Context<Self>) {
+        // A scene picked to cover a clip belongs to the cut it was picked on.
+        self.cover_scene = None;
         let Self { bardo, editor, .. } = self;
         if let Some(editor) = editor.as_mut() {
             self.error = bardo
@@ -1214,7 +1217,12 @@ impl EditorScreen {
                                             .overflow_hidden()
                                             .text_ellipsis(),
                                     )
-                                    .child(label(kind, TEXT_3).text_size(px(11.))),
+                                    .child(
+                                        label(kind, TEXT_3)
+                                            .text_size(px(11.))
+                                            .overflow_hidden()
+                                            .text_ellipsis(),
+                                    ),
                             )
                             .child(
                                 label(short_duration(asset.duration), TEXT_3)
@@ -2484,16 +2492,22 @@ impl EditorScreen {
             (length < COVER_LONGEST).then(|| lengthen((length + COVER_STEP).min(COVER_LONGEST))),
             cx,
         );
-        let cover = tool_button("performed-cover", scene.is_some(), false)
+        // The cover starts at the playhead, so it must be over this clip.
+        let item = view.timeline.as_ref()?.video().get(index)?;
+        let playhead = editor.playhead();
+        let over = item.at <= playhead && playhead + frame_time(1) <= item.end();
+        let target = scene.filter(|_| over);
+        let cover = tool_button("performed-cover", target.is_some(), false)
             .border_1()
             .border_color(color(OUTLINE))
             .child(tr(bardo, Text::EditorPerformedCoverButton))
-            .when_some(scene, |button, scene| {
+            .when_some(target, |button, scene| {
                 button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     let reach = this.timeline.snap_reach();
                     let length = this.cover_length;
                     this.edit(
                         EditAction::Cover {
+                            index,
                             scene,
                             length,
                             reach,
@@ -2514,6 +2528,9 @@ impl EditorScreen {
                     TEXT_3,
                 ))
                 .child(label(state, ink).whitespace_normal())
+                .when(performance.sync == PerformedSync::Unheard, |section| {
+                    section.child(hint(tr(bardo, Text::EditorPerformedUnheardHint)))
+                })
                 .when(off, |section| {
                     section.child(h_flex().child(put_back)).child(hint(tr(
                         bardo,
@@ -2678,9 +2695,11 @@ impl EditorScreen {
             .justify_between()
             .gap_2()
             .cursor_pointer()
-            .child(label(name, TEXT_2))
+            // A long name wraps beside the pill in a narrow column.
+            .child(label(name, TEXT_2).whitespace_normal().min_w_0().flex_1())
             .child(
                 div()
+                    .flex_none()
                     .w(px(28.))
                     .h(px(16.))
                     .p(px(2.))
@@ -2956,6 +2975,10 @@ fn provenance_lines(bardo: &Bardo, clip: &ClipView) -> Vec<String> {
         )
     };
     let mut lines = Vec::new();
+    if clip.performance.is_some() {
+        lines.push(bardo.text(Text::EditorSourcePerformed).into_owned());
+        return lines;
+    }
     if let ClipShows::Footage(_) = clip.shows {
         lines.push(bardo.text(Text::EditorSourceFootage).into_owned());
         return lines;

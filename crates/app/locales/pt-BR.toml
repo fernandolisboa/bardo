@@ -1319,6 +1319,7 @@ source_clip = "Animada com {provider} · {model}"
 source_still = "Imagem parada"
 source_none = "Ainda sem imagem"
 source_footage = "Vídeo importado. A imagem toca sem o som dele: ponha som na faixa de música ou de efeitos."
+source_performed = "Clipe interpretado: a sua tomada, interpretada pela persona. A imagem toca sem o som dele; a narração na A1 é a voz dele."
 in = "Entrada"
 out = "Saída"
 length = "Duração"
@@ -1490,8 +1491,8 @@ audio = "Áudio"
 video = "Vídeo"
 take = "Tomada {n}"
 put_on_cut = "Pôr no corte"
-performed_rough_cut = "Usar clipes interpretados num novo corte bruto"
-performed_rough_cut_hint = "Quando o corte recomeça, cada tomada mostra seu clipe interpretado em sincronia com a narração, com as imagens das cenas entre elas. Pôr no corte coloca um no corte que você tem agora."
+performed_rough_cut = "Clipes interpretados nos cortes brutos"
+performed_rough_cut_hint = "Um novo corte bruto toca o clipe interpretado mais recente de cada tomada em sincronia, com as imagens das cenas entre eles. Um corte que você editou fica como está; Pôr no corte coloca um nele."
 
 [editor.media.error]
 unreadable = "Não foi possível ler o arquivo. Confira se ele ainda está lá."
@@ -1507,7 +1508,8 @@ late = "{time} atrasado"
 unheard = "A narração dele foi cortada"
 put_back = "Voltar à sincronia"
 put_back_hint = "Move o clipe, e o corte depois dele, alongando ou encurtando o clipe anterior."
-cannot_sync = "Nada antes dele absorve a diferença: apare os clipes anteriores à mão."
+cannot_sync = "Nenhum clipe antes dele absorve a diferença: apare ou mova os clipes em volta dele à mão."
+unheard_hint = "O corte deixou de fora a narração que este clipe interpreta: ponha essa narração de volta na A1, ou remova o clipe."
 cover = "Cobrir com a imagem de uma cena"
 cover_hint = "Mostra uma cena sobre a interpretação a partir do cursor; o resto da tomada segue em sincronia. Desfazer traz a tomada de volta inteira."
 cover_scene = "Cena"
@@ -2845,11 +2847,7 @@ name = "Tour do editor, parte 2"
 
 [tour.editor-more.mix]
 title = "A mixagem"
-body = "Clique no cabeçalho de uma faixa de áudio para ajustar o volume, ou use M e S para deixá-la muda ou tocar só ela. Selecione um trecho de áudio para dar entrada ou saída gradual."
-
-[tour.editor-more.duck]
-title = "Atenuação"
-body = "A atenuação abaixa a música enquanto a narração fala e a devolve nas pausas. Escolha a faixa de música para definir o quanto ela abaixa."
+body = "Clique no cabeçalho de uma faixa de áudio para ajustar o volume, ou use M e S para deixá-la muda ou tocar só ela. Selecione um trecho de áudio para dar entrada ou saída gradual. A atenuação abaixa a música enquanto o narrador fala; o cabeçalho da faixa de música define o quanto."
 
 [tour.editor-more.captions]
 title = "Legendas"

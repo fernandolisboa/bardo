@@ -7,15 +7,21 @@
 -- gone before this column existed.
 ALTER TABLE performed_clip ADD COLUMN narration_id TEXT;
 ALTER TABLE performed_clip ADD COLUMN take_start_ms INTEGER CHECK (take_start_ms >= 0);
-ALTER TABLE performed_clip ADD COLUMN take_end_ms INTEGER CHECK (take_end_ms > take_start_ms);
+ALTER TABLE performed_clip ADD COLUMN take_end_ms INTEGER
+    CHECK (take_end_ms > take_start_ms
+           AND (narration_id IS NULL) = (take_start_ms IS NULL)
+           AND (take_start_ms IS NULL) = (take_end_ms IS NULL));
 
 -- The face's center over the take, in thousandths of the picture across
 -- and down, when its take model keeps the take's framing.
 ALTER TABLE performed_clip ADD COLUMN face_x INTEGER CHECK (face_x BETWEEN 0 AND 1000);
-ALTER TABLE performed_clip ADD COLUMN face_y INTEGER CHECK (face_y BETWEEN 0 AND 1000);
+ALTER TABLE performed_clip ADD COLUMN face_y INTEGER
+    CHECK (face_y BETWEEN 0 AND 1000 AND (face_x IS NULL) = (face_y IS NULL));
 
 -- Clips used before: their capture's narration and their take as it is
--- now, while the capture is still there.
+-- now, while the capture is still there and the take has not changed
+-- since its final was made (its control video is the one the final was
+-- made from).
 UPDATE performed_clip
 SET narration_id = (
         SELECT capture.narration_id FROM capture
@@ -29,13 +35,22 @@ SET narration_id = (
         SELECT capture_take.end_ms FROM capture_take
         JOIN capture ON capture.project_id = capture_take.project_id
         WHERE capture.id = performed_clip.capture_id
-          AND capture_take.position = performed_clip.position
-          AND capture_take.end_ms > capture_take.start_ms);
-
--- A stretch is all there or not at all.
-UPDATE performed_clip
-SET narration_id = NULL, take_start_ms = NULL, take_end_ms = NULL
-WHERE narration_id IS NULL OR take_start_ms IS NULL OR take_end_ms IS NULL;
+          AND capture_take.position = performed_clip.position)
+WHERE EXISTS (
+    SELECT 1 FROM capture_take
+    JOIN capture ON capture.project_id = capture_take.project_id
+    WHERE capture.id = performed_clip.capture_id
+      AND capture_take.position = performed_clip.position
+      AND capture_take.end_ms > capture_take.start_ms)
+  AND EXISTS (
+    SELECT 1 FROM take_result
+    JOIN control_video ON control_video.project_id = take_result.project_id
+                      AND control_video.position = take_result.position
+    WHERE take_result.project_id = performed_clip.project_id
+      AND take_result.position = performed_clip.position
+      AND take_result.step = 'final'
+      AND control_video.capture_id = performed_clip.capture_id
+      AND control_video.fingerprint = take_result.control);
 
 -- A project whose new rough cut leaves its performed clips off; a project
 -- without a row puts them on.
@@ -43,3 +58,9 @@ CREATE TABLE performed_rough_cut (
     project_id TEXT PRIMARY KEY NOT NULL REFERENCES video_project (id) ON DELETE CASCADE,
     on_cut     INTEGER NOT NULL CHECK (on_cut IN (0, 1))
 ) STRICT, WITHOUT ROWID;
+
+-- Projects with performed clips already used keep the cut they play now:
+-- one never edited would otherwise start over with the clips on it.
+INSERT INTO performed_rough_cut (project_id, on_cut)
+SELECT DISTINCT performed_clip.project_id, 0 FROM performed_clip
+WHERE performed_clip.project_id NOT IN (SELECT project_id FROM timeline);

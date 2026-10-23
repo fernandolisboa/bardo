@@ -181,8 +181,6 @@ pub enum Control {
     EditorUndo,
     /// Editor: the audio tracks' headers, with level, mute and solo.
     EditorMix,
-    /// Editor: Duck music under narration.
-    EditorDuck,
     /// Editor: showing the captions, and their track.
     EditorCaptions,
     /// Editor: the 16:9 and 9:16 switch over the preview.
@@ -875,7 +873,6 @@ pub const EDITOR_MORE: Tour = {
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "mix", control(Control::EditorMix)).learn(PAGE, "mix"),
-            at_stage(AT, "duck", control(Control::EditorDuck)).learn(PAGE, "ducking"),
             at_stage(AT, "captions", control(Control::EditorCaptions)).learn(PAGE, "captions"),
             at_stage(AT, "framing", control(Control::EditorAspect)).learn(PAGE, "framing"),
             // Shown with a still selected, scrolled into view; else the

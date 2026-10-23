@@ -57,7 +57,7 @@ use bardo_domain::{
     PerformedPlace, PerformedSync, Picture, PlayedTransition, ProjectFiles, RepositoryError, Scene,
     ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline, TimelineRepository, Track,
     Transition, VideoFormat, VideoItem, VideoProject, VideoProjectId, VideoSource, frame_at,
-    frame_time, nearest_frame, snap,
+    frame_time, min_length, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -480,9 +480,11 @@ pub enum EditAction {
     PutOnCut {
         asset: MediaAssetId,
     },
-    /// Covers the clip under the playhead with scene `scene`'s picture,
-    /// from the playhead for `length`, cut short where the clip ends.
+    /// Covers video item `index` with scene `scene`'s picture, from the
+    /// playhead for `length`, cut short where the item ends. The playhead
+    /// snaps within the item only; outside it, the cover is refused.
     Cover {
+        index: usize,
         scene: usize,
         length: Duration,
         reach: Duration,
@@ -886,11 +888,18 @@ impl Editor {
                 (edit, Some(Some(placed)))
             }
             EditAction::Cover {
+                index,
                 scene,
                 length,
                 reach,
             } => {
-                let (from, _) = self.snapped(self.playhead, reach);
+                let item = timeline.video().get(index).ok_or(EditError::NoSuchItem)?;
+                let within = |time: Duration| item.at <= time && time + min_length() <= item.end();
+                let (snapped, _) = self.snapped(self.playhead, reach);
+                let from = [snapped, self.playhead]
+                    .into_iter()
+                    .find(|&time| within(time))
+                    .ok_or(EditError::OutsideItem)?;
                 let source = self
                     .view
                     .scenes
@@ -1418,6 +1427,7 @@ fn preview_failure(finished: Option<Result<(), MediaError>>) -> Text {
 /// the saved cut while it still fits the plan, narration and media, else
 /// the rough cut as the channel starts one (its captions, motion and frame
 /// shape, the shape the left-behind cut had, and the track in use).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn project_cut(
     project: &VideoProject,
     channel: Option<&bardo_domain::Channel>,
@@ -1982,14 +1992,16 @@ impl Bardo {
     }
 
     /// Makes a new rough cut of the editor's project put each take's
-    /// performed clip on, or not. The cut in the editor stays as it is.
+    /// performed clip on, or not. A cut the user edited stays as it is; a
+    /// rough cut never edited is made again at once.
     pub fn set_performed_in_rough_cut(
         &self,
         editor: &mut Editor,
         on: bool,
     ) -> Result<(), EditorError> {
         self.media_assets
-            .set_performed_in_rough_cut(editor.project(), on)?;
+            .set_performed_in_rough_cut(editor.project(), on)
+            .map_err(EditorError::NotSaved)?;
         self.refresh_editor(editor)
     }
 
@@ -4810,6 +4822,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_rough_cut_never_saved_with_realistic_performed_clips_needs_the_disclosure() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _, _) = three_takes(&h, &app);
+        let narrator = app.narrator(&project).unwrap().expect("a narrator");
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("me.png");
+        std::fs::write(&photo, crate::testing::LOOK_IMAGE).unwrap();
+        app.import_look(narrator.id, &photo, true).unwrap();
+        // Nobody opened the editor: the cut a render makes is the rough
+        // cut, with the clips on.
+        assert!(app.needs_disclosure(project.id).unwrap());
+        bardo_domain::MediaAssetRepository::set_performed_in_rough_cut(&*h.db, project.id, false)
+            .unwrap();
+        assert!(!app.needs_disclosure(project.id).unwrap());
+    }
+
     /// Imports `name` as a 16:9 video `length` long and saves it as a
     /// performed clip of take `position`, which covers `start..end` of the
     /// project's narration, with the take's face at `face`.
@@ -5034,12 +5064,30 @@ mod tests {
 
         // A scene over two frames of its middle; the rest plays on in sync.
         let before = editor.view().timeline.clone();
+        let piece = editor
+            .view()
+            .clips
+            .iter()
+            .position(|clip| clip.performance.is_some())
+            .unwrap();
+        editor.seek(Duration::ZERO);
+        let elsewhere = EditAction::Cover {
+            index: piece,
+            scene: 0,
+            length: frames(2),
+            reach: Duration::ZERO,
+        };
+        assert!(
+            app.edit(&mut editor, elsewhere).is_err(),
+            "the playhead is not over the clip"
+        );
         editor.seek(at(1) + frames(2));
         let scene = editor.view().scene_under(editor.playhead()).unwrap();
         assert_eq!(scene, 1, "the take's own scene");
         app.edit(
             &mut editor,
             EditAction::Cover {
+                index: piece,
                 scene: 0,
                 length: frames(2),
                 reach: Duration::ZERO,

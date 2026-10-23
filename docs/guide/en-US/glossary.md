@@ -105,7 +105,7 @@ The words Bardo uses, in plain terms.
 
 **Motion (Ken Burns)**: a slow zoom or pan over a still picture while it shows, so a video of stills does not play as a slideshow. Set per still, with a strength; a channel's new cuts vary it from scene to scene.
 
-**In sync**: a performed clip whose first frame plays where the cut plays the start of its take's narration. A trim or a move before it puts it early or late; **Put back in sync** brings it back.
+**In sync**: a performed clip that plays where the cut plays the narration it performs, frame for frame. Trimming, moving or removing a clip before it puts it early or late; **Put back in sync** brings it back.
 
 **Cover (B-roll)**: a scene picture shown over part of a performed clip, from the playhead, while the rest of the take plays on in sync.
 

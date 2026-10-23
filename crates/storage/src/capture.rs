@@ -1481,24 +1481,30 @@ mod tests {
             };
             db.save_performed_clip(&asset, &clip).unwrap();
         };
+        // Its final, made from the take's control video as it is now.
+        db.save_control_video(&control(&saved, 0, "fp-1")).unwrap();
+        db.save_take_result(&result(&saved, 0, TakeStep::Final, "fp-1"))
+            .unwrap();
         used(0, saved.id);
         // One of a capture that is gone.
         used(3, CaptureId::new());
-        {
-            // As the database was before migration 56.
+        // As the database was before migration 56, then migrated.
+        let migrate = |before: &str| {
             let mut conn = db.conn();
-            conn.execute_batch(
-                "ALTER TABLE performed_clip DROP COLUMN face_y;
+            conn.execute_batch(&format!(
+                "{before}
+                 ALTER TABLE performed_clip DROP COLUMN face_y;
                  ALTER TABLE performed_clip DROP COLUMN face_x;
                  ALTER TABLE performed_clip DROP COLUMN take_end_ms;
                  ALTER TABLE performed_clip DROP COLUMN take_start_ms;
                  ALTER TABLE performed_clip DROP COLUMN narration_id;
                  DROP TABLE performed_rough_cut;
-                 PRAGMA user_version = 55;",
-            )
+                 PRAGMA user_version = 55;"
+            ))
             .unwrap();
             crate::migrations::run(&mut conn).unwrap();
-        }
+        };
+        migrate("");
         let clips = db.performed_clips(project.id).unwrap();
         let take = &saved.takes.as_slice()[0];
         assert_eq!(
@@ -1510,5 +1516,11 @@ mod tests {
             })
         );
         assert_eq!(clips[1].stretch, None, "its capture is gone");
+        // A project never edited keeps its cut without the clips.
+        assert!(!db.performed_in_rough_cut(project.id).unwrap());
+        // A take whose control video changed after its final was made
+        // may have other bounds now: no stretch.
+        migrate("UPDATE control_video SET fingerprint = 'fp-2';");
+        assert_eq!(db.performed_clips(project.id).unwrap()[0].stretch, None);
     }
 }
