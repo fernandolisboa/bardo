@@ -1319,6 +1319,7 @@ source_clip = "Animada com {provider} · {model}"
 source_still = "Imagem parada"
 source_none = "Ainda sem imagem"
 source_footage = "Vídeo importado. A imagem toca sem o som dele: ponha som na faixa de música ou de efeitos."
+source_performed = "Clipe interpretado: a sua tomada, interpretada pela persona. A imagem toca sem o som dele; a narração na A1 é a voz dele."
 in = "Entrada"
 out = "Saída"
 length = "Duração"
@@ -1473,6 +1474,7 @@ nothing_to_cut = "Nada para cortar aí: coloque o cursor dentro de um clipe ou s
 cannot_edit = "Essa edição não cabe aí."
 edit_not_saved = "Não foi possível salvar a edição, então o corte continua como estava."
 caption_text = "A legenda precisa de texto, com até 200 caracteres."
+performed_not_heard = "O corte deixa de fora o trecho da narração desta tomada, então o clipe não tem onde entrar. Volte com essa narração para a A1 primeiro."
 
 [editor.media]
 import = "Importar arquivos…"
@@ -1487,12 +1489,32 @@ add_hint = "Adiciona no cursor, nessa faixa."
 import_failed = "{file}: {reason}"
 audio = "Áudio"
 video = "Vídeo"
+take = "Tomada {n}"
+put_on_cut = "Pôr no corte"
+performed_rough_cut = "Clipes interpretados nos cortes brutos"
+performed_rough_cut_hint = "Um novo corte bruto toca o clipe interpretado mais recente de cada tomada em sincronia, com as imagens das cenas entre eles. Um corte que você editou fica como está; Pôr no corte coloca um nele."
 
 [editor.media.error]
 unreadable = "Não foi possível ler o arquivo. Confira se ele ainda está lá."
 unsupported = "Não é um arquivo de áudio ou vídeo que o Bardo consiga tocar, ou o arquivo está danificado."
 too_short = "O arquivo é curto demais para entrar na linha do tempo."
 not_saved = "Não foi possível copiar o arquivo para o projeto. Confira o espaço livre em disco e tente de novo."
+
+[editor.performed]
+title = "Tomada interpretada {n}"
+in_sync = "Em sincronia com a narração"
+early = "{time} adiantado"
+late = "{time} atrasado"
+unheard = "A narração dele foi cortada"
+put_back = "Voltar à sincronia"
+put_back_hint = "Alonga ou encurta o clipe anterior, e o clipe seguinte no sentido contrário, para o resto do corte ficar onde está."
+cannot_sync = "Nenhum clipe antes dele absorve a diferença: apare ou mova os clipes em volta dele à mão."
+unheard_hint = "O corte deixou de fora a narração que este clipe interpreta: ponha essa narração de volta na A1, ou remova o clipe."
+cover = "Cobrir com a imagem de uma cena"
+cover_hint = "Mostra uma cena sobre a interpretação a partir do cursor; o resto da tomada segue em sincronia. Desfazer traz a tomada de volta inteira."
+cover_scene = "Cena"
+cover_length = "Duração"
+cover_button = "Cobrir a partir do cursor"
 
 [music]
 title = "Prompt de música"
@@ -2825,11 +2847,7 @@ name = "Tour do editor, parte 2"
 
 [tour.editor-more.mix]
 title = "A mixagem"
-body = "Clique no cabeçalho de uma faixa de áudio para ajustar o volume, ou use M e S para deixá-la muda ou tocar só ela. Selecione um trecho de áudio para dar entrada ou saída gradual."
-
-[tour.editor-more.duck]
-title = "Atenuação"
-body = "A atenuação abaixa a música enquanto a narração fala e a devolve nas pausas. Escolha a faixa de música para definir o quanto ela abaixa."
+body = "Clique no cabeçalho de uma faixa de áudio para ajustar o volume, ou use M e S para deixá-la muda ou tocar só ela. Selecione um trecho de áudio para dar entrada ou saída gradual. A atenuação abaixa a música enquanto o narrador fala; o cabeçalho da faixa de música define o quanto."
 
 [tour.editor-more.captions]
 title = "Legendas"
@@ -2842,6 +2860,10 @@ body = "O formato do quadro do corte inteiro. Em 9:16, o clipe selecionado mostr
 [tour.editor-more.motion]
 title = "Movimento nas imagens"
 body = "Uma imagem parada se move: um zoom ou pan lento enquanto aparece, para o vídeo não virar um slideshow. Selecione uma imagem para escolher o movimento e a intensidade no inspetor, ou varie todas de uma vez."
+
+[tour.editor-more.performed]
+title = "Clipes interpretados"
+body = "Um clipe interpretado traz a sua própria atuação, então precisa ficar junto da narração de onde saiu. Selecione um para ver se está em sincronia, pô-lo de volta em sincronia ou cobrir um trecho com a imagem de uma cena."
 
 [tour.editor-more.suggestions]
 title = "Sugestões de corte"

@@ -74,7 +74,7 @@ The words Bardo uses, in plain terms.
 
 **Take prompt**: what a take model is told about a take: the look, the set and the delivery. Claude writes it from a template, and you edit it.
 
-**Performed clip**: a take's final, made by its take model, reviewed and used: it joins the project's media for the editor. Drafts, where the model makes them, come first and are approved before the final.
+**Performed clip**: a take's final, made by its take model, reviewed and used: it joins the project's media, where it goes on the cut in sync with its take's narration. Drafts, where the model makes them, come first and are approved before the final.
 
 **Scene plan**: the narration split into scenes, each with an image prompt.
 
@@ -104,6 +104,10 @@ The words Bardo uses, in plain terms.
 **Transition**: how the picture goes from one clip to the next around a cut: a crossfade, a pass through black or white, a wipe, a slide or a zoom. Centered on the cut, so the cut and the narration stay where they are.
 
 **Motion (Ken Burns)**: a slow zoom or pan over a still picture while it shows, so a video of stills does not play as a slideshow. Set per still, with a strength; a channel's new cuts vary it from scene to scene.
+
+**In sync**: a performed clip that plays where the cut plays the narration it performs, frame for frame. Trimming, moving or removing a clip before it puts it early or late; **Put back in sync** brings it back.
+
+**Cover (B-roll)**: a scene picture shown over part of a performed clip, from the playhead, while the rest of the take plays on in sync.
 
 **Mix**: how loud each audio track plays, with mute and solo.
 

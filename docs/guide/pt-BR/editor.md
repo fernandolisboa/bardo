@@ -8,7 +8,7 @@ tour: editor
 
 # O editor
 
-É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/projects/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Projetos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens e as sugestões de corte.
+É no editor que as cenas e a narração viram um corte: você apara, mixa o som, legenda e enquadra, e depois manda para o render. Ele abre sobre a janela inteira a partir da etapa [Edição](bardo:go/projects/edit) de um projeto, quando as cenas estão planejadas e narradas, e **Projetos**, no canto superior esquerdo, leva você de volta. O corte se salva sozinho a cada edição. [Mostre o editor para mim](bardo:tour/editor), ou [a parte 2 do tour](bardo:tour/editor-more) para a mixagem, as legendas, o enquadramento, o movimento nas imagens, os clipes interpretados e as sugestões de corte.
 
 F1 abre este guia sobre o editor, e **Voltar ao editor** devolve você a ele como estava. Esc fecha um tour; o botão **Tour do editor** na barra de cima (Shift+F1) volta ao passo em que ele fechou.
 
@@ -34,7 +34,7 @@ O corte corre da esquerda para a direita em cinco faixas:
 
 Clique na linha do tempo para mover o cursor de reprodução, e clique num item para selecioná-lo: o cursor vai até ele e o inspetor, à direita, mostra as propriedades. **Esc** limpa a seleção. Ctrl e a roda do mouse dão zoom, ou use − e + no fim da barra de ferramentas.
 
-O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe dela) e a **Mídia**: **Importar arquivos…** traz arquivos de vídeo e áudio do seu computador, e os botões de cada arquivo o colocam numa faixa, no cursor de reprodução. A música gerada na etapa Roteiro aparece aqui depois que você a usa ([Música a partir do prompt](script.md#generated-music)), assim como cada clipe interpretado que você usa na etapa Captura ([Usar um clipe interpretado](capture.md#use)).
+O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe dela) e a **Mídia**: **Importar arquivos…** traz arquivos de vídeo e áudio do seu computador, e os botões de cada arquivo o colocam numa faixa, no cursor de reprodução. A música gerada na etapa Roteiro aparece aqui depois que você a usa ([Música a partir do prompt](script.md#generated-music)), assim como cada clipe interpretado que você usa na etapa Captura ([Usar um clipe interpretado](capture.md#use)), cujo **Pôr no corte** o coloca em sincronia com a tomada ([Clipes interpretados](#performed)).
 
 <a id="cuts"></a>
 ## Cortar
@@ -131,6 +131,19 @@ Selecione uma imagem e escolha o movimento dela no inspetor, ou **Nenhum** para 
 O movimento acontece sobre a imagem como ela está enquadrada: a janela 9:16 num corte vertical, a imagem inteira num 16:9. Onde a imagem aparece com faixas (**Ajustar** em 9:16, ou uma imagem alta em 16:9), as faixas se movem junto. Ele dura todo o tempo do clipe na tela, transições incluídas, então a imagem nunca para enquanto aparece. Dividir uma imagem dá o movimento inteiro a cada pedaço. Clipes têm movimento próprio, então o movimento vale só para imagens: uma cena que ganha um clipe guarda o movimento da imagem sem tocá-lo, e volta a tocá-lo se a cena mostrar a imagem de novo.
 
 A prévia e o render desenham o movimento do mesmo jeito, suave a uma fração de pixel; uma imagem em movimento leva um pouco mais para renderizar do que uma parada.
+
+<a id="performed"></a>
+## Clipes interpretados
+
+Um [clipe interpretado](capture.md#use) traz a sua própria atuação de uma tomada, então só funciona onde o corte toca a narração dessa tomada. Na aba **Mídia**, cada um traz a sua tomada ("Tomada 2"), e **Pôr no corte** o coloca na V1 onde o corte toca o início da tomada, cobrindo o que estiver ali pelo comprimento do clipe (ou o da tomada, quando o clipe voltou mais longo). Quando o corte deixou esse trecho da narração de fora, o Bardo avisa e não coloca nada: ponha a narração de volta na A1 primeiro.
+
+**Clipes interpretados nos cortes brutos**, no alto da aba **Mídia** quando a narração tem clipes interpretados, faz cada corte bruto tocar o clipe interpretado mais recente de cada tomada em sincronia, com as imagens das cenas entre eles. Fica ligado, a menos que você o desligue. Um corte que você editou fica como está; um corte bruto que você ainda não mexeu muda na hora.
+
+Selecione um clipe interpretado e o inspetor diz se ele toca junto da narração: **Em sincronia com a narração**, quanto está adiantado ou atrasado (em centésimos de segundo, então um único quadro de diferença aparece), ou que a narração dele foi cortada (ponha a narração de volta na A1, ou remova o clipe). Aparar, mover ou remover um clipe antes dele o desloca. **Voltar à sincronia** alonga ou encurta o clipe anterior para trazê-lo de volta, e o clipe seguinte no sentido contrário, para o resto do corte ficar onde estava. Um clipe anterior nunca é esticado além do fim do arquivo dele; quando nada absorve a diferença, apare ou mova os clipes em volta dele à mão. Um clipe fora de sincronia também avisa na V1.
+
+**Cobrir com a imagem de uma cena** mostra uma cena sobre parte da atuação (B-roll): escolha a **Cena** (a que está sob o cursor de reprodução, de início) e a **Duração** (0,5 a 10 s), depois **Cobrir a partir do cursor**. O cursor de reprodução precisa estar sobre o clipe selecionado, e a cobertura para onde o clipe termina, e o resto da tomada continua em sincronia depois dela. Desfazer traz a tomada de volta inteira.
+
+Num corte 9:16, um clipe cujo modelo mantém o seu enquadramento começa com a janela de recorte no seu rosto, como ele foi achado na análise da tomada; um clipe de controle de movimento começa centralizado, como as outras filmagens. Um clipe interpretado de uma narração que o projeto não usa mais é filmagem comum: sem tomada, sem sincronia. Uma versão em outro idioma mostra as imagens das cenas onde este corte toca clipes interpretados, já que eles falam este idioma.
 
 <a id="suggestions"></a>
 ## Sugestões de corte

@@ -76,6 +76,7 @@ mod network_account;
 mod owner_metrics;
 mod performance;
 mod performed;
+mod performed_cut;
 mod persona;
 mod persona_look;
 mod post_insights;
@@ -245,8 +246,9 @@ pub use performance::{
 };
 pub use performed::{
     LENGTH_TOLERANCE, MAX_TAKE_PROMPT, PerformedClip, TakePrompt, TakePromptError, TakeResult,
-    take_prompt_text,
+    TakeStretch, take_prompt_text,
 };
+pub use performed_cut::{PerformedPlace, PerformedSync, scene_at_narration};
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
     PersonaRepository, VoiceFlag,

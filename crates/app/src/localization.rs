@@ -630,6 +630,16 @@ impl LocalizationHandler {
                 .timelines
                 .saved_timeline(source.id)
                 .map_err(unexpected)?;
+            // Where the source's performed clips play, the version shows
+            // the scenes a rough cut would (#193).
+            let performed = crate::editor::PerformedCut::of(
+                &self.media.performed_clips(source.id).map_err(unexpected)?,
+                &assets,
+                &narration,
+                self.media
+                    .performed_in_rough_cut(source.id)
+                    .map_err(unexpected)?,
+            );
             let (cut, _) = project_cut(
                 &source,
                 Some(&source_channel),
@@ -638,13 +648,14 @@ impl LocalizationHandler {
                 timeline.as_ref(),
                 &assets,
                 music.as_ref(),
+                &performed,
             );
-            let carried = CarriedCut::of(&cut, plan.scenes().len());
+            let carried = CarriedCut::of(&cut, &plan);
 
             let new_plan = copy_plan(&plan, version, now);
             let mut ids: HashMap<MediaAssetId, MediaAssetId> = HashMap::new();
             // Performed clips are lip-synced to the source's narration: the
-            // version shows scene pictures in their place (#192).
+            // version leaves them out.
             let media: Vec<MediaAsset> = assets
                 .iter()
                 .filter(|asset| asset.source != bardo_domain::AssetSource::Performed)

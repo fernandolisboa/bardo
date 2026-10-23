@@ -53,6 +53,26 @@ impl CropPosition {
         (f32::from(self.x) / steps, f32::from(self.y) / steps)
     }
 
+    /// The position that centers a window of `target`'s shape over
+    /// `source` on the point `x`, `y` (fractions of the picture across and
+    /// down), the window stopping at the picture's edges.
+    pub fn centered_on(source: PictureSize, target: AspectRatio, x: f32, y: f32) -> CropPosition {
+        let window = crop_window(source, target, CropPosition::CENTER);
+        let axis = |point: f32, side: u32, size: u32| -> u16 {
+            let slack = side.saturating_sub(size);
+            if slack == 0 {
+                return CROP_STEPS / 2;
+            }
+            let offset = f64::from(point.clamp(0.0, 1.0)) * f64::from(side) - f64::from(size) / 2.0;
+            let share = (offset / f64::from(slack)).clamp(0.0, 1.0);
+            (share * f64::from(CROP_STEPS)).round() as u16
+        };
+        CropPosition::new(
+            axis(x, source.width, window.width),
+            axis(y, source.height, window.height),
+        )
+    }
+
     /// This position moved across by `by` steps, within the range.
     pub fn nudged(self, by: i32) -> Self {
         let x = (i32::from(self.x) + by).clamp(0, i32::from(CROP_STEPS));
@@ -204,6 +224,33 @@ mod tests {
         assert_eq!(right.x + right.width, 1920);
         let quarter = crop_window(HD, AspectRatio::Vertical, CropPosition::new(250, 500));
         assert_eq!(quarter.x, 329);
+    }
+
+    #[test]
+    fn a_window_centers_on_a_point_and_stops_at_the_edges() {
+        // The face a third of the way across: the window's middle is there.
+        let at = CropPosition::centered_on(HD, AspectRatio::Vertical, 1.0 / 3.0, 0.4);
+        let window = crop_window(HD, AspectRatio::Vertical, at);
+        assert!(
+            (window.x + window.width / 2).abs_diff(640) <= 2,
+            "{window:?}"
+        );
+        // A window of full height has no room down: it stays centered.
+        assert_eq!(at.y(), CROP_STEPS / 2);
+        assert_eq!(
+            CropPosition::centered_on(HD, AspectRatio::Vertical, 0.02, 0.5).x(),
+            0
+        );
+        assert_eq!(
+            CropPosition::centered_on(HD, AspectRatio::Vertical, 0.99, 0.5).x(),
+            CROP_STEPS
+        );
+        // A picture of the frame's own shape has nowhere to go.
+        let tall = PictureSize::new(1080, 1920);
+        assert_eq!(
+            CropPosition::centered_on(tall, AspectRatio::Vertical, 0.1, 0.1),
+            CropPosition::CENTER
+        );
     }
 
     #[test]

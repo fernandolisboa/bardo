@@ -76,9 +76,12 @@ pub struct CarriedCut {
 }
 
 impl CarriedCut {
-    /// What `timeline`, a cut on a plan of `scenes` scenes, gives a version.
-    pub fn of(timeline: &Timeline, scenes: usize) -> CarriedCut {
-        let looks = (0..scenes)
+    /// What `timeline`, a cut on `plan`, gives a version. Performed clips
+    /// are lip-synced to the source's narration, so a scene they cover
+    /// shows in the version with a rough cut's look (#193).
+    pub fn of(timeline: &Timeline, plan: &ScenePlan) -> CarriedCut {
+        let performed = timeline.scenes_under_performed(plan);
+        let looks = (0..plan.scenes().len())
             .map(|scene| {
                 timeline
                     .video()
@@ -91,6 +94,13 @@ impl CarriedCut {
                             motion: item.motion,
                             transition: item.transition.filter(|_| index > 0),
                         }
+                    })
+                    .or_else(|| {
+                        performed.contains(&scene).then(|| SceneLook {
+                            framing: Framing::default(),
+                            motion: None,
+                            transition: None,
+                        })
                     })
             })
             .collect();
@@ -991,7 +1001,7 @@ mod tests {
             scene_sentences: vec![0, 1, 2],
             cut: CarriedCut::of(
                 &Timeline::rough_cut(plan, &narrated(SOURCE, 500), AspectRatio::Vertical),
-                plan.scenes().len(),
+                plan,
             ),
             created_at: SystemTime::UNIX_EPOCH,
         }
@@ -1150,7 +1160,7 @@ mod tests {
             fade_in: Duration::ZERO,
             fade_out: Duration::ZERO,
         });
-        let cut = CarriedCut::of(&timeline, 3);
+        let cut = CarriedCut::of(&timeline, &source);
         assert_eq!(
             cut.scenes[0].unwrap().transition,
             None,
@@ -1160,6 +1170,54 @@ mod tests {
         assert_eq!(cut.scenes[2], None);
         assert_eq!(cut.audio[0].at, ms(500), "in narration time");
         assert_eq!(cut.audio[0].until, ms(1_000));
+    }
+
+    #[test]
+    fn a_version_shows_scene_pictures_where_the_source_played_performed_clips() {
+        let source = drawn_plan();
+        let narration = narrated(SOURCE, 500);
+        // A performed clip over the second scene and most of the third.
+        let place = crate::PerformedPlace {
+            file: "media-performed.mp4".into(),
+            length: ms(2_000),
+            start: ms(1_000),
+            end: ms(3_000),
+            framing: Framing::default(),
+        };
+        let mut timeline = Timeline::rough_cut(&source, &narration, AspectRatio::Vertical)
+            .with_performed(vec![place.clone()]);
+        timeline.video[0].framing = Framing::Fit;
+        let timeline = timeline.with_performed_takes(&[place]);
+        assert!(
+            !timeline
+                .video()
+                .iter()
+                .any(|item| item.picture == Picture::Scene(1)),
+            "the second scene is covered whole"
+        );
+        let cut = CarriedCut::of(&timeline, &source);
+        assert_eq!(cut.scenes[0].unwrap().framing, Framing::Fit);
+        assert_eq!(
+            cut.scenes[1],
+            Some(SceneLook {
+                framing: Framing::default(),
+                motion: None,
+                transition: None,
+            }),
+            "a rough cut's look"
+        );
+        assert!(cut.scenes[2].is_some());
+        let map = localization(&source).time_map(&[ms(0), ms(1_000), ms(2_000)], ms(3_500));
+        let version = localized_cut(&source, &narration, &cut, &map, &[]);
+        let pictures: Vec<Picture> = version
+            .video()
+            .iter()
+            .map(|item| item.picture.clone())
+            .collect();
+        assert_eq!(
+            pictures,
+            [Picture::Scene(0), Picture::Scene(1), Picture::Scene(2)]
+        );
     }
 
     #[test]

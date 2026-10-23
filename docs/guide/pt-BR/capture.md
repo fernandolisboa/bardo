@@ -119,7 +119,7 @@ Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **P
 <a id="use"></a>
 ## Usar um clipe interpretado
 
-**Usar** copia a versão final para a mídia do projeto como um clipe interpretado com o nome da tomada ("Clipe interpretado 1"), na aba **Mídia** do editor, de onde você o coloca no corte ([Linha do tempo e faixas](editor.md#timeline)). Cada **Usar** adiciona um, e a tomada os conta. Os clipes interpretados ficam quando a captura é removida, e as versões em outros idiomas não os levam. Quando a aparência da persona é realista, um corte com um dos clipes interpretados dela liga o [aviso de conteúdo sintético](uploading.md#disclosure).
+**Usar** copia a versão final para a mídia do projeto como um clipe interpretado com o nome da tomada ("Clipe interpretado 1"), na aba **Mídia** do editor, onde **Pôr no corte** o coloca em sincronia com a narração da tomada ([Clipes interpretados](editor.md#performed)). Cada **Usar** adiciona um, e a tomada os conta. Os clipes interpretados ficam quando a captura é removida, e as versões em outros idiomas não os levam. Quando a aparência da persona é realista, um corte com um dos clipes interpretados dela liga o [aviso de conteúdo sintético](uploading.md#disclosure).
 
 <a id="cuts"></a>
 ## Mover um corte

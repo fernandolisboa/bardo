@@ -27,6 +27,12 @@
 //! the shape or moving a clip's window is an edit, saved and undoable, and
 //! the preview plays it at the new shape.
 //!
+//! Performed clips (#193) belong to their take's stretch of the
+//! narration: **Put on the cut** places one there, a scene picture can
+//! cover part of it, and a piece moved off its narration says how far and
+//! goes back in sync. A new rough cut puts each take's on, unless the
+//! project turned that off.
+//!
 //! Opening or refreshing the editor queues a job for the proxies the
 //! timeline lacks; editing never waits on it, clips without a proxy show
 //! that they are building, and the preview waits until none is.
@@ -47,10 +53,11 @@ use bardo_domain::{
     AspectRatio, AudioLane, CaptionHighlight, CaptionSpan, CaptionStyle, DuckEnvelope, Ducking,
     Edge, Edit, EditError, FPS, Framing, Generation, History, ItemRef, Job, JobKind, JobState,
     LaneMix, MediaAsset, MediaAssetId, MediaKind, Motion, MotionDefault, MotionPattern,
-    MotionStrength, MotionView, NarrationId, NarrationRepository, Picture, PlayedTransition,
-    ProjectFiles, RepositoryError, Scene, ScenePlanId, ScenePlanRepository, Shift, ThemeRepository,
-    Timeline, TimelineRepository, Track, Transition, VideoFormat, VideoProject, VideoProjectId,
-    VideoSource, frame_at, frame_time, nearest_frame, snap,
+    MotionStrength, MotionView, Narration, NarrationId, NarrationRepository, PerformedClip,
+    PerformedPlace, PerformedSync, Picture, PlayedTransition, ProjectFiles, RepositoryError, Scene,
+    ScenePlanId, ScenePlanRepository, Shift, ThemeRepository, Timeline, TimelineRepository, Track,
+    Transition, VideoFormat, VideoItem, VideoProject, VideoProjectId, VideoSource, frame_at,
+    frame_time, min_length, nearest_frame, snap,
 };
 use bardo_media::ffmpeg::{
     self, AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, FramePoll,
@@ -109,6 +116,7 @@ impl EditorError {
             EditorError::Preview(_) => Text::EditorPreviewFailed,
             EditorError::NothingToCut => Text::EditorNothingToCut,
             EditorError::Edit(EditError::InvalidText) => Text::EditorCaptionTextInvalid,
+            EditorError::Edit(EditError::NotHeard) => Text::EditorPerformedNotHeard,
             EditorError::Edit(_) => Text::EditorCannotEdit,
             EditorError::NotSaved(_) => Text::EditorEditNotSaved,
             EditorError::Repository(_) => Text::EditorNotLoaded,
@@ -182,6 +190,19 @@ pub struct ClipView {
     pub clip: Option<Generation>,
     /// The scene's narration.
     pub text: String,
+    /// What it performs, when it is a performed clip of the narration.
+    pub performance: Option<ClipPerformance>,
+}
+
+/// A performed piece of the video track (#193).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipPerformance {
+    /// Its take, from 1.
+    pub take: u32,
+    /// Whether it plays with the narration it belongs to.
+    pub sync: PerformedSync,
+    /// Whether **Put back in sync** can move it there.
+    pub can_sync: bool,
 }
 
 /// One imported file as the media bin lists it.
@@ -193,13 +214,21 @@ pub struct BinMedia {
     /// Peaks of an audio file's waveform, once built; `peaks_per_second`
     /// of them, over the file's own time.
     pub peaks: Option<(u32, Vec<f32>)>,
+    /// The take it performs, from 1, when it is a performed clip of the
+    /// narration: it can go on the cut at its take.
+    pub take: Option<u32>,
 }
 
 /// One scene as the bin lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BinScene {
     pub index: usize,
+    /// Its stretch of the narration.
+    pub start: Duration,
+    pub end: Duration,
     pub duration: Duration,
+    /// What it shows on the cut.
+    pub source: VideoSource,
     pub prompt: String,
     pub thumbnail: Option<PathBuf>,
 }
@@ -283,6 +312,10 @@ pub struct EditorView {
     pub job: Option<Job>,
     /// The AI cut suggestions on the cut, and asking for more.
     pub suggestions: SuggestionsView,
+    /// Whether the project's media has performed clips of the narration.
+    pub has_performed: bool,
+    /// Whether a new rough cut puts each take's performed clip on.
+    pub performed_in_rough_cut: bool,
 }
 
 impl EditorView {
@@ -337,6 +370,22 @@ impl EditorView {
     /// The imported file named `file` in the project folder.
     pub fn media_file(&self, file: &str) -> Option<&BinMedia> {
         self.media.iter().find(|media| media.asset.file == file)
+    }
+
+    /// The scene a rough cut shows where the cut plays `time`: the one
+    /// whose stretch of the narration holds the moment heard there.
+    pub fn scene_under(&self, time: Duration) -> Option<usize> {
+        let timeline = self.timeline.as_ref()?;
+        let heard = timeline
+            .narration_at(time)
+            .map(|index| &timeline.narration()[index])
+            .map_or(time, |item| item.start + (time - item.at));
+        self.scenes
+            .iter()
+            .find(|scene| scene.start <= heard && heard < scene.end)
+            .or_else(|| self.scenes.iter().rev().find(|scene| scene.start <= heard))
+            .or_else(|| self.scenes.first())
+            .map(|scene| scene.index)
     }
 }
 
@@ -427,6 +476,23 @@ pub enum EditAction {
     /// Gives the stills a varied pattern of motions at `strength`, so no
     /// still moves the way the one before it did.
     VaryMotion(MotionStrength),
+    /// Puts a performed clip on the cut where the cut plays its take.
+    PutOnCut {
+        asset: MediaAssetId,
+    },
+    /// Covers video item `index` with scene `scene`'s picture, from the
+    /// playhead for `length`, cut short where the item ends. The playhead
+    /// snaps within the item only; outside it, the cover is refused.
+    Cover {
+        index: usize,
+        scene: usize,
+        length: Duration,
+        reach: Duration,
+    },
+    /// Moves performed piece `index` back to the narration it belongs to.
+    PutBackInSync {
+        index: usize,
+    },
     Undo,
     Redo,
 }
@@ -803,6 +869,61 @@ impl Editor {
             EditAction::VaryMotion(strength) => (
                 timeline.motion_pattern(MotionDefault::new(MotionPattern::Varied, strength)),
                 None,
+            ),
+            EditAction::PutOnCut { asset } => {
+                let file = &self
+                    .view
+                    .media
+                    .iter()
+                    .find(|media| media.asset.id == asset)
+                    .ok_or(EditError::NoSuchItem)?
+                    .asset
+                    .file;
+                let place = timeline
+                    .performed()
+                    .iter()
+                    .find(|place| place.file == *file)
+                    .ok_or(EditError::NotHeard)?;
+                let (edit, placed) = timeline.put_performed(place)?;
+                (edit, Some(Some(placed)))
+            }
+            EditAction::Cover {
+                index,
+                scene,
+                length,
+                reach,
+            } => {
+                let item = timeline.video().get(index).ok_or(EditError::NoSuchItem)?;
+                let within = |time: Duration| item.at <= time && time + min_length() <= item.end();
+                let (snapped, _) = self.snapped(self.playhead, reach);
+                let from = [snapped, self.playhead]
+                    .into_iter()
+                    .find(|&time| within(time))
+                    .ok_or(EditError::OutsideItem)?;
+                let source = self
+                    .view
+                    .scenes
+                    .iter()
+                    .find(|bin| bin.index == scene)
+                    .ok_or(EditError::NoSuchItem)?
+                    .source
+                    .clone();
+                let picture = VideoItem {
+                    picture: Picture::Scene(scene),
+                    source,
+                    start: Duration::ZERO,
+                    at: Duration::ZERO,
+                    duration: length,
+                    framing: Framing::default(),
+                    transition: None,
+                    motion: None,
+                };
+                let (edit, covered) = timeline.cover(from, length, picture)?;
+                (edit, Some(Some(covered)))
+            }
+            EditAction::PutBackInSync { index } => (
+                timeline.back_in_sync(index)?,
+                Some(Some(ItemRef::video(index))),
             ),
             EditAction::Undo | EditAction::Redo => return Err(EditorError::NothingToCut),
         })
@@ -1306,6 +1427,7 @@ fn preview_failure(finished: Option<Result<(), MediaError>>) -> Text {
 /// the saved cut while it still fits the plan, narration and media, else
 /// the rough cut as the channel starts one (its captions, motion and frame
 /// shape, the shape the left-behind cut had, and the track in use).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn project_cut(
     project: &VideoProject,
     channel: Option<&bardo_domain::Channel>,
@@ -1314,6 +1436,7 @@ pub(crate) fn project_cut(
     saved: Option<&bardo_domain::SavedTimeline>,
     assets: &[MediaAsset],
     music: Option<&MediaAsset>,
+    performed: &PerformedCut,
 ) -> (Timeline, bool) {
     // A new cut's stills move as the channel says.
     let motion = channel.map_or(MotionDefault::default(), |channel| channel.details.motion());
@@ -1340,19 +1463,98 @@ pub(crate) fn project_cut(
         })
     });
     let found = restored.is_some();
-    // A cut that starts over keeps the frame shape it had.
-    let timeline = restored.unwrap_or_else(|| {
-        let cut = Timeline::rough_cut(plan, narration, aspect)
-            .with_caption_style(caption_style)
-            .with_caption_highlight(caption_highlight)
-            .with_motion(motion)
-            .with_aspect(saved.map_or(aspect, |saved| saved.aspect));
-        match music {
-            Some(music) => cut.use_music(None, music).unwrap_or(cut),
-            None => cut,
+    // A cut that starts over keeps the frame shape it had, and puts each
+    // take's performed clip on unless the project said not to.
+    let timeline = match restored {
+        Some(timeline) => timeline.with_performed(performed.places.clone()),
+        None => {
+            let cut = Timeline::rough_cut(plan, narration, aspect)
+                .with_caption_style(caption_style)
+                .with_caption_highlight(caption_highlight)
+                .with_motion(motion)
+                .with_aspect(saved.map_or(aspect, |saved| saved.aspect));
+            let cut = match music {
+                Some(music) => cut.use_music(None, music).unwrap_or(cut),
+                None => cut,
+            };
+            let cut = cut.with_performed(performed.places.clone());
+            if performed.in_rough_cut {
+                cut.with_performed_takes(&performed.rough)
+            } else {
+                cut
+            }
         }
-    });
+    };
     (timeline, found)
+}
+
+/// What a cut knows of a project's performed clips (#193).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PerformedCut {
+    /// Where each performed clip of the narration belongs.
+    pub places: Vec<PerformedPlace>,
+    /// The ones a new rough cut puts on: each take's used last, in the
+    /// narration's order.
+    pub rough: Vec<PerformedPlace>,
+    /// Each one's take, from 1, by file.
+    pub takes: HashMap<String, u32>,
+    /// Whether a new rough cut puts them on.
+    pub in_rough_cut: bool,
+}
+
+impl PerformedCut {
+    /// What `clips` (oldest first) give a cut of `narration`: those made on
+    /// it whose video is among `assets`. A clip starts filling a 9:16 frame
+    /// on its take's face when it knows where that is, else centered.
+    pub(crate) fn of(
+        clips: &[PerformedClip],
+        assets: &[MediaAsset],
+        narration: &Narration,
+        in_rough_cut: bool,
+    ) -> PerformedCut {
+        let mut cut = PerformedCut {
+            in_rough_cut,
+            ..PerformedCut::default()
+        };
+        let mut latest: Vec<(u32, PerformedPlace)> = Vec::new();
+        for clip in clips {
+            let Some(stretch) = clip.stretch.filter(|s| s.narration == narration.id) else {
+                continue;
+            };
+            let Some(asset) = assets
+                .iter()
+                .find(|asset| asset.id == clip.asset && asset.kind == MediaKind::Video)
+            else {
+                continue;
+            };
+            let framing = match (clip.face, asset.picture) {
+                (Some((x, y)), Some(picture)) => {
+                    let share = |value: u16| f32::from(value) / 1_000.0;
+                    Framing::Crop(bardo_domain::CropPosition::centered_on(
+                        picture,
+                        AspectRatio::Vertical,
+                        share(x),
+                        share(y),
+                    ))
+                }
+                _ => Framing::default(),
+            };
+            let place = PerformedPlace {
+                file: asset.file.clone(),
+                length: asset.duration,
+                start: stretch.start,
+                end: stretch.end,
+                framing,
+            };
+            cut.takes.insert(asset.file.clone(), clip.position + 1);
+            latest.retain(|(position, _)| *position != clip.position);
+            latest.push((clip.position, place.clone()));
+            cut.places.push(place);
+        }
+        latest.sort_by_key(|(_, place)| place.start);
+        cut.rough = latest.into_iter().map(|(_, place)| place).collect();
+        cut
+    }
 }
 
 /// The project a proxies job serves.
@@ -1416,6 +1618,16 @@ impl Bardo {
             .and_then(|track| assets.iter().find(|asset| asset.id == track.asset))
             .cloned();
         let saved = self.timelines.saved_timeline(project.id)?;
+        let performed_in_rough_cut = self.media_assets.performed_in_rough_cut(project.id)?;
+        let performed = match &narration {
+            Some(narration) => PerformedCut::of(
+                &self.media_assets.performed_clips(project.id)?,
+                &assets,
+                narration,
+                performed_in_rough_cut,
+            ),
+            None => PerformedCut::default(),
+        };
         let (timeline, basis, cut_outdated) = match (&plan, &narration) {
             (Some(plan), Some(narration)) => {
                 let (timeline, restored) = project_cut(
@@ -1426,6 +1638,7 @@ impl Bardo {
                     saved.as_ref(),
                     &assets,
                     music.as_ref(),
+                    &performed,
                 );
                 let basis = CutBasis {
                     scene_plan: plan.id,
@@ -1438,7 +1651,7 @@ impl Bardo {
         let mut clips = Vec::new();
         let (mut ready, mut total) = (0, 0);
         if let (Some(timeline), Some(plan)) = (&timeline, &plan) {
-            for item in timeline.video() {
+            for (index, item) in timeline.video().iter().enumerate() {
                 let scene = item.scene().and_then(|index| plan.scenes().get(index));
                 let shows = match &item.picture {
                     Picture::Scene(index) => ClipShows::Scene(*index),
@@ -1479,6 +1692,14 @@ impl Bardo {
                         .filter(|_| is_clip)
                         .and_then(|scene| scene.clip().map(|clip| clip.generation.clone())),
                     text: scene.map(|scene| scene.text.clone()).unwrap_or_default(),
+                    performance: timeline.sync(index).and_then(|sync| {
+                        let file = item.source.file()?;
+                        Some(ClipPerformance {
+                            take: *performed.takes.get(file)?,
+                            sync,
+                            can_sync: timeline.back_in_sync(index).is_ok(),
+                        })
+                    }),
                 });
             }
         }
@@ -1498,7 +1719,10 @@ impl Bardo {
                     .enumerate()
                     .map(|(index, scene)| BinScene {
                         index,
+                        start: scene.start,
+                        end: scene.end,
                         duration: scene.duration(),
+                        source: VideoSource::of(scene),
                         prompt: scene.prompt().as_str().to_owned(),
                         thumbnail: thumbnail(scene),
                     })
@@ -1530,6 +1754,7 @@ impl Bardo {
                     peaks: (asset.kind == MediaKind::Audio)
                         .then(|| peaks(&asset.file))
                         .flatten(),
+                    take: performed.takes.get(&asset.file).copied(),
                     media,
                     asset,
                 }
@@ -1585,6 +1810,8 @@ impl Bardo {
         )?;
         Ok(EditorView {
             suggestions,
+            has_performed: !performed.places.is_empty(),
+            performed_in_rough_cut,
             channel_name,
             transition,
             motion,
@@ -1762,6 +1989,20 @@ impl Bardo {
             editor.select(selection);
         }
         Ok(())
+    }
+
+    /// Makes a new rough cut of the editor's project put each take's
+    /// performed clip on, or not. A cut the user edited stays as it is; a
+    /// rough cut never edited is made again at once.
+    pub fn set_performed_in_rough_cut(
+        &self,
+        editor: &mut Editor,
+        on: bool,
+    ) -> Result<(), EditorError> {
+        self.media_assets
+            .set_performed_in_rough_cut(editor.project(), on)
+            .map_err(EditorError::NotSaved)?;
+        self.refresh_editor(editor)
     }
 
     /// Builds again the proxies that failed or were cancelled.
@@ -4535,6 +4776,8 @@ mod tests {
                 .unwrap(),
                 realistic,
                 used_at: SystemTime::now(),
+                stretch: None,
+                face: None,
             };
             bardo_domain::MediaAssetRepository::save_performed_clip(&*h.db, &take, &clip).unwrap();
             take
@@ -4577,6 +4820,345 @@ mod tests {
             app.needs_disclosure(project.id).unwrap(),
             "a look that reads as a real person now"
         );
+    }
+
+    #[test]
+    fn a_rough_cut_never_saved_with_realistic_performed_clips_needs_the_disclosure() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _, _) = three_takes(&h, &app);
+        let narrator = app.narrator(&project).unwrap().expect("a narrator");
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("me.png");
+        std::fs::write(&photo, crate::testing::LOOK_IMAGE).unwrap();
+        app.import_look(narrator.id, &photo, true).unwrap();
+        // Nobody opened the editor: the cut a render makes is the rough
+        // cut, with the clips on.
+        assert!(app.needs_disclosure(project.id).unwrap());
+        bardo_domain::MediaAssetRepository::set_performed_in_rough_cut(&*h.db, project.id, false)
+            .unwrap();
+        assert!(!app.needs_disclosure(project.id).unwrap());
+    }
+
+    /// Imports `name` as a 16:9 video `length` long and saves it as a
+    /// performed clip of take `position`, which covers `start..end` of the
+    /// project's narration, with the take's face at `face`.
+    #[allow(clippy::too_many_arguments)]
+    fn performed_clip(
+        h: &Harness,
+        app: &Bardo,
+        project: VideoProjectId,
+        dir: &tempfile::TempDir,
+        name: &str,
+        position: u32,
+        (start, end): (Duration, Duration),
+        length: Duration,
+        face: Option<(u16, u16)>,
+    ) -> MediaAsset {
+        use bardo_media::ffmpeg::{MediaInfo, VideoStream};
+        let _ = (app, dir);
+        // Probed by its contents, as an imported file is.
+        h.media.probes.lock().unwrap().insert(
+            name.into(),
+            MediaInfo {
+                duration: length,
+                video: Some(VideoStream {
+                    codec: "h264".into(),
+                    width: 1920,
+                    height: 1080,
+                    frame_rate: (30, 1),
+                }),
+                audio: None,
+            },
+        );
+        let id = bardo_domain::MediaAssetId::new();
+        let file = MediaAsset::file_name(id, name);
+        h.files.write(project, &file, name.as_bytes()).unwrap();
+        let narration = h.db.narration(project).unwrap().unwrap();
+        let asset = MediaAsset {
+            id,
+            project,
+            owner: narration.owner,
+            kind: MediaKind::Video,
+            source: bardo_domain::AssetSource::Performed,
+            file,
+            name: name.trim_end_matches(".mp4").to_owned(),
+            duration: length,
+            picture: Some(bardo_domain::PictureSize::new(1920, 1080)),
+            imported_at: SystemTime::UNIX_EPOCH + Duration::from_secs(u64::from(position)),
+        };
+        let clip = PerformedClip {
+            asset: asset.id,
+            project,
+            capture: bardo_domain::CaptureId::new(),
+            position,
+            model: bardo_domain::ClipModelRef::new(
+                bardo_domain::Provider::Higgsfield,
+                "fake/video-edit",
+            )
+            .unwrap(),
+            realistic: false,
+            used_at: SystemTime::now() + Duration::from_millis(u64::from(position)),
+            stretch: Some(bardo_domain::TakeStretch {
+                narration: narration.id,
+                start,
+                end,
+            }),
+            face,
+        };
+        bardo_domain::MediaAssetRepository::save_performed_clip(&*h.db, &asset, &clip).unwrap();
+        asset
+    }
+
+    /// The performed pieces of the editor's cut: their take, where they
+    /// start and how long they are, and their sync.
+    fn performed_pieces(editor: &Editor) -> Vec<(u32, Duration, Duration, PerformedSync)> {
+        editor
+            .view()
+            .clips
+            .iter()
+            .filter_map(|clip| {
+                let performance = clip.performance?;
+                Some((performance.take, clip.at, clip.duration, performance.sync))
+            })
+            .collect()
+    }
+
+    /// Three performed takes over the three scenes of a drawn project; the
+    /// third clip is a tenth of a second shorter than its take, and the
+    /// first knows where the face is.
+    fn three_takes(
+        h: &Harness,
+        app: &Bardo,
+    ) -> (VideoProject, bardo_domain::ScenePlan, Vec<MediaAsset>) {
+        let (project, plan) = h.drawn_project(app);
+        let dir = tempfile::tempdir().unwrap();
+        let scenes = plan.scenes();
+        assert_eq!(scenes.len(), 3);
+        let clips = (0..3)
+            .map(|n| {
+                let scene = &scenes[n];
+                let length = scene.end - scene.start;
+                let length = if n == 2 {
+                    length - Duration::from_millis(100)
+                } else {
+                    length
+                };
+                performed_clip(
+                    h,
+                    app,
+                    project.id,
+                    &dir,
+                    &format!("take-{n}.mp4"),
+                    n as u32,
+                    (scene.start, scene.end),
+                    length,
+                    (n == 0).then_some((250, 400)),
+                )
+            })
+            .collect();
+        (project, plan, clips)
+    }
+
+    #[test]
+    fn a_rough_cut_plays_each_performed_take_in_sync_and_scenes_elsewhere() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan, clips) = three_takes(&h, &app);
+        let mut editor = app.open_editor(project.id).unwrap();
+        let view = editor.view();
+        assert!(view.has_performed);
+        assert!(view.performed_in_rough_cut);
+        let at = |n: usize| frame_time(nearest_frame(plan.scenes()[n].start));
+        let pieces = performed_pieces(&editor);
+        assert_eq!(pieces.len(), 3, "{pieces:?}");
+        for (n, (take, start, _, sync)) in pieces.iter().enumerate() {
+            assert_eq!(*take, n as u32 + 1);
+            assert_eq!(*start, at(n));
+            assert_eq!(*sync, PerformedSync::InSync);
+        }
+        // The third take's scene fills the rest of its stretch.
+        let third = view
+            .clips
+            .iter()
+            .position(|clip| clip.performance.is_some_and(|p| p.take == 3))
+            .unwrap();
+        let after = &view.clips[third + 1];
+        assert_eq!(after.shows, ClipShows::Scene(2));
+        assert_eq!(after.at, view.clips[third].at + view.clips[third].duration);
+        assert!(
+            after.duration >= Duration::from_millis(66),
+            "{:?}",
+            after.duration
+        );
+        assert_eq!(third + 2, view.clips.len());
+        // In the bin, each says its take.
+        for (n, clip) in clips.iter().enumerate() {
+            assert_eq!(
+                view.media_file(&clip.file).unwrap().take,
+                Some(n as u32 + 1)
+            );
+        }
+        // A Short frames the first take's face from the start.
+        let timeline = view.timeline.as_ref().unwrap();
+        let face = timeline.video()[view
+            .clips
+            .iter()
+            .position(|c| c.performance.is_some())
+            .unwrap()]
+        .framing;
+        assert_eq!(
+            face,
+            Framing::Crop(bardo_domain::CropPosition::centered_on(
+                bardo_domain::PictureSize::new(1920, 1080),
+                AspectRatio::Vertical,
+                0.25,
+                0.4
+            ))
+        );
+        assert_ne!(face, Framing::FILL);
+        let second = &timeline.video()[view
+            .clips
+            .iter()
+            .position(|c| c.performance.is_some_and(|p| p.take == 2))
+            .unwrap()];
+        assert_eq!(second.framing, Framing::FILL, "no face known: centered");
+
+        // Turned off, a rough cut leaves them in the bin.
+        app.set_performed_in_rough_cut(&mut editor, false).unwrap();
+        assert!(!editor.view().performed_in_rough_cut);
+        assert!(performed_pieces(&editor).is_empty());
+        assert_eq!(editor.view().clips.len(), plan.scenes().len());
+        app.set_performed_in_rough_cut(&mut editor, true).unwrap();
+        assert_eq!(performed_pieces(&editor).len(), 3);
+    }
+
+    #[test]
+    fn a_performed_clip_goes_on_the_cut_is_covered_and_goes_back_in_sync() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan, clips) = three_takes(&h, &app);
+        let mut editor = app.open_editor(project.id).unwrap();
+        app.set_performed_in_rough_cut(&mut editor, false).unwrap();
+        settle(&app, &mut editor);
+        let at = |n: usize| frame_time(nearest_frame(plan.scenes()[n].start));
+        let frames = |n: u64| frame_time(n);
+        let covers = |n: usize| {
+            let scene = &plan.scenes()[n];
+            frame_time(frame_at(clips[n].duration))
+                .min(frame_time(nearest_frame(scene.end - scene.start)))
+        };
+
+        // Put on the cut: one undoable edit, selected.
+        app.edit(&mut editor, EditAction::PutOnCut { asset: clips[1].id })
+            .unwrap();
+        assert_eq!(
+            performed_pieces(&editor),
+            [(2, at(1), covers(1), PerformedSync::InSync)]
+        );
+        let selected = editor.selected_clip().unwrap();
+        assert!(editor.view().clips[selected].performance.is_some());
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert!(performed_pieces(&editor).is_empty());
+        app.edit(&mut editor, EditAction::Redo).unwrap();
+
+        // A scene over two frames of its middle; the rest plays on in sync.
+        let before = editor.view().timeline.clone();
+        let piece = editor
+            .view()
+            .clips
+            .iter()
+            .position(|clip| clip.performance.is_some())
+            .unwrap();
+        editor.seek(Duration::ZERO);
+        let elsewhere = EditAction::Cover {
+            index: piece,
+            scene: 0,
+            length: frames(2),
+            reach: Duration::ZERO,
+        };
+        assert!(
+            app.edit(&mut editor, elsewhere).is_err(),
+            "the playhead is not over the clip"
+        );
+        editor.seek(at(1) + frames(2));
+        let scene = editor.view().scene_under(editor.playhead()).unwrap();
+        assert_eq!(scene, 1, "the take's own scene");
+        app.edit(
+            &mut editor,
+            EditAction::Cover {
+                index: piece,
+                scene: 0,
+                length: frames(2),
+                reach: Duration::ZERO,
+            },
+        )
+        .unwrap();
+        let pieces = performed_pieces(&editor);
+        assert_eq!(pieces.len(), 2, "{pieces:?}");
+        assert!(pieces.iter().all(|piece| piece.3 == PerformedSync::InSync));
+        let covered = editor.selected_clip().unwrap();
+        assert_eq!(editor.view().clips[covered].shows, ClipShows::Scene(0));
+        assert_eq!(editor.view().clips[covered].duration, frames(2));
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert_eq!(editor.view().timeline, before, "the take back whole");
+
+        // The third take, then the second scene's picture goes: the take
+        // plays early, and goes back by lengthening the scene before it.
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        app.edit(&mut editor, EditAction::PutOnCut { asset: clips[2].id })
+            .unwrap();
+        editor.select(Some(ItemRef::video(1)));
+        app.edit(&mut editor, EditAction::DeleteSelection).unwrap();
+        let (index, clip) = editor
+            .view()
+            .clips
+            .iter()
+            .enumerate()
+            .find(|(_, clip)| clip.performance.is_some())
+            .unwrap();
+        let performance = clip.performance.unwrap();
+        assert_eq!(
+            performance.sync,
+            PerformedSync::Off(Shift::between(at(2), at(1)))
+        );
+        assert!(performance.can_sync);
+        app.edit(&mut editor, EditAction::PutBackInSync { index })
+            .unwrap();
+        assert_eq!(performed_pieces(&editor)[0].3, PerformedSync::InSync);
+        assert_eq!(editor.view().clips[index].at, at(2));
+    }
+
+    #[test]
+    fn a_performed_clip_of_another_narration_is_plain_footage() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan) = h.drawn_project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let scene = &plan.scenes()[0];
+        let clip = performed_clip(
+            &h,
+            &app,
+            project.id,
+            &dir,
+            "old.mp4",
+            0,
+            (scene.start, scene.end),
+            scene.end - scene.start,
+            None,
+        );
+        // A new narration of the project leaves it behind.
+        let mut narration = h.db.narration(project.id).unwrap().unwrap();
+        narration.id = bardo_domain::NarrationId::new();
+        h.db.save_narration(&narration).unwrap();
+        let mut editor = app.open_editor(project.id).unwrap();
+        assert!(!editor.view().has_performed);
+        assert_eq!(editor.view().media_file(&clip.file).unwrap().take, None);
+        assert!(performed_pieces(&editor).is_empty());
+        assert!(matches!(
+            app.edit(&mut editor, EditAction::PutOnCut { asset: clip.id }),
+            Err(EditorError::Edit(EditError::NotHeard))
+        ));
     }
 
     #[test]

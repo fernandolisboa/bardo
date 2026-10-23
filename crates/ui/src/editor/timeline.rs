@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use bardo_app::bardo_domain::{
     AudioItem, AudioLane, DUCK_RANGE, Decibels, DuckEnvelope, Ducking, Edge, ItemRef, LaneMix,
-    Track as Lane, timecode,
+    PerformedSync, Track as Lane, timecode,
 };
 use bardo_app::{
     ClipMedia, ClipView, Control, EditAction, Editor, EditorView, Side, Text, TourAnchor,
@@ -40,7 +40,7 @@ use gpui_kit::{
 
 use super::retention::RETENTION_ROW;
 use super::tokens::*;
-use super::{EditorScreen, clip_name, color, icon, label, tool_button};
+use super::{EditorScreen, clip_name, color, icon, label, sync_line, tool_button};
 use crate::appearance::EditorColor;
 use crate::shell::tr;
 use crate::tour::Anchored as _;
@@ -540,8 +540,7 @@ impl EditorScreen {
                         cx,
                     );
                 }))
-            })
-            .tour_anchor(TourAnchor::Control(Control::EditorDuck), Side::Above, None);
+            });
         let shown = self
             .editor
             .as_ref()
@@ -998,6 +997,11 @@ impl EditorScreen {
                     .opacity(0.85)
             });
         let name = clip_name(bardo, clip);
+        let off_sync = clip
+            .performance
+            .as_ref()
+            .filter(|performance| performance.sync != PerformedSync::InSync && state.is_none())
+            .map(|performance| sync_line(bardo, performance.sync));
         let element = div()
             .id(("clip", index))
             .absolute()
@@ -1035,6 +1039,13 @@ impl EditorScreen {
                             .gap_1()
                             .child(icon(state_icon, tint).size_3())
                             .child(label(tr(bardo, text), tint).text_size(px(11.)))
+                    }))
+                    // A performed clip off its narration says so.
+                    .children(off_sync.map(|(text, tint)| {
+                        h_flex()
+                            .gap_1()
+                            .child(icon(IconName::TriangleAlert, tint).size_3())
+                            .child(label(text, tint).text_size(px(11.)))
                     })),
             )
             .on_mouse_down(

@@ -2,8 +2,8 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     CaptureId, JobId, MediaAsset, MediaAssetId, MediaAssetRepository, MusicPrompt,
-    MusicPromptRepository, MusicTrack, MusicTrackRepository, MusicTracks, PerformedClip,
-    PictureSize, ProfileId, RepositoryError, VideoProjectId,
+    MusicPromptRepository, MusicTrack, MusicTrackRepository, MusicTracks, NarrationId,
+    PerformedClip, PictureSize, ProfileId, RepositoryError, TakeStretch, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
@@ -94,46 +94,36 @@ impl MediaAssetRepository for Database {
         &self,
         project: VideoProjectId,
     ) -> Result<Vec<PerformedClip>, RepositoryError> {
-        type Row = (String, String, i64, String, String, bool, i64);
         let conn = self.conn();
         let mut statement = conn
             .prepare(
                 "SELECT asset_id, capture_id, position, take_provider, take_model, realistic,
-                        used_at
+                        used_at, narration_id, take_start_ms, take_end_ms, face_x, face_y
                  FROM performed_clip WHERE project_id = ?1
                  ORDER BY used_at, rowid",
             )
             .map_err(boxed)?;
-        let rows: Vec<Row> = statement
+        let rows: Vec<PerformedRow> = statement
             .query_map([project.to_string()], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                ))
+                Ok(PerformedRow {
+                    asset: row.get(0)?,
+                    capture: row.get(1)?,
+                    position: row.get(2)?,
+                    provider: row.get(3)?,
+                    model: row.get(4)?,
+                    realistic: row.get(5)?,
+                    used_at: row.get(6)?,
+                    narration: row.get(7)?,
+                    start_ms: row.get(8)?,
+                    end_ms: row.get(9)?,
+                    face_x: row.get(10)?,
+                    face_y: row.get(11)?,
+                })
             })
             .map_err(boxed)?
             .collect::<Result<_, _>>()
             .map_err(boxed)?;
-        rows.into_iter()
-            .map(
-                |(asset, capture, position, provider, model, realistic, used_at)| {
-                    Ok(PerformedClip {
-                        asset: MediaAssetId::from(uuid(&asset)?),
-                        project,
-                        capture: CaptureId::from(uuid(&capture)?),
-                        position: u32::try_from(position).map_err(boxed)?,
-                        model: model_ref(&provider, &model)?,
-                        realistic,
-                        used_at: from_unix_millis(used_at),
-                    })
-                },
-            )
-            .collect()
+        rows.into_iter().map(|row| row.into_clip(project)).collect()
     }
 
     fn save_performed_clip(
@@ -141,13 +131,24 @@ impl MediaAssetRepository for Database {
         asset: &MediaAsset,
         clip: &PerformedClip,
     ) -> Result<(), RepositoryError> {
+        let millis = |time: Duration| i64::try_from(time.as_millis()).map_err(boxed);
+        let stretch = match &clip.stretch {
+            Some(stretch) => Some((
+                stretch.narration.to_string(),
+                millis(stretch.start)?,
+                millis(stretch.end)?,
+            )),
+            None => None,
+        };
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
         insert_asset(&tx, asset)?;
         tx.execute(
             "INSERT INTO performed_clip (asset_id, project_id, capture_id, position,
-                                         take_provider, take_model, realistic, used_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                         take_provider, take_model, realistic, used_at,
+                                         narration_id, take_start_ms, take_end_ms, face_x,
+                                         face_y)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 clip.asset.to_string(),
                 clip.project.to_string(),
@@ -157,10 +158,93 @@ impl MediaAssetRepository for Database {
                 clip.model.model(),
                 clip.realistic,
                 to_unix_millis(clip.used_at),
+                stretch.as_ref().map(|(narration, _, _)| narration.clone()),
+                stretch.as_ref().map(|(_, start, _)| *start),
+                stretch.as_ref().map(|(_, _, end)| *end),
+                clip.face.map(|(x, _)| i64::from(x)),
+                clip.face.map(|(_, y)| i64::from(y)),
             ],
         )
         .map_err(boxed)?;
         tx.commit().map_err(boxed)
+    }
+
+    fn performed_in_rough_cut(&self, project: VideoProjectId) -> Result<bool, RepositoryError> {
+        let on: Option<bool> = self
+            .conn()
+            .query_row(
+                "SELECT on_cut FROM performed_rough_cut WHERE project_id = ?1",
+                [project.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(on.unwrap_or(true))
+    }
+
+    fn set_performed_in_rough_cut(
+        &self,
+        project: VideoProjectId,
+        on: bool,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "INSERT INTO performed_rough_cut (project_id, on_cut) VALUES (?1, ?2)
+                 ON CONFLICT (project_id) DO UPDATE SET on_cut = excluded.on_cut",
+                params![project.to_string(), on],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+}
+
+/// A performed clip row as stored.
+struct PerformedRow {
+    asset: String,
+    capture: String,
+    position: i64,
+    provider: String,
+    model: String,
+    realistic: bool,
+    used_at: i64,
+    narration: Option<String>,
+    start_ms: Option<i64>,
+    end_ms: Option<i64>,
+    face_x: Option<i64>,
+    face_y: Option<i64>,
+}
+
+impl PerformedRow {
+    fn into_clip(self, project: VideoProjectId) -> Result<PerformedClip, RepositoryError> {
+        let millis = |value: i64| {
+            u64::try_from(value)
+                .map(Duration::from_millis)
+                .map_err(boxed)
+        };
+        let stretch = match (self.narration, self.start_ms, self.end_ms) {
+            (Some(narration), Some(start), Some(end)) => Some(TakeStretch {
+                narration: NarrationId::from(uuid(&narration)?),
+                start: millis(start)?,
+                end: millis(end)?,
+            }),
+            _ => None,
+        };
+        let thousandths = |value: i64| u16::try_from(value).map_err(boxed);
+        let face = match (self.face_x, self.face_y) {
+            (Some(x), Some(y)) => Some((thousandths(x)?, thousandths(y)?)),
+            _ => None,
+        };
+        Ok(PerformedClip {
+            asset: MediaAssetId::from(uuid(&self.asset)?),
+            project,
+            capture: CaptureId::from(uuid(&self.capture)?),
+            position: u32::try_from(self.position).map_err(boxed)?,
+            model: model_ref(&self.provider, &self.model)?,
+            realistic: self.realistic,
+            used_at: from_unix_millis(self.used_at),
+            stretch,
+            face,
+        })
     }
 }
 
@@ -561,6 +645,12 @@ mod tests {
             .unwrap(),
             realistic: true,
             used_at: time(3_000),
+            stretch: Some(TakeStretch {
+                narration: NarrationId::new(),
+                start: Duration::from_millis(4_250),
+                end: Duration::from_millis(12_000),
+            }),
+            face: Some((420, 380)),
         };
         db.save_performed_clip(&performed, &clip).unwrap();
         assert_eq!(db.media_assets(project.id).unwrap(), [performed.clone()]);
@@ -580,6 +670,42 @@ mod tests {
             )
             .unwrap();
         assert!(db.performed_clips(project.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_performed_clip_without_a_stretch_or_face_reads_back() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut performed = asset(&project, MediaKind::Video, "media-8.mp4", 2_000);
+        performed.source = AssetSource::Performed;
+        let clip = PerformedClip {
+            asset: performed.id,
+            project: project.id,
+            capture: CaptureId::new(),
+            position: 0,
+            model: bardo_domain::ClipModelRef::new(
+                Provider::Higgsfield,
+                "kling-video/v3/motion-control/pro",
+            )
+            .unwrap(),
+            realistic: false,
+            used_at: time(1_000),
+            stretch: None,
+            face: None,
+        };
+        db.save_performed_clip(&performed, &clip).unwrap();
+        assert_eq!(db.performed_clips(project.id).unwrap(), [clip]);
+    }
+
+    #[test]
+    fn a_project_puts_its_performed_clips_on_a_rough_cut_until_turned_off() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        assert!(db.performed_in_rough_cut(project.id).unwrap());
+        db.set_performed_in_rough_cut(project.id, false).unwrap();
+        assert!(!db.performed_in_rough_cut(project.id).unwrap());
+        db.set_performed_in_rough_cut(project.id, true).unwrap();
+        assert!(db.performed_in_rough_cut(project.id).unwrap());
     }
 
     #[test]
