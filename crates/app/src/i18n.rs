@@ -1315,7 +1315,9 @@ pub enum Text {
     LookEmpty,
     LookDrawnTag,
     LookImportedTag,
-    LookPromptLabel,
+    LookFromDescription,
+    LookRemovePhotoConfirm,
+    LookNotLoaded,
     LookDescription,
     LookDescriptionPlaceholder,
     LookDraw,
@@ -3502,7 +3504,9 @@ impl Text {
             Text::LookEmpty => "persona.look.empty",
             Text::LookDrawnTag => "persona.look.drawn_tag",
             Text::LookImportedTag => "persona.look.imported_tag",
-            Text::LookPromptLabel => "persona.look.prompt_label",
+            Text::LookFromDescription => "persona.look.from_description",
+            Text::LookRemovePhotoConfirm => "persona.look.remove_photo_confirm",
+            Text::LookNotLoaded => "persona.look.not_loaded",
             Text::LookDescription => "persona.look.description",
             Text::LookDescriptionPlaceholder => "persona.look.description_placeholder",
             Text::LookDraw => "persona.look.draw",
@@ -5689,7 +5693,9 @@ mod tests {
         texts.push(Text::LookEmpty);
         texts.push(Text::LookDrawnTag);
         texts.push(Text::LookImportedTag);
-        texts.push(Text::LookPromptLabel);
+        texts.push(Text::LookFromDescription);
+        texts.push(Text::LookRemovePhotoConfirm);
+        texts.push(Text::LookNotLoaded);
         texts.push(Text::LookDescription);
         texts.push(Text::LookDescriptionPlaceholder);
         texts.push(Text::LookDraw);

@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    ImageFormat, JobFailureKind, JobState, LookImageError, LookSource, PersonaId, PersonaLook,
+    ImageFormat, JobFailureKind, JobId, JobState, LookImageError, LookSource, PersonaId,
+    PersonaLook,
 };
 use bardo_app::{Bardo, BudgetConsent, LookError, LookView, SpendEstimate, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -67,7 +68,17 @@ pub struct LookSection {
     bardo: Entity<Bardo>,
     /// The persona being edited; `None` while creating one.
     persona: Option<PersonaId>,
+    /// The section's facts, without the pictures (kept in `look` and
+    /// `pending`, decoded once).
     view: Option<LookView>,
+    /// The section could not be read.
+    load_failed: bool,
+    /// The drawing job last seen, by id and state: the section reloads
+    /// when it moves, not on every other job's progress.
+    seen_job: Option<(JobId, JobState)>,
+    /// A finished job whose outcome the user moved past (kept, discarded,
+    /// imported or removed a look since): its line no longer shows.
+    dismissed: Option<JobId>,
     look: Option<Shown>,
     pending: Option<Shown>,
     description: Entity<TextareaState>,
@@ -115,6 +126,9 @@ impl LookSection {
             bardo,
             persona: None,
             view: None,
+            load_failed: false,
+            seen_job: None,
+            dismissed: None,
             look: None,
             pending: None,
             description,
@@ -180,7 +194,7 @@ impl LookSection {
             return;
         };
         match self.bardo.read(cx).persona_look(persona) {
-            Ok(view) => {
+            Ok(mut view) => {
                 // Decode a picture only when it changed.
                 let same = |shown: &Option<Shown>, look: &Option<PersonaLook>| match (shown, look) {
                     (Some(shown), Some(look)) => shown.look == *look,
@@ -193,24 +207,51 @@ impl LookSection {
                 if !same(&self.pending, &view.pending) {
                     self.pending = view.pending.clone().map(Shown::of);
                 }
+                // The pictures live in `look` and `pending`; the view is
+                // cloned on every render.
+                view.look = None;
+                view.pending = None;
+                self.seen_job = view.job.as_ref().map(|job| (job.id(), job.state()));
                 self.view = Some(view);
+                self.load_failed = false;
             }
-            Err(error) => {
+            Err(_) => {
                 self.view = None;
                 self.look = None;
                 self.pending = None;
-                self.notice = Some(Notice::Error(error.message(), None));
+                self.load_failed = true;
             }
         }
     }
 
+    /// Reloads when this persona's drawing job moved.
     fn poll(&mut self, cx: &mut Context<Self>) {
+        let Some(persona) = self.persona else {
+            return;
+        };
         let revision = self.bardo.read(cx).jobs_revision();
-        if revision != self.revision {
-            self.revision = revision;
+        if revision == self.revision {
+            return;
+        }
+        self.revision = revision;
+        let job = self
+            .bardo
+            .read(cx)
+            .persona_look_job(persona)
+            .map(|job| (job.id(), job.state()));
+        if job != self.seen_job {
             self.load(cx);
             cx.notify();
         }
+    }
+
+    /// The latest job's outcome no longer applies.
+    fn dismiss_job(&mut self) {
+        self.dismissed = self
+            .view
+            .as_ref()
+            .and_then(|view| view.job.as_ref())
+            .map(|job| job.id());
     }
 
     fn fail(&mut self, error: &LookError, cx: &mut Context<Self>) {
@@ -251,7 +292,10 @@ impl LookSection {
             return;
         };
         match self.bardo.read(cx).keep_drawn_look(persona) {
-            Ok(_) => self.notice = Some(Notice::Kept),
+            Ok(_) => {
+                self.dismiss_job();
+                self.notice = Some(Notice::Kept);
+            }
             Err(error) => self.fail(&error, cx),
         }
         self.load(cx);
@@ -263,8 +307,9 @@ impl LookSection {
             return;
         };
         self.notice = None;
-        if let Err(error) = self.bardo.read(cx).discard_drawn_look(persona) {
-            self.fail(&error, cx);
+        match self.bardo.read(cx).discard_drawn_look(persona) {
+            Ok(()) => self.dismiss_job(),
+            Err(error) => self.fail(&error, cx),
         }
         self.load(cx);
         cx.notify();
@@ -276,7 +321,10 @@ impl LookSection {
         };
         self.removing = false;
         match self.bardo.read(cx).remove_look(persona) {
-            Ok(()) => self.notice = Some(Notice::Removed),
+            Ok(()) => {
+                self.dismiss_job();
+                self.notice = Some(Notice::Removed);
+            }
             Err(error) => self.fail(&error, cx),
         }
         self.load(cx);
@@ -317,6 +365,7 @@ impl LookSection {
                             match this.bardo.read(cx).import_look(persona, path, shows_me) {
                                 Ok(_) => {
                                     this.importing = None;
+                                    this.dismiss_job();
                                     this.notice = Some(Notice::Imported);
                                 }
                                 Err(error) => this.fail(&error, cx),
@@ -354,16 +403,19 @@ impl LookSection {
             .into_any_element()
     }
 
-    /// The prompt a look was drawn from, small under its tag.
+    /// The description a look was drawn from, small under its tag.
     fn drawn_from(bardo: &Bardo, look: &PersonaLook, cx: &App) -> Option<AnyElement> {
-        let drawing = look.drawing.as_ref()?;
+        let drawing = look
+            .drawing
+            .as_ref()
+            .filter(|d| !d.description.is_empty())?;
         Some(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
                 .child(SharedString::from(bardo.text_with(
-                    Text::LookPromptLabel,
-                    &[("prompt", &drawing.prompt)],
+                    Text::LookFromDescription,
+                    &[("description", &drawing.description)],
                 )))
                 .into_any_element(),
         )
@@ -391,6 +443,8 @@ impl LookSection {
                 Checkbox::new("persona-look-realistic")
                     .min_w_0()
                     .checked(look.realistic)
+                    // A photo of you is a real person.
+                    .disabled(look.source == LookSource::Imported)
                     .label(tr(bardo, Text::LookRealistic))
                     .on_click(
                         cx.listener(|this, checked: &bool, _, cx| this.set_realistic(*checked, cx)),
@@ -405,7 +459,13 @@ impl LookSection {
         let remove: AnyElement = if self.removing {
             v_flex()
                 .gap_2()
-                .child(div().text_sm().child(tr(bardo, Text::LookRemoveConfirm)))
+                .child(div().text_sm().child(tr(
+                    bardo,
+                    match look.source {
+                        LookSource::Drawn => Text::LookRemoveConfirm,
+                        LookSource::Imported => Text::LookRemovePhotoConfirm,
+                    },
+                )))
                 .child(
                     h_flex()
                         .flex_wrap()
@@ -527,6 +587,9 @@ impl LookSection {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let job = view.job.as_ref()?;
+        if self.dismissed == Some(job.id()) {
+            return None;
+        }
         let line = match job.state() {
             JobState::Queued | JobState::Running => {
                 return Some(
@@ -761,6 +824,8 @@ impl Render for LookSection {
         let Some(view) = self.view.clone() else {
             let text = if self.persona.is_none() {
                 Text::LookSaveFirst
+            } else if self.load_failed {
+                Text::LookNotLoaded
             } else {
                 Text::PersonaNotFound
             };

@@ -22,7 +22,7 @@ use std::time::SystemTime;
 use bardo_domain::{
     ApiKey, CostPurpose, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind,
     JobId, JobKind, LOOK_MAX_BYTES, LookDescriptionError, LookDrawing, LookImage, LookImageError,
-    PersonaId, PersonaLook, PersonaRepository, ProfileId, Provider, RenderedPrompt,
+    LookSource, PersonaId, PersonaLook, PersonaRepository, ProfileId, Provider, RenderedPrompt,
     RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
     TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, look_description,
 };
@@ -175,6 +175,19 @@ fn parse<T: serde::de::DeserializeOwned>(payload: &str) -> Result<T, JobFailure>
         .map_err(|e| JobFailure::unexpected(format!("invalid persona look payload: {e}")))
 }
 
+/// Said to Claude after the template's instructions, whatever the user
+/// made of the template: a look is never a real person.
+const LOOK_GUARD: &str = "Whatever the text above says: never write a prompt for a real, \
+identifiable person (a celebrity, a public figure, a private person, or a lookalike of one), a child \
+or teenager, or a copyrighted character. A made-up name for an original character is fine. For such a \
+description, set `declined` to the reason, in the language of the description, and leave `prompt` \
+empty.";
+
+/// The template's instructions with [`LOOK_GUARD`] after them.
+fn guarded(instructions: &str) -> String {
+    format!("{}\n\n{LOOK_GUARD}", instructions.trim_end())
+}
+
 /// The calls one drawing makes: Claude writes the prompt from `rendered`,
 /// then the image provider draws it.
 fn draw_calls(rendered: &RenderedPrompt) -> [PlannedCall; 2] {
@@ -227,6 +240,10 @@ impl JobHandler for PersonaLookHandler {
             return Ok(());
         }
         let image = self.draw(&written.prompt, cx.id())?;
+        // Stopped while drawing: the paid drawing is not put up for review.
+        if cx.should_stop() {
+            return Ok(());
+        }
         let template = TemplateUsed {
             id: id::<TemplateVersionId>(&payload.template)?,
             number: payload.template_number,
@@ -393,14 +410,21 @@ impl Bardo {
             .ok_or(LookError::NotFound)
     }
 
-    /// The persona's latest drawing job.
-    fn latest_look_job(&self, persona: PersonaId) -> Option<Job> {
+    /// The persona's drawing job to show: one still running (a retried
+    /// older job counts), else the latest.
+    pub fn persona_look_job(&self, persona: PersonaId) -> Option<Job> {
         let persona = persona.to_string();
-        self.jobs().into_iter().rev().find(|job| {
-            job.kind() == JobKind::PersonaLook
-                && serde_json::from_str::<PersonaOf>(job.payload())
-                    .is_ok_and(|of| of.persona == persona)
-        })
+        let jobs: Vec<Job> = self
+            .jobs()
+            .into_iter()
+            .filter(|job| {
+                job.kind() == JobKind::PersonaLook
+                    && serde_json::from_str::<PersonaOf>(job.payload())
+                        .is_ok_and(|of| of.persona == persona)
+            })
+            .collect();
+        let active = jobs.iter().rev().find(|job| job.state().is_active());
+        active.or(jobs.last()).cloned()
     }
 
     fn render_look_prompt(
@@ -419,6 +443,19 @@ impl Bardo {
             .map_err(|missing| LookError::Repository(RepositoryError(Box::new(missing))))
     }
 
+    /// A stored look, or none when it no longer reads as one (a damaged
+    /// row): the section then offers to draw or import a new one, which
+    /// replaces it.
+    fn stored_look(
+        &self,
+        look: Result<Option<PersonaLook>, RepositoryError>,
+    ) -> Option<PersonaLook> {
+        look.unwrap_or_else(|error| {
+            tracing::warn!(%error, "a stored persona look could not be read");
+            None
+        })
+    }
+
     /// The persona's Look section.
     pub fn persona_look(&self, persona: PersonaId) -> Result<LookView, LookError> {
         let found = self.look_persona(persona)?;
@@ -427,9 +464,9 @@ impl Bardo {
         let rendered = self.render_look_prompt(&found, "", &template)?;
         Ok(LookView {
             persona,
-            look: self.personas.look(persona)?,
-            pending: self.personas.pending_look(persona)?,
-            job: self.latest_look_job(persona),
+            look: self.stored_look(self.personas.look(persona)),
+            pending: self.stored_look(self.personas.pending_look(persona)),
+            job: self.persona_look_job(persona),
             estimate: self.estimate(&draw_calls(&rendered))?,
             template,
         })
@@ -449,7 +486,7 @@ impl Bardo {
         let found = self.look_persona(persona)?;
         let description = look_description(description).map_err(LookError::Description)?;
         if self
-            .latest_look_job(persona)
+            .persona_look_job(persona)
             .is_some_and(|job| job.state().is_active())
         {
             return Err(LookError::Busy);
@@ -460,7 +497,8 @@ impl Bardo {
             }
         }
         let template = self.current_template(TemplateKind::LookPrompt)?;
-        let rendered = self.render_look_prompt(&found, &description, &template)?;
+        let mut rendered = self.render_look_prompt(&found, &description, &template)?;
+        rendered.instructions = guarded(&rendered.instructions);
         if let Err(estimate) = self.check_budget(&draw_calls(&rendered), consent)? {
             return Err(LookError::OverBudget(estimate));
         }
@@ -514,10 +552,15 @@ impl Bardo {
             tracing::warn!(%error, "could not read a look photo");
             LookError::Unreadable(error.to_string())
         };
+        let file = std::fs::File::open(path).map_err(unreadable)?;
+        let size = file.metadata().map_err(unreadable)?.len();
+        if size > LOOK_MAX_BYTES {
+            return Err(LookError::Image(LookImageError::FileTooLarge(size)));
+        }
         let mut bytes = Vec::new();
-        std::fs::File::open(path)
-            .map_err(unreadable)?
-            // One byte past the limit tells "too large" from "at the limit".
+        file
+            // One byte past the limit tells "too large" from "at the limit",
+            // should the file grow meanwhile.
             .take(LOOK_MAX_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(unreadable)?;
@@ -535,14 +578,16 @@ impl Bardo {
     /// Removes the persona's look. A drawing waiting for review stays.
     pub fn remove_look(&self, persona: PersonaId) -> Result<(), LookError> {
         self.look_persona(persona)?;
-        if self.personas.look(persona)?.is_none() {
+        // A look that no longer reads is removed all the same.
+        if matches!(self.personas.look(persona), Ok(None)) {
             return Err(LookError::NoLook);
         }
         Ok(self.personas.remove_look(persona)?)
     }
 
-    /// Marks the persona's look realistic or not: realistic looks need the
-    /// networks' synthetic-content disclosure once they perform.
+    /// Marks the persona's drawn look realistic or not: realistic looks need
+    /// the networks' synthetic-content disclosure once they perform. A
+    /// photo of the user always is.
     pub fn set_look_realistic(
         &self,
         persona: PersonaId,
@@ -550,7 +595,8 @@ impl Bardo {
     ) -> Result<PersonaLook, LookError> {
         self.look_persona(persona)?;
         let mut look = self.personas.look(persona)?.ok_or(LookError::NoLook)?;
-        if look.realistic != realistic {
+        // A photo of the user is a real person: it stays realistic.
+        if look.realistic != realistic && look.source == LookSource::Drawn {
             look.realistic = realistic;
             self.personas.save_look(&look)?;
         }
@@ -630,6 +676,10 @@ mod tests {
         assert!(request.prompt.contains(DESCRIPTION), "{}", request.prompt);
         assert!(request.prompt.contains("Documentary Narrator"));
         assert!(request.instructions.contains("declined"));
+        assert!(
+            request.instructions.ends_with(LOOK_GUARD),
+            "the guard follows whatever the template says"
+        );
         assert!(matches!(request.format, TextFormat::Json { .. }));
         let drawn = h.images.requests.lock().unwrap().pop().unwrap();
         assert_eq!(drawn.shape, ImageShape::Portrait);
@@ -842,6 +892,36 @@ mod tests {
     }
 
     #[test]
+    fn a_retried_older_job_still_counts_as_drawing() {
+        let h = Harness::new();
+        let app = h.start();
+        let persona = narrator(&app);
+        *h.images.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "bad key",
+        ));
+        h.answer(answer("", "A keeper", false));
+        let failed = wait_done(
+            &app,
+            app.draw_look(persona, DESCRIPTION, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(failed.state(), JobState::Failed);
+        *h.images.failure.lock().unwrap() = None;
+        draw(&h, &app, persona);
+        *h.images.delay.lock().unwrap() = Duration::from_millis(300);
+        app.retry_job(failed.id()).unwrap();
+        let view = app.persona_look(persona).unwrap();
+        assert_eq!(view.job.as_ref().map(Job::id), Some(failed.id()));
+        assert!(view.is_drawing());
+        assert!(matches!(
+            app.draw_look(persona, DESCRIPTION, BudgetConsent::Ask),
+            Err(LookError::Busy)
+        ));
+        wait_done(&app, failed.id());
+    }
+
+    #[test]
     fn a_photo_of_the_user_becomes_the_look_once_confirmed() {
         let h = Harness::new();
         let app = h.start();
@@ -895,8 +975,8 @@ mod tests {
             app.import_look(persona, &path, true)
                 .unwrap_err()
                 .image_error(),
-            Some(LookImageError::FileTooLarge(LOOK_MAX_BYTES + 1)),
-            "only one byte past the limit is read"
+            Some(LookImageError::FileTooLarge(LOOK_MAX_BYTES + 5)),
+            "the file's own size"
         );
         let missing = app
             .import_look(persona, Path::new("/no/such/photo.png"), true)
@@ -921,6 +1001,13 @@ mod tests {
         assert!(app.persona_look(persona).unwrap().look.unwrap().realistic);
         app.remove_look(persona).unwrap();
         assert!(app.persona_look(persona).unwrap().look.is_none());
+
+        let (_dir, path) = photo(LOOK_IMAGE);
+        app.import_look(persona, &path, true).unwrap();
+        assert!(
+            app.set_look_realistic(persona, false).unwrap().realistic,
+            "a photo of the user stays realistic"
+        );
     }
 
     #[test]
@@ -938,7 +1025,9 @@ mod tests {
         let package = app.export_persona(persona).unwrap();
         assert!(package.contains("\"version\": 2"));
         let imported = app.import_persona(&package).unwrap();
-        let look = app.persona_look(imported.id).unwrap().look.unwrap();
+        let view = app.persona_look(imported.id).unwrap();
+        assert!(view.look.is_none(), "a packaged look waits for review");
+        let look = view.pending.unwrap();
         assert_eq!(look.image, drawn.image);
         assert_eq!(look.source, LookSource::Drawn);
         let drawing = look.drawing.unwrap();

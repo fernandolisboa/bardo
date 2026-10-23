@@ -31,7 +31,8 @@
 //! ```
 
 use bardo_domain::{
-    GenerationPresets, LookImage, PersonaDetails, PersonaDraft, PersonaLook, Provider, VoiceRef,
+    GenerationPresets, LookImage, MAX_LOOK_PROMPT, PersonaDetails, PersonaDraft, PersonaLook,
+    Provider, VoiceRef, look_description,
 };
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -206,10 +207,16 @@ pub fn decode(text: &str) -> Result<Package, PackageError> {
                 .decode(look.image.as_bytes())
                 .map_err(|_| PackageError::InvalidPersona)?;
             let image = LookImage::check(bytes).map_err(|_| PackageError::InvalidPersona)?;
+            let description =
+                look_description(&look.description).map_err(|_| PackageError::InvalidPersona)?;
+            let prompt = look.prompt.trim();
+            if prompt.is_empty() || prompt.chars().count() > MAX_LOOK_PROMPT {
+                return Err(PackageError::InvalidPersona);
+            }
             Some(PackagedLook {
                 image,
-                description: look.description,
-                prompt: look.prompt,
+                description,
+                prompt: prompt.to_owned(),
                 realistic: look.realistic,
             })
         }
@@ -388,6 +395,22 @@ mod tests {
                 decode(&json.to_string()),
                 Err(PackageError::InvalidPersona),
                 "{image}"
+            );
+        }
+        let words = [
+            ("description", "   ".to_owned()),
+            ("description", "x".repeat(1_001)),
+            ("prompt", String::new()),
+            ("prompt", "x".repeat(bardo_domain::MAX_LOOK_PROMPT + 1)),
+        ];
+        for (field, text) in words {
+            let mut json: serde_json::Value = serde_json::from_str(&package).unwrap();
+            json["persona"]["look"][field] = text.clone().into();
+            assert_eq!(
+                decode(&json.to_string()),
+                Err(PackageError::InvalidPersona),
+                "{field}: {} characters",
+                text.len()
             );
         }
         // A look in a version 1 package is not one this format has.

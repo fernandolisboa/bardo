@@ -241,8 +241,13 @@ impl Bardo {
         };
         self.personas.save(&copy)?;
         // Same look; a drawing waiting for review stays with the original.
-        if let Some(look) = self.personas.look(original.id)? {
-            self.personas.save_look(&look.for_persona(copy.id))?;
+        // The copy is made either way: copying again would make a second one.
+        let copied = self.personas.look(original.id).and_then(|look| match look {
+            Some(look) => self.personas.save_look(&look.for_persona(copy.id)),
+            None => Ok(()),
+        });
+        if let Err(error) = copied {
+            tracing::warn!(%error, "could not copy a persona's look");
         }
         Ok(copy)
     }
@@ -252,7 +257,10 @@ impl Bardo {
     /// reference and its look when that is a drawing.
     pub fn export_persona(&self, id: PersonaId) -> Result<String, PersonaError> {
         let persona = self.own_persona(id)?;
-        let look = self.personas.look(id)?;
+        let look = self.personas.look(id).unwrap_or_else(|error| {
+            tracing::warn!(%error, "exporting a persona without its unreadable look");
+            None
+        });
         Ok(persona_package::encode(&persona.details, look.as_ref()))
     }
 
@@ -276,7 +284,9 @@ impl Bardo {
         })?;
         let photo_left_out = self
             .personas
-            .look(id)?
+            .look(id)
+            .ok()
+            .flatten()
             .is_some_and(|look| !look.is_shareable());
         tracing::info!(photo_left_out, "exported a persona package");
         Ok(PersonaExport { photo_left_out })
@@ -310,6 +320,8 @@ impl Bardo {
             ..Persona::new(self.profile.id, details)
         };
         self.personas.save(&persona)?;
+        // A packaged look waits for review like any drawing: the file may
+        // have been made or edited anywhere.
         if let Some(look) = look {
             let drawing = LookDrawing {
                 description: look.description,
@@ -323,7 +335,10 @@ impl Bardo {
                 look.realistic,
                 crate::publications::whole_millis(SystemTime::now()),
             );
-            self.personas.save_look(&look)?;
+            if let Err(error) = self.personas.save_pending_look(&look) {
+                // The persona is in; importing again would make a second one.
+                tracing::warn!(%error, "could not keep an imported persona's look");
+            }
         }
         tracing::info!(flag = ?persona.voice_flag, "imported a persona package");
         Ok(persona)

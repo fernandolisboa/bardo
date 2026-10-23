@@ -230,7 +230,7 @@ pub use persona::{
 pub use persona_look::{
     LOOK_MAX_BYTES, LOOK_MAX_RATIO_TENTHS, LOOK_MAX_SIDE, LOOK_MIN_RATIO_TENTHS, LOOK_MIN_SIDE,
     LookDescriptionError, LookDrawing, LookImage, LookImageError, LookSource, MAX_LOOK_DESCRIPTION,
-    PersonaLook, UnknownLookSource, look_description,
+    MAX_LOOK_PROMPT, PersonaLook, UnknownLookSource, look_description,
 };
 pub use post_insights::{
     Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,

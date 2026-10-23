@@ -22,6 +22,8 @@ pub const LOOK_MAX_RATIO_TENTHS: u32 = 25;
 pub const LOOK_MAX_BYTES: u64 = 10_000_000;
 /// The longest description a look is drawn from, in characters.
 pub const MAX_LOOK_DESCRIPTION: usize = 1_000;
+/// The longest image prompt a look keeps, in characters.
+pub const MAX_LOOK_PROMPT: usize = 4_000;
 
 /// Why an image cannot be a look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
