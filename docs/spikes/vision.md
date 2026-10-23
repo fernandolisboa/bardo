@@ -11,7 +11,7 @@ No app code. `spikes/vision-probe/` is a standalone crate with its own workspace
 | Piece | What it does |
 | --- | --- |
 | `vision-probe info` | Loads every model on the CPU or DirectML and prints inputs, outputs and where it runs |
-| `vision-probe face` | MediaPipe Face Landmarker rebuilt in Rust: BlazeFace short range (SSD anchors, weighted NMS), rotated crop, 478-point mesh, tracking from the last frame's landmarks, 52 blendshapes. Writes `face_landmarks.json` in the spec's format and a video with the mesh drawn over the face |
+| `vision-probe face` | MediaPipe Face Landmarker rebuilt in Rust: BlazeFace short range (SSD anchors, weighted NMS), rotated crop, 478-point mesh, tracking from the last frame's landmarks, 52 blendshapes. Writes `face_landmarks.json` in the spec's layout (without the model hashes the spec adds) and a video with the mesh drawn over the face |
 | `vision-probe mask` | Selfie multiclass segmenter; overlap between consecutive masks and a video with the classes colored |
 | `vision-probe depth` | Depth Anything V2 Small per frame (`v2`), the same smoothed over time (`v2-ema`), or Video Depth Anything Small in 32-frame windows (`video`, its window alignment ported from upstream); flicker on the background and a depth-figure video |
 | `vision-probe bench` | Face, mask and both depth models on one take, as JSON |
@@ -19,9 +19,10 @@ No app code. `spikes/vision-probe/` is a standalone crate with its own workspace
 | `tools/takes.py` | Fetches the two test recordings by SHA-256 and cuts the takes |
 | `tools/gen_edges.py` | Writes the mesh's triangles, contours and irises from MediaPipe's own lists |
 | `tools/compare_face.py` | Runs MediaPipe's own Face Landmarker on the same video and compares |
+| `tools/compare_mask.py` | Runs MediaPipe's own Image Segmenter on frames of a video and compares, with the frame stretched and letterboxed |
 | `models.toml` | The draft models manifest |
 
-Run it: `python tools/convert.py models`, `python tools/takes.py takes`, then `cargo run --release -- bench --models models --video takes/take-head-30s.mp4` from `spikes/vision-probe` (the pinned ffmpeg comes from `cargo xtask fetch-ffmpeg`).
+Run it: `python tools/convert.py models`, `python tools/takes.py takes ../../.ffmpeg/bin/ffmpeg` (it encodes with libopenh264, which the pinned ffmpeg has), then `cargo run --release -- bench --models models --video takes/take-head-30s.mp4` from `spikes/vision-probe` (the pinned ffmpeg comes from `cargo xtask fetch-ffmpeg`).
 
 ## Test takes
 
@@ -41,7 +42,7 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
 
 ## Runtime
 
-- **`ort =2.0.0-rc.12`** with ONNX Runtime **1.24.2**, linked statically from pyke's builds (`download-binaries`); no `onnxruntime.so` on Linux. Release binary with everything: 32.6 MB on Linux. Windows files are in the CI table below.
+- **`ort =2.0.0-rc.12`** with ONNX Runtime **1.24.2**, linked statically from pyke's builds (`download-binaries`); no `onnxruntime.so` on Linux. Release binary with everything: 32.6 MB on Linux. The Windows files are under "Speed of a whole take".
 - **No `unsafe`** in the probe: sessions, tensors from slices (`TensorRef::from_array_view((shape, &data))`) and outputs (`try_extract_tensor`) are all safe API.
 - **DirectML**: registered per session with `error_on_failure`; a session whose DirectML start fails is rebuilt on the CPU and says why, so a missing or broken graphics driver never stops analysis. DirectML also needs memory patterns off and sequential execution.
 - **Threads**: the face models are small and run faster on one thread (20.6 ms a frame) than on four (28 ms), from the cost of handing tiny operators between threads. The depth models want all cores.
@@ -51,7 +52,7 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
 
 - **MediaPipe** (`face_landmarker.task` float16 v1: three TFLite files; selfie multiclass float32 v1) through **tf2onnx 1.17**, opset 17. On random input every converted model matches TFLite within 7·10⁻⁴ (landmarks, in pixels of a 256 input) or 10⁻⁴ (the rest).
   - The segmenter's nearest-neighbour upsampling comes out as `Resize` with `tf_half_pixel_for_nn`, deprecated since opset 13 (ONNX Runtime warns). For its 2× upscales that is the same as `asymmetric` with `floor`; `convert.py` rewrites the three nodes and the result still matches TFLite.
-  - The landmark model's output is pixel coordinates in its 256×256 input; presence and the detector's scores are logits (sigmoid); the segmenter's output is logits (softmax). Inputs: detector −1..1, landmarks 0..1, segmenter −1..1 with the frame stretched to 256×256 (letterboxing it made the mask worse against MediaPipe's own: IoU 0.87 against 0.97).
+  - The landmark model's output is pixel coordinates in its 256×256 input; presence and the detector's scores are logits (sigmoid); the segmenter's output is logits (softmax). Inputs: detector −1..1, landmarks 0..1, segmenter −1..1 with the frame stretched to 256×256 (letterboxing it made the mask worse against MediaPipe's own: person IoU 0.90 against 0.96 on the gestures take, `compare_mask.py`).
 - **Depth** checkpoints into their upstream code at a pinned commit, exported with `torch.onnx` (TorchScript exporter), opset 17, fixed input size. The export matches PyTorch within 3·10⁻⁶ of the output range.
   - Video Depth Anything's attention starts from `torch.baddbmm` over an uninitialised tensor with `beta=0`; traced, that tensor became 300 MB of constant zeros (a 411 MB file). `convert.py` swaps in a plain matmul before export: 116 MB, same output.
   - Export needs `torch.no_grad()`: without it tracing Video Depth Anything ran out of 15 GB of memory.
@@ -70,7 +71,7 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
 ## Face mesh
 
 - **Matches MediaPipe.** On the 900 frames of the head take, against MediaPipe's own Face Landmarker (Python task, video mode, same `.task`): both find the face in every frame; landmarks differ by 1.8 px on average (95th percentile 3.5 px, worst 9.2 px) on a face 357 px tall; blendshapes by 0.009 on average. MediaPipe's video mode smooths landmarks over time (a one-euro filter) and the probe does not, which accounts for most of the gap.
-- **Small faces.** On the gestures take (face 13 % of the frame's height) neither MediaPipe nor the probe finds a face in any of 454 frames: in the whole frame letterboxed to 128×72, the face is 7 pixels tall, under what BlazeFace short range sees. The probe then searches a square three times the size of the person mask's face-skin pixels: the face is found in every frame (figure 2), and the search ran once (the landmarks track it after that).
+- **Small faces.** On the gestures take (face 13 % of the frame's height) neither MediaPipe nor the probe finds a face in any of 454 frames: in the whole frame letterboxed to 128×72, the face is about 9 pixels tall, under what BlazeFace short range sees. The probe then searches a square three times the size of the person mask's face-skin pixels: the face is found in every frame (figure 2), and the search ran once (the landmarks track it after that).
 - **More than one face.** The detector runs on every frame (2.4 ms) to count faces, as the "one person only" check needs. With a small face it sees none, even while the landmarks track one, so the check must count in the head search's region or in each person-mask region too, not in the whole frame alone.
 - **Edges.** MediaPipe's tessellation is 852 triangles (2,556 edges, each triangle's three in order), plus 124 contour edges and 4 per iris. The mesh covers the face from the brows down; **the eyes and mouth are holes** in it, so drawing the triangles filled still shows the performer's eyes and teeth (figure 1). The forehead above the brows and the hairline are outside it too.
 - **`face_landmarks.json`** at five decimals is 12.5 MB for a 30 s take. Fine on disk; compress it or store it in binary if takes multiply.
@@ -79,12 +80,12 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
 
 - Hair (curly, loose), hands in front of the body and arms all come out right; figure 3 colors them by class (hair, body skin, face skin, clothes). The edges follow the 256×256 grid (about 4 px of a 1080p frame).
 - From frame to frame the person's pixels overlap by 0.991 on average on the gestures take (worst 0.839, one pair under 0.9 in 453) and 0.995 on the head take (worst 0.953, none under 0.9).
-- Against MediaPipe's own segmenter on the same frame, the person pixels overlap by 0.97.
+- Against MediaPipe's own segmenter (`compare_mask.py`, ten frames a take), the person pixels overlap by 0.99 on the head take and 0.96 on the gestures take, where the difference is at the hair's edge.
 - **No SAM-class segmenter.** For one performer near the camera this is enough; the spec's rule stands (only if reviews show masks failing). The fast-gesture take on #51 is the check.
 
 ## Depth
 
-All at 280×504 unless noted, on the 4-core container. "Flicker" is the mean change from one frame to the next of the depth mapped to 0..1 (between its 2nd and 98th percentiles), on background pixels (outside the person mask) where nothing moves. "Person" is the same on the person, who does move.
+All at 280×504 unless noted, on the 4-core container. "Flicker" is the mean change from one frame to the next of the depth mapped to 0..1 (between its 2nd and 98th percentiles), on background pixels (outside the person mask) where nothing moves. "Person" is the same on the person, who does move. Peak memory is the process's peak resident memory (`/usr/bin/time -v`) for the whole run.
 
 | Model | ms a frame | 30 s take | Flicker, head | Flicker, gestures | Person, head | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -93,10 +94,11 @@ All at 280×504 unless noted, on the 4-core container. "Flicker" is the mean cha
 | **Video Depth Anything Small** | 364 | 5.5 min | **0.0009** | **0.0012** | 0.0027 | 4.4 GB |
 | V2 Small at 518×924 (150 frames) | 1,100 | 16.5 min | 0.0031 | — | 0.0047 | — |
 
-- Video Depth Anything flickers five times less than V2 per frame and three times less than V2 smoothed, for 1.3× the time. Smoothing V2 trades flicker for lag: it also damps the person's real motion (0.0035 against 0.0055).
+- Video Depth Anything flickers five times less than V2 per frame and three times less than V2 smoothed, for 1.3× the time. Smoothing lowers the change on the person by as much as on the background (0.0020 against 0.0021), so what it removes there is flicker too; how far it lags on fast moves is not measured.
 - Its cost: 32 frames go through the model at once, and the DPT head's full-size features for all 32 take 4.4 GB of memory on the CPU. At its native 518 lines it did not even export in 15 GB. So 280 lines.
-- Each window's first ten frames repeat ten from the window before (frame 0, frame 12 and the last eight), so 22 new frames a window; the output is aligned by a scale and shift fitted on two shared key frames and blended over eight frames. A frame's depth is final eight frames later.
-- 518 lines makes V2 four times slower for less flicker than smoothing at 280 gives, and still three times the flicker of Video Depth Anything at 280. The control video's depth figure is a silhouette with shading for the model to follow in build and outline; 280 lines is plenty for that.
+- Each window's first ten frames repeat ten from the window before (frame 0, frame 12 and the last eight), so 22 new frames a window; the output is aligned by a scale and shift fitted on two shared key frames and blended over eight frames. A frame's depth is final once the next window has run, 22 to 29 frames later.
+- The flicker figures are means over all frames, so a seam where windows join (every 22 frames) would barely move them; the depth-figure videos show none, but #190 should check the frame-to-frame change at the joins.
+- 518 lines makes V2 four times slower, and its flicker (0.0031, over its first 150 frames only, so not strictly comparable) is no lower than V2 smoothed at 280 (0.0028) and three times Video Depth Anything's at 280. The control video's depth figure is a silhouette with shading for the model to follow in build and outline; 280 lines is plenty for that.
 - **The figure needs its own normalization.** Colored by the whole frame's range, the person is nearly one color (the background takes most of the range; figure 4). The Depth control video should map depth to colors within the person mask.
 
 ## Speed of a whole take

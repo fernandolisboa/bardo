@@ -24,6 +24,10 @@ jobs:
     name: Convert models and cut takes
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        # bash with pipefail, so `convert.py | tee` fails when the check does.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,7 +42,7 @@ jobs:
       - name: Convert the models
         run: |
           mkdir -p models
-          python spikes/vision-probe/tools/convert.py models | tee models/convert.log
+          python spikes/vision-probe/tools/convert.py models --depth-size 280x504 --depth-size 504x280 | tee models/convert.log
       - name: Check the generated mesh edges match MediaPipe
         run: |
           python spikes/vision-probe/tools/gen_edges.py edges.rs
@@ -115,6 +119,7 @@ jobs:
           cp .ffmpeg/bin/* kit/
           cp models/*.onnx kit/models/
           cp takes/take-*.mp4 kit/takes/
+          ls -l kit kit/models
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:

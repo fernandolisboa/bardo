@@ -50,8 +50,10 @@ repo = "https://github.com/DepthAnything/Video-Depth-Anything.git"
 commit = "4f5ae23172ba60fd7bc11ef671cca678842c7072"
 license = "Apache-2.0"
 
-# Files convert.py writes (default sizes), with their SHA-256 from the run
-# recorded in docs/spikes/vision.md. Filled for the mirror release.
+# Files convert.py writes (`--depth-size 280x504 --depth-size 504x280`).
+# Their SHA-256 are those of the mirrored files, filled when the mirror
+# release is made: tf2onnx's output differs from run to run, so a
+# re-conversion is checked against TFLite, not by hash.
 [[onnx]]
 file = "face_detector.onnx"
 from = "face_landmarker"
@@ -74,4 +76,12 @@ from = "depth_anything_v2_small"
 
 [[onnx]]
 file = "video_depth_anything_small_32x280x504.onnx"
+from = "video_depth_anything_small"
+
+[[onnx]]
+file = "depth_anything_v2_small_504x280.onnx"
+from = "depth_anything_v2_small"
+
+[[onnx]]
+file = "video_depth_anything_small_32x504x280.onnx"
 from = "video_depth_anything_small"

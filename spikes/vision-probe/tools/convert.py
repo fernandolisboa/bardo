@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import io
 import pathlib
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -35,17 +36,16 @@ def fetch(entry, cache):
     """The bytes of a manifest entry's download, from the cache when there."""
     url, want = entry["url"], entry["sha256"]
     path = cache / want
-    if path.exists():
-        data = path.read_bytes()
-    else:
-        print(f"downloading {url}", flush=True)
-        req = urllib.request.Request(url, headers={"User-Agent": "bardo-vision-probe"})
-        with urllib.request.urlopen(req) as r:
-            data = r.read()
-        path.write_bytes(data)
+    if path.exists() and sha256(data := path.read_bytes()) == want:
+        return data
+    print(f"downloading {url}", flush=True)
+    req = urllib.request.Request(url, headers={"User-Agent": "bardo-vision-probe"})
+    with urllib.request.urlopen(req) as r:
+        data = r.read()
     got = sha256(data)
     if got != want:
         sys.exit(f"{url}: SHA-256 {got}, expected {want}")
+    path.write_bytes(data)
     return data
 
 
@@ -103,7 +103,10 @@ def checkout(entry, dest):
     """The upstream model code at a pinned commit; the commit id pins the
     content, as a SHA-256 does for a download."""
     path = dest / entry["commit"]
-    if not path.exists():
+    head = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True) if path.exists() else None
+    if head is None or head.stdout.strip() != entry["commit"]:
+        if path.exists():
+            shutil.rmtree(path)
         print(f"cloning {entry['repo']} at {entry['commit']}", flush=True)
         subprocess.run(["git", "clone", "--quiet", "--filter=blob:none", "--no-checkout", entry["repo"], str(path)], check=True)
         subprocess.run(["git", "-C", str(path), "checkout", "--quiet", entry["commit"]], check=True)

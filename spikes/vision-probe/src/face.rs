@@ -399,7 +399,7 @@ impl FaceTracker {
             h: d.bbox[3],
             rotation: rotation(d.keypoints[0], d.keypoints[1], width, height),
         };
-        transform(r, 1.5, false, width, height)
+        transform(r, 1.5, true, width, height)
     }
 
     fn rect_from_landmarks(lm: &[[f32; 3]], width: usize, height: usize) -> Rect {
@@ -428,7 +428,8 @@ impl FaceTracker {
     /// The face in this frame (tracked from the last one when possible) and
     /// how many faces the detector saw (when it ran). `head` is called for a
     /// region to search when the whole frame shows no face and none is
-    /// tracked (the person mask's face and hair, for a small face).
+    /// tracked or the track was just lost (the person mask's face and hair,
+    /// for a small face).
     pub fn process(
         &mut self,
         frame: &Frame,
@@ -459,6 +460,13 @@ impl FaceTracker {
             self.track = None;
             if faces_seen.is_none() {
                 detections = self.detect(frame)?;
+                faces_seen = Some(detections.len());
+            }
+            if detections.is_empty()
+                && let Some(region) = head(frame)?
+            {
+                detections = self.detect_in(frame, &region)?;
+                self.times.head_searches += 1;
                 faces_seen = Some(detections.len());
             }
             if let Some(d) = detections.first() {

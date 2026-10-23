@@ -32,19 +32,30 @@ SOURCES = {
 ENCODE = ["-c:v", "libopenh264", "-b:v", "12M", "-an"]
 
 
-def fetch(url, sha, dest):
-    if not dest.exists():
-        print(f"downloading {url}", flush=True)
-        req = urllib.request.Request(url, headers={"User-Agent": "bardo-vision-probe"})
-        with urllib.request.urlopen(req) as r, open(dest, "wb") as f:
-            while chunk := r.read(1 << 20):
-                f.write(chunk)
+def file_sha256(path):
     h = hashlib.sha256()
-    with open(dest, "rb") as f:
+    with open(path, "rb") as f:
         while chunk := f.read(1 << 20):
             h.update(chunk)
-    if h.hexdigest() != sha:
-        sys.exit(f"{url}: SHA-256 {h.hexdigest()}, expected {sha}")
+    return h.hexdigest()
+
+
+def fetch(url, sha, dest):
+    """Downloads next to `dest` and keeps the file only when its SHA-256
+    matches, so a broken download never stays behind."""
+    if dest.exists() and file_sha256(dest) == sha:
+        return
+    part = dest.with_name(dest.name + ".part")
+    print(f"downloading {url}", flush=True)
+    req = urllib.request.Request(url, headers={"User-Agent": "bardo-vision-probe"})
+    with urllib.request.urlopen(req) as r, open(part, "wb") as f:
+        while chunk := r.read(1 << 20):
+            f.write(chunk)
+    got = file_sha256(part)
+    if got != sha:
+        part.unlink()
+        sys.exit(f"{url}: SHA-256 {got}, expected {sha}")
+    part.replace(dest)
 
 
 def main(out, ffmpeg="ffmpeg"):
