@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use super::captions::{CaptionFiles, CaptionTrack, escape_graph, escape_option, path_option};
 use super::frames::{FrameSize, FrameStream};
 use super::process::{self, Span};
-use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, seconds};
+use super::{
+    Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, remove_partial, seconds,
+};
 use crate::PcmStream;
 use bardo_domain::TransitionKind;
 
@@ -943,7 +945,7 @@ impl Ffmpeg {
                 Ok(())
             }
             Err(error) => {
-                let _ = std::fs::remove_file(&partial);
+                remove_partial(&partial);
                 Err(error)
             }
         }
