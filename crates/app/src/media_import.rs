@@ -226,6 +226,7 @@ mod tests {
                 transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
                 voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
                 voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
+                vision: Arc::new(crate::take_analysis::testing::FakeVision::default()),
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],

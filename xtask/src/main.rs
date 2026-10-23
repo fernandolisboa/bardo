@@ -6,6 +6,9 @@
 //! `cargo xtask fetch-ffmpeg`: downloads the pinned ffmpeg build into
 //! `.ffmpeg/bin` (ADR-0007).
 //!
+//! `cargo xtask fetch-models`: downloads the pinned vision models into
+//! `.models` (ADR-0024).
+//!
 //! `cargo xtask package`: stages Bardo as installed and builds the Windows
 //! installer (issue #135).
 //!
@@ -14,6 +17,7 @@
 
 mod deps;
 mod ffmpeg;
+mod models;
 mod package;
 
 use std::process::ExitCode;
@@ -22,6 +26,7 @@ use anyhow::Context as _;
 use cargo_metadata::{CargoOpt, MetadataCommand};
 
 const USAGE: &str = "usage: cargo xtask <lint-deps | fetch-ffmpeg [--archive <path>] | \
+                     fetch-models [--dir <path>] | \
                      package [--no-build] [--no-installer] [--tag <vX.Y.Z>] | \
                      mirror-ffmpeg <dir>>";
 
@@ -43,6 +48,18 @@ fn main() -> anyhow::Result<ExitCode> {
                 return Ok(ExitCode::FAILURE);
             };
             ffmpeg::mirror(workspace, std::path::Path::new(&dir))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some("fetch-models") => {
+            let dir = match (std::env::args().nth(2).as_deref(), std::env::args().nth(3)) {
+                (Some("--dir"), Some(path)) => Some(path.into()),
+                (None, _) => None,
+                _ => {
+                    eprintln!("usage: cargo xtask fetch-models [--dir <path>]");
+                    return Ok(ExitCode::FAILURE);
+                }
+            };
+            models::fetch(workspace, dir)?;
             Ok(ExitCode::SUCCESS)
         }
         Some("fetch-ffmpeg") => {

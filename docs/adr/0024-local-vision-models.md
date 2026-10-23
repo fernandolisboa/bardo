@@ -23,7 +23,7 @@ Performance capture (#186) analyses each take on the computer: a face mesh for M
 ## Consequences
 
 - Mesh mode costs 12 to 20 s per 30 s take on a 4-core CPU and Depth mode 4.5 to 11 min: analysis is a job with progress, cancel and resume, as the spec planned. The reference machine's GPU numbers are checked on #51.
-- The installer grows by about 455 MB for a module not every user opens (each orientation's two depth files are 215 MB); fp16 depth weights would bring it to about 240 MB and are worth trying in #190. Bundling keeps Bardo working offline.
+- The installer grows by about 455 MB for a module not every user opens (each orientation's two depth files are 215 MB); fp16 depth weights would bring it to about 240 MB and are worth trying in #190. #190 ships float16 weights for every model: the bundle is about 228 MB, mirrored as `vision-models-1`. ONNX Runtime is linked into `bardo.exe`; only `DirectML.dll` ships beside it. Bundling keeps Bardo working offline.
 - A new model or version is a new conversion, a new mirror release and a manifest change. tf2onnx's output is not byte-for-byte reproducible, so the mirrored files, not a re-conversion, are the pinned artifact.
 - MediaPipe's mesh leaves the eyes and mouth open and stops at the brows: the Mesh control video (#191) must cover those too before it can promise that no frame shows the performer's face.
 - Depth Anything V2 Base/Large and Video Depth Anything Base/Large (CC-BY-NC) stay out, and so does Video Depth Anything at its native 518 lines (it does not fit in memory on a CPU).

@@ -283,6 +283,7 @@ thumbnail_image = "Thumbnail background"
 chapters = "Chapters"
 localization = "Version in another language"
 persona_look = "Persona look"
+take_analysis = "Take analysis"
 
 [job.state]
 queued = "Queued"
@@ -308,6 +309,7 @@ cut_short = "Bardo closed before it finished. Start it again."
 restored = "This was under way when the backup was made, so Bardo didn't resume it after the restore. Check the network: if the post isn't there, retry."
 checksum = "The installer doesn't match the checksum its release publishes, so Bardo didn't keep it. Try again; if it happens again, report it."
 off_script = "The recording does not follow the script closely enough. Record it again reading the current script, then import it."
+vision_models = "The face, depth and mask models are missing, damaged or would not run. Reinstall Bardo to put them back, then retry."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -634,7 +636,43 @@ remove_hint = "Removes the recording and its takes from the project. The narrati
 remove_confirm = "Remove the recording and its takes? The narration stays; getting the takes back means importing the recording again."
 remove_keep = "Keep it"
 take_flagged = "To fix"
+take_blocked = "Cannot go on"
+mode_label = "Mode"
+mode_hint = "What the take model receives for this take: the recording as it is, your face covered by its drawn mesh, or you as a depth figure over the set. Depth also analyzes the depth and the person mask."
 voice_persona_none = "The persona's voice"
+
+[capture.mode]
+recording = "Recording"
+mesh = "Mesh"
+depth = "Depth"
+
+[capture.analysis]
+hint = "Bardo analyzes each take on this computer, free: the face mesh of every take, and the depth and person mask of takes in Depth mode. Nothing leaves the computer."
+not_started = "{part}: not analyzed yet."
+queued = "{part}: waiting to run."
+running = "{part}: {percent}% {device}."
+running_left = "{part}: {percent}% {device}, about {left} left."
+done = "{part}: done {device}."
+cancelled = "{part}: stopped. Resume picks up where it stopped."
+failed = "{part}: did not finish."
+on_gpu = "on the graphics card"
+on_cpu = "on the processor"
+cpu_note = "No usable graphics card, so the processor runs the analysis. It takes longer, and it still works."
+redone = "The cut moved, so this take is analyzed again."
+analyze = "Analyze"
+resume = "Resume"
+
+[capture.analysis.part]
+face = "Face mesh"
+depth = "Depth and mask"
+
+[capture.check]
+no_face = "No face in {n} of {frames} frames."
+several_faces = "More than one face in {n} frames. Only you may be in the recording: record this take again alone."
+small_face = "The face is under 15% of the frame's height in {n} frames. Move closer to the camera."
+turned = "The head is turned more than 45° in {n} frames."
+mask_jumps = "The person mask jumps by more than 20% in {n} frames."
+passed = "Checks passed: one face, big enough, facing the camera."
 
 [capture.error]
 no_persona = "No persona voices this project: choose a narrator for it, or a default persona for its channel. Or use your own voice."
@@ -2504,6 +2542,14 @@ body = "The recording you imported, the voice its speech was given and the sente
 [tour.capture.takes]
 title = "The takes"
 body = "The recording is split into takes of 4 to 30 seconds at sentence ends and pauses. Each becomes one performed clip; a take that cannot be one says why."
+
+[tour.capture.mode]
+title = "Its mode"
+body = "Recording, Mesh or Depth: what the take model receives for this take. The face mesh runs on every take; Depth also needs the depth and the person mask."
+
+[tour.capture.analysis]
+title = "Its analysis"
+body = "Bardo analyzes each take on this computer, free, on the graphics card when it can. Each part shows its progress and the time left; the checks below say what to record again."
 
 [tour.capture.cut]
 title = "Move a cut"

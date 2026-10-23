@@ -229,7 +229,7 @@ fn download_either(urls: &[String], path: &Path) -> anyhow::Result<String> {
 }
 
 /// Streams the body to `path` and returns its SHA-256 in hex.
-fn download_to(url: &str, path: &Path) -> anyhow::Result<String> {
+pub(crate) fn download_to(url: &str, path: &Path) -> anyhow::Result<String> {
     let response = ureq::get(url)
         .call()
         .with_context(|| format!("GET {url}"))?;

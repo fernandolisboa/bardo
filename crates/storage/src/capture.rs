@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    Capture, CaptureConfirmation, CaptureId, CaptureRepository, CaptureVideo, CaptureVoice, JobId,
-    NarrationId, ProfileId, Provider, RepositoryError, Take, Takes, VideoProjectId, VoiceRef,
+    AnalysisPart, Capture, CaptureConfirmation, CaptureId, CaptureRepository, CaptureVideo,
+    CaptureVoice, DepthRange, Device, JobId, NarrationId, ProfileId, Provider, RepositoryError,
+    Take, TakeAnalysis, TakeChecks, TakeMode, Takes, VideoProjectId, VoiceRef,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -62,7 +63,7 @@ struct CaptureRow {
 fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, RepositoryError> {
     let mut statement = conn
         .prepare(
-            "SELECT first_word, end_word, start_ms, end_ms, revision FROM capture_take
+            "SELECT first_word, end_word, start_ms, end_ms, revision, mode FROM capture_take
              WHERE project_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -74,16 +75,19 @@ fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, Reposi
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
             ))
         })
         .map_err(boxed)?;
     rows.map(|row| {
-        let (first, end, start_ms, end_ms, revision) = row.map_err(boxed)?;
+        let (first, end, start_ms, end_ms, revision, mode) = row.map_err(boxed)?;
         Ok(Take {
             words: index(first)?..index(end)?,
             start: duration(start_ms)?,
             end: duration(end_ms)?,
             revision: u32::try_from(revision).map_err(boxed)?,
+            mode: TakeMode::from_code(&mode)
+                .ok_or_else(|| invalid(format!("unknown take mode {mode}")))?,
         })
     })
     .collect()
@@ -191,8 +195,8 @@ fn insert_takes(
     let mut insert = tx
         .prepare(
             "INSERT INTO capture_take
-                 (project_id, position, first_word, end_word, start_ms, end_ms, revision)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 (project_id, position, first_word, end_word, start_ms, end_ms, revision, mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )
         .map_err(boxed)?;
     for (position, take) in takes.as_slice().iter().enumerate() {
@@ -205,6 +209,7 @@ fn insert_takes(
                 millis(take.start),
                 millis(take.end),
                 take.revision,
+                take.mode.code(),
             ])
             .map_err(boxed)?;
     }
@@ -328,6 +333,145 @@ impl CaptureRepository for Database {
             )
             .map_err(boxed)?;
         Ok(())
+    }
+
+    fn analyses(&self, project: VideoProjectId) -> Result<Vec<TakeAnalysis>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT capture_id, position, part, revision, device, fallback, model, frames,
+                     no_face, several_faces, small_face, turned, mask_jumps, depth_far,
+                     depth_near, finished_at, job_id
+                 FROM take_analysis WHERE project_id = ?1
+                 ORDER BY position, part = 'depth'",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok(AnalysisRow {
+                    capture: row.get(0)?,
+                    position: row.get(1)?,
+                    part: row.get(2)?,
+                    revision: row.get(3)?,
+                    device: row.get(4)?,
+                    fallback: row.get(5)?,
+                    model: row.get(6)?,
+                    checks: [
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                    ],
+                    depth: [row.get(13)?, row.get(14)?],
+                    finished_at: row.get(15)?,
+                    job: row.get(16)?,
+                })
+            })
+            .map_err(boxed)?;
+        rows.map(|row| row.map_err(boxed)?.into_analysis(project))
+            .collect()
+    }
+
+    fn save_analysis(&self, analysis: &TakeAnalysis) -> Result<bool, RepositoryError> {
+        let (device, fallback) = match &analysis.device {
+            Device::Gpu => ("gpu", None),
+            Device::Cpu { fallback } => ("cpu", fallback.as_deref()),
+        };
+        let checks = &analysis.checks;
+        // Kept only while the take is still the one analyzed.
+        let saved = self
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO take_analysis (project_id, capture_id, position, part,
+                     revision, device, fallback, model, frames, no_face, several_faces,
+                     small_face, turned, mask_jumps, depth_far, depth_near, finished_at, job_id)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17, ?18
+                 WHERE EXISTS (
+                     SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
+                     WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3
+                         AND t.revision = ?5)",
+                params![
+                    analysis.project.to_string(),
+                    analysis.capture.to_string(),
+                    analysis.position,
+                    analysis.part.code(),
+                    analysis.revision,
+                    device,
+                    fallback,
+                    analysis.model,
+                    checks.frames,
+                    checks.no_face,
+                    checks.several_faces,
+                    checks.small_face,
+                    checks.turned,
+                    checks.mask_jumps,
+                    analysis.depth_range.map(|range| range.far),
+                    analysis.depth_range.map(|range| range.near),
+                    to_unix_millis(analysis.finished_at),
+                    analysis.job.map(|job| job.to_string()),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(saved == 1)
+    }
+}
+
+/// A take analysis row as stored.
+struct AnalysisRow {
+    capture: String,
+    position: i64,
+    part: String,
+    revision: i64,
+    device: String,
+    fallback: Option<String>,
+    model: String,
+    checks: [i64; 6],
+    depth: [Option<i64>; 2],
+    finished_at: i64,
+    job: Option<String>,
+}
+
+impl AnalysisRow {
+    fn into_analysis(self, project: VideoProjectId) -> Result<TakeAnalysis, RepositoryError> {
+        let frames = |value: i64| u32::try_from(value).map_err(boxed);
+        let [all, no_face, several_faces, small_face, turned, mask_jumps] = self.checks;
+        let depth_range = match self.depth {
+            [Some(far), Some(near)] => Some(DepthRange {
+                far: u16::try_from(far).map_err(boxed)?,
+                near: u16::try_from(near).map_err(boxed)?,
+            }),
+            _ => None,
+        };
+        Ok(TakeAnalysis {
+            project,
+            capture: CaptureId::from(uuid(&self.capture)?),
+            position: frames(self.position)?,
+            revision: frames(self.revision)?,
+            part: AnalysisPart::from_code(&self.part)
+                .ok_or_else(|| invalid(format!("unknown analysis part {}", self.part)))?,
+            device: match self.device.as_str() {
+                "gpu" => Device::Gpu,
+                "cpu" => Device::Cpu {
+                    fallback: self.fallback,
+                },
+                other => return Err(invalid(format!("unknown device {other}"))),
+            },
+            model: self.model,
+            checks: TakeChecks {
+                frames: frames(all)?,
+                no_face: frames(no_face)?,
+                several_faces: frames(several_faces)?,
+                small_face: frames(small_face)?,
+                turned: frames(turned)?,
+                mask_jumps: frames(mask_jumps)?,
+            },
+            depth_range,
+            finished_at: from_unix_millis(self.finished_at),
+            job: self.job.as_deref().map(uuid).transpose()?.map(JobId::from),
+        })
     }
 }
 
@@ -536,5 +680,91 @@ mod tests {
                 .execute("UPDATE capture SET voice = 'persona'", [])
                 .is_err()
         );
+    }
+
+    fn analysis(saved: &Capture, position: u32, part: AnalysisPart) -> TakeAnalysis {
+        TakeAnalysis {
+            project: saved.project,
+            capture: saved.id,
+            position,
+            revision: saved.takes.as_slice()[position as usize].revision,
+            part,
+            device: Device::Cpu {
+                fallback: Some("No devices detected".into()),
+            },
+            model: "MediaPipe Face Landmarker float16/1".into(),
+            checks: TakeChecks {
+                frames: 90,
+                no_face: 2,
+                several_faces: 1,
+                small_face: 3,
+                turned: 4,
+                mask_jumps: 5,
+            },
+            depth_range: (part == AnalysisPart::Depth).then_some(DepthRange {
+                far: 1_200,
+                near: 60_000,
+            }),
+            finished_at: time(1_800_000_020),
+            job: Some(JobId::new()),
+        }
+    }
+
+    #[test]
+    fn take_modes_and_analyses_round_trip_while_the_take_is_the_one_analyzed() {
+        let (db, project) = setup();
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let saved = capture(&project, &narration, CaptureVoice::Own);
+        db.save_capture(&saved).unwrap();
+
+        let mut takes = saved.takes.clone();
+        takes.set_mode(0, TakeMode::Depth).unwrap();
+        db.save_takes(project.id, saved.id, &takes).unwrap();
+        let loaded = db.capture(project.id).unwrap().unwrap();
+        assert_eq!(loaded.takes.as_slice()[0].mode, TakeMode::Depth);
+
+        let face = analysis(&saved, 0, AnalysisPart::Face);
+        let depth = analysis(&saved, 0, AnalysisPart::Depth);
+        assert!(db.save_analysis(&face).unwrap());
+        assert!(db.save_analysis(&depth).unwrap());
+        assert_eq!(
+            db.analyses(project.id).unwrap(),
+            [face.clone(), depth.clone()]
+        );
+        // On the graphics card, and done again: replaced.
+        let again = TakeAnalysis {
+            device: Device::Gpu,
+            ..face.clone()
+        };
+        assert!(db.save_analysis(&again).unwrap());
+        assert_eq!(db.analyses(project.id).unwrap(), [again, depth]);
+
+        // Not kept for a revision the take moved past, nor another capture.
+        let old = TakeAnalysis {
+            revision: face.revision + 1,
+            ..face.clone()
+        };
+        assert!(!db.save_analysis(&old).unwrap());
+        let other = TakeAnalysis {
+            capture: CaptureId::new(),
+            ..face.clone()
+        };
+        assert!(!db.save_analysis(&other).unwrap());
+
+        // Moving cuts keeps them (stale by revision); a new capture or
+        // deleting it removes them.
+        db.save_takes(project.id, saved.id, &takes).unwrap();
+        assert_eq!(db.analyses(project.id).unwrap().len(), 2);
+        db.save_capture(&capture(&project, &narration, CaptureVoice::Own))
+            .unwrap();
+        assert!(db.analyses(project.id).unwrap().is_empty());
+        let saved = db.capture(project.id).unwrap().unwrap();
+        assert!(
+            db.save_analysis(&analysis(&saved, 0, AnalysisPart::Face))
+                .unwrap()
+        );
+        db.delete_capture(project.id).unwrap();
+        assert!(db.analyses(project.id).unwrap().is_empty());
     }
 }

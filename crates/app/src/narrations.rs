@@ -123,6 +123,8 @@ pub struct NarrationView {
     pub persona: Option<Persona>,
     /// What reading the current script would cost; `None` without one.
     pub estimate: Option<SpendEstimate>,
+    /// The capture's takes' analyses, in order; empty without a capture.
+    pub analyses: Vec<crate::TakeAnalysisView>,
 }
 
 /// The provider's calls that read `text` aloud: billed per character.
@@ -597,8 +599,14 @@ impl Bardo {
             Some(script) => Some(self.estimate(&[narration_call(script.text())])?),
             None => None,
         };
+        let capture = self.capture_of(narration.as_ref(), project.id)?;
+        let analyses = match &capture {
+            Some(capture) => self.analysis_views(capture)?,
+            None => Vec::new(),
+        };
         Ok(NarrationView {
-            capture: self.capture_of(narration.as_ref(), project.id)?,
+            analyses,
+            capture,
             estimate,
             script: script.map(|script| script.text().clone()),
             narration,
@@ -852,6 +860,7 @@ pub(crate) mod tests {
         pub(crate) transcriber: Arc<FakeTranscriber>,
         pub(crate) voice_changer: Arc<FakeVoiceChanger>,
         pub(crate) voice_isolator: Arc<FakeVoiceIsolator>,
+        pub(crate) vision: Arc<crate::take_analysis::testing::FakeVision>,
     }
 
     impl Harness {
@@ -872,6 +881,7 @@ pub(crate) mod tests {
                 transcriber: Arc::default(),
                 voice_changer: Arc::default(),
                 voice_isolator: Arc::default(),
+                vision: Arc::default(),
             }
         }
 
@@ -890,6 +900,7 @@ pub(crate) mod tests {
                 transcriber: Arc::clone(&self.transcriber) as _,
                 voice_changer: Arc::clone(&self.voice_changer) as _,
                 voice_isolator: Arc::clone(&self.voice_isolator) as _,
+                vision: Arc::clone(&self.vision) as _,
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],

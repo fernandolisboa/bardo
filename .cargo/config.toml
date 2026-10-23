@@ -5,3 +5,6 @@ xtask = "run --quiet --package xtask --"
 # Where `cargo xtask fetch-ffmpeg` unpacks the pinned ffmpeg build.
 # `bardo-media` looks here first when run through cargo (tests, `cargo run`).
 BARDO_FFMPEG_DIR = { value = ".ffmpeg/bin", relative = true }
+# Where `cargo xtask fetch-models` puts the pinned vision models (#190).
+# `bardo-vision` looks here first when run through cargo.
+BARDO_MODELS_DIR = { value = ".models", relative = true }

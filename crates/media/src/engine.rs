@@ -7,8 +7,9 @@ use std::time::Duration;
 
 use crate::PcmStream;
 use crate::ffmpeg::{
-    Encoders, Ffmpeg, FrameSize, FrameStream, Loudness, LoudnessTarget, MediaError, MediaInfo,
-    Monitor, Output, ProxySettings, RenderPlan, ThumbnailSpec, Waveform,
+    Encoders, Ffmpeg, FrameSize, FrameSource, FrameStream, GrayDepth, GraySink, GraySource,
+    Loudness, LoudnessTarget, MediaError, MediaInfo, Monitor, Output, ProxySettings, RenderPlan,
+    ThumbnailSpec, Waveform,
 };
 
 /// The media work the editor and the render need: probing, proxies,
@@ -87,6 +88,36 @@ pub trait MediaEngine: Send + Sync {
         destination: &Path,
         monitor: &dyn Monitor,
     ) -> Result<(), MediaError>;
+
+    /// The frames of the recording at `path` (`size` its picture) from
+    /// `from` for `length`, at a steady `fps_milli` thousandths a second,
+    /// as RGB no larger than 1080p (#190).
+    fn rgb_frames(
+        &self,
+        path: &Path,
+        from: Duration,
+        length: Duration,
+        fps_milli: u32,
+        size: (u32, u32),
+    ) -> Result<Box<dyn FrameSource>, MediaError>;
+
+    /// Writes gray frames of `size` losslessly to `destination` (FFV1 in
+    /// Matroska); the file is there once the sink finishes.
+    fn gray_writer(
+        &self,
+        destination: &Path,
+        size: (u32, u32),
+        fps_milli: u32,
+        depth: GrayDepth,
+    ) -> Result<Box<dyn GraySink>, MediaError>;
+
+    /// The gray frames of a file `gray_writer` wrote.
+    fn gray_frames(
+        &self,
+        path: &Path,
+        size: (u32, u32),
+        depth: GrayDepth,
+    ) -> Result<Box<dyn GraySource>, MediaError>;
 }
 
 /// The bundled ffmpeg, located the first time it is needed. A failed
@@ -205,5 +236,37 @@ impl MediaEngine for BundledFfmpeg {
         monitor: &dyn Monitor,
     ) -> Result<(), MediaError> {
         self.ffmpeg()?.extract_sound(source, destination, monitor)
+    }
+
+    fn rgb_frames(
+        &self,
+        path: &Path,
+        from: Duration,
+        length: Duration,
+        fps_milli: u32,
+        size: (u32, u32),
+    ) -> Result<Box<dyn FrameSource>, MediaError> {
+        self.ffmpeg()?
+            .rgb_frames(path, from, length, fps_milli, size)
+    }
+
+    fn gray_writer(
+        &self,
+        destination: &Path,
+        size: (u32, u32),
+        fps_milli: u32,
+        depth: GrayDepth,
+    ) -> Result<Box<dyn GraySink>, MediaError> {
+        self.ffmpeg()?
+            .gray_writer(destination, size, fps_milli, depth)
+    }
+
+    fn gray_frames(
+        &self,
+        path: &Path,
+        size: (u32, u32),
+        depth: GrayDepth,
+    ) -> Result<Box<dyn GraySource>, MediaError> {
+        self.ffmpeg()?.gray_frames(path, size, depth)
     }
 }

@@ -45,6 +45,29 @@ A captura é dividida em tomadas de 4 a 30 segundos. As tomadas começam e termi
 
 Uma tomada que não pode virar clipe interpretado diz por quê: **Passa de 30 segundos** sem pausa para cortar (grave essa fala de novo com uma pausa), ou **Menos de 4 segundos** sem vizinha para juntar. A etapa pede atenção até não sobrar nenhuma.
 
+<a id="mode"></a>
+## O modo da tomada
+
+Cada tomada tem um modo: o que o modelo de tomada recebe. **Gravação** envia a tomada como foi gravada. **Malha** cobre seu rosto com a malha desenhada. **Profundidade** mostra você como uma figura de profundidade sobre o cenário, e também precisa da profundidade e da máscara da pessoa da tomada. As tomadas novas começam em Gravação; escolha outro modo abaixo das palavras da tomada.
+
+<a id="analysis"></a>
+## A análise
+
+O Bardo analisa cada tomada neste computador, de graça, e nada sai dele. Assim que as tomadas existem, ele encontra seu rosto em cada quadro e guarda a malha: 478 pontos e 52 notas de expressão por quadro, no `face_landmarks.json` da tomada, na pasta do projeto. Passar uma tomada para **Profundidade** também calcula a profundidade e a máscara da pessoa, sobre a tomada inteira de uma vez para a profundidade não pulsar de um quadro para outro; voltar a outro modo as interrompe.
+
+Cada parte é um job por tomada, mostrado abaixo da tomada com o progresso, onde roda e quanto falta, mais ou menos. Roda na placa de vídeo quando pode; num computador sem uma utilizável, o processador roda, o que demora mais, mas funciona. Cancelar guarda o que já terminou: **Retomar** continua do último trecho de quadros terminado. Mover um corte analisa as duas tomadas de novo.
+
+<a id="checks"></a>
+## As checagens
+
+Quando a análise de uma tomada termina, ela diz o que encontrou, em quadros:
+
+- **Mais de um rosto**: só você pode aparecer na gravação. A tomada não pode seguir; grave-a de novo sozinho.
+- **Nenhum rosto**: quadros em que seu rosto sai da imagem ou fica escondido.
+- **Rosto pequeno demais**: menos de 15% da altura do quadro. Chegue mais perto da câmera.
+- **Cabeça virada**: mais de 45° de lado em relação à câmera.
+- **Saltos da máscara** (modo Profundidade): a máscara da pessoa mudando mais de 20% de um quadro para o seguinte.
+
 <a id="cuts"></a>
 ## Mover um corte
 

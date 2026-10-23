@@ -1896,10 +1896,11 @@ pub(crate) mod testing {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use bardo_domain::{ProjectFiles, VideoProjectId};
+    use bardo_domain::{ProjectFiles, RgbFrame, VideoProjectId};
     use bardo_media::ffmpeg::{
-        Encoders, FrameSize, FrameStream, Loudness, LoudnessTarget, MediaError, MediaInfo, Monitor,
-        Output, RenderPlan, ThumbnailSpec, VideoEncoder, VideoFrame, Waveform,
+        Encoders, FrameSize, FrameSource, FrameStream, GrayDepth, GraySink, GraySource, Loudness,
+        LoudnessTarget, MediaError, MediaInfo, MemoryFrames, Monitor, Output, RenderPlan,
+        ThumbnailSpec, VideoEncoder, VideoFrame, Waveform,
     };
     use bardo_media::{MediaEngine, PcmStream};
     use bardo_storage::MemoryProjectFiles;
@@ -1967,6 +1968,9 @@ pub(crate) mod testing {
         pub(crate) sound: Mutex<Option<Vec<u8>>>,
         /// The recordings whose sound was extracted.
         pub(crate) extracted: Mutex<Vec<PathBuf>>,
+        /// The stretches decoded for the take analysis: from, length and
+        /// frame rate.
+        pub(crate) decoded: Mutex<Vec<(Duration, Duration, u32)>>,
     }
 
     impl FakeMedia {
@@ -2243,6 +2247,81 @@ pub(crate) mod testing {
             self.extracted.lock().unwrap().push(source.to_owned());
             std::fs::write(destination, sound)?;
             Ok(())
+        }
+
+        /// Tiny black frames, as many as the stretch holds.
+        fn rgb_frames(
+            &self,
+            path: &Path,
+            from: Duration,
+            length: Duration,
+            fps_milli: u32,
+            _size: (u32, u32),
+        ) -> Result<Box<dyn FrameSource>, MediaError> {
+            self.check(path)?;
+            self.decoded.lock().unwrap().push((from, length, fps_milli));
+            let count = bardo_domain::take_frames(length, fps_milli);
+            Ok(Box::new(MemoryFrames(
+                (0..count).map(|_| RgbFrame::black(16, 9)).collect(),
+            )))
+        }
+
+        /// Writes the raw frames, once finished.
+        fn gray_writer(
+            &self,
+            destination: &Path,
+            _size: (u32, u32),
+            _fps_milli: u32,
+            _depth: GrayDepth,
+        ) -> Result<Box<dyn GraySink>, MediaError> {
+            Ok(Box::new(RawGray {
+                destination: destination.to_owned(),
+                bytes: Vec::new(),
+            }))
+        }
+
+        fn gray_frames(
+            &self,
+            path: &Path,
+            (width, height): (u32, u32),
+            depth: GrayDepth,
+        ) -> Result<Box<dyn GraySource>, MediaError> {
+            let bytes = std::fs::read(path)?;
+            let frame = width as usize
+                * height as usize
+                * match depth {
+                    GrayDepth::Eight => 1,
+                    GrayDepth::Sixteen => 2,
+                };
+            Ok(Box::new(RawGrayFrames(
+                bytes.chunks(frame).map(<[u8]>::to_vec).collect(),
+            )))
+        }
+    }
+
+    /// A gray file as raw frames one after another.
+    struct RawGray {
+        destination: PathBuf,
+        bytes: Vec<u8>,
+    }
+
+    impl GraySink for RawGray {
+        fn write(&mut self, frame: &[u8]) -> Result<(), MediaError> {
+            self.bytes.extend_from_slice(frame);
+            Ok(())
+        }
+
+        fn finish(self: Box<Self>) -> Result<(), MediaError> {
+            std::fs::write(&self.destination, &self.bytes)?;
+            Ok(())
+        }
+    }
+
+    struct RawGrayFrames(std::collections::VecDeque<Vec<u8>>);
+
+    impl GraySource for RawGrayFrames {
+        fn next_frame(&mut self) -> Result<Option<Vec<u8>>, MediaError> {
+            Ok(self.0.pop_front())
         }
     }
 }

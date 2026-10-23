@@ -18,6 +18,7 @@ bardo-media.workspace = true
 bardo-ai.workspace = true
 bardo-publish.workspace = true
 bardo-storage.workspace = true
+bardo-vision.workspace = true
 dirs.workspace = true
 jiff.workspace = true
 serde.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Repository tasks: `cargo xtask lint-deps`, `fetch-ffmpeg`, `package`, `mirror-ffmpeg`."
+description = "Repository tasks: `cargo xtask lint-deps`, `fetch-ffmpeg`, `fetch-models`, `package`, `mirror-ffmpeg`."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

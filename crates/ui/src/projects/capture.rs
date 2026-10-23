@@ -5,17 +5,23 @@
 //! word that the recording shows only them. The takes and their cuts come
 //! from `bardo_app`; this view lays them out the same in every layout.
 
-use bardo_app::bardo_domain::{BoundaryMove, Capture, CaptureVoice, Narration, TakeFlag};
-use bardo_app::{
-    BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control, SpendEstimate, Text,
-    TourAnchor, take_source,
+use std::time::Duration;
+
+use bardo_app::bardo_domain::{
+    AnalysisPart, BoundaryMove, Capture, CaptureVoice, Device, Narration, TakeChecks, TakeFlag,
+    TakeMode,
 };
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use bardo_app::{
+    AnalysisStatus, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
+    SpendEstimate, TakeAnalysisView, Text, TourAnchor, take_source,
+};
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::radio::Radio;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, StyledExt as _, h_flex,
+    v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, ClickEvent, PathPromptOptions, SharedString, Task, Window, div};
@@ -58,6 +64,29 @@ impl Default for CaptureImport {
             confirm_remove: false,
         }
     }
+}
+
+/// `40 s`, `3 min`: about how long an analysis has left.
+fn rough(left: Duration) -> String {
+    let seconds = left.as_secs();
+    if seconds < 90 {
+        format!("{} s", seconds.max(1))
+    } else {
+        format!("{} min", seconds.div_ceil(60))
+    }
+}
+
+/// Whether an analysis runs or ran on the processor.
+fn on_cpu(status: &AnalysisStatus) -> bool {
+    matches!(
+        status,
+        AnalysisStatus::Running {
+            gpu: Some(false),
+            ..
+        } | AnalysisStatus::Done {
+            device: Device::Cpu { .. }
+        }
+    )
 }
 
 /// `1080 × 1920`.
@@ -206,6 +235,40 @@ impl ProjectsScreen {
             .bardo
             .read(cx)
             .move_take_boundary(id, index, to)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn set_take_mode(
+        &mut self,
+        index: usize,
+        mode: TakeMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.capture.error = self
+            .bardo
+            .read(cx)
+            .set_take_mode(id, index, mode)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn analyze_take(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.capture.error = self
+            .bardo
+            .read(cx)
+            .analyze_take(id, index)
             .err()
             .map(|error| error.message());
         self.load(window, cx);
@@ -566,6 +629,15 @@ impl ProjectsScreen {
         narration: &Narration,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let analyses = self
+            .narration
+            .as_ref()
+            .map_or(&[][..], |view| view.analyses.as_slice());
+        let mut rendered: Vec<Option<(AnyElement, AnyElement)>> = analyses
+            .iter()
+            .enumerate()
+            .map(|(index, analysis)| Some(self.render_take_analysis(index, analysis, cx)))
+            .collect();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let source = take_source(narration);
@@ -585,6 +657,17 @@ impl ProjectsScreen {
                     guide::refs::CAPTURE_TAKES,
                 )),
         );
+        // Said once: the processor runs it, which takes longer.
+        if analyses
+            .iter()
+            .any(|view| on_cpu(&view.face) || view.depth.as_ref().is_some_and(on_cpu))
+        {
+            list = list.child(kit::notice(
+                Tone::Info,
+                tr(bardo, Text::AnalysisCpuNote),
+                cx,
+            ));
+        }
         for (index, take) in takes.iter().enumerate() {
             let said = match (
                 words.get(take.words.start),
@@ -593,10 +676,19 @@ impl ProjectsScreen {
                 (Some(first), Some(last)) => text[first.text.start..last.text.end].to_owned(),
                 _ => String::new(),
             };
+            let analysis = analyses.get(index);
+            let blocked = analysis.is_some_and(TakeAnalysisView::blocked);
             let (tone, state) = match take.flag() {
                 None => (Tone::Success, Text::CaptureTakeOk),
                 Some(TakeFlag::TooLong) => (Tone::Warning, Text::CaptureTakeTooLong),
                 Some(TakeFlag::TooShort) => (Tone::Warning, Text::CaptureTakeTooShort),
+            };
+            let (tone, pill) = if blocked {
+                (Tone::Danger, Text::CaptureTakeBlocked)
+            } else if take.flag().is_some() {
+                (tone, Text::CaptureTakeFlagged)
+            } else {
+                (tone, state)
             };
             let row = kit::well(cx)
                 .id(("capture-take", index))
@@ -622,18 +714,7 @@ impl ProjectsScreen {
                                 ],
                             )),
                         ))
-                        .child(kit::status(
-                            tone,
-                            tr(
-                                bardo,
-                                if take.flag().is_none() {
-                                    state
-                                } else {
-                                    Text::CaptureTakeFlagged
-                                },
-                            ),
-                            cx,
-                        )),
+                        .child(kit::status(tone, tr(bardo, pill), cx)),
                 )
                 .child(div().text_sm().child(SharedString::from(said)))
                 .when(take.flag().is_some(), |row| {
@@ -644,6 +725,24 @@ impl ProjectsScreen {
                             .child(tr(bardo, state)),
                     )
                 });
+            let row = match rendered.get_mut(index).and_then(Option::take) {
+                Some((mode, lines)) => {
+                    let anchored = |anchor, element: AnyElement| {
+                        if index == 0 {
+                            kit::anchor_in(anchor, element, Some(&self.page_scroll))
+                                .into_any_element()
+                        } else {
+                            element
+                        }
+                    };
+                    row.child(anchored(TourAnchor::Control(Control::CaptureMode), mode))
+                        .child(anchored(
+                            TourAnchor::Control(Control::CaptureAnalysis),
+                            lines,
+                        ))
+                }
+                None => row,
+            };
             list = list.child(row);
             if index + 1 < takes.len() {
                 let can = |to| !busy && capture.takes.boundary_target(&source, index, to).is_ok();
@@ -683,5 +782,210 @@ impl ProjectsScreen {
             }
         }
         list.into_any_element()
+    }
+
+    /// A take's mode picker, and its analysis: each part's progress and
+    /// where it runs, starting or resuming it, and the checks it found.
+    fn render_take_analysis(
+        &self,
+        index: usize,
+        view: &TakeAnalysisView,
+        cx: &mut Context<Self>,
+    ) -> (AnyElement, AnyElement) {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let modes = ButtonGroup::new(("take-mode", index))
+            .outline()
+            .xsmall()
+            .children(TakeMode::ALL.map(|mode| {
+                Button::new(mode.code())
+                    .label(tr(bardo, Text::TakeModeName(mode)))
+                    .selected(view.mode == mode)
+            }))
+            .on_click(cx.listener(move |this, clicked: &Vec<usize>, window, cx| {
+                if let Some(&mode) = clicked.first().and_then(|&i| TakeMode::ALL.get(i)) {
+                    this.set_take_mode(index, mode, window, cx);
+                }
+            }));
+        let mode = h_flex()
+            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(bardo, Text::CaptureModeLabel)),
+            )
+            .child(modes)
+            .when(index == 0, |row| {
+                row.child(guide::info(
+                    bardo,
+                    "capture-mode-info",
+                    tr(bardo, Text::CaptureModeHint),
+                    guide::refs::CAPTURE_MODE,
+                ))
+            })
+            .into_any_element();
+
+        let mut lines = v_flex().gap_1();
+        let parts = [
+            (AnalysisPart::Face, Some(&view.face)),
+            (AnalysisPart::Depth, view.depth.as_ref()),
+        ];
+        for (part, status) in parts {
+            let Some(status) = status else {
+                continue;
+            };
+            let name = bardo.text(Text::AnalysisPartName(part)).into_owned();
+            let device = |gpu: bool| {
+                bardo
+                    .text(if gpu {
+                        Text::AnalysisOnGpu
+                    } else {
+                        Text::AnalysisOnCpu
+                    })
+                    .into_owned()
+            };
+            let (text, button, running) = match status {
+                AnalysisStatus::NotStarted => (
+                    bardo.text_with(Text::AnalysisNotStarted, &[("part", &name)]),
+                    Some(Text::AnalyzeTake),
+                    false,
+                ),
+                AnalysisStatus::Queued => (
+                    bardo.text_with(Text::AnalysisQueued, &[("part", &name)]),
+                    None,
+                    true,
+                ),
+                AnalysisStatus::Running {
+                    progress,
+                    gpu,
+                    left,
+                } => {
+                    let percent = progress.percent().to_string();
+                    let device = device(gpu.unwrap_or(true));
+                    let text = match left {
+                        Some(left) => bardo.text_with(
+                            Text::AnalysisRunningLeft,
+                            &[
+                                ("part", &name),
+                                ("percent", &percent),
+                                ("device", &device),
+                                ("left", &rough(*left)),
+                            ],
+                        ),
+                        None => bardo.text_with(
+                            Text::AnalysisRunning,
+                            &[("part", &name), ("percent", &percent), ("device", &device)],
+                        ),
+                    };
+                    (text, None, true)
+                }
+                AnalysisStatus::Cancelled => (
+                    bardo.text_with(Text::AnalysisCancelled, &[("part", &name)]),
+                    Some(Text::ResumeAnalysis),
+                    false,
+                ),
+                AnalysisStatus::Failed { kind } => (
+                    format!(
+                        "{} {}",
+                        bardo.text_with(Text::AnalysisFailed, &[("part", &name)]),
+                        bardo.text(Text::JobFailureKindName(*kind))
+                    ),
+                    Some(Text::AnalyzeTake),
+                    false,
+                ),
+                AnalysisStatus::Done { device: done } => (
+                    bardo.text_with(
+                        Text::AnalysisDone,
+                        &[("part", &name), ("device", &device(*done == Device::Gpu))],
+                    ),
+                    None,
+                    false,
+                ),
+            };
+            let line = h_flex()
+                .gap_2()
+                .items_center()
+                .flex_wrap()
+                .when(running, |line| line.child(Spinner::new().xsmall()))
+                .child(div().text_xs().child(SharedString::from(text)))
+                .when_some(button, |line, label| {
+                    line.child(
+                        Button::new(("take-analyze", index * 2 + part as usize))
+                            .ghost()
+                            .xsmall()
+                            .label(tr(bardo, label))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.analyze_take(index, window, cx)
+                            })),
+                    )
+                })
+                .when(index == 0 && part == AnalysisPart::Face, |line| {
+                    line.child(guide::info(
+                        bardo,
+                        "capture-analysis-info",
+                        tr(bardo, Text::AnalysisHint),
+                        guide::refs::CAPTURE_ANALYSIS,
+                    ))
+                });
+            lines = lines.child(line);
+        }
+        if view.redone && !matches!(view.face, AnalysisStatus::Done { .. }) {
+            lines = lines.child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(bardo, Text::AnalysisRedone)),
+            );
+        }
+        if let Some(checks) = view.checks {
+            lines = lines.child(self.render_checks(&checks, cx));
+        }
+        (mode, lines.into_any_element())
+    }
+
+    /// What a take's analysis found, worst first.
+    fn render_checks(&self, checks: &TakeChecks, cx: &App) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let frames = checks.frames.to_string();
+        let line = |text: Text, n: u32| {
+            bardo.text_with(text, &[("n", &n.to_string()), ("frames", &frames)])
+        };
+        let mut found = v_flex().gap_1();
+        if checks.several_faces > 0 {
+            found = found.child(kit::notice(
+                Tone::Danger,
+                SharedString::from(line(Text::CheckSeveralFaces, checks.several_faces)),
+                cx,
+            ));
+        }
+        let warnings = [
+            (Text::CheckNoFace, checks.no_face),
+            (Text::CheckSmallFace, checks.small_face),
+            (Text::CheckTurned, checks.turned),
+            (Text::CheckMaskJumps, checks.mask_jumps),
+        ];
+        let mut any = checks.several_faces > 0;
+        for (text, n) in warnings {
+            if n > 0 {
+                any = true;
+                found = found.child(kit::notice(
+                    Tone::Warning,
+                    SharedString::from(line(text, n)),
+                    cx,
+                ));
+            }
+        }
+        if !any {
+            found = found.child(kit::status(
+                Tone::Success,
+                tr(bardo, Text::ChecksPassed),
+                cx,
+            ));
+        }
+        found.into_any_element()
     }
 }

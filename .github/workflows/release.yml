@@ -16,6 +16,7 @@ on:
       - installer/**
       - xtask/**
       - crates/media/ffmpeg.toml
+      - crates/vision/models.toml
       - crates/ui/build.rs
       - assets/brand/bardo.ico
       - .github/workflows/release.yml
@@ -45,6 +46,11 @@ jobs:
         with:
           path: .ffmpeg
           key: ffmpeg-${{ runner.os }}-${{ hashFiles('crates/media/ffmpeg.toml') }}
+      - name: Cache the pinned vision models
+        uses: actions/cache@v4
+        with:
+          path: .models
+          key: models-${{ hashFiles('crates/vision/models.toml') }}
       - name: Install cargo-about (third-party notices)
         uses: taiki-e/install-action@v2
         with:

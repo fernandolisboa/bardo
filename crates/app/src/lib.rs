@@ -49,6 +49,7 @@ mod settings_transfer;
 mod shortcuts;
 mod showcase;
 mod stages;
+mod take_analysis;
 mod templates;
 mod themes;
 mod thumbnails;
@@ -77,7 +78,7 @@ use bardo_domain::{
     VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
     Zone, running_since,
 };
-use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
+use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed, VisionModels};
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{
     DataPaths, Database, LocalBackups, MemoryBackups, MemoryExportFiles, MemoryProjectFiles,
@@ -180,6 +181,7 @@ pub use stages::{
     SceneState, Stage, StageNote, StageState, StageStatus, opening_stage, project_stages,
     scene_states,
 };
+pub use take_analysis::{AnalysisStatus, TakeAnalysisView};
 pub use templates::{TemplateError, default_template};
 pub use themes::{SUGGESTIONS_PER_RUN, ThemeError, ThemesView};
 pub use thumbnails::{
@@ -452,6 +454,9 @@ pub struct Providers {
     pub post_insights: Vec<Arc<dyn InsightsReader>>,
     /// Bardo's own releases, for updates (GitHub Releases).
     pub releases: Arc<dyn ReleaseFeed>,
+    /// The face mesh, depth and person mask models that analyze a
+    /// capture's takes on the computer (ONNX Runtime).
+    pub vision: Arc<dyn VisionModels>,
 }
 
 impl Providers {
@@ -498,6 +503,7 @@ impl Providers {
                 Arc::new(bardo_publish::TikTokInsights::new()),
             ],
             releases: Arc::new(live_releases()),
+            vision: Arc::new(bardo_vision::OnnxVision::installed()),
         }
     }
 }
@@ -770,6 +776,14 @@ impl Bardo {
             aligner: Arc::clone(&providers.aligner),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
+            jobs: Arc::clone(&jobs),
+        };
+        let analysis_handler = crate::take_analysis::TakeAnalysisHandler {
+            captures: Arc::clone(&captures),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+            vision: Arc::clone(&providers.vision),
+            depth_slot: std::sync::Mutex::default(),
         };
         let scene_handler = SceneHandler {
             owner: profile.id,
@@ -929,6 +943,7 @@ impl Bardo {
                 narrations: narration_handler,
                 imports: import_handler,
                 captures: capture_handler,
+                analyses: analysis_handler,
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,
@@ -2278,6 +2293,7 @@ pub(crate) mod testing {
             transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
             voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
             voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
+            vision: Arc::new(crate::take_analysis::testing::FakeVision::default()),
             images: Arc::new(FakeImages::default()),
             music: Arc::new(FakeMusic::default()),
             clips: vec![Arc::new(FakeClips::default())],

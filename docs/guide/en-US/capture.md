@@ -45,6 +45,29 @@ The capture is split into takes of 4 to 30 seconds. Takes start and end at sente
 
 A take that cannot become a performed clip says why: **Over 30 seconds** with no pause to cut at (record that line again with a pause), or **Under 4 seconds** with no neighbour to join. The stage asks for attention until none is left.
 
+<a id="mode"></a>
+## A take's mode
+
+Each take has a mode: what its take model receives. **Recording** sends the take as recorded. **Mesh** covers your face with its drawn mesh. **Depth** shows you as a depth figure over the set, and also needs the take's depth and person mask. New takes start as Recording; pick another under the take's words.
+
+<a id="analysis"></a>
+## Analysis
+
+Bardo analyzes each take on this computer, free, and nothing leaves it. As soon as the takes exist, it finds your face in every frame and keeps its mesh: 478 points and 52 expression scores per frame, in the take's `face_landmarks.json` in the project folder. Switching a take to **Depth** also works out its depth and person mask, over the whole take at once so the depth does not pump from frame to frame; switching back stops them.
+
+Each part is a job per take, shown under the take with its progress, where it runs and about how long is left. It runs on the graphics card when it can; on a computer without a usable one, the processor runs it, which takes longer and still works. Cancelling one keeps what it finished: **Resume** picks up at the last finished stretch of frames. Moving a cut analyzes both takes again.
+
+<a id="checks"></a>
+## The checks
+
+When a take's analysis is done, it says what it found, in frames:
+
+- **More than one face**: only you may be in the recording. The take cannot go on; record it again alone.
+- **No face**: frames where your face is out of the picture or hidden.
+- **Face too small**: under 15% of the frame's height. Move closer to the camera.
+- **Head turned**: more than 45° away from the camera.
+- **Mask jumps** (Depth mode): the person mask changing by more than 20% from one frame to the next.
+
 <a id="cuts"></a>
 ## Moving a cut
 

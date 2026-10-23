@@ -90,6 +90,7 @@ mod scene;
 mod schedule;
 mod script;
 mod speech;
+mod take_analysis;
 mod template;
 mod text;
 mod theme;
@@ -291,6 +292,15 @@ pub use speech::{
     AlignedSpeech, Alignment, AlignmentRequest, ChangedSpeech, CharTiming, Speech, SpeechAligner,
     SpeechRequest, SpeechSynthesizer, SpeechTranscriber, Transcript, TranscriptionRequest,
     VoiceChangeRequest, VoiceChanger, VoiceIsolator, split_for_speech,
+};
+pub use take_analysis::{
+    ANALYSIS_CHUNK_FRAMES, AnalysisPart, BLENDSHAPE_NAMES, DEPTH_FAR_PERMILLE, DEPTH_NEAR_PERMILLE,
+    DepthEstimator, DepthHistogram, DepthMap, DepthRange, DepthScale, Device, FACE_FILE_VERSION,
+    FACE_LANDMARKS, FaceFileError, FaceFrame, FaceLandmarks, FaceMesh, FaceObservation, FaceSource,
+    FaceTracker, MASK_BACKGROUND, MASK_FACE_SKIN, MAX_HEAD_TURN_DEGREES, MAX_MASK_CHANGE,
+    MIN_FACE_HEIGHT, ModelFile, ModelInfo, PersonMask, PersonSegmenter, REGION_COUNT_EVERY, Region,
+    RgbFrame, TakeAnalysis, TakeChecks, TakeMode, VisionError, VisionModels, analysis_fps,
+    distinct_faces, take_frame_time, take_frames,
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,

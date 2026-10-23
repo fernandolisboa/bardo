@@ -80,6 +80,11 @@ function Test-ProgramFolder {
         (Test-Path "$ffmpeg\LICENSE.txt") -and (Test-Path "$ffmpeg\SOURCE.txt") -and
         @(Get-ChildItem "$ffmpeg\*.dll").Count -gt 0 -and -not (Test-Path "$ffmpeg\ffplay.exe")
     } { (Get-ChildItem $ffmpeg -Name) -join ', ' }
+    $models = Join-Path $paths.Program 'models'
+    Test-Check $Id 'DirectML.dll is beside bardo.exe, and models\ holds the vision models and NOTICES.txt' {
+        (Test-Path (Join-Path $paths.Program 'DirectML.dll')) -and (Test-Path "$models\NOTICES.txt") -and
+        @(Get-ChildItem "$models\*.onnx").Count -ge 8
+    } { (Get-ChildItem $models -Name) -join ', ' }
     Test-Check $Id 'the installed bardo.exe is the one this commit built' {
         (Get-FileSha256 $paths.Exe) -eq $built
     }

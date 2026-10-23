@@ -218,7 +218,20 @@ pub fn project_stages(
     };
 
     let capture_stage = narration.capture.as_ref().map(|capture| {
-        let flagged = capture.takes.flagged();
+        // A take to fix, or one with more than one face in frame.
+        let flagged = capture
+            .takes
+            .as_slice()
+            .iter()
+            .enumerate()
+            .filter(|(index, take)| {
+                take.flag().is_some()
+                    || narration
+                        .analyses
+                        .get(*index)
+                        .is_some_and(crate::TakeAnalysisView::blocked)
+            })
+            .count();
         if narration.stale {
             StageStatus::new(
                 Stage::Capture,

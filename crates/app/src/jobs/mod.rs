@@ -44,6 +44,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) narrations: NarrationHandler,
     pub(crate) imports: NarrationImportHandler,
     pub(crate) captures: crate::captures::CaptureHandler,
+    pub(crate) analyses: crate::take_analysis::TakeAnalysisHandler,
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
     pub(crate) proxies: ProxyHandler,
@@ -75,6 +76,7 @@ pub(crate) fn built_in_handlers(
         narrations,
         imports,
         captures,
+        analyses,
         scenes,
         clips,
         proxies,
@@ -104,6 +106,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Narration, Arc::new(narrations));
     handlers.insert(JobKind::NarrationImport, Arc::new(imports));
     handlers.insert(JobKind::Capture, Arc::new(captures));
+    handlers.insert(JobKind::TakeAnalysis, Arc::new(analyses));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);

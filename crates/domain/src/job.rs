@@ -118,6 +118,10 @@ pub enum JobKind {
     /// and splits it into takes. Each step's result is kept, so a resumed
     /// job pays for nothing twice.
     Capture,
+    /// Analyzes one take of a capture on the computer (#190): its face
+    /// mesh, or its depth map and person mask, a chunk of frames per
+    /// checkpoint, so a resumed job starts at the last finished chunk.
+    TakeAnalysis,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -146,7 +150,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 28] = [
+    pub const ALL: [JobKind; 29] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -175,6 +179,7 @@ impl JobKind {
         JobKind::Localization,
         JobKind::PersonaLook,
         JobKind::Capture,
+        JobKind::TakeAnalysis,
     ];
 
     /// Stable name stored in the database.
@@ -208,6 +213,7 @@ impl JobKind {
             JobKind::Localization => "localization",
             JobKind::PersonaLook => "persona_look",
             JobKind::Capture => "capture",
+            JobKind::TakeAnalysis => "take_analysis",
         }
     }
 }
@@ -378,10 +384,13 @@ pub enum JobFailureKind {
     /// A capture's speech does not follow the project's script (#189): the
     /// user records it again.
     OffScript,
+    /// The local vision models are missing, damaged or would not run
+    /// (#190): reinstalling Bardo puts them back.
+    VisionModels,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 16] = [
+    pub const ALL: [JobFailureKind; 17] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -398,6 +407,7 @@ impl JobFailureKind {
         JobFailureKind::Restored,
         JobFailureKind::Checksum,
         JobFailureKind::OffScript,
+        JobFailureKind::VisionModels,
     ];
 
     /// Stable name stored in the database.
@@ -419,6 +429,7 @@ impl JobFailureKind {
             JobFailureKind::Restored => "restored",
             JobFailureKind::Checksum => "checksum",
             JobFailureKind::OffScript => "off_script",
+            JobFailureKind::VisionModels => "vision_models",
         }
     }
 
@@ -439,7 +450,8 @@ impl JobFailureKind {
             | JobFailureKind::CutShort
             | JobFailureKind::Restored
             | JobFailureKind::Checksum
-            | JobFailureKind::OffScript => false,
+            | JobFailureKind::OffScript
+            | JobFailureKind::VisionModels => false,
         }
     }
 }
