@@ -35,16 +35,20 @@ pub enum TemplateKind {
     Thumbnail,
     /// Where a long video's YouTube chapters start and their titles (#182).
     Chapters,
+    /// A video's script adapted, sentence by sentence, for another
+    /// channel's language and country (#184).
+    Localization,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 6] = [
+    pub const ALL: [TemplateKind; 7] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
         TemplateKind::Metadata,
         TemplateKind::Thumbnail,
         TemplateKind::Chapters,
+        TemplateKind::Localization,
     ];
 
     /// Stable name stored in the database.
@@ -56,6 +60,7 @@ impl TemplateKind {
             TemplateKind::Metadata => "metadata",
             TemplateKind::Thumbnail => "thumbnail",
             TemplateKind::Chapters => "chapters",
+            TemplateKind::Localization => "localization",
         }
     }
 
@@ -124,6 +129,17 @@ impl TemplateKind {
                 TemplateVariable::VideoLength,
                 TemplateVariable::NarrationSentences,
             ],
+            TemplateKind::Localization => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::Language,
+                TemplateVariable::Country,
+                TemplateVariable::Persona,
+                TemplateVariable::SourceLanguage,
+                TemplateVariable::SourceCountry,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::NarrationSentences,
+            ],
         }
     }
 }
@@ -187,10 +203,14 @@ pub enum TemplateVariable {
     /// The video's title on YouTube, as its metadata has it (the working
     /// title until there is one).
     VideoTitle,
+    /// The language a localized version is adapted from.
+    SourceLanguage,
+    /// The audience country a localized version is adapted from.
+    SourceCountry,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 17] = [
+    pub const ALL: [TemplateVariable; 19] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -208,6 +228,8 @@ impl TemplateVariable {
         TemplateVariable::TargetLength,
         TemplateVariable::FrameShape,
         TemplateVariable::VideoTitle,
+        TemplateVariable::SourceLanguage,
+        TemplateVariable::SourceCountry,
     ];
 
     /// The name written between the braces.
@@ -230,6 +252,8 @@ impl TemplateVariable {
             TemplateVariable::TargetLength => "target_length",
             TemplateVariable::FrameShape => "frame_shape",
             TemplateVariable::VideoTitle => "video_title",
+            TemplateVariable::SourceLanguage => "source_language",
+            TemplateVariable::SourceCountry => "source_country",
         }
     }
 

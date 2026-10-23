@@ -20,6 +20,7 @@ mod guide;
 mod guide_site;
 pub mod i18n;
 mod jobs;
+mod localization;
 pub mod logging;
 mod media_import;
 mod music_prompts;
@@ -63,15 +64,15 @@ use bardo_domain::{
     AgentTask, BackupStore, ChannelRepository, ChapterRepository, ClipGenerator, ConnectionSecrets,
     ConsentReceiver, CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles,
     ExportRepository, ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId,
-    MarketData, MediaAssetRepository, MusicGenerator, MusicPromptRepository, MusicTrackRepository,
-    NarrationRepository, NetworkAccountRepository, NetworkConnectionRepository, NetworkSignIn,
-    NicheResearchRepository, OwnerAnalytics, Persona, PersonaRepository, ProfileRepository,
-    ProjectFiles, PublicationRepository, RUNNER_ALIVE, Redactor, RenderRepository, RepositoryError,
-    RunnerRole, ScenePlanRepository, ScriptRepository, SecretStore, SpeechAligner,
-    SpeechSynthesizer, TemplateRepository, TextGenerator, ThemeRepository, ThumbnailRepository,
-    TimelineRepository, TourProgressRepository, UiLanguage, UiThemePreference, UserProfile,
-    VideoStats, VideoUploader, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
-    Zone, running_since,
+    LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
+    MusicPromptRepository, MusicTrackRepository, NarrationRepository, NetworkAccountRepository,
+    NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
+    PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
+    Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
+    SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator,
+    ThemeRepository, ThumbnailRepository, TimelineRepository, TourProgressRepository, UiLanguage,
+    UiThemePreference, UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews,
+    VoiceSampleStore, YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -128,6 +129,10 @@ pub use guide::{
 pub use guide_site::{SiteFile, SiteOptions, guide_site};
 pub use i18n::{Catalog, Text};
 pub use jobs::{JobActionError, JobContext, JobGroups, JobHandler, JobSettings, TestJob};
+pub use localization::{
+    LocalizationError, MadeVersion, VersionBlock, VersionScenes, VersionSource, VersionTarget,
+    VersionsView,
+};
 pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
@@ -222,7 +227,7 @@ pub enum AppError {
 /// a field here; tests swap any of them for a fake.
 pub struct Repositories {
     pub profiles: Box<dyn ProfileRepository>,
-    pub channels: Box<dyn ChannelRepository>,
+    pub channels: Arc<dyn ChannelRepository>,
     /// Shared with the job queue's worker threads.
     pub jobs: Arc<dyn JobRepository>,
     /// Niche research results and seeds. Shared with the job queue.
@@ -266,6 +271,9 @@ pub struct Repositories {
     pub publications: Arc<dyn PublicationRepository>,
     /// Each project's AI cut suggestions. Shared with the job queue.
     pub cut_suggestions: Arc<dyn CutSuggestionRepository>,
+    /// What each localized version was made from. Shared with the job
+    /// queue.
+    pub localizations: Arc<dyn LocalizationRepository>,
     /// What generations cost, the user's rates and budgets. Shared with
     /// the job queue.
     pub costs: Arc<dyn CostRepository>,
@@ -339,7 +347,7 @@ impl Repositories {
     ) -> Self {
         Self {
             profiles: Box::new(Arc::clone(&db)),
-            channels: Box::new(Arc::clone(&db)),
+            channels: Arc::clone(&db) as _,
             jobs: Arc::clone(&db) as Arc<dyn JobRepository>,
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,
@@ -360,6 +368,7 @@ impl Repositories {
             export_files: Arc::new(MemoryExportFiles::default()),
             publications: Arc::clone(&db) as _,
             cut_suggestions: Arc::clone(&db) as _,
+            localizations: Arc::clone(&db) as _,
             costs: Arc::clone(&db) as _,
             tours: Box::new(Arc::clone(&db)),
             youtube_data: Arc::clone(&db) as _,
@@ -494,7 +503,7 @@ fn live_releases() -> bardo_ai::GitHubReleases {
 /// The running app for the local user profile.
 pub struct Bardo {
     profiles: Box<dyn ProfileRepository>,
-    channels: Box<dyn ChannelRepository>,
+    channels: Arc<dyn ChannelRepository>,
     research: Arc<dyn NicheResearchRepository>,
     themes: Arc<dyn ThemeRepository>,
     templates: Arc<dyn TemplateRepository>,
@@ -514,6 +523,7 @@ pub struct Bardo {
     export_files: Arc<dyn ExportFiles>,
     publications: Arc<dyn PublicationRepository>,
     cut_suggestions: Arc<dyn CutSuggestionRepository>,
+    localizations: Arc<dyn LocalizationRepository>,
     cost_book: CostBook,
     files: Arc<dyn ProjectFiles>,
     voice_samples: Arc<dyn VoiceSampleStore>,
@@ -629,6 +639,7 @@ impl Bardo {
             export_files,
             publications,
             cut_suggestions,
+            localizations,
             costs,
             files,
             voice_samples,
@@ -685,6 +696,22 @@ impl Bardo {
         let script_handler = ScriptHandler {
             owner: profile.id,
             scripts: Arc::clone(&scripts),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
+        let localization_handler = crate::localization::LocalizationHandler {
+            owner: profile.id,
+            themes: Arc::clone(&themes),
+            channels: Arc::clone(&channels),
+            scripts: Arc::clone(&scripts),
+            narrations: Arc::clone(&narrations),
+            plans: Arc::clone(&scene_plans),
+            timelines: Arc::clone(&timelines),
+            media: Arc::clone(&media_assets),
+            tracks: Arc::clone(&music_tracks),
+            localizations: Arc::clone(&localizations),
+            files: Arc::clone(&files),
             text: Arc::clone(&providers.text),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
@@ -850,6 +877,7 @@ impl Bardo {
                 research: research_handler,
                 themes: theme_handler,
                 scripts: script_handler,
+                localizations: localization_handler,
                 narrations: narration_handler,
                 imports: import_handler,
                 scenes: scene_handler,
@@ -897,6 +925,7 @@ impl Bardo {
             export_files,
             publications,
             cut_suggestions,
+            localizations,
             cost_book,
             files,
             voice_samples,
@@ -2265,7 +2294,7 @@ mod tests {
             profiles: Box::new(profiles.clone()),
             tours: Box::new(Arc::clone(&db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
-            channels: Box::new(Arc::clone(&db)),
+            channels: Arc::clone(&db) as _,
             jobs: Arc::clone(&db) as _,
             themes: Arc::clone(&db) as _,
             templates: Arc::clone(&db) as _,
@@ -2285,6 +2314,7 @@ mod tests {
             exports: Arc::clone(&db) as _,
             publications: Arc::clone(&db) as _,
             cut_suggestions: Arc::clone(&db) as _,
+            localizations: Arc::clone(&db) as _,
             export_files: Arc::new(MemoryExportFiles::default()),
             costs: Arc::clone(&db) as _,
             files: Arc::new(MemoryProjectFiles::default()),

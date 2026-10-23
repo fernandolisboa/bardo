@@ -1302,6 +1302,59 @@ fn preview_failure(finished: Option<Result<(), MediaError>>) -> Text {
     }
 }
 
+/// The cut `project` plays now, and whether it is the one the user saved:
+/// the saved cut while it still fits the plan, narration and media, else
+/// the rough cut as the channel starts one (its captions, motion and frame
+/// shape, the shape the left-behind cut had, and the track in use).
+pub(crate) fn project_cut(
+    project: &VideoProject,
+    channel: Option<&bardo_domain::Channel>,
+    plan: &bardo_domain::ScenePlan,
+    narration: &bardo_domain::Narration,
+    saved: Option<&bardo_domain::SavedTimeline>,
+    assets: &[MediaAsset],
+    music: Option<&MediaAsset>,
+) -> (Timeline, bool) {
+    // A new cut's stills move as the channel says.
+    let motion = channel.map_or(MotionDefault::default(), |channel| channel.details.motion());
+    // A new cut's captions take the channel's style and highlight.
+    let caption_style = channel.map_or(CaptionStyle::default(), |channel| {
+        channel.details.caption_style()
+    });
+    let caption_highlight = channel.map_or(CaptionHighlight::default(), |channel| {
+        channel.details.caption_highlight()
+    });
+    // A new cut starts in the shape of the project's format.
+    let aspect = project
+        .format(channel.map_or(VideoFormat::default(), |channel| channel.details.format()))
+        .aspect();
+    let restored = saved.and_then(|saved| {
+        let timeline = Timeline::restore(saved, plan, narration, assets)?;
+        // A cut saved before captions existed gets them now.
+        Some(if saved.captions.is_none() {
+            timeline
+                .with_caption_style(caption_style)
+                .with_caption_highlight(caption_highlight)
+        } else {
+            timeline
+        })
+    });
+    let found = restored.is_some();
+    // A cut that starts over keeps the frame shape it had.
+    let timeline = restored.unwrap_or_else(|| {
+        let cut = Timeline::rough_cut(plan, narration, aspect)
+            .with_caption_style(caption_style)
+            .with_caption_highlight(caption_highlight)
+            .with_motion(motion)
+            .with_aspect(saved.map_or(aspect, |saved| saved.aspect));
+        match music {
+            Some(music) => cut.use_music(None, music).unwrap_or(cut),
+            None => cut,
+        }
+    });
+    (timeline, found)
+}
+
 /// The project a proxies job serves.
 #[derive(Deserialize)]
 struct ProjectOf {
@@ -1339,27 +1392,9 @@ impl Bardo {
         let transition = channel.as_ref().map_or(Transition::default(), |channel| {
             channel.details.transition()
         });
-        // A new cut's stills move as the channel says.
         let motion = channel
             .as_ref()
             .map_or(MotionDefault::default(), |channel| channel.details.motion());
-        // A new cut's captions take the channel's style and highlight.
-        let caption_style = channel.as_ref().map_or(CaptionStyle::default(), |channel| {
-            channel.details.caption_style()
-        });
-        let caption_highlight = channel
-            .as_ref()
-            .map_or(CaptionHighlight::default(), |channel| {
-                channel.details.caption_highlight()
-            });
-        // A new cut starts in the shape of the project's format.
-        let aspect = project
-            .format(
-                channel
-                    .as_ref()
-                    .map_or(VideoFormat::default(), |channel| channel.details.format()),
-            )
-            .aspect();
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
         let job = self.latest_proxies_job(project.id);
@@ -1383,35 +1418,20 @@ impl Bardo {
         let saved = self.timelines.saved_timeline(project.id)?;
         let (timeline, basis, cut_outdated) = match (&plan, &narration) {
             (Some(plan), Some(narration)) => {
-                let restored = saved.as_ref().and_then(|saved| {
-                    let timeline = Timeline::restore(saved, plan, narration, &assets)?;
-                    // A cut saved before captions existed gets them now.
-                    Some(if saved.captions.is_none() {
-                        timeline
-                            .with_caption_style(caption_style)
-                            .with_caption_highlight(caption_highlight)
-                    } else {
-                        timeline
-                    })
-                });
-                let outdated = saved.is_some() && restored.is_none();
+                let (timeline, restored) = project_cut(
+                    &project,
+                    channel.as_ref(),
+                    plan,
+                    narration,
+                    saved.as_ref(),
+                    &assets,
+                    music.as_ref(),
+                );
                 let basis = CutBasis {
                     scene_plan: plan.id,
                     narration: narration.id,
                 };
-                // A cut that starts over keeps the frame shape it had.
-                let timeline = restored.unwrap_or_else(|| {
-                    let cut = Timeline::rough_cut(plan, narration, aspect)
-                        .with_caption_style(caption_style)
-                        .with_caption_highlight(caption_highlight)
-                        .with_motion(motion)
-                        .with_aspect(saved.as_ref().map_or(aspect, |saved| saved.aspect));
-                    match &music {
-                        Some(music) => cut.use_music(None, music).unwrap_or(cut),
-                        None => cut,
-                    }
-                });
-                (Some(timeline), Some(basis), outdated)
+                (Some(timeline), Some(basis), saved.is_some() && !restored)
             }
             _ => (None, None, false),
         };

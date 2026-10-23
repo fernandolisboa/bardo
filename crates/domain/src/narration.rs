@@ -210,7 +210,7 @@ fn tokens(text: &str) -> impl Iterator<Item = (usize, &str)> {
 
 /// What a word sounds like for matching: lowercase letters and digits,
 /// accents dropped.
-fn key(word: &str) -> String {
+pub(crate) fn key(word: &str) -> String {
     word.chars()
         .flat_map(char::to_lowercase)
         .filter_map(fold_accent)

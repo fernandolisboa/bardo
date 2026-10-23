@@ -50,6 +50,8 @@ The words Bardo uses, in plain terms.
 
 **Script**: what the narrator says. Claude writes it, and you edit it as you like.
 
+**Version**: the same video made again for a channel in another language or country: its script adapted by Claude, its scenes and cut carried over from the original, its own narration, captions and metadata.
+
 **Narration**: the script read aloud by the project's persona, with the timing of every word. A changed script makes it out of date.
 
 **Word timings**: when each word of the narration is spoken. They drive the captions, the highlighted word and where cuts snap.

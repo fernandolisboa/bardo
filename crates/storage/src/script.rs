@@ -143,6 +143,36 @@ pub(crate) fn insert_generation(
     Ok(())
 }
 
+/// Saves `script` and the generations it refers to, inside `tx`.
+pub(crate) fn write_script(tx: &Transaction<'_>, script: &Script) -> Result<(), RepositoryError> {
+    insert_generation(tx, script.source().generation())?;
+    if let Some(pending) = script.pending() {
+        insert_generation(tx, pending.generation())?;
+    }
+    tx.execute(
+        "INSERT INTO script (project_id, profile_id, text, source_generation_id,
+             pending_generation_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (project_id) DO UPDATE SET
+             text = excluded.text,
+             source_generation_id = excluded.source_generation_id,
+             pending_generation_id = excluded.pending_generation_id,
+             updated_at = excluded.updated_at",
+        params![
+            script.project.to_string(),
+            script.owner.to_string(),
+            script.text().as_str(),
+            script.source().generation().id.to_string(),
+            script
+                .pending()
+                .map(|pending| pending.generation().id.to_string()),
+            to_unix_millis(script.updated_at),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
+}
+
 impl ScriptRepository for Database {
     fn script(&self, project: VideoProjectId) -> Result<Option<Script>, RepositoryError> {
         let conn = self.conn();
@@ -179,31 +209,7 @@ impl ScriptRepository for Database {
     fn save_script(&self, script: &Script) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
-        insert_generation(&tx, script.source().generation())?;
-        if let Some(pending) = script.pending() {
-            insert_generation(&tx, pending.generation())?;
-        }
-        tx.execute(
-            "INSERT INTO script (project_id, profile_id, text, source_generation_id,
-                 pending_generation_id, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT (project_id) DO UPDATE SET
-                 text = excluded.text,
-                 source_generation_id = excluded.source_generation_id,
-                 pending_generation_id = excluded.pending_generation_id,
-                 updated_at = excluded.updated_at",
-            params![
-                script.project.to_string(),
-                script.owner.to_string(),
-                script.text().as_str(),
-                script.source().generation().id.to_string(),
-                script
-                    .pending()
-                    .map(|pending| pending.generation().id.to_string()),
-                to_unix_millis(script.updated_at),
-            ],
-        )
-        .map_err(boxed)?;
+        write_script(&tx, script)?;
         tx.commit().map_err(boxed)
     }
 }

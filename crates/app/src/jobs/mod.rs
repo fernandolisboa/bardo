@@ -18,6 +18,7 @@ use crate::chapters::ChaptersHandler;
 use crate::clips::ClipHandler;
 use crate::cut_suggestions::CutSuggestionHandler;
 use crate::export::{ExportHandler, MetadataHandler};
+use crate::localization::LocalizationHandler;
 use crate::music_prompts::MusicPromptHandler;
 use crate::music_tracks::MusicHandler;
 use crate::narration_import::NarrationImportHandler;
@@ -38,6 +39,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) research: NicheResearchHandler,
     pub(crate) themes: ThemeHandler,
     pub(crate) scripts: ScriptHandler,
+    pub(crate) localizations: LocalizationHandler,
     pub(crate) narrations: NarrationHandler,
     pub(crate) imports: NarrationImportHandler,
     pub(crate) scenes: SceneHandler,
@@ -66,6 +68,7 @@ pub(crate) fn built_in_handlers(
         research,
         themes,
         scripts,
+        localizations,
         narrations,
         imports,
         scenes,
@@ -92,6 +95,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ThemeSuggestion, Arc::clone(&themes) as _);
     handlers.insert(JobKind::ThemeRanking, themes);
     handlers.insert(JobKind::ScriptGeneration, Arc::new(scripts));
+    handlers.insert(JobKind::Localization, Arc::new(localizations));
     handlers.insert(JobKind::Narration, Arc::new(narrations));
     handlers.insert(JobKind::NarrationImport, Arc::new(imports));
     let scenes = Arc::new(scenes);
@@ -1446,7 +1450,7 @@ mod tests {
             profiles: Box::new(Arc::clone(db)),
             tours: Box::new(Arc::clone(db)),
             agent_task: Arc::new(bardo_storage::MemoryAgentTask::default()),
-            channels: Box::new(Arc::clone(db)),
+            channels: Arc::clone(db) as _,
             jobs: Arc::clone(db) as Arc<dyn JobRepository>,
             themes: Arc::clone(db) as _,
             templates: Arc::clone(db) as _,
@@ -1466,6 +1470,7 @@ mod tests {
             exports: Arc::clone(db) as _,
             publications: Arc::clone(db) as _,
             cut_suggestions: Arc::clone(db) as _,
+            localizations: Arc::clone(db) as _,
             export_files: Arc::new(bardo_storage::MemoryExportFiles::default()),
             costs: Arc::clone(db) as _,
             files: Arc::new(bardo_storage::MemoryProjectFiles::default()),

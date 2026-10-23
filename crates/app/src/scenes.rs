@@ -142,6 +142,8 @@ pub struct ScenesView {
     pub image_estimate: Option<SpendEstimate>,
     /// The scenes' clips: models, lengths, prices and jobs.
     pub clips: ClipsView,
+    /// For a version: the scenes it carried and where they stand.
+    pub version: Option<crate::VersionScenes>,
 }
 
 /// Claude's call that plans scenes from `rendered`.
@@ -260,7 +262,7 @@ pub(crate) fn id<T: From<uuid::Uuid>>(text: &str) -> Result<T, JobFailure> {
 }
 
 /// `m:ss`.
-fn clock(duration: Duration) -> String {
+pub(crate) fn clock(duration: Duration) -> String {
     let seconds = duration.as_secs();
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
@@ -588,6 +590,12 @@ impl Bardo {
             .ok_or(SceneError::ProjectNotFound)
     }
 
+    /// Whether a scene plan or image job of the project is running.
+    pub(crate) fn scenes_busy(&self, project: VideoProjectId) -> bool {
+        self.latest_scene_job(project)
+            .is_some_and(|job| job.state().is_active())
+    }
+
     fn latest_scene_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
         self.jobs().into_iter().rev().find(|job| {
@@ -636,8 +644,10 @@ impl Bardo {
         };
         let missing = plan.as_ref().map_or(0, |plan| plan.missing_images().len());
         let clips = self.clips_view(project.channel, plan.as_ref())?;
+        let version = self.version_scenes(project.id, plan.as_ref(), narration.as_ref())?;
         Ok(ScenesView {
             clips,
+            version,
             narration: narration.as_ref().map(|narration| narration.id),
             stale: plan
                 .as_ref()

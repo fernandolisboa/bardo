@@ -60,6 +60,7 @@ mod framing;
 mod generation;
 mod image;
 mod job;
+mod localization;
 mod market;
 mod media;
 mod metadata;
@@ -165,6 +166,12 @@ pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
     JobRecord, JobRepository, JobState, Progress, RetryPolicy, UnknownJobFailureKind,
     UnknownJobKind, UnknownJobState,
+};
+pub use localization::{
+    Adaptation, AdaptationError, CarriedAudio, CarriedCut, Gap, Localization,
+    LocalizationRepository, NewVersion, PlacedScene, STRETCH_FLAG, SceneLook, SourceSentence,
+    TimeMap, adaptation_gaps, join_adapted, localized_cut, place_scenes, placed_scene_notes,
+    scene_sentences, sentence_times, sentence_words, source_gaps,
 };
 pub use market::{
     ContentLanguage, Country, Market, UnsupportedContentLanguage, UnsupportedCountry,

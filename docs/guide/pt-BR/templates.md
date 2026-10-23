@@ -21,6 +21,7 @@ Há um modelo para cada tipo de geração:
 - **Metadados**: o título, a descrição e as tags de cada rede, na etapa Publicação.
 - **Miniatura**: o texto da miniatura do YouTube de um vídeo longo e o prompt do fundo dela ([Miniatura](uploading.md#thumbnail)).
 - **Capítulos**: os capítulos do YouTube de um vídeo longo, a partir das frases da narração ([Capítulos](uploading.md#chapters)).
+- **Versão localizada**: o roteiro de uma versão, adaptado frase por frase para outro idioma ou país ([Versões em outros idiomas](script.md#versions)). Além dos dados do canal de destino, ele lê `{{source_language}}`, `{{source_country}}`, o título original e as frases numeradas.
 
 <a id="versions"></a>
 ## Versões

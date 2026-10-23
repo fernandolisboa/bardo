@@ -182,6 +182,33 @@ The narration, one sentence per line: its number, when it is spoken, and its tex
 Split the video into chapters. For each chapter give the number of the sentence it starts at and \
 its title.";
 
+const LOCALIZATION_INSTRUCTIONS: &str = "\
+You adapt the narration of a faceless YouTube video for another audience: the same video, made \
+again for a channel in {{language}} whose audience lives in {{country}}. The original is in \
+{{source_language}}, for an audience in {{source_country}}.
+
+Adapt; do not translate word for word. Write as a narrator from {{country}} would say it: natural \
+idioms, and the units, currencies, dates and number formats used there. Swap a reference only \
+when the new audience would miss it, and keep every fact, name and number true. Keep the \
+narrator's tone and style, and keep it safe for advertisers.
+
+The pictures stay as they are, timed on the sentences, so work sentence by sentence: exactly one \
+adapted sentence for each numbered sentence, in the same order, each saying what its original \
+says and about as long to read aloud. Never merge, split, drop or add sentences. Write only what \
+the narrator says: no numbers in brackets, notes or markdown.";
+
+const LOCALIZATION_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Narrator: {{persona}}
+
+Original title: {{theme_title}}
+
+The original narration, one sentence per line: its number, when it is spoken, and its text.
+{{narration_sentences}}
+
+Adapt the title for the new audience, then each sentence, in order, one for one.";
+
 /// Bardo's earlier default texts, before the video format (#179): one
 /// fixed script length and wide frames. A profile whose current version is
 /// still one of these, untouched, moves on to today's default.
@@ -225,7 +252,8 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
         TemplateKind::MusicPrompt
         | TemplateKind::Metadata
         | TemplateKind::Thumbnail
-        | TemplateKind::Chapters => return Vec::new(),
+        | TemplateKind::Chapters
+        | TemplateKind::Localization => return Vec::new(),
     };
     vec![TemplateBody::new(kind, instructions, prompt).expect("the retired templates are valid")]
 }
@@ -274,6 +302,7 @@ pub fn default_template(kind: TemplateKind) -> TemplateBody {
         TemplateKind::Metadata => (METADATA_INSTRUCTIONS, METADATA_PROMPT),
         TemplateKind::Thumbnail => (THUMBNAIL_INSTRUCTIONS, THUMBNAIL_PROMPT),
         TemplateKind::Chapters => (CHAPTERS_INSTRUCTIONS, CHAPTERS_PROMPT),
+        TemplateKind::Localization => (LOCALIZATION_INSTRUCTIONS, LOCALIZATION_PROMPT),
     };
     TemplateBody::new(kind, instructions, prompt).expect("the default templates are valid")
 }

@@ -16,6 +16,7 @@ mod export_files;
 mod files;
 mod installers;
 mod job;
+mod localization;
 mod media;
 mod migrations;
 mod narration;

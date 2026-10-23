@@ -467,10 +467,15 @@ mod tests {
         let before = render(&project, &accounts[1], 1_000);
         db.save_render(&before).unwrap();
         {
-            // As the database was before migration 49.
+            // As the database was before migration 49 (and the ones after).
             let mut conn = db.conn();
-            conn.execute_batch("DROP TABLE rendered_cut; PRAGMA user_version = 48;")
-                .unwrap();
+            conn.execute_batch(
+                "DROP TABLE rendered_cut; DROP TABLE adapted_sentence;
+                 DROP TABLE localized_audio; DROP TABLE localized_lane;
+                 DROP TABLE localized_scene; DROP TABLE localized_sentence;
+                 DROP TABLE localization; PRAGMA user_version = 48;",
+            )
+            .unwrap();
             crate::migrations::run(&mut conn).unwrap();
         }
         assert_eq!(

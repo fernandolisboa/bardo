@@ -139,6 +139,7 @@ pub mod refs {
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
     pub const SCRIPT_MUSIC: GuideRef = at("script", "music");
     pub const SCRIPT_MUSIC_TRACK: GuideRef = at("script", "generated-music");
+    pub const SCRIPT_VERSIONS: GuideRef = at("script", "versions");
     pub const NARRATION_GENERATE: GuideRef = at("narration", "generate");
     pub const NARRATION_PLAY: GuideRef = at("narration", "play");
     pub const NARRATION_STALE: GuideRef = at("narration", "stale");
@@ -146,6 +147,7 @@ pub mod refs {
     pub const SCENES_PLAN: GuideRef = at("scenes", "plan");
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
     pub const SCENES_REPLAN: GuideRef = at("scenes", "replan");
+    pub const SCENES_PLACE: GuideRef = at("scenes", "place");
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
     pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
     pub const PERSONAS_LIBRARY: GuideRef = at("personas", "library");
@@ -195,7 +197,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 67] = [
+    pub const ALL: [GuideRef; 69] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -210,6 +212,7 @@ pub mod refs {
         SCRIPT_REVIEW,
         SCRIPT_MUSIC,
         SCRIPT_MUSIC_TRACK,
+        SCRIPT_VERSIONS,
         NARRATION_GENERATE,
         NARRATION_PLAY,
         NARRATION_STALE,
@@ -217,6 +220,7 @@ pub mod refs {
         SCENES_PLAN,
         SCENES_REDRAW,
         SCENES_REPLAN,
+        SCENES_PLACE,
         CLIPS_ANIMATE,
         CLIPS_REVIEW,
         PERSONAS_LIBRARY,

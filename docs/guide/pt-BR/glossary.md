@@ -50,6 +50,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Roteiro**: o que o narrador fala. O Claude escreve, e você edita como quiser.
 
+**Versão**: o mesmo vídeo feito de novo para um canal em outro idioma ou país: roteiro adaptado pelo Claude, cenas e corte trazidos do original, narração, legendas e metadados próprios.
+
 **Narração**: o roteiro lido em voz alta pela persona do projeto, com o tempo de cada palavra. Se o roteiro muda, ela fica desatualizada.
 
 **Tempo das palavras**: quando cada palavra da narração é falada. É o que conduz as legendas, a palavra destacada e onde os cortes se encaixam.

@@ -98,6 +98,9 @@ pub enum Control {
     ScriptDetails,
     /// Script: the music prompt.
     MusicPrompt,
+    /// Script: making the video again for a channel in another language,
+    /// and the versions made.
+    ScriptVersions,
     /// Script: the music made from the prompt, and the button that
     /// composes it.
     MusicTrack,
@@ -113,6 +116,8 @@ pub enum Control {
     ScenesPlan,
     /// Scenes: All and Pending over the scenes.
     ScenesFilter,
+    /// Scenes: a version's scenes, placed on its own narration.
+    ScenesPlace,
     /// Scenes: drawing a scene's image again, or the new one to review.
     SceneRedraw,
     /// Clips: animating every scene without a clip.
@@ -578,14 +583,15 @@ pub const PROJECTS: Tour = {
 };
 
 /// Script: writing or generating it, a new version to review, saving,
-/// what a generation costs, where the script came from, the music prompt.
+/// what a generation costs, where the script came from, the music, and
+/// versions in other languages.
 pub const SCRIPT: Tour = {
     const AT: Stage = Stage::Script;
     const PAGE: &str = "script";
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Script,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "write", control(Control::ScriptBody))
@@ -607,10 +613,9 @@ pub const SCRIPT: Tour = {
             at_stage(AT, "music", control(Control::MusicPrompt))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "music"),
-            // Only once there is a music prompt.
-            at_stage(AT, "track", control(Control::MusicTrack))
+            at_stage(AT, "versions", control(Control::ScriptVersions))
                 .missing(WhenMissing::Skip)
-                .learn(PAGE, "generated-music"),
+                .learn(PAGE, "versions"),
         ],
     }
 };
@@ -645,14 +650,15 @@ pub const NARRATION: Tour = {
 };
 
 /// Scenes: planning them, the scene list, a scene's image and prompt,
-/// drawing it again, the filter, and planning again.
+/// drawing it again, the filter, planning again, and placing a version's
+/// scenes on its narration.
 pub const SCENES: Tour = {
     const AT: Stage = Stage::Scenes;
     const PAGE: &str = "scenes";
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))
@@ -672,6 +678,10 @@ pub const SCENES: Tour = {
             at_stage(AT, "replan", control(Control::ScenesPlan))
                 .missing(TOOLBAR)
                 .learn(PAGE, "replan"),
+            // Only on a version whose scenes wait for its narration.
+            at_stage(AT, "place", control(Control::ScenesPlace))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "place"),
         ],
     }
 };

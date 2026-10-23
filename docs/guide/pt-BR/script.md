@@ -60,3 +60,18 @@ A faixa nova espera no cartão, marcada como **Faixa nova**, com a duração e o
 **Gerar outra** faz uma faixa nova, que toma o lugar da que espera revisão; a faixa em uso fica até você usar outra. Uma faixa usada é um arquivo de mídia do projeto, então também aparece na aba Mídia do editor ([O editor](editor.md)), onde dá para colocá-la de novo à mão. Uma faixa esperando revisão não aparece.
 
 Cada faixa guarda o prompt, a duração pedida, o modelo e a tarefa que a fez. A ElevenLabs assina a faixa com credenciais de conteúdo C2PA, que dizem que ela foi feita por IA. Uma tarefa que falhou mostra o motivo dado pela ElevenLabs: plano sem acesso ao Music, chave sem a permissão Music, créditos esgotados ou um prompt recusado (por exemplo, um que cita um artista; a ElevenLabs sugere outra redação).
+
+<a id="versions"></a>
+## Versões em outros idiomas
+
+No fim da etapa Roteiro, **Versões em outros idiomas** faz o mesmo vídeo de novo para outro canal seu com outro idioma ou país, como um canal em inglês para os Estados Unidos e um em português para o Brasil. Antes, o vídeo precisa da narração e das cenas planejadas nessa narração. Cada canal possível aparece com o idioma, o país e o narrador (a persona padrão do canal) e quanto custa a adaptação; **Fazer versão** inicia o job.
+
+O Claude adapta em vez de traduzir, a partir do **modelo de localização** ([Modelos](templates.md#kinds)): expressões, unidades, moedas, datas e referências do novo país, com os fatos mantidos e cada frase com mais ou menos o mesmo tempo de fala. Ele responde com um título e uma frase adaptada para cada frase da narração, para que cada cena siga a sua frase; qualquer outra resposta faz o job falhar e nada é criado. Só então a versão começa como um projeto desse canal, com:
+
+- o roteiro e o título adaptados, para você revisar e editar como qualquer roteiro;
+- cópias do plano de cenas (imagens e clipes atuais, prompts e modelos de vídeo escolhidos) e das mídias e músicas geradas do projeto, cada uma com a sua origem;
+- o que o corte fazia com elas, para quando as cenas forem posicionadas ([Posicionar as cenas numa versão](scenes.md#place)).
+
+Os arquivos são copiados para a pasta da própria versão, então remover um projeto nunca mexe no outro. Narração, legendas, metadados, miniatura, capítulos, renderizações e publicações não são copiados: a versão faz os seus, para o seu público, como o YouTube espera de conteúdo reaproveitado. A versão mantém o formato do original, Short ou longo. Só a adaptação é cobrada, no novo projeto ([Custos](costs.md)).
+
+Um canal tem uma versão de cada vídeo; depois de feita, ela aparece em **Versões feitas** com **Abrir**. Na versão, a etapa Roteiro diz de qual vídeo ela é versão, e **Gerar de novo** adapta as frases do original outra vez; a nova adaptação aguarda revisão como qualquer roteiro novo. Remover o original mantém as versões.

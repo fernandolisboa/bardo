@@ -280,6 +280,7 @@ update_download = "Download de atualização"
 thumbnail = "Texto da miniatura"
 thumbnail_image = "Fundo da miniatura"
 chapters = "Capítulos"
+localization = "Versão em outro idioma"
 
 [job.state]
 queued = "Na fila"
@@ -712,6 +713,7 @@ music_prompt = "Prompt de música"
 metadata = "Metadados"
 thumbnail = "Miniatura"
 chapters = "Capítulos"
+localization = "Versão localizada"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -731,6 +733,8 @@ networks = "As contas de rede do canal, uma por linha, com os campos e limites d
 target_length = "O tamanho do roteiro, pelo formato do vídeo: menos de um minuto para um Short, de 8 a 10 minutos para um vídeo longo."
 frame_shape = "O formato das imagens, pelo formato do vídeo: em pé (9:16) para um Short, deitado (16:9) para um vídeo longo."
 video_title = "O título do vídeo no YouTube depois que os metadados forem escritos; antes disso, o título provisório."
+source_language = "O idioma de onde a versão é adaptada: o do canal de origem."
+source_country = "O país do público de onde a versão é adaptada: o do canal de origem."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -1314,6 +1318,7 @@ narration_missing = "Ainda não gravada"
 narration_stale = "Desatualizada"
 scenes_missing = "Ainda não planejadas"
 scenes_stale = "Desatualizadas"
+scenes_to_place = "Cenas para posicionar"
 to_review = "{n} para revisar"
 images = "{done} de {total} imagens"
 clips = "{done} de {total} clipes"
@@ -2337,12 +2342,12 @@ title = "De onde ele veio"
 body = "Detalhes diz qual modelo de IA escreveu o roteiro, a partir de qual versão do modelo de roteiro e com quantos tokens. Mostrar prompt mostra exatamente o que foi enviado."
 
 [tour.script.music]
-title = "O prompt de música"
-body = "O Claude escreve um prompt para a música do vídeo a partir do canal, do tema e da duração do vídeo. Edite como quiser: a música é feita a partir dele, aqui ou numa ferramenta sua."
+title = "A música"
+body = "O Claude escreve um prompt para a música do vídeo a partir do canal, do tema e da duração. Edite-o; depois Gerar música faz o ElevenLabs Music compor uma faixa para revisar, ou faça a música numa ferramenta sua."
 
-[tour.script.track]
-title = "Música a partir do prompt"
-body = "Gerar música pede ao ElevenLabs Music uma faixa instrumental com a duração da narração. Ouça, e então Usar esta faixa coloca a faixa na trilha de música desde 0:00, ou Descartar joga fora. Uma faixa sua ainda pode ser importada no editor."
+[tour.script.versions]
+title = "Versões em outros idiomas"
+body = "Faça o vídeo de novo para um canal em outro idioma ou país. O Claude adapta o roteiro frase por frase; a versão mantém estas cenas e o corte e ganha narração própria."
 
 [tour.narration]
 name = "Tour da Narração"
@@ -2389,6 +2394,10 @@ body = "Pendentes mostra só as cenas com algo por fazer, uma imagem para desenh
 [tour.scenes.replan]
 title = "Planeje de novo"
 body = "Quando a narração é feita de novo, as cenas ficam desatualizadas, porque os tempos delas não batem mais. Planejar de novo as substitui, e pergunta antes quando isso descartaria imagens ou clipes."
+
+[tour.scenes.place]
+title = "Posicionar as cenas"
+body = "Numa versão, depois que a narração dela fica pronta, Posicionar cenas leva cada cena do original ao novo tempo da sua frase e monta o corte como o original estava."
 
 [tour.clips]
 name = "Tour dos Clipes"
@@ -3288,3 +3297,43 @@ footage = "Mídia importada"
 no_picture = "Sem imagem: o vídeo já acabou"
 no_speech = "Nenhuma narração toca aqui."
 show_in_editor = "Mostrar no editor"
+
+[versions]
+title = "Versões em outros idiomas"
+hint = "Faça este vídeo de novo para um canal em outro idioma ou país. O Claude adapta o roteiro frase por frase; o novo projeto mantém estas cenas, imagens, clipes, mídias e corte, e ganha narração, legendas e metadados próprios."
+target = "{language} · {country} · narrado por {narrator}"
+target_no_narrator = "{language} · {country} · sem narrador padrão"
+make = "Fazer versão"
+make_hint = "O Claude adapta as frases da narração com a versão {n} do modelo de localização; depois a versão começa nesse canal com cópias destes arquivos. Só a adaptação é cobrada, no novo projeto."
+making = "Fazendo a versão para {channel}…"
+stopped = "A última versão parou:"
+made = "Versões feitas"
+made_line = "{channel} · {language} · {country}"
+open = "Abrir"
+of = "Versão de “{title}” ({language}, {country})."
+of_channel = "Feita a partir do canal {channel}."
+source_gone = "O projeto original foi removido."
+open_source = "Abrir o original"
+adapt_hint = "Gerar de novo adapta as frases do original outra vez; a nova adaptação aguarda revisão aqui."
+
+[versions.error]
+same_audience = "Escolha um canal em outro idioma ou país."
+already_made = "Esse canal já tem uma versão deste vídeo."
+no_narration = "Faça a narração primeiro: a versão adapta as frases dela."
+no_plan = "Planeje as cenas na narração atual primeiro: a versão as mantém."
+no_channel = "Nenhum outro canal fala outro idioma ou para outro país. Crie um na tela Canais."
+busy = "Uma versão deste vídeo já está sendo feita."
+not_saved = "Não foi possível carregar ou salvar as versões. Tente de novo."
+
+[scenes.place]
+title = "Cenas do original"
+hint = "Esta versão tem narração própria. Posicionar as cenas leva cada uma, com sua imagem e seu clipe, ao novo tempo da frase em que começava, e monta o corte como o original estava."
+button = "Posicionar cenas nesta narração"
+nothing = "Não há cenas do original para posicionar nesta narração."
+
+[scenes.placed]
+title = "Vale conferir"
+all = "Todas as {n}"
+past_clip = "Agora é mais longa que o clipe de {clip} s, que segura o último quadro. Faça um novo clipe ou recorte."
+stretched = "Tinha {was} s, agora {now} s."
+dropped = "Esta versão não narra esta cena; ela fica fora do corte."

@@ -48,6 +48,15 @@ pub trait ProjectFiles: Send + Sync {
         source: &Path,
     ) -> Result<(), ProjectFileError>;
 
+    /// Copies the file `name` of project `from` into project `project`
+    /// under the same name, as `copy_in` does.
+    fn copy_from(
+        &self,
+        from: VideoProjectId,
+        name: &str,
+        project: VideoProjectId,
+    ) -> Result<(), ProjectFileError>;
+
     fn exists(&self, project: VideoProjectId, name: &str) -> bool;
 
     /// The file's size in bytes.
@@ -89,6 +98,15 @@ impl<T: ProjectFiles + ?Sized> ProjectFiles for Arc<T> {
         source: &Path,
     ) -> Result<(), ProjectFileError> {
         (**self).copy_in(project, name, source)
+    }
+
+    fn copy_from(
+        &self,
+        from: VideoProjectId,
+        name: &str,
+        project: VideoProjectId,
+    ) -> Result<(), ProjectFileError> {
+        (**self).copy_from(from, name, project)
     }
 
     fn size(&self, project: VideoProjectId, name: &str) -> Result<u64, ProjectFileError> {

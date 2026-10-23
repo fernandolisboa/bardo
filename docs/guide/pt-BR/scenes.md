@@ -41,3 +41,12 @@ Acima das cenas, **Todas** mostra cada uma e **Pendentes** só as que têm algo 
 ## Planejar de novo
 
 Quando a narração é refeita, os tempos das cenas não batem mais e a etapa mostra **Desatualizada**. **Planejar de novo** troca as cenas por novas. Se elas já têm imagens ou clipes, o Bardo pergunta antes, porque planejar de novo descarta esses arquivos.
+
+<a id="place"></a>
+## Posicionar as cenas numa versão
+
+Uma [versão em outro idioma](script.md#versions) começa com as cenas do original, ainda nos tempos do original. Depois que a narração dela fica pronta (gerada ou importada), a etapa mostra **Cenas para posicionar** e oferece **Posicionar cenas nesta narração**. Cada cena mantém a imagem, o clipe e os prompts e vai para o novo tempo da frase em que começava; o texto dela passa a ser as palavras da nova narração. As frases são encontradas comparando as palavras da adaptação com o que foi narrado, então editar o roteiro antes não atrapalha.
+
+Posicionar também monta o corte da versão a partir do original: o enquadramento, o movimento e a transição de cada cena, as cenas que ele deixou de fora, o estilo e o destaque das legendas, a mixagem e o formato do quadro. Música e SFX vão para o mesmo ponto da narração (a música mantém início e fim nas palavras, um SFX a sua duração). As legendas vêm da nova narração. Cortes e aparas dentro de uma cena, imagens importadas colocadas à mão e textos de legenda editados não vêm junto; refaça-os no [editor](editor.md).
+
+As cenas esticam ou encolhem com as suas frases. **Vale conferir** lista as cenas que agora passam do clipe (o clipe segura o último quadro), as que cresceram mais da metade ou encolheram mais de um terço e as que a versão não narra, que ficam fora do corte. Depois de uma nova narração, posicionar volta a ser oferecido; **Planejar de novo** substitui as cenas como em qualquer projeto.

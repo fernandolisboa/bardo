@@ -290,6 +290,11 @@ impl ProjectsScreen {
         };
         let bardo = self.bardo.read(cx);
         let pending = states.iter().filter(|state| state.is_pending()).count();
+        // A version's carried scenes say so in their own card.
+        let can_place = view
+            .version
+            .as_ref()
+            .is_some_and(|version| version.can_place);
         let row = h_flex();
         let filter = (!states.is_empty()).then(|| {
             kit::anchor(
@@ -332,7 +337,7 @@ impl ProjectsScreen {
             .flex_wrap()
             .items_center()
             .children(filter)
-            .when(stage == Stage::Scenes && view.stale, |row| {
+            .when(stage == Stage::Scenes && view.stale && !can_place, |row| {
                 row.child(kit::status(
                     Tone::Warning,
                     tr(bardo, Text::ScenesStaleTag),
@@ -369,7 +374,11 @@ impl ProjectsScreen {
         let stale = view.stale;
         // Only the leading button is primary: planning while there is no
         // plan or it is stale, else drawing the missing images.
-        let plans_first = plan.is_none() || stale;
+        let can_place = view
+            .version
+            .as_ref()
+            .is_some_and(|version| version.can_place);
+        let plans_first = plan.is_none() || (stale && !can_place);
         let can_plan = !busy && !view.is_animating() && view.narration.is_some();
         let plan_button = can_plan.then(|| {
             let button = Button::new("plan-scenes").small().label(tr(
@@ -485,6 +494,144 @@ impl ProjectsScreen {
         (actions, estimate)
     }
 
+    fn place_scenes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.scenes_error = self
+            .bardo
+            .read(cx)
+            .place_scenes(id)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// On a version: placing the original's scenes on its narration, or,
+    /// once placed, the scenes worth a look.
+    fn render_place_scenes(&self, view: &ScenesView, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let version = view.version.as_ref()?;
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let seconds = |duration: std::time::Duration| format!("{:.1}", duration.as_secs_f64());
+        if version.can_place {
+            let busy = view.is_busy() || view.is_animating();
+            // One line, the explanation behind its ⓘ: the scene list keeps
+            // its room in a short window.
+            let card = kit::card(cx)
+                .px_3()
+                .py_2()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap_2()
+                .items_center()
+                .border_color(look(cx).tokens.accent_edge)
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .gap_1()
+                        .items_center()
+                        .child(div().font_medium().child(tr(bardo, Text::PlaceScenesTitle)))
+                        .child(guide::info(
+                            bardo,
+                            "place-scenes-info",
+                            tr(bardo, Text::PlaceScenesHint),
+                            guide::refs::SCENES_PLACE,
+                        )),
+                )
+                .when(!busy, |card| {
+                    card.child(
+                        Button::new("place-scenes")
+                            .primary()
+                            .small()
+                            .label(tr(bardo, Text::PlaceScenes))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.place_scenes(window, cx)
+                            })),
+                    )
+                });
+            return Some(
+                kit::anchor(TourAnchor::Control(Control::ScenesPlace), card).into_any_element(),
+            );
+        }
+        if version.notes.is_empty() {
+            return None;
+        }
+        let plan = view.plan.as_ref()?;
+        let lines: Vec<SharedString> = version
+            .notes
+            .iter()
+            .filter_map(|(index, note)| {
+                let scene = plan.scenes().get(*index)?;
+                let label = bardo.text_with(
+                    Text::SceneLabel,
+                    &[
+                        ("n", &(index + 1).to_string()),
+                        ("start", &clock(scene.start)),
+                        ("end", &clock(scene.end)),
+                    ],
+                );
+                let what = match note {
+                    bardo_app::bardo_domain::PlacedScene::PastClip { clip, .. } => {
+                        bardo.text_with(Text::PlacedScenePastClip, &[("clip", &seconds(*clip))])
+                    }
+                    bardo_app::bardo_domain::PlacedScene::Stretched { was, now } => bardo
+                        .text_with(
+                            Text::PlacedSceneStretched,
+                            &[("was", &seconds(*was)), ("now", &seconds(*now))],
+                        ),
+                    bardo_app::bardo_domain::PlacedScene::Dropped => {
+                        bardo.text(Text::PlacedSceneDropped).into_owned()
+                    }
+                };
+                Some(SharedString::from(format!("{label}: {what}")))
+            })
+            .collect();
+        // A few lines show; past that, all of them behind a button, so the
+        // scene list keeps its room.
+        const SHOWN: usize = 3;
+        let more = (lines.len() > SHOWN).then(|| {
+            h_flex().child(kit::details(
+                "placed-scenes-all",
+                SharedString::from(
+                    bardo.text_with(Text::PlacedScenesAll, &[("n", &lines.len().to_string())]),
+                ),
+                lines.clone(),
+            ))
+        });
+        let card = kit::card(cx)
+            .px_3()
+            .py_2()
+            .gap_1()
+            .border_color(theme.warning)
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        div()
+                            .font_medium()
+                            .child(tr(bardo, Text::PlacedScenesTitle)),
+                    )
+                    .child(guide::info(
+                        bardo,
+                        "placed-scenes-info",
+                        tr(bardo, Text::PlaceScenesHint),
+                        guide::refs::SCENES_PLACE,
+                    )),
+            )
+            .children(
+                lines
+                    .into_iter()
+                    .take(SHOWN)
+                    .map(|line| div().text_sm().child(line)),
+            )
+            .children(more);
+        Some(kit::anchor(TourAnchor::Control(Control::ScenesPlace), card).into_any_element())
+    }
+
     /// What happened to the scenes: an error, the job, why nothing can be
     /// planned yet, and the questions before discarding images or going
     /// past a budget.
@@ -555,11 +702,14 @@ impl ProjectsScreen {
         let no_narration = view.narration.is_none().then(|| {
             kit::notice(Tone::Info, tr(bardo, Text::ScenesNoNarration), cx).into_any_element()
         });
+        let place = self.render_place_scenes(view, cx);
+        let bardo = self.bardo.read(cx);
         self.scenes_error
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element())
             .into_iter()
             .chain(job)
             .chain(no_narration)
+            .chain(place)
             .chain(confirm)
             .chain(ask)
             .collect()

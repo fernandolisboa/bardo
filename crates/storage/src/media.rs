@@ -90,7 +90,10 @@ impl MediaAssetRepository for Database {
     }
 }
 
-fn insert_asset(conn: &rusqlite::Connection, asset: &MediaAsset) -> Result<(), RepositoryError> {
+pub(crate) fn insert_asset(
+    conn: &rusqlite::Connection,
+    asset: &MediaAsset,
+) -> Result<(), RepositoryError> {
     let duration = i64::try_from(asset.duration.as_nanos()).map_err(boxed)?;
     conn.execute(
         "INSERT INTO media_asset (id, project_id, profile_id, kind, source, file, name,
@@ -150,6 +153,32 @@ impl TrackRow {
     }
 }
 
+/// Saves `track`, whose media asset is already saved.
+pub(crate) fn insert_track(
+    conn: &rusqlite::Connection,
+    track: &MusicTrack,
+) -> Result<(), RepositoryError> {
+    conn.execute(
+        "INSERT INTO music_track (asset_id, project_id, profile_id, provider, model, prompt,
+                                  length_ms, job_id, generated_at, chosen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            track.asset.to_string(),
+            track.project.to_string(),
+            track.owner.to_string(),
+            track.provider.code(),
+            track.model,
+            track.prompt,
+            i64::try_from(track.length.as_millis()).map_err(boxed)?,
+            track.job.map(|job| job.to_string()),
+            to_unix_millis(track.generated_at),
+            track.chosen_at.map(to_unix_millis),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
+}
+
 impl MusicTrackRepository for Database {
     fn music_tracks(&self, project: VideoProjectId) -> Result<MusicTracks, RepositoryError> {
         let conn = self.conn();
@@ -194,24 +223,7 @@ impl MusicTrackRepository for Database {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
         insert_asset(&tx, asset)?;
-        tx.execute(
-            "INSERT INTO music_track (asset_id, project_id, profile_id, provider, model, prompt,
-                                      length_ms, job_id, generated_at, chosen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                track.asset.to_string(),
-                track.project.to_string(),
-                track.owner.to_string(),
-                track.provider.code(),
-                track.model,
-                track.prompt,
-                i64::try_from(track.length.as_millis()).map_err(boxed)?,
-                track.job.map(|job| job.to_string()),
-                to_unix_millis(track.generated_at),
-                track.chosen_at.map(to_unix_millis),
-            ],
-        )
-        .map_err(boxed)?;
+        insert_track(&tx, track)?;
         tx.commit().map_err(boxed)
     }
 
