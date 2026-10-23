@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    GenerationPresets, JobId, Narration, NarrationId, NarrationRepository, NarrationSource,
-    ProfileId, Provider, RepositoryError, ScriptText, VideoProjectId, VoiceRef, WordTiming,
-    WordTimings,
+    CaptureVoice, GenerationPresets, JobId, Narration, NarrationId, NarrationRepository,
+    NarrationSource, ProfileId, Provider, RepositoryError, ScriptText, VideoProjectId, VoiceRef,
+    WordTiming, WordTimings,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -34,6 +34,18 @@ fn duration(millis: i64) -> Result<Duration, RepositoryError> {
 
 fn index(value: i64) -> Result<usize, RepositoryError> {
     usize::try_from(value).map_err(boxed)
+}
+
+/// Presets as stored: stability, similarity, style and speed, all there.
+pub(crate) fn stored_presets(presets: [Option<i64>; 4]) -> Option<GenerationPresets> {
+    let [stability, similarity, style, speed] =
+        presets.map(|value| value.map(|value| u8::try_from(value).unwrap_or(u8::MAX)));
+    Some(GenerationPresets {
+        stability: stability?,
+        similarity: similarity?,
+        style: style?,
+        speed: speed?,
+    })
 }
 
 /// A narration row as stored, before domain validation.
@@ -87,33 +99,13 @@ impl NarrationRow {
         let missing = |column: &str| invalid(format!("{column} is missing"));
         match self.source.as_str() {
             "generated" => {
-                let [provider, voice_id, voice_name] = &self.voice;
-                let (Some(provider), Some(voice_id), Some(voice_name)) =
-                    (provider, voice_id, voice_name)
-                else {
-                    return Err(missing("the voice"));
-                };
-                let provider: Provider = provider.parse().map_err(boxed)?;
-                let voice = VoiceRef::new(provider, voice_id, voice_name).map_err(boxed)?;
-                let [stability, similarity, style, speed] = self
-                    .presets
-                    .map(|value| value.map(|value| u8::try_from(value).unwrap_or(u8::MAX)));
-                let (Some(stability), Some(similarity), Some(style), Some(speed)) =
-                    (stability, similarity, style, speed)
-                else {
-                    return Err(missing("a preset"));
-                };
+                let (voice, presets) = self.voice()?.ok_or_else(|| missing("the voice"))?;
                 let billed = self
                     .billed_characters
                     .ok_or_else(|| missing("billed_characters"))?;
                 Ok(NarrationSource::Generated {
                     voice,
-                    presets: GenerationPresets {
-                        stability,
-                        similarity,
-                        style,
-                        speed,
-                    },
+                    presets,
                     model: self.model.clone(),
                     billed_characters: u64::try_from(billed).map_err(boxed)?,
                 })
@@ -131,8 +123,38 @@ impl NarrationRow {
                     .map_err(boxed)?,
                 model: self.model.clone(),
             }),
+            "captured" => Ok(NarrationSource::Captured {
+                file_name: self
+                    .recording_name
+                    .clone()
+                    .ok_or_else(|| missing("recording_name"))?,
+                voice: match self.voice()? {
+                    Some((voice, presets)) => CaptureVoice::Persona { voice, presets },
+                    None => CaptureVoice::Own,
+                },
+                model: self.model.clone(),
+                aligner: self
+                    .aligner
+                    .as_deref()
+                    .ok_or_else(|| missing("aligner"))?
+                    .parse()
+                    .map_err(boxed)?,
+            }),
             other => Err(invalid(format!("unknown source {other}"))),
         }
+    }
+
+    /// The voice and presets that spoke it, when the row names them.
+    fn voice(&self) -> Result<Option<(VoiceRef, GenerationPresets)>, RepositoryError> {
+        let [provider, voice_id, voice_name] = &self.voice;
+        let (Some(provider), Some(voice_id), Some(voice_name)) = (provider, voice_id, voice_name)
+        else {
+            return Ok(None);
+        };
+        let provider: Provider = provider.parse().map_err(boxed)?;
+        let voice = VoiceRef::new(provider, voice_id, voice_name).map_err(boxed)?;
+        let presets = stored_presets(self.presets).ok_or_else(|| invalid("a preset is missing"))?;
+        Ok(Some((voice, presets)))
     }
 
     /// Rebuilds the narration through domain validation, so rows edited
@@ -234,6 +256,25 @@ impl NarrationRepository for Database {
                 Some(file_name.as_str()),
                 Some(aligner.code()),
             ),
+            NarrationSource::Captured {
+                file_name,
+                voice,
+                aligner,
+                ..
+            } => {
+                let (voice, presets) = match voice {
+                    CaptureVoice::Persona { voice, presets } => (Some(voice), Some(presets)),
+                    CaptureVoice::Own => (None, None),
+                };
+                (
+                    "captured",
+                    voice,
+                    presets,
+                    None,
+                    Some(file_name.as_str()),
+                    Some(aligner.code()),
+                )
+            }
         };
         tx.execute(
             "INSERT INTO narration (project_id, id, profile_id, text, source, voice_provider,
@@ -408,6 +449,45 @@ mod tests {
             .query_row("SELECT voice_id FROM narration", [], |row| row.get(0))
             .unwrap();
         assert_eq!(voice, None);
+    }
+
+    #[test]
+    fn a_captured_narration_round_trips_with_or_without_a_persona_voice() {
+        let (db, project) = setup();
+        let mut captured = narration(&project, "Li o roteiro para a câmera.");
+        let voice = VoiceRef::elevenlabs("FrS6cKLB1wg4WYgPa9GW", "Wyatt").unwrap();
+        captured.source = NarrationSource::Captured {
+            file_name: "IMG_0042.MOV".into(),
+            voice: CaptureVoice::Persona {
+                voice,
+                presets: GenerationPresets {
+                    stability: 55,
+                    similarity: 80,
+                    style: 5,
+                    speed: 100,
+                },
+            },
+            model: "eleven_multilingual_sts_v2".into(),
+            aligner: Provider::ElevenLabs,
+        };
+        db.save_narration(&captured).unwrap();
+        assert_eq!(db.narration(project.id).unwrap(), Some(captured.clone()));
+
+        captured.id = NarrationId::new();
+        captured.source = NarrationSource::Captured {
+            file_name: "IMG_0042.MOV".into(),
+            voice: CaptureVoice::Own,
+            model: "audio_isolation".into(),
+            aligner: Provider::ElevenLabs,
+        };
+        db.save_narration(&captured).unwrap();
+        assert_eq!(db.narration(project.id).unwrap(), Some(captured));
+        // Half a voice is refused.
+        assert!(
+            db.conn()
+                .execute("UPDATE narration SET voice_id = 'x'", [])
+                .is_err()
+        );
     }
 
     #[test]

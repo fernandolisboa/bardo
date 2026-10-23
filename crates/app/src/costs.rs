@@ -233,7 +233,10 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         },
         CostPurpose::SceneClip => Metered::video_seconds(5),
         // A ten-minute recording.
-        CostPurpose::NarrationAlignment => Metered::audio_seconds(600),
+        CostPurpose::NarrationAlignment
+        | CostPurpose::ScriptCheck
+        | CostPurpose::VoiceChange
+        | CostPurpose::VoiceIsolation => Metered::audio_seconds(600),
         // A short paragraph.
         CostPurpose::MusicPrompt => tokens(500, 200),
         // Music for a ten-minute narration, the longest a track is.

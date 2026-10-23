@@ -1076,6 +1076,9 @@ pub(crate) mod tests {
                 speech: Arc::clone(&self.speech) as _,
                 previews: Arc::new(crate::testing::NoPreviews),
                 aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
+                transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
+                voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
+                voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
                 images: Arc::clone(&self.images) as _,
                 music: Arc::clone(&self.music) as _,
                 clips: std::iter::once(Arc::clone(&self.clips) as _)

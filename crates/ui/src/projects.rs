@@ -16,9 +16,9 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    Channel, ChannelId, Generation, Job, JobKind, JobState, Narration, NarrationSource, Network,
-    NetworkAccountId, PersonaId, SceneFieldError, ScenePlanId, ScriptFieldError, TemplateKind,
-    VideoFormat, VideoMetadataDraft, VideoProject, VideoProjectId,
+    CaptureVoice, Channel, ChannelId, Generation, Job, JobKind, JobState, Narration,
+    NarrationSource, Network, NetworkAccountId, PersonaId, SceneFieldError, ScenePlanId,
+    ScriptFieldError, TemplateKind, VideoFormat, VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
@@ -50,6 +50,7 @@ use crate::shell::tr;
 use crate::spend::{budget_question, estimate_note};
 use crate::{guide, layout};
 
+mod capture;
 mod export;
 mod music;
 mod render;
@@ -177,6 +178,8 @@ pub struct ProjectsScreen {
     recording: Option<(Recording, SpendEstimate)>,
     /// An import held back at a budget.
     import_ask: Option<SpendEstimate>,
+    /// Importing a capture, and what the Capture stage says.
+    capture: capture::CaptureImport,
     /// The music prompt card, and the prompt as the user types it.
     music: Option<MusicPromptView>,
     music_editor: Entity<TextareaState>,
@@ -461,6 +464,7 @@ impl ProjectsScreen {
             reading_recording: false,
             recording: None,
             import_ask: None,
+            capture: capture::CaptureImport::default(),
             music: None,
             music_editor,
             music_loaded: None,
@@ -673,6 +677,7 @@ impl ProjectsScreen {
         self.reading_recording = false;
         self.recording = None;
         self.import_ask = None;
+        self.capture = capture::CaptureImport::default();
         self.music_loaded = None;
         self.music_error = None;
         self.music_notice = None;
@@ -780,6 +785,10 @@ impl ProjectsScreen {
                 .narration
                 .as_ref()
                 .is_some_and(|view| view.narration.is_some()),
+            Stage::Capture => self
+                .narration
+                .as_ref()
+                .is_some_and(|view| view.capture.is_some()),
             Stage::Scenes => plan.is_some(),
             Stage::Clips => plan.is_some_and(|plan| {
                 plan.scenes()
@@ -1815,6 +1824,8 @@ impl ProjectsScreen {
             .as_ref()
             .and_then(|job| self.render_narration_job(job, cx));
         let record = narration.map(|narration| self.render_narration_record(narration, cx));
+        let capture_import = self.render_capture_import(cx);
+        let capture_button = self.render_capture_button(cx);
         let bardo = self.bardo.read(cx);
         let running = self.narration_running();
         let scroll = Some(&self.page_scroll);
@@ -1884,8 +1895,12 @@ impl ProjectsScreen {
         } else {
             generate.primary().small()
         };
-        let choosing = self.choosing_recording.is_some() || self.recording.is_some();
+        let choosing = self.choosing_recording.is_some()
+            || self.recording.is_some()
+            || self.capture.choosing.is_some()
+            || self.capture.chosen.is_some();
         let can_import = !running && !choosing && view.script.is_some();
+        let capture_button = can_import.then_some(capture_button);
         let import = Button::new("import-narration")
             .label(tr(bardo, Text::ImportNarration))
             .outline()
@@ -1959,8 +1974,23 @@ impl ProjectsScreen {
                                             ))
                                             .into_any_element(),
                                     ))
+                                })
+                                .when_some(capture_button, |row, button| {
+                                    row.child(div().w(px(8.))).child(tagged(
+                                        TourAnchor::Control(Control::NarrationCapture),
+                                        button,
+                                    ))
                                 }),
-                        ),
+                        )
+                        // Another narration takes the capture with it.
+                        .when(view.capture.is_some(), |panel| {
+                            panel.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(tr(bardo, Text::CaptureReplacesNote)),
+                            )
+                        }),
                 )
                 .when(self.reading_recording, |panel| {
                     panel.child(
@@ -1972,6 +2002,7 @@ impl ProjectsScreen {
                     )
                 })
                 .children(chosen)
+                .children(capture_import)
                 .children(self.narration_ask.as_ref().map(|estimate| {
                     budget_question(
                         "narration-budget",
@@ -2015,10 +2046,10 @@ impl ProjectsScreen {
                     .child(Spinner::new().small())
                     .child(div().text_sm().child(tr(
                         bardo,
-                        if job.kind() == JobKind::NarrationImport {
-                            Text::NarrationAligning
-                        } else {
-                            Text::NarrationRunning
+                        match job.kind() {
+                            JobKind::NarrationImport => Text::NarrationAligning,
+                            JobKind::Capture => Text::CaptureRunning,
+                            _ => Text::NarrationRunning,
                         },
                     )))
                     .child(div().text_xs().text_color(theme.muted_foreground).child(
@@ -2192,10 +2223,30 @@ impl ProjectsScreen {
                     ),
                 ));
             }
+            NarrationSource::Captured {
+                file_name, voice, ..
+            } => {
+                facts.push(fact(Text::NarrationRecording, file_name.clone()));
+                facts.push(fact(
+                    Text::NarrationVoice,
+                    match voice {
+                        CaptureVoice::Persona { voice, .. } => voice.name().to_owned(),
+                        CaptureVoice::Own => bardo.text(Text::CaptureVoiceOwnShort).into_owned(),
+                    },
+                ));
+                facts.push(fact(
+                    Text::NarrationCost,
+                    bardo.text_with(
+                        Text::NarrationAudioValue,
+                        &[("length", &clock(narration.duration))],
+                    ),
+                ));
+            }
         }
         let made = match source {
             NarrationSource::Generated { .. } => Text::ProvenanceGenerated,
             NarrationSource::Imported { .. } => Text::NarrationImported,
+            NarrationSource::Captured { .. } => Text::NarrationCaptured,
         };
         facts.push(fact(Text::NarrationDuration, clock(narration.duration)));
         facts.push(fact(made, bardo.time_ago(narration.generated_at)));
@@ -2300,6 +2351,10 @@ impl Render for ProjectsScreen {
             }
             Stage::Narration => {
                 parts.content.extend(self.render_narration(cx));
+                parts.scroll = Some(self.page_scroll.clone());
+            }
+            Stage::Capture => {
+                parts.content = self.capture_page(cx);
                 parts.scroll = Some(self.page_scroll.clone());
             }
             Stage::Scenes | Stage::Clips => self.scene_parts(current, &mut parts, cx),

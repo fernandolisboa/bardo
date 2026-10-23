@@ -31,6 +31,7 @@ icon_assets!(
         ShieldCheck,
         Trash,
         Tv,
+        Webcam,
     ]
 );
 
@@ -77,6 +78,7 @@ pub fn stage(stage: Stage) -> Lucide {
     match stage {
         Stage::Script => Lucide::FileText,
         Stage::Narration => Lucide::Mic,
+        Stage::Capture => Lucide::Webcam,
         Stage::Scenes => Lucide::Image,
         Stage::Clips => Lucide::Film,
         Stage::Edit => Lucide::Scissors,

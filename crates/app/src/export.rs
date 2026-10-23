@@ -22,8 +22,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, Cost, CostPurpose, Export, ExportFiles, ExportRepository, Generation, GenerationId,
-    Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
+    ApiKey, CaptureVoice, Cost, CostPurpose, Export, ExportFiles, ExportRepository, Generation,
+    GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
     NarrationSource, Network, NetworkAccount, NetworkAccountId, Post, ProfileId, Progress,
     ProjectFiles, Provider, Render, RenderId, RenderRepository, RenderedPrompt, RepositoryError,
     SecretStore, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
@@ -793,15 +793,25 @@ impl Bardo {
 
     /// Whether posts of the project need a synthetic-content disclosure:
     /// its narrator's voice is flagged as a clone or a realistic synthetic
-    /// voice, and the narration was generated with it (a recording the
-    /// user imported is their own voice).
+    /// voice, and the narration speaks with it, generated or a capture
+    /// voiced with it (a recording the user imported, or a capture left in
+    /// their own voice, is their own voice).
     pub fn needs_disclosure(&self, project: VideoProjectId) -> Result<bool, ExportError> {
         let project = self.export_project(project)?;
-        let imported = self
+        let own_voice = self
             .narrations
             .narration(project.id)?
-            .is_some_and(|narration| matches!(narration.source, NarrationSource::Imported { .. }));
-        if imported {
+            .is_some_and(|narration| {
+                matches!(
+                    narration.source,
+                    NarrationSource::Imported { .. }
+                        | NarrationSource::Captured {
+                            voice: CaptureVoice::Own,
+                            ..
+                        }
+                )
+            });
+        if own_voice {
             return Ok(false);
         }
         Ok(self

@@ -112,6 +112,12 @@ pub enum JobKind {
     /// the user's description, then the image provider draws it, and the
     /// drawing waits for review.
     PersonaLook,
+    /// Imports a capture (#189): copies the recording into the project
+    /// folder, extracts its sound, checks it follows the script, voices it
+    /// (the persona's voice or the user's own, cleaned), times its words
+    /// and splits it into takes. Each step's result is kept, so a resumed
+    /// job pays for nothing twice.
+    Capture,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -140,7 +146,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 27] = [
+    pub const ALL: [JobKind; 28] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -168,6 +174,7 @@ impl JobKind {
         JobKind::Chapters,
         JobKind::Localization,
         JobKind::PersonaLook,
+        JobKind::Capture,
     ];
 
     /// Stable name stored in the database.
@@ -200,6 +207,7 @@ impl JobKind {
             JobKind::Chapters => "chapters",
             JobKind::Localization => "localization",
             JobKind::PersonaLook => "persona_look",
+            JobKind::Capture => "capture",
         }
     }
 }
@@ -367,10 +375,13 @@ pub enum JobFailureKind {
     /// A downloaded file did not match the checksum its source published
     /// (an update's installer): it was deleted, and nothing ran.
     Checksum,
+    /// A capture's speech does not follow the project's script (#189): the
+    /// user records it again.
+    OffScript,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 15] = [
+    pub const ALL: [JobFailureKind; 16] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -386,6 +397,7 @@ impl JobFailureKind {
         JobFailureKind::CutShort,
         JobFailureKind::Restored,
         JobFailureKind::Checksum,
+        JobFailureKind::OffScript,
     ];
 
     /// Stable name stored in the database.
@@ -406,6 +418,7 @@ impl JobFailureKind {
             JobFailureKind::CutShort => "cut_short",
             JobFailureKind::Restored => "restored",
             JobFailureKind::Checksum => "checksum",
+            JobFailureKind::OffScript => "off_script",
         }
     }
 
@@ -425,7 +438,8 @@ impl JobFailureKind {
             | JobFailureKind::Files
             | JobFailureKind::CutShort
             | JobFailureKind::Restored
-            | JobFailureKind::Checksum => false,
+            | JobFailureKind::Checksum
+            | JobFailureKind::OffScript => false,
         }
     }
 }

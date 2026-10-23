@@ -144,6 +144,9 @@ pub mod refs {
     pub const NARRATION_PLAY: GuideRef = at("narration", "play");
     pub const NARRATION_STALE: GuideRef = at("narration", "stale");
     pub const NARRATION_IMPORT: GuideRef = at("narration", "import");
+    pub const CAPTURE_IMPORT: GuideRef = at("capture", "import");
+    pub const CAPTURE_TAKES: GuideRef = at("capture", "takes");
+    pub const CAPTURE_REMOVE: GuideRef = at("capture", "remove");
     pub const SCENES_PLAN: GuideRef = at("scenes", "plan");
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
     pub const SCENES_REPLAN: GuideRef = at("scenes", "replan");
@@ -198,7 +201,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 70] = [
+    pub const ALL: [GuideRef; 73] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -218,6 +221,9 @@ pub mod refs {
         NARRATION_PLAY,
         NARRATION_STALE,
         NARRATION_IMPORT,
+        CAPTURE_IMPORT,
+        CAPTURE_TAKES,
+        CAPTURE_REMOVE,
         SCENES_PLAN,
         SCENES_REDRAW,
         SCENES_REPLAN,

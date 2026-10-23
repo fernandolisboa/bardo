@@ -263,6 +263,7 @@ theme_ranking = "Theme ranking"
 script_generation = "Script generation"
 narration = "Narration"
 narration_import = "Narration import"
+capture = "Capture import"
 scene_plan = "Scene plan"
 scene_images = "Scene images"
 scene_clips = "Scene clips"
@@ -306,11 +307,13 @@ files = "A file couldn't be read or written. Check that the folder exists and th
 cut_short = "Bardo closed before it finished. Start it again."
 restored = "This was under way when the backup was made, so Bardo didn't resume it after the restore. Check the network: if the post isn't there, retry."
 checksum = "The installer doesn't match the checksum its release publishes, so Bardo didn't keep it. Try again; if it happens again, report it."
+off_script = "The recording does not follow the script closely enough. Record it again reading the current script, then import it."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
 not_started = "Could not start the job. Try again."
 runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
+superseded = "A newer narration of this project replaced this import, so it cannot run again."
 
 [setup]
 step_by_step = "Step by step"
@@ -597,6 +600,57 @@ recording_unreadable = "Could not read the file. Check that it still exists and 
 recording_unsupported = "Bardo imports MP3 and uncompressed WAV recordings. Convert the file to one of them and import it again."
 recording_empty = "The file has no audio."
 recording_too_large = "The file is over 500 MB. Export it as MP3 and import it again."
+
+[capture]
+import = "Import capture"
+import_dialog = "Import capture"
+import_hint = "Recorded yourself reading the script on camera? Import the MP4 or MOV. Its speech becomes the narration, in the persona's voice or your own, and the recording is split into takes."
+chosen = "{file}: {size}, {fps} fps, {length}."
+voice = "Voice"
+voice_persona = "The persona's voice: {voice}, from {persona}"
+voice_own = "My own voice, cleaned of music and room sound"
+voice_own_short = "My own voice"
+confirm = "This recording shows only me."
+steps = "ElevenLabs checks the speech follows the script before voicing it, then times its words. Only the sound leaves this computer."
+use = "Import this capture"
+running = "Matching your recording to the script…"
+replaces_note = "Generating or importing another narration removes the capture."
+source = "Captured"
+summary = "{file} · {size}, {fps} fps, {length}"
+confirmed = "You confirmed: “{text}”"
+coverage = "Says {percent}% of the script in order."
+takes = "Takes"
+takes_hint = "Each take becomes one performed clip, 4 to 30 seconds long. Takes are cut at sentence ends or pauses; move a cut to the one before or after."
+take = "Take {n}"
+take_span = "{start} to {end} · {length}"
+take_ok = "Ready"
+take_too_long = "Over 30 seconds with no pause to cut at. Record this line again with a pause."
+take_too_short = "Under 4 seconds, with no take next to it that it can join."
+cut_earlier = "Cut earlier"
+cut_later = "Cut later"
+stale = "The script changed after this capture. Record it again with the current script and import it."
+remove = "Remove capture"
+remove_hint = "Removes the recording and its takes from the project. The narration stays."
+remove_confirm = "Remove the recording and its takes? The narration stays; getting the takes back means importing the recording again."
+remove_keep = "Keep it"
+take_flagged = "To fix"
+voice_persona_none = "The persona's voice"
+
+[capture.error]
+no_persona = "No persona voices this project: choose a narrator for it, or a default persona for its channel. Or use your own voice."
+not_confirmed = "Confirm the recording shows only you to import it."
+missing = "This project has no capture."
+no_cut_point = "There is no sentence end or pause that way that keeps both takes between 4 and 30 seconds."
+not_saved = "Could not save the capture. Try again."
+
+[capture.problem]
+not_mp4_or_mov = "Bardo imports captures as MP4 or MOV. Export the recording as one of them."
+no_video = "The file has no picture Bardo can read. Import a video of yourself reading the script."
+no_audio = "The file has no sound. Record again with the microphone on."
+too_short = "The recording is under 4 seconds."
+too_long = "The recording is over 15 minutes. Split the script into shorter videos."
+frame_rate = "Record at 24 to 60 frames per second."
+too_small = "Record at 720p or more."
 
 [scenes]
 title = "Scenes, images and clips"
@@ -1369,6 +1423,9 @@ terminal_dark = "Terminal · dark"
 budgets_used = "{percent}% of this month's budgets"
 
 [stage.note]
+takes = "{n} takes"
+takes_one = "1 take"
+takes_flagged = "{n} to fix"
 render_ready = "Ready to review"
 rendered = "Files: {n}"
 render_outdated = "Out of date: {n}"
@@ -1440,6 +1497,7 @@ settings = "Settings"
 [stage.name]
 script = "Script"
 narration = "Narration"
+capture = "Capture"
 scenes = "Scenes"
 clips = "Clips"
 edit = "Edit"
@@ -1449,6 +1507,7 @@ publish = "Publish"
 [stage.after]
 script = "After the script"
 narration = "After the narration"
+capture = "After the capture"
 scenes = "After the scenes"
 clips = "After the clips"
 edit = "After the edit"
@@ -2430,6 +2489,29 @@ body = "When the script changes after the narration was made, the narration is m
 [tour.narration.import]
 title = "Import a recording"
 body = "Recorded the script yourself? Import it as MP3 or WAV, and ElevenLabs times its words against the script."
+
+[tour.narration.capture]
+title = "Import a capture"
+body = "Recorded yourself reading the script on camera? Import the video: its speech becomes the narration, in the persona's voice or yours, and the recording is split into takes."
+
+[tour.capture]
+name = "Capture tour"
+
+[tour.capture.recording]
+title = "Your recording"
+body = "The recording you imported, the voice its speech was given and the sentence you confirmed. Its speech is the project's narration."
+
+[tour.capture.takes]
+title = "The takes"
+body = "The recording is split into takes of 4 to 30 seconds at sentence ends and pauses. Each becomes one performed clip; a take that cannot be one says why."
+
+[tour.capture.cut]
+title = "Move a cut"
+body = "Cut earlier or Cut later moves the cut between two takes to the sentence end or pause before or after it."
+
+[tour.capture.remove]
+title = "Remove it"
+body = "Removing the capture takes the recording and its takes out of the project. The narration made from it stays."
 
 [tour.scenes]
 name = "Scenes tour"

@@ -58,6 +58,10 @@ The words Bardo uses, in plain terms.
 
 **Word timings**: when each word of the narration is spoken. They drive the captions, the highlighted word and where cuts snap.
 
+**Capture**: a recording of you reading the script on camera. Its speech becomes the narration, in the persona's voice or yours, and it is split into takes.
+
+**Take**: a stretch of a capture, 4 to 30 seconds from sentence end to sentence end, that becomes one performed clip.
+
 **Scene plan**: the narration split into scenes, each with an image prompt.
 
 **Scene**: a stretch of the narration with one image, and optionally a clip.

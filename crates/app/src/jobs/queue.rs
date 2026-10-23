@@ -101,6 +101,9 @@ pub enum JobActionError {
     /// A restore waits until no job runs.
     #[error("jobs are running")]
     Busy,
+    /// A newer narration of the project replaced what the job would make.
+    #[error("a newer job replaced it")]
+    Superseded,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]

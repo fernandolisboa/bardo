@@ -31,3 +31,8 @@ Quando o roteiro é salvo ou substituído depois que a narração foi feita, a n
 ## Importar uma gravação
 
 Gravou o roteiro você mesmo? **Importar gravação** aceita um arquivo MP3 ou WAV sem compressão de até 500 MB. O Bardo mostra o nome, a duração e quanto custa marcar o tempo das palavras, e **Usar esta gravação** faz a ElevenLabs marcar o tempo de cada palavra conforme o roteiro atual, cobrado por hora de áudio. Ela substitui a narração atual quando o tempo das palavras fica pronto. Leia o roteiro como está escrito, para que o tempo bata.
+
+<a id="capture"></a>
+## Importar uma captura
+
+Você se gravou lendo o roteiro diante da câmera? **Importar captura** recebe o vídeo: a fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas na etapa [Captura](bardo:go/projects/capture). Veja [Captura de atuação](capture.md).

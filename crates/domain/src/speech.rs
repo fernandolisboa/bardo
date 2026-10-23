@@ -7,12 +7,16 @@
 //! Speech alignment (PRD story 33) gives the same character timings for a
 //! recording the user made of the text, so imported narration is timed
 //! like generated narration.
+//!
+//! A capture's speech (#189) is transcribed to check it follows the
+//! script, then converted into the persona's voice or cleaned of every
+//! other sound.
 
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{ApiKey, GenerationPresets, ProviderFailure, VoiceRef};
+use crate::{ApiKey, GenerationPresets, HeardWord, ProviderFailure, VoiceRef};
 
 /// When one character of the spoken text is heard. Providers time
 /// characters of the text they read, whitespace and punctuation included.
@@ -137,6 +141,118 @@ impl<T: SpeechAligner + ?Sized> SpeechAligner for Arc<T> {
         request: &AlignmentRequest<'_>,
     ) -> Result<AlignedSpeech, ProviderFailure> {
         (**self).align(key, request)
+    }
+}
+
+/// A recording to transcribe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TranscriptionRequest<'a> {
+    /// The audio file's bytes.
+    pub audio: &'a [u8],
+    /// The file's name, which tells the provider its format.
+    pub file_name: &'a str,
+    /// The language spoken (ISO 639-1), when known.
+    pub language: Option<&'a str>,
+}
+
+/// What a recording says, word by word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transcript {
+    pub words: Vec<HeardWord>,
+    /// The model that listened, as the provider names it.
+    pub model: String,
+}
+
+/// Writes down what a recording says, with when each word is heard
+/// (speech-to-text). A capture's speech is checked against its script with
+/// it before anything else is paid for. Calls the network and blocks, so
+/// it runs inside a job.
+pub trait SpeechTranscriber: Send + Sync {
+    fn transcribe(
+        &self,
+        key: &ApiKey,
+        request: &TranscriptionRequest<'_>,
+    ) -> Result<Transcript, ProviderFailure>;
+}
+
+impl<T: SpeechTranscriber + ?Sized> SpeechTranscriber for Arc<T> {
+    fn transcribe(
+        &self,
+        key: &ApiKey,
+        request: &TranscriptionRequest<'_>,
+    ) -> Result<Transcript, ProviderFailure> {
+        (**self).transcribe(key, request)
+    }
+}
+
+/// Speech to convert into another voice, or to clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VoiceChangeRequest<'a> {
+    /// The audio file's bytes.
+    pub audio: &'a [u8],
+    /// The file's name, which tells the provider its format.
+    pub file_name: &'a str,
+}
+
+/// Speech the provider made from a recording.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedSpeech {
+    /// The audio file's bytes: MP3 or WAV.
+    pub audio: Vec<u8>,
+    /// The model that made it, as the provider names it.
+    pub model: String,
+}
+
+/// Converts recorded speech into a persona's voice, keeping its timing
+/// and delivery, so lips filmed with it stay in sync (speech-to-speech).
+/// The provider takes a limited length at once; longer speech goes in
+/// parts. Calls the network and blocks, so it runs inside a job.
+pub trait VoiceChanger: Send + Sync {
+    /// The longest speech one request takes.
+    fn max_length(&self) -> Duration;
+
+    fn change(
+        &self,
+        key: &ApiKey,
+        voice: &VoiceRef,
+        presets: GenerationPresets,
+        request: &VoiceChangeRequest<'_>,
+    ) -> Result<ChangedSpeech, ProviderFailure>;
+}
+
+impl<T: VoiceChanger + ?Sized> VoiceChanger for Arc<T> {
+    fn max_length(&self) -> Duration {
+        (**self).max_length()
+    }
+
+    fn change(
+        &self,
+        key: &ApiKey,
+        voice: &VoiceRef,
+        presets: GenerationPresets,
+        request: &VoiceChangeRequest<'_>,
+    ) -> Result<ChangedSpeech, ProviderFailure> {
+        (**self).change(key, voice, presets, request)
+    }
+}
+
+/// Keeps only the voice of a recording: music, noise and room sound go.
+/// Calls the network and blocks, so it runs inside a job.
+pub trait VoiceIsolator: Send + Sync {
+    fn isolate(
+        &self,
+        key: &ApiKey,
+        request: &VoiceChangeRequest<'_>,
+    ) -> Result<ChangedSpeech, ProviderFailure>;
+}
+
+impl<T: VoiceIsolator + ?Sized> VoiceIsolator for Arc<T> {
+    fn isolate(
+        &self,
+        key: &ApiKey,
+        request: &VoiceChangeRequest<'_>,
+    ) -> Result<ChangedSpeech, ProviderFailure> {
+        (**self).isolate(key, request)
     }
 }
 
