@@ -10,7 +10,7 @@ use bardo_domain::{
 };
 
 use super::captions::{TempFile, ass_colour, ass_text, fonts_dir, subtitles_filter};
-use super::{Ffmpeg, MediaError, partial_path, path_arg, process};
+use super::{Ffmpeg, MediaError, partial_path, path_arg, process, remove_partial};
 
 /// What a thumbnail is made of.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,7 +168,7 @@ impl Ffmpeg {
                 .args(["-pix_fmt", "yuvj420p", "-f", "mjpeg"])
                 .arg(path_arg(&partial));
             if let Err(error) = process::output(command) {
-                let _ = std::fs::remove_file(&partial);
+                remove_partial(&partial);
                 return Err(error);
             }
             if std::fs::metadata(&partial)?.len() <= MAX_THUMBNAIL_BYTES {
@@ -176,7 +176,7 @@ impl Ffmpeg {
                 return Ok(());
             }
         }
-        let _ = std::fs::remove_file(&partial);
+        remove_partial(&partial);
         Err(MediaError::Io(std::io::Error::other(
             "the thumbnail stays over 2 MB at every quality",
         )))

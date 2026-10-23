@@ -599,6 +599,13 @@ impl JobQueue {
         self.shared.state().paused
     }
 
+    /// Whether the job's handler still runs in this process. A cancelled
+    /// job reads cancelled at once; its handler stops on its next check
+    /// and cleans up before it returns.
+    pub(crate) fn runs_here(&self, id: JobId) -> bool {
+        self.shared.state().workers.contains_key(&id)
+    }
+
     /// Whether the job runs in another runner's process as of the last
     /// tick.
     pub(crate) fn held_elsewhere(&self, id: JobId) -> bool {

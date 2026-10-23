@@ -198,6 +198,13 @@ impl Bardo {
         self.jobs.held_elsewhere(id)
     }
 
+    /// Whether this process still runs the job's handler: after a cancel
+    /// the job reads cancelled at once, and its handler may still be
+    /// stopping (a render removing its partial file, say).
+    pub fn job_runs_here(&self, id: JobId) -> bool {
+        self.jobs.runs_here(id)
+    }
+
     pub fn start_test_job(&self, job: TestJob) -> Result<JobId, AppError> {
         let job = Job::new(self.profile.id, JobKind::Countdown, job.payload());
         Ok(self.jobs.enqueue(job)?)
@@ -532,6 +539,42 @@ mod tests {
             JobState::Cancelled
         );
         assert_eq!(stored(&db, owner, id).state(), JobState::Cancelled);
+    }
+
+    #[test]
+    fn a_cancelled_job_runs_here_until_its_handler_returns() {
+        let (db, owner) = memory_db();
+        let release = Arc::new(AtomicBool::new(false));
+        let gate = Arc::clone(&release);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                until_stopped(cx);
+                // Still cleaning up after the stop, as a render removing
+                // its partial file is.
+                while !gate.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Ok(())
+            }),
+            settings(),
+        );
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+        assert!(q.runs_here(id));
+
+        q.cancel(id).unwrap();
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Cancelled);
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(q.runs_here(id), "the handler has not returned yet");
+
+        release.store(true, Ordering::SeqCst);
+        let deadline = Instant::now() + PATIENCE;
+        while q.runs_here(id) {
+            assert!(Instant::now() < deadline, "the handler never let go");
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 
     #[test]

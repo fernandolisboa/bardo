@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::process::{self, Span};
-use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg};
+use super::{Ffmpeg, MediaError, Monitor, VideoEncoder, partial_path, path_arg, remove_partial};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProxySettings {
@@ -77,7 +77,7 @@ impl Ffmpeg {
                 Ok(())
             }
             Err(error) => {
-                let _ = std::fs::remove_file(&partial);
+                remove_partial(&partial);
                 Err(error)
             }
         }
@@ -109,7 +109,7 @@ impl Ffmpeg {
                 Ok(())
             }
             Err(error) => {
-                let _ = std::fs::remove_file(&partial);
+                remove_partial(&partial);
                 Err(error)
             }
         }
