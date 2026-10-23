@@ -23,6 +23,7 @@ Há um modelo para cada tipo de geração:
 - **Capítulos**: os capítulos do YouTube de um vídeo longo, a partir das frases da narração ([Capítulos](uploading.md#chapters)).
 - **Versão localizada**: o roteiro de uma versão, adaptado frase por frase para outro idioma ou país ([Versões em outros idiomas](script.md#versions)). Além dos dados do canal de destino, ele lê `{{source_language}}`, `{{source_country}}`, o título original e as frases numeradas.
 - **Prompt de aparência**: o prompt de imagem da aparência desenhada de uma persona, a partir da sua descrição ([A aparência](personas.md#look)). Ele lê `{{persona}}` e `{{look_description}}`, e precisa continuar recusando pessoas reais.
+- **Prompt da tomada**: o prompt que um modelo de tomada recebe para uma tomada de uma captura ([O prompt da tomada](capture.md#take-prompt)). Ele lê `{{look}}`, `{{set}}`, `{{words}}` e `{{instruction}}`: o que o modelo faz com o modo da tomada, que o prompt deve manter.
 
 <a id="versions"></a>
 ## Versões

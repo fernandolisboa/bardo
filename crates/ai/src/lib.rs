@@ -23,7 +23,7 @@ pub use elevenlabs::{
 pub use gemini::GeminiImages;
 pub use github_releases::GitHubReleases;
 pub use google_clips::GoogleClips;
-pub use higgsfield::HiggsfieldClips;
+pub use higgsfield::{HiggsfieldClips, HiggsfieldTakes};
 pub use jev::JevDecisionEngine;
 pub use key_check::HttpKeyChecker;
 pub use kling::KlingClips;

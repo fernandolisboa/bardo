@@ -438,6 +438,7 @@ impl LocalizationHandler {
         let request = TextRequest {
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
+            images: Vec::new(),
             format: TextFormat::Json {
                 schema: ADAPTATION_SCHEMA.to_owned(),
             },
@@ -642,8 +643,11 @@ impl LocalizationHandler {
 
             let new_plan = copy_plan(&plan, version, now);
             let mut ids: HashMap<MediaAssetId, MediaAssetId> = HashMap::new();
+            // Performed clips are lip-synced to the source's narration: the
+            // version shows scene pictures in their place (#192).
             let media: Vec<MediaAsset> = assets
                 .iter()
+                .filter(|asset| asset.source != bardo_domain::AssetSource::Performed)
                 .map(|asset| {
                     let id = MediaAssetId::new();
                     ids.insert(asset.id, id);

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::{ApiKey, ProviderFailure};
+use crate::{ApiKey, ImageFormat, ProviderFailure};
 
 /// The shape the text must have.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,25 @@ pub enum TextFormat {
     Json { schema: String },
 }
 
+/// A picture the writer looks at with the task (#192: a frame of a take
+/// whose set it describes).
+#[derive(Clone, PartialEq, Eq)]
+pub struct TextImage {
+    pub bytes: Vec<u8>,
+    pub format: ImageFormat,
+}
+
+impl std::fmt::Debug for TextImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TextImage({} bytes of {:?})",
+            self.bytes.len(),
+            self.format
+        )
+    }
+}
+
 /// What to write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRequest {
@@ -25,6 +44,8 @@ pub struct TextRequest {
     pub instructions: String,
     /// The task itself, with its inputs.
     pub prompt: String,
+    /// Pictures that go with the task, before it.
+    pub images: Vec<TextImage>,
     pub format: TextFormat,
 }
 

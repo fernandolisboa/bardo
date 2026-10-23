@@ -4,8 +4,9 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     AnalysisPart, Capture, CaptureConfirmation, CaptureId, CaptureRepository, CaptureVideo,
-    CaptureVoice, ControlVideo, DepthRange, Device, JobId, NarrationId, ProfileId, Provider,
-    RepositoryError, SetSource, Take, TakeAnalysis, TakeChecks, TakeMode, TakeSet, Takes,
+    CaptureVoice, ClipModelRef, ControlVideo, DepthRange, Device, JobId, Money, NarrationId,
+    ProfileId, Provider, RepositoryError, SetSource, Take, TakeAnalysis, TakeChecks, TakeMode,
+    TakePrompt, TakeResult, TakeSet, TakeStep, Takes, TemplateUsed, TemplateVersionId,
     VideoProjectId, VoiceRef,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -34,6 +35,11 @@ fn duration(millis: i64) -> Result<Duration, RepositoryError> {
     u64::try_from(millis)
         .map(Duration::from_millis)
         .map_err(boxed)
+}
+
+pub(crate) fn model_ref(provider: &str, model: &str) -> Result<ClipModelRef, RepositoryError> {
+    let provider: Provider = provider.parse().map_err(boxed)?;
+    ClipModelRef::new(provider, model).map_err(boxed)
 }
 
 fn index(value: i64) -> Result<usize, RepositoryError> {
@@ -66,7 +72,8 @@ struct CaptureRow {
 fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, RepositoryError> {
     let mut statement = conn
         .prepare(
-            "SELECT first_word, end_word, start_ms, end_ms, revision, mode, set_file, set_source
+            "SELECT first_word, end_word, start_ms, end_ms, revision, mode, set_file, set_source,
+                 take_provider, take_model
              FROM capture_take WHERE project_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -81,11 +88,15 @@ fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, Reposi
                 row.get::<_, String>(5)?,
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<String>>(7)?,
+                (
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                ),
             ))
         })
         .map_err(boxed)?;
     rows.map(|row| {
-        let (first, end, start_ms, end_ms, revision, mode, set_file, set_source) =
+        let (first, end, start_ms, end_ms, revision, mode, set_file, set_source, model) =
             row.map_err(boxed)?;
         let set = match (set_file, set_source) {
             (None, None) => TakeSet::Room,
@@ -104,6 +115,10 @@ fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, Reposi
             mode: TakeMode::from_code(&mode)
                 .ok_or_else(|| invalid(format!("unknown take mode {mode}")))?,
             set,
+            model: match model {
+                (Some(provider), Some(model)) => Some(model_ref(&provider, &model)?),
+                _ => None,
+            },
         })
     })
     .collect()
@@ -212,8 +227,8 @@ fn insert_takes(
         .prepare(
             "INSERT INTO capture_take
                  (project_id, position, first_word, end_word, start_ms, end_ms, revision, mode,
-                  set_file, set_source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                  set_file, set_source, take_provider, take_model)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )
         .map_err(boxed)?;
     for (position, take) in takes.as_slice().iter().enumerate() {
@@ -232,6 +247,8 @@ fn insert_takes(
                     TakeSet::Room => None,
                     TakeSet::Image { from, .. } => Some(from.code()),
                 },
+                take.model.as_ref().map(|model| model.provider().code()),
+                take.model.as_ref().map(ClipModelRef::model),
             ])
             .map_err(boxed)?;
     }
@@ -550,6 +567,268 @@ impl CaptureRepository for Database {
             )
             .map_err(boxed)?;
         Ok(approved == 1)
+    }
+
+    fn take_prompts(&self, project: VideoProjectId) -> Result<Vec<TakePrompt>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT capture_id, position, control, take_provider, take_model, text,
+                     template_id, template_number, writer, written_at, job_id, edited
+                 FROM take_prompt WHERE project_id = ?1 ORDER BY position",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok((
+                    [
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(8)?,
+                    ],
+                    row.get::<_, i64>(1)?,
+                    (
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                    ),
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, bool>(11)?,
+                ))
+            })
+            .map_err(boxed)?;
+        rows.map(|row| {
+            let (texts, position, template, written_at, job, edited) = row.map_err(boxed)?;
+            let [capture, control, provider, model, text, writer] = texts;
+            Ok(TakePrompt {
+                project,
+                capture: CaptureId::from(uuid(&capture)?),
+                position: u32::try_from(position).map_err(boxed)?,
+                control,
+                model: model_ref(&provider, &model)?,
+                text,
+                template: template_used(template)?,
+                writer,
+                written_at: from_unix_millis(written_at),
+                job: job.as_deref().map(uuid).transpose()?.map(JobId::from),
+                edited,
+            })
+        })
+        .collect()
+    }
+
+    fn save_take_prompt(&self, prompt: &TakePrompt) -> Result<bool, RepositoryError> {
+        // Kept only while the take is still there on the project's capture.
+        let saved = self
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO take_prompt (project_id, capture_id, position, control,
+                     take_provider, take_model, text, template_id, template_number, writer,
+                     written_at, job_id, edited)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+                 WHERE EXISTS (
+                     SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
+                     WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3)",
+                params![
+                    prompt.project.to_string(),
+                    prompt.capture.to_string(),
+                    prompt.position,
+                    prompt.control,
+                    prompt.model.provider().code(),
+                    prompt.model.model(),
+                    prompt.text,
+                    prompt.template.map(|t| t.id.to_string()),
+                    prompt.template.map(|t| t.number),
+                    prompt.writer,
+                    to_unix_millis(prompt.written_at),
+                    prompt.job.map(|job| job.to_string()),
+                    prompt.edited,
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(saved == 1)
+    }
+
+    fn take_results(&self, project: VideoProjectId) -> Result<Vec<TakeResult>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT capture_id, position, step, control, take_provider, take_model,
+                     priced_model, prompt, template_id, template_number, look, realistic,
+                     request, cost_micros, file, duration_ms, made_at, job_id, accepted_at
+                 FROM take_result WHERE project_id = ?1 ORDER BY position, step = 'final'",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok(ResultRow {
+                    texts: [
+                        row.get(0)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(10)?,
+                        row.get(12)?,
+                        row.get(14)?,
+                    ],
+                    position: row.get(1)?,
+                    template: (row.get(8)?, row.get(9)?),
+                    realistic: row.get(11)?,
+                    cost_micros: row.get(13)?,
+                    duration_ms: row.get(15)?,
+                    made_at: row.get(16)?,
+                    job: row.get(17)?,
+                    accepted_at: row.get(18)?,
+                })
+            })
+            .map_err(boxed)?;
+        rows.map(|row| row.map_err(boxed)?.into_result(project))
+            .collect()
+    }
+
+    fn save_take_result(&self, result: &TakeResult) -> Result<bool, RepositoryError> {
+        // Kept only while the take is still there on the project's capture.
+        let saved = self
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO take_result (project_id, capture_id, position, step,
+                     control, take_provider, take_model, priced_model, prompt, template_id,
+                     template_number, look, realistic, request, cost_micros, file, duration_ms,
+                     made_at, job_id, accepted_at)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17, ?18, ?19, ?20
+                 WHERE EXISTS (
+                     SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
+                     WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3)",
+                params![
+                    result.project.to_string(),
+                    result.capture.to_string(),
+                    result.position,
+                    result.step.code(),
+                    result.control,
+                    result.model.provider().code(),
+                    result.model.model(),
+                    result.priced_model,
+                    result.prompt,
+                    result.template.map(|t| t.id.to_string()),
+                    result.template.map(|t| t.number),
+                    result.look,
+                    result.realistic,
+                    result.request,
+                    result
+                        .cost
+                        .map(|cost| i64::try_from(cost.micros()).unwrap_or(i64::MAX)),
+                    result.file,
+                    millis(result.duration).max(1),
+                    to_unix_millis(result.made_at),
+                    result.job.map(|job| job.to_string()),
+                    result.accepted_at.map(to_unix_millis),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(saved == 1)
+    }
+
+    fn accept_take_result(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        step: TakeStep,
+        control: &str,
+        at: Option<SystemTime>,
+    ) -> Result<bool, RepositoryError> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE take_result SET accepted_at = ?5
+                 WHERE project_id = ?1 AND position = ?2 AND step = ?3 AND control = ?4",
+                params![
+                    project.to_string(),
+                    position,
+                    step.code(),
+                    control,
+                    at.map(to_unix_millis)
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(changed == 1)
+    }
+}
+
+/// The template version of a prompt or result, as stored.
+fn template_used(
+    (id, number): (Option<String>, Option<i64>),
+) -> Result<Option<TemplateUsed>, RepositoryError> {
+    match (id, number) {
+        (Some(id), Some(number)) => Ok(Some(TemplateUsed {
+            id: TemplateVersionId::from(uuid(&id)?),
+            number: u32::try_from(number).map_err(boxed)?,
+        })),
+        (None, None) => Ok(None),
+        _ => Err(invalid("a template without its number")),
+    }
+}
+
+/// A take result row as stored.
+struct ResultRow {
+    /// capture, step, control, provider, model, priced model, prompt,
+    /// look, request, file.
+    texts: [String; 10],
+    position: i64,
+    template: (Option<String>, Option<i64>),
+    realistic: bool,
+    cost_micros: Option<i64>,
+    duration_ms: i64,
+    made_at: i64,
+    job: Option<String>,
+    accepted_at: Option<i64>,
+}
+
+impl ResultRow {
+    fn into_result(self, project: VideoProjectId) -> Result<TakeResult, RepositoryError> {
+        let [
+            capture,
+            step,
+            control,
+            provider,
+            model,
+            priced_model,
+            prompt,
+            look,
+            request,
+            file,
+        ] = self.texts;
+        Ok(TakeResult {
+            project,
+            capture: CaptureId::from(uuid(&capture)?),
+            position: u32::try_from(self.position).map_err(boxed)?,
+            step: TakeStep::from_code(&step)
+                .ok_or_else(|| invalid(format!("unknown take step {step}")))?,
+            control,
+            model: model_ref(&provider, &model)?,
+            priced_model,
+            prompt,
+            template: template_used(self.template)?,
+            look,
+            realistic: self.realistic,
+            request,
+            cost: self
+                .cost_micros
+                .map(|micros| u64::try_from(micros).map(Money::from_micros))
+                .transpose()
+                .map_err(boxed)?,
+            file,
+            duration: duration(self.duration_ms)?,
+            made_at: from_unix_millis(self.made_at),
+            job: self.job.as_deref().map(uuid).transpose()?.map(JobId::from),
+            accepted_at: self.accepted_at.map(from_unix_millis),
+        })
     }
 }
 
@@ -1026,5 +1305,142 @@ mod tests {
         assert_eq!(db.control_videos(project.id).unwrap().len(), 1);
         db.delete_capture(project.id).unwrap();
         assert!(db.control_videos(project.id).unwrap().is_empty());
+    }
+
+    fn seedance() -> ClipModelRef {
+        ClipModelRef::new(Provider::Higgsfield, "bytedance/seedance-2.5/video-edit").unwrap()
+    }
+
+    fn prompt(saved: &Capture, position: u32, control: &str) -> TakePrompt {
+        TakePrompt {
+            project: saved.project,
+            capture: saved.id,
+            position,
+            control: control.into(),
+            model: seedance(),
+            text: "The character in the image talks to the camera.".into(),
+            template: None,
+            writer: "claude-opus-5-5".into(),
+            written_at: time(1_800_000_060),
+            job: Some(JobId::new()),
+            edited: false,
+        }
+    }
+
+    fn result(saved: &Capture, position: u32, step: TakeStep, control: &str) -> TakeResult {
+        TakeResult {
+            project: saved.project,
+            capture: saved.id,
+            position,
+            step,
+            control: control.into(),
+            model: seedance(),
+            priced_model: format!("bytedance/seedance-2.5/video-edit/{}", step.code()),
+            prompt: "The character in the image talks to the camera.".into(),
+            template: None,
+            look: "look-1.png".into(),
+            realistic: true,
+            request: "d7e6c0f3".into(),
+            cost: Some(Money::from_micros(2_460_000)),
+            file: format!("take-{}.mp4", step.code()),
+            duration: Duration::from_millis(3_010),
+            made_at: time(1_800_000_070),
+            job: Some(JobId::new()),
+            accepted_at: None,
+        }
+    }
+
+    #[test]
+    fn a_takes_model_prompt_and_results_round_trip_and_go_with_its_capture() {
+        let (db, project) = setup();
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let mut saved = capture(&project, &narration, CaptureVoice::Own);
+        saved
+            .takes
+            .set_model(0, Some(seedance()), TakeMode::Mesh)
+            .unwrap();
+        db.save_capture(&saved).unwrap();
+        let loaded = db.capture(project.id).unwrap().unwrap();
+        assert_eq!(loaded.takes.as_slice()[0].model, Some(seedance()));
+
+        let written = prompt(&saved, 0, "aaaa");
+        assert!(db.save_take_prompt(&written).unwrap());
+        assert_eq!(
+            db.take_prompts(project.id).unwrap(),
+            std::slice::from_ref(&written)
+        );
+        // Writing again replaces it.
+        let edited = TakePrompt {
+            text: "Edited.".into(),
+            edited: true,
+            ..written
+        };
+        assert!(db.save_take_prompt(&edited).unwrap());
+        assert_eq!(db.take_prompts(project.id).unwrap(), [edited]);
+
+        let draft = result(&saved, 0, TakeStep::Draft, "aaaa");
+        let final_take = result(&saved, 0, TakeStep::Final, "aaaa");
+        assert!(db.save_take_result(&final_take).unwrap());
+        assert!(db.save_take_result(&draft).unwrap());
+        assert_eq!(
+            db.take_results(project.id).unwrap(),
+            [draft.clone(), final_take.clone()],
+            "the draft first"
+        );
+        // Approved only for the control video it was made from.
+        assert!(
+            !db.accept_take_result(
+                project.id,
+                0,
+                TakeStep::Draft,
+                "bbbb",
+                Some(time(1_800_000_080))
+            )
+            .unwrap()
+        );
+        assert!(
+            db.accept_take_result(
+                project.id,
+                0,
+                TakeStep::Draft,
+                "aaaa",
+                Some(time(1_800_000_080))
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            db.take_results(project.id).unwrap()[0].accepted_at,
+            Some(time(1_800_000_080))
+        );
+        // A new draft replaces the approved one.
+        assert!(db.save_take_result(&draft).unwrap());
+        assert_eq!(db.take_results(project.id).unwrap()[0].accepted_at, None);
+
+        // Not kept for a take or capture that is not there.
+        assert!(!db.save_take_prompt(&prompt(&saved, 99, "aaaa")).unwrap());
+        assert!(
+            !db.save_take_result(&result(&saved, 99, TakeStep::Draft, "aaaa"))
+                .unwrap()
+        );
+        let other = TakeResult {
+            capture: CaptureId::new(),
+            ..draft
+        };
+        assert!(!db.save_take_result(&other).unwrap());
+
+        // A take model without its provider is refused by the schema.
+        assert!(
+            db.conn()
+                .execute(
+                    "UPDATE capture_take SET take_provider = NULL WHERE position = 0",
+                    []
+                )
+                .is_err()
+        );
+
+        db.delete_capture(project.id).unwrap();
+        assert!(db.take_prompts(project.id).unwrap().is_empty());
+        assert!(db.take_results(project.id).unwrap().is_empty());
     }
 }

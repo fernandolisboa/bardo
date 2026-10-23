@@ -96,6 +96,21 @@ video_seconds = "0.042"
 [higgsfield."minimax/h3/"]
 video_seconds = "0.13"
 
+# Take models (performed takes), per second of take. Kling 3.0 Motion
+# Control at 1080p is Kling's list price (2026-10-22). Seedance 2.5 Video
+# Edit has no published per-second price on Higgsfield: these come from
+# ModelArk's token rates at 24 fps, counting the input and output seconds
+# (US$ 6.40 per million tokens at 480p, US$ 7.00 at 1080p). Higgsfield's own
+# quote, asked before every take, is what gets recorded.
+[higgsfield."kling-video/v3/motion-control/pro"]
+video_seconds = "0.168"
+
+[higgsfield."bytedance/seedance-2.5/video-edit/480p"]
+video_seconds = "0.123"
+
+[higgsfield."bytedance/seedance-2.5/video-edit/1080p"]
+video_seconds = "0.680"
+
 # Kling bills each clip per second of video from prepaid resource packages,
 # by model and resolution, with sound off; these are its published list
 # prices (checked on 2026-10-20, 1 unit = US$ 0.14). Kling quotes nothing

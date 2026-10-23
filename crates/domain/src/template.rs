@@ -41,10 +41,13 @@ pub enum TemplateKind {
     /// The prompt a persona's look is drawn from, written from the user's
     /// description (#188).
     LookPrompt,
+    /// The prompt a take model makes a take from: the look, the set, the
+    /// take's words and the model's instruction (#192).
+    TakePrompt,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 8] = [
+    pub const ALL: [TemplateKind; 9] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -53,6 +56,7 @@ impl TemplateKind {
         TemplateKind::Chapters,
         TemplateKind::Localization,
         TemplateKind::LookPrompt,
+        TemplateKind::TakePrompt,
     ];
 
     /// Stable name stored in the database.
@@ -66,6 +70,7 @@ impl TemplateKind {
             TemplateKind::Chapters => "chapters",
             TemplateKind::Localization => "localization",
             TemplateKind::LookPrompt => "look_prompt",
+            TemplateKind::TakePrompt => "take_prompt",
         }
     }
 
@@ -148,6 +153,12 @@ impl TemplateKind {
             TemplateKind::LookPrompt => {
                 &[TemplateVariable::Persona, TemplateVariable::LookDescription]
             }
+            TemplateKind::TakePrompt => &[
+                TemplateVariable::Look,
+                TemplateVariable::Set,
+                TemplateVariable::Words,
+                TemplateVariable::Instruction,
+            ],
         }
     }
 }
@@ -217,10 +228,19 @@ pub enum TemplateVariable {
     SourceCountry,
     /// What the user wrote about the character a persona's look shows.
     LookDescription,
+    /// Who the take's persona looks like: its look's description.
+    Look,
+    /// Where the take is performed: the room as one frame shows it, or the
+    /// set image.
+    Set,
+    /// What the take says.
+    Words,
+    /// What the take model must do with its inputs, fixed per model.
+    Instruction,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 20] = [
+    pub const ALL: [TemplateVariable; 24] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -241,6 +261,10 @@ impl TemplateVariable {
         TemplateVariable::SourceLanguage,
         TemplateVariable::SourceCountry,
         TemplateVariable::LookDescription,
+        TemplateVariable::Look,
+        TemplateVariable::Set,
+        TemplateVariable::Words,
+        TemplateVariable::Instruction,
     ];
 
     /// The name written between the braces.
@@ -266,6 +290,10 @@ impl TemplateVariable {
             TemplateVariable::SourceLanguage => "source_language",
             TemplateVariable::SourceCountry => "source_country",
             TemplateVariable::LookDescription => "look_description",
+            TemplateVariable::Look => "look",
+            TemplateVariable::Set => "set",
+            TemplateVariable::Words => "words",
+            TemplateVariable::Instruction => "instruction",
         }
     }
 

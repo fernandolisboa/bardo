@@ -13,8 +13,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::narration::key;
 use crate::{
-    ControlVideo, GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError, TakeAnalysis,
-    TakeMode, TakeSet, VideoProjectId, VoiceRef, WordTiming, spoken_words,
+    ClipModelRef, ControlVideo, GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError,
+    TakeAnalysis, TakeMode, TakePrompt, TakeResult, TakeSet, TakeStep, VideoProjectId, VoiceRef,
+    WordTiming, spoken_words,
 };
 
 uuid_id!(
@@ -313,6 +314,7 @@ impl TakeSource<'_> {
             revision,
             mode: TakeMode::default(),
             set: TakeSet::default(),
+            model: None,
         }
     }
 }
@@ -349,6 +351,8 @@ pub struct Take {
     pub mode: TakeMode,
     /// Where it is performed in Depth mode (#191).
     pub set: TakeSet,
+    /// The take model it goes to (#192); `None` follows the channel's.
+    pub model: Option<ClipModelRef>,
 }
 
 impl Take {
@@ -525,8 +529,31 @@ impl Takes {
         Ok(())
     }
 
+    /// Gives take `index` its own take `model` and `mode`, or the
+    /// channel's model with `None`. Its stretch, and so its revision, stay.
+    pub fn set_model(
+        &mut self,
+        index: usize,
+        model: Option<ClipModelRef>,
+        mode: TakeMode,
+    ) -> Result<(), BoundaryError> {
+        let take = self.0.get_mut(index).ok_or(BoundaryError::NoSuchTake)?;
+        take.model = model;
+        take.mode = mode;
+        Ok(())
+    }
+
+    /// Puts every take in `mode`, as takes start in their model's first
+    /// mode.
+    pub fn start_in(&mut self, mode: TakeMode) {
+        for take in &mut self.0 {
+            take.mode = mode;
+        }
+    }
+
     /// Moves the boundary after take `index` to the previous or next cut
-    /// point. Both takes get a new revision and keep their modes and sets.
+    /// point. Both takes get a new revision and keep their modes, sets and
+    /// models.
     pub fn move_boundary(
         &mut self,
         source: &TakeSource<'_>,
@@ -538,11 +565,13 @@ impl Takes {
         let earlier = Take {
             mode: before.mode,
             set: before.set.clone(),
+            model: before.model.clone(),
             ..source.take(before.words.start..at, before.revision + 1)
         };
         let later = Take {
             mode: after.mode,
             set: after.set.clone(),
+            model: after.model.clone(),
             ..source.take(at..after.words.end, after.revision + 1)
         };
         self.0[index] = earlier;
@@ -686,6 +715,36 @@ pub trait CaptureRepository: Send + Sync {
         fingerprint: &str,
         at: SystemTime,
     ) -> Result<bool, RepositoryError>;
+
+    /// The prompts of the project's capture's takes, current or stale
+    /// ([`TakePrompt::fits`]).
+    fn take_prompts(&self, project: VideoProjectId) -> Result<Vec<TakePrompt>, RepositoryError>;
+
+    /// Keeps `prompt` as its take's, replacing the one before, while the
+    /// project's capture is still its capture and has that take. Returns
+    /// whether it was kept.
+    fn save_take_prompt(&self, prompt: &TakePrompt) -> Result<bool, RepositoryError>;
+
+    /// The drafts and finals of the project's capture's takes, current or
+    /// stale ([`TakeResult::fits`]).
+    fn take_results(&self, project: VideoProjectId) -> Result<Vec<TakeResult>, RepositoryError>;
+
+    /// Keeps `result` as its take's draft or final, replacing the one
+    /// before, while the project's capture is still its capture and has
+    /// that take. Returns whether it was kept.
+    fn save_take_result(&self, result: &TakeResult) -> Result<bool, RepositoryError>;
+
+    /// Marks take `position`'s `step` accepted at `at` (a draft approved, a
+    /// final used), or not with `None`, when it is still the one made from
+    /// the control video `control`. Returns whether it was.
+    fn accept_take_result(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        step: TakeStep,
+        control: &str,
+        at: Option<SystemTime>,
+    ) -> Result<bool, RepositoryError>;
 }
 
 impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
@@ -737,6 +796,33 @@ impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
         at: SystemTime,
     ) -> Result<bool, RepositoryError> {
         (**self).approve_control_video(project, position, fingerprint, at)
+    }
+
+    fn take_prompts(&self, project: VideoProjectId) -> Result<Vec<TakePrompt>, RepositoryError> {
+        (**self).take_prompts(project)
+    }
+
+    fn save_take_prompt(&self, prompt: &TakePrompt) -> Result<bool, RepositoryError> {
+        (**self).save_take_prompt(prompt)
+    }
+
+    fn take_results(&self, project: VideoProjectId) -> Result<Vec<TakeResult>, RepositoryError> {
+        (**self).take_results(project)
+    }
+
+    fn save_take_result(&self, result: &TakeResult) -> Result<bool, RepositoryError> {
+        (**self).save_take_result(result)
+    }
+
+    fn accept_take_result(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        step: TakeStep,
+        control: &str,
+        at: Option<SystemTime>,
+    ) -> Result<bool, RepositoryError> {
+        (**self).accept_take_result(project, position, step, control, at)
     }
 }
 
@@ -1155,6 +1241,38 @@ mod tests {
     }
 
     #[test]
+    fn a_take_keeps_its_model_when_its_cut_moves() {
+        let text = sentences(6, 12);
+        let words = timed(&text, 0.4, 0.1, &[]);
+        let source = TakeSource {
+            text: &text,
+            words: &words,
+            duration: words.last().unwrap().end,
+        };
+        let mut takes = Takes::split(&source);
+        takes.start_in(TakeMode::Mesh);
+        assert!(takes.as_slice().iter().all(|t| t.mode == TakeMode::Mesh));
+        assert!(takes.as_slice().iter().all(|t| t.model.is_none()));
+        let seedance =
+            ClipModelRef::new(crate::Provider::Higgsfield, "bytedance/seedance").unwrap();
+        takes
+            .set_model(0, Some(seedance.clone()), TakeMode::Depth)
+            .unwrap();
+        assert_eq!(takes.as_slice()[0].model.as_ref(), Some(&seedance));
+        assert_eq!(takes.as_slice()[0].mode, TakeMode::Depth);
+        assert_eq!(takes.as_slice()[0].revision, 1, "same stretch");
+        takes
+            .move_boundary(&source, 0, BoundaryMove::Earlier)
+            .unwrap();
+        assert_eq!(takes.as_slice()[0].model.as_ref(), Some(&seedance));
+        assert_eq!(takes.as_slice()[1].model, None);
+        assert_eq!(
+            takes.set_model(5, None, TakeMode::Recording),
+            Err(BoundaryError::NoSuchTake)
+        );
+    }
+
+    #[test]
     fn stored_takes_must_cover_the_words_in_order() {
         let take = |words: Range<usize>| Take {
             words,
@@ -1163,6 +1281,7 @@ mod tests {
             revision: 1,
             mode: TakeMode::Recording,
             set: TakeSet::Room,
+            model: None,
         };
         assert!(Takes::restore(10, vec![take(0..4), take(4..10)]).is_ok());
         assert!(Takes::restore(0, vec![]).is_ok());

@@ -57,6 +57,9 @@ pub struct ChannelDraft {
     /// The video model the channel's clips use unless a scene picks
     /// another; `None` uses the app's default.
     pub clip_model: Option<ClipModelRef>,
+    /// The take model the channel's takes use unless a take picks another
+    /// (#192); `None` uses the app's default.
+    pub take_model: Option<ClipModelRef>,
     /// How the captions of the channel's new projects look.
     pub caption_style: CaptionStyle,
     /// Whether the captions of the channel's new projects light the
@@ -107,6 +110,7 @@ pub struct ChannelDetails {
     format: VideoFormat,
     default_persona: Option<PersonaId>,
     clip_model: Option<ClipModelRef>,
+    take_model: Option<ClipModelRef>,
     caption_style: CaptionStyle,
     caption_highlight: CaptionHighlight,
     thumbnail_look: ThumbnailLook,
@@ -169,6 +173,7 @@ impl ChannelDetails {
             format: draft.format,
             default_persona: draft.default_persona,
             clip_model: draft.clip_model,
+            take_model: draft.take_model,
             caption_style: draft.caption_style,
             caption_highlight: draft.caption_highlight,
             thumbnail_look: draft.thumbnail_look,
@@ -214,6 +219,11 @@ impl ChannelDetails {
     /// Whether the provider offers the model is the app's to check.
     pub fn clip_model(&self) -> Option<&ClipModelRef> {
         self.clip_model.as_ref()
+    }
+
+    /// Whether the provider offers the model is the app's to check.
+    pub fn take_model(&self) -> Option<&ClipModelRef> {
+        self.take_model.as_ref()
     }
 
     /// How the captions of the channel's new projects look.
@@ -266,6 +276,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             format: details.format,
             default_persona: details.default_persona,
             clip_model: details.clip_model.clone(),
+            take_model: details.take_model.clone(),
             caption_style: details.caption_style,
             caption_highlight: details.caption_highlight,
             thumbnail_look: details.thumbnail_look,
@@ -459,6 +470,13 @@ mod tests {
             format: VideoFormat::Long,
             default_persona: Some(PersonaId::new()),
             clip_model: Some(ClipModelRef::new(crate::Provider::Higgsfield, "kling").unwrap()),
+            take_model: Some(
+                ClipModelRef::new(
+                    crate::Provider::Higgsfield,
+                    "kling-video/v3/motion-control/pro",
+                )
+                .unwrap(),
+            ),
             caption_style: crate::CaptionStyle::Punch,
             caption_highlight: crate::CaptionHighlight::Pink,
             thumbnail_look: crate::ThumbnailLook::Banner,

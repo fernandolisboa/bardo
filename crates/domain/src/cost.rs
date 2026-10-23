@@ -524,6 +524,12 @@ pub enum CostPurpose {
     /// A capture's speech cleaned of every other sound, in the user's own
     /// voice (#189).
     VoiceIsolation,
+    /// Claude writing a take's prompt for its take model (#192).
+    TakePrompt,
+    /// A take model making a take's draft at its cheap tier (#192).
+    TakeDraft,
+    /// A take model making a take's final at 1080p (#192).
+    TakeFinal,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -574,7 +580,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 21] = [
+    pub const ALL: [CostPurpose; 24] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -596,6 +602,9 @@ impl CostPurpose {
         CostPurpose::ScriptCheck,
         CostPurpose::VoiceChange,
         CostPurpose::VoiceIsolation,
+        CostPurpose::TakePrompt,
+        CostPurpose::TakeDraft,
+        CostPurpose::TakeFinal,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -622,6 +631,9 @@ impl CostPurpose {
             CostPurpose::ScriptCheck => "script_check",
             CostPurpose::VoiceChange => "voice_change",
             CostPurpose::VoiceIsolation => "voice_isolation",
+            CostPurpose::TakePrompt => "take_prompt",
+            CostPurpose::TakeDraft => "take_draft",
+            CostPurpose::TakeFinal => "take_final",
         }
     }
 }

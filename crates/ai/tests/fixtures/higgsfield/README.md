@@ -24,6 +24,12 @@ real key:
   a validation list), `submit-model-not-found.http` (404),
   `submit-overloaded.http` (503).
 
+Takes (#192) replay the same answers, plus two written from the documented
+shapes: `upload-url-video.http` (an upload URL for `video/mp4`) and
+`estimate-take.http` (a 30-second Kling 3.0 Motion Control final).
+Re-record both, and a `submit-queued.http` for each take model, with a
+funded key.
+
 Synthetic, for edge cases: `status-completed-no-video.http`,
 `upload-expired.http`, `download-expired.http`, and `download-clip.http`
 (not a real video: just the `ftyp` box marker an MP4 starts with).

@@ -1,13 +1,14 @@
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    JobId, MediaAsset, MediaAssetId, MediaAssetRepository, MusicPrompt, MusicPromptRepository,
-    MusicTrack, MusicTrackRepository, MusicTracks, PictureSize, ProfileId, RepositoryError,
-    VideoProjectId,
+    CaptureId, JobId, MediaAsset, MediaAssetId, MediaAssetRepository, MusicPrompt,
+    MusicPromptRepository, MusicTrack, MusicTrackRepository, MusicTracks, PerformedClip,
+    PictureSize, ProfileId, RepositoryError, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
+use crate::capture::model_ref;
 use crate::script::{generation, insert_generation};
 use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
@@ -87,6 +88,79 @@ impl MediaAssetRepository for Database {
 
     fn save_media_asset(&self, asset: &MediaAsset) -> Result<(), RepositoryError> {
         insert_asset(&self.conn(), asset)
+    }
+
+    fn performed_clips(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<PerformedClip>, RepositoryError> {
+        type Row = (String, String, i64, String, String, bool, i64);
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT asset_id, capture_id, position, take_provider, take_model, realistic,
+                        used_at
+                 FROM performed_clip WHERE project_id = ?1
+                 ORDER BY used_at, rowid",
+            )
+            .map_err(boxed)?;
+        let rows: Vec<Row> = statement
+            .query_map([project.to_string()], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .map_err(boxed)?
+            .collect::<Result<_, _>>()
+            .map_err(boxed)?;
+        rows.into_iter()
+            .map(
+                |(asset, capture, position, provider, model, realistic, used_at)| {
+                    Ok(PerformedClip {
+                        asset: MediaAssetId::from(uuid(&asset)?),
+                        project,
+                        capture: CaptureId::from(uuid(&capture)?),
+                        position: u32::try_from(position).map_err(boxed)?,
+                        model: model_ref(&provider, &model)?,
+                        realistic,
+                        used_at: from_unix_millis(used_at),
+                    })
+                },
+            )
+            .collect()
+    }
+
+    fn save_performed_clip(
+        &self,
+        asset: &MediaAsset,
+        clip: &PerformedClip,
+    ) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        insert_asset(&tx, asset)?;
+        tx.execute(
+            "INSERT INTO performed_clip (asset_id, project_id, capture_id, position,
+                                         take_provider, take_model, realistic, used_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                clip.asset.to_string(),
+                clip.project.to_string(),
+                clip.capture.to_string(),
+                i64::from(clip.position),
+                clip.model.provider().code(),
+                clip.model.model(),
+                clip.realistic,
+                to_unix_millis(clip.used_at),
+            ],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)
     }
 }
 
@@ -467,6 +541,45 @@ mod tests {
             generated_at: time(generated),
             chosen_at: None,
         }
+    }
+
+    #[test]
+    fn a_performed_clip_is_saved_with_its_asset_and_goes_with_it() {
+        let db = Database::open_in_memory().unwrap();
+        let project = project(&db);
+        let mut performed = asset(&project, MediaKind::Video, "media-9.mp4", 2_000);
+        performed.source = AssetSource::Performed;
+        let clip = PerformedClip {
+            asset: performed.id,
+            project: project.id,
+            capture: CaptureId::new(),
+            position: 2,
+            model: bardo_domain::ClipModelRef::new(
+                Provider::Higgsfield,
+                "kling-video/v3/motion-control/pro",
+            )
+            .unwrap(),
+            realistic: true,
+            used_at: time(3_000),
+        };
+        db.save_performed_clip(&performed, &clip).unwrap();
+        assert_eq!(db.media_assets(project.id).unwrap(), [performed.clone()]);
+        assert_eq!(
+            db.performed_clips(project.id).unwrap(),
+            std::slice::from_ref(&clip)
+        );
+
+        // Saved twice for the same asset is refused, and leaves nothing new.
+        assert!(db.save_performed_clip(&performed, &clip).is_err());
+        assert_eq!(db.performed_clips(project.id).unwrap().len(), 1);
+
+        db.conn()
+            .execute(
+                "DELETE FROM media_asset WHERE id = ?1",
+                [performed.id.to_string()],
+            )
+            .unwrap();
+        assert!(db.performed_clips(project.id).unwrap().is_empty());
     }
 
     #[test]

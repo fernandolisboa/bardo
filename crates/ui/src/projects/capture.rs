@@ -9,16 +9,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
-    AnalysisPart, ApprovalBlock, BoundaryMove, Capture, CaptureVoice, Device, Narration, SetSource,
-    TakeChecks, TakeFlag, TakeMode, TakeSet,
+    AnalysisPart, ApprovalBlock, BoundaryMove, Capture, CaptureVoice, ClipModelRef, Device,
+    JobFailureKind, JobId, JobState, Narration, SetSource, TakeChecks, TakeFlag, TakeMode,
+    TakeResult, TakeSet, TakeStep, VideoProjectId,
 };
 use bardo_app::{
-    AnalysisStatus, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
-    ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene, SpendEstimate,
-    Stage, TakeAnalysisView, Text, TourAnchor, take_source,
+    AnalysisStatus, Bardo, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
+    ControlPlayer, ControlStatus, ControlVideoView, PerformedStep, PerformedTakeView,
+    PerformedView, SetChoice, SetPicture, SetScene, SpendEstimate, Stage, TakeAnalysisView, Text,
+    TourAnchor, take_source,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::Textarea;
 use gpui_kit::component::radio::Radio;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
@@ -60,11 +63,20 @@ pub(super) struct CaptureImport {
     pub(super) scene_picker: Option<(usize, Vec<SetScene>)>,
     /// Choosing a set picture; dropping it stops waiting.
     pub(super) choosing_set: Option<Task<()>>,
+    /// The take whose prompt is open in the editor.
+    pub(super) editing_prompt: Option<usize>,
+    /// A take's paid step held back at a budget, and what it would cost.
+    pub(super) performed_ask: Option<(usize, PerformedStep, SpendEstimate)>,
+    /// The take whose final was just added to the media.
+    pub(super) used: Option<usize>,
 }
 
-/// A take's control video in its player, with the picture showing.
+/// A take's control video, or its draft or final, in its player, with the
+/// picture showing.
 pub(super) struct Watching {
     pub(super) take: usize,
+    /// `None` for the control video.
+    pub(super) step: Option<TakeStep>,
     pub(super) player: ControlPlayer,
     pub(super) frame: Option<Arc<RenderImage>>,
 }
@@ -83,6 +95,9 @@ impl Default for CaptureImport {
             watching: None,
             scene_picker: None,
             choosing_set: None,
+            editing_prompt: None,
+            performed_ask: None,
+            used: None,
         }
     }
 }
@@ -108,6 +123,50 @@ fn on_cpu(status: &AnalysisStatus) -> bool {
             device: Device::Cpu { .. }
         }
     )
+}
+
+/// How much longer or shorter than its take a draft or final is, when
+/// the difference shows.
+fn length_note(bardo: &Bardo, made: Duration, take: Duration) -> Option<String> {
+    let difference = made.abs_diff(take);
+    if difference < Duration::from_millis(500) {
+        return None;
+    }
+    let text = if made > take {
+        Text::TakeLonger
+    } else {
+        Text::TakeShorter
+    };
+    Some(bardo.text_with(text, &[("seconds", &bardo.seconds(difference))]))
+}
+
+/// A player's picture, upright or wide at most 180 px high, and what
+/// stopped it playing.
+fn render_player(bardo: &Bardo, watching: &Watching, muted: gpui_kit::Hsla) -> AnyElement {
+    let size = watching.player.size();
+    let height = 180.0_f32;
+    let width = height * size.width as f32 / size.height.max(1) as f32;
+    let picture = div()
+        .w(px(width))
+        .h(px(height))
+        .max_w_full()
+        .bg(gpui_kit::black())
+        .rounded_md()
+        .overflow_hidden()
+        .when_some(watching.frame.clone(), |frame, image| {
+            frame.child(
+                img(ImageSource::Render(image))
+                    .size_full()
+                    .object_fit(ObjectFit::Contain),
+            )
+        });
+    v_flex()
+        .gap_1()
+        .child(picture)
+        .when_some(watching.player.error(), |column, error| {
+            column.child(div().text_xs().text_color(muted).child(tr(bardo, *error)))
+        })
+        .into_any_element()
 }
 
 /// `1080 × 1920`.
@@ -400,7 +459,7 @@ impl ProjectsScreen {
             .capture
             .watching
             .as_mut()
-            .filter(|watching| watching.take == index)
+            .filter(|watching| watching.take == index && watching.step.is_none())
         {
             watching.player.toggle();
             cx.notify();
@@ -411,12 +470,172 @@ impl ProjectsScreen {
             Ok(player) => {
                 self.capture.watching = Some(Watching {
                     take: index,
+                    step: None,
                     player,
                     frame: None,
                 });
             }
             Err(error) => self.capture.error = Some(error.message()),
         }
+        cx.notify();
+    }
+
+    /// Plays take `index`'s draft or final with the take's voice, or stops
+    /// it.
+    fn toggle_take_result(
+        &mut self,
+        index: usize,
+        step: TakeStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.project else {
+            return;
+        };
+        if let Some(watching) = self
+            .capture
+            .watching
+            .as_mut()
+            .filter(|watching| watching.take == index && watching.step == Some(step))
+        {
+            watching.player.toggle();
+            cx.notify();
+            return;
+        }
+        self.close_control(usize::MAX, window, cx);
+        match self.bardo.read(cx).take_result_player(id, index, step) {
+            Ok(player) => {
+                self.capture.watching = Some(Watching {
+                    take: index,
+                    step: Some(step),
+                    player,
+                    frame: None,
+                });
+            }
+            Err(error) => self.capture.error = Some(error.message()),
+        }
+        cx.notify();
+    }
+
+    /// Runs a performed clip action on the project, showing what went
+    /// wrong. `true` when it went through.
+    fn performed_action(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        action: impl FnOnce(&Bardo, VideoProjectId) -> Result<(), CaptureError>,
+    ) -> bool {
+        let Some(id) = self.project else {
+            return false;
+        };
+        self.capture.confirm_remove = false;
+        self.capture.used = None;
+        let result = action(self.bardo.read(cx), id);
+        let done = result.is_ok();
+        self.capture.error = result.err().map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+        done
+    }
+
+    /// Makes take `index` go to `model`, or to the channel's with `None`.
+    fn set_take_model(
+        &mut self,
+        index: usize,
+        model: Option<ClipModelRef>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.capture.editing_prompt == Some(index) {
+            self.capture.editing_prompt = None;
+        }
+        self.performed_action(window, cx, |bardo, id| {
+            bardo.set_take_model(id, index, model)
+        });
+    }
+
+    /// Writes take `index`'s prompt or makes its draft or final, asking
+    /// first past a budget.
+    fn performed_step(
+        &mut self,
+        index: usize,
+        step: PerformedStep,
+        consent: BudgetConsent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.capture.performed_ask = None;
+        let mut ask = None;
+        self.performed_action(window, cx, |bardo, id| {
+            let started = match step {
+                PerformedStep::Prompt => bardo.write_take_prompt(id, index, consent),
+                PerformedStep::Make(made) => bardo.make_performed_take(id, index, made, consent),
+            };
+            match started {
+                Ok(_) => Ok(()),
+                Err(CaptureError::OverBudget(estimate)) => {
+                    ask = Some(estimate);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        });
+        if let Some(estimate) = ask {
+            self.capture.performed_ask = Some((index, step, estimate));
+        }
+    }
+
+    /// Opens take `index`'s prompt in the editor.
+    fn edit_take_prompt(
+        &mut self,
+        index: usize,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.capture.editing_prompt = Some(index);
+        self.take_prompt_editor
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        cx.notify();
+    }
+
+    fn save_take_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.capture.editing_prompt else {
+            return;
+        };
+        let text = self.take_prompt_editor.read(cx).value().to_string();
+        if self.performed_action(window, cx, |bardo, id| {
+            bardo.edit_take_prompt(id, index, &text)
+        }) {
+            self.capture.editing_prompt = None;
+        }
+    }
+
+    /// Checks again on a take job that was stopped or failed: it polls the
+    /// request it sent, when it sent one.
+    fn retry_take(&mut self, job: JobId, window: &mut Window, cx: &mut Context<Self>) {
+        self.capture.error = self
+            .bardo
+            .read(cx)
+            .retry_job(job)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn use_performed_take(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        match self.bardo.read(cx).use_performed_take(id, index) {
+            Ok(_) => {
+                self.capture.error = None;
+                self.capture.used = Some(index);
+            }
+            Err(error) => self.capture.error = Some(error.message()),
+        }
+        self.load(window, cx);
         cx.notify();
     }
 
@@ -453,15 +672,24 @@ impl ProjectsScreen {
         let Some(watching) = self.capture.watching.as_ref() else {
             return;
         };
-        let current = self.current_stage() == Some(Stage::Capture)
-            && self
-                .narration
-                .as_ref()
+        let bardo = self.bardo.read(cx);
+        let narration = self.narration.as_ref();
+        let path = match watching.step {
+            None => narration
                 .and_then(|view| view.controls.get(watching.take))
                 .and_then(|view| view.built.as_ref())
-                .is_some_and(|built| {
-                    self.bardo.read(cx).control_video_path(built) == watching.player.path()
-                });
+                .map(|built| bardo.control_video_path(built)),
+            Some(step) => narration
+                .and_then(|view| view.performed.as_ref())
+                .and_then(|performed| performed.takes.get(watching.take))
+                .and_then(|take| match step {
+                    TakeStep::Draft => take.draft.as_ref(),
+                    TakeStep::Final => take.final_take.as_ref(),
+                })
+                .map(|made| bardo.take_result_path(made)),
+        };
+        let current = self.current_stage() == Some(Stage::Capture)
+            && path.is_some_and(|path| path == watching.player.path());
         if !current {
             self.close_control(usize::MAX, window, cx);
             return;
@@ -856,6 +1084,25 @@ impl ProjectsScreen {
             .enumerate()
             .map(|(index, control)| Some(self.render_take_control(index, control, cx)))
             .collect();
+        let mut performed: Vec<Option<AnyElement>> = match self
+            .narration
+            .as_ref()
+            .and_then(|view| view.performed.as_ref().map(|performed| (view, performed)))
+        {
+            Some((view, performed)) => performed
+                .takes
+                .iter()
+                .enumerate()
+                .map(|(index, take)| {
+                    let sends_frame = view
+                        .controls
+                        .get(index)
+                        .is_some_and(|control| control.outbound.sends_set_frame());
+                    Some(self.render_take_performed(index, performed, take, sends_frame, cx))
+                })
+                .collect(),
+            None => Vec::new(),
+        };
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let source = take_source(narration);
@@ -973,6 +1220,18 @@ impl ProjectsScreen {
                 Some(control) => row.child(control),
                 None => row,
             };
+            let row = match performed.get_mut(index).and_then(Option::take) {
+                Some(section) if index == 0 => row.child(
+                    kit::anchor_in(
+                        TourAnchor::Control(Control::CapturePerformed),
+                        section,
+                        Some(&self.page_scroll),
+                    )
+                    .into_any_element(),
+                ),
+                Some(section) => row.child(section),
+                None => row,
+            };
             list = list.child(row);
             if index + 1 < takes.len() {
                 let can = |to| !busy && capture.takes.boundary_target(&source, index, to).is_ok();
@@ -999,16 +1258,7 @@ impl ProjectsScreen {
                                 this.move_cut(index, BoundaryMove::Later, window, cx)
                             })),
                     );
-                list = list.child(if index == 0 {
-                    kit::anchor_in(
-                        TourAnchor::Control(Control::CaptureCut),
-                        cut,
-                        Some(&self.page_scroll),
-                    )
-                    .into_any_element()
-                } else {
-                    cut.into_any_element()
-                });
+                list = list.child(cut);
             }
         }
         list.into_any_element()
@@ -1025,6 +1275,13 @@ impl ProjectsScreen {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let muted = theme.muted_foreground;
+        // Only the modes the take's model takes.
+        let model = self
+            .narration
+            .as_ref()
+            .and_then(|view| view.performed.as_ref())
+            .and_then(|performed| performed.takes.get(index))
+            .and_then(|take| take.model.as_ref());
         let modes = ButtonGroup::new(("take-mode", index))
             .outline()
             .xsmall()
@@ -1032,6 +1289,7 @@ impl ProjectsScreen {
                 Button::new(mode.code())
                     .label(tr(bardo, Text::TakeModeName(mode)))
                     .selected(view.mode == mode)
+                    .disabled(view.mode != mode && model.is_some_and(|model| !model.takes(mode)))
             }))
             .on_click(cx.listener(move |this, clicked: &Vec<usize>, window, cx| {
                 if let Some(&mode) = clicked.first().and_then(|&i| TakeMode::ALL.get(i)) {
@@ -1330,30 +1588,9 @@ impl ProjectsScreen {
                 .capture
                 .watching
                 .as_ref()
-                .filter(|watching| watching.take == index);
+                .filter(|watching| watching.take == index && watching.step.is_none());
             if let Some(watching) = watching {
-                let size = watching.player.size();
-                // Upright or wide, at most 180 px high.
-                let height = 180.0_f32;
-                let width = height * size.width as f32 / size.height.max(1) as f32;
-                let picture = div()
-                    .w(px(width))
-                    .h(px(height))
-                    .max_w_full()
-                    .bg(gpui_kit::black())
-                    .rounded_md()
-                    .overflow_hidden()
-                    .when_some(watching.frame.clone(), |frame, image| {
-                        frame.child(
-                            img(ImageSource::Render(image))
-                                .size_full()
-                                .object_fit(ObjectFit::Contain),
-                        )
-                    });
-                section = section.child(picture);
-                if let Some(error) = watching.player.error() {
-                    section = section.child(small(tr(bardo, *error)).text_color(muted));
-                }
+                section = section.child(render_player(bardo, watching, muted));
             }
             let playing = watching.is_some_and(|watching| watching.player.is_playing());
             let actions = h_flex()
@@ -1405,6 +1642,554 @@ impl ProjectsScreen {
                     ))
                 });
             section = section.child(actions);
+        }
+        section.into_any_element()
+    }
+
+    /// A take's performed clip: its take model, its prompt, and its draft
+    /// and final with what makes, reviews and uses them.
+    fn render_take_performed(
+        &self,
+        index: usize,
+        performed: &PerformedView,
+        view: &PerformedTakeView,
+        sends_frame: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let small = |text: SharedString| div().text_xs().child(text);
+        let busy = view.is_busy();
+        let blocked = view.block.is_some();
+        let info = |id: &'static str, hint: Text, at| {
+            (index == 0).then(|| guide::info(bardo, id, tr(bardo, hint), at))
+        };
+        let mut section = v_flex().gap_1().pt_1().child(
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_medium()
+                        .child(tr(bardo, Text::PerformedTitle)),
+                )
+                .children(info(
+                    "capture-performed-info",
+                    Text::PerformedHint,
+                    guide::refs::CAPTURE_PERFORMED,
+                )),
+        );
+
+        // Its take model, the channel's marked.
+        let channel = performed.channel_model.as_ref().map(|model| &model.id);
+        let mut models = h_flex()
+            .gap_x_3()
+            .gap_y_1()
+            .flex_wrap()
+            .items_center()
+            .child(small(tr(bardo, Text::TakeModelLabel)).text_color(muted));
+        for (number, model) in performed.models.iter().enumerate() {
+            let label = if Some(&model.id) == channel {
+                bardo.text_with(Text::TakeModelChannelTag, &[("model", &model.name)])
+            } else {
+                model.name.clone()
+            };
+            let picked = view.model.as_ref().is_some_and(|own| own.id == model.id);
+            let id = model.id.clone();
+            models = models.child(
+                Radio::new(SharedString::from(format!("take-model-{index}-{number}")))
+                    .label(SharedString::from(label))
+                    .xsmall()
+                    .checked(picked)
+                    .disabled(busy)
+                    .on_click(cx.listener(move |this, checked: &bool, window, cx| {
+                        if *checked {
+                            this.set_take_model(index, Some(id.clone()), window, cx);
+                        }
+                    })),
+            );
+        }
+        section = section.child(models);
+        if let Some(block) = view.block {
+            section = section.child(kit::notice(
+                Tone::Warning,
+                tr(bardo, Text::PerformedBlocked(block)),
+                cx,
+            ));
+        }
+
+        // Its prompt; a blocked take with none has nothing to show yet.
+        if blocked && view.prompt.is_none() && self.capture.editing_prompt != Some(index) {
+            return section.into_any_element();
+        }
+        section = section.child(
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_medium()
+                        .child(tr(bardo, Text::TakePromptLabel)),
+                )
+                .children(info(
+                    "capture-take-prompt-info",
+                    Text::TakePromptHint,
+                    guide::refs::CAPTURE_TAKE_PROMPT,
+                )),
+        );
+        let writing = view
+            .prompt_job
+            .as_ref()
+            .filter(|job| job.state().is_active());
+        if self.capture.editing_prompt == Some(index) {
+            section = section
+                .child(Textarea::new(&self.take_prompt_editor))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new(("save-take-prompt", index))
+                                .primary()
+                                .xsmall()
+                                .label(tr(bardo, Text::SaveTakePrompt))
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.save_take_prompt(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new(("cancel-take-prompt", index))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::CancelTakePrompt))
+                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.capture.editing_prompt = None;
+                                    cx.notify();
+                                })),
+                        ),
+                );
+        } else if let Some(prompt) = &view.prompt {
+            let text = prompt.text.clone();
+            section = section
+                .child(small(SharedString::from(prompt.text.clone())))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .items_center()
+                        .when(prompt.edited, |row| {
+                            row.child(kit::status(
+                                Tone::Info,
+                                tr(bardo, Text::TakePromptEdited),
+                                cx,
+                            ))
+                        })
+                        .child(
+                            Button::new(("edit-take-prompt", index))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::EditTakePrompt))
+                                .disabled(busy)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.edit_take_prompt(index, text.clone(), window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new(("rewrite-take-prompt", index))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::WriteTakePromptAgain))
+                                .disabled(busy || blocked)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.performed_step(
+                                        index,
+                                        PerformedStep::Prompt,
+                                        BudgetConsent::Ask,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        ),
+                );
+        } else if writing.is_none() {
+            section = section.child(
+                h_flex().gap_2().items_center().child(
+                    Button::new(("write-take-prompt", index))
+                        .primary()
+                        .xsmall()
+                        .label(tr(bardo, Text::WriteTakePrompt))
+                        .disabled(busy || blocked)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.performed_step(
+                                index,
+                                PerformedStep::Prompt,
+                                BudgetConsent::Ask,
+                                window,
+                                cx,
+                            )
+                        })),
+                ),
+            );
+            if sends_frame {
+                section =
+                    section.child(small(tr(bardo, Text::TakePromptFrameNote)).text_color(muted));
+            }
+        }
+        match view.prompt_job.as_ref() {
+            Some(job) if job.state().is_active() => {
+                section = section.child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(Spinner::new().xsmall())
+                        .child(small(tr(bardo, Text::TakePromptWriting))),
+                );
+            }
+            Some(job) if job.state() == JobState::Failed => {
+                let kind = job.failure().map(|failure| failure.kind);
+                let mut text = bardo.text(Text::TakePromptFailed).into_owned();
+                if let Some(kind) = kind {
+                    text = format!("{text} {}", bardo.text(Text::JobFailureKindName(kind)));
+                }
+                section = section.child(kit::notice(Tone::Danger, SharedString::from(text), cx));
+            }
+            _ => {}
+        }
+
+        // Its draft and final.
+        let job = view.job.as_ref();
+        match job {
+            Some((job, step)) if job.state().is_active() => {
+                let text = match (job.state(), step) {
+                    (JobState::Queued, _) => Text::TakeQueued,
+                    (_, TakeStep::Draft) => Text::TakeMakingDraft,
+                    (_, TakeStep::Final) => Text::TakeMakingFinal,
+                };
+                let id = job.id();
+                section = section.child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .items_center()
+                        .child(Spinner::new().xsmall())
+                        .child(small(tr(bardo, text)))
+                        .child(
+                            Button::new(("stop-take", index))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::StopTakeWaiting))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.stop_control(id, cx)
+                                })),
+                        ),
+                );
+            }
+            Some((job, _)) if job.state() == JobState::Cancelled => {
+                let id = job.id();
+                section = section
+                    .child(kit::notice(
+                        Tone::Info,
+                        tr(bardo, Text::TakeStoppedWaiting),
+                        cx,
+                    ))
+                    .child(
+                        h_flex().child(
+                            Button::new(("check-take", index))
+                                .outline()
+                                .xsmall()
+                                .label(tr(bardo, Text::CheckTakeAgain))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.retry_take(id, window, cx)
+                                })),
+                        ),
+                    );
+            }
+            Some((job, _)) if job.state() == JobState::Failed => {
+                let failure = job.failure();
+                if failure.is_some_and(|failure| failure.kind == JobFailureKind::Declined) {
+                    section =
+                        section.child(kit::notice(Tone::Danger, tr(bardo, Text::TakeRefused), cx));
+                } else {
+                    let reason = failure.map_or_else(String::new, |failure| {
+                        bardo
+                            .text(Text::JobFailureKindName(failure.kind))
+                            .into_owned()
+                    });
+                    let id = job.id();
+                    section = section
+                        .child(kit::notice(
+                            Tone::Danger,
+                            SharedString::from(
+                                bardo.text_with(Text::TakeFailed, &[("reason", &reason)]),
+                            ),
+                            cx,
+                        ))
+                        .child(
+                            h_flex().child(
+                                Button::new(("check-take", index))
+                                    .outline()
+                                    .xsmall()
+                                    .label(tr(bardo, Text::CheckTakeAgain))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.retry_take(id, window, cx)
+                                        },
+                                    )),
+                            ),
+                        );
+                }
+            }
+            _ => {}
+        }
+
+        let watching = |step: TakeStep| {
+            self.capture
+                .watching
+                .as_ref()
+                .filter(|watching| watching.take == index && watching.step == Some(step))
+        };
+        let play = |step: TakeStep, label: Text| {
+            let playing = watching(step).is_some_and(|watching| watching.player.is_playing());
+            Button::new(SharedString::from(format!(
+                "play-take-{}-{index}",
+                step.code()
+            )))
+            .outline()
+            .xsmall()
+            .label(tr(
+                bardo,
+                if playing {
+                    Text::ControlStopPlaying
+                } else {
+                    label
+                },
+            ))
+        };
+        let length = view.length;
+        let made_lines = |made: &TakeResult, ready: Option<Text>| {
+            let mut lines = Vec::new();
+            if let Some(ready) = ready {
+                lines.push(
+                    small(SharedString::from(bardo.text_with(
+                        ready,
+                        &[("seconds", &bardo.seconds(made.duration))],
+                    )))
+                    .into_any_element(),
+                );
+            }
+            if let Some(note) = length_note(bardo, made.duration, length) {
+                lines.push(
+                    small(SharedString::from(note))
+                        .text_color(muted)
+                        .into_any_element(),
+                );
+            }
+            lines
+        };
+        let can_make = !busy && !blocked && view.prompt.is_some();
+        let make = |id: &'static str, label: Text, step: TakeStep, primary: bool| {
+            let button = Button::new((id, index))
+                .xsmall()
+                .label(tr(bardo, label))
+                .disabled(!can_make);
+            let button = if primary {
+                button.primary()
+            } else {
+                button.outline()
+            };
+            button.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.performed_step(
+                    index,
+                    PerformedStep::Make(step),
+                    BudgetConsent::Ask,
+                    window,
+                    cx,
+                )
+            }))
+        };
+
+        if view.has_drafts() {
+            match &view.draft {
+                Some(draft) => {
+                    let approved = draft.accepted_at.is_some();
+                    section = section.children(made_lines(
+                        draft,
+                        Some(if approved {
+                            Text::TakeDraftApproved
+                        } else {
+                            Text::TakeDraftReady
+                        }),
+                    ));
+                    if let Some(watching) = watching(TakeStep::Draft) {
+                        section = section.child(render_player(bardo, watching, muted));
+                    }
+                    let mut row = h_flex().gap_2().flex_wrap().items_center().child(
+                        play(TakeStep::Draft, Text::PlayTakeDraft).on_click(cx.listener(
+                            move |this, _: &ClickEvent, window, cx| {
+                                this.toggle_take_result(index, TakeStep::Draft, window, cx)
+                            },
+                        )),
+                    );
+                    row = if approved {
+                        row.child(
+                            Button::new(("back-to-drafts", index))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::BackToTakeDrafts))
+                                .disabled(busy)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.performed_action(window, cx, |bardo, id| {
+                                        bardo.back_to_take_drafts(id, index)
+                                    });
+                                })),
+                        )
+                    } else {
+                        row.child(
+                            Button::new(("approve-draft", index))
+                                .primary()
+                                .xsmall()
+                                .label(tr(bardo, Text::ApproveTakeDraft))
+                                .disabled(busy)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.performed_action(window, cx, |bardo, id| {
+                                        bardo.approve_take_draft(id, index)
+                                    });
+                                })),
+                        )
+                        .child(make(
+                            "regenerate-draft",
+                            Text::RegenerateTakeDraft,
+                            TakeStep::Draft,
+                            false,
+                        ))
+                    };
+                    section = section.child(row);
+                }
+                None => {
+                    section = section
+                        .child(small(tr(bardo, Text::TakeDraftNote)).text_color(muted))
+                        .when(view.prompt.is_some(), |section| {
+                            section.child(h_flex().child(make(
+                                "make-draft",
+                                Text::MakeTakeDraft,
+                                TakeStep::Draft,
+                                true,
+                            )))
+                        });
+                }
+            }
+        }
+
+        let final_due = view.next == PerformedStep::Make(TakeStep::Final);
+        match &view.final_take {
+            Some(made) => {
+                section = section.children(made_lines(made, Some(Text::TakeFinalReady)));
+                if let Some(watching) = watching(TakeStep::Final) {
+                    section = section.child(render_player(bardo, watching, muted));
+                }
+                section = section.child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .items_center()
+                        .child(
+                            play(TakeStep::Final, Text::PlayTakeFinal).on_click(cx.listener(
+                                move |this, _: &ClickEvent, window, cx| {
+                                    this.toggle_take_result(index, TakeStep::Final, window, cx)
+                                },
+                            )),
+                        )
+                        .child(
+                            Button::new(("use-take", index))
+                                .primary()
+                                .xsmall()
+                                .label(tr(bardo, Text::UsePerformedTake))
+                                .disabled(busy)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.use_performed_take(index, window, cx)
+                                })),
+                        )
+                        .when(final_due, |row| {
+                            row.child(make(
+                                "make-final-again",
+                                Text::MakeTakeFinalAgain,
+                                TakeStep::Final,
+                                false,
+                            ))
+                        }),
+                );
+            }
+            None if final_due && view.prompt.is_some() => {
+                section = section
+                    .child(h_flex().child(make(
+                        "make-final",
+                        Text::MakeTakeFinal,
+                        TakeStep::Final,
+                        true,
+                    )))
+                    .child(small(tr(bardo, Text::TakeFinalPaidNote)).text_color(muted));
+            }
+            None => {}
+        }
+        let estimate = view
+            .estimate
+            .as_ref()
+            .filter(|_| !busy)
+            .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx));
+        section = section.child(
+            h_flex()
+                .gap_1()
+                .items_start()
+                .children(estimate)
+                .children(info(
+                    "capture-draft-final-info",
+                    Text::TakeMakeHint,
+                    guide::refs::CAPTURE_DRAFT_FINAL,
+                )),
+        );
+        if let Some((_, step, estimate)) = self
+            .capture
+            .performed_ask
+            .as_ref()
+            .filter(|(take, ..)| *take == index)
+        {
+            let step = *step;
+            let confirm = cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.performed_step(index, step, BudgetConsent::Confirmed, window, cx)
+            });
+            let cancel = cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.capture.performed_ask = None;
+                cx.notify();
+            });
+            section = section.child(budget_question(
+                SharedString::from(format!("performed-budget-{index}")),
+                bardo,
+                estimate,
+                cx,
+                confirm,
+                cancel,
+            ));
+        }
+        if self.capture.used == Some(index) {
+            section = section.child(kit::notice(
+                Tone::Success,
+                tr(bardo, Text::PerformedUsedNow),
+                cx,
+            ));
+        } else if view.used > 0 {
+            section = section.child(
+                small(SharedString::from(bardo.text_with(
+                    Text::PerformedUsed,
+                    &[("n", &view.used.to_string())],
+                )))
+                .text_color(muted),
+            );
+        }
+        if performed.realistic && view.final_take.is_some() {
+            section =
+                section.child(small(tr(bardo, Text::PerformedRealisticNote)).text_color(muted));
         }
         section.into_any_element()
     }

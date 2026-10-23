@@ -128,6 +128,8 @@ pub struct NarrationView {
     /// The capture's takes' control videos, in order; empty without a
     /// capture.
     pub controls: Vec<crate::ControlVideoView>,
+    /// The capture's performed clips work; `None` without a capture.
+    pub performed: Option<crate::PerformedView>,
 }
 
 /// The provider's calls that read `text` aloud: billed per character.
@@ -603,13 +605,26 @@ impl Bardo {
             None => None,
         };
         let capture = self.capture_of(narration.as_ref(), project.id)?;
-        let (analyses, controls) = match &capture {
-            Some(capture) => (self.analysis_views(capture)?, self.control_views(capture)?),
-            None => (Vec::new(), Vec::new()),
+        let (analyses, controls, performed) = match &capture {
+            Some(capture) => {
+                let controls = self.control_views(capture)?;
+                let performed =
+                    self.performed_view(capture, &controls)
+                        .map_err(|error| match error {
+                            crate::CaptureError::Repository(error) => {
+                                NarrationError::Repository(error)
+                            }
+                            crate::CaptureError::ProjectNotFound => NarrationError::ProjectNotFound,
+                            other => NarrationError::Repository(RepositoryError(Box::new(other))),
+                        })?;
+                (self.analysis_views(capture)?, controls, Some(performed))
+            }
+            None => (Vec::new(), Vec::new(), None),
         };
         Ok(NarrationView {
             analyses,
             controls,
+            performed,
             capture,
             estimate,
             script: script.map(|script| script.text().clone()),
@@ -865,6 +880,7 @@ pub(crate) mod tests {
         pub(crate) voice_changer: Arc<FakeVoiceChanger>,
         pub(crate) voice_isolator: Arc<FakeVoiceIsolator>,
         pub(crate) vision: Arc<crate::take_analysis::testing::FakeVision>,
+        pub(crate) takes: Arc<crate::testing::FakeTakes>,
     }
 
     impl Harness {
@@ -886,6 +902,7 @@ pub(crate) mod tests {
                 voice_changer: Arc::default(),
                 voice_isolator: Arc::default(),
                 vision: Arc::default(),
+                takes: Arc::default(),
             }
         }
 
@@ -908,6 +925,7 @@ pub(crate) mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
+                takes: vec![Arc::clone(&self.takes) as _],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),

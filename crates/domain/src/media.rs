@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::{PictureSize, ProfileId, RepositoryError, Track, VideoProjectId};
+use crate::{PerformedClip, PictureSize, ProfileId, RepositoryError, Track, VideoProjectId};
 
 uuid_id!(
     /// Identifies one media asset of a project.
@@ -68,16 +68,24 @@ pub enum AssetSource {
     Imported,
     /// A music track Bardo made (`crate::MusicTrack`).
     Generated,
+    /// A take's final the user chose (#192): the persona performing it
+    /// (`crate::PerformedClip`).
+    Performed,
 }
 
 impl AssetSource {
-    pub const ALL: [AssetSource; 2] = [AssetSource::Imported, AssetSource::Generated];
+    pub const ALL: [AssetSource; 3] = [
+        AssetSource::Imported,
+        AssetSource::Generated,
+        AssetSource::Performed,
+    ];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             AssetSource::Imported => "imported",
             AssetSource::Generated => "generated",
+            AssetSource::Performed => "performed",
         }
     }
 }
@@ -145,6 +153,19 @@ pub trait MediaAssetRepository: Send + Sync {
     fn media_assets(&self, project: VideoProjectId) -> Result<Vec<MediaAsset>, RepositoryError>;
 
     fn save_media_asset(&self, asset: &MediaAsset) -> Result<(), RepositoryError>;
+
+    /// The project's performed clips (#192), oldest first.
+    fn performed_clips(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<PerformedClip>, RepositoryError>;
+
+    /// Saves `asset` and the take it performs, together.
+    fn save_performed_clip(
+        &self,
+        asset: &MediaAsset,
+        clip: &PerformedClip,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: MediaAssetRepository + ?Sized> MediaAssetRepository for Arc<T> {
@@ -154,6 +175,21 @@ impl<T: MediaAssetRepository + ?Sized> MediaAssetRepository for Arc<T> {
 
     fn save_media_asset(&self, asset: &MediaAsset) -> Result<(), RepositoryError> {
         (**self).save_media_asset(asset)
+    }
+
+    fn performed_clips(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<PerformedClip>, RepositoryError> {
+        (**self).performed_clips(project)
+    }
+
+    fn save_performed_clip(
+        &self,
+        asset: &MediaAsset,
+        clip: &PerformedClip,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_performed_clip(asset, clip)
     }
 }
 

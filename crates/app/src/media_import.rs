@@ -230,6 +230,7 @@ mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
+                takes: vec![Arc::new(crate::testing::FakeTakes::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),

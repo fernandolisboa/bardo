@@ -9,7 +9,8 @@ use bardo_ai::ClaudeTextGenerator;
 use bardo_ai::claude::{FALLBACK_BETA, MESSAGES_URL, MODEL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, Provider, ProviderFailureKind, TextFormat, TextGenerator, TextRequest, TokenUsage,
+    ApiKey, ImageFormat, Provider, ProviderFailureKind, TextFormat, TextGenerator, TextImage,
+    TextRequest, TokenUsage,
 };
 use common::{Scripted, fixture, recording_sleeper};
 use serde_json::json;
@@ -25,6 +26,7 @@ fn request(format: TextFormat) -> TextRequest {
     TextRequest {
         instructions: "You plan videos for a faceless channel.".into(),
         prompt: "Propose three themes about space history.".into(),
+        images: Vec::new(),
         format,
     }
 }
@@ -83,6 +85,37 @@ fn prose_requests_have_no_format() {
         .unwrap();
     let body = &claude.transport().sent()[0].body;
     assert!(body["output_config"].get("format").is_none());
+}
+
+#[test]
+fn pictures_go_before_the_task_as_base64_blocks() {
+    let claude = generator(&["messages-themes"]);
+    let mut asked = request(TextFormat::Prose);
+    asked.images = vec![TextImage {
+        bytes: vec![0xFF, 0xD8, 0xFF, 0xE0],
+        format: ImageFormat::Jpeg,
+    }];
+    claude.generate(&key(), &asked).unwrap();
+    let body = &claude.transport().sent()[0].body;
+    assert_eq!(
+        body["messages"][0]["content"],
+        json!([
+            {
+                "type": "image",
+                "source": { "type": "base64", "media_type": "image/jpeg", "data": "/9j/4A==" },
+            },
+            { "type": "text", "text": "Propose three themes about space history." },
+        ])
+    );
+    // Without pictures the task stays plain text.
+    let claude = generator(&["messages-themes"]);
+    claude
+        .generate(&key(), &request(TextFormat::Prose))
+        .unwrap();
+    assert_eq!(
+        claude.transport().sent()[0].body["messages"][0]["content"],
+        "Propose three themes about space history."
+    );
 }
 
 #[test]

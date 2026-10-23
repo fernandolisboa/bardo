@@ -475,7 +475,11 @@ mod tests {
                  DROP TABLE localized_scene; DROP TABLE localized_sentence;
                  DROP TABLE localization; DROP TABLE persona_look;
                  DROP TABLE control_video; DROP TABLE take_analysis;
+                 DROP TABLE take_prompt; DROP TABLE take_result;
+                 DROP TABLE performed_clip;
                  DROP TABLE capture_take; DROP TABLE capture;
+                 ALTER TABLE channel DROP COLUMN take_model;
+                 ALTER TABLE channel DROP COLUMN take_provider;
                  PRAGMA user_version = 48;",
             )
             .unwrap();

@@ -180,6 +180,8 @@ pub struct ProjectsScreen {
     import_ask: Option<SpendEstimate>,
     /// Importing a capture, and what the Capture stage says.
     capture: capture::CaptureImport,
+    /// The take prompt open in the Capture stage, as the user types it.
+    take_prompt_editor: Entity<TextareaState>,
     /// The music prompt card, and the prompt as the user types it.
     music: Option<MusicPromptView>,
     music_editor: Entity<TextareaState>,
@@ -328,6 +330,7 @@ impl ProjectsScreen {
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+        let take_prompt_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let thumbnail_text = cx.new(|cx| InputState::new(window, cx));
         let thumbnail_prompt = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6));
         let chapter_title = cx.new(|cx| InputState::new(window, cx));
@@ -467,6 +470,7 @@ impl ProjectsScreen {
             capture: capture::CaptureImport::default(),
             music: None,
             music_editor,
+            take_prompt_editor,
             music_loaded: None,
             music_error: None,
             music_notice: None,

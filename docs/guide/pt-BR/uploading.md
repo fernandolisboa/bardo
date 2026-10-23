@@ -58,7 +58,7 @@ Cada capítulo mostra seu tempo no corte como está agora (`m:ss`, ou `h:mm:ss` 
 <a id="disclosure"></a>
 ## Conteúdo sintético
 
-Quando a voz do narrador está marcada como clone ou voz sintética realista, cada rede pede que você diga isso, e o Bardo lembra você no post de cada rede:
+Quando a voz do narrador está marcada como clone ou voz sintética realista, ou o corte usa um clipe interpretado de uma aparência realista ([Usar um clipe interpretado](capture.md#use)), cada rede pede que você diga isso, e o Bardo lembra você no post de cada rede:
 
 - **YouTube**: "Conteúdo alterado ou sintético", que a revisão do envio marca para você.
 - **Instagram**: o rótulo "Informações de IA", que a revisão marca para você.

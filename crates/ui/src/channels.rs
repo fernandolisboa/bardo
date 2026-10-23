@@ -79,6 +79,27 @@ fn persona_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<PersonaId>>> {
     )
 }
 
+/// The default take model first (a channel that keeps it follows the
+/// default), then every take model by name.
+fn take_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef>>> {
+    let models = bardo.take_models();
+    let default = models.first().map(|model| Choice {
+        value: None,
+        title: SharedString::from(
+            bardo.text_with(Text::ChannelClipModelDefault, &[("model", &model.name)]),
+        ),
+    });
+    SearchableVec::new(
+        default
+            .into_iter()
+            .chain(models.iter().map(|model| Choice {
+                title: SharedString::from(model.name.clone()),
+                value: Some(model.id.clone()),
+            }))
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// The provider's default model first (a channel that keeps it follows the
 /// default), then every model by name and provider. The provider is always
 /// named: the same Kling model comes through Higgsfield and from Kling.
@@ -224,6 +245,7 @@ pub struct ChannelsScreen {
     country: ChoiceSelect<Country>,
     persona: ChoiceSelect<Option<PersonaId>>,
     clip_model: ChoiceSelect<Option<ClipModelRef>>,
+    take_model: ChoiceSelect<Option<ClipModelRef>>,
     caption_style: ChoiceSelect<CaptionStyle>,
     caption_highlight: ChoiceSelect<CaptionHighlight>,
     thumbnail_look: ChoiceSelect<ThumbnailLook>,
@@ -287,6 +309,9 @@ impl ChannelsScreen {
         });
         let clip_model =
             cx.new(|cx| SelectState::new(clip_models, Some(IndexPath::new(0)), window, cx));
+        let take_models = take_model_choices(bardo.read(cx));
+        let take_model =
+            cx.new(|cx| SelectState::new(take_models, Some(IndexPath::new(0)), window, cx));
         let caption_style = cx.new(|cx| {
             let selected = index_of(&CaptionStyle::ALL, &defaults.caption_style);
             SelectState::new(caption_styles, selected, window, cx)
@@ -351,6 +376,7 @@ impl ChannelsScreen {
             country,
             persona,
             clip_model,
+            take_model,
             caption_style,
             caption_highlight,
             thumbnail_look,
@@ -393,6 +419,7 @@ impl ChannelsScreen {
         let countries = country_choices(bardo);
         let personas = persona_choices(bardo);
         let clip_models = clip_model_choices(bardo);
+        let take_models = take_model_choices(bardo);
         let caption_styles = caption_style_choices(bardo);
         let caption_highlights = caption_highlight_choices(bardo);
         let thumbnail_looks = thumbnail_look_choices(bardo);
@@ -428,6 +455,11 @@ impl ChannelsScreen {
         self.clip_model.update(cx, |select, cx| {
             let selected = select.selected_value().cloned().flatten();
             select.set_items(clip_models, window, cx);
+            select.set_selected_value(&selected, window, cx);
+        });
+        self.take_model.update(cx, |select, cx| {
+            let selected = select.selected_value().cloned().flatten();
+            select.set_items(take_models, window, cx);
             select.set_selected_value(&selected, window, cx);
         });
         self.caption_style.update(cx, |select, cx| {
@@ -545,6 +577,12 @@ impl ChannelsScreen {
                 select.set_selected_value(&None, window, cx);
             }
         });
+        self.take_model.update(cx, |select, cx| {
+            select.set_selected_value(&draft.take_model, window, cx);
+            if select.selected_value().is_none() {
+                select.set_selected_value(&None, window, cx);
+            }
+        });
         self.caption_style.update(cx, |select, cx| {
             select.set_selected_value(&draft.caption_style, window, cx)
         });
@@ -597,6 +635,7 @@ impl ChannelsScreen {
                 .unwrap_or_default(),
             default_persona: self.persona.read(cx).selected_value().copied().flatten(),
             clip_model: self.clip_model.read(cx).selected_value().cloned().flatten(),
+            take_model: self.take_model.read(cx).selected_value().cloned().flatten(),
             caption_style: self
                 .caption_style
                 .read(cx)
@@ -879,6 +918,13 @@ impl ChannelsScreen {
                             Text::ChannelClipModelHint,
                             guide::refs::CHANNELS_DEFAULTS,
                             Select::new(&self.clip_model).into_any_element(),
+                        ))
+                        .child(explained(
+                            "channel-take-model-info",
+                            Text::ChannelTakeModel,
+                            Text::ChannelTakeModelHint,
+                            guide::refs::CHANNELS_DEFAULTS,
+                            Select::new(&self.take_model).into_any_element(),
                         ))
                         .child(
                             h_flex()

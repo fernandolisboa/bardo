@@ -1982,6 +1982,8 @@ pub(crate) mod testing {
         pub(crate) control_hold: Arc<AtomicBool>,
         /// The set pictures read.
         pub(crate) covered: Mutex<Vec<PathBuf>>,
+        /// The frames taken as pictures: from what, when and within what.
+        pub(crate) frames: Mutex<Vec<(PathBuf, Duration, u64)>>,
     }
 
     /// A stretch decoded for a control video: from, length, frame rate and
@@ -2276,6 +2278,26 @@ pub(crate) mod testing {
             let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
             jpeg.extend((height as u16).to_be_bytes());
             jpeg.extend((width as u16).to_be_bytes());
+            std::fs::write(destination, jpeg)?;
+            Ok(())
+        }
+
+        fn frame_picture(
+            &self,
+            source: &Path,
+            at: Duration,
+            destination: &Path,
+            max_bytes: u64,
+        ) -> Result<(), MediaError> {
+            self.check(source)?;
+            self.frames
+                .lock()
+                .unwrap()
+                .push((source.to_path_buf(), at, max_bytes));
+            // A baseline JPEG header of a 1280 × 720 frame.
+            let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
+            jpeg.extend(720u16.to_be_bytes());
+            jpeg.extend(1280u16.to_be_bytes());
             std::fs::write(destination, jpeg)?;
             Ok(())
         }
@@ -4491,6 +4513,58 @@ mod tests {
             "images, the narration and both imports"
         );
         assert_eq!(view.media_file(&song.file).unwrap().asset.id, song.id);
+    }
+
+    #[test]
+    fn a_cut_with_a_performed_clip_of_a_realistic_look_needs_the_disclosure() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let dir = tempfile::tempdir().unwrap();
+        let performed = |name: &str, realistic: bool| {
+            let take = import(&h, &app, project.id, &dir, name, 6, true);
+            let clip = bardo_domain::PerformedClip {
+                asset: take.id,
+                project: project.id,
+                capture: bardo_domain::CaptureId::new(),
+                position: 0,
+                model: bardo_domain::ClipModelRef::new(
+                    bardo_domain::Provider::Higgsfield,
+                    "fake/motion-control",
+                )
+                .unwrap(),
+                realistic,
+                used_at: SystemTime::now(),
+            };
+            bardo_domain::MediaAssetRepository::save_performed_clip(&*h.db, &take, &clip).unwrap();
+            take
+        };
+        let stylized = performed("stylized.mp4", false);
+        let realistic = performed("realistic.mp4", true);
+        assert!(
+            !app.needs_disclosure(project.id).unwrap(),
+            "in the media bin, not on the cut"
+        );
+
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        let place = |editor: &mut Editor, asset| {
+            app.edit(
+                editor,
+                EditAction::Place {
+                    asset,
+                    track: Track::Video,
+                },
+            )
+            .unwrap();
+        };
+        place(&mut editor, stylized.id);
+        assert!(
+            !app.needs_disclosure(project.id).unwrap(),
+            "a stylized look needs none"
+        );
+        place(&mut editor, realistic.id);
+        assert!(app.needs_disclosure(project.id).unwrap());
     }
 
     #[test]

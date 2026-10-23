@@ -34,8 +34,9 @@ use bardo_domain::{
     JobKind, JobRepository, MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId,
     NarrationRepository, NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider,
     ProviderFailure, RecordingFacts, RepositoryError, ScriptText, SecretStore, SpeechAligner,
-    SpeechTranscriber, TakeSource, Takes, TranscriptionRequest, VideoProjectId, VoiceChangeRequest,
-    VoiceChanger, VoiceFlag, VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
+    SpeechTranscriber, TakeMode, TakeSource, Takes, TranscriptionRequest, VideoProjectId,
+    VoiceChangeRequest, VoiceChanger, VoiceFlag, VoiceIsolator, VoiceRef, WordTimings, audio_parts,
+    script_coverage,
 };
 use bardo_media::ffmpeg::{MediaError, Monitor};
 use bardo_media::{MediaEngine, audio, mp3};
@@ -98,6 +99,29 @@ pub enum CaptureError {
     /// The set picture is gone, or not a PNG or JPEG.
     #[error("the set picture cannot be read")]
     SetUnreadable,
+    /// No take model is offered by that name.
+    #[error("the take model is not offered")]
+    TakeModelNotOffered,
+    /// The take cannot go to its take model yet.
+    #[error("the take cannot be performed yet ({0:?})")]
+    Performed(crate::PerformedBlock),
+    /// A prompt or a performed take of it is being made.
+    #[error("the take is busy")]
+    TakeBusy,
+    /// The take's prompt cannot go to its take model.
+    #[error("the take prompt cannot be used: {0}")]
+    Prompt(bardo_domain::TakePromptError),
+    /// The take model makes no drafts.
+    #[error("the take model makes no drafts")]
+    NoDrafts,
+    /// A final needs the draft approved first.
+    #[error("the draft is not approved")]
+    DraftNotApproved,
+    /// Nothing made for the take to review or use.
+    #[error("nothing was made for the take")]
+    NoTakeResult,
+    #[error(transparent)]
+    Template(#[from] crate::TemplateError),
     #[error(transparent)]
     Boundary(#[from] BoundaryError),
     #[error(transparent)]
@@ -112,6 +136,8 @@ impl CaptureError {
             CaptureError::NoScript => Text::NarrationNoScript,
             CaptureError::NoPersona => Text::CaptureNoPersona,
             CaptureError::VoiceFlagged(flag) => Text::NarrationVoiceFlagged(*flag),
+            CaptureError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
+            CaptureError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
             CaptureError::MissingKey(_) => Text::NarrationMissingKey,
             CaptureError::Busy => Text::NarrationBusy,
             CaptureError::OverBudget(_) => Text::BudgetReachedTitle,
@@ -127,6 +153,13 @@ impl CaptureError {
             CaptureError::NotApprovable(ApprovalBlock::Uncovered) => Text::ControlUncoveredBlocked,
             CaptureError::NotApprovable(ApprovalBlock::Length(_)) => Text::ControlLengthBlocked,
             CaptureError::SetUnreadable => Text::SetUnreadable,
+            CaptureError::TakeModelNotOffered => Text::TakeModelGone,
+            CaptureError::Performed(block) => Text::PerformedBlocked(*block),
+            CaptureError::TakeBusy => Text::PerformedBusy,
+            CaptureError::Prompt(error) => Text::TakePromptInvalid(*error),
+            CaptureError::NoDrafts | CaptureError::NoTakeResult => Text::PerformedNothing,
+            CaptureError::DraftNotApproved => Text::PerformedDraftFirst,
+            CaptureError::Template(error) => error.message(),
             CaptureError::Boundary(_) => Text::CaptureNoCutPoint,
             CaptureError::Repository(_) => Text::CaptureNotSaved,
         }
@@ -290,6 +323,10 @@ pub(crate) struct CapturePayload {
     /// The ISO 639-1 code of the channel's language.
     language: String,
     text: String,
+    /// The mode the takes start in: the first of the channel's take model
+    /// (#192). Missing in jobs queued before, which start in Recording.
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 impl CapturePayload {
@@ -824,11 +861,14 @@ impl CaptureHandler {
         checkpoint(&mut cx, "aligned", 900)?;
 
         let words = WordTimings::from_alignment(work.text.as_str(), &aligned.alignment());
-        let takes = Takes::split(&TakeSource {
+        let mut takes = Takes::split(&TakeSource {
             text: work.text.as_str(),
             words: words.as_slice(),
             duration: joined.duration,
         });
+        if let Some(mode) = payload.mode.as_deref().and_then(TakeMode::from_code) {
+            takes.start_in(mode);
+        }
         let now = SystemTime::now();
         let capture = Capture {
             id: work.capture,
@@ -871,6 +911,7 @@ impl CaptureHandler {
         let previous = self.narrations.narration(project).map_err(unexpected)?;
         // Their rows go with the capture they were made from.
         let previous_controls = self.captures.control_videos(project).map_err(unexpected)?;
+        let previous_results = self.captures.take_results(project).map_err(unexpected)?;
         self.captures.save_capture(&capture).map_err(unexpected)?;
         self.narrations
             .save_narration(&narration)
@@ -889,6 +930,11 @@ impl CaptureHandler {
                 self.files.as_ref(),
                 &previous,
                 &previous_controls,
+            );
+            crate::performed_takes::remove_take_files(
+                self.files.as_ref(),
+                &previous,
+                &previous_results,
             );
         }
         // The face mesh runs on every take as soon as it exists.
@@ -934,11 +980,13 @@ pub(crate) fn forget_capture(
         return Ok(());
     }
     let controls = captures.control_videos(project)?;
+    let results = captures.take_results(project)?;
     captures.delete_capture(project)?;
     // One that will not go (open in a player) is left behind.
     let _ = files.remove(project, &capture.video_file);
     crate::take_analysis::remove_analysis_files(files, &capture);
     crate::control_videos::remove_control_files(files, &capture, &controls);
+    crate::performed_takes::remove_take_files(files, &capture, &results);
     Ok(())
 }
 
@@ -1051,6 +1099,9 @@ impl Bardo {
             voice: voice_payload,
             language: language.to_owned(),
             text: script.text().as_str().to_owned(),
+            mode: self
+                .capture_take_model(project.channel)
+                .map(|model| model.default_mode().code().to_owned()),
         };
         // Only now, when the import goes ahead: what an earlier capture
         // job left can no longer be retried once this one is queued.
@@ -1171,10 +1222,12 @@ impl Bardo {
             return Err(CaptureError::Busy);
         }
         let controls = self.captures.control_videos(capture.project)?;
+        let results = self.captures.take_results(capture.project)?;
         self.captures.delete_capture(capture.project)?;
         let _ = self.files.remove(capture.project, &capture.video_file);
         crate::take_analysis::remove_analysis_files(self.files.as_ref(), &capture);
         crate::control_videos::remove_control_files(self.files.as_ref(), &capture, &controls);
+        crate::performed_takes::remove_take_files(self.files.as_ref(), &capture, &results);
         Ok(())
     }
 

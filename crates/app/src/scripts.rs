@@ -187,6 +187,7 @@ impl ScriptHandler {
         let request = TextRequest {
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
+            images: Vec::new(),
             format: TextFormat::Prose,
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
@@ -513,6 +514,7 @@ mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
+                takes: vec![Arc::new(crate::testing::FakeTakes::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
                 sign_ins: Vec::new(),
