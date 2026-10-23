@@ -388,7 +388,9 @@ pub fn sentence_words(text: &str, starts: &[usize], narration: &Narration) -> Ve
     starts
         .iter()
         .map(|&start| {
-            let first = ours.partition_point(|word| word.end <= start);
+            // A lone dash or quote opening the sentence goes with the word
+            // before it, so a word belongs to the sentence it starts in.
+            let first = ours.partition_point(|word| word.start < start);
             matched[first.min(matched.len())..]
                 .iter()
                 .find_map(|word| *word)
@@ -633,7 +635,7 @@ pub fn localized_cut(
 pub enum PlacedScene {
     /// The scene now runs past its clip, which holds its last frame.
     PastClip { clip: Duration, scene: Duration },
-    /// The scene's length changed by more than half.
+    /// The scene grew by more than half or shrank by more than a third.
     Stretched { was: Duration, now: Duration },
     /// The new narration says none of its sentences.
     Dropped,
@@ -880,6 +882,20 @@ mod tests {
         // The last two sentences gone: they start where nothing is left.
         let narration = narrated("Um dois.", 400);
         assert_eq!(sentence_words(text, &[0, 9, 24], &narration), [0, 2, 2]);
+    }
+
+    #[test]
+    fn a_sentence_opening_on_a_lone_dash_starts_at_its_first_word() {
+        let adaptation = join_adapted(
+            &["Um dois.".to_owned(), "— Três quatro.".to_owned()],
+            &[Gap::Space],
+        )
+        .unwrap();
+        let narration = narrated(&adaptation.text, 400);
+        assert_eq!(
+            sentence_words(&adaptation.text, &adaptation.starts, &narration),
+            [0, 2]
+        );
     }
 
     #[test]

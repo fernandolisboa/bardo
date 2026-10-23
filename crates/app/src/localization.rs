@@ -141,6 +141,8 @@ pub struct VersionTarget {
     pub narrator: Option<String>,
     /// What the adaptation would cost.
     pub estimate: SpendEstimate,
+    /// The localization template the adaptation would use.
+    pub template: u32,
 }
 
 /// A version made from the project.
@@ -427,15 +429,11 @@ impl LocalizationHandler {
             .ok_or_else(|| JobFailure::new(JobFailureKind::MissingKey, "no Claude key is saved"))
     }
 
-    /// Asks Claude for the adaptation and records what it cost, on
-    /// `channel` and `project`.
-    fn adapt(
+    /// Asks Claude for the adaptation.
+    fn ask(
         &self,
         payload: &LocalizationPayload,
-        job: JobId,
-        channel: Option<ChannelId>,
-        project: VideoProjectId,
-    ) -> Result<(Adapted, bardo_domain::GeneratedText), JobFailure> {
+    ) -> Result<bardo_domain::GeneratedText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
             instructions: payload.instructions.clone(),
@@ -444,9 +442,20 @@ impl LocalizationHandler {
                 schema: ADAPTATION_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
+        self.text.generate(&key, &request).map_err(|failure| {
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        })
+    }
+
+    /// Records what the adaptation cost, on `channel` and, once it exists,
+    /// `project`.
+    fn bill(
+        &self,
+        generated: &bardo_domain::GeneratedText,
+        job: JobId,
+        channel: Option<ChannelId>,
+        project: Option<VideoProjectId>,
+    ) {
         self.costs.record(
             PaidCall {
                 provider: Provider::Claude,
@@ -457,11 +466,8 @@ impl LocalizationHandler {
                 reported: None,
             },
             channel,
-            Some(project),
+            project,
         );
-        let adapted: Adapted =
-            serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
-        Ok((adapted, generated))
     }
 
     /// Makes the version `payload` asked for, for `channel`.
@@ -518,176 +524,221 @@ impl LocalizationHandler {
             .map_err(unexpected)?
             .filter(|plan| !plan.is_stale(Some(&narration)))
             .ok_or_else(|| source_gone("the scenes are no longer planned on the narration"))?;
+        // Asked again from the Jobs screen, the job skips `make_version`:
+        // the channel must still take a version.
+        let versions = self.localizations.versions(source.id).map_err(unexpected)?;
+        if versions.iter().any(|made| made.channel == target.id) {
+            return Err(source_gone(
+                "that channel already has a version of this project",
+            ));
+        }
+        let came_from = match self
+            .localizations
+            .localization(source.id)
+            .map_err(unexpected)?
+            .and_then(|localization| localization.source)
+        {
+            Some(id) => self
+                .themes
+                .project(id)
+                .map_err(unexpected)?
+                .map(|project| project.channel),
+            None => None,
+        };
+        if target.id == source.channel
+            || Some(target.id) == came_from
+            || !other_audience(
+                &target,
+                source_channel.details.language(),
+                source_channel.details.country(),
+            )
+        {
+            return Err(source_gone(
+                "the channel speaks the project's language to its country",
+            ));
+        }
         let spoken = sentences(&narration);
         let gaps = source_gaps(&narration, &spoken);
 
-        let (adapted, generated) = self.adapt(payload, job, Some(target.id), version)?;
-        let adaptation =
-            join_adapted(&adapted.sentences, &gaps).map_err(|e| not_usable(&e.to_string()))?;
-        let angle = self
-            .themes
-            .theme(source.theme)
-            .map_err(unexpected)?
-            .map(|theme| theme.idea().angle().to_owned())
-            .unwrap_or_default();
-        let idea = ThemeIdea::new(&adapted.title, &angle)
-            .or_else(|_| ThemeIdea::new(&adapted.title, ""))
-            .map_err(|e| not_usable(&format!("the title is not usable ({e:?})")))?;
-        if should_stop() {
-            return Ok(());
-        }
+        let generated = self.ask(payload)?;
+        // The adaptation is billed on the version once it exists; an
+        // unusable or stopped one only on the channel.
+        let saved = (|| -> Result<bool, JobFailure> {
+            let adapted: Adapted =
+                serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
+            let adaptation =
+                join_adapted(&adapted.sentences, &gaps).map_err(|e| not_usable(&e.to_string()))?;
+            let angle = self
+                .themes
+                .theme(source.theme)
+                .map_err(unexpected)?
+                .map(|theme| theme.idea().angle().to_owned())
+                .unwrap_or_default();
+            let idea = ThemeIdea::new(&adapted.title, &angle)
+                .or_else(|_| ThemeIdea::new(&adapted.title, ""))
+                .map_err(|e| not_usable(&format!("the title is not usable ({e:?})")))?;
+            if should_stop() {
+                return Ok(false);
+            }
 
-        let now = SystemTime::now();
-        let mut theme = Theme::suggested(
-            self.owner,
-            target.id,
-            source.niche.clone(),
-            idea,
-            now,
-            0,
-            None,
-        );
-        let mut project = theme
-            .approve(now)
-            .map_err(|e| JobFailure::unexpected(e.to_string()))?;
-        project.id = version;
-        // Its pictures have the source's shape.
-        project.format = Some(source.format(source_channel.details.format()));
-        let generation = Generation {
-            id: GenerationId::new(),
-            owner: self.owner,
-            project: version,
-            provider: Provider::Claude,
-            model: generated.model,
-            template: payload.template()?,
-            instructions: payload.instructions.clone(),
-            prompt: payload.prompt.clone(),
-            output: adaptation.text,
-            usage: generated.usage,
-            generated_at: now,
-            job: Some(job),
-        };
-        let script = Script::first(
-            GeneratedScript::new(generation)
-                .map_err(|e| not_usable(&format!("the script is not usable ({e:?})")))?,
-            now,
-        );
+            let now = SystemTime::now();
+            let mut theme = Theme::suggested(
+                self.owner,
+                target.id,
+                source.niche.clone(),
+                idea,
+                now,
+                0,
+                None,
+            );
+            let mut project = theme
+                .approve(now)
+                .map_err(|e| JobFailure::unexpected(e.to_string()))?;
+            project.id = version;
+            // Its pictures have the source's shape.
+            project.format = Some(source.format(source_channel.details.format()));
+            let generation = Generation {
+                id: GenerationId::new(),
+                owner: self.owner,
+                project: version,
+                provider: Provider::Claude,
+                model: generated.model.clone(),
+                template: payload.template()?,
+                instructions: payload.instructions.clone(),
+                prompt: payload.prompt.clone(),
+                output: adaptation.text,
+                usage: generated.usage,
+                generated_at: now,
+                job: Some(job),
+            };
+            let script = Script::first(
+                GeneratedScript::new(generation)
+                    .map_err(|e| not_usable(&format!("the script is not usable ({e:?})")))?,
+                now,
+            );
 
-        // What the source cut does with its scenes and sounds, now.
-        let tracks = self.tracks.music_tracks(source.id).map_err(unexpected)?;
-        let mut assets = self.media.media_assets(source.id).map_err(unexpected)?;
-        assets.retain(|asset| !tracks.holds_back(asset.id));
-        let music = tracks
-            .in_use()
-            .and_then(|track| assets.iter().find(|asset| asset.id == track.asset))
-            .cloned();
-        let saved = self
-            .timelines
-            .saved_timeline(source.id)
-            .map_err(unexpected)?;
-        let (cut, _) = project_cut(
-            &source,
-            Some(&source_channel),
-            &plan,
-            &narration,
-            saved.as_ref(),
-            &assets,
-            music.as_ref(),
-        );
-        let carried = CarriedCut::of(&cut, plan.scenes().len());
+            // What the source cut does with its scenes and sounds, now.
+            let tracks = self.tracks.music_tracks(source.id).map_err(unexpected)?;
+            let mut assets = self.media.media_assets(source.id).map_err(unexpected)?;
+            assets.retain(|asset| !tracks.holds_back(asset.id));
+            let music = tracks
+                .in_use()
+                .and_then(|track| assets.iter().find(|asset| asset.id == track.asset))
+                .cloned();
+            let timeline = self
+                .timelines
+                .saved_timeline(source.id)
+                .map_err(unexpected)?;
+            let (cut, _) = project_cut(
+                &source,
+                Some(&source_channel),
+                &plan,
+                &narration,
+                timeline.as_ref(),
+                &assets,
+                music.as_ref(),
+            );
+            let carried = CarriedCut::of(&cut, plan.scenes().len());
 
-        let new_plan = copy_plan(&plan, version, now);
-        let mut ids: HashMap<MediaAssetId, MediaAssetId> = HashMap::new();
-        let media: Vec<MediaAsset> = assets
-            .iter()
-            .map(|asset| {
-                let id = MediaAssetId::new();
-                ids.insert(asset.id, id);
-                MediaAsset {
-                    id,
-                    project: version,
-                    ..asset.clone()
-                }
-            })
-            .collect();
-        let copied_tracks: Vec<MusicTrack> = tracks
-            .all()
-            .iter()
-            .filter_map(|track| {
-                Some(MusicTrack {
-                    asset: *ids.get(&track.asset)?,
-                    project: version,
-                    ..track.clone()
+            let new_plan = copy_plan(&plan, version, now);
+            let mut ids: HashMap<MediaAssetId, MediaAssetId> = HashMap::new();
+            let media: Vec<MediaAsset> = assets
+                .iter()
+                .map(|asset| {
+                    let id = MediaAssetId::new();
+                    ids.insert(asset.id, id);
+                    MediaAsset {
+                        id,
+                        project: version,
+                        ..asset.clone()
+                    }
                 })
-            })
-            .collect();
-        let localization = Localization {
-            project: version,
-            owner: self.owner,
-            source: Some(source.id),
-            source_title: source.title.clone(),
-            source_language: source_channel.details.language(),
-            source_country: source_channel.details.country(),
-            source_length: narration_length(&narration),
-            sentences: source_sentences(&narration),
-            plan: new_plan.id,
-            scene_sentences: scene_sentences(&plan, &spoken),
-            cut: carried,
-            created_at: now,
-        };
+                .collect();
+            let copied_tracks: Vec<MusicTrack> = tracks
+                .all()
+                .iter()
+                .filter_map(|track| {
+                    Some(MusicTrack {
+                        asset: *ids.get(&track.asset)?,
+                        project: version,
+                        ..track.clone()
+                    })
+                })
+                .collect();
+            let localization = Localization {
+                project: version,
+                owner: self.owner,
+                source: Some(source.id),
+                source_title: source.title.clone(),
+                source_language: source_channel.details.language(),
+                source_country: source_channel.details.country(),
+                source_length: narration_length(&narration),
+                sentences: source_sentences(&narration),
+                plan: new_plan.id,
+                scene_sentences: scene_sentences(&plan, &spoken),
+                cut: carried,
+                created_at: now,
+            };
 
-        let mut names: Vec<String> = new_plan
-            .scenes()
-            .iter()
-            .flat_map(|scene| scene.files().map(str::to_owned).collect::<Vec<_>>())
-            .chain(media.iter().map(|asset| asset.file.clone()))
-            .collect();
-        names.sort();
-        names.dedup();
-        let mut copied: Vec<String> = Vec::new();
-        let remove_copies = |copied: &[String]| {
-            for name in copied {
-                let _ = self.files.remove(version, name);
-            }
-        };
-        for name in &names {
-            if let Err(error) = self.files.copy_from(source.id, name, version) {
-                remove_copies(&copied);
-                return Err(JobFailure::unexpected(format!(
-                    "could not copy {name} into the version: {error}"
-                )));
-            }
-            copied.push(name.clone());
-            // Previews made for the editor come along when they are there.
-            for kind in ProxyKind::ALL {
-                let proxy = proxy_name(name, kind);
-                if self.files.exists(source.id, &proxy)
-                    && self.files.copy_from(source.id, &proxy, version).is_ok()
-                {
-                    copied.push(proxy);
+            let mut names: Vec<String> = new_plan
+                .scenes()
+                .iter()
+                .flat_map(|scene| scene.files().map(str::to_owned).collect::<Vec<_>>())
+                .chain(media.iter().map(|asset| asset.file.clone()))
+                .collect();
+            names.sort();
+            names.dedup();
+            let mut copied: Vec<String> = Vec::new();
+            let remove_copies = |copied: &[String]| {
+                for name in copied {
+                    let _ = self.files.remove(version, name);
+                }
+            };
+            for name in &names {
+                if let Err(error) = self.files.copy_from(source.id, name, version) {
+                    remove_copies(&copied);
+                    return Err(JobFailure::unexpected(format!(
+                        "could not copy {name} into the version: {error}"
+                    )));
+                }
+                copied.push(name.clone());
+                // Previews made for the editor come along when they are there.
+                for kind in ProxyKind::ALL {
+                    let proxy = proxy_name(name, kind);
+                    if self.files.exists(source.id, &proxy)
+                        && self.files.copy_from(source.id, &proxy, version).is_ok()
+                    {
+                        copied.push(proxy);
+                    }
                 }
             }
-        }
-        if should_stop() {
-            remove_copies(&copied);
-            return Ok(());
-        }
-        let starts = adaptation.starts;
-        let saved = self.localizations.start_version(&NewVersion {
-            theme,
-            project,
-            script,
-            starts,
-            plan: new_plan,
-            media,
-            tracks: copied_tracks,
-            localization,
-        });
-        if let Err(error) = saved {
-            remove_copies(&copied);
-            return Err(unexpected(error));
-        }
-        Ok(())
+            if should_stop() {
+                remove_copies(&copied);
+                return Ok(false);
+            }
+            let starts = adaptation.starts;
+            if let Err(error) = self.localizations.start_version(&NewVersion {
+                theme,
+                project,
+                script,
+                starts,
+                plan: new_plan,
+                media,
+                tracks: copied_tracks,
+                localization,
+            }) {
+                remove_copies(&copied);
+                return Err(unexpected(error));
+            }
+            Ok(true)
+        })();
+        self.bill(
+            &generated,
+            job,
+            Some(target.id),
+            matches!(saved, Ok(true)).then_some(version),
+        );
+        saved.map(|_| ())
     }
 
     /// Adapts the version `payload` names again; the new adaptation waits
@@ -729,7 +780,10 @@ impl LocalizationHandler {
             .project(project)
             .map_err(unexpected)?
             .map(|project| project.channel);
-        let (adapted, generated) = self.adapt(payload, job, channel, project)?;
+        let generated = self.ask(payload)?;
+        self.bill(&generated, job, channel, Some(project));
+        let adapted: Adapted =
+            serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
         let adaptation =
             join_adapted(&adapted.sentences, &gaps).map_err(|e| not_usable(&e.to_string()))?;
         let now = SystemTime::now();
@@ -848,6 +902,21 @@ impl Bardo {
         }
     }
 
+    /// The channel of the project `project` is a version of: a version is
+    /// not made back for it.
+    fn came_from(&self, project: VideoProjectId) -> Result<Option<ChannelId>, RepositoryError> {
+        Ok(
+            match self
+                .localizations
+                .localization(project)?
+                .and_then(|localization| localization.source)
+            {
+                Some(id) => self.themes.project(id)?.map(|project| project.channel),
+                None => None,
+            },
+        )
+    }
+
     /// The Script stage's versions section of `project`.
     pub fn versions(&self, project: VideoProjectId) -> Result<VersionsView, LocalizationError> {
         let project = self.version_project(project)?;
@@ -895,11 +964,7 @@ impl Bardo {
             .channels
             .get(project.channel)?
             .ok_or(LocalizationError::ProjectNotFound)?;
-        // A version is not made back for the channel it came from.
-        let came_from = match localization.as_ref().and_then(|l| l.source) {
-            Some(id) => self.themes.project(id)?.map(|project| project.channel),
-            None => None,
-        };
+        let came_from = self.came_from(project.id)?;
         let narration = self.narrations.narration(project.id)?;
         let plan = self.scene_plans.scene_plan(project.id)?;
         let channels: Vec<Channel> = self
@@ -948,6 +1013,7 @@ impl Bardo {
                         .narrator(&planned)?
                         .map(|persona| persona.details.name().to_owned()),
                     estimate: self.estimate(&[adaptation_call(&rendered)])?,
+                    template: template.number,
                 });
             }
         }
@@ -997,6 +1063,7 @@ impl Bardo {
             .get(project.channel)?
             .ok_or(LocalizationError::ProjectNotFound)?;
         if target.id == own.id
+            || Some(target.id) == self.came_from(project.id)?
             || !other_audience(&target, own.details.language(), own.details.country())
         {
             return Err(LocalizationError::SameAudience);
@@ -1154,7 +1221,10 @@ impl Bardo {
             .scene_plan(project.id)?
             .filter(|plan| localization.carries(plan) && plan.is_stale(Some(&narration)))
             .ok_or(LocalizationError::NothingToPlace)?;
-        if self.scenes_busy(project.id) || self.clips_busy(project.id) {
+        if self.scenes_busy(project.id)
+            || self.clips_busy(project.id)
+            || self.narration_busy(project.id)
+        {
             return Err(LocalizationError::ScenesBusy);
         }
         let script = self
@@ -1365,6 +1435,19 @@ mod tests {
         assert_eq!(view.job_channel.as_deref(), Some("Lost Signals"));
         assert_eq!(view.targets.len(), 1);
         assert!(app.video_projects(channel.id).unwrap().is_empty());
+        // The answer was paid for: on the channel, with no project.
+        let costs = app
+            .cost_book
+            .costs
+            .recent_costs(app.profile.id, CostPurpose::Script, 10)
+            .unwrap();
+        let billed: Vec<_> = costs
+            .iter()
+            .filter(|cost| cost.job == Some(job.id()))
+            .collect();
+        assert_eq!(billed.len(), 1);
+        assert_eq!(billed[0].channel, Some(channel.id));
+        assert_eq!(billed[0].project, None);
     }
 
     #[test]
@@ -1402,6 +1485,12 @@ mod tests {
         assert!(matches!(
             app.make_version(source.id, channel.id, BudgetConsent::Ask),
             Err(LocalizationError::AlreadyMade)
+        ));
+        // Nor is the version made again for the channel it came from.
+        let version = app.versions(source.id).unwrap().made[0].project.id;
+        assert!(matches!(
+            app.make_version(version, source.channel, BudgetConsent::Ask),
+            Err(LocalizationError::SameAudience)
         ));
     }
 

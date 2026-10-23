@@ -81,7 +81,13 @@ impl ProjectsScreen {
                 }))
         });
         Some(
-            kit::notice(Tone::Info, SharedString::from(format!("{line} {from}")), cx)
+            v_flex()
+                .gap_1()
+                .child(kit::notice(
+                    Tone::Info,
+                    SharedString::from(format!("{line} {from}")),
+                    cx,
+                ))
                 .child(
                     h_flex()
                         .gap_1()
@@ -182,11 +188,6 @@ impl ProjectsScreen {
                 ),
             )
         });
-        let template = self
-            .view
-            .as_ref()
-            .map(|view| view.template.number)
-            .unwrap_or_default();
         let targets: Vec<AnyElement> = view
             .targets
             .iter()
@@ -224,12 +225,10 @@ impl ProjectsScreen {
                         .child(guide::info(
                             bardo,
                             SharedString::from(format!("make-version-info-{channel}")),
-                            SharedString::from(
-                                bardo.text_with(
-                                    Text::MakeVersionHint,
-                                    &[("n", &template.to_string())],
-                                ),
-                            ),
+                            SharedString::from(bardo.text_with(
+                                Text::MakeVersionHint,
+                                &[("n", &target.template.to_string())],
+                            )),
                             guide::refs::SCRIPT_VERSIONS,
                         ))
                 });

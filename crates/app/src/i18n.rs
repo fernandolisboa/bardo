@@ -456,7 +456,6 @@ pub enum Text {
     ScriptFieldError(ScriptFieldError),
     VersionsTitle,
     VersionsHint,
-    VersionChannel,
     /// Placeholders: `{language}`, `{country}`, `{narrator}`.
     VersionTargetLine,
     /// Placeholders: `{language}`, `{country}`.
@@ -489,8 +488,8 @@ pub enum Text {
     PlaceScenesHint,
     PlaceScenes,
     PlaceScenesNothing,
-    ScenesPlaced,
     PlacedScenesTitle,
+    PlacedScenesAll,
     /// Placeholder: `{clip}` (seconds).
     PlacedScenePastClip,
     /// Placeholders: `{was}`, `{now}` (seconds).
@@ -3271,7 +3270,6 @@ impl Text {
             Text::StageScenesStale => "stage.note.scenes_stale",
             Text::VersionsTitle => "versions.title",
             Text::VersionsHint => "versions.hint",
-            Text::VersionChannel => "versions.channel",
             Text::VersionTargetLine => "versions.target",
             Text::VersionTargetNoNarrator => "versions.target_no_narrator",
             Text::MakeVersion => "versions.make",
@@ -3297,8 +3295,8 @@ impl Text {
             Text::PlaceScenesHint => "scenes.place.hint",
             Text::PlaceScenes => "scenes.place.button",
             Text::PlaceScenesNothing => "scenes.place.nothing",
-            Text::ScenesPlaced => "scenes.place.done",
             Text::PlacedScenesTitle => "scenes.placed.title",
+            Text::PlacedScenesAll => "scenes.placed.all",
             Text::PlacedScenePastClip => "scenes.placed.past_clip",
             Text::PlacedSceneStretched => "scenes.placed.stretched",
             Text::PlacedSceneDropped => "scenes.placed.dropped",
@@ -5418,7 +5416,6 @@ mod tests {
         texts.push(Text::StageScenesStale);
         texts.push(Text::VersionsTitle);
         texts.push(Text::VersionsHint);
-        texts.push(Text::VersionChannel);
         texts.push(Text::VersionTargetLine);
         texts.push(Text::VersionTargetNoNarrator);
         texts.push(Text::MakeVersion);
@@ -5444,8 +5441,8 @@ mod tests {
         texts.push(Text::PlaceScenesHint);
         texts.push(Text::PlaceScenes);
         texts.push(Text::PlaceScenesNothing);
-        texts.push(Text::ScenesPlaced);
         texts.push(Text::PlacedScenesTitle);
+        texts.push(Text::PlacedScenesAll);
         texts.push(Text::PlacedScenePastClip);
         texts.push(Text::PlacedSceneStretched);
         texts.push(Text::PlacedSceneDropped);

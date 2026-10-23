@@ -517,23 +517,39 @@ impl ProjectsScreen {
         let seconds = |duration: std::time::Duration| format!("{:.1}", duration.as_secs_f64());
         if version.can_place {
             let busy = view.is_busy() || view.is_animating();
+            // One line, the explanation behind its ⓘ: the scene list keeps
+            // its room in a short window.
             let card = kit::card(cx)
-                .p_3()
+                .px_3()
+                .py_2()
+                .flex()
+                .flex_row()
+                .flex_wrap()
                 .gap_2()
+                .items_center()
                 .border_color(look(cx).tokens.accent_edge)
-                .child(div().font_medium().child(tr(bardo, Text::PlaceScenesTitle)))
-                .child(div().text_sm().child(tr(bardo, Text::PlaceScenesHint)))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .gap_1()
+                        .items_center()
+                        .child(div().font_medium().child(tr(bardo, Text::PlaceScenesTitle)))
+                        .child(guide::info(
+                            bardo,
+                            "place-scenes-info",
+                            tr(bardo, Text::PlaceScenesHint),
+                            guide::refs::SCENES_PLACE,
+                        )),
+                )
                 .when(!busy, |card| {
                     card.child(
-                        h_flex().child(
-                            Button::new("place-scenes")
-                                .primary()
-                                .small()
-                                .label(tr(bardo, Text::PlaceScenes))
-                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                    this.place_scenes(window, cx)
-                                })),
-                        ),
+                        Button::new("place-scenes")
+                            .primary()
+                            .small()
+                            .label(tr(bardo, Text::PlaceScenes))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.place_scenes(window, cx)
+                            })),
                     )
                 });
             return Some(
@@ -544,36 +560,50 @@ impl ProjectsScreen {
             return None;
         }
         let plan = view.plan.as_ref()?;
-        let lines = version.notes.iter().filter_map(|(index, note)| {
-            let scene = plan.scenes().get(*index)?;
-            let label = bardo.text_with(
-                Text::SceneLabel,
-                &[
-                    ("n", &(index + 1).to_string()),
-                    ("start", &clock(scene.start)),
-                    ("end", &clock(scene.end)),
-                ],
-            );
-            let what = match note {
-                bardo_app::bardo_domain::PlacedScene::PastClip { clip, .. } => {
-                    bardo.text_with(Text::PlacedScenePastClip, &[("clip", &seconds(*clip))])
-                }
-                bardo_app::bardo_domain::PlacedScene::Stretched { was, now } => bardo.text_with(
-                    Text::PlacedSceneStretched,
-                    &[("was", &seconds(*was)), ("now", &seconds(*now))],
+        let lines: Vec<SharedString> = version
+            .notes
+            .iter()
+            .filter_map(|(index, note)| {
+                let scene = plan.scenes().get(*index)?;
+                let label = bardo.text_with(
+                    Text::SceneLabel,
+                    &[
+                        ("n", &(index + 1).to_string()),
+                        ("start", &clock(scene.start)),
+                        ("end", &clock(scene.end)),
+                    ],
+                );
+                let what = match note {
+                    bardo_app::bardo_domain::PlacedScene::PastClip { clip, .. } => {
+                        bardo.text_with(Text::PlacedScenePastClip, &[("clip", &seconds(*clip))])
+                    }
+                    bardo_app::bardo_domain::PlacedScene::Stretched { was, now } => bardo
+                        .text_with(
+                            Text::PlacedSceneStretched,
+                            &[("was", &seconds(*was)), ("now", &seconds(*now))],
+                        ),
+                    bardo_app::bardo_domain::PlacedScene::Dropped => {
+                        bardo.text(Text::PlacedSceneDropped).into_owned()
+                    }
+                };
+                Some(SharedString::from(format!("{label}: {what}")))
+            })
+            .collect();
+        // A few lines show; past that, all of them behind a button, so the
+        // scene list keeps its room.
+        const SHOWN: usize = 3;
+        let more = (lines.len() > SHOWN).then(|| {
+            h_flex().child(kit::details(
+                "placed-scenes-all",
+                SharedString::from(
+                    bardo.text_with(Text::PlacedScenesAll, &[("n", &lines.len().to_string())]),
                 ),
-                bardo_app::bardo_domain::PlacedScene::Dropped => {
-                    bardo.text(Text::PlacedSceneDropped).into_owned()
-                }
-            };
-            Some(
-                div()
-                    .text_sm()
-                    .child(SharedString::from(format!("{label}: {what}"))),
-            )
+                lines.clone(),
+            ))
         });
         let card = kit::card(cx)
-            .p_3()
+            .px_3()
+            .py_2()
             .gap_1()
             .border_color(theme.warning)
             .child(
@@ -592,7 +622,13 @@ impl ProjectsScreen {
                         guide::refs::SCENES_PLACE,
                     )),
             )
-            .children(lines);
+            .children(
+                lines
+                    .into_iter()
+                    .take(SHOWN)
+                    .map(|line| div().text_sm().child(line)),
+            )
+            .children(more);
         Some(kit::anchor(TourAnchor::Control(Control::ScenesPlace), card).into_any_element())
     }
 
