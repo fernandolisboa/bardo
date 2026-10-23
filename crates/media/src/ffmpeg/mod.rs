@@ -276,9 +276,102 @@ fn partial_path(destination: &Path) -> PathBuf {
     destination.with_file_name(format!("{stem}.partial{extension}"))
 }
 
+/// Attempts at removing a cancelled or failed run's partial file, a tenth
+/// of a second apart: about a second in all.
+const PARTIAL_REMOVAL_ATTEMPTS: u32 = 10;
+const PARTIAL_REMOVAL_PAUSE: Duration = Duration::from_millis(100);
+
+/// Removes a cancelled or failed run's partial file. On Windows a scanner
+/// can still hold it just after ffmpeg exits, so a refused removal is tried
+/// again for about a second. One still there after that is left: the next
+/// run overwrites it.
+fn remove_partial(partial: &Path) {
+    let _ = remove_retrying(
+        partial,
+        PARTIAL_REMOVAL_ATTEMPTS,
+        PARTIAL_REMOVAL_PAUSE,
+        |path| std::fs::remove_file(path),
+    );
+}
+
+/// Calls `remove` on `path` up to `attempts` times, `pause` apart, until it
+/// succeeds or finds the file gone; the last refusal otherwise.
+fn remove_retrying(
+    path: &Path,
+    attempts: u32,
+    pause: Duration,
+    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut attempt = 1;
+    loop {
+        match remove(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if attempt >= attempts => return Err(error),
+            Err(_) => {
+                std::thread::sleep(pause);
+                attempt += 1;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn refused() -> std::io::Error {
+        std::io::Error::from(std::io::ErrorKind::PermissionDenied)
+    }
+
+    #[test]
+    fn a_refused_removal_is_tried_again_until_it_goes() {
+        let mut tries = 0;
+        let removed = remove_retrying(Path::new("x.partial.mp4"), 5, Duration::ZERO, |_| {
+            tries += 1;
+            if tries < 3 { Err(refused()) } else { Ok(()) }
+        });
+        assert!(removed.is_ok());
+        assert_eq!(tries, 3);
+    }
+
+    #[test]
+    fn a_removal_refused_every_time_gives_up_after_its_attempts() {
+        let mut tries = 0;
+        let removed = remove_retrying(Path::new("x.partial.mp4"), 4, Duration::ZERO, |_| {
+            tries += 1;
+            Err(refused())
+        });
+        assert_eq!(
+            removed.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(tries, 4);
+    }
+
+    #[test]
+    fn a_file_already_gone_counts_as_removed() {
+        let mut tries = 0;
+        let removed = remove_retrying(Path::new("x.partial.mp4"), 4, Duration::ZERO, |_| {
+            tries += 1;
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        });
+        assert!(removed.is_ok());
+        assert_eq!(tries, 1);
+    }
+
+    #[test]
+    fn a_partial_file_is_removed() {
+        let partial = std::env::temp_dir().join(format!(
+            "bardo-media-{}-render-x.partial.mp4",
+            std::process::id()
+        ));
+        std::fs::write(&partial, b"half").unwrap();
+        remove_partial(&partial);
+        assert!(!partial.exists());
+        // Gone already: nothing to do.
+        remove_partial(&partial);
+    }
 
     #[test]
     fn reads_release_versions_from_common_builds() {

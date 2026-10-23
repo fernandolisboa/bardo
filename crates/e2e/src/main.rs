@@ -449,6 +449,21 @@ fn wait_for(bardo: &Bardo, id: JobId) -> anyhow::Result<Value> {
     }
 }
 
+/// Waits for `id`'s handler to return in this process. A cancelled job
+/// reads cancelled at once, and its handler cleans up after it (a render
+/// removes its partial file), so what is on disk is the end state only
+/// after this.
+fn wait_for_handler(bardo: &Bardo, id: JobId) -> anyhow::Result<()> {
+    let deadline = Instant::now() + JOB_PATIENCE;
+    while bardo.job_runs_here(id) {
+        if Instant::now() > deadline {
+            bail!("the job's handler did not return within {JOB_PATIENCE:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Ok(())
+}
+
 /// Whether this would be the only window: Bardo's window takes the same
 /// lock at start.
 fn window_lock() -> anyhow::Result<()> {
