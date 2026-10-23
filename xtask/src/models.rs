@@ -61,6 +61,15 @@ impl Manifest {
                 source.name, source.version, source.url, source.license, source.license_url
             ));
         }
+        // Mesh and Depth control videos (#191) draw the face mesh along
+        // MediaPipe's edge lists, compiled into Bardo.
+        out.push_str(concat!(
+            "MediaPipe face mesh connections (FaceLandmarksConnections), which Bardo's\n",
+            "control videos draw the face mesh along\n",
+            "  Source: https://github.com/google-ai-edge/mediapipe\n",
+            "  License: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0)\n",
+            "  Copyright 2023 The MediaPipe Authors.\n\n",
+        ));
         out
     }
 }
@@ -130,6 +139,7 @@ mod tests {
         let notices = manifest.notices();
         assert!(notices.contains("Apache-2.0"));
         assert!(notices.contains("Video Depth Anything"));
+        assert!(notices.contains("FaceLandmarksConnections"));
     }
 
     #[test]

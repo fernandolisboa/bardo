@@ -122,6 +122,10 @@ pub enum JobKind {
     /// mesh, or its depth map and person mask, a chunk of frames per
     /// checkpoint, so a resumed job starts at the last finished chunk.
     TakeAnalysis,
+    /// Builds one take's control video (#191): the take as recorded, or
+    /// drawn over in Mesh or Depth mode from its analysis, with its
+    /// stretch of the narration. Starts over on resume.
+    ControlVideo,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -150,7 +154,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 29] = [
+    pub const ALL: [JobKind; 30] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -180,6 +184,7 @@ impl JobKind {
         JobKind::PersonaLook,
         JobKind::Capture,
         JobKind::TakeAnalysis,
+        JobKind::ControlVideo,
     ];
 
     /// Stable name stored in the database.
@@ -214,6 +219,7 @@ impl JobKind {
             JobKind::PersonaLook => "persona_look",
             JobKind::Capture => "capture",
             JobKind::TakeAnalysis => "take_analysis",
+            JobKind::ControlVideo => "control_video",
         }
     }
 }

@@ -284,6 +284,7 @@ chapters = "Chapters"
 localization = "Version in another language"
 persona_look = "Persona look"
 take_analysis = "Take analysis"
+control_video = "Control video"
 
 [job.state]
 queued = "Queued"
@@ -665,6 +666,50 @@ resume = "Resume"
 [capture.analysis.part]
 face = "Face mesh"
 depth = "Depth and mask"
+
+[capture.control]
+title = "Control video"
+hint = "What the take model receives for this take, built on this computer for free: the take in its mode, with its stretch of the narration. Watch it, then approve it. Nothing is paid before you approve."
+waiting = "Built once the take's analysis finishes."
+not_built = "Not built yet."
+queued = "Waiting to be built."
+building = "Building: {percent}%."
+cancelled = "Stopped."
+failed = "Could not be built."
+ready = "Built: {size} MB."
+approved = "Approved: this take can go to its take model."
+approval_lost = "The take changed after you approved it. Watch the new build and approve it again."
+uncovered = "{n} of {frames} frames had no face near enough to cover, so they would show your face. This control video cannot be approved: record the take again, or switch it to Depth."
+uncovered_blocked = "Some frames would show your face. Record the take again, or switch it to Depth."
+several_faces_blocked = "More than one face appears in this take, so its control video cannot be approved. Record it again with no one else in the picture."
+review_hint = "Play it to watch it with its sound, and read what leaves the computer. An approval holds for this build only: any change to the take asks again."
+build = "Build"
+build_again = "Build again"
+stop_build = "Stop"
+approve = "Approve"
+play = "Play"
+stop_playing = "Stop"
+set_frame = "When the take is generated, one frame of it goes to Claude to describe your room."
+not_ready = "The control video is not built from the take as it is now. Build it, watch it, then approve it."
+length_blocked = "No take model accepts a take of this length. Move a cut first."
+cannot_play = "Could not play the control video."
+
+[capture.control.outbound]
+recording = "Leaves the computer: your face, body and room, as recorded, with the take's voice."
+mesh = "Leaves the computer: your body and room, with your face covered by its drawn mesh, and the take's voice. Not your face."
+depth_over_room = "Leaves the computer: your body shape and face geometry as a depth figure over your room, with the take's voice. Not your face."
+depth_over_image = "Leaves the computer: your body shape and face geometry as a depth figure over the set image, with the take's voice. No pixel of the recording."
+
+[capture.set]
+label = "Set"
+hint = "Where you appear in Depth mode: your room as recorded, one of the project's scene images, or a picture of yours (PNG or JPEG). Over an image, no pixel of the recording leaves the computer."
+room = "Your room"
+scene_image = "Scene image"
+scene_number = "Scene {n}"
+import = "Import image"
+import_dialog = "Choose a set image"
+no_scenes = "The project has no scene images yet."
+unreadable = "Could not read the picture. Choose a PNG or JPEG."
 
 [capture.check]
 no_face = "No face in {n} of {frames} frames."
@@ -2550,6 +2595,10 @@ body = "Recording, Mesh or Depth: what the take model receives for this take. Th
 [tour.capture.analysis]
 title = "Its analysis"
 body = "Bardo analyzes each take on this computer, free, on the graphics card when it can. Each part shows its progress and the time left; the checks below say what to record again."
+
+[tour.capture.control]
+title = "Its control video"
+body = "What the take model receives for this take, built here for free once the analysis is done. Play it, read what leaves the computer, then approve it. Nothing is paid for a take until you do."
 
 [tour.capture.cut]
 title = "Move a cut"

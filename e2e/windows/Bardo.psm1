@@ -97,7 +97,11 @@ function Stop-BardoWindow {
 }
 
 function Stop-BardoAll {
-    Get-Process bardo -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $running = @(Get-Process bardo -ErrorAction SilentlyContinue)
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Stopping returns before the processes are gone: wait, so that their
+    # files (bardo.db) are free to read.
+    $running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
 }
 
 # The agent's task as Task Scheduler holds it, or $null.

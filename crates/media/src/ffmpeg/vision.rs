@@ -77,7 +77,7 @@ fn fps_arg(fps_milli: u32) -> String {
 
 /// Keeps reading stderr so ffmpeg never blocks on it; its tail is the
 /// error message.
-fn drain_stderr(child: &mut Child) -> Option<thread::JoinHandle<String>> {
+pub(super) fn drain_stderr(child: &mut Child) -> Option<thread::JoinHandle<String>> {
     let mut stderr = child.stderr.take()?;
     Some(thread::spawn(move || {
         let mut text = String::new();
@@ -87,7 +87,7 @@ fn drain_stderr(child: &mut Child) -> Option<thread::JoinHandle<String>> {
     }))
 }
 
-fn spawn(mut command: Command) -> Result<Child, MediaError> {
+pub(super) fn spawn(mut command: Command) -> Result<Child, MediaError> {
     let program = command.get_program().to_string_lossy().into_owned();
     command
         .spawn()
@@ -203,9 +203,9 @@ impl GraySource for GrayReader {
     }
 }
 
-/// An ffmpeg encoding raw gray frames from its stdin into `partial`,
-/// renamed to `destination` when it finishes well.
-struct FfvWriter {
+/// An ffmpeg encoding raw frames from its stdin into `partial`, renamed to
+/// `destination` when it finishes well.
+pub(super) struct FfvWriter {
     child: Child,
     stdin: Option<ChildStdin>,
     stderr: Option<thread::JoinHandle<String>>,
@@ -214,8 +214,33 @@ struct FfvWriter {
     destination: PathBuf,
 }
 
-impl GraySink for FfvWriter {
-    fn write(&mut self, frame: &[u8]) -> Result<(), MediaError> {
+impl FfvWriter {
+    /// Starts `command`, which reads frames of `frame_len` bytes from its
+    /// stdin and writes `destination`'s partial path.
+    pub(super) fn start(
+        mut command: Command,
+        frame_len: usize,
+        destination: &Path,
+    ) -> Result<FfvWriter, MediaError> {
+        // `Ffmpeg::ffmpeg()` closes stdin; this run reads it.
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let mut child = spawn(command)?;
+        let stdin = child.stdin.take();
+        let stderr = drain_stderr(&mut child);
+        Ok(FfvWriter {
+            child,
+            stdin,
+            stderr,
+            frame_len,
+            partial: partial_path(destination),
+            destination: destination.to_owned(),
+        })
+    }
+
+    pub(super) fn write_frame(&mut self, frame: &[u8]) -> Result<(), MediaError> {
         if frame.len() != self.frame_len {
             return Err(MediaError::Parse(format!(
                 "a gray frame of {} bytes, expected {}",
@@ -227,11 +252,25 @@ impl GraySink for FfvWriter {
             .stdin
             .as_mut()
             .ok_or_else(|| MediaError::Parse("the writer is closed".to_owned()))?;
-        stdin.write_all(frame)?;
+        if let Err(error) = stdin.write_all(frame) {
+            // ffmpeg stopped reading: say why, from its log.
+            drop(self.stdin.take());
+            let status = self.child.wait()?;
+            let log = self
+                .stderr
+                .take()
+                .and_then(|h| h.join().ok())
+                .unwrap_or_default();
+            let _ = std::fs::remove_file(&self.partial);
+            if !status.success() {
+                return Err(failed(status.to_string(), log));
+            }
+            return Err(error.into());
+        }
         Ok(())
     }
 
-    fn finish(mut self: Box<Self>) -> Result<(), MediaError> {
+    pub(super) fn finish_file(mut self) -> Result<(), MediaError> {
         drop(self.stdin.take());
         let status = self.child.wait()?;
         let log = self
@@ -245,6 +284,16 @@ impl GraySink for FfvWriter {
         }
         std::fs::rename(&self.partial, &self.destination)?;
         Ok(())
+    }
+}
+
+impl GraySink for FfvWriter {
+    fn write(&mut self, frame: &[u8]) -> Result<(), MediaError> {
+        self.write_frame(frame)
+    }
+
+    fn finish(self: Box<Self>) -> Result<(), MediaError> {
+        (*self).finish_file()
     }
 }
 
@@ -272,7 +321,19 @@ impl Ffmpeg {
         fps_milli: u32,
         (width, height): (u32, u32),
     ) -> Result<Box<dyn FrameSource>, MediaError> {
-        let (w, h) = analysis_size(width, height);
+        self.video_frames(path, from, length, fps_milli, analysis_size(width, height))
+    }
+
+    /// The frames of `path` from `from` for `length`, at a steady
+    /// `fps_milli` thousandths a second, as RGB at `w` × `h`.
+    pub fn video_frames(
+        &self,
+        path: &Path,
+        from: Duration,
+        length: Duration,
+        fps_milli: u32,
+        (w, h): (u32, u32),
+    ) -> Result<Box<dyn FrameSource>, MediaError> {
         let mut command = self.ffmpeg();
         command
             .args(["-ss", &seconds(from), "-t", &seconds(length), "-i"])
@@ -315,22 +376,11 @@ impl Ffmpeg {
             .args(["-i", "pipe:0", "-c:v", "ffv1", "-level", "3", "-g", "1"])
             .args(["-pix_fmt", depth.pix_fmt(), "-f", "matroska"])
             .arg(path_arg(&partial));
-        // `self.ffmpeg()` closes stdin; this run reads it.
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
-        let mut child = spawn(command)?;
-        let stdin = child.stdin.take();
-        let stderr = drain_stderr(&mut child);
-        Ok(Box::new(FfvWriter {
-            child,
-            stdin,
-            stderr,
-            frame_len: width as usize * height as usize * depth.bytes(),
-            partial,
-            destination: destination.to_owned(),
-        }))
+        Ok(Box::new(FfvWriter::start(
+            command,
+            width as usize * height as usize * depth.bytes(),
+            destination,
+        )?))
     }
 
     /// The gray frames of a file [`Ffmpeg::gray_writer`] wrote.

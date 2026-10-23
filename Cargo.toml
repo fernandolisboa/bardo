@@ -55,3 +55,14 @@ opt-level = 3
 
 [profile.dev.package.blake2]
 opt-level = 3
+
+# Control videos (#191) draw every frame of a take, which unoptimized code
+# does too slowly to try out or test.
+[profile.dev.package.bardo-media]
+opt-level = 3
+
+[profile.dev.package.tiny-skia]
+opt-level = 3
+
+[profile.dev.package.tiny-skia-path]
+opt-level = 3

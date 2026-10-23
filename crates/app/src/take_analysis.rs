@@ -399,10 +399,13 @@ impl Frames {
 
 /// Runs take analysis jobs.
 pub(crate) struct TakeAnalysisHandler {
+    pub(crate) owner: ProfileId,
     pub(crate) captures: Arc<dyn CaptureRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) media: Arc<dyn MediaEngine>,
     pub(crate) vision: Arc<dyn VisionModels>,
+    /// Where the take's control video is queued once its analyses are in.
+    pub(crate) jobs: Arc<dyn JobRepository>,
     /// Held while a depth analysis runs: one at a time.
     pub(crate) depth_slot: Mutex<()>,
 }
@@ -551,6 +554,15 @@ impl TakeAnalysisHandler {
                     revision,
                 );
             }
+            // The last analysis the take needed makes its control video.
+            crate::control_videos::queue_when_ready(
+                self.owner,
+                self.captures.as_ref(),
+                self.jobs.as_ref(),
+                work.project,
+                work.capture,
+                work.position,
+            );
         }
         Ok(())
     }
@@ -1214,7 +1226,8 @@ impl Bardo {
 
     /// Sets what take `index` goes to its take model as. Depth mode queues
     /// its depth and person mask; leaving it stops them at their next
-    /// chunk.
+    /// chunk. The control video is built again in the new mode once its
+    /// analyses are in.
     pub fn set_take_mode(
         &self,
         project: VideoProjectId,
@@ -1222,10 +1235,20 @@ impl Bardo {
         mode: TakeMode,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        // The mode it has: nothing to build again.
+        if capture
+            .takes
+            .as_slice()
+            .get(index)
+            .is_some_and(|take| take.mode == mode)
+        {
+            return Ok(());
+        }
         capture.takes.set_mode(index, mode)?;
         self.captures
             .save_takes(capture.project, capture.id, &capture.takes)?;
-        self.queue_take_analyses(&capture, index, false)
+        self.queue_take_analyses(&capture, index, false)?;
+        self.queue_control_video(&capture, index)
     }
 
     /// Queues again the analyses of the takes either side of the cut

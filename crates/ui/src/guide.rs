@@ -148,6 +148,9 @@ pub mod refs {
     pub const CAPTURE_TAKES: GuideRef = at("capture", "takes");
     pub const CAPTURE_MODE: GuideRef = at("capture", "mode");
     pub const CAPTURE_ANALYSIS: GuideRef = at("capture", "analysis");
+    pub const CAPTURE_CONTROL: GuideRef = at("capture", "control");
+    pub const CAPTURE_REVIEW: GuideRef = at("capture", "review");
+    pub const CAPTURE_SET: GuideRef = at("capture", "set");
     pub const CAPTURE_REMOVE: GuideRef = at("capture", "remove");
     pub const SCENES_PLAN: GuideRef = at("scenes", "plan");
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
@@ -203,7 +206,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 75] = [
+    pub const ALL: [GuideRef; 78] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -227,6 +230,9 @@ pub mod refs {
         CAPTURE_TAKES,
         CAPTURE_MODE,
         CAPTURE_ANALYSIS,
+        CAPTURE_CONTROL,
+        CAPTURE_REVIEW,
+        CAPTURE_SET,
         CAPTURE_REMOVE,
         SCENES_PLAN,
         SCENES_REDRAW,

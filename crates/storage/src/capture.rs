@@ -1,9 +1,12 @@
 use std::time::Duration;
 
+use std::time::SystemTime;
+
 use bardo_domain::{
     AnalysisPart, Capture, CaptureConfirmation, CaptureId, CaptureRepository, CaptureVideo,
-    CaptureVoice, DepthRange, Device, JobId, NarrationId, ProfileId, Provider, RepositoryError,
-    Take, TakeAnalysis, TakeChecks, TakeMode, Takes, VideoProjectId, VoiceRef,
+    CaptureVoice, ControlVideo, DepthRange, Device, JobId, NarrationId, ProfileId, Provider,
+    RepositoryError, SetSource, Take, TakeAnalysis, TakeChecks, TakeMode, TakeSet, Takes,
+    VideoProjectId, VoiceRef,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -63,8 +66,8 @@ struct CaptureRow {
 fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, RepositoryError> {
     let mut statement = conn
         .prepare(
-            "SELECT first_word, end_word, start_ms, end_ms, revision, mode FROM capture_take
-             WHERE project_id = ?1 ORDER BY position",
+            "SELECT first_word, end_word, start_ms, end_ms, revision, mode, set_file, set_source
+             FROM capture_take WHERE project_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
     let rows = statement
@@ -76,11 +79,23 @@ fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, Reposi
                 row.get::<_, i64>(3)?,
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })
         .map_err(boxed)?;
     rows.map(|row| {
-        let (first, end, start_ms, end_ms, revision, mode) = row.map_err(boxed)?;
+        let (first, end, start_ms, end_ms, revision, mode, set_file, set_source) =
+            row.map_err(boxed)?;
+        let set = match (set_file, set_source) {
+            (None, None) => TakeSet::Room,
+            (Some(file), Some(source)) => TakeSet::Image {
+                file,
+                from: SetSource::from_code(&source)
+                    .ok_or_else(|| invalid(format!("unknown set source {source}")))?,
+            },
+            _ => return Err(invalid("a set image without its source")),
+        };
         Ok(Take {
             words: index(first)?..index(end)?,
             start: duration(start_ms)?,
@@ -88,6 +103,7 @@ fn takes(conn: &Connection, project: VideoProjectId) -> Result<Vec<Take>, Reposi
             revision: u32::try_from(revision).map_err(boxed)?,
             mode: TakeMode::from_code(&mode)
                 .ok_or_else(|| invalid(format!("unknown take mode {mode}")))?,
+            set,
         })
     })
     .collect()
@@ -195,8 +211,9 @@ fn insert_takes(
     let mut insert = tx
         .prepare(
             "INSERT INTO capture_take
-                 (project_id, position, first_word, end_word, start_ms, end_ms, revision, mode)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (project_id, position, first_word, end_word, start_ms, end_ms, revision, mode,
+                  set_file, set_source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .map_err(boxed)?;
     for (position, take) in takes.as_slice().iter().enumerate() {
@@ -210,6 +227,11 @@ fn insert_takes(
                 millis(take.end),
                 take.revision,
                 take.mode.code(),
+                take.set.image(),
+                match &take.set {
+                    TakeSet::Room => None,
+                    TakeSet::Image { from, .. } => Some(from.code()),
+                },
             ])
             .map_err(boxed)?;
     }
@@ -416,6 +438,118 @@ impl CaptureRepository for Database {
             )
             .map_err(boxed)?;
         Ok(saved == 1)
+    }
+
+    fn control_videos(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<ControlVideo>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT capture_id, position, fingerprint, file, bytes, frames, uncovered,
+                     encoder, built_at, job_id, approved_at, replaced_approval
+                 FROM control_video WHERE project_id = ?1 ORDER BY position",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    [row.get::<_, i64>(4)?, row.get(5)?, row.get(6)?],
+                    row.get::<_, String>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    (row.get::<_, Option<i64>>(10)?, row.get::<_, bool>(11)?),
+                ))
+            })
+            .map_err(boxed)?;
+        rows.map(|row| {
+            let (capture, position, fingerprint, file, sizes, encoder, built_at, job, approval) =
+                row.map_err(boxed)?;
+            let (approved_at, replaced_approval) = approval;
+            let [bytes, frames, uncovered] = sizes;
+            Ok(ControlVideo {
+                project,
+                capture: CaptureId::from(uuid(&capture)?),
+                position: u32::try_from(position).map_err(boxed)?,
+                fingerprint,
+                file,
+                bytes: u64::try_from(bytes).map_err(boxed)?,
+                frames: u32::try_from(frames).map_err(boxed)?,
+                uncovered: u32::try_from(uncovered).map_err(boxed)?,
+                encoder,
+                built_at: from_unix_millis(built_at),
+                job: job.as_deref().map(uuid).transpose()?.map(JobId::from),
+                approved_at: approved_at.map(from_unix_millis),
+                replaced_approval,
+            })
+        })
+        .collect()
+    }
+
+    fn save_control_video(&self, video: &ControlVideo) -> Result<bool, RepositoryError> {
+        // Kept only while the take is still there on the project's capture.
+        // An approval given meanwhile to a build of the same take, as it
+        // is, carries over.
+        let saved = self
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO control_video (project_id, capture_id, position,
+                     fingerprint, file, bytes, frames, uncovered, encoder, built_at, job_id,
+                     approved_at, replaced_approval)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                     COALESCE(?12, (SELECT approved_at FROM control_video
+                         WHERE project_id = ?1 AND capture_id = ?2 AND position = ?3
+                             AND fingerprint = ?4)),
+                     ?13
+                 WHERE EXISTS (
+                     SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
+                     WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3)",
+                params![
+                    video.project.to_string(),
+                    video.capture.to_string(),
+                    video.position,
+                    video.fingerprint,
+                    video.file,
+                    i64::try_from(video.bytes).unwrap_or(i64::MAX),
+                    video.frames,
+                    video.uncovered,
+                    video.encoder,
+                    to_unix_millis(video.built_at),
+                    video.job.map(|job| job.to_string()),
+                    video.approved_at.map(to_unix_millis),
+                    video.replaced_approval,
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(saved == 1)
+    }
+
+    fn approve_control_video(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        fingerprint: &str,
+        at: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        let approved = self
+            .conn()
+            .execute(
+                "UPDATE control_video SET approved_at = ?4, replaced_approval = 0
+                 WHERE project_id = ?1 AND position = ?2 AND fingerprint = ?3",
+                params![
+                    project.to_string(),
+                    position,
+                    fingerprint,
+                    to_unix_millis(at)
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(approved == 1)
     }
 }
 
@@ -766,5 +900,131 @@ mod tests {
         );
         db.delete_capture(project.id).unwrap();
         assert!(db.analyses(project.id).unwrap().is_empty());
+    }
+
+    fn control(saved: &Capture, position: u32, fingerprint: &str) -> ControlVideo {
+        ControlVideo {
+            project: saved.project,
+            capture: saved.id,
+            position,
+            fingerprint: fingerprint.into(),
+            file: format!("control-{fingerprint}.mp4"),
+            bytes: 45_000_000,
+            frames: 900,
+            uncovered: 3,
+            encoder: "h264_nvenc".into(),
+            built_at: time(1_800_000_030),
+            job: Some(JobId::new()),
+            approved_at: None,
+            replaced_approval: false,
+        }
+    }
+
+    #[test]
+    fn take_sets_round_trip_and_must_name_their_source() {
+        let (db, project) = setup();
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let saved = capture(&project, &narration, CaptureVoice::Own);
+        db.save_capture(&saved).unwrap();
+        assert_eq!(saved.takes.as_slice()[0].set, TakeSet::Room);
+
+        let mut takes = saved.takes.clone();
+        let set = TakeSet::Image {
+            file: "set-1.png".into(),
+            from: SetSource::Scene,
+        };
+        takes.set_set(0, set.clone()).unwrap();
+        db.save_takes(project.id, saved.id, &takes).unwrap();
+        let loaded = db.capture(project.id).unwrap().unwrap();
+        assert_eq!(loaded.takes.as_slice()[0].set, set);
+
+        // A file without where it came from is refused by the schema.
+        assert!(
+            db.conn()
+                .execute("UPDATE capture_take SET set_source = NULL", [])
+                .is_err()
+        );
+        assert!(
+            db.conn()
+                .execute("UPDATE capture_take SET set_source = 'elsewhere'", [])
+                .is_err()
+        );
+        assert!(
+            db.conn()
+                .execute("UPDATE capture_take SET set_file = NULL", [])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_control_video_is_approved_only_for_its_fingerprint_and_goes_with_its_capture() {
+        let (db, project) = setup();
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let saved = capture(&project, &narration, CaptureVoice::Own);
+        db.save_capture(&saved).unwrap();
+
+        let first = control(&saved, 0, "aaaa");
+        assert!(db.save_control_video(&first).unwrap());
+        assert_eq!(
+            db.control_videos(project.id).unwrap(),
+            std::slice::from_ref(&first)
+        );
+        // Not for a fingerprint it was not built from.
+        assert!(
+            !db.approve_control_video(project.id, 0, "bbbb", time(1_800_000_040))
+                .unwrap()
+        );
+        assert!(
+            db.approve_control_video(project.id, 0, "aaaa", time(1_800_000_040))
+                .unwrap()
+        );
+        let approved = db.control_videos(project.id).unwrap().remove(0);
+        assert_eq!(approved.approved_at, Some(time(1_800_000_040)));
+        assert!(approved.approved_for("aaaa"));
+
+        // Another build of the same take, started before the approval,
+        // keeps it.
+        let again = ControlVideo {
+            file: "again.mp4".into(),
+            ..first.clone()
+        };
+        assert!(db.save_control_video(&again).unwrap());
+        let kept = db.control_videos(project.id).unwrap().remove(0);
+        assert_eq!(kept.file, "again.mp4");
+        assert_eq!(kept.approved_at, Some(time(1_800_000_040)));
+
+        // A new build replaces it, as the app says: unapproved, its
+        // approval lost with the take it was for.
+        let second = ControlVideo {
+            replaced_approval: true,
+            ..control(&saved, 0, "bbbb")
+        };
+        assert!(db.save_control_video(&second).unwrap());
+        assert_eq!(db.control_videos(project.id).unwrap(), [second]);
+        // Approving it clears that.
+        assert!(
+            db.approve_control_video(project.id, 0, "bbbb", time(1_800_000_050))
+                .unwrap()
+        );
+        let approved = db.control_videos(project.id).unwrap().remove(0);
+        assert!(!approved.replaced_approval);
+        assert_eq!(approved.approved_at, Some(time(1_800_000_050)));
+
+        // Not kept for a take or capture that is not there.
+        assert!(!db.save_control_video(&control(&saved, 99, "cccc")).unwrap());
+        let other = ControlVideo {
+            capture: CaptureId::new(),
+            ..control(&saved, 0, "dddd")
+        };
+        assert!(!db.save_control_video(&other).unwrap());
+
+        // Moving cuts keeps it (stale by fingerprint); deleting the capture
+        // removes it.
+        db.save_takes(project.id, saved.id, &saved.takes).unwrap();
+        assert_eq!(db.control_videos(project.id).unwrap().len(), 1);
+        db.delete_capture(project.id).unwrap();
+        assert!(db.control_videos(project.id).unwrap().is_empty());
     }
 }

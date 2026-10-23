@@ -677,6 +677,7 @@ impl ProjectsScreen {
         self.reading_recording = false;
         self.recording = None;
         self.import_ask = None;
+        self.close_control(usize::MAX, window, cx);
         self.capture = capture::CaptureImport::default();
         self.music_loaded = None;
         self.music_error = None;
@@ -737,6 +738,7 @@ impl ProjectsScreen {
     fn pick_stage(&mut self, stage: Stage, cx: &mut Context<Self>) {
         if stage == Stage::Edit {
             if let Some(id) = self.project {
+                self.pause_control();
                 cx.emit(OpenEditor(id));
             }
         } else if stage.is_page() {
@@ -2320,7 +2322,8 @@ fn muted(cx: &App, text: SharedString) -> AnyElement {
 }
 
 impl Render for ProjectsScreen {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.advance_control(window, cx);
         if self.channels.is_empty() {
             let bardo = self.bardo.read(cx);
             let mut parts = ScreenParts::new(Header::place(bardo, Destination::Projects));

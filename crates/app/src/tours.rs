@@ -122,6 +122,8 @@ pub enum Control {
     CaptureMode,
     /// Capture: the first take's analysis and checks.
     CaptureAnalysis,
+    /// Capture: the first take's control video, its review and approval.
+    CaptureControl,
     /// Capture: moving the cut between two takes.
     CaptureCut,
     /// Capture: removing the capture.
@@ -668,15 +670,15 @@ pub const NARRATION: Tour = {
     }
 };
 
-/// Capture: the recording and its voice, the takes, a take's mode and
-/// analysis, moving a cut, and removing the capture.
+/// Capture: the recording and its voice, the takes, a take's mode,
+/// analysis and control video, moving a cut, and removing the capture.
 pub const CAPTURE: Tour = {
     const AT: Stage = Stage::Capture;
     const PAGE: &str = "capture";
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Capture,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "recording", control(Control::CaptureSummary))
@@ -691,6 +693,9 @@ pub const CAPTURE: Tour = {
             at_stage(AT, "analysis", control(Control::CaptureAnalysis))
                 .missing(PAGE_PART)
                 .learn(PAGE, "analysis"),
+            at_stage(AT, "control", control(Control::CaptureControl))
+                .missing(PAGE_PART)
+                .learn(PAGE, "control"),
             // A single take has no cut to move.
             at_stage(AT, "cut", control(Control::CaptureCut))
                 .missing(WhenMissing::Skip)

@@ -10,6 +10,7 @@ mod channels;
 mod chapters;
 mod clips;
 mod connections;
+mod control_videos;
 mod costs;
 mod cut_suggestions;
 mod decision_engines;
@@ -107,6 +108,9 @@ pub use connections::{
     AccountChoice, AppCredentialsStatus, CONSENT_TIMEOUT, ConnectAttempt, ConnectResult,
     ConnectionCheck, ConnectionError, ConnectionRenewal, ConnectionState, Disconnected,
     Disconnection, TokenConnect, TokenConnectResult, TokenConnected, YouTubeUpkeep,
+};
+pub use control_videos::{
+    ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene,
 };
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
@@ -779,11 +783,18 @@ impl Bardo {
             jobs: Arc::clone(&jobs),
         };
         let analysis_handler = crate::take_analysis::TakeAnalysisHandler {
+            owner: profile.id,
             captures: Arc::clone(&captures),
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
             vision: Arc::clone(&providers.vision),
+            jobs: Arc::clone(&jobs),
             depth_slot: std::sync::Mutex::default(),
+        };
+        let control_handler = crate::control_videos::ControlVideoHandler {
+            captures: Arc::clone(&captures),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
         };
         let scene_handler = SceneHandler {
             owner: profile.id,
@@ -944,6 +955,7 @@ impl Bardo {
                 imports: import_handler,
                 captures: capture_handler,
                 analyses: analysis_handler,
+                controls: control_handler,
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,

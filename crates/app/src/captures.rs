@@ -28,14 +28,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bardo_domain::{
-    Alignment, AlignmentRequest, ApiKey, BoundaryError, BoundaryMove, Capture, CaptureConfirmation,
-    CaptureId, CaptureProblem, CaptureRepository, CaptureVideo, CaptureVoice, CharTiming,
-    CostPurpose, GenerationPresets, HeardWord, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    JobRepository, MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId, NarrationRepository,
-    NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider, ProviderFailure,
-    RecordingFacts, RepositoryError, ScriptText, SecretStore, SpeechAligner, SpeechTranscriber,
-    TakeSource, Takes, TranscriptionRequest, VideoProjectId, VoiceChangeRequest, VoiceChanger,
-    VoiceFlag, VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
+    Alignment, AlignmentRequest, ApiKey, ApprovalBlock, BoundaryError, BoundaryMove, Capture,
+    CaptureConfirmation, CaptureId, CaptureProblem, CaptureRepository, CaptureVideo, CaptureVoice,
+    CharTiming, CostPurpose, GenerationPresets, HeardWord, Job, JobFailure, JobFailureKind, JobId,
+    JobKind, JobRepository, MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId,
+    NarrationRepository, NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider,
+    ProviderFailure, RecordingFacts, RepositoryError, ScriptText, SecretStore, SpeechAligner,
+    SpeechTranscriber, TakeSource, Takes, TranscriptionRequest, VideoProjectId, VoiceChangeRequest,
+    VoiceChanger, VoiceFlag, VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
 };
 use bardo_media::ffmpeg::{MediaError, Monitor};
 use bardo_media::{MediaEngine, audio, mp3};
@@ -89,6 +89,15 @@ pub enum CaptureError {
     /// The project has no capture of its current narration.
     #[error("the project has no capture")]
     NoCapture,
+    /// The take's control video is not built from the take as it is now.
+    #[error("the take's control video is not ready")]
+    ControlNotReady,
+    /// The take cannot go to a take model as it is.
+    #[error("the take cannot be approved ({0:?})")]
+    NotApprovable(ApprovalBlock),
+    /// The set picture is gone, or not a PNG or JPEG.
+    #[error("the set picture cannot be read")]
+    SetUnreadable,
     #[error(transparent)]
     Boundary(#[from] BoundaryError),
     #[error(transparent)]
@@ -111,6 +120,13 @@ impl CaptureError {
             CaptureError::NoFfmpeg => Text::EditorFfmpegMissing,
             CaptureError::Unsupported(problem) => Text::CaptureProblem(*problem),
             CaptureError::NoCapture => Text::CaptureMissing,
+            CaptureError::ControlNotReady => Text::ControlNotReady,
+            CaptureError::NotApprovable(ApprovalBlock::SeveralFaces) => {
+                Text::ControlSeveralFacesBlocked
+            }
+            CaptureError::NotApprovable(ApprovalBlock::Uncovered) => Text::ControlUncoveredBlocked,
+            CaptureError::NotApprovable(ApprovalBlock::Length(_)) => Text::ControlLengthBlocked,
+            CaptureError::SetUnreadable => Text::SetUnreadable,
             CaptureError::Boundary(_) => Text::CaptureNoCutPoint,
             CaptureError::Repository(_) => Text::CaptureNotSaved,
         }
@@ -853,6 +869,8 @@ impl CaptureHandler {
         // project's, so a failure between the two leaves nothing half done.
         let previous_capture = self.captures.capture(project).map_err(unexpected)?;
         let previous = self.narrations.narration(project).map_err(unexpected)?;
+        // Their rows go with the capture they were made from.
+        let previous_controls = self.captures.control_videos(project).map_err(unexpected)?;
         self.captures.save_capture(&capture).map_err(unexpected)?;
         self.narrations
             .save_narration(&narration)
@@ -867,6 +885,11 @@ impl CaptureHandler {
                 let _ = self.files.remove(project, &previous.video_file);
             }
             crate::take_analysis::remove_analysis_files(self.files.as_ref(), &previous);
+            crate::control_videos::remove_control_files(
+                self.files.as_ref(),
+                &previous,
+                &previous_controls,
+            );
         }
         // The face mesh runs on every take as soon as it exists.
         crate::take_analysis::queue_face_analyses(self.owner, &capture, self.jobs.as_ref());
@@ -910,10 +933,12 @@ pub(crate) fn forget_capture(
     if capture.narration == kept {
         return Ok(());
     }
+    let controls = captures.control_videos(project)?;
     captures.delete_capture(project)?;
     // One that will not go (open in a player) is left behind.
     let _ = files.remove(project, &capture.video_file);
     crate::take_analysis::remove_analysis_files(files, &capture);
+    crate::control_videos::remove_control_files(files, &capture, &controls);
     Ok(())
 }
 
@@ -1145,9 +1170,11 @@ impl Bardo {
         if self.narration_busy(capture.project) {
             return Err(CaptureError::Busy);
         }
+        let controls = self.captures.control_videos(capture.project)?;
         self.captures.delete_capture(capture.project)?;
         let _ = self.files.remove(capture.project, &capture.video_file);
         crate::take_analysis::remove_analysis_files(self.files.as_ref(), &capture);
+        crate::control_videos::remove_control_files(self.files.as_ref(), &capture, &controls);
         Ok(())
     }
 
@@ -1391,9 +1418,14 @@ pub(crate) mod tests {
 
         /// A phone recording: 1080 × 1920 at 29.97 fps with sound.
         pub(crate) fn chosen(&self, seconds: u64) -> ChosenCapture {
+            self.chosen_at(seconds, (1080, 1920))
+        }
+
+        /// A recording of `size` at 29.97 fps with sound.
+        pub(crate) fn chosen_at(&self, seconds: u64, (width, height): (u32, u32)) -> ChosenCapture {
             let path = self.recording(
                 "Take 1.MOV",
-                info(seconds, Some((1080, 1920, (30_000, 1001))), true),
+                info(seconds, Some((width, height, (30_000, 1001))), true),
             );
             self.app.capture_reader().open(&path).unwrap()
         }
@@ -1416,7 +1448,17 @@ pub(crate) mod tests {
             project: VideoProjectId,
             voice: CaptureVoiceChoice,
         ) -> (Job, Capture, Narration) {
-            let job = self.import(project, &self.chosen(13), voice);
+            self.imported_at(project, voice, (1080, 1920))
+        }
+
+        /// `imported`, from a recording of `size`.
+        pub(crate) fn imported_at(
+            &self,
+            project: VideoProjectId,
+            voice: CaptureVoiceChoice,
+            size: (u32, u32),
+        ) -> (Job, Capture, Narration) {
+            let job = self.import(project, &self.chosen_at(13, size), voice);
             assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
             let view = self.app.narration(project).unwrap();
             (job, view.capture.unwrap(), view.narration.unwrap())

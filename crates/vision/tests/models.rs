@@ -218,3 +218,46 @@ fn video_depth_anything_gives_every_frame_and_resumes_the_same() {
 fn depth_anything_v2_gives_every_frame_and_resumes_the_same() {
     check_depth(DepthKind::PerFrame);
 }
+
+/// Mesh mode (#191) on a real face: no pixel inside the face's outline
+/// still passes for skin once the face is covered and its mesh drawn.
+#[test]
+fn a_covered_face_shows_no_skin_inside_its_outline() {
+    use bardo_media::control::{Canvas, inside, looks_like_skin};
+
+    let frames = frames("head-3s.mp4", 3);
+    let vision = vision();
+    let mut tracker = vision.face_tracker().expect("loads");
+    let seen = track_all(tracker.as_mut(), &frames, 0);
+    let mut skin_before = 0;
+    for (frame, seen) in frames.iter().zip(&seen).step_by(5) {
+        let mesh = seen.mesh.as_ref().expect("a face in every frame");
+        let mut canvas = Canvas::new(frame.width, frame.height).expect("a canvas");
+        canvas.put_rgb(frame);
+        let outline = canvas.face_outline(mesh);
+        let pixels_inside = |picture: &RgbFrame| {
+            let mut skin = 0;
+            for y in 0..picture.height {
+                for x in 0..picture.width {
+                    let point = (x as f32 + 0.5, y as f32 + 0.5);
+                    let at = ((y * picture.width + x) * 3) as usize;
+                    let rgb = [picture.rgb[at], picture.rgb[at + 1], picture.rgb[at + 2]];
+                    if inside(&outline, point) && looks_like_skin(rgb) {
+                        skin += 1;
+                    }
+                }
+            }
+            skin
+        };
+        skin_before += pixels_inside(frame);
+        canvas.cover_face(mesh, 0.0);
+        canvas.draw_mesh(mesh);
+        assert_eq!(
+            pixels_inside(&canvas.rgb()),
+            0,
+            "skin shows inside the outline"
+        );
+    }
+    // The clip's face does read as skin before it is covered.
+    assert!(skin_before > 1_000, "{skin_before}");
+}
