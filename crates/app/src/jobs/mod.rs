@@ -134,6 +134,7 @@ impl JobActionError {
         match self {
             JobActionError::Elsewhere => Text::JobRunsElsewhere,
             JobActionError::Busy => Text::RestoreWaitsForJobs,
+            JobActionError::Superseded => Text::JobSuperseded,
             _ => Text::JobNotUpdated,
         }
     }
@@ -230,6 +231,9 @@ impl Bardo {
             .find(|job| job.id() == id && job.kind() == JobKind::Restore)
         {
             return self.retry_restore(&restore);
+        }
+        if self.superseded_capture(id) {
+            return Err(JobActionError::Superseded);
         }
         self.jobs.retry(id)
     }

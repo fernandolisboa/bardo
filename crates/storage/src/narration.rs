@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    CaptureVoice, GenerationPresets, JobId, Narration, NarrationId, NarrationRepository, NarrationSource,
-    ProfileId, Provider, RepositoryError, ScriptText, VideoProjectId, VoiceRef, WordTiming,
-    WordTimings,
+    CaptureVoice, GenerationPresets, JobId, Narration, NarrationId, NarrationRepository,
+    NarrationSource, ProfileId, Provider, RepositoryError, ScriptText, VideoProjectId, VoiceRef,
+    WordTiming, WordTimings,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -153,8 +153,7 @@ impl NarrationRow {
         };
         let provider: Provider = provider.parse().map_err(boxed)?;
         let voice = VoiceRef::new(provider, voice_id, voice_name).map_err(boxed)?;
-        let presets = stored_presets(self.presets)
-            .ok_or_else(|| invalid("a preset is missing"))?;
+        let presets = stored_presets(self.presets).ok_or_else(|| invalid("a preset is missing"))?;
         Ok(Some((voice, presets)))
     }
 

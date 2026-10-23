@@ -28,14 +28,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bardo_domain::{
-    Alignment, AlignmentRequest, ApiKey, BoundaryError, BoundaryMove, Capture,
-    CaptureConfirmation, CaptureId, CaptureProblem, CaptureRepository, CaptureVideo, CaptureVoice,
-    CharTiming, CostPurpose, GenerationPresets, HeardWord, Job, JobFailure, JobFailureKind, JobId,
-    JobKind, MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId, NarrationRepository,
-    NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider, ProviderFailure,
-    RecordingFacts, RepositoryError, ScriptText, SecretStore, SpeechAligner, SpeechTranscriber,
-    TakeSource, Takes, TranscriptionRequest, VideoProjectId, VoiceChangeRequest, VoiceChanger,
-    VoiceFlag, VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
+    Alignment, AlignmentRequest, ApiKey, BoundaryError, BoundaryMove, Capture, CaptureConfirmation,
+    CaptureId, CaptureProblem, CaptureRepository, CaptureVideo, CaptureVoice, CharTiming,
+    CostPurpose, GenerationPresets, HeardWord, Job, JobFailure, JobFailureKind, JobId, JobKind,
+    MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId, NarrationRepository, NarrationSource,
+    Persona, ProfileId, Progress, ProjectFiles, Provider, ProviderFailure, RecordingFacts,
+    RepositoryError, ScriptText, SecretStore, SpeechAligner, SpeechTranscriber, TakeSource, Takes,
+    TranscriptionRequest, VideoProjectId, VoiceChangeRequest, VoiceChanger, VoiceFlag,
+    VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
 };
 use bardo_media::ffmpeg::{MediaError, Monitor};
 use bardo_media::{MediaEngine, audio, mp3};
@@ -47,6 +47,10 @@ use crate::{Bardo, KeyState, Text};
 
 /// Every provider a capture calls: ElevenLabs.
 const PROVIDER: Provider = Provider::ElevenLabs;
+/// More parts than a capture is ever voiced in: parts are cut in the second
+/// half of the provider's longest (about five minutes), so 15 minutes take
+/// seven at most.
+const MAX_PARTS: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {
@@ -317,9 +321,7 @@ impl CapturePayload {
     fn extension(&self) -> String {
         self.file_name
             .rsplit_once('.')
-            .map_or_else(String::new, |(_, extension)| {
-                extension.to_ascii_lowercase()
-            })
+            .map_or_else(String::new, |(_, extension)| extension.to_ascii_lowercase())
     }
 }
 
@@ -523,17 +525,17 @@ impl CaptureHandler {
                 .map_err(unexpected)?
                 .is_some_and(|capture| saved(capture.job))
         {
+            self.remove_leftovers(project, work.capture);
             return Ok(());
         }
         let stopped = |cx: &Option<&mut JobContext>| cx.as_ref().is_some_and(|cx| cx.should_stop());
-        let checkpoint = |cx: &mut Option<&mut JobContext>, step: &str, permille: u16| {
-            match cx.as_mut() {
+        let checkpoint =
+            |cx: &mut Option<&mut JobContext>, step: &str, permille: u16| match cx.as_mut() {
                 Some(cx) => cx
                     .save_checkpoint(step, Progress::from_permille(permille))
                     .map_err(unexpected),
                 None => Ok(()),
-            }
-        };
+            };
 
         // Copy the video in, and check it is still the one chosen: a
         // longer one would cost more than the user agreed to.
@@ -573,11 +575,10 @@ impl CaptureHandler {
         let sound_name = sound_file(work.capture);
         if !self.files.exists(project, &sound_name) {
             let monitor = JobMonitor(cx.as_deref());
-            match self.media.extract_sound(
-                &copy,
-                &self.files.path(project, &sound_name),
-                &monitor,
-            ) {
+            match self
+                .media
+                .extract_sound(&copy, &self.files.path(project, &sound_name), &monitor)
+            {
                 Ok(()) => {}
                 Err(MediaError::Cancelled) => return Ok(()),
                 Err(error) => {
@@ -663,7 +664,9 @@ impl CaptureHandler {
             CaptureVoice::Own => vec![Duration::ZERO..length],
         };
         for (index, span) in spans.iter().enumerate() {
-            if self.files.exists(project, &part_record(work.capture, index))
+            if self
+                .files
+                .exists(project, &part_record(work.capture, index))
                 && self.files.exists(project, &part_audio(work.capture, index))
             {
                 continue;
@@ -752,7 +755,10 @@ impl CaptureHandler {
         // Its words timed against the script.
         let aligned_name = aligned_file(work.capture);
         let aligned = if self.files.exists(project, &aligned_name) {
-            let record = self.files.read(project, &aligned_name).map_err(unexpected)?;
+            let record = self
+                .files
+                .read(project, &aligned_name)
+                .map_err(unexpected)?;
             serde_json::from_slice::<AlignedRecord>(&record).map_err(unexpected)?
         } else {
             if stopped(&cx) {
@@ -850,16 +856,7 @@ impl CaptureHandler {
             .save_narration(&narration)
             .map_err(unexpected)?;
 
-        // Leftovers only cost disk space: a file that will not go (open in
-        // a player) stays rather than failing a finished import.
-        let capture_id = work.capture;
-        for file in [sound_name, heard_name, aligned_name] {
-            let _ = self.files.remove(project, &file);
-        }
-        for index in 0..spans.len() {
-            let _ = self.files.remove(project, &part_audio(capture_id, index));
-            let _ = self.files.remove(project, &part_record(capture_id, index));
-        }
+        self.remove_leftovers(project, work.capture);
         if let Some(previous) = previous.filter(|p| p.audio_file != narration.audio_file) {
             crate::proxies::remove_media(self.files.as_ref(), project, &previous.audio_file);
         }
@@ -867,6 +864,27 @@ impl CaptureHandler {
             let _ = self.files.remove(project, &previous.video_file);
         }
         Ok(())
+    }
+}
+
+impl CaptureHandler {
+    /// Removes what the import of `capture` made on the way: its sound, the
+    /// transcript, the voiced parts and the alignment. Leftovers only cost
+    /// disk space: a file that will not go (open in a player) stays rather
+    /// than failing a finished import.
+    fn remove_leftovers(&self, project: VideoProjectId, capture: CaptureId) {
+        let mut files = vec![
+            sound_file(capture),
+            heard_file(capture),
+            aligned_file(capture),
+        ];
+        for index in 0..MAX_PARTS {
+            files.push(part_audio(capture, index));
+            files.push(part_record(capture, index));
+        }
+        for file in files {
+            let _ = self.files.remove(project, &file);
+        }
     }
 }
 
@@ -971,7 +989,6 @@ impl Bardo {
         if self.narration_busy(project.id) {
             return Err(CaptureError::Busy);
         }
-        self.forget_abandoned_captures(project.id)?;
         if self.provider_key(PROVIDER).state == KeyState::NotSet {
             return Err(CaptureError::MissingKey(PROVIDER));
         }
@@ -1002,12 +1019,16 @@ impl Bardo {
             language: language.to_owned(),
             text: script.text().as_str().to_owned(),
         };
+        // Only now, when the import goes ahead: what an earlier capture
+        // job left can no longer be retried once this one is queued.
+        self.forget_abandoned_captures(project.id)?;
         let job = Job::new(self.profile.id, JobKind::Capture, payload.to_json());
         Ok(self.jobs.enqueue(job)?)
     }
 
     /// Removes what earlier capture jobs of the project left in its folder
-    /// when they failed or were cancelled; a new capture supersedes them.
+    /// when they failed or were cancelled; a new capture supersedes them,
+    /// and a superseded job is not retried ([`Bardo::superseded_capture`]).
     /// Called while no narration job of the project runs.
     fn forget_abandoned_captures(&self, project: VideoProjectId) -> Result<(), CaptureError> {
         let current = self.captures.capture(project)?.map(|capture| capture.id);
@@ -1031,9 +1052,7 @@ impl Bardo {
                 heard_file(capture),
                 aligned_file(capture),
             ];
-            // A capture is voiced in a few parts at most (15 minutes, about
-            // five minutes each).
-            for index in 0..8 {
+            for index in 0..MAX_PARTS {
                 files.push(part_audio(capture, index));
                 files.push(part_record(capture, index));
             }
@@ -1050,6 +1069,26 @@ impl Bardo {
             }
         }
         Ok(())
+    }
+
+    /// Whether `job` is a capture import that a newer narration job of its
+    /// project (generated, imported or captured) has replaced: retrying it
+    /// would put back an older narration over the newer one, and what it
+    /// left in the project folder may be gone.
+    pub(crate) fn superseded_capture(&self, job: JobId) -> bool {
+        let jobs = self.jobs();
+        let Some(payload) = jobs
+            .iter()
+            .find(|candidate| candidate.id() == job && candidate.kind() == JobKind::Capture)
+            .and_then(|job| CapturePayload::parse(job.payload()).ok())
+        else {
+            return false;
+        };
+        let Ok(project) = payload.project.parse::<uuid::Uuid>() else {
+            return false;
+        };
+        self.latest_narration_job(VideoProjectId::from(project))
+            .is_some_and(|latest| latest.id() != job)
     }
 
     /// The project's capture with the narration it made, when that is
@@ -1085,7 +1124,8 @@ impl Bardo {
         capture
             .takes
             .move_boundary(&take_source(&narration), index, to)?;
-        self.captures.save_takes(capture.project, &capture.takes)?;
+        self.captures
+            .save_takes(capture.project, capture.id, &capture.takes)?;
         Ok(())
     }
 
@@ -1194,10 +1234,7 @@ pub(crate) mod testing {
 
     impl VoiceChanger for FakeVoiceChanger {
         fn max_length(&self) -> Duration {
-            self.max
-                .lock()
-                .unwrap()
-                .unwrap_or(Duration::from_secs(290))
+            self.max.lock().unwrap().unwrap_or(Duration::from_secs(290))
         }
 
         fn change(
@@ -1311,7 +1348,8 @@ mod tests {
 
     fn info(seconds: u64, video: Option<(u32, u32, (u32, u32))>, audio: bool) -> MediaInfo {
         MediaInfo {
-            duration: Duration::from_secs(seconds),
+            // ffprobe reads lengths finer than a millisecond.
+            duration: Duration::from_secs(seconds) + Duration::from_nanos(33_333_333),
             video: video.map(|(width, height, frame_rate)| VideoStream {
                 codec: "h264".into(),
                 width,
@@ -1410,7 +1448,8 @@ mod tests {
                 width: 1080,
                 height: 1920,
                 fps_milli: 29_970,
-                duration: Duration::from_secs(13),
+                // ffprobe's 13.033333 s, in whole milliseconds.
+                duration: Duration::from_millis(13_033),
             }
         );
         assert_eq!(chosen.size, "Take 1.MOV".len() as u64);
@@ -1439,7 +1478,10 @@ mod tests {
             CaptureProblem::TooSmall
         );
         assert_eq!(
-            refused(open("slow.mp4", info(13, Some((1920, 1080, (15, 1))), true))),
+            refused(open(
+                "slow.mp4",
+                info(13, Some((1920, 1080, (15, 1))), true)
+            )),
             CaptureProblem::FrameRate
         );
         assert_eq!(
@@ -1449,19 +1491,13 @@ mod tests {
         // ffprobe cannot read it at all.
         let garbage = s.user.path().join("garbage.mp4");
         std::fs::write(&garbage, b"not a video").unwrap();
-        assert_eq!(
-            refused(reader.open(&garbage)),
-            CaptureProblem::NoVideo
-        );
+        assert_eq!(refused(reader.open(&garbage)), CaptureProblem::NoVideo);
         assert!(matches!(
             reader.open(&s.user.path().join("gone.mp4")),
             Err(CaptureError::Unreadable)
         ));
         s.h.media.not_found.store(true, Ordering::SeqCst);
-        assert!(matches!(
-            reader.open(&garbage),
-            Err(CaptureError::NoFfmpeg)
-        ));
+        assert!(matches!(reader.open(&garbage), Err(CaptureError::NoFfmpeg)));
         for problem in CaptureProblem::ALL {
             assert_eq!(
                 CaptureError::Unsupported(problem).message(),
@@ -1550,7 +1586,11 @@ mod tests {
         assert_eq!(
             s.costs(project.id),
             [
-                (CostPurpose::NarrationAlignment, "forced_alignment".into(), 2),
+                (
+                    CostPurpose::NarrationAlignment,
+                    "forced_alignment".into(),
+                    2
+                ),
                 (CostPurpose::ScriptCheck, "scribe_v2".into(), 13),
                 (
                     CostPurpose::VoiceChange,
@@ -1564,7 +1604,10 @@ mod tests {
         // The Capture stage shows its takes after the narration's.
         let stages = s.stages(project.id);
         let order: Vec<Stage> = stages.iter().map(|status| status.stage).collect();
-        assert_eq!(order[..3], [Stage::Script, Stage::Narration, Stage::Capture]);
+        assert_eq!(
+            order[..3],
+            [Stage::Script, Stage::Narration, Stage::Capture]
+        );
         let status = stages[2];
         // One second of narration is one take, too short to perform.
         assert_eq!(capture.takes.as_slice()[0].flag(), Some(TakeFlag::TooShort));
@@ -1620,8 +1663,10 @@ mod tests {
     fn a_recording_off_the_script_is_refused_before_its_voice_is_paid_for() {
         let s = setup(13);
         let project = project(&s.app);
-        s.h.transcriber
-            .hears("Hoje vamos falar de outra coisa completamente diferente", Duration::from_secs(1));
+        s.h.transcriber.hears(
+            "Hoje vamos falar de outra coisa completamente diferente",
+            Duration::from_secs(1),
+        );
 
         let job = s.import(project.id, &s.chosen(13), CaptureVoiceChoice::Persona);
 
@@ -1656,7 +1701,10 @@ mod tests {
         let parts = s.h.voice_changer.requests.lock().unwrap().clone();
         assert_eq!(parts.len(), 3);
         assert_eq!(
-            parts.iter().map(|part| part.file_name.clone()).collect::<Vec<_>>(),
+            parts
+                .iter()
+                .map(|part| part.file_name.clone())
+                .collect::<Vec<_>>(),
             ["001", "002", "003"].map(|n| format!(
                 "capture-{}.part{n}.wav",
                 CapturePayload::parse(job.payload()).unwrap().capture
@@ -1683,6 +1731,55 @@ mod tests {
             (part * 3).as_millis(),
             "the parts joined"
         );
+    }
+
+    #[test]
+    fn a_failed_import_stays_retryable_until_a_newer_one_replaces_it() {
+        let mut s = setup(13);
+        let project = project(&s.app);
+        *s.h.aligner.failure.lock().unwrap() = Some(ProviderFailure {
+            kind: ProviderFailureKind::Rejected,
+            detail: "invalid key".into(),
+        });
+        let failed = s.import(project.id, &s.chosen(13), CaptureVoiceChoice::Persona);
+        assert_eq!(failed.state(), JobState::Failed);
+        let left = CapturePayload::parse(failed.payload())
+            .unwrap()
+            .capture()
+            .unwrap();
+        let folder = s._folders.path().join(project.id.to_string());
+        let paid = folder.join(heard_file(left));
+        assert!(paid.exists(), "the paid transcript is kept for a retry");
+
+        // An import refused before it is queued leaves it as it was.
+        let key =
+            s.h.secrets
+                .get(s.app.profile.id, PROVIDER)
+                .unwrap()
+                .unwrap();
+        s.app.remove_provider_key(PROVIDER).unwrap();
+        assert!(matches!(
+            s.app.import_capture(
+                project.id,
+                &s.chosen(13),
+                CaptureVoiceChoice::Persona,
+                true,
+                BudgetConsent::Ask
+            ),
+            Err(CaptureError::MissingKey(_))
+        ));
+        assert!(paid.exists());
+        assert!(!s.app.superseded_capture(failed.id()));
+
+        // A newer import replaces it: its files go and it does not run again.
+        s.app.save_provider_key(PROVIDER, key.expose()).unwrap();
+        *s.h.aligner.failure.lock().unwrap() = None;
+        s.imported(project.id, CaptureVoiceChoice::Persona);
+        assert!(!paid.exists());
+        assert!(matches!(
+            s.app.retry_job(failed.id()),
+            Err(crate::jobs::JobActionError::Superseded)
+        ));
     }
 
     #[test]
@@ -1734,7 +1831,10 @@ mod tests {
 
         assert_eq!(job.state(), JobState::Failed);
         assert!(
-            job.failure().unwrap().detail.contains("no longer the recording"),
+            job.failure()
+                .unwrap()
+                .detail
+                .contains("no longer the recording"),
             "{:?}",
             job.failure()
         );

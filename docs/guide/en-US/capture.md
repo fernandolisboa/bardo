@@ -36,7 +36,7 @@ Only the recording's sound is sent to ElevenLabs; the video stays in the project
 <a id="check"></a>
 ## Checking it follows the script
 
-Before the voice is paid for, ElevenLabs transcribes the sound and Bardo checks it says at least 80% of the script in order. A recording that does not stops with **Does not follow the script**, having paid only for the transcription. Record it again reading the current script and import the new file.
+Before the voice is paid for, ElevenLabs transcribes the sound and Bardo checks it says at least 80% of the script in order, and that at least 80% of what it says is the script. A recording that does not stops, saying it does not follow the script closely enough, having paid only for the transcription. Record it again reading the current script and import the new file.
 
 <a id="takes"></a>
 ## Takes
@@ -48,7 +48,7 @@ A take that cannot become a performed clip says why: **Over 30 seconds** with no
 <a id="cuts"></a>
 ## Moving a cut
 
-**Cut earlier** and **Cut later** move the cut between a take and the next one to the sentence end or pause before or after it. Both takes change, and work made from their earlier stretch will show as out of date.
+**Cut earlier** and **Cut later** move the cut between a take and the next one to the nearest sentence end or pause before or after it that keeps both takes 4 to 30 seconds long. Both takes change, and work made from their earlier stretch will show as out of date.
 
 <a id="stale"></a>
 ## Out of date
@@ -58,4 +58,4 @@ When the script changes after the capture, its narration is out of date and so i
 <a id="remove"></a>
 ## Removing it
 
-**Remove capture** takes the recording and its takes out of the project. The narration made from it stays.
+**Remove capture** takes the recording and its takes out of the project. The narration made from it stays. Bardo asks once first; getting the takes back means importing the recording again.

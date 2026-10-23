@@ -18,18 +18,18 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    Alignment, ApiKey, Capture, CaptureRepository, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind,
-    JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, NarrationSource, Persona,
-    ProfileId, Progress, ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore,
-    SpeechRequest, SpeechSynthesizer, VideoProject, VideoProjectId, VoiceFlag, VoiceRef,
-    WordTimings, split_for_speech,
+    Alignment, ApiKey, Capture, CaptureRepository, CharTiming, CostPurpose, GenerationPresets, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, Metered, Narration, NarrationId,
+    NarrationRepository, NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider,
+    RepositoryError, Script, ScriptText, SecretStore, SpeechRequest, SpeechSynthesizer,
+    VideoProject, VideoProjectId, VoiceFlag, VoiceRef, WordTimings, split_for_speech,
 };
 use bardo_media::{Playback, PlaybackError, mp3};
 use serde::{Deserialize, Serialize};
 
+use crate::captures::CapturePayload;
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
-use crate::captures::CapturePayload;
 use crate::narration_import::ImportPayload;
 use crate::{Bardo, KeyState, Text};
 
@@ -317,14 +317,21 @@ impl NarrationHandler {
         let reading = Reading::from_payload(&NarrationPayload::parse(payload)?)?;
         let (project, id) = (reading.project, reading.id);
         // An earlier attempt may have saved the narration and stopped
-        // before the queue recorded it as done.
-        if self
+        // before the queue recorded it as done, or before it forgot the
+        // capture it replaced.
+        if let Some(saved) = self
             .narrations
             .narration(project)
             .map_err(unexpected)?
-            .is_some_and(|saved| saved.job == Some(job))
+            .filter(|saved| saved.job == Some(job))
         {
-            return Ok(());
+            return crate::captures::forget_capture(
+                &*self.captures,
+                &*self.files,
+                project,
+                saved.id,
+            )
+            .map_err(unexpected);
         }
         let text = reading.text.as_str();
         let parts = split_for_speech(text, self.speech.max_chars());
@@ -535,7 +542,7 @@ impl Bardo {
 
     /// The project's latest job that makes its narration: generating it or
     /// importing a recording.
-    fn latest_narration_job(&self, project: VideoProjectId) -> Option<Job> {
+    pub(crate) fn latest_narration_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
         self.jobs().into_iter().rev().find(|job| match job.kind() {
             JobKind::Narration => {

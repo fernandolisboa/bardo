@@ -298,18 +298,23 @@ impl CaptureRepository for Database {
         tx.commit().map_err(boxed)
     }
 
-    fn save_takes(&self, project: VideoProjectId, takes: &Takes) -> Result<(), RepositoryError> {
+    fn save_takes(
+        &self,
+        project: VideoProjectId,
+        capture: CaptureId,
+        takes: &Takes,
+    ) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
         let exists: bool = tx
             .query_row(
-                "SELECT EXISTS (SELECT 1 FROM capture WHERE project_id = ?1)",
-                [project.to_string()],
+                "SELECT EXISTS (SELECT 1 FROM capture WHERE project_id = ?1 AND id = ?2)",
+                [project.to_string(), capture.to_string()],
                 |row| row.get(0),
             )
             .map_err(boxed)?;
         if !exists {
-            return Err(invalid("the project has no capture"));
+            return Err(invalid("the project's capture is not this one"));
         }
         insert_takes(&tx, project, takes)?;
         tx.commit().map_err(boxed)
@@ -477,9 +482,14 @@ mod tests {
         let mut takes = saved.takes.as_slice().to_vec();
         takes[0].revision = 7;
         let takes = Takes::restore(narration.words.len(), takes).unwrap();
-        db.save_takes(project.id, &takes).unwrap();
+        db.save_takes(project.id, saved.id, &takes).unwrap();
         assert_eq!(db.capture(project.id).unwrap().unwrap().takes, takes);
-        assert!(db.save_takes(VideoProjectId::new(), &takes).is_err());
+        assert!(
+            db.save_takes(VideoProjectId::new(), saved.id, &takes)
+                .is_err()
+        );
+        // Nor onto a capture that replaced the one they were cut from.
+        assert!(db.save_takes(project.id, CaptureId::new(), &takes).is_err());
 
         // Takes edited outside the app to leave words out are refused.
         db.conn()

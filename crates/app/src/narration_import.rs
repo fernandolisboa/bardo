@@ -19,9 +19,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    AlignmentRequest, ApiKey, CaptureRepository, CostPurpose, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    Metered, Narration, NarrationId, NarrationRepository, NarrationSource, ProfileId, Progress,
-    ProjectFiles, Provider, ScriptText, SecretStore, SpeechAligner, VideoProjectId, WordTimings,
+    AlignmentRequest, ApiKey, CaptureRepository, CostPurpose, Job, JobFailure, JobFailureKind,
+    JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, NarrationSource,
+    ProfileId, Progress, ProjectFiles, Provider, ScriptText, SecretStore, SpeechAligner,
+    VideoProjectId, WordTimings,
 };
 use bardo_media::{AudioFormat, ProbeError, audio};
 use serde::{Deserialize, Serialize};
@@ -184,14 +185,21 @@ impl NarrationImportHandler {
         let format = AudioFormat::from_extension(&payload.format)
             .ok_or_else(|| unexpected(format!("unknown format {}", payload.format)))?;
         // An earlier attempt may have saved the narration and stopped
-        // before the queue recorded it as done.
-        if self
+        // before the queue recorded it as done, or before it forgot the
+        // capture it replaced.
+        if let Some(saved) = self
             .narrations
             .narration(project)
             .map_err(unexpected)?
-            .is_some_and(|saved| saved.job == Some(job))
+            .filter(|saved| saved.job == Some(job))
         {
-            return Ok(());
+            return crate::captures::forget_capture(
+                &*self.captures,
+                &*self.files,
+                project,
+                saved.id,
+            )
+            .map_err(unexpected);
         }
 
         let file = audio_file(id, format);

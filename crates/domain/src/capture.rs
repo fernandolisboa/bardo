@@ -45,8 +45,8 @@ pub const MIN_TAKE_PAUSE: Duration = Duration::from_millis(300);
 /// its last, where it starts or ends the recording.
 pub const TAKE_PADDING: Duration = Duration::from_millis(300);
 
-/// The share of the script's words, in thousandths, that a capture's
-/// speech must say in order.
+/// The share, in thousandths, of the script's words that a capture's
+/// speech must say in order, and of its words that must be the script's.
 pub const MIN_SCRIPT_COVERAGE: u16 = 800;
 
 /// Why a recording cannot be a capture.
@@ -131,7 +131,9 @@ impl CaptureVideo {
             width,
             height,
             fps_milli: (fps * 1000.0).round() as u32,
-            duration: facts.duration,
+            // Whole milliseconds, as the capture is kept, so a recording
+            // read again compares equal to the one read before.
+            duration: Duration::from_millis(facts.duration.as_millis() as u64),
         })
     }
 }
@@ -175,11 +177,13 @@ pub struct HeardWord {
     pub end: Duration,
 }
 
-/// How much of `script` the `heard` words say in order, in thousandths of
-/// the script's words: the longest run of script words found in the same
-/// order (not necessarily next to each other) in what was heard. Words
-/// match as narration timings do: letters and digits, case and accents
-/// ignored. A script without words is followed by anything.
+/// How closely the `heard` words follow `script`, in thousandths: the
+/// longest run of script words found in the same order (not necessarily
+/// next to each other) in what was heard, as a share of the script's words
+/// or of the heard words, whichever is less, so a recording that says the
+/// script and then much else does not pass. Words match as narration
+/// timings do: letters and digits, case and accents ignored. A script
+/// without words is followed by anything.
 pub fn script_coverage(script: &str, heard: &[HeardWord]) -> u16 {
     let script: Vec<String> = spoken_words(script)
         .into_iter()
@@ -209,7 +213,8 @@ pub fn script_coverage(script: &str, heard: &[HeardWord]) -> u16 {
         std::mem::swap(&mut previous, &mut row);
     }
     let found = u64::from(previous[heard.len()]);
-    (found * 1000 / script.len() as u64) as u16
+    let said = script.len().max(heard.len()) as u64;
+    (found * 1000 / said) as u16
 }
 
 /// Where to cut a recording of `duration` into parts of at most `max` for
@@ -462,7 +467,9 @@ impl Takes {
     }
 
     /// Where the boundary after take `index` (between it and the next)
-    /// would go moving `to`: the word the later take would start at.
+    /// would go moving `to`: the word the later take would start at, at the
+    /// nearest cut point that does not leave either take newly over
+    /// [`MAX_TAKE`] or under [`MIN_TAKE`].
     pub fn boundary_target(
         &self,
         source: &TakeSource<'_>,
@@ -474,12 +481,24 @@ impl Takes {
             _ => return Err(BoundaryError::NoSuchBoundary),
         };
         let current = before.words.end;
-        let cut = |word: &usize| source.cut_after(*word).is_some();
+        let flags = |earlier: &Take, later: &Take| {
+            usize::from(earlier.flag().is_some()) + usize::from(later.flag().is_some())
+        };
+        let now = flags(before, after);
+        // A cut after `word`, keeping both takes as fit as they are.
+        let fits = |word: &usize| {
+            let at = *word + 1;
+            source.cut_after(*word).is_some()
+                && flags(
+                    &source.take(before.words.start..at, 0),
+                    &source.take(at..after.words.end, 0),
+                ) <= now
+        };
         let target = match to {
             // The earlier take keeps at least its first word.
-            BoundaryMove::Earlier => (before.words.start..current - 1).rev().find(cut),
+            BoundaryMove::Earlier => (before.words.start..current - 1).rev().find(fits),
             // The later take keeps at least its last word.
-            BoundaryMove::Later => (current..after.words.end - 1).find(cut),
+            BoundaryMove::Later => (current..after.words.end - 1).find(fits),
         };
         target.map(|word| word + 1).ok_or(BoundaryError::NoCutPoint)
     }
@@ -596,8 +615,14 @@ pub trait CaptureRepository: Send + Sync {
     /// Makes `capture` the project's one, replacing any other.
     fn save_capture(&self, capture: &Capture) -> Result<(), RepositoryError>;
 
-    /// Replaces the takes of the project's capture.
-    fn save_takes(&self, project: VideoProjectId, takes: &Takes) -> Result<(), RepositoryError>;
+    /// Replaces the takes of the project's capture, when it is still
+    /// `capture`: takes cut from another capture's narration do not fit.
+    fn save_takes(
+        &self,
+        project: VideoProjectId,
+        capture: CaptureId,
+        takes: &Takes,
+    ) -> Result<(), RepositoryError>;
 
     /// Removes the project's capture, if any.
     fn delete_capture(&self, project: VideoProjectId) -> Result<(), RepositoryError>;
@@ -612,8 +637,13 @@ impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
         (**self).save_capture(capture)
     }
 
-    fn save_takes(&self, project: VideoProjectId, takes: &Takes) -> Result<(), RepositoryError> {
-        (**self).save_takes(project, takes)
+    fn save_takes(
+        &self,
+        project: VideoProjectId,
+        capture: CaptureId,
+        takes: &Takes,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_takes(project, capture, takes)
     }
 
     fn delete_capture(&self, project: VideoProjectId) -> Result<(), RepositoryError> {
@@ -644,18 +674,40 @@ mod tests {
         assert_eq!((video.width, video.height), (1920, 1080));
         assert_eq!(video.fps_milli, 29_970);
         assert_eq!(video.duration, s(60.0));
+        // Kept in whole milliseconds, as stored, so reading the same file
+        // again gives the same capture.
+        let odd = facts(13.033_333, Some((1920, 1080, 29.97)), true);
+        let video = CaptureVideo::check("take.mp4", &odd).unwrap();
+        assert_eq!(video.duration, Duration::from_millis(13_033));
+        assert_eq!(
+            CaptureVideo::check("take.mp4", &odd),
+            CaptureVideo::check("take.mp4", &odd)
+        );
         assert!(CaptureVideo::check("take.mp4", &good).is_ok());
         // A portrait phone recording is fine: its short side counts.
-        assert!(CaptureVideo::check("take.mp4", &facts(60.0, Some((720, 1280, 30.0)), true)).is_ok());
-        for (fps, ok) in [(23.976, true), (24.0, true), (59.94, true), (60.0, true), (15.0, false), (120.0, false)] {
+        assert!(
+            CaptureVideo::check("take.mp4", &facts(60.0, Some((720, 1280, 30.0)), true)).is_ok()
+        );
+        for (fps, ok) in [
+            (23.976, true),
+            (24.0, true),
+            (59.94, true),
+            (60.0, true),
+            (15.0, false),
+            (120.0, false),
+        ] {
             let result = CaptureVideo::check("t.mp4", &facts(10.0, Some((1280, 720, fps)), true));
             assert_eq!(result.is_ok(), ok, "{fps} fps");
         }
 
-        let refused = |name: &str, facts: RecordingFacts| CaptureVideo::check(name, &facts).unwrap_err();
+        let refused =
+            |name: &str, facts: RecordingFacts| CaptureVideo::check(name, &facts).unwrap_err();
         assert_eq!(refused("take.mkv", good), CaptureProblem::NotMp4OrMov);
         assert_eq!(refused("take", good), CaptureProblem::NotMp4OrMov);
-        assert_eq!(refused("take.mp4", facts(60.0, None, true)), CaptureProblem::NoVideo);
+        assert_eq!(
+            refused("take.mp4", facts(60.0, None, true)),
+            CaptureProblem::NoVideo
+        );
         assert_eq!(
             refused("take.mp4", facts(60.0, Some((1920, 1080, 30.0)), false)),
             CaptureProblem::NoAudio
@@ -665,7 +717,10 @@ mod tests {
             CaptureProblem::TooShort
         );
         assert_eq!(
-            refused("take.mp4", facts(15.0 * 60.0 + 0.5, Some((1920, 1080, 30.0)), true)),
+            refused(
+                "take.mp4",
+                facts(15.0 * 60.0 + 0.5, Some((1920, 1080, 30.0)), true)
+            ),
             CaptureProblem::TooLong
         );
         assert_eq!(
@@ -690,19 +745,46 @@ mod tests {
         let script = "Era uma vez, em 1969, uma sonda. Ela partiu — e nunca voltou.";
         // 12 words; the dash goes with "partiu".
         assert_eq!(script_coverage(script, &heard(script)), 1000);
-        // Case, accents and punctuation do not matter; filler is ignored.
+        // Case, accents and punctuation do not matter; a filler word costs
+        // a little: 12 of 13 heard.
         assert_eq!(
-            script_coverage(script, &heard("ERA uma, hum, vez em 1969 uma SONDA ela partiu e nunca voltou")),
-            1000
+            script_coverage(
+                script,
+                &heard("ERA uma, hum, vez em 1969 uma SONDA ela partiu e nunca voltou")
+            ),
+            923
+        );
+        // The whole script and then as much again of something else: half
+        // of what was heard.
+        assert_eq!(
+            script_coverage(
+                script,
+                &heard(
+                    "Era uma vez em 1969 uma sonda ela partiu e nunca voltou \
+                     a b c d e f g h i j k l"
+                )
+            ),
+            500
         );
         // Two words left out: 10 of 12.
         assert_eq!(
-            script_coverage(script, &heard("Era uma vez em 1969 uma sonda partiu e voltou")),
+            script_coverage(
+                script,
+                &heard("Era uma vez em 1969 uma sonda partiu e voltou")
+            ),
             833
         );
         // Words said in another order count only once in order.
-        assert!(script_coverage(script, &heard("voltou nunca e partiu ela sonda uma 1969 em vez uma era")) < 300);
-        assert_eq!(script_coverage(script, &heard("something else entirely")), 0);
+        assert!(
+            script_coverage(
+                script,
+                &heard("voltou nunca e partiu ela sonda uma 1969 em vez uma era")
+            ) < 300
+        );
+        assert_eq!(
+            script_coverage(script, &heard("something else entirely")),
+            0
+        );
         assert_eq!(script_coverage(script, &[]), 0);
         assert_eq!(script_coverage("…", &[]), 1000);
         // A provider that hears several words as one entry still counts.
@@ -889,7 +971,9 @@ mod tests {
 
     #[test]
     fn a_boundary_moves_to_the_previous_or_next_cut_point() {
-        let text = sentences(6, 20);
+        // Six sentences of 12 words at 0.5 s: 6 s each, a 0.3 s pause
+        // after word 5. Four sentences fit in one take, two in the next.
+        let text = sentences(6, 12);
         let words = timed(&text, 0.4, 0.1, &[(5, 0.3)]);
         let source = TakeSource {
             text: &text,
@@ -897,37 +981,57 @@ mod tests {
             duration: words.last().unwrap().end,
         };
         let mut takes = Takes::split(&source);
-        let before = takes.as_slice()[0].words.clone();
-        assert_eq!(before, 0..40);
+        let ranges = |takes: &Takes| {
+            takes
+                .as_slice()
+                .iter()
+                .map(|take| take.words.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ranges(&takes), [0..48, 48..72]);
 
         takes
             .move_boundary(&source, 0, BoundaryMove::Earlier)
             .unwrap();
-        // Back one sentence, to the end of word 19.
-        assert_eq!(takes.as_slice()[0].words, 0..20);
-        assert_eq!(takes.as_slice()[1].words.start, 20);
+        // Back one sentence, to the end of word 35.
+        assert_eq!(ranges(&takes), [0..36, 36..72]);
         assert_eq!(takes.as_slice()[0].revision, 2);
         assert_eq!(takes.as_slice()[1].revision, 2);
-        assert_eq!(takes.as_slice()[2].revision, 1, "others are untouched");
         assert_eq!(takes.as_slice()[0].end, takes.as_slice()[1].start);
-
-        // Then to the pause after word 5.
         takes
             .move_boundary(&source, 0, BoundaryMove::Earlier)
             .unwrap();
-        assert_eq!(takes.as_slice()[0].words, 0..6);
+        assert_eq!(ranges(&takes), [0..24, 24..72]);
+
+        takes
+            .move_boundary(&source, 0, BoundaryMove::Earlier)
+            .unwrap();
+        assert_eq!(ranges(&takes), [0..12, 12..72]);
+
+        // Not to the pause after word 5: the first take would be under 4
+        // seconds and the second over 30.
         assert_eq!(
             takes.move_boundary(&source, 0, BoundaryMove::Earlier),
             Err(BoundaryError::NoCutPoint)
         );
-        takes.move_boundary(&source, 0, BoundaryMove::Later).unwrap();
-        assert_eq!(takes.as_slice()[0].words, 0..20);
+        assert_eq!(ranges(&takes), [0..12, 12..72], "unchanged");
+
+        for _ in 0..3 {
+            takes
+                .move_boundary(&source, 0, BoundaryMove::Later)
+                .unwrap();
+        }
+        assert_eq!(ranges(&takes), [0..48, 48..72]);
+        // Five sentences are over 30 seconds.
         assert_eq!(
-            takes.move_boundary(&source, 2, BoundaryMove::Later),
+            takes.move_boundary(&source, 0, BoundaryMove::Later),
+            Err(BoundaryError::NoCutPoint)
+        );
+        assert_eq!(
+            takes.move_boundary(&source, 1, BoundaryMove::Later),
             Err(BoundaryError::NoSuchBoundary)
         );
-        let words_left: usize = takes.as_slice().iter().map(|t| t.words.len()).sum();
-        assert_eq!(words_left, words.len());
+        assert!(takes.as_slice().iter().all(|take| take.flag().is_none()));
     }
 
     #[test]

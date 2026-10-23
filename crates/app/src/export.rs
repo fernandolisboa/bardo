@@ -22,8 +22,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, CaptureVoice, Cost, CostPurpose, Export, ExportFiles, ExportRepository, Generation, GenerationId,
-    Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
+    ApiKey, CaptureVoice, Cost, CostPurpose, Export, ExportFiles, ExportRepository, Generation,
+    GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
     NarrationSource, Network, NetworkAccount, NetworkAccountId, Post, ProfileId, Progress,
     ProjectFiles, Provider, Render, RenderId, RenderRepository, RenderedPrompt, RepositoryError,
     SecretStore, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,

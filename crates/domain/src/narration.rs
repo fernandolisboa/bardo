@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    Alignment, CaptureVoice, GenerationPresets, JobId, ProfileId, Provider, RepositoryError, Script, ScriptText,
-    VideoProjectId, VoiceRef,
+    Alignment, CaptureVoice, GenerationPresets, JobId, ProfileId, Provider, RepositoryError,
+    Script, ScriptText, VideoProjectId, VoiceRef,
 };
 
 uuid_id!(

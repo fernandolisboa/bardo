@@ -189,7 +189,10 @@ fn changes_the_voice_with_the_personas_presets_but_never_its_speed() {
         b"name=\"audio\"; filename=\"capture.part001.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
     ));
     assert!(contains(body, AUDIO));
-    assert!(contains(body, &field("model_id", "eleven_multilingual_sts_v2")));
+    assert!(contains(
+        body,
+        &field("model_id", "eleven_multilingual_sts_v2")
+    ));
     assert!(contains(body, &field("remove_background_noise", "true")));
     let settings = String::from_utf8_lossy(body);
     let settings = settings
@@ -213,7 +216,10 @@ fn changes_the_voice_with_the_personas_presets_but_never_its_speed() {
 fn voice_change_failures_say_why() {
     for (name, kind) in [
         ("voice-changer-rejected", ProviderFailureKind::Rejected),
-        ("voice-changer-voice-not-found", ProviderFailureKind::Unexpected),
+        (
+            "voice-changer-voice-not-found",
+            ProviderFailureKind::Unexpected,
+        ),
         ("voice-changer-empty", ProviderFailureKind::Unexpected),
         ("isolation-missing-file", ProviderFailureKind::Unexpected),
     ] {

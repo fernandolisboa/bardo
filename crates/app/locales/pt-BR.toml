@@ -313,6 +313,7 @@ off_script = "A gravação não segue o roteiro de perto o bastante. Grave de no
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
 not_started = "Não foi possível iniciar a tarefa. Tente de novo."
 runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
+superseded = "Uma narração mais nova deste projeto substituiu esta importação, então ela não roda de novo."
 
 [setup]
 step_by_step = "Passo a passo"
@@ -603,13 +604,13 @@ recording_too_large = "O arquivo passa de 500 MB. Exporte em MP3 e importe de no
 [capture]
 import = "Importar captura"
 import_dialog = "Importar captura"
-import_hint = "Gravou você mesmo lendo o roteiro diante da câmera? Importe o MP4 ou MOV. A fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas."
+import_hint = "Você se gravou lendo o roteiro diante da câmera? Importe o MP4 ou MOV. A fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas."
 chosen = "{file}: {size}, {fps} fps, {length}."
 voice = "Voz"
-voice_persona = "Voz de {persona} ({voice})"
+voice_persona = "A voz da persona: {voice}, de {persona}"
 voice_own = "Minha própria voz, limpa de música e ruído do ambiente"
 voice_own_short = "Minha própria voz"
-confirm = "Esta gravação mostra só a mim."
+confirm = "Só eu apareço nesta gravação."
 steps = "A ElevenLabs confere se a fala segue o roteiro antes de dar a voz, depois marca o tempo das palavras. Só o som sai deste computador."
 use = "Importar esta captura"
 running = "Conferindo sua gravação com o roteiro…"
@@ -624,18 +625,22 @@ take = "Tomada {n}"
 take_span = "{start} a {end} · {length}"
 take_ok = "Pronta"
 take_too_long = "Passa de 30 segundos sem pausa para cortar. Grave esta fala de novo com uma pausa."
-take_too_short = "Menos de 4 segundos. Mova um corte para aumentá-la."
+take_too_short = "Menos de 4 segundos, sem uma tomada vizinha a que possa se juntar."
 cut_earlier = "Cortar antes"
 cut_later = "Cortar depois"
 stale = "O roteiro mudou depois desta captura. Grave de novo com o roteiro atual e importe."
 remove = "Remover captura"
 remove_hint = "Remove a gravação e suas tomadas do projeto. A narração fica."
+remove_confirm = "Remover a gravação e suas tomadas? A narração fica; para ter as tomadas de volta, importe a gravação de novo."
+remove_keep = "Manter"
+take_flagged = "A corrigir"
+voice_persona_none = "A voz da persona"
 
 [capture.error]
 no_persona = "Nenhuma persona dá voz a este projeto: escolha um narrador para ele, ou uma persona padrão para o canal. Ou use a sua própria voz."
 not_confirmed = "Confirme que a gravação mostra só você para importá-la."
 missing = "Este projeto não tem captura."
-no_cut_point = "Não há fim de frase ou pausa para onde mover o corte nesse sentido."
+no_cut_point = "Não há fim de frase ou pausa nesse sentido que deixe as duas tomadas entre 4 e 30 segundos."
 not_saved = "Não foi possível salvar a captura. Tente de novo."
 
 [capture.problem]
@@ -644,7 +649,7 @@ no_video = "O arquivo não tem imagem que o Bardo consiga ler. Importe um vídeo
 no_audio = "O arquivo não tem som. Grave de novo com o microfone ligado."
 too_short = "A gravação tem menos de 4 segundos."
 too_long = "A gravação passa de 15 minutos. Divida o roteiro em vídeos mais curtos."
-frame_rate = "Grave a 24 até 60 quadros por segundo."
+frame_rate = "Grave entre 24 e 60 quadros por segundo."
 too_small = "Grave em 720p ou mais."
 
 [scenes]
@@ -2486,7 +2491,7 @@ body = "Gravou o roteiro você mesmo? Importe em MP3 ou WAV, e a ElevenLabs marc
 
 [tour.narration.capture]
 title = "Importe uma captura"
-body = "Gravou você mesmo lendo o roteiro diante da câmera? Importe o vídeo: a fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas."
+body = "Você se gravou lendo o roteiro diante da câmera? Importe o vídeo: a fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas."
 
 [tour.capture]
 name = "Tour da captura"

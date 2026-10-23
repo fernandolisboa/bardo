@@ -63,18 +63,19 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AgentTask, BackupStore, CaptureRepository, ChannelRepository, ChapterRepository, ClipGenerator, ConnectionSecrets,
-    ConsentReceiver, CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles,
-    ExportRepository, ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId,
-    LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
+    AgentTask, BackupStore, CaptureRepository, ChannelRepository, ChapterRepository, ClipGenerator,
+    ConnectionSecrets, ConsentReceiver, CostRepository, CutSuggestionRepository, DecisionEngine,
+    ExportFiles, ExportRepository, ImageGenerator, InsightsReader, JobRepository, KeyChecker,
+    LayoutId, LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
     MusicPromptRepository, MusicTrackRepository, NarrationRepository, NetworkAccountRepository,
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
     Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
-    SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber, TemplateRepository, TextGenerator,
-    ThemeRepository, ThumbnailRepository, TimelineRepository, TourProgressRepository, UiLanguage,
-    UiThemePreference, UserProfile, VideoStats, VideoUploader, VoiceChanger, VoiceIsolator, VoiceLibrary,
-    VoicePreviews, VoiceSampleStore, YouTubeDataStore, Zone, running_since,
+    SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber, TemplateRepository,
+    TextGenerator, ThemeRepository, ThumbnailRepository, TimelineRepository,
+    TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
+    VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
+    Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -97,9 +98,7 @@ pub use backup::{
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look, highlight_colour};
-pub use captures::{
-    CaptureError, CaptureReader, CaptureVoiceChoice, ChosenCapture, take_source,
-};
+pub use captures::{CaptureError, CaptureReader, CaptureVoiceChoice, ChosenCapture, take_source};
 pub use channels::ChannelError;
 pub use chapters::{ChapterRow, ChaptersError, ChaptersView};
 pub use clips::{ClipsView, SceneClipView};
@@ -2276,9 +2275,9 @@ pub(crate) mod testing {
             speech: Arc::new(FakeSpeech::default()),
             previews: Arc::new(NoPreviews),
             aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
-                transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
-                voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
-                voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
+            transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
+            voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
+            voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
             images: Arc::new(FakeImages::default()),
             music: Arc::new(FakeMusic::default()),
             clips: vec![Arc::new(FakeClips::default())],

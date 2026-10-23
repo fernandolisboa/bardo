@@ -134,9 +134,7 @@ fn wav_layout(bytes: &[u8]) -> Result<WavLayout, ProbeError> {
                 if !WAV_FORMATS.contains(&format) || rate == 0 || align == 0 {
                     return Err(ProbeError::UnsupportedFormat);
                 }
-                let end = body
-                    .saturating_add(size as usize)
-                    .min(bytes.len());
+                let end = body.saturating_add(size as usize).min(bytes.len());
                 block = Some((at..end, rate, align));
             }
             b"data" => {

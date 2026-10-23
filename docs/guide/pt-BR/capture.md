@@ -13,14 +13,14 @@ Uma captura é uma gravação sua lendo o roteiro do projeto diante da câmera. 
 <a id="record"></a>
 ## Gravar
 
-Grave você lendo o roteiro atual como está escrito, sozinho na imagem, com o rosto iluminado e o microfone perto. O Bardo importa arquivos MP4 ou MOV de 4 segundos a 15 minutos, a 24 até 60 quadros por segundo e em 720p ou mais; um celular na vertical ou uma webcam bastam. Faça uma pausa curta entre as frases: as tomadas são cortadas em fins de frase e pausas.
+Grave-se lendo o roteiro atual como está escrito, sozinho na imagem, com o rosto iluminado e o microfone perto. O Bardo importa arquivos MP4 ou MOV de 4 segundos a 15 minutos, de 24 a 60 quadros por segundo e em 720p ou mais; um celular na vertical ou uma webcam bastam. Faça uma pausa curta entre as frases: as tomadas são cortadas em fins de frase e pausas.
 
 Grave só você. O Bardo importa uma captura só depois que você confirma que a gravação mostra só você, e nunca importa a partir de um link.
 
 <a id="import"></a>
 ## Importar
 
-Na etapa [Narração](bardo:go/projects/narration), **Importar captura** abre a escolha de arquivo. O Bardo lê o arquivo primeiro e mostra tamanho, quadros por segundo e duração, ou por que ele não pode ser uma captura. Depois escolha a voz, marque **Esta gravação mostra só a mim.** e confira a estimativa: a conferência do roteiro, a voz e o tempo das palavras são cobrados por hora de som pela ElevenLabs. **Importar esta captura** roda como uma tarefa; é preciso uma chave da ElevenLabs ([Suas chaves de API](api-keys.md#providers)).
+Na etapa [Narração](bardo:go/projects/narration), **Importar captura** abre a escolha de arquivo. O Bardo lê o arquivo primeiro e mostra tamanho, quadros por segundo e duração, ou por que ele não pode ser uma captura. Depois escolha a voz, marque **Só eu apareço nesta gravação.** e confira a estimativa: a conferência do roteiro, a voz e o tempo das palavras são cobrados por hora de som pela ElevenLabs. **Importar esta captura** roda como uma tarefa; é preciso uma chave da ElevenLabs ([Suas chaves de API](api-keys.md#providers)).
 
 A captura substitui a narração atual quando termina. Gerar ou importar outra narração depois remove a captura.
 
@@ -36,7 +36,7 @@ Só o som da gravação vai para a ElevenLabs; o vídeo fica na pasta do projeto
 <a id="check"></a>
 ## Conferir se segue o roteiro
 
-Antes de pagar pela voz, a ElevenLabs transcreve o som e o Bardo confere se ele diz pelo menos 80% do roteiro na ordem. Uma gravação que não diz para com **Não segue o roteiro**, tendo pago só a transcrição. Grave de novo lendo o roteiro atual e importe o novo arquivo.
+Antes de pagar pela voz, a ElevenLabs transcreve o som e o Bardo confere se ele diz pelo menos 80% do roteiro na ordem, e se pelo menos 80% do que ele diz é o roteiro. Uma gravação que não diz para dizendo que a gravação não segue o roteiro de perto o bastante, tendo pago só a transcrição. Grave de novo lendo o roteiro atual e importe o novo arquivo.
 
 <a id="takes"></a>
 ## Tomadas
@@ -48,7 +48,7 @@ Uma tomada que não pode virar clipe interpretado diz por quê: **Passa de 30 se
 <a id="cuts"></a>
 ## Mover um corte
 
-**Cortar antes** e **Cortar depois** movem o corte entre uma tomada e a seguinte para o fim de frase ou a pausa anterior ou seguinte. As duas tomadas mudam, e o que foi feito do trecho antigo delas aparece como desatualizado.
+**Cortar antes** e **Cortar depois** movem o corte entre uma tomada e a seguinte para o fim de frase ou a pausa mais próxima, antes ou depois, que deixe as duas tomadas com 4 a 30 segundos. As duas tomadas mudam, e o que foi feito do trecho antigo delas aparece como desatualizado.
 
 <a id="stale"></a>
 ## Desatualizada
@@ -58,4 +58,4 @@ Quando o roteiro muda depois da captura, a narração dela fica desatualizada, e
 <a id="remove"></a>
 ## Remover
 
-**Remover captura** tira a gravação e suas tomadas do projeto. A narração feita com ela fica.
+**Remover captura** tira a gravação e suas tomadas do projeto. A narração feita com ela fica. O Bardo pergunta uma vez antes; para ter as tomadas de volta, importe a gravação de novo.
