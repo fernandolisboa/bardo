@@ -265,7 +265,6 @@ fn cancel_during_second(
         .cancel_job(job)
         .map_err(|error| anyhow!("cancelling: {error:?}"))?;
     let stopped = wait_for(bardo, job)?;
-    // The render removes its partial file after the job reads cancelled.
     wait_for_handler(bardo, job)?;
     let at_cancel = renders(bardo, project)?;
     let files = folder_files(bardo, project)?;

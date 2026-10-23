@@ -276,8 +276,8 @@ fn partial_path(destination: &Path) -> PathBuf {
     destination.with_file_name(format!("{stem}.partial{extension}"))
 }
 
-/// Tries at removing a cancelled or failed run's partial file, a tenth of
-/// a second apart: about a second in all.
+/// Attempts at removing a cancelled or failed run's partial file, a tenth
+/// of a second apart: about a second in all.
 const PARTIAL_REMOVAL_ATTEMPTS: u32 = 10;
 const PARTIAL_REMOVAL_PAUSE: Duration = Duration::from_millis(100);
 
