@@ -1099,30 +1099,31 @@ impl EditorScreen {
                         Text::EditorMediaImportFailed,
                         &[("file", file), ("reason", &bardo.text(*reason))],
                     )))
-            }))
-            // Only once the narration has performed clips.
-            .children(view.filter(|view| view.has_performed).map(|view| {
-                let on = view.performed_in_rough_cut;
-                let click: Click = Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
-                    this.set_performed_in_rough_cut(!on, cx)
-                });
-                v_flex()
-                    .gap_1()
-                    .pt_1()
-                    .child(self.switch(
-                        "media-performed-rough-cut",
-                        tr(bardo, Text::EditorMediaPerformedRoughCut),
-                        on,
-                        click,
-                        cx,
-                    ))
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(color(TEXT_3))
-                            .child(tr(bardo, Text::EditorMediaPerformedRoughCutHint)),
-                    )
             }));
+        // Only once the narration has performed clips; it scrolls with the
+        // files, so a short window still shows them.
+        let performed_switch = view.filter(|view| view.has_performed).map(|view| {
+            let on = view.performed_in_rough_cut;
+            let click: Click = Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                this.set_performed_in_rough_cut(!on, cx)
+            });
+            v_flex()
+                .gap_1()
+                .p_2()
+                .child(self.switch(
+                    "media-performed-rough-cut",
+                    tr(bardo, Text::EditorMediaPerformedRoughCut),
+                    on,
+                    click,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(color(TEXT_3))
+                        .child(tr(bardo, Text::EditorMediaPerformedRoughCutHint)),
+                )
+        });
         let media = view.map_or(&[][..], |view| view.media.as_slice());
         let rows: Vec<AnyElement> = media
             .iter()
@@ -1260,6 +1261,7 @@ impl EditorScreen {
                     .overflow_y_scroll()
                     .p_2()
                     .gap_1()
+                    .children(performed_switch)
                     .children(empty)
                     .children(rows)
                     .when(!media.is_empty(), |list| {
