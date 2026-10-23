@@ -66,6 +66,10 @@ The words Bardo uses, in plain terms.
 
 **Take analysis**: the face mesh of every take, and the depth and person mask of a take in Depth mode, worked out on your computer, free, with the checks it found.
 
+**Control video**: what a take's model receives for it, built on your computer, free: the take in its mode, with its stretch of the narration. You watch it and approve it before anything is paid for the take.
+
+**Set**: where you appear in a Depth take: your room as recorded, a scene image of the project, or a picture of yours.
+
 **Scene plan**: the narration split into scenes, each with an image prompt.
 
 **Scene**: a stretch of the narration with one image, and optionally a clip.

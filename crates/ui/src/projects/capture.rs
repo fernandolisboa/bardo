@@ -5,15 +5,17 @@
 //! word that the recording shows only them. The takes and their cuts come
 //! from `bardo_app`; this view lays them out the same in every layout.
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
-    AnalysisPart, BoundaryMove, Capture, CaptureVoice, Device, Narration, TakeChecks, TakeFlag,
-    TakeMode,
+    AnalysisPart, ApprovalBlock, BoundaryMove, Capture, CaptureVoice, Device, Narration, SetSource,
+    TakeChecks, TakeFlag, TakeMode, TakeSet,
 };
 use bardo_app::{
     AnalysisStatus, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
-    SpendEstimate, TakeAnalysisView, Text, TourAnchor, take_source,
+    ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SpendEstimate, TakeAnalysisView,
+    Text, TourAnchor, take_source,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -24,7 +26,10 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, PathPromptOptions, SharedString, Task, Window, div};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, ImageSource, ObjectFit, PathPromptOptions, RenderImage,
+    SharedString, Task, Window, div, img, px,
+};
 
 use super::{ProjectsScreen, clock};
 use crate::appearance::look;
@@ -49,6 +54,19 @@ pub(super) struct CaptureImport {
     pub(super) error: Option<Text>,
     /// Whether Remove capture waits for the user to confirm it.
     pub(super) confirm_remove: bool,
+    /// A take's control video being watched.
+    pub(super) watching: Option<Watching>,
+    /// The take whose scene images are offered as its set.
+    pub(super) scene_picker: Option<usize>,
+    /// Choosing a set picture; dropping it stops waiting.
+    pub(super) choosing_set: Option<Task<()>>,
+}
+
+/// A take's control video in its player, with the picture showing.
+pub(super) struct Watching {
+    pub(super) take: usize,
+    pub(super) player: ControlPlayer,
+    pub(super) frame: Option<Arc<RenderImage>>,
 }
 
 impl Default for CaptureImport {
@@ -62,6 +80,9 @@ impl Default for CaptureImport {
             ask: None,
             error: None,
             confirm_remove: false,
+            watching: None,
+            scene_picker: None,
+            choosing_set: None,
         }
     }
 }
@@ -273,6 +294,175 @@ impl ProjectsScreen {
             .map(|error| error.message());
         self.load(window, cx);
         cx.notify();
+    }
+
+    fn build_control(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.capture.error = self
+            .bardo
+            .read(cx)
+            .build_control_video(id, index)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn stop_control(&mut self, job: bardo_app::bardo_domain::JobId, cx: &mut Context<Self>) {
+        // A job that already ended has nothing to stop.
+        let _ = self.bardo.read(cx).cancel_job(job);
+        cx.notify();
+    }
+
+    fn approve_control(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.capture.error = self
+            .bardo
+            .read(cx)
+            .approve_control_video(id, index)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    fn set_take_set(
+        &mut self,
+        index: usize,
+        choice: SetChoice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.project else {
+            return;
+        };
+        self.capture.scene_picker = None;
+        self.close_control(index, window, cx);
+        self.capture.error = self
+            .bardo
+            .read(cx)
+            .set_take_set(id, index, choice)
+            .err()
+            .map(|error| error.message());
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// Asks for a PNG or JPEG to be take `index`'s set.
+    fn choose_set_picture(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.capture.scene_picker = None;
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr(self.bardo.read(cx), Text::SetImportDialog)),
+        });
+        self.capture.choosing_set = Some(cx.spawn(async move |this, cx| {
+            let (path, failed) = match chosen.await {
+                Ok(Ok(Some(paths))) => (paths.into_iter().next(), false),
+                Ok(Err(_)) => (None, true),
+                Ok(Ok(None)) | Err(_) => (None, false),
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.capture.choosing_set = None;
+                match path {
+                    Some(path) => this.set_take_set(index, SetChoice::Picture(path), window, cx),
+                    None if failed => this.capture.error = Some(Text::FileDialogFailed),
+                    None => {}
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Plays take `index`'s control video, or stops it.
+    fn toggle_control(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        if let Some(watching) = self
+            .capture
+            .watching
+            .as_mut()
+            .filter(|watching| watching.take == index)
+        {
+            watching.player.toggle();
+            cx.notify();
+            return;
+        }
+        self.close_control(usize::MAX, window, cx);
+        match self.bardo.read(cx).control_player(id, index) {
+            Ok(mut player) => {
+                player.play();
+                self.capture.watching = Some(Watching {
+                    take: index,
+                    player,
+                    frame: None,
+                });
+            }
+            Err(error) => self.capture.error = Some(error.message()),
+        }
+        cx.notify();
+    }
+
+    /// Closes the player, unless it is take `keep`'s, freeing its picture.
+    pub(super) fn close_control(
+        &mut self,
+        keep: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .capture
+            .watching
+            .as_ref()
+            .is_some_and(|watching| watching.take != keep)
+            && let Some(watching) = self.capture.watching.take()
+            && let Some(frame) = watching.frame
+        {
+            cx.drop_image(frame, Some(window));
+        }
+    }
+
+    /// Moves the control video player on and swaps in a new picture when
+    /// one is due. A player whose take was built again since closes.
+    pub(super) fn advance_control(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(watching) = self.capture.watching.as_ref() else {
+            return;
+        };
+        let current = self
+            .narration
+            .as_ref()
+            .and_then(|view| view.controls.get(watching.take))
+            .and_then(|view| view.built.as_ref())
+            .is_some_and(|built| {
+                self.bardo.read(cx).control_video_path(built) == watching.player.path()
+            });
+        if !current {
+            self.close_control(usize::MAX, window, cx);
+            return;
+        }
+        let Some(watching) = self.capture.watching.as_mut() else {
+            return;
+        };
+        if !watching.player.needs_ticks() {
+            return;
+        }
+        if let Some(frame) = watching.player.tick(Instant::now()) {
+            let size = frame.size;
+            // RenderImage holds BGRA in an RGBA-typed buffer; no swizzle.
+            if let Some(buffer) = image::RgbaImage::from_raw(size.width, size.height, frame.bgra) {
+                let next = Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+                if let Some(old) = watching.frame.replace(next) {
+                    cx.drop_image(old, Some(window));
+                }
+            }
+        }
+        window.request_animation_frame();
     }
 
     fn remove_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -638,6 +828,14 @@ impl ProjectsScreen {
             .enumerate()
             .map(|(index, analysis)| Some(self.render_take_analysis(index, analysis, cx)))
             .collect();
+        let mut controls: Vec<Option<AnyElement>> = self
+            .narration
+            .as_ref()
+            .map_or(&[][..], |view| view.controls.as_slice())
+            .iter()
+            .enumerate()
+            .map(|(index, control)| Some(self.render_take_control(index, control, cx)))
+            .collect();
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
         let source = take_source(narration);
@@ -741,6 +939,18 @@ impl ProjectsScreen {
                             lines,
                         ))
                 }
+                None => row,
+            };
+            let row = match controls.get_mut(index).and_then(Option::take) {
+                Some(control) if index == 0 => row.child(
+                    kit::anchor_in(
+                        TourAnchor::Control(Control::CaptureControl),
+                        control,
+                        Some(&self.page_scroll),
+                    )
+                    .into_any_element(),
+                ),
+                Some(control) => row.child(control),
                 None => row,
             };
             list = list.child(row);
@@ -945,6 +1155,354 @@ impl ProjectsScreen {
             lines = lines.child(self.render_checks(&checks, cx));
         }
         (mode, lines.into_any_element())
+    }
+
+    /// A take's control video: where its build is, the set in Depth mode,
+    /// what leaves the computer, its player and Approve.
+    fn render_take_control(
+        &self,
+        index: usize,
+        view: &ControlVideoView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let set = (view.mode == TakeMode::Depth).then(|| self.render_take_set(index, view, cx));
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let small = |text: SharedString| div().text_xs().child(text);
+        let mut section = v_flex().gap_1().pt_1().child(
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_medium()
+                        .child(tr(bardo, Text::ControlTitle)),
+                )
+                .when(index == 0, |row| {
+                    row.child(guide::info(
+                        bardo,
+                        "capture-control-info",
+                        tr(bardo, Text::ControlHint),
+                        guide::refs::CAPTURE_CONTROL,
+                    ))
+                }),
+        );
+
+        if let Some(set) = set {
+            section = section.child(set);
+        }
+
+        // Where the build is, with what starts or stops it.
+        let (text, button, running): (String, Option<Text>, bool) = match &view.status {
+            ControlStatus::Waiting => (bardo.text(Text::ControlWaiting).into_owned(), None, false),
+            ControlStatus::NotBuilt => (
+                bardo.text(Text::ControlNotBuilt).into_owned(),
+                Some(Text::ControlBuild),
+                false,
+            ),
+            ControlStatus::Queued => (bardo.text(Text::ControlQueued).into_owned(), None, true),
+            ControlStatus::Building { progress } => (
+                bardo.text_with(
+                    Text::ControlBuilding,
+                    &[("percent", &progress.percent().to_string())],
+                ),
+                None,
+                true,
+            ),
+            ControlStatus::Cancelled => (
+                bardo.text(Text::ControlCancelled).into_owned(),
+                Some(Text::ControlBuildAgain),
+                false,
+            ),
+            ControlStatus::Failed { kind } => (
+                format!(
+                    "{} {}",
+                    bardo.text(Text::ControlFailed),
+                    bardo.text(Text::JobFailureKindName(*kind))
+                ),
+                Some(Text::ControlBuildAgain),
+                false,
+            ),
+            ControlStatus::Ready { .. } => {
+                let built = view.built.as_ref();
+                let megabytes = built.map_or(0.0, |b| b.bytes as f64 / 1_000_000.0);
+                let length = self
+                    .narration
+                    .as_ref()
+                    .and_then(|n| n.capture.as_ref())
+                    .and_then(|c| c.takes.as_slice().get(index))
+                    .map_or(Duration::ZERO, |take| take.length());
+                (
+                    bardo.text_with(
+                        Text::ControlReady,
+                        &[
+                            ("length", &format!("{:.1} s", length.as_secs_f64())),
+                            ("size", &format!("{megabytes:.1}")),
+                        ],
+                    ),
+                    None,
+                    false,
+                )
+            }
+        };
+        let job = view.job;
+        section = section.child(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .flex_wrap()
+                .when(running, |line| line.child(Spinner::new().xsmall()))
+                .child(small(SharedString::from(text)))
+                .when_some(button, |line, label| {
+                    line.child(
+                        Button::new(("control-build", index))
+                            .ghost()
+                            .xsmall()
+                            .label(tr(bardo, label))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.build_control(index, window, cx)
+                            })),
+                    )
+                })
+                .when_some(job.filter(|_| running), |line, job| {
+                    line.child(
+                        Button::new(("control-stop", index))
+                            .ghost()
+                            .xsmall()
+                            .label(tr(bardo, Text::ControlStopBuild))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.stop_control(job, cx)
+                            })),
+                    )
+                }),
+        );
+
+        // What leaves the computer with it.
+        section =
+            section.child(small(tr(bardo, Text::ControlOutbound(view.outbound))).text_color(muted));
+        if view.outbound.sends_set_frame() {
+            section = section.child(small(tr(bardo, Text::ControlSetFrame)).text_color(muted));
+        }
+        if view.approval_lost && !view.is_approved() {
+            section = section.child(kit::notice(
+                Tone::Warning,
+                tr(bardo, Text::ControlApprovalLost),
+                cx,
+            ));
+        }
+        if let Some(built) = view.built.as_ref().filter(|b| b.uncovered > 0) {
+            section = section.child(kit::notice(
+                Tone::Warning,
+                SharedString::from(bardo.text_with(
+                    Text::ControlUncovered,
+                    &[
+                        ("n", &built.uncovered.to_string()),
+                        ("frames", &built.frames.to_string()),
+                    ],
+                )),
+                cx,
+            ));
+        }
+        if let Some(ApprovalBlock::Length(_)) = view.block {
+            section = section.child(kit::notice(
+                Tone::Danger,
+                tr(bardo, Text::ControlLengthBlocked),
+                cx,
+            ));
+        }
+
+        if let ControlStatus::Ready { approved } = view.status {
+            let watching = self
+                .capture
+                .watching
+                .as_ref()
+                .filter(|watching| watching.take == index);
+            if let Some(watching) = watching {
+                let size = watching.player.size();
+                // Upright or wide, at most 180 px high.
+                let height = 180.0_f32;
+                let width = height * size.width as f32 / size.height.max(1) as f32;
+                let picture = div()
+                    .w(px(width))
+                    .h(px(height))
+                    .max_w_full()
+                    .bg(gpui_kit::black())
+                    .rounded_md()
+                    .overflow_hidden()
+                    .when_some(watching.frame.clone(), |frame, image| {
+                        frame.child(
+                            img(ImageSource::Render(image))
+                                .size_full()
+                                .object_fit(ObjectFit::Contain),
+                        )
+                    });
+                section = section.child(picture);
+                if let Some(error) = watching.player.error() {
+                    section = section.child(small(tr(bardo, *error)).text_color(muted));
+                }
+            }
+            let playing = watching.is_some_and(|watching| watching.player.is_playing());
+            let actions = h_flex()
+                .gap_2()
+                .items_center()
+                .flex_wrap()
+                .child(
+                    Button::new(("control-play", index))
+                        .outline()
+                        .xsmall()
+                        .label(tr(
+                            bardo,
+                            if playing {
+                                Text::ControlStopPlaying
+                            } else {
+                                Text::ControlPlay
+                            },
+                        ))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.toggle_control(index, window, cx)
+                        })),
+                )
+                .map(|row| {
+                    if approved {
+                        row.child(kit::status(
+                            Tone::Success,
+                            tr(bardo, Text::ControlApproved),
+                            cx,
+                        ))
+                    } else {
+                        row.child(
+                            Button::new(("control-approve", index))
+                                .primary()
+                                .xsmall()
+                                .label(tr(bardo, Text::ControlApprove))
+                                .disabled(!view.can_approve())
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.approve_control(index, window, cx)
+                                })),
+                        )
+                    }
+                })
+                .when(index == 0, |row| {
+                    row.child(guide::info(
+                        bardo,
+                        "capture-review-info",
+                        tr(bardo, Text::ControlHint),
+                        guide::refs::CAPTURE_REVIEW,
+                    ))
+                });
+            section = section.child(actions);
+        }
+        section.into_any_element()
+    }
+
+    /// A Depth take's set: the room, a scene image or a picture.
+    fn render_take_set(
+        &self,
+        index: usize,
+        view: &ControlVideoView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let muted = cx.theme().muted_foreground;
+        let picked = match &view.set {
+            TakeSet::Room => 0,
+            TakeSet::Image {
+                from: SetSource::Scene,
+                ..
+            } => 1,
+            TakeSet::Image {
+                from: SetSource::Imported,
+                ..
+            } => 2,
+        };
+        let choosing = self.capture.choosing_set.is_some();
+        let choices = ButtonGroup::new(("take-set", index))
+            .outline()
+            .xsmall()
+            .child(
+                Button::new("room")
+                    .label(tr(bardo, Text::SetRoom))
+                    .selected(picked == 0),
+            )
+            .child(
+                Button::new("scene")
+                    .label(tr(bardo, Text::SetSceneImage))
+                    .selected(picked == 1),
+            )
+            .child(
+                Button::new("picture")
+                    .label(tr(bardo, Text::SetImport))
+                    .selected(picked == 2)
+                    .disabled(choosing),
+            )
+            .on_click(cx.listener(move |this, clicked: &Vec<usize>, window, cx| {
+                match clicked.first() {
+                    Some(0) => this.set_take_set(index, SetChoice::Room, window, cx),
+                    Some(1) => {
+                        this.capture.scene_picker =
+                            (this.capture.scene_picker != Some(index)).then_some(index);
+                        cx.notify();
+                    }
+                    Some(2) => this.choose_set_picture(index, cx),
+                    _ => {}
+                }
+            }));
+        let mut set = v_flex().gap_1().child(
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(bardo, Text::SetLabel)),
+                )
+                .child(choices)
+                .when(index == 0, |row| {
+                    row.child(guide::info(
+                        bardo,
+                        "capture-set-info",
+                        tr(bardo, Text::SetHint),
+                        guide::refs::CAPTURE_SET,
+                    ))
+                }),
+        );
+        if self.capture.scene_picker == Some(index) {
+            let scenes = self
+                .project
+                .and_then(|project| bardo.set_scenes(project).ok())
+                .unwrap_or_default();
+            if scenes.is_empty() {
+                set = set.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(bardo, Text::SetNoScenes)),
+                );
+            } else {
+                let mut row = h_flex().gap_1().flex_wrap();
+                for scene in scenes {
+                    let file = scene.file.clone();
+                    row = row.child(
+                        Button::new(("set-scene", scene.number))
+                            .ghost()
+                            .xsmall()
+                            .label(SharedString::from(bardo.text_with(
+                                Text::SetSceneNumber,
+                                &[("n", &scene.number.to_string())],
+                            )))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.set_take_set(index, SetChoice::Scene(file.clone()), window, cx)
+                            })),
+                    );
+                }
+                set = set.child(row);
+            }
+        }
+        set.into_any_element()
     }
 
     /// What a take's analysis found, worst first.

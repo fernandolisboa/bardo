@@ -66,6 +66,10 @@ As palavras que o Bardo usa, em termos simples.
 
 **Análise da tomada**: a malha do rosto de toda tomada, e a profundidade e a máscara da pessoa de uma tomada no modo Profundidade, calculadas no seu computador, de graça, com as checagens que encontrou.
 
+**Vídeo de controle**: o que o modelo de uma tomada recebe dela, montado no seu computador, de graça: a tomada no modo dela, com o trecho da narração. Você assiste e aprova antes de qualquer coisa ser paga pela tomada.
+
+**Cenário**: onde você aparece numa tomada em Profundidade: o seu ambiente como gravado, uma imagem de cena do projeto ou uma imagem sua.
+
 **Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
 
 **Cena**: um trecho da narração com uma imagem e, se quiser, um clipe.

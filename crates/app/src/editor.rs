@@ -1898,9 +1898,10 @@ pub(crate) mod testing {
 
     use bardo_domain::{ProjectFiles, RgbFrame, VideoProjectId};
     use bardo_media::ffmpeg::{
-        Encoders, FrameSize, FrameSource, FrameStream, GrayDepth, GraySink, GraySource, Loudness,
-        LoudnessTarget, MediaError, MediaInfo, MemoryFrames, Monitor, Output, RenderPlan,
-        ThumbnailSpec, VideoEncoder, VideoFrame, Waveform,
+        ControlOutput, Encoders, FrameSink, FrameSize, FrameSource, FrameStream, GrayDepth,
+        GraySink, GraySource, Loudness, LoudnessTarget, MediaError, MediaInfo, MemoryFrames,
+        Monitor, Output, RenderPlan, ThumbnailSpec, VideoEncoder, VideoFrame, VideoStream,
+        VoiceCut, Waveform,
     };
     use bardo_media::{MediaEngine, PcmStream};
     use bardo_storage::MemoryProjectFiles;
@@ -1971,6 +1972,33 @@ pub(crate) mod testing {
         /// The stretches decoded for the take analysis: from, length and
         /// frame rate.
         pub(crate) decoded: Mutex<Vec<(Duration, Duration, u32)>>,
+        /// The size each gray file was written at, which probing it reads.
+        gray_sizes: Mutex<HashMap<PathBuf, (u32, u32)>>,
+        /// The stretches decoded for control videos.
+        pub(crate) control_decoded: Mutex<Vec<Decoded>>,
+        /// The control videos made, in order.
+        pub(crate) controls: Arc<Mutex<Vec<ControlCall>>>,
+        /// Holds control videos (they wait to be cancelled) while set.
+        pub(crate) control_hold: Arc<AtomicBool>,
+        /// The set pictures read.
+        pub(crate) covered: Mutex<Vec<PathBuf>>,
+    }
+
+    /// A stretch decoded for a control video: from, length, frame rate and
+    /// size.
+    pub(crate) type Decoded = (Duration, Duration, u32, (u32, u32));
+
+    /// One control video made.
+    #[derive(Debug, Clone)]
+    pub(crate) struct ControlCall {
+        pub(crate) destination: PathBuf,
+        pub(crate) output: ControlOutput,
+        pub(crate) voice: VoiceCut,
+        /// Cut from this recording (Recording mode), else drawn.
+        pub(crate) recording: Option<PathBuf>,
+        pub(crate) frames: u32,
+        /// The last frame written, RGBA.
+        pub(crate) last: Vec<u8>,
     }
 
     impl FakeMedia {
@@ -2004,6 +2032,18 @@ pub(crate) mod testing {
             Ok(())
         }
 
+        /// Fails an encoder set broken, as a hardware one on an old driver.
+        fn broken(&self, encoder: VideoEncoder) -> Result<(), MediaError> {
+            if self.broken_encoders.lock().unwrap().contains(&encoder) {
+                return Err(MediaError::Failed {
+                    program: "ffmpeg".into(),
+                    status: "exit status: 1".into(),
+                    log: "OpenEncodeSessionEx failed: unsupported device".into(),
+                });
+            }
+            Ok(())
+        }
+
         fn write(&self, destination: &Path) {
             self.built.lock().unwrap().push(destination.to_owned());
             let Some(files) = &self.files else { return };
@@ -2021,6 +2061,18 @@ pub(crate) mod testing {
         fn probe(&self, path: &Path) -> Result<MediaInfo, MediaError> {
             if self.not_found.load(Ordering::SeqCst) {
                 return Err(MediaError::NotFound { tried: Vec::new() });
+            }
+            if let Some(&(width, height)) = self.gray_sizes.lock().unwrap().get(path) {
+                return Ok(MediaInfo {
+                    duration: Duration::from_secs(1),
+                    video: Some(VideoStream {
+                        codec: "ffv1".into(),
+                        width,
+                        height,
+                        frame_rate: (30_000, 1001),
+                    }),
+                    audio: None,
+                });
             }
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             let contents = match &self.files {
@@ -2270,10 +2322,14 @@ pub(crate) mod testing {
         fn gray_writer(
             &self,
             destination: &Path,
-            _size: (u32, u32),
+            size: (u32, u32),
             _fps_milli: u32,
             _depth: GrayDepth,
         ) -> Result<Box<dyn GraySink>, MediaError> {
+            self.gray_sizes
+                .lock()
+                .unwrap()
+                .insert(destination.to_owned(), size);
             Ok(Box::new(RawGray {
                 destination: destination.to_owned(),
                 bytes: Vec::new(),
@@ -2296,6 +2352,124 @@ pub(crate) mod testing {
             Ok(Box::new(RawGrayFrames(
                 bytes.chunks(frame).map(<[u8]>::to_vec).collect(),
             )))
+        }
+
+        /// Black frames of `size`, as many as the stretch holds.
+        fn video_frames(
+            &self,
+            path: &Path,
+            from: Duration,
+            length: Duration,
+            fps_milli: u32,
+            size: (u32, u32),
+        ) -> Result<Box<dyn FrameSource>, MediaError> {
+            self.check(path)?;
+            self.control_decoded
+                .lock()
+                .unwrap()
+                .push((from, length, fps_milli, size));
+            let count = bardo_domain::take_frames(length, fps_milli);
+            Ok(Box::new(MemoryFrames(
+                (0..count)
+                    .map(|_| RgbFrame::black(size.0, size.1))
+                    .collect(),
+            )))
+        }
+
+        /// Counts the frames and writes the file once finished.
+        fn control_writer(
+            &self,
+            destination: &Path,
+            output: &ControlOutput,
+            voice: &VoiceCut,
+        ) -> Result<Box<dyn FrameSink>, MediaError> {
+            self.check(&voice.path)?;
+            self.broken(output.encoder)?;
+            Ok(Box::new(FakeControl {
+                call: ControlCall {
+                    destination: destination.to_owned(),
+                    output: *output,
+                    voice: voice.clone(),
+                    recording: None,
+                    frames: 0,
+                    last: Vec::new(),
+                },
+                hold: Arc::clone(&self.control_hold),
+                calls: Arc::clone(&self.controls),
+            }))
+        }
+
+        fn cut_recording(
+            &self,
+            source: &Path,
+            output: &ControlOutput,
+            voice: &VoiceCut,
+            destination: &Path,
+            monitor: &dyn Monitor,
+        ) -> Result<(), MediaError> {
+            self.check(source)?;
+            self.check(&voice.path)?;
+            self.broken(output.encoder)?;
+            while self.control_hold.load(Ordering::SeqCst) {
+                if monitor.should_stop() {
+                    return Err(MediaError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            monitor.progress(1.0);
+            let frames = bardo_domain::take_frames(voice.length, output.fps_milli);
+            std::fs::write(destination, format!("control {frames}"))?;
+            self.controls.lock().unwrap().push(ControlCall {
+                destination: destination.to_owned(),
+                output: *output,
+                voice: voice.clone(),
+                recording: Some(source.to_owned()),
+                frames,
+                last: Vec::new(),
+            });
+            Ok(())
+        }
+
+        /// A mid-gray picture of `size`, from any file that is there.
+        fn cover_picture(&self, path: &Path, size: (u32, u32)) -> Result<RgbFrame, MediaError> {
+            self.check(path)?;
+            std::fs::metadata(path)?;
+            self.covered.lock().unwrap().push(path.to_owned());
+            Ok(RgbFrame {
+                width: size.0,
+                height: size.1,
+                rgb: vec![128; size.0 as usize * size.1 as usize * 3],
+            })
+        }
+    }
+
+    /// A control video being written: its frames are counted.
+    struct FakeControl {
+        call: ControlCall,
+        hold: Arc<AtomicBool>,
+        calls: Arc<Mutex<Vec<ControlCall>>>,
+    }
+
+    impl FrameSink for FakeControl {
+        fn write(&mut self, frame: &[u8]) -> Result<(), MediaError> {
+            let (width, height) = self.call.output.size;
+            assert_eq!(frame.len(), width as usize * height as usize * 4);
+            while self.hold.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            self.call.frames += 1;
+            self.call.last.clear();
+            self.call.last.extend_from_slice(frame);
+            Ok(())
+        }
+
+        fn finish(self: Box<Self>) -> Result<(), MediaError> {
+            std::fs::write(
+                &self.call.destination,
+                format!("control {}", self.call.frames),
+            )?;
+            self.calls.lock().unwrap().push(self.call);
+            Ok(())
         }
     }
 

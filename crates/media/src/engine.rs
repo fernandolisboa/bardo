@@ -6,10 +6,12 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::PcmStream;
+use bardo_domain::RgbFrame;
+
 use crate::ffmpeg::{
-    Encoders, Ffmpeg, FrameSize, FrameSource, FrameStream, GrayDepth, GraySink, GraySource,
-    Loudness, LoudnessTarget, MediaError, MediaInfo, Monitor, Output, ProxySettings, RenderPlan,
-    ThumbnailSpec, Waveform,
+    ControlOutput, Encoders, Ffmpeg, FrameSink, FrameSize, FrameSource, FrameStream, GrayDepth,
+    GraySink, GraySource, Loudness, LoudnessTarget, MediaError, MediaInfo, Monitor, Output,
+    ProxySettings, RenderPlan, ThumbnailSpec, VoiceCut, Waveform,
 };
 
 /// The media work the editor and the render need: probing, proxies,
@@ -118,6 +120,40 @@ pub trait MediaEngine: Send + Sync {
         size: (u32, u32),
         depth: GrayDepth,
     ) -> Result<Box<dyn GraySource>, MediaError>;
+
+    /// The frames of the recording at `path` from `from` for `length`, at
+    /// a steady `fps_milli` thousandths a second, as RGB at `size` (#191).
+    fn video_frames(
+        &self,
+        path: &Path,
+        from: Duration,
+        length: Duration,
+        fps_milli: u32,
+        size: (u32, u32),
+    ) -> Result<Box<dyn FrameSource>, MediaError>;
+
+    /// Starts a control video at `destination` from RGBA frames, with
+    /// `voice` as its sound; the file is there once the sink finishes.
+    fn control_writer(
+        &self,
+        destination: &Path,
+        output: &ControlOutput,
+        voice: &VoiceCut,
+    ) -> Result<Box<dyn FrameSink>, MediaError>;
+
+    /// A Recording-mode control video: the stretch of `source` the voice
+    /// covers, scaled, with the voice for its sound.
+    fn cut_recording(
+        &self,
+        source: &Path,
+        output: &ControlOutput,
+        voice: &VoiceCut,
+        destination: &Path,
+        monitor: &dyn Monitor,
+    ) -> Result<(), MediaError>;
+
+    /// The picture at `path` scaled to cover `size` and centred, as RGB.
+    fn cover_picture(&self, path: &Path, size: (u32, u32)) -> Result<RgbFrame, MediaError>;
 }
 
 /// The bundled ffmpeg, located the first time it is needed. A failed
@@ -268,5 +304,42 @@ impl MediaEngine for BundledFfmpeg {
         depth: GrayDepth,
     ) -> Result<Box<dyn GraySource>, MediaError> {
         self.ffmpeg()?.gray_frames(path, size, depth)
+    }
+
+    fn video_frames(
+        &self,
+        path: &Path,
+        from: Duration,
+        length: Duration,
+        fps_milli: u32,
+        size: (u32, u32),
+    ) -> Result<Box<dyn FrameSource>, MediaError> {
+        self.ffmpeg()?
+            .video_frames(path, from, length, fps_milli, size)
+    }
+
+    fn control_writer(
+        &self,
+        destination: &Path,
+        output: &ControlOutput,
+        voice: &VoiceCut,
+    ) -> Result<Box<dyn FrameSink>, MediaError> {
+        self.ffmpeg()?.control_writer(destination, output, voice)
+    }
+
+    fn cut_recording(
+        &self,
+        source: &Path,
+        output: &ControlOutput,
+        voice: &VoiceCut,
+        destination: &Path,
+        monitor: &dyn Monitor,
+    ) -> Result<(), MediaError> {
+        self.ffmpeg()?
+            .cut_recording(source, output, voice, destination, monitor)
+    }
+
+    fn cover_picture(&self, path: &Path, size: (u32, u32)) -> Result<RgbFrame, MediaError> {
+        self.ffmpeg()?.cover_picture(path, size)
     }
 }

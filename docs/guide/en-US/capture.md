@@ -68,6 +68,29 @@ When a take's analysis is done, it says what it found, in frames:
 - **Head turned**: more than 45° away from the camera.
 - **Mask jumps** (Depth mode): the person mask changing by more than 20% from one frame to the next.
 
+<a id="control"></a>
+## The control video
+
+Each take has a control video: exactly what its take model will receive, built on this computer, free, as soon as the take's analysis is done. It is the take in its mode, with its stretch of the narration as its sound, as an MP4 that fits every take model: at most 1920 × 1080 (or 1080 × 1920 upright), never larger than the recording, and well under 100 MB. Recording keeps the recording's frame rate; Mesh and Depth are drawn on every analyzed frame.
+
+- **Recording** is the take's stretch of the recording as it is.
+- **Mesh** covers your face, frame by frame, with an oval filled in a dark slate and the mesh drawn over it: lips, eyes and eyebrows each in their own colour. A frame where no face was found borrows the nearest frame's face within half a second; longer gaps go as recorded, and the review counts them.
+- **Depth** draws you as a figure coloured by depth, near warm and far cool, inside your person mask, with the mesh lines over your face, over the [set](#set).
+
+Changing the take's mode or set, or moving a cut, builds it again. **Build again** starts one that failed or was stopped.
+
+<a id="review"></a>
+## Reviewing and approving
+
+Under the take, **Play** plays the control video with its sound, and a line says what leaves the computer with it: your face, body and room (Recording); your body and room, not your face (Mesh); or your build and facial geometry as a depth figure over your room or over the set image (Depth). When the set is your room, one frame of the take also goes to Claude to describe it when the take is generated.
+
+**Approve** says this take may go to its take model; nothing is paid for a take before you approve it. An approval holds for what you watched: changing the take's mode, set or cut, or its analysis running again, asks you to watch and approve the new build. A take with more than one face, or one no take model takes at its length, cannot be approved.
+
+<a id="set"></a>
+## The set
+
+In Depth mode, **Set** picks where you appear: **Your room**, as recorded; a **Scene image** of the project; or **Import image**, a PNG or JPEG of yours. The image is copied into the project folder, so the take keeps it whatever happens to the scene or the file. Over an image, nothing of the recording is decoded or leaves the computer.
+
 <a id="cuts"></a>
 ## Moving a cut
 

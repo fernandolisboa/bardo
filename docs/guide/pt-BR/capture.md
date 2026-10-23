@@ -68,6 +68,29 @@ Quando a análise de uma tomada termina, ela diz o que encontrou, em quadros:
 - **Cabeça virada**: mais de 45° de lado em relação à câmera.
 - **Saltos da máscara** (modo Profundidade): a máscara da pessoa mudando mais de 20% de um quadro para o seguinte.
 
+<a id="control"></a>
+## O vídeo de controle
+
+Cada tomada tem um vídeo de controle: exatamente o que o modelo de tomada vai receber, montado neste computador, de graça, assim que a análise da tomada termina. É a tomada no modo dela, com o trecho da narração como som, num MP4 que serve para todo modelo de tomada: no máximo 1920 × 1080 (ou 1080 × 1920 em pé), nunca maior que a gravação, e bem abaixo de 100 MB. Gravação mantém a taxa de quadros da gravação; Malha e Profundidade são desenhadas em cada quadro analisado.
+
+- **Gravação** é o trecho da gravação como está.
+- **Malha** cobre seu rosto, quadro a quadro, com um oval preenchido num cinza-ardósia escuro e a malha desenhada por cima: lábios, olhos e sobrancelhas cada um na sua cor. Um quadro em que não se achou rosto usa o rosto do quadro mais próximo dentro de meio segundo; lacunas maiores vão como gravadas, e a revisão as conta.
+- **Profundidade** desenha você como uma figura colorida pela profundidade, o perto quente e o longe frio, dentro da máscara da pessoa, com as linhas da malha sobre o rosto, sobre o [cenário](#set).
+
+Mudar o modo ou o cenário da tomada, ou mover um corte, monta de novo. **Montar de novo** inicia um que falhou ou foi interrompido.
+
+<a id="review"></a>
+## Revisar e aprovar
+
+Abaixo da tomada, **Reproduzir** toca o vídeo de controle com o som, e uma linha diz o que sai do computador com ele: seu rosto, corpo e ambiente (Gravação); seu corpo e ambiente, não o rosto (Malha); ou sua silhueta e a geometria do rosto como figura de profundidade sobre o seu ambiente ou sobre a imagem de cenário (Profundidade). Quando o cenário é o seu ambiente, um quadro da tomada também vai para o Claude descrevê-lo quando a tomada for gerada.
+
+**Aprovar** diz que esta tomada pode ir para o modelo de tomada; nada é pago por uma tomada antes da sua aprovação. A aprovação vale para o que você assistiu: mudar o modo, o cenário ou o corte da tomada, ou a análise dela rodar de novo, pede que você assista e aprove a nova montagem. Uma tomada com mais de um rosto, ou com uma duração que nenhum modelo de tomada aceita, não pode ser aprovada.
+
+<a id="set"></a>
+## O cenário
+
+No modo Profundidade, **Cenário** escolhe onde você aparece: **Seu ambiente**, como gravado; uma **Imagem de cena** do projeto; ou **Importar imagem**, um PNG ou JPEG seu. A imagem é copiada para a pasta do projeto, então a tomada a mantém aconteça o que acontecer com a cena ou o arquivo. Sobre uma imagem, nada da gravação é decodificado nem sai do computador.
+
 <a id="cuts"></a>
 ## Mover um corte
 

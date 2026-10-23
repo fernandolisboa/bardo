@@ -49,6 +49,7 @@ mod channel;
 mod chapters;
 mod clip;
 mod connection;
+mod control_video;
 mod cost;
 mod cut_retention;
 mod cut_suggestion;
@@ -144,6 +145,14 @@ pub use connection::{
     DiscoveredAccount, NetworkConnection, NetworkConnectionRepository, NetworkSignIn,
     PastedTokenError, PastedTokenSignIn, SecretText, SignInFailure, SignInFailureKind,
     SignInMethod, TokenGrant, TokenSet, TokenSetTooLarge, parse_pasted_token,
+};
+pub use control_video::{
+    ApprovalBlock, CONTROL_AUDIO_BITRATE, CONTROL_BUDGET_BYTES, CONTROL_KEYFRAME_EVERY,
+    CONTROL_LONG_SIDE, CONTROL_SHORT_SIDE, ControlVideo, FACE_HOLD, FIGURE_FAR_PERMILLE,
+    FIGURE_MASK_FROM, FIGURE_NEAR_PERMILLE, MAX_CONTROL_BITRATE, MAX_CONTROL_BYTES,
+    MIN_CONTROL_BITRATE, Outbound, SET_EXTENSIONS, SetSource, TakeSet, approval_block,
+    control_bitrate, control_fingerprint, control_fps, control_size, face_cover, merged_checks,
+    needed_analyses,
 };
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,

@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use bardo_domain::{CaptionHighlight, CaptionStyle, TransitionKind, VideoCodec};
 use bardo_media::ffmpeg::{
-    AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, Dip, Duck, Ffmpeg, FrameSize,
-    Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Motion, Output, ProxyCodec,
-    ProxySettings, RenderPlan, ThumbnailSpec, Transition, VideoClip, VideoEncoder, View,
+    AudioClip, AudioTrack, CaptionLine, CaptionTrack, ClipSource, ControlOutput, Dip, Duck, Ffmpeg,
+    FrameSize, Framing, LoudnessTarget, MIN_VERSION, MediaError, Monitor, Motion, Output,
+    ProxyCodec, ProxySettings, RenderPlan, ThumbnailSpec, Transition, VideoClip, VideoEncoder,
+    View, VoiceCut,
 };
 
 fn ffmpeg() -> Ffmpeg {
@@ -1437,4 +1438,197 @@ fn a_recordings_sound_is_extracted_as_mono_wav_at_cd_rate() {
             .is_err()
     );
     assert!(!silent.exists());
+}
+
+/// A voice of `seconds` that is silent but for a 400 ms tone at `beep`.
+fn beep_voice(ffmpeg: &Ffmpeg, destination: &Path, seconds: f64, beep: f64) {
+    let output = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg(format!(
+            "sine=frequency=880:sample_rate=44100:duration={seconds},\
+             volume=enable='not(between(t,{beep},{}))':volume=0",
+            beep + 0.4
+        ))
+        .args(["-c:a", "libmp3lame", "-b:a", "128k"])
+        .arg(destination)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn control_output(size: (u32, u32), fps_milli: u32, length: Duration) -> ControlOutput {
+    ControlOutput {
+        size,
+        fps_milli,
+        encoder: VideoEncoder::OpenH264,
+        bitrate: bardo_domain::control_bitrate(length),
+        keyframe_interval: fps_milli.div_ceil(1000) * 2,
+    }
+}
+
+#[test]
+fn a_thirty_second_1080p_control_video_of_noise_stays_under_100_mb_with_its_voice() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("control-size");
+    let voice = dir.join("voice.mp3");
+    beep_voice(&ffmpeg, &voice, 32.0, 10.0);
+    let length = secs(30.0);
+    let output = control_output((1920, 1080), 30_000, length);
+    let destination = dir.join("control.mp4");
+    let cut = VoiceCut {
+        path: voice,
+        from: secs(1.0),
+        length,
+    };
+    let mut sink = ffmpeg.control_writer(&destination, &output, &cut).unwrap();
+    // Noise is the hardest picture to compress: a few frames of it, in
+    // turn, so the encoder never sees two alike in a row.
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let noise: Vec<Vec<u8>> = (0..3)
+        .map(|_| {
+            (0..1920 * 1080)
+                .flat_map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    let [r, g, b, ..] = seed.to_le_bytes();
+                    [r, g, b, 255]
+                })
+                .collect()
+        })
+        .collect();
+    for index in 0..900 {
+        sink.write(&noise[index % noise.len()]).unwrap();
+    }
+    assert!(!destination.exists(), "only once finished");
+    sink.finish().unwrap();
+
+    let bytes = std::fs::metadata(&destination).unwrap().len();
+    assert!(
+        bytes < bardo_domain::MAX_CONTROL_BYTES,
+        "{bytes} bytes for 30 s of noise"
+    );
+    let info = ffmpeg.probe(&destination).unwrap();
+    let video = info.video.expect("a picture");
+    assert_eq!((video.width, video.height), (1920, 1080));
+    assert!(info.audio.is_some(), "with its voice");
+    assert!(close(info.duration, 30.0, 0.1), "{:?}", info.duration);
+}
+
+#[test]
+fn a_control_videos_voice_stays_in_sync_with_its_frames() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("control-sync");
+    let voice = dir.join("voice.mp3");
+    // The tone at 6 s of the narration; the take starts at 2 s, so it is
+    // heard 4 s in, where the one white frame is.
+    beep_voice(&ffmpeg, &voice, 10.0, 6.0);
+    let length = secs(6.0);
+    let output = control_output((320, 180), 25_000, length);
+    let destination = dir.join("control.mp4");
+    let cut = VoiceCut {
+        path: voice,
+        from: secs(2.0),
+        length,
+    };
+    let mut sink = ffmpeg.control_writer(&destination, &output, &cut).unwrap();
+    for index in 0..150 {
+        let shade = if index == 100 { 255 } else { 0 };
+        sink.write(&[shade, shade, shade, 255].repeat(320 * 180))
+            .unwrap();
+    }
+    sink.finish().unwrap();
+
+    assert!(level(&ffmpeg, &destination, 4.05, 0.3) > -30.0, "the tone");
+    assert!(level(&ffmpeg, &destination, 2.0, 1.5) < -60.0, "silence");
+    let mut frames = ffmpeg
+        .video_frames(&destination, secs(0.0), length, 25_000, (320, 180))
+        .unwrap();
+    let mut white = Vec::new();
+    let mut index = 0;
+    while let Some(frame) = frames.next_frame().unwrap() {
+        if frame.rgb[3 * (90 * 320 + 160)] > 128 {
+            white.push(index);
+        }
+        index += 1;
+    }
+    assert_eq!(index, 150);
+    assert_eq!(white, [100], "the white frame stays at 4 s");
+}
+
+#[test]
+fn a_recording_is_cut_scaled_and_voiced() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("control-cut");
+    let voice = dir.join("voice.mp3");
+    beep_voice(&ffmpeg, &voice, 4.0, 1.5);
+    let length = secs(1.5);
+    let output = control_output((320, 180), 30_000, length);
+    let destination = dir.join("take.mp4");
+    let cut = VoiceCut {
+        path: voice,
+        from: secs(0.5),
+        length,
+    };
+    let recorder = Recorder::default();
+    ffmpeg
+        .cut_recording(
+            &fixture("clip-a.mp4"),
+            &output,
+            &cut,
+            &destination,
+            &recorder,
+        )
+        .unwrap();
+    let info = ffmpeg.probe(&destination).unwrap();
+    let video = info.video.expect("a picture");
+    assert_eq!((video.width, video.height), (320, 180));
+    assert!(close(info.duration, 1.5, 0.1), "{:?}", info.duration);
+    // The voice, not the clip's own sound: its tone starts 1 s in.
+    assert!(level(&ffmpeg, &destination, 0.1, 0.8) < -60.0);
+    assert!(level(&ffmpeg, &destination, 1.1, 0.3) > -30.0);
+    assert!(!recorder.progress.borrow().is_empty());
+}
+
+#[test]
+fn a_set_picture_covers_the_frame() {
+    let picture = ffmpeg()
+        .cover_picture(&fixture("still-640x360.png"), (180, 320))
+        .unwrap();
+    assert_eq!((picture.width, picture.height), (180, 320));
+    assert_eq!(picture.rgb.len(), 180 * 320 * 3);
+    assert!(
+        ffmpeg()
+            .cover_picture(&fixture("voice-3s.mp3"), (180, 320))
+            .is_err()
+    );
+}
+
+#[test]
+fn a_control_video_whose_voice_will_not_read_says_why() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("control-no-voice");
+    let output = control_output((320, 180), 25_000, secs(2.0));
+    let destination = dir.join("control.mp4");
+    let cut = VoiceCut {
+        path: dir.join("gone.mp3"),
+        from: secs(0.0),
+        length: secs(2.0),
+    };
+    let mut sink = ffmpeg.control_writer(&destination, &output, &cut).unwrap();
+    let frame = [0, 0, 0, 255].repeat(320 * 180);
+    let failed = (0..50).find_map(|_| sink.write(&frame).err());
+    let error = match failed {
+        Some(error) => error,
+        None => sink.finish().unwrap_err(),
+    };
+    assert!(
+        matches!(&error, MediaError::Failed { log, .. } if log.contains("gone.mp3")),
+        "{error:?}"
+    );
+    assert!(!destination.exists());
 }

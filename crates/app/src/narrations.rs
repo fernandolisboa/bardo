@@ -125,6 +125,9 @@ pub struct NarrationView {
     pub estimate: Option<SpendEstimate>,
     /// The capture's takes' analyses, in order; empty without a capture.
     pub analyses: Vec<crate::TakeAnalysisView>,
+    /// The capture's takes' control videos, in order; empty without a
+    /// capture.
+    pub controls: Vec<crate::ControlVideoView>,
 }
 
 /// The provider's calls that read `text` aloud: billed per character.
@@ -600,12 +603,13 @@ impl Bardo {
             None => None,
         };
         let capture = self.capture_of(narration.as_ref(), project.id)?;
-        let analyses = match &capture {
-            Some(capture) => self.analysis_views(capture)?,
-            None => Vec::new(),
+        let (analyses, controls) = match &capture {
+            Some(capture) => (self.analysis_views(capture)?, self.control_views(capture)?),
+            None => (Vec::new(), Vec::new()),
         };
         Ok(NarrationView {
             analyses,
+            controls,
             capture,
             estimate,
             script: script.map(|script| script.text().clone()),

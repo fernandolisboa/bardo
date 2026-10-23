@@ -2320,7 +2320,8 @@ fn muted(cx: &App, text: SharedString) -> AnyElement {
 }
 
 impl Render for ProjectsScreen {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.advance_control(window, cx);
         if self.channels.is_empty() {
             let bardo = self.bardo.read(cx);
             let mut parts = ScreenParts::new(Header::place(bardo, Destination::Projects));

@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::narration::key;
 use crate::{
-    GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError, TakeAnalysis, TakeMode,
-    VideoProjectId, VoiceRef, WordTiming, spoken_words,
+    ControlVideo, GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError, TakeAnalysis,
+    TakeMode, TakeSet, VideoProjectId, VoiceRef, WordTiming, spoken_words,
 };
 
 uuid_id!(
@@ -312,6 +312,7 @@ impl TakeSource<'_> {
             end: span.end,
             revision,
             mode: TakeMode::default(),
+            set: TakeSet::default(),
         }
     }
 }
@@ -346,6 +347,8 @@ pub struct Take {
     pub revision: u32,
     /// What the take model receives for it (#190).
     pub mode: TakeMode,
+    /// Where it is performed in Depth mode (#191).
+    pub set: TakeSet,
 }
 
 impl Take {
@@ -515,8 +518,15 @@ impl Takes {
         Ok(())
     }
 
+    /// Gives take `index` `set`. Its stretch, and so its revision, stay.
+    pub fn set_set(&mut self, index: usize, set: TakeSet) -> Result<(), BoundaryError> {
+        let take = self.0.get_mut(index).ok_or(BoundaryError::NoSuchTake)?;
+        take.set = set;
+        Ok(())
+    }
+
     /// Moves the boundary after take `index` to the previous or next cut
-    /// point. Both takes get a new revision and keep their modes.
+    /// point. Both takes get a new revision and keep their modes and sets.
     pub fn move_boundary(
         &mut self,
         source: &TakeSource<'_>,
@@ -527,10 +537,12 @@ impl Takes {
         let (before, after) = (&self.0[index], &self.0[index + 1]);
         let earlier = Take {
             mode: before.mode,
+            set: before.set.clone(),
             ..source.take(before.words.start..at, before.revision + 1)
         };
         let later = Take {
             mode: after.mode,
+            set: after.set.clone(),
             ..source.take(at..after.words.end, after.revision + 1)
         };
         self.0[index] = earlier;
@@ -653,6 +665,27 @@ pub trait CaptureRepository: Send + Sync {
     /// one before, while the project's capture is still its capture and
     /// the take is still at its revision. Returns whether it was kept.
     fn save_analysis(&self, analysis: &TakeAnalysis) -> Result<bool, RepositoryError>;
+
+    /// The control videos of the project's capture's takes, current or
+    /// stale (their fingerprints tell).
+    fn control_videos(&self, project: VideoProjectId)
+    -> Result<Vec<ControlVideo>, RepositoryError>;
+
+    /// Keeps `video` as its take's control video, unapproved, replacing the
+    /// one before, while the project's capture is still its capture and
+    /// has that take. Returns whether it was kept.
+    fn save_control_video(&self, video: &ControlVideo) -> Result<bool, RepositoryError>;
+
+    /// Approves the control video of the take at `position`, when it is
+    /// still the one made from what `fingerprint` names. Returns whether
+    /// it was approved.
+    fn approve_control_video(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        fingerprint: &str,
+        at: SystemTime,
+    ) -> Result<bool, RepositoryError>;
 }
 
 impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
@@ -683,6 +716,27 @@ impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
 
     fn save_analysis(&self, analysis: &TakeAnalysis) -> Result<bool, RepositoryError> {
         (**self).save_analysis(analysis)
+    }
+
+    fn control_videos(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<ControlVideo>, RepositoryError> {
+        (**self).control_videos(project)
+    }
+
+    fn save_control_video(&self, video: &ControlVideo) -> Result<bool, RepositoryError> {
+        (**self).save_control_video(video)
+    }
+
+    fn approve_control_video(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        fingerprint: &str,
+        at: SystemTime,
+    ) -> Result<bool, RepositoryError> {
+        (**self).approve_control_video(project, position, fingerprint, at)
     }
 }
 
@@ -1108,6 +1162,7 @@ mod tests {
             end: s(1.0),
             revision: 1,
             mode: TakeMode::Recording,
+            set: TakeSet::Room,
         };
         assert!(Takes::restore(10, vec![take(0..4), take(4..10)]).is_ok());
         assert!(Takes::restore(0, vec![]).is_ok());

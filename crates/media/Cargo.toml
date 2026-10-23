@@ -13,6 +13,8 @@ rodio = { version = "0.22", default-features = false, features = ["playback", "m
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Draws the control videos' mesh and figures (#191); pure Rust.
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 
 [lints]
 workspace = true

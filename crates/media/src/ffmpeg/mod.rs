@@ -8,6 +8,7 @@
 //! job threads and passes a [`Monitor`] for progress and cancel.
 
 mod captions;
+mod control;
 mod encoders;
 mod frames;
 mod picture;
@@ -27,6 +28,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 pub use captions::{CaptionLine, CaptionLook, CaptionTrack, caption_look, highlight_colour};
+pub use control::{ControlOutput, FrameSink, VoiceCut};
 pub use encoders::{Encoders, VideoEncoder};
 pub use frames::{FramePoll, FrameSize, FrameStream, VideoFrame};
 pub use probe::{AudioStream, MediaInfo, VideoStream};
