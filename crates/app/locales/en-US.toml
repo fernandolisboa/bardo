@@ -1424,6 +1424,7 @@ budgets_used = "{percent}% of this month's budgets"
 
 [stage.note]
 takes = "{n} takes"
+takes_one = "1 take"
 takes_flagged = "{n} to fix"
 render_ready = "Ready to review"
 rendered = "Files: {n}"

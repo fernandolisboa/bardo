@@ -411,6 +411,7 @@ impl Bardo {
                 let seconds = length.as_secs();
                 format!("{}:{:02}", seconds / 60, seconds % 60)
             }
+            StageNote::Takes(1) => self.text(Text::StageTakesOne).into_owned(),
             StageNote::Takes(takes) => n(Text::StageTakes, takes),
             StageNote::TakesFlagged(takes) => n(Text::StageTakesFlagged, takes),
             StageNote::ScenesMissing => self.text(Text::StageScenesMissing).into_owned(),

@@ -5,10 +5,12 @@
 //! - "Space Archives" (English, United States): YouTube, TikTok, X and
 //!   Instagram accounts; four published videos with their numbers; ranked
 //!   theme ideas; niche research for four seeds; a project ready to render
-//!   and publish ("The probe that never came back"): a 24 s narration in
-//!   the persona's realistic voice, with word timings, five scenes with stills, imported music,
-//!   a sound effect and portrait footage on the cut, a music prompt and
-//!   every network's title and text. X renders landscape at 720p.
+//!   and publish ("The probe that never came back"): a 24 s narration
+//!   captured from a recording of the user and voiced by the persona's
+//!   realistic voice, with word timings and takes, five scenes with
+//!   stills, imported music, a sound effect and portrait footage on the
+//!   cut, a music prompt and every network's title and text. X renders
+//!   landscape at 720p.
 //! - "Vozes do Mar" (Portuguese, Brazil): one project with a script.
 //! - A persona, this month's spend against two budgets, and a finished and
 //!   a failed job.
@@ -45,6 +47,8 @@ const NARRATION: &str = "In 1977 a small probe left Earth on a mission nobody ex
     Engineers listened every night for a voice from the dark. \
     Decades later, one quiet morning, the antennas heard it again.";
 const NARRATION_MS: u64 = 24_000;
+/// The recording the narration was captured from, as the user named it.
+const CAPTURE_NAME: &str = "IMG_4412.MOV";
 /// The persona's made-up voice.
 const VOICE_ID: &str = "e2eVoiceArchivist01";
 const VOICE_NAME: &str = "Archivist (made up)";
@@ -477,6 +481,76 @@ pub(crate) fn make(ffmpeg: &Path, args: &[&str], out: &Path) -> anyhow::Result<(
     Ok(())
 }
 
+/// The recording of the user the narration was captured from, as the
+/// capture job would have left it: its copy in the project folder (a
+/// small stand-in, picture and sound) and the takes cut from the
+/// narration's words.
+#[allow(clippy::too_many_arguments)]
+fn capture(
+    db: &Database,
+    ffmpeg: &Path,
+    dir: &Path,
+    profile: ProfileId,
+    project: &VideoProject,
+    narration: &Narration,
+    voice: CaptureVoice,
+    now: SystemTime,
+) -> anyhow::Result<()> {
+    let id = CaptureId::new();
+    let video_file = format!("capture-{id}.mov");
+    let seconds = (NARRATION_MS / 1000).to_string();
+    make(
+        ffmpeg,
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("color=c=0x2a3a4a:s=720x1280:d={seconds}:r=30"),
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("sine=f=220:d={seconds}"),
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "mpeg4",
+            "-q:v",
+            "31",
+            "-g",
+            "300",
+            "-c:a",
+            "aac",
+            "-shortest",
+        ],
+        &dir.join(&video_file),
+    )?;
+    let capture = Capture {
+        id,
+        project: project.id,
+        owner: profile,
+        file_name: CAPTURE_NAME.into(),
+        video_file,
+        video: CaptureVideo {
+            width: 720,
+            height: 1280,
+            fps_milli: 30_000,
+            duration: Duration::from_millis(NARRATION_MS),
+        },
+        confirmation: CaptureConfirmation {
+            text: "This recording shows only me.".into(),
+            at: now,
+        },
+        voice,
+        narration: narration.id,
+        coverage: 1000,
+        takes: Takes::split(&bardo_app::take_source(narration)),
+        imported_at: now,
+        job: None,
+    };
+    db.save_capture(&capture)?;
+    Ok(())
+}
+
 /// The project ready to render: what the script, narration, scene and
 /// image steps would have saved, and imported media on the cut.
 fn render_ready(
@@ -543,18 +617,22 @@ fn render_ready(
             })
             .collect(),
     };
+    // The user's capture, voiced by the persona's realistic voice: posts
+    // need the synthetic-content disclosure.
+    let voice = CaptureVoice::Persona {
+        voice: VoiceRef::new(Provider::ElevenLabs, VOICE_ID, VOICE_NAME)?,
+        presets: GenerationPresets::default(),
+    };
     let narration = Narration {
         id: NarrationId::new(),
         project: project.id,
         owner: profile,
         text: ScriptText::new(NARRATION).valid()?,
-        // Read by the persona's realistic voice: posts need the
-        // synthetic-content disclosure.
-        source: NarrationSource::Generated {
-            voice: VoiceRef::new(Provider::ElevenLabs, VOICE_ID, VOICE_NAME)?,
-            presets: GenerationPresets::default(),
-            model: "voice-fixture".into(),
-            billed_characters: NARRATION.chars().count() as u64,
+        source: NarrationSource::Captured {
+            file_name: CAPTURE_NAME.into(),
+            voice: voice.clone(),
+            model: "eleven_multilingual_sts_v2".into(),
+            aligner: Provider::ElevenLabs,
         },
         audio_file: "narration-1.mp3".into(),
         duration: Duration::from_millis(NARRATION_MS),
@@ -563,6 +641,7 @@ fn render_ready(
         job: None,
     };
     db.save_narration(&narration)?;
+    capture(db, ffmpeg, &dir, profile, &project, &narration, voice, now)?;
 
     let prompts = [
         "A small probe on a launch pad, archival photo, 1977",
