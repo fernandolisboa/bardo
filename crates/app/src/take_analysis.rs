@@ -1235,6 +1235,9 @@ impl Bardo {
         mode: TakeMode,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         // The mode it has: nothing to build again.
         if capture
             .takes

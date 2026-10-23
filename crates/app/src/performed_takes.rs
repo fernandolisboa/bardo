@@ -26,15 +26,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelId, ClipHandle,
-    ClipModelRef, ClipStatus, CostPurpose, ImageFormat, Job, JobFailure, JobFailureKind, JobId,
-    JobKind, LookSource, MAX_TAKE_PROMPT, MediaAsset, MediaAssetId, MediaAssetRepository,
-    MediaKind, Metered, Money, Outbound, PerformedClip, PersonaId, PersonaLook, PersonaRepository,
-    PictureSize, ProfileId, ProjectFiles, Provider, ProviderFailure, RepositoryError, SecretStore,
-    StagedFile, TakeGenerator, TakeInput, TakeMode, TakeModel, TakePrompt, TakePromptError,
-    TakeRequest, TakeResult, TakeStep, TemplateKind, TemplateUsed, TemplateValues,
-    TemplateVariable, TemplateVersionId, TextFormat, TextGenerator, TextImage, TextRequest,
-    VideoProjectId, take_model_of, take_prompt_text,
+    ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelId, ChannelRepository,
+    ClipHandle, ClipModelRef, ClipStatus, CostPurpose, ImageFormat, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, JobState, LookSource, MAX_TAKE_PROMPT, MediaAsset,
+    MediaAssetId, MediaAssetRepository, MediaKind, Metered, Money, Outbound, PerformedClip,
+    PersonaId, PersonaLook, PersonaRepository, PictureSize, ProfileId, ProjectFiles, Provider,
+    ProviderFailure, RepositoryError, SecretStore, StagedFile, TakeGenerator, TakeInput, TakeMode,
+    TakeModel, TakePrompt, TakePromptError, TakeRequest, TakeResult, TakeStep, TemplateKind,
+    TemplateUsed, TemplateValues, TemplateVariable, TemplateVersionId, TextFormat, TextGenerator,
+    TextImage, TextRequest, ThemeRepository, VideoProjectId, take_model_of, take_prompt_text,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -156,10 +156,17 @@ pub struct PerformedTakeView {
     /// they are now, and on disk.
     pub draft: Option<TakeResult>,
     pub final_take: Option<TakeResult>,
-    /// Its latest prompt job.
+    /// Its latest prompt job, and its latest draft or final job with the
+    /// step it makes: one under way, else one made for its control video
+    /// and model as they are now.
     pub prompt_job: Option<Job>,
-    /// Its latest draft or final job, with the step it makes.
     pub job: Option<(Job, TakeStep)>,
+    /// Whether a prompt or a performed take of it is being made.
+    pub busy: bool,
+    /// Whether its latest draft or final job stopped (or failed) after
+    /// Higgsfield took the request: checking again polls it, and nothing
+    /// new is paid for until then.
+    pub pending: bool,
     /// The next paid step, and what it would cost.
     pub next: PerformedStep,
     pub estimate: Option<SpendEstimate>,
@@ -172,13 +179,7 @@ pub struct PerformedTakeView {
 impl PerformedTakeView {
     /// Whether a prompt or a performed take is being made.
     pub fn is_busy(&self) -> bool {
-        self.prompt_job
-            .as_ref()
-            .is_some_and(|job| job.state().is_active())
-            || self
-                .job
-                .as_ref()
-                .is_some_and(|(job, _)| job.state().is_active())
+        self.busy
     }
 
     /// The draft waiting for review: made and not approved.
@@ -261,6 +262,19 @@ struct TakeOf {
     position: u32,
     #[serde(default)]
     step: Option<String>,
+    control: String,
+    provider: String,
+    model: String,
+}
+
+impl TakeOf {
+    /// Whether the job was made for `control` and `model`.
+    fn made_for(&self, control: Option<&str>, model: Option<&TakeModel>) -> bool {
+        control == Some(self.control.as_str())
+            && model.is_some_and(|model| {
+                model.id.provider().code() == self.provider && model.id.model() == self.model
+            })
+    }
 }
 
 /// What a take job sent, saved as its external handle after every change:
@@ -284,6 +298,17 @@ struct TakeState {
     quote_micros: Option<u64>,
     /// Higgsfield's request id, once submitted.
     request: Option<String>,
+    /// Whether the take's cost is in the cost book, so an attempt after a
+    /// failed save does not count it again.
+    #[serde(default)]
+    recorded: bool,
+}
+
+/// Whether a take job's saved state holds a request Higgsfield took.
+fn has_request(job: &Job) -> bool {
+    job.external_handle()
+        .and_then(|saved| serde_json::from_str::<TakeState>(saved).ok())
+        .is_some_and(|state| state.request.is_some())
 }
 
 impl TakeState {
@@ -293,6 +318,21 @@ impl TakeState {
             restarts: self.restarts + 1,
             ..TakeState::default()
         };
+    }
+
+    /// Whether a submission that failed with `kind` surely made nothing,
+    /// so the next attempt may be a new one. Any other failure (an answer
+    /// that could not be read, Higgsfield down) resends the same
+    /// submission, which Higgsfield answers with the first one.
+    fn refused(kind: JobFailureKind) -> bool {
+        matches!(
+            kind,
+            JobFailureKind::Declined
+                | JobFailureKind::KeyRejected
+                | JobFailureKind::NotAllowed
+                | JobFailureKind::LimitReached
+                | JobFailureKind::MissingKey
+        )
     }
 }
 
@@ -375,6 +415,52 @@ fn provider_failure(failure: ProviderFailure) -> JobFailure {
     JobFailure::new(kind, format!("Higgsfield: {}", failure.detail))
 }
 
+/// Whether take `position` of capture `capture`, the project's, still has
+/// control video `control` in `file`, approved and on disk.
+fn control_approved(
+    captures: &dyn CaptureRepository,
+    files: &dyn ProjectFiles,
+    project: VideoProjectId,
+    capture: CaptureId,
+    position: u32,
+    (control, file): (&str, &str),
+) -> Result<bool, JobFailure> {
+    let current = captures
+        .capture(project)
+        .map_err(unexpected)?
+        .is_some_and(|current| current.id == capture);
+    Ok(current
+        && captures
+            .control_videos(project)
+            .map_err(unexpected)?
+            .iter()
+            .any(|made| {
+                made.capture == capture
+                    && made.position == position
+                    && made.fingerprint == control
+                    && made.file == file
+                    && made.approved_at.is_some()
+                    && files.exists(project, &made.file)
+            }))
+}
+
+/// A folder only the user can read, removed with everything in it when
+/// dropped: the photo of the user and the frame sent pass through it.
+fn private_folder() -> Result<tempfile::TempDir, JobFailure> {
+    tempfile::Builder::new()
+        .prefix("bardo-take-")
+        .tempdir()
+        .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
+}
+
+/// The failure of a job whose take changed (or went) while it ran.
+fn take_changed() -> JobFailure {
+    JobFailure::new(
+        JobFailureKind::NotAllowed,
+        "the take changed while this was made (its control video or model); approve it again",
+    )
+}
+
 /// Writes take prompts.
 pub(crate) struct TakePromptHandler {
     pub(crate) owner: ProfileId,
@@ -403,6 +489,20 @@ impl JobHandler for TakePromptHandler {
             return Ok(());
         }
         let key = key_of(self.secrets.as_ref(), self.owner, Provider::Claude)?;
+        let approved = || {
+            control_approved(
+                self.captures.as_ref(),
+                self.files.as_ref(),
+                project,
+                capture,
+                payload.position,
+                (&payload.control, &payload.control_file),
+            )
+        };
+        // Nothing of a take that changed goes to Claude.
+        if !approved()? {
+            return Err(take_changed());
+        }
         let images = match payload.frame_at_ms {
             Some(at) => vec![self.frame(project, &payload.control_file, at)?],
             None => Vec::new(),
@@ -445,6 +545,14 @@ impl JobHandler for TakePromptHandler {
                 "Claude: the take prompt is empty",
             ));
         }
+        // Stopped, or the take changed: the prompt it has (maybe edited
+        // since) stays.
+        if cx.should_stop() {
+            return Ok(());
+        }
+        if !approved()? {
+            return Err(take_changed());
+        }
         let provider: Provider = payload.provider.parse().map_err(unexpected)?;
         let prompt = TakePrompt {
             project,
@@ -479,9 +587,9 @@ impl TakePromptHandler {
         at: u64,
     ) -> Result<TextImage, JobFailure> {
         let source = self.files.path(project, control_file);
-        let destination =
-            std::env::temp_dir().join(format!("bardo-frame-{}.jpg", uuid::Uuid::new_v4().simple()));
-        let made = self
+        let folder = private_folder()?;
+        let destination = folder.path().join("frame.jpg");
+        let bytes = self
             .media
             .frame_picture(
                 &source,
@@ -493,10 +601,9 @@ impl TakePromptHandler {
             .and_then(|()| {
                 std::fs::read(&destination)
                     .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
-            });
-        let _ = std::fs::remove_file(&destination);
+            })?;
         Ok(TextImage {
-            bytes: made?,
+            bytes,
             format: ImageFormat::Jpeg,
         })
     }
@@ -506,6 +613,8 @@ impl TakePromptHandler {
 pub(crate) struct PerformedTakeHandler {
     pub(crate) owner: ProfileId,
     pub(crate) captures: Arc<dyn CaptureRepository>,
+    pub(crate) projects: Arc<dyn ThemeRepository>,
+    pub(crate) channels: Arc<dyn ChannelRepository>,
     pub(crate) personas: Arc<dyn PersonaRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) media: Arc<dyn MediaEngine>,
@@ -596,6 +705,8 @@ impl TakeRun<'_> {
             match self.generator.status(&self.key, &request) {
                 Ok(ClipStatus::Queued | ClipStatus::Running) => hiccups = 0,
                 Ok(ClipStatus::Done { video }) => {
+                    // The take is made and paid: whatever goes wrong now,
+                    // the next attempt polls the same request again.
                     match self.generator.download(&self.key, &video) {
                         Ok(clip) => return self.save(&clip.bytes, cx),
                         Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
@@ -604,7 +715,7 @@ impl TakeRun<'_> {
                                 return Err(provider_failure(failure));
                             }
                         }
-                        Err(failure) => return self.ended(failure, cx),
+                        Err(failure) => return Err(provider_failure(failure)),
                     }
                 }
                 Ok(ClipStatus::Failed(failure)) => return self.ended(failure, cx),
@@ -629,35 +740,63 @@ impl TakeRun<'_> {
             .map_err(unexpected)
     }
 
-    /// The request ended without a take: the next attempt submits it
-    /// again, the very same request.
+    /// The request ended without a take: a retry by the user submits it
+    /// again, a new paid request, so the queue never retries it on its
+    /// own.
     fn ended(&mut self, failure: ProviderFailure, cx: &mut JobContext) -> Result<(), JobFailure> {
         self.state.restart();
         self.save_state(cx)?;
-        Err(provider_failure(failure))
+        let failure = provider_failure(failure);
+        if failure.kind.is_transient() {
+            return Err(JobFailure::new(
+                JobFailureKind::UnexpectedAnswer,
+                failure.detail,
+            ));
+        }
+        Err(failure)
     }
 
-    /// Whether the take is still the one approved: its control video built
-    /// from the same take, approved and on disk.
+    /// Whether the take is still the one the job was made for: its control
+    /// video built from the same take, approved and on disk, and the same
+    /// take model.
     fn still_approved(&self) -> Result<bool, JobFailure> {
-        let captures = &self.handler.captures;
-        let current = captures
+        let handler = self.handler;
+        if !control_approved(
+            handler.captures.as_ref(),
+            handler.files.as_ref(),
+            self.project,
+            self.capture,
+            self.payload.position,
+            (&self.payload.control, &self.payload.control_file),
+        )? {
+            return Ok(false);
+        }
+        let own = handler
+            .captures
             .capture(self.project)
             .map_err(unexpected)?
-            .is_some_and(|capture| capture.id == self.capture);
-        Ok(current
-            && captures
-                .control_videos(self.project)
+            .and_then(|capture| {
+                capture
+                    .takes
+                    .as_slice()
+                    .get(self.payload.position as usize)
+                    .and_then(|take| take.model.clone())
+            });
+        let channel = match handler.projects.project(self.project).map_err(unexpected)? {
+            Some(project) => handler
+                .channels
+                .get(project.channel)
                 .map_err(unexpected)?
-                .iter()
-                .any(|control| {
-                    control.capture == self.capture
-                        && control.position == self.payload.position
-                        && control.fingerprint == self.payload.control
-                        && control.file == self.payload.control_file
-                        && control.approved_at.is_some()
-                        && self.handler.files.exists(self.project, &control.file)
-                }))
+                .and_then(|channel| channel.details.take_model().cloned()),
+            None => return Ok(false),
+        };
+        let models: Vec<TakeModel> = handler
+            .generators
+            .iter()
+            .flat_map(|generator| generator.models())
+            .collect();
+        Ok(take_model_of(&models, channel.as_ref(), own.as_ref())
+            .is_some_and(|model| model.id == self.model.id))
     }
 
     /// Stages what is not staged yet, asks the quote and submits. `false`
@@ -665,9 +804,7 @@ impl TakeRun<'_> {
     fn submit(&mut self, cx: &mut JobContext) -> Result<bool, JobFailure> {
         // Nothing paid yet: the take must still be the one approved.
         if !self.still_approved()? {
-            return Err(JobFailure::unexpected(
-                "the take changed after its control video was approved; approve it again",
-            ));
+            return Err(take_changed());
         }
         if self.state.video.is_none() {
             let bytes = self
@@ -726,7 +863,7 @@ impl TakeRun<'_> {
                 Ok(true)
             }
             Err(failure) => {
-                if !JobFailureKind::from(failure.kind).is_transient() {
+                if TakeState::refused(JobFailureKind::from(failure.kind)) {
                     self.state.restart();
                     self.save_state(cx)?;
                 }
@@ -757,50 +894,30 @@ impl TakeRun<'_> {
     /// which also drops any metadata a photo carries (where and with what
     /// it was taken).
     fn fit_look(&self, look: &PersonaLook) -> Result<Vec<u8>, JobFailure> {
-        let stem = format!("bardo-take-look-{}", uuid::Uuid::new_v4().simple());
-        let extension = look.image.format().extension();
-        let source = std::env::temp_dir().join(format!("{stem}.{extension}"));
-        let destination = std::env::temp_dir().join(format!("{stem}-out.jpg"));
-        let fitted = std::fs::write(&source, look.image.bytes())
+        let folder = private_folder()?;
+        let source = folder
+            .path()
+            .join(format!("look.{}", look.image.format().extension()));
+        let destination = folder.path().join("look-out.jpg");
+        std::fs::write(&source, look.image.bytes())
+            .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))?;
+        self.handler
+            .media
+            .fit_picture(&source, &destination, self.model.max_image_bytes)
+            .map_err(|e| JobFailure::new(JobFailureKind::Media, e.to_string()))?;
+        std::fs::read(&destination)
             .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
-            .and_then(|()| {
-                self.handler
-                    .media
-                    .fit_picture(&source, &destination, self.model.max_image_bytes)
-                    .map_err(|e| JobFailure::new(JobFailureKind::Media, e.to_string()))
-            })
-            .and_then(|()| {
-                std::fs::read(&destination)
-                    .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
-            });
-        let _ = std::fs::remove_file(&source);
-        let _ = std::fs::remove_file(&destination);
-        fitted
     }
 
-    /// Records the take's cost and saves it as the take's draft or final;
-    /// the one it replaces goes.
+    /// Records the take's cost (once) and saves it as the take's draft or
+    /// final; the one it replaces goes. A take that changed while it was
+    /// made keeps what it has: the result is paid for but not kept.
     fn save(&mut self, bytes: &[u8], cx: &mut JobContext) -> Result<(), JobFailure> {
         let files = &self.handler.files;
         let file = take_file(self.capture, self.payload.position, self.step, cx.id());
         files
             .write(self.project, &file, bytes)
             .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))?;
-        let quote = self.state.quote_micros.map(Money::from_micros);
-        self.handler.costs.record_for_project(
-            PaidCall {
-                provider: PROVIDER,
-                model: &self.payload.priced_model,
-                purpose: match self.step {
-                    TakeStep::Draft => CostPurpose::TakeDraft,
-                    TakeStep::Final => CostPurpose::TakeFinal,
-                },
-                usage: Metered::video_seconds(u64::from(self.payload.seconds)),
-                job: Some(cx.id()),
-                reported: quote,
-            },
-            self.project,
-        );
         let duration = match self.handler.media.probe(&files.path(self.project, &file)) {
             Ok(info) if !info.duration.is_zero() && info.video.is_some() => info.duration,
             Ok(_) => {
@@ -815,13 +932,35 @@ impl TakeRun<'_> {
                 return Err(JobFailure::new(JobFailureKind::Media, error.to_string()));
             }
         };
+        let quote = self.state.quote_micros.map(Money::from_micros);
+        if !self.state.recorded {
+            self.handler.costs.record_for_project(
+                PaidCall {
+                    provider: PROVIDER,
+                    model: &self.payload.priced_model,
+                    purpose: match self.step {
+                        TakeStep::Draft => CostPurpose::TakeDraft,
+                        TakeStep::Final => CostPurpose::TakeFinal,
+                    },
+                    usage: Metered::video_seconds(u64::from(self.payload.seconds)),
+                    job: Some(cx.id()),
+                    reported: quote,
+                },
+                self.project,
+            );
+            self.state.recorded = true;
+            self.save_state(cx)?;
+        }
+        if !self.still_approved()? {
+            let _ = files.remove(self.project, &file);
+            return Err(take_changed());
+        }
         let captures = &self.handler.captures;
         let replaced = captures
             .take_results(self.project)
             .map_err(unexpected)?
             .into_iter()
             .find(|old| old.position == self.payload.position && old.step == self.step);
-        let provider: Provider = self.payload.provider.parse().map_err(unexpected)?;
         let template = match (&self.payload.template, self.payload.template_number) {
             (Some(template), Some(number)) => Some(TemplateUsed {
                 id: id::<TemplateVersionId>(template)?,
@@ -835,7 +974,7 @@ impl TakeRun<'_> {
             position: self.payload.position,
             step: self.step,
             control: self.payload.control.clone(),
-            model: ClipModelRef::new(provider, &self.payload.model).map_err(unexpected)?,
+            model: self.model.id.clone(),
             priced_model: self.payload.priced_model.clone(),
             prompt: self.payload.prompt.clone(),
             template,
@@ -852,7 +991,7 @@ impl TakeRun<'_> {
         if !captures.save_take_result(&result).map_err(unexpected)? {
             // The take is gone.
             let _ = files.remove(self.project, &file);
-            return Ok(());
+            return Err(take_changed());
         }
         if let Some(replaced) = replaced.filter(|old| old.file != file) {
             let _ = files.remove(self.project, &replaced.file);
@@ -997,7 +1136,7 @@ impl Bardo {
     }
 
     /// The look of the persona that performs `project`'s takes.
-    fn performer_look(
+    pub(crate) fn performer_look(
         &self,
         project: VideoProjectId,
     ) -> Result<Option<(PersonaId, PersonaLook)>, CaptureError> {
@@ -1075,15 +1214,24 @@ impl Bardo {
                     .cloned()
             };
             let (draft, final_take) = (result(TakeStep::Draft), result(TakeStep::Final));
+            let of_take = || jobs.iter().filter(|(_, of)| of.position == position);
+            let busy = of_take().any(|(job, _)| job.state().is_active());
+            // One under way, else the latest made for the take as it is now:
+            // one for another control video or model is history.
             let latest = |kind: JobKind| {
-                jobs.iter()
-                    .rev()
-                    .find(|(job, of)| job.kind() == kind && of.position == position)
+                of_take().rev().find(|(job, of)| {
+                    job.kind() == kind
+                        && (job.state().is_active()
+                            || of.made_for(approved.as_deref(), model.as_ref()))
+                })
             };
             let prompt_job = latest(JobKind::TakePrompt).map(|(job, _)| job.clone());
             let job = latest(JobKind::PerformedTake).and_then(|(job, of)| {
                 let step = TakeStep::from_code(of.step.as_deref()?)?;
                 Some((job.clone(), step))
+            });
+            let pending = job.as_ref().is_some_and(|(job, _)| {
+                matches!(job.state(), JobState::Failed | JobState::Cancelled) && has_request(job)
             });
             let next = next_step(model.as_ref(), prompt.as_ref(), draft.as_ref());
             let estimate = match (&model, block) {
@@ -1102,6 +1250,8 @@ impl Bardo {
                 final_take,
                 prompt_job,
                 job,
+                busy,
+                pending,
                 next,
                 estimate,
                 length: take.length(),
@@ -1149,6 +1299,9 @@ impl Bardo {
         model: Option<ClipModelRef>,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         let models = self.take_models();
         if model
             .as_ref()
@@ -1203,6 +1356,9 @@ impl Bardo {
         }
         if view.is_busy() {
             return Err(CaptureError::TakeBusy);
+        }
+        if view.pending {
+            return Err(CaptureError::TakePending);
         }
         view.model
             .as_ref()
@@ -1389,6 +1545,45 @@ impl Bardo {
         Ok(self.jobs.enqueue(job)?)
     }
 
+    /// Checks again on take `index`'s draft or final job that stopped (or
+    /// failed) after Higgsfield took its request: it polls that request,
+    /// paying nothing new.
+    pub fn check_take_again(
+        &self,
+        project: VideoProjectId,
+        index: usize,
+    ) -> Result<(), CaptureError> {
+        let (_, view) = self.performed_take(project, index)?;
+        if view.is_busy() {
+            return Err(CaptureError::TakeBusy);
+        }
+        let (job, _) = view
+            .job
+            .filter(|_| view.pending)
+            .ok_or(CaptureError::NoTakeResult)?;
+        self.retry_job(job.id())
+            .map_err(|_| CaptureError::NoTakeResult)
+    }
+
+    /// Whether a prompt or a performed take of take `index` of `capture`
+    /// is being made: its take, set, mode and model stay as they are until
+    /// it ends.
+    pub(crate) fn performed_busy(&self, capture: &Capture, index: usize) -> bool {
+        self.performed_jobs(capture)
+            .iter()
+            .any(|(job, of)| of.position as usize == index && job.state().is_active())
+    }
+
+    /// Whether a prompt or a performed take of `project`'s capture is
+    /// being made: the capture (and the narration it made) stays until it
+    /// ends, so a paid result is never thrown away.
+    pub(crate) fn takes_busy(&self, project: VideoProjectId) -> bool {
+        let project = project.to_string();
+        self.jobs().into_iter().any(|job| {
+            job.state().is_active() && take_of(&job).is_some_and(|of| of.project == project)
+        })
+    }
+
     /// Approves take `index`'s draft: its final can be made.
     pub fn approve_take_draft(
         &self,
@@ -1491,13 +1686,17 @@ impl Bardo {
             let _ = self.files.remove(project, &file);
             return Err(error.into());
         }
-        self.captures.accept_take_result(
+        // The clip is in the media already: a failure to mark the final
+        // used must not make the user add it twice.
+        if let Err(error) = self.captures.accept_take_result(
             project,
             made.position,
             TakeStep::Final,
             &made.control,
             Some(now),
-        )?;
+        ) {
+            tracing::warn!(%error, "the used final could not be marked");
+        }
         Ok(asset)
     }
 
@@ -1740,7 +1939,7 @@ mod tests {
         let asset = s.app.use_performed_take(project, 0).unwrap();
         assert_eq!(asset.source, AssetSource::Performed);
         assert_eq!(asset.kind, MediaKind::Video);
-        assert_eq!(asset.name, "Performed take 1");
+        assert_eq!(asset.name, "Performed clip 1");
         assert_eq!(asset.picture, Some(PictureSize::new(1280, 720)));
         assert_eq!(s.h.files.read(project, &asset.file).unwrap(), TAKE);
         let clips = s.h.db.performed_clips(project).unwrap();
@@ -1908,16 +2107,36 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(view(&s, project, 0).is_busy());
-        assert!(matches!(
-            s.app.edit_take_prompt(project, 0, "Another prompt."),
-            Err(CaptureError::TakeBusy)
-        ));
+        let busy = |result: Result<(), CaptureError>| matches!(result, Err(CaptureError::TakeBusy));
+        assert!(busy(s.app.edit_take_prompt(project, 0, "Another prompt.")));
+        assert!(busy(s.app.set_take_model(
+            project,
+            0,
+            Some(FakeTakes::edit())
+        )));
+        assert!(busy(s.app.set_take_mode(project, 0, TakeMode::Mesh)));
+        assert!(busy(s.app.build_control_video(project, 0)));
+        assert!(busy(s.app.move_take_boundary(
+            project,
+            0,
+            bardo_domain::BoundaryMove::Later
+        )));
+        assert!(busy(s.app.remove_capture(project)), "nothing paid is lost");
         s.app.cancel_job(id).unwrap();
         let job = wait_done(&s.app, id);
         assert_eq!(job.state(), JobState::Cancelled);
+        assert!(view(&s, project, 0).pending);
+        assert!(
+            matches!(
+                s.app
+                    .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask),
+                Err(CaptureError::TakePending)
+            ),
+            "checking again comes before paying for another"
+        );
 
         s.h.takes.hold(false);
-        s.app.retry_job(id).unwrap();
+        s.app.check_take_again(project, 0).unwrap();
         let job = wait_done(&s.app, id);
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
         assert_eq!(s.h.takes.requests.lock().unwrap().len(), 1, "paid once");
@@ -1925,6 +2144,99 @@ mod tests {
         assert_eq!(*s.h.takes.quotes.lock().unwrap(), 1);
         let polls = s.h.takes.polls.lock().unwrap().clone();
         assert!(polls.iter().all(|request| request == "take-0"));
+        assert!(!view(&s, project, 0).pending);
+    }
+
+    #[test]
+    fn a_restart_while_a_take_is_made_polls_the_same_request() {
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        prompt_written(&s, project, 0, "The host speaks.");
+        s.h.takes.hold(true);
+        let id = s
+            .app
+            .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while s.h.takes.polls.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "never polled");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        let s = s.restart();
+        s.h.takes.hold(false);
+        let job = wait_done(&s.app, id);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(s.h.takes.requests.lock().unwrap().len(), 1, "paid once");
+        assert_eq!(s.h.takes.staged.lock().unwrap().len(), 2, "staged once");
+        assert_eq!(*s.h.takes.quotes.lock().unwrap(), 1);
+        let polls = s.h.takes.polls.lock().unwrap().clone();
+        assert!(polls.iter().all(|request| request == "take-0"));
+        assert_eq!(costs(&s, project).len(), 1, "counted once");
+        assert!(view(&s, project, 0).final_take.is_some());
+    }
+
+    #[test]
+    fn a_take_that_fails_on_higgsfield_is_never_sent_again_on_its_own() {
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        prompt_written(&s, project, 0, "The host speaks.");
+        s.h.takes.fail.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert!(!failure.kind.is_transient(), "{failure:?}");
+        assert!(failure.detail.contains("the generation failed"));
+        assert_eq!(
+            s.h.takes.requests.lock().unwrap().len(),
+            1,
+            "a new request is the user's call"
+        );
+        let after = view(&s, project, 0);
+        assert!(!after.pending, "nothing to check again");
+        assert!(costs(&s, project).is_empty());
+
+        s.h.takes.fail.store(false, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(s.h.takes.requests.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_take_made_for_another_model_never_lands_on_the_take() {
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        prompt_written(&s, project, 0, "The host speaks.");
+        s.h.takes.hold(true);
+        let id = s
+            .app
+            .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while s.h.takes.polls.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "never polled");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        s.app.cancel_job(id).unwrap();
+        wait_done(&s.app, id);
+        s.app
+            .set_take_model(project, 0, Some(FakeTakes::edit()))
+            .unwrap();
+        settled(&s.app, project);
+        let now = view(&s, project, 0);
+        assert!(now.job.is_none() && !now.pending, "the old job is history");
+
+        // Retried from the Jobs screen: Higgsfield's take is paid, not kept.
+        s.h.takes.hold(false);
+        s.app.retry_job(id).unwrap();
+        let job = wait_done(&s.app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::NotAllowed);
+        assert_eq!(costs(&s, project).len(), 1);
+        assert!(s.app.captures.take_results(project).unwrap().is_empty());
     }
 
     #[test]

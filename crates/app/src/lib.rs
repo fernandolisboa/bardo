@@ -817,6 +817,8 @@ impl Bardo {
         let performed_handler = crate::performed_takes::PerformedTakeHandler {
             owner: profile.id,
             captures: Arc::clone(&captures),
+            projects: Arc::clone(&themes),
+            channels: Arc::clone(&channels),
             personas: Arc::clone(&personas),
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
@@ -2337,6 +2339,8 @@ pub(crate) mod testing {
         pub(crate) hold: std::sync::atomic::AtomicBool,
         /// Higgsfield's moderation refuses every request while set.
         pub(crate) refuse: std::sync::atomic::AtomicBool,
+        /// Every request fails on Higgsfield's side while set.
+        pub(crate) fail: std::sync::atomic::AtomicBool,
         pub(crate) quote: Mutex<Option<Money>>,
     }
 
@@ -2448,6 +2452,12 @@ pub(crate) mod testing {
                 return Ok(ClipStatus::Failed(ProviderFailure::new(
                     bardo_domain::ProviderFailureKind::Declined,
                     "Higgsfield's moderation declined the image or the clip",
+                )));
+            }
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::ProviderDown,
+                    "the generation failed",
                 )));
             }
             Ok(ClipStatus::Done {

@@ -4565,6 +4565,18 @@ mod tests {
         );
         place(&mut editor, realistic.id);
         assert!(app.needs_disclosure(project.id).unwrap());
+
+        // Without the realistic clip, until the look reads as a real person.
+        app.edit(&mut editor, EditAction::Undo).unwrap();
+        assert!(!app.needs_disclosure(project.id).unwrap());
+        let narrator = app.narrator(&project).unwrap().expect("a narrator");
+        let photo = dir.path().join("me.png");
+        std::fs::write(&photo, crate::testing::LOOK_IMAGE).unwrap();
+        app.import_look(narrator.id, &photo, true).unwrap();
+        assert!(
+            app.needs_disclosure(project.id).unwrap(),
+            "a look that reads as a real person now"
+        );
     }
 
     #[test]

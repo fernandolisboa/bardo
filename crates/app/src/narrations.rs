@@ -608,16 +608,14 @@ impl Bardo {
         let (analyses, controls, performed) = match &capture {
             Some(capture) => {
                 let controls = self.control_views(capture)?;
-                let performed =
-                    self.performed_view(capture, &controls)
-                        .map_err(|error| match error {
-                            crate::CaptureError::Repository(error) => {
-                                NarrationError::Repository(error)
-                            }
-                            crate::CaptureError::ProjectNotFound => NarrationError::ProjectNotFound,
-                            other => NarrationError::Repository(RepositoryError(Box::new(other))),
-                        })?;
-                (self.analysis_views(capture)?, controls, Some(performed))
+                // The narration panel stays usable without it.
+                let performed = self
+                    .performed_view(capture, &controls)
+                    .inspect_err(|error| {
+                        tracing::warn!(%error, "the performed clips could not be read");
+                    })
+                    .ok();
+                (self.analysis_views(capture)?, controls, performed)
             }
             None => (Vec::new(), Vec::new(), None),
         };
@@ -654,7 +652,7 @@ impl Bardo {
         if let Some(flag) = persona.voice_flag {
             return Err(NarrationError::VoiceFlagged(flag));
         }
-        if self.narration_busy(project.id) {
+        if self.narration_busy(project.id) || self.takes_busy(project.id) {
             return Err(NarrationError::Busy);
         }
         let provider = persona.details.voice().provider();

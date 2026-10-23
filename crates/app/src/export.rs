@@ -825,16 +825,24 @@ impl Bardo {
     }
 
     /// Whether the project's cut, as the editor keeps it, shows a performed
-    /// clip of a look that reads as a real person.
+    /// clip of a look that reads as a real person: when it was made, or
+    /// now (a drawn look marked realistic later still asks for it).
     fn cut_performs_realistic_look(
         &self,
         project: VideoProjectId,
     ) -> Result<bool, RepositoryError> {
-        let realistic: Vec<bardo_domain::MediaAssetId> = self
-            .media_assets
-            .performed_clips(project)?
+        let clips = self.media_assets.performed_clips(project)?;
+        if clips.is_empty() {
+            return Ok(false);
+        }
+        // When the look cannot be read, the disclosure errs on the side of
+        // being on.
+        let realistic_now = self
+            .performer_look(project)
+            .map_or(true, |look| look.is_some_and(|(_, look)| look.realistic));
+        let realistic: Vec<bardo_domain::MediaAssetId> = clips
             .into_iter()
-            .filter(|clip| clip.realistic)
+            .filter(|clip| clip.realistic || realistic_now)
             .map(|clip| clip.asset)
             .collect();
         if realistic.is_empty() {

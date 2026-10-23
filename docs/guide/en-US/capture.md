@@ -82,7 +82,7 @@ Changing the take's mode or set, or moving a cut, builds it again. **Build again
 <a id="review"></a>
 ## Reviewing and approving
 
-Under the take, **Play** plays the control video with its sound, and a line says what leaves the computer with it: your face, body and room (Recording); your body and room, not your face (Mesh); or your body shape and face geometry as a depth figure over your room or over the set image (Depth). The take's voice always goes with it. Unless the take is in Depth over an image, one frame of the take also goes to Claude to describe your room when its [prompt](#take-prompt) is written.
+Under the take, **Play** plays the control video with its sound, and a line says what leaves the computer with it: your face, body and room (Recording); your body and room, not your face (Mesh); or your body shape and face geometry as a depth figure over your room or over the set image (Depth). The take's voice always goes with it. Unless the take is in Depth over an image, one frame of the control video also goes to Claude to describe your room when its [prompt](#take-prompt) is written; in Recording, that frame shows you.
 
 **Approve** says this take may go to its take model; nothing is paid for a take before you approve it. An approval holds for what you watched: changing the take's mode, set or cut, or its analysis running again, asks you to watch and approve the new build. A take with more than one face, a Mesh take with frames left uncovered, or one no take model accepts at its length, cannot be approved.
 
@@ -104,7 +104,7 @@ Picking a model that does not take the take's mode switches the take to the mode
 <a id="take-prompt"></a>
 ## The take's prompt
 
-**Write prompt** has Claude write the take's prompt from the **Take prompt** template ([Templates](templates.md#kinds)): the look's description (a photo has none), the set, the take's words (for the delivery, never quoted) and what the model does with the control video. Unless the take is in Depth over an image, one frame from the middle of the control video goes with it, so Claude describes your room without anyone in it. Edit the prompt as you like, up to 2,500 characters; **Write again** replaces it, edits included. A prompt holds for the control video and model it was written for: approving a new build or picking another model asks for a new one.
+**Write prompt** has Claude write the take's prompt from the **Take prompt** template ([Templates](templates.md#kinds)): the look's description (a photo has none), the set, the take's words (for the delivery, never quoted) and what the model does with the control video. Unless the take is in Depth over an image, one frame from the middle of the control video goes with it, so Claude can describe your room (the prompt describes it without anyone in it). In Recording, that frame is of your recording and shows you; the take says so before you write the prompt. Edit the prompt as you like, up to 2,500 characters; **Write again** replaces it, edits included. A prompt holds for the control video and model it was written for: approving a new build or picking another model asks for a new one.
 
 <a id="draft-final"></a>
 ## Draft and final
@@ -114,12 +114,12 @@ Picking a model that does not take the take's mode switches the take to the mode
 - A draft (Seedance) waits for review: **Play draft**, then **Approve draft**, or **Regenerate draft** for another one, which replaces it. Only an approved draft lets you **Make final**; **Back to drafts** takes the approval back.
 - A final waits for review the same way: **Play final**, then **Use**. **Make it again** makes another, which replaces it. A final is billed whether you use it or not.
 
-A line says how much longer or shorter than the take a result came out. **Stop waiting** stops Bardo waiting, not Higgsfield, which may still finish and bill it: **Check again** picks up the same request without paying twice, as Bardo does after a restart. When Higgsfield refuses the content, the take says so and nothing is changed or sent again on its own; change the prompt or the look, then make it again.
+A line says how much longer or shorter than the take a result came out. **Stop waiting** stops Bardo waiting, not Higgsfield, which may still finish and bill it: **Check again** picks up the same request, as Bardo does after a restart, and nothing new can be made for the take until then. When Higgsfield refuses the content, or the request fails on its side, the take says so and nothing is changed or sent again on its own: making it again is a new paid request, and only you start it.
 
 <a id="use"></a>
 ## Using a performed clip
 
-**Use** copies the final into the project's media as a performed clip named after its take ("Performed take 1"), in the editor's **Media** bin, where you put it on the cut ([Timeline and tracks](editor.md#timeline)). Each **Use** adds one, and the take counts them. Performed clips stay when the capture is removed, and versions in other languages do not carry them. When the persona's look is realistic, a cut with one of its performed clips turns the [synthetic-content disclosure](uploading.md#disclosure) on.
+**Use** copies the final into the project's media as a performed clip named after its take ("Performed clip 1"), in the editor's **Media** tab, where you put it on the cut ([Timeline and tracks](editor.md#timeline)). Each **Use** adds one, and the take counts them. Performed clips stay when the capture is removed, and versions in other languages do not carry them. When the persona's look is realistic, a cut with one of its performed clips turns the [synthetic-content disclosure](uploading.md#disclosure) on.
 
 <a id="cuts"></a>
 ## Moving a cut

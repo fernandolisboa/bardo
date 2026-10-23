@@ -908,6 +908,9 @@ impl Bardo {
                 bardo_domain::BoundaryError::NoSuchTake,
             ));
         }
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         self.queue_control_video(&capture, index)
     }
 
@@ -969,6 +972,9 @@ impl Bardo {
         choice: SetChoice,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         let old = capture
             .takes
             .as_slice()

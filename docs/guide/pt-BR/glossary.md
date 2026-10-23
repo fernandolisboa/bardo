@@ -72,7 +72,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Modelo de tomada**: o modelo que faz a persona interpretar uma tomada a partir do vídeo de controle e da aparência da persona, como o Kling 3.0 Motion Control ou o Seedance 2.5 Video Edit pelo Higgsfield. Definido por canal, mudável por tomada; ele decide em quais modos uma tomada pode estar.
 
-**Prompt da tomada**: o que um modelo de tomada recebe sobre uma tomada: a aparência, o cenário e a interpretação. O Claude o escreve a partir de um modelo, e você o edita.
+**Prompt da tomada**: o que um modelo de tomada recebe sobre uma tomada: a aparência, o cenário e a interpretação. O Claude o escreve a partir do modelo de texto **Prompt da tomada** (veja Modelos), e você o edita.
 
 **Clipe interpretado**: a versão final de uma tomada, feita pelo modelo de tomada, revisada e usada: ela entra na mídia do projeto para o editor. Os rascunhos, quando o modelo os faz, vêm antes e são aprovados antes da versão final.
 

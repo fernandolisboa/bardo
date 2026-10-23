@@ -82,7 +82,7 @@ Mudar o modo ou o cenário da tomada, ou mover um corte, monta de novo. **Montar
 <a id="review"></a>
 ## Revisar e aprovar
 
-Abaixo da tomada, **Reproduzir** toca o vídeo de controle com o som, e uma linha diz o que sai do computador com ele: seu rosto, corpo e ambiente (Gravação); seu corpo e ambiente, não o rosto (Malha); ou sua silhueta e a geometria do rosto como figura de profundidade sobre o seu ambiente ou sobre a imagem de cenário (Profundidade). A voz da tomada sempre vai junto. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro dela também vai para o Claude descrever o seu ambiente quando o [prompt](#take-prompt) dela for escrito.
+Abaixo da tomada, **Reproduzir** toca o vídeo de controle com o som, e uma linha diz o que sai do computador com ele: seu rosto, corpo e ambiente (Gravação); seu corpo e ambiente, não o rosto (Malha); ou sua silhueta e a geometria do rosto como figura de profundidade sobre o seu ambiente ou sobre a imagem de cenário (Profundidade). A voz da tomada sempre vai junto. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro do vídeo de controle também vai para o Claude descrever o seu ambiente quando o [prompt](#take-prompt) dela for escrito; em Gravação, esse quadro mostra você.
 
 **Aprovar** diz que esta tomada pode ir para o modelo de tomada; nada é pago por uma tomada antes da sua aprovação. A aprovação vale para o que você assistiu: mudar o modo, o cenário ou o corte da tomada, ou a análise dela rodar de novo, pede que você assista e aprove a nova montagem. Uma tomada com mais de um rosto, uma tomada em Malha com quadros descobertos ou uma tomada com uma duração que nenhum modelo de tomada aceita não pode ser aprovada.
 
@@ -104,7 +104,7 @@ Escolher um modelo que não aceita o modo da tomada passa a tomada para o primei
 <a id="take-prompt"></a>
 ## O prompt da tomada
 
-**Escrever prompt** faz o Claude escrever o prompt da tomada a partir do modelo **Prompt da tomada** ([Modelos](templates.md#kinds)): a descrição da aparência (uma foto não tem), o cenário, as palavras da tomada (para a interpretação, nunca citadas) e o que o modelo faz com o vídeo de controle. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro do meio do vídeo de controle vai junto, para o Claude descrever o seu ambiente sem ninguém nele. Edite o prompt como quiser, até 2.500 caracteres; **Escrever de novo** o substitui, edições incluídas. Um prompt vale para o vídeo de controle e o modelo para os quais foi escrito: aprovar uma nova montagem ou escolher outro modelo pede um novo.
+**Escrever prompt** faz o Claude escrever o prompt da tomada a partir do modelo **Prompt da tomada** ([Modelos](templates.md#kinds)): a descrição da aparência (uma foto não tem), o cenário, as palavras da tomada (para a interpretação, nunca citadas) e o que o modelo faz com o vídeo de controle. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro do meio do vídeo de controle vai junto, para o Claude poder descrever o seu ambiente (o prompt o descreve sem ninguém nele). Em Gravação, esse quadro é da sua gravação e mostra você; a tomada avisa isso antes de você escrever o prompt. Edite o prompt como quiser, até 2.500 caracteres; **Escrever de novo** o substitui, edições incluídas. Um prompt vale para o vídeo de controle e o modelo para os quais foi escrito: aprovar uma nova montagem ou escolher outro modelo pede um novo.
 
 <a id="draft-final"></a>
 ## Rascunho e versão final
@@ -114,12 +114,12 @@ Escolher um modelo que não aceita o modo da tomada passa a tomada para o primei
 - Um rascunho (Seedance) espera revisão: **Reproduzir rascunho**, depois **Aprovar rascunho**, ou **Refazer rascunho** para outro, que o substitui. Só um rascunho aprovado libera **Fazer versão final**; **Voltar aos rascunhos** desfaz a aprovação.
 - A versão final espera revisão do mesmo jeito: **Reproduzir versão final**, depois **Usar**. **Fazer de novo** faz outra, que a substitui. Uma versão final é cobrada mesmo que você não a use.
 
-Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **Parar de esperar** faz o Bardo parar de esperar, não o Higgsfield, que ainda pode terminar e cobrar: **Verificar de novo** retoma o mesmo pedido sem pagar duas vezes, como o Bardo faz depois de reiniciar. Quando o Higgsfield recusa o conteúdo, a tomada diz isso e nada é mudado nem enviado de novo sozinho; mude o prompt ou a aparência e faça de novo.
+Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **Parar de esperar** faz o Bardo parar de esperar, não o Higgsfield, que ainda pode terminar e cobrar: **Verificar de novo** retoma o mesmo pedido, como o Bardo faz depois de reiniciar, e nada novo pode ser feito para a tomada até lá. Quando o Higgsfield recusa o conteúdo, ou o pedido falha do lado dele, a tomada diz isso e nada é mudado nem enviado de novo sozinho: fazer de novo é um novo pedido pago, e só você o inicia.
 
 <a id="use"></a>
 ## Usar um clipe interpretado
 
-**Usar** copia a versão final para a mídia do projeto como um clipe interpretado com o nome da tomada ("Tomada interpretada 1"), na lista **Mídia** do editor, de onde você o coloca no corte ([Linha do tempo e faixas](editor.md#timeline)). Cada **Usar** adiciona um, e a tomada os conta. Os clipes interpretados ficam quando a captura é removida, e as versões em outros idiomas não os levam. Quando a aparência da persona é realista, um corte com um dos clipes interpretados dela liga o [aviso de conteúdo sintético](uploading.md#disclosure).
+**Usar** copia a versão final para a mídia do projeto como um clipe interpretado com o nome da tomada ("Clipe interpretado 1"), na aba **Mídia** do editor, de onde você o coloca no corte ([Linha do tempo e faixas](editor.md#timeline)). Cada **Usar** adiciona um, e a tomada os conta. Os clipes interpretados ficam quando a captura é removida, e as versões em outros idiomas não os levam. Quando a aparência da persona é realista, um corte com um dos clipes interpretados dela liga o [aviso de conteúdo sintético](uploading.md#disclosure).
 
 <a id="cuts"></a>
 ## Mover um corte

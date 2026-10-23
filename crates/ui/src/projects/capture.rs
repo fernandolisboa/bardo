@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use bardo_app::bardo_domain::{
     AnalysisPart, ApprovalBlock, BoundaryMove, Capture, CaptureVoice, ClipModelRef, Device,
-    JobFailureKind, JobId, JobState, Narration, SetSource, TakeChecks, TakeFlag, TakeMode,
-    TakeResult, TakeSet, TakeStep, VideoProjectId,
+    JobFailureKind, JobState, Narration, SetSource, TakeChecks, TakeFlag, TakeMode, TakeResult,
+    TakeSet, TakeStep, VideoProjectId,
 };
 use bardo_app::{
     AnalysisStatus, Bardo, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
@@ -517,6 +517,16 @@ impl ProjectsScreen {
         cx.notify();
     }
 
+    /// Whether a prompt or a performed take of take `index` is being made:
+    /// its mode, set, cuts and model stay as they are until it ends.
+    fn take_busy(&self, index: usize) -> bool {
+        self.narration
+            .as_ref()
+            .and_then(|view| view.performed.as_ref())
+            .and_then(|performed| performed.takes.get(index))
+            .is_some_and(|take| take.is_busy())
+    }
+
     /// Runs a performed clip action on the project, showing what went
     /// wrong. `true` when it went through.
     fn performed_action(
@@ -530,6 +540,7 @@ impl ProjectsScreen {
         };
         self.capture.confirm_remove = false;
         self.capture.used = None;
+        self.capture.performed_ask = None;
         let result = action(self.bardo.read(cx), id);
         let done = result.is_ok();
         self.capture.error = result.err().map(|error| error.message());
@@ -611,17 +622,10 @@ impl ProjectsScreen {
         }
     }
 
-    /// Checks again on a take job that was stopped or failed: it polls the
-    /// request it sent, when it sent one.
-    fn retry_take(&mut self, job: JobId, window: &mut Window, cx: &mut Context<Self>) {
-        self.capture.error = self
-            .bardo
-            .read(cx)
-            .retry_job(job)
-            .err()
-            .map(|error| error.message());
-        self.load(window, cx);
-        cx.notify();
+    /// Checks again on take `index`'s draft or final job that was stopped
+    /// or failed after Higgsfield took its request: it polls that request.
+    fn check_take_again(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.performed_action(window, cx, |bardo, id| bardo.check_take_again(id, index));
     }
 
     fn use_performed_take(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -1094,11 +1098,18 @@ impl ProjectsScreen {
                 .iter()
                 .enumerate()
                 .map(|(index, take)| {
-                    let sends_frame = view
+                    let frame = view
                         .controls
                         .get(index)
-                        .is_some_and(|control| control.outbound.sends_set_frame());
-                    Some(self.render_take_performed(index, performed, take, sends_frame, cx))
+                        .filter(|control| control.outbound.sends_set_frame())
+                        .map(|control| {
+                            if control.mode == TakeMode::Recording {
+                                Text::TakePromptFrameNoteRecording
+                            } else {
+                                Text::TakePromptFrameNote
+                            }
+                        });
+                    Some(self.render_take_performed(index, performed, take, frame, cx))
                 })
                 .collect(),
             None => Vec::new(),
@@ -1234,7 +1245,12 @@ impl ProjectsScreen {
             };
             list = list.child(row);
             if index + 1 < takes.len() {
-                let can = |to| !busy && capture.takes.boundary_target(&source, index, to).is_ok();
+                let can = |to| {
+                    !busy
+                        && !self.take_busy(index)
+                        && !self.take_busy(index + 1)
+                        && capture.takes.boundary_target(&source, index, to).is_ok()
+                };
                 let cut = h_flex()
                     .gap_2()
                     .justify_center()
@@ -1282,6 +1298,7 @@ impl ProjectsScreen {
             .and_then(|view| view.performed.as_ref())
             .and_then(|performed| performed.takes.get(index))
             .and_then(|take| take.model.as_ref());
+        let take_busy = self.take_busy(index);
         let modes = ButtonGroup::new(("take-mode", index))
             .outline()
             .xsmall()
@@ -1289,7 +1306,10 @@ impl ProjectsScreen {
                 Button::new(mode.code())
                     .label(tr(bardo, Text::TakeModeName(mode)))
                     .selected(view.mode == mode)
-                    .disabled(view.mode != mode && model.is_some_and(|model| !model.takes(mode)))
+                    .disabled(
+                        view.mode != mode
+                            && (take_busy || model.is_some_and(|model| !model.takes(mode))),
+                    )
             }))
             .on_click(cx.listener(move |this, clicked: &Vec<usize>, window, cx| {
                 if let Some(&mode) = clicked.first().and_then(|&i| TakeMode::ALL.get(i)) {
@@ -1529,6 +1549,7 @@ impl ProjectsScreen {
                             .ghost()
                             .xsmall()
                             .label(tr(bardo, label))
+                            .disabled(self.take_busy(index))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.build_control(index, window, cx)
                             })),
@@ -1653,7 +1674,7 @@ impl ProjectsScreen {
         index: usize,
         performed: &PerformedView,
         view: &PerformedTakeView,
-        sends_frame: bool,
+        frame: Option<Text>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let bardo = self.bardo.read(cx);
@@ -1720,8 +1741,9 @@ impl ProjectsScreen {
             ));
         }
 
-        // Its prompt; a blocked take with none has nothing to show yet.
-        if blocked && view.prompt.is_none() && self.capture.editing_prompt != Some(index) {
+        // Its prompt; a blocked take with none, and nothing under way, has
+        // nothing to show yet.
+        if blocked && !busy && view.prompt.is_none() && self.capture.editing_prompt != Some(index) {
             return section.into_any_element();
         }
         section = section.child(
@@ -1832,9 +1854,8 @@ impl ProjectsScreen {
                         })),
                 ),
             );
-            if sends_frame {
-                section =
-                    section.child(small(tr(bardo, Text::TakePromptFrameNote)).text_color(muted));
+            if let Some(frame) = frame {
+                section = section.child(small(tr(bardo, frame)).text_color(muted));
             }
         }
         match view.prompt_job.as_ref() {
@@ -1859,6 +1880,15 @@ impl ProjectsScreen {
         }
 
         // Its draft and final.
+        let check_again = || {
+            Button::new(("check-take", index))
+                .outline()
+                .xsmall()
+                .label(tr(bardo, Text::CheckTakeAgain))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.check_take_again(index, window, cx)
+                }))
+        };
         let job = view.job.as_ref();
         match job {
             Some((job, step)) if job.state().is_active() => {
@@ -1886,25 +1916,14 @@ impl ProjectsScreen {
                         ),
                 );
             }
-            Some((job, _)) if job.state() == JobState::Cancelled => {
-                let id = job.id();
+            Some((job, _)) if job.state() == JobState::Cancelled && view.pending => {
                 section = section
                     .child(kit::notice(
                         Tone::Info,
                         tr(bardo, Text::TakeStoppedWaiting),
                         cx,
                     ))
-                    .child(
-                        h_flex().child(
-                            Button::new(("check-take", index))
-                                .outline()
-                                .xsmall()
-                                .label(tr(bardo, Text::CheckTakeAgain))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.retry_take(id, window, cx)
-                                })),
-                        ),
-                    );
+                    .child(h_flex().child(check_again()));
             }
             Some((job, _)) if job.state() == JobState::Failed => {
                 let failure = job.failure();
@@ -1917,7 +1936,6 @@ impl ProjectsScreen {
                             .text(Text::JobFailureKindName(failure.kind))
                             .into_owned()
                     });
-                    let id = job.id();
                     section = section
                         .child(kit::notice(
                             Tone::Danger,
@@ -1926,19 +1944,12 @@ impl ProjectsScreen {
                             ),
                             cx,
                         ))
-                        .child(
-                            h_flex().child(
-                                Button::new(("check-take", index))
-                                    .outline()
-                                    .xsmall()
-                                    .label(tr(bardo, Text::CheckTakeAgain))
-                                    .on_click(cx.listener(
-                                        move |this, _: &ClickEvent, window, cx| {
-                                            this.retry_take(id, window, cx)
-                                        },
-                                    )),
-                            ),
-                        );
+                        .children(failure.map(|failure| {
+                            small(SharedString::from(failure.detail.clone())).text_color(muted)
+                        }))
+                        .when(view.pending, |section| {
+                            section.child(h_flex().child(check_again()))
+                        });
                 }
             }
             _ => {}
@@ -1988,7 +1999,11 @@ impl ProjectsScreen {
             }
             lines
         };
-        let can_make = !busy && !blocked && view.prompt.is_some();
+        let can_make = !busy
+            && !blocked
+            && !view.pending
+            && view.prompt.is_some()
+            && self.capture.editing_prompt != Some(index);
         let make = |id: &'static str, label: Text, step: TakeStep, primary: bool| {
             let button = Button::new((id, index))
                 .xsmall()
@@ -2120,6 +2135,10 @@ impl ProjectsScreen {
                             ))
                         }),
                 );
+                if final_due {
+                    section =
+                        section.child(small(tr(bardo, Text::TakeFinalPaidNote)).text_color(muted));
+                }
             }
             None if final_due && view.prompt.is_some() => {
                 section = section
@@ -2215,24 +2234,27 @@ impl ProjectsScreen {
             } => 2,
         };
         let choosing = self.capture.choosing_set.is_some();
+        let take_busy = self.take_busy(index);
         let choices = ButtonGroup::new(("take-set", index))
             .outline()
             .xsmall()
             .child(
                 Button::new("room")
                     .label(tr(bardo, Text::SetRoom))
-                    .selected(picked == 0),
+                    .selected(picked == 0)
+                    .disabled(take_busy && picked != 0),
             )
             .child(
                 Button::new("scene")
                     .label(tr(bardo, Text::SetSceneImage))
-                    .selected(picked == 1),
+                    .selected(picked == 1)
+                    .disabled(take_busy),
             )
             .child(
                 Button::new("picture")
                     .label(tr(bardo, Text::SetImport))
                     .selected(picked == 2)
-                    .disabled(choosing),
+                    .disabled(choosing || take_busy),
             )
             .on_click(cx.listener(move |this, clicked: &Vec<usize>, window, cx| {
                 match clicked.first() {

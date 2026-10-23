@@ -1005,6 +1005,17 @@ impl ProjectsScreen {
                 {
                     self.player = None;
                 }
+                // A take prompt being edited that went (a new build or
+                // model) has nothing left to save.
+                if let Some(index) = self.capture.editing_prompt
+                    && view
+                        .performed
+                        .as_ref()
+                        .and_then(|performed| performed.takes.get(index))
+                        .is_none_or(|take| take.prompt.is_none())
+                {
+                    self.capture.editing_prompt = None;
+                }
                 self.narration = Some(view);
             }
             Err(error) => {

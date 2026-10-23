@@ -108,6 +108,10 @@ pub enum CaptureError {
     /// A prompt or a performed take of it is being made.
     #[error("the take is busy")]
     TakeBusy,
+    /// Higgsfield took a request of it that was stopped: checking again
+    /// comes before paying for another.
+    #[error("a take request is pending")]
+    TakePending,
     /// The take's prompt cannot go to its take model.
     #[error("the take prompt cannot be used: {0}")]
     Prompt(bardo_domain::TakePromptError),
@@ -136,8 +140,9 @@ impl CaptureError {
             CaptureError::NoScript => Text::NarrationNoScript,
             CaptureError::NoPersona => Text::CaptureNoPersona,
             CaptureError::VoiceFlagged(flag) => Text::NarrationVoiceFlagged(*flag),
-            CaptureError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
-            CaptureError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
+            // Only the performed clips of a capture ask Claude and Higgsfield.
+            CaptureError::MissingKey(Provider::Claude) => Text::PerformedMissingClaudeKey,
+            CaptureError::MissingKey(Provider::Higgsfield) => Text::PerformedMissingHiggsfieldKey,
             CaptureError::MissingKey(_) => Text::NarrationMissingKey,
             CaptureError::Busy => Text::NarrationBusy,
             CaptureError::OverBudget(_) => Text::BudgetReachedTitle,
@@ -156,6 +161,7 @@ impl CaptureError {
             CaptureError::TakeModelNotOffered => Text::TakeModelGone,
             CaptureError::Performed(block) => Text::PerformedBlocked(*block),
             CaptureError::TakeBusy => Text::PerformedBusy,
+            CaptureError::TakePending => Text::PerformedPending,
             CaptureError::Prompt(error) => Text::TakePromptInvalid(*error),
             CaptureError::NoDrafts | CaptureError::NoTakeResult => Text::PerformedNothing,
             CaptureError::DraftNotApproved => Text::PerformedDraftFirst,
@@ -1070,6 +1076,9 @@ impl Bardo {
         if self.narration_busy(project.id) {
             return Err(CaptureError::Busy);
         }
+        if self.takes_busy(project.id) {
+            return Err(CaptureError::TakeBusy);
+        }
         if self.provider_key(PROVIDER).state == KeyState::NotSet {
             return Err(CaptureError::MissingKey(PROVIDER));
         }
@@ -1205,6 +1214,9 @@ impl Bardo {
         to: BoundaryMove,
     ) -> Result<(), CaptureError> {
         let (mut capture, narration) = self.current_capture(project)?;
+        if self.performed_busy(&capture, index) || self.performed_busy(&capture, index + 1) {
+            return Err(CaptureError::TakeBusy);
+        }
         capture
             .takes
             .move_boundary(&take_source(&narration), index, to)?;
@@ -1220,6 +1232,9 @@ impl Bardo {
         let (capture, _) = self.current_capture(project)?;
         if self.narration_busy(capture.project) {
             return Err(CaptureError::Busy);
+        }
+        if self.takes_busy(capture.project) {
+            return Err(CaptureError::TakeBusy);
         }
         let controls = self.captures.control_videos(capture.project)?;
         let results = self.captures.take_results(capture.project)?;
@@ -1455,6 +1470,24 @@ pub(crate) mod tests {
     }
 
     impl Setup {
+        /// Closes the app and opens it again over the same data.
+        pub(crate) fn restart(self) -> Setup {
+            let Setup {
+                h,
+                app,
+                user,
+                _folders,
+            } = self;
+            drop(app);
+            let app = h.start();
+            Setup {
+                h,
+                app,
+                user,
+                _folders,
+            }
+        }
+
         /// A recording in the user's folder that ffprobe reads as `info`.
         fn recording(&self, name: &str, info: MediaInfo) -> PathBuf {
             let path = self.user.path().join(name);
