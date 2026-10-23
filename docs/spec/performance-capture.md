@@ -44,7 +44,7 @@ Each slice adds its terms to `docs/CONTEXT.md` when it lands. They are named apa
    - Word timings come from aligning the speech with the script, as for imported narration. A capture that does not follow the script is refused.
 3. **Takes.** Bardo splits the capture into takes of 4 to 30 seconds at sentence ends, from the word timings. The user can move a boundary to another sentence end.
 4. **Model and mode.** Each take uses the channel's take model unless the user picks another. The mode is the model's first unless the user picks another the model takes.
-5. **Analysis (local, free).** For each take, Bardo runs the face mesh on the computer. It also runs the depth map and person mask when the take's mode is Depth. Checks flag:
+5. **Analysis (local, free).** For each take, Bardo runs the face mesh on the computer. It also runs the depth map and person mask when the take's mode is Depth; in Mesh mode it runs the person mask only on the frames where it must find a small face or count faces (see Small faces). Checks flag:
    - frames with no face;
    - frames with more than one face (the take cannot go on);
    - a face too small or turned away;
@@ -111,8 +111,8 @@ Prices change. Each model is priced from the provider's quote when it gives one,
   - MediaPipe Face Landmarker (BlazeFace short-range detector, the 478-point face mesh, the blendshape model), converted to ONNX;
   - Video Depth Anything Small at 280×504 (504×280 for vertical takes), which flickers five times less than Depth Anything V2 Small per frame; V2 Small smoothed over time where the 4.5 GB it needs on the CPU are not free;
   - MediaPipe's multiclass selfie segmenter for the person mask, since a take has one performer near the camera. A SAM-class video segmenter comes in only if reviews show masks failing.
-- **Pinning.** Each model's source, SHA-256 and license are pinned in a manifest like `crates/media/ffmpeg.toml`. An xtask fetches them, they are mirrored as release assets, and the installer bundles them. The spike (#187: `docs/spikes/vision.md`, ADR-0024) confirmed the choice and measured speed: on a 4-core CPU, about 20 s of analysis per 30 s take for Mesh mode and 6.5 min for Depth mode.
-- **Small faces.** A face as small as in a standing shot (13 % of the frame's height in the spike) is too small for the face detector in the whole frame; Bardo searches again around the person mask's face.
+- **Pinning.** Each model's source, SHA-256 and license are pinned in a manifest like `crates/media/ffmpeg.toml`. An xtask fetches them, they are mirrored as release assets, and the installer bundles them. The spike (#187: `docs/spikes/vision.md`, ADR-0024) confirmed the choice and measured speed: on a 4-core CPU, 12 to 20 s of analysis per 30 s take for Mesh mode and 4.5 to 11 min for Depth mode.
+- **Small faces.** A face as small as in a standing shot (13 % of the frame's height in the spike) is too small for the face detector in the whole frame; Bardo searches again around the person mask's face. The "one person only" check then counts faces in each person region, on a sample of frames (about one a second) so Mesh mode stays fast.
 - **`face_landmarks.json`**, per take, holds:
   - the format version;
   - the source (file, width, height, frame rate, frame count);

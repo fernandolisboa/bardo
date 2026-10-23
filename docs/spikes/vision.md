@@ -42,9 +42,9 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
 
 ## Runtime
 
-- **`ort =2.0.0-rc.12`** with ONNX Runtime **1.24.2**, linked statically from pyke's builds (`download-binaries`); no `onnxruntime.so` on Linux. Release binary with everything: 32.6 MB on Linux. The Windows files are under "Speed of a whole take".
+- **`ort =2.0.0-rc.12`** with ONNX Runtime **1.24.2**, linked statically from pyke's builds (`download-binaries`); no `onnxruntime.so` on Linux. Release binary with everything: 32.8 MB on Linux. On Windows, `vision-probe.exe` is 20.5 MB and `DirectML.dll` (18.5 MB, copied next to it by `copy-dylibs`) is the only other runtime file.
 - **No `unsafe`** in the probe: sessions, tensors from slices (`TensorRef::from_array_view((shape, &data))`) and outputs (`try_extract_tensor`) are all safe API.
-- **DirectML**: registered per session with `error_on_failure`; a session whose DirectML start fails is rebuilt on the CPU and says why, so a missing or broken graphics driver never stops analysis. DirectML also needs memory patterns off and sequential execution.
+- **DirectML**: registered per session with `error_on_failure`; a session whose DirectML start fails is rebuilt on the CPU and says why, so a missing or broken graphics driver never stops analysis. On the Windows runner, which has no graphics card, every model fell back this way ("No devices detected that match the filter criteria") and the runs went on on the CPU. DirectML also needs memory patterns off and sequential execution.
 - **Threads**: the face models are small and run faster on one thread (20.6 ms a frame) than on four (28 ms), from the cost of handing tiny operators between threads. The depth models want all cores.
 - ONNX Runtime's CPU kernels are about half as fast as TFLite with XNNPACK on the face landmark model (16 ms against 8 ms a call); `ort`'s `xnnpack` execution provider is the thing to try if the face step ever matters. It does not today (below).
 
@@ -57,7 +57,7 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
   - Video Depth Anything's attention starts from `torch.baddbmm` over an uninitialised tensor with `beta=0`; traced, that tensor became 300 MB of constant zeros (a 411 MB file). `convert.py` swaps in a plain matmul before export: 116 MB, same output.
   - Export needs `torch.no_grad()`: without it tracing Video Depth Anything ran out of 15 GB of memory.
   - Fixed shapes: DINOv2's position embedding is resized from Python numbers, so each input size is its own file (`…_280x504`, and a `…_504x280` for vertical takes).
-- **Reproducibility**: the PyTorch exports are byte-for-byte the same on every run; tf2onnx's are not (node names and order change), though they compute the same. So the SHA-256 that matters is that of the files Bardo mirrors, not of a re-conversion; `convert.py`'s checks against TFLite and PyTorch are what make the conversion repeatable.
+- **Reproducibility**: the PyTorch exports are byte-for-byte the same on every run, in the container and on the CI runner alike; tf2onnx's are not (node names and order change), though they compute the same. So the SHA-256 that matters is that of the files Bardo mirrors, not of a re-conversion; `convert.py`'s checks against TFLite and PyTorch are what make the conversion repeatable.
 
 | File | Size |
 | --- | --- |
@@ -67,6 +67,8 @@ Neither has fast gestures or a hand crossing the face; a take recorded for the p
 | `selfie_multiclass_256x256.onnx` | 16.5 MB |
 | `depth_anything_v2_small_280x504.onnx` | 98.9 MB |
 | `video_depth_anything_small_32x280x504.onnx` | 116.3 MB |
+| `depth_anything_v2_small_504x280.onnx` | 98.9 MB |
+| `video_depth_anything_small_32x504x280.onnx` | 116.3 MB |
 
 ## Face mesh
 
@@ -107,25 +109,29 @@ A 30 s 1080p30 take, CPU only:
 
 | Step | Container (4 cores) | `ubuntu-latest` | `windows-latest` |
 | --- | --- | --- | --- |
-| Decode (ffmpeg, RGB on a pipe) | 3.8 s | — | — |
-| Face mesh (detector every frame, landmarks, blendshapes) | 19 s | — | — |
-| Person mask | 52 s | — | — |
-| Depth, Video Depth Anything Small 280×504 | 5.5 min | — | — |
-| Depth, V2 Small 280×504 | 4.3 min | — | — |
+| Decode (ffmpeg, RGB on a pipe) | 3.8 s | 1.1 s | 2.8 s |
+| Face mesh (detector every frame, landmarks, blendshapes; one thread) | 19 s | 12 s | 14 s |
+| Person mask | 52 s | 25 s | 69 s |
+| Depth, Video Depth Anything Small 280×504 | 5.5 min | 4.2 min | 9.9 min |
+| Depth, V2 Small 280×504 | 4.3 min | 2.1 min | 5.9 min |
 
-So Recording mode needs nothing, Mesh mode about 20 s a take and Depth mode about 6.5 min a take on a 4-core CPU: a job, with progress and cancel, as the spec plans. The reference machine's GPU numbers go with the Windows checks on #51.
+The runners have 4 vCPUs each; the Windows one is two to three times slower on the depth models than the Linux one. Every quality figure (flicker, mask overlap, faces found) came out the same on all three machines.
+
+So Recording mode needs nothing, Mesh mode 12 to 20 s a take (a few seconds more for the mask where it searches for a small face or counts faces) and Depth mode 4.5 to 11 min a take on a 4-core CPU: a job, with progress and cancel, as the spec plans. The reference machine's GPU numbers go with the Windows checks on #51.
 
 ## Decisions
 
 See [ADR-0024](../adr/0024-local-vision-models.md). For the slices:
 
-- **#190 (analysis):** the face pipeline as built here, plus MediaPipe's one-euro smoothing (min cutoff 0.05, beta 80); the head search from the person mask; the "more than one face" check in the person regions too. Face models on one thread. Video Depth Anything Small at 280×504 (and 504×280 for vertical takes) where the memory allows (about 4.5 GB free), else V2 smoothed; per-orientation model files. Depth and mask only for Depth mode.
+- **#190 (analysis):** the face pipeline as built here, plus MediaPipe's one-euro smoothing (min cutoff 0.05, beta 80); the head search from the person mask; the "more than one face" check in each person region too, on a sample of frames (one a second costs about 2 s a take; every frame would cost the mask's 52 s). Face models on one thread. Video Depth Anything Small at 280×504 (and 504×280 for vertical takes) where the memory allows (about 4.5 GB free), else V2 smoothed; per-orientation model files. Depth only for Depth mode; the mask in Mesh mode only for the head search and that sample.
 - **#191 (control video):** Mesh mode must fill the eye and mouth holes and cover beyond the mesh's outline (forehead, hairline) so that no frame shows the performer's face; the acceptance test should check for skin-colored pixels inside the face oval. Depth mode colors depth within the person mask.
-- **Shipping:** the ONNX files above, about 240 MB in all, mirrored as release assets (`vision-models-1`) and bundled; storing the depth weights as fp16 would halve that and is worth a try in #190.
+- **Shipping:** the ONNX files above with the vertical depth files, about 455 MB in all (each orientation's depth files are 215 MB), mirrored as release assets (`vision-models-1`) and bundled; fp16 depth weights would bring that to about 240 MB and are worth a try in #190.
 
 ## Windows-only checks (for #51)
 
-- [ ] `vision-probe info --models <dir> --ep directml` on the reference machine: every model on DirectML, none falling back.
-- [ ] `vision-probe bench --models <dir> --video take-head-30s.mp4 --ep directml` and the same with `--ep cpu`: record face, mask and both depth models' ms a frame, and Video Depth Anything's GPU memory (Task Manager, dedicated GPU memory).
-- [ ] A take of your own: 20 to 30 s, 1080p, alone, talking with fast hand gestures, a hand passing in front of the face once, turning the head away once. Run `face` and `mask` with `--overlay`: the mesh stays on the face, the mask keeps hair and hands, and the frames where the face is turned away come out without a face.
-- [ ] The same take recorded vertical (9:16) on a phone, with `depth --variant video --size 504x280` (after `convert.py --depth-size 504x280`).
+The `vision-spike` workflow's Windows job uploads a kit (`vision-probe-windows-kit`): `vision-probe.exe` with its runtime files and the pinned ffmpeg, the converted models (both orientations) and the two test takes. In the kit's folder:
+
+- [ ] `vision-probe info --models models --ep directml` on the reference machine: every model on DirectML, none falling back.
+- [ ] `vision-probe bench --models models --video takes/take-head-30s.mp4 --ep directml` and the same with `--ep cpu`: record face, mask and both depth models' ms a frame, and Video Depth Anything's GPU memory (Task Manager, dedicated GPU memory).
+- [ ] A take recorded for the purpose: 20 to 30 s, 1080p, one person, talking with fast hand gestures, a hand passing in front of the face once, the head turned away once. Run `face` with `--overlay face.mp4` and `mask` with `--overlay mask.mp4`: the mesh stays on the face, the mask keeps hair and hands, and the frames where the face is turned away come out without a face.
+- [ ] The same take recorded vertical (9:16) on a phone, with `depth --variant video --size 504x280 --overlay depth.mp4`.
