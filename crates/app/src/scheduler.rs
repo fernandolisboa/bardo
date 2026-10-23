@@ -254,7 +254,7 @@ mod tests {
     use crate::publications::whole_millis;
     use crate::scenes::tests::{done, wait_done};
     use crate::uploads::reel_tests::{ready, review, state, upload};
-    use crate::{UploadChoices, UploadState};
+    use crate::{UploadChoices, UploadReviewError, UploadState};
 
     const MINUTE: Duration = Duration::from_secs(60);
     const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -281,6 +281,30 @@ mod tests {
             .unwrap()
     }
 
+    /// Reviews the Reel to go `delay` after Bardo takes it, and returns the
+    /// job and its due time. The due time is read once the review is built,
+    /// so building it eats none of the delay; on a runner so slow that the
+    /// time still passes before `start_upload` checks it, the Reel is
+    /// reviewed again with a longer delay.
+    fn schedule_in(s: &Setup, delay: Duration) -> (JobId, SystemTime) {
+        let mut delay = delay;
+        loop {
+            let review = review(s);
+            let due = whole_millis(SystemTime::now() + delay);
+            let choices = UploadChoices {
+                publish_at: Some(due),
+                ..review.choices()
+            };
+            match s.app.start_upload(&review, choices) {
+                Ok(job) => return (job, due),
+                Err(UploadReviewError::Schedule(ScheduleProblem::Past)) if delay < MINUTE => {
+                    delay = delay.max(Duration::from_millis(100)) * 2;
+                }
+                Err(error) => panic!("not scheduled: {error:?}"),
+            }
+        }
+    }
+
     fn job(s: &Setup, id: JobId) -> Job {
         s.app.jobs().into_iter().find(|job| job.id() == id).unwrap()
     }
@@ -304,8 +328,7 @@ mod tests {
     #[test]
     fn a_scheduled_reel_is_prepared_ahead_and_published_at_its_due_time() {
         let s = ready();
-        let due = whole_millis(SystemTime::now() + Duration::from_millis(1500));
-        let job = schedule(&s, due);
+        let (job, due) = schedule_in(&s, Duration::from_millis(1500));
         wait_until("processed and waiting", || {
             matches!(state(&s), UploadState::Due(_)) && s.h.reels.files.lock().unwrap().len() == 1
         });
@@ -437,7 +460,7 @@ mod tests {
     fn closed_while_publishing(published: bool) -> (Setup, JobId) {
         let s = ready();
         s.h.reels.stall_publish.store(true, Ordering::SeqCst);
-        let id = schedule(&s, SystemTime::now() + Duration::from_millis(300));
+        let (id, _) = schedule_in(&s, Duration::from_millis(300));
         wait_until("publishing", || s.h.reels.stalled.load(Ordering::SeqCst));
         assert!(upload(&s).upload().unwrap().claimed_at.is_some());
         if published {
@@ -463,7 +486,7 @@ mod tests {
     fn a_reel_that_failed_at_its_due_time_goes_when_retried() {
         let s = ready();
         s.h.reels.publish_answer(Err(UploadErrorKind::SignedOut));
-        let id = schedule(&s, SystemTime::now() + Duration::from_millis(300));
+        let (id, _) = schedule_in(&s, Duration::from_millis(300));
         let failed = wait_done(&s.app, id);
         assert_eq!(failed.state(), JobState::Failed);
         assert!(matches!(state(&s), UploadState::Failed { .. }));
