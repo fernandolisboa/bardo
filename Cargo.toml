@@ -17,6 +17,7 @@ bardo-ai = { path = "crates/ai" }
 bardo-publish = { path = "crates/publish" }
 bardo-storage = { path = "crates/storage" }
 bardo-app = { path = "crates/app" }
+bardo-vision = { path = "crates/vision" }
 
 # GPUI family: pinned exactly (see issue #5). Only `bardo-ui` may depend on it;
 # `cargo xtask lint-deps` enforces that in CI.

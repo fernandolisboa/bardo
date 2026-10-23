@@ -1,0 +1,94 @@
+name: Vision models mirror
+
+# Bardo's own copy of the local vision models (ADR-0024, issue #190): the
+# `vision-models-<n>` release that crates/vision/models.toml names as its
+# mirror, which `cargo xtask fetch-models` downloads from and the installer
+# bundles. Converts the pinned sources (crates/vision/tools/convert.py) and
+# makes the release when it does not exist yet; a mirror release that
+# exists is left as it is. Its SHA256SUMS are then pinned in models.toml.
+# Runs when the manifest or the converter changes on main, or by hand.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/vision/models.toml
+      - crates/vision/tools/**
+      - .github/workflows/vision-models.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vision-models-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Convert and mirror the vision models
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        # bash with pipefail, so `convert.py | tee` fails when a check does.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is the mirror already there?
+        id: mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(sed -n 's|^mirror = ".*/releases/download/\(.*\)"$|\1|p' crates/vision/models.toml | head -n 1)
+          test -n "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already mirrored"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.mirror.outputs.exists != 'true'
+        with:
+          python-version: "3.13"
+      - name: Install the conversion tools
+        if: steps.mirror.outputs.exists != 'true'
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r crates/vision/tools/requirements.txt
+      - name: Convert
+        if: steps.mirror.outputs.exists != 'true'
+        run: |
+          mkdir -p mirror
+          python crates/vision/tools/convert.py mirror | tee mirror/convert.log
+      - name: Make the mirror release
+        if: steps.mirror.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.mirror.outputs.tag }}
+        run: |
+          {
+            echo "Bardo's copy of the local vision models (ADR-0024), converted to ONNX by"
+            echo "\`crates/vision/tools/convert.py\` at $GITHUB_SHA from the sources pinned in"
+            echo "\`crates/vision/models.toml\`. All Apache-2.0:"
+            echo
+            echo "- MediaPipe Face Landmarker float16/1 and selfie multiclass segmenter float32/1 (Google)"
+            echo "- Depth Anything V2 Small and Video Depth Anything Small (Depth Anything authors)"
+            echo
+            echo "SHA-256 of every file:"
+            echo
+            echo '```'
+            cat mirror/SHA256SUMS
+            echo '```'
+            echo
+            echo "Conversion log:"
+            echo
+            echo '```'
+            grep -v '^downloading\|^cloning' mirror/convert.log
+            echo '```'
+          } > mirror/NOTES.md
+          gh release create "$TAG" mirror/*.onnx mirror/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Vision models ${TAG#vision-models-} (Bardo's copy)" \
+            --notes-file mirror/NOTES.md \
+            --prerelease \
+            --latest=false
