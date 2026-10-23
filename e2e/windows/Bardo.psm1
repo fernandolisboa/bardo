@@ -4,6 +4,8 @@
 
 Set-StrictMode -Version Latest
 
+Import-Module (Join-Path $PSScriptRoot 'Watchdog.psm1')
+
 # Never changes: installer/bardo.iss names it AppGuid.
 $script:AppGuid = 'C6E790A6-186B-4ED1-8997-82360B3BE325'
 
@@ -27,27 +29,38 @@ function Get-BardoPaths {
     }
 }
 
-# Runs an installer or uninstaller and waits; its exit code.
+# Runs an installer or uninstaller and waits; its exit code. One that has
+# not finished within `Minutes` (a silent install takes seconds) is ended
+# with its children (Inno Setup's loader runs the setup from a temporary
+# copy), after `Report` gets what ran and which windows were open.
 function Invoke-Setup {
-    param([Parameter(Mandatory)][string]$Path, [string[]]$Arguments = @(), [int]$Minutes = 10)
+    param([Parameter(Mandatory)][string]$Path, [string[]]$Arguments = @(), [int]$Minutes = 5, [string]$Report)
     $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
     if (-not $process.WaitForExit($Minutes * 60 * 1000)) {
-        $process.Kill()
-        throw "$Path did not finish within $Minutes minutes"
+        $name = Split-Path -Leaf $Path
+        if ($Report) { Save-ProcessReport $Report "$name did not finish within $Minutes minutes." }
+        $process.Kill($true)
+        throw "$name did not finish within $Minutes minutes$(if ($Report) { " (see $(Split-Path -Leaf $Report))" })"
     }
     return $process.ExitCode
+}
+
+# `Log`'s name with .hang.txt for .log: where a stuck setup's report goes.
+function Get-HangReportPath {
+    param([Parameter(Mandatory)][string]$Log)
+    return [System.IO.Path]::ChangeExtension($Log, '.hang.txt')
 }
 
 function Install-Bardo {
     param([Parameter(Mandatory)][string]$Setup, [string]$Tasks = '', [Parameter(Mandatory)][string]$Log)
     $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$Log`"", "/TASKS=`"$Tasks`"")
-    return Invoke-Setup $Setup $arguments
+    return Invoke-Setup $Setup $arguments -Report (Get-HangReportPath $Log)
 }
 
 function Uninstall-Bardo {
     param([Parameter(Mandatory)][string]$Log)
     $uninstaller = Join-Path (Get-BardoPaths).Program 'unins000.exe'
-    $code = Invoke-Setup $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$Log`"")
+    $code = Invoke-Setup $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$Log`"") -Report (Get-HangReportPath $Log)
     # The uninstaller hands the removal of its own files to a copy of itself.
     Start-Sleep -Seconds 3
     return $code

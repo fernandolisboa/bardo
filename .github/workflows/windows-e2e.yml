@@ -69,6 +69,8 @@ jobs:
     needs: build
     runs-on: windows-latest
     # A hung wizard or process fails the job instead of holding it for hours.
+    # Each Checks step has a shorter timeout of its own: a job that hits its
+    # timeout is killed before the artifact upload, and loses every log.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -96,6 +98,8 @@ jobs:
           }
       - name: Checks
         shell: pwsh
+        # installer.ps1's watchdog ends a stuck run after 10 minutes.
+        timeout-minutes: 20
         run: >
           ./e2e/windows/installer.ps1
           -Scenario ${{ matrix.scenario }}
@@ -124,6 +128,7 @@ jobs:
           path: build
       - name: Checks
         shell: pwsh
+        timeout-minutes: 20
         run: >
           ./e2e/windows/app.ps1
           -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
@@ -151,6 +156,7 @@ jobs:
           path: build
       - name: Checks
         shell: pwsh
+        timeout-minutes: 35
         run: >
           ./e2e/windows/look.ps1
           -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName
@@ -178,6 +184,7 @@ jobs:
           path: build
       - name: Checks
         shell: pwsh
+        timeout-minutes: 20
         run: >
           ./e2e/windows/media.ps1
           -Setup (Get-ChildItem build/Bardo-Setup-*.exe | Select-Object -First 1).FullName

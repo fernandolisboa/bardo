@@ -22,9 +22,9 @@ public static class BardoWizardWin32 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, string lParam);
-    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, string lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
     [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr hwnd);
@@ -33,6 +33,27 @@ public static class BardoWizardWin32 {
     const uint WM_SETTEXT = 0x000C, WM_GETTEXT = 0x000D, WM_GETTEXTLENGTH = 0x000E, WM_COMMAND = 0x0111;
     const uint LB_GETTEXT = 0x0189, LB_GETTEXTLEN = 0x018A, LB_GETCOUNT = 0x018B;
     const int GWL_STYLE = -16, LBS_HASSTRINGS = 0x0040;
+
+    // Every message to the wizard gives up after 10 s, or at once when
+    // Windows already counts the wizard as hung: a plain SendMessage to a
+    // window that stopped answering never returns (issue #214). A message
+    // that gave up reads as 0, an empty text or list.
+    const uint SMTO_ABORTIFHUNG = 0x0002, TimeoutMs = 10000;
+
+    static IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam) {
+        IntPtr result;
+        return SendMessageTimeout(hwnd, msg, wParam, lParam, SMTO_ABORTIFHUNG, TimeoutMs, out result) == IntPtr.Zero ? IntPtr.Zero : result;
+    }
+
+    static void SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam) {
+        IntPtr result;
+        SendMessageTimeout(hwnd, msg, wParam, lParam, SMTO_ABORTIFHUNG, TimeoutMs, out result);
+    }
+
+    static void SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, string lParam) {
+        IntPtr result;
+        SendMessageTimeout(hwnd, msg, wParam, lParam, SMTO_ABORTIFHUNG, TimeoutMs, out result);
+    }
 
     public static string ClassOf(IntPtr hwnd) {
         var name = new StringBuilder(256);

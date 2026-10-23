@@ -19,11 +19,15 @@ param(
     [Parameter(Mandatory)][string]$Program,
     # The latest published release's installer, for the upgrade.
     [string]$Previous,
-    [Parameter(Mandatory)][string]$Out
+    [Parameter(Mandatory)][string]$Out,
+    # How long the scenario may run before the watchdog ends it (a passing
+    # run takes about two minutes).
+    [int]$WatchdogMinutes = 10
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Checks.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Watchdog.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'Bardo.psm1') -Force
 
 $paths = Get-BardoPaths
@@ -127,6 +131,7 @@ function Invoke-Fresh {
 
     # First install, through the wizard, with the agent ticked on the
     # command line (the wizard keeps it ticked).
+    Enter-Stage 'first install through the wizard'
     $wizard = Start-Process -FilePath $Setup -ArgumentList @('/TASKS="backgroundagent"', "/LOG=`"$Out\install-wizard.log`"") -PassThru
     Import-Module (Join-Path $PSScriptRoot 'Wizard.psm1') -Force
     $window = Find-WizardWindow
@@ -148,6 +153,7 @@ function Invoke-Fresh {
         $text -match 'background_agent = true' -and $text.Contains("settings_file = '''$settingsFile'''")
     } { Get-Content -Raw -Encoding utf8 $paths.SetupChoices }
     Test-ProgramFolder 'S1.01'
+    Enter-Stage "the wizard's Finish, Bardo's first start"
     Invoke-WizardButton $window '^&?Finish'
     [void]$wizard.WaitForExit(60000)
     Test-Check 'S1.01' "the finished page's Launch Bardo opens it" {
@@ -158,12 +164,14 @@ function Invoke-Fresh {
     Test-Check 'S2.05' 'without a GPU, Bardo draws its window (the screen is not blank)' { $colours -gt 16 } { "$colours colours" }
 
     # Uninstall while the window is open: the uninstaller refuses.
+    Enter-Stage 'uninstall with the window open'
     $code = Uninstall-Bardo "$Out\uninstall-window-open.log"
     Test-Check 'S13.13' 'with the window open, the uninstall stops and leaves Bardo installed' {
         (Test-Path $paths.Exe) -and (Test-Path $paths.UninstallKey) -and @(Get-BardoProcesses Window).Count -ge 1
     } { "exit $code" }
 
     # Uninstall with the window closed and the agent running.
+    Enter-Stage 'uninstall with the agent running'
     New-Item -ItemType Directory -Force $paths.Backups, $paths.Projects | Out-Null
     Set-Content (Join-Path $paths.Backups 'bardo-auto-test.zip') 'kept'
     Set-Content (Join-Path $paths.Projects 'kept.txt') 'kept'
@@ -185,6 +193,7 @@ function Invoke-Fresh {
     }
 
     # Reinstall without the agent: the data is found again, the agent is off.
+    Enter-Stage 'reinstall without the agent'
     $code = Install-Bardo $Setup '' "$Out\reinstall.log"
     Test-Check 'S13.13' 'the reinstall finishes' { $code -eq 0 } { "exit $code" }
     Test-Check 'S1.01' 'an install with the box unticked leaves background_agent = false' {
@@ -196,6 +205,7 @@ function Invoke-Fresh {
     Stop-BardoWindow
 
     # An uninstall before Bardo ever opened creates no database.
+    Enter-Stage 'install and uninstall without opening Bardo'
     $code = Uninstall-Bardo "$Out\uninstall-2.log"
     Remove-Item -Recurse -Force $paths.Roaming, $paths.Local -ErrorAction SilentlyContinue
     $code = Install-Bardo $Setup '' "$Out\install-unopened.log"
@@ -207,6 +217,7 @@ function Invoke-Fresh {
 
 function Invoke-Upgrade {
     $Previous = (Resolve-Path $Previous).Path
+    Enter-Stage "the published release ($(Split-Path -Leaf $Previous))"
     $code = Install-Bardo $Previous 'backgroundagent' "$Out\install-previous.log"
     Test-Check 'S1.01' 'the latest published release installs with the agent ticked' { $code -eq 0 } { "exit $code" }
     Start-BardoWindow | Out-Null
@@ -216,6 +227,7 @@ function Invoke-Upgrade {
     $previousExe = Get-FileSha256 $paths.Exe
 
     # This build over it, while Bardo and its agent run.
+    Enter-Stage 'this build over the running release'
     $code = Install-Bardo $Setup '' "$Out\upgrade.log"
     Test-Check 'S1.08' 'the upgrade finishes over a running Bardo and agent' { $code -eq 0 } { "exit $code" }
     Test-Check 'S1.08' 'the upgrade closed Bardo and the agent' { Wait-Until { @(Get-BardoProcesses Any).Count -eq 0 } 20 }
@@ -230,6 +242,7 @@ function Invoke-Upgrade {
     # that wait. An agent that finds itself off exits at once, and so does
     # one started within 30 seconds of the ended agent's last sign of life
     # (RUNNER_ALIVE), which still counts as running.
+    Enter-Stage "running the agent's task"
     Start-Sleep -Seconds 35
     schtasks.exe /Run /TN $paths.TaskName | Out-Null
     Test-Check 'S1.08' 'the agent stays on and its task still works' {
@@ -237,6 +250,7 @@ function Invoke-Upgrade {
         Start-Sleep -Seconds 10
         $started -and @(Get-BardoProcesses Agent).Count -eq 1
     }
+    Enter-Stage 'the upgraded window'
     Start-BardoWindow | Out-Null
     [void](Wait-Until { @(Get-BardoProcesses Window).Count -ge 1 } 30)
     Start-Sleep -Seconds 10
@@ -246,6 +260,7 @@ function Invoke-Upgrade {
 
     # This build over itself, through the wizard: an upgrade shows no
     # Import settings page and no agent question, and does not reopen Bardo.
+    Enter-Stage 'this build over itself through the wizard'
     $wizard = Start-Process -FilePath $Setup -ArgumentList @("/LOG=`"$Out\upgrade-wizard.log`"") -PassThru
     Import-Module (Join-Path $PSScriptRoot 'Wizard.psm1') -Force
     $window = Find-WizardWindow
@@ -261,18 +276,33 @@ function Invoke-Upgrade {
         Start-Sleep -Seconds 5
         @(Get-BardoProcesses Any).Count -eq 0
     }
+    Enter-Stage "the wizard's Finish"
     Invoke-WizardButton $window '^&?Finish'
     [void]$wizard.WaitForExit(60000)
     Stop-BardoAll
 }
 
+# A stuck run ends with its logs, results and a report of what hung (in
+# hang.txt) instead of holding the job until its timeout, which leaves none.
+Start-Watchdog -Minutes $WatchdogMinutes -Folder $Out
 try {
     if ($Scenario -eq 'fresh') { Invoke-Fresh } else { Invoke-Upgrade }
+    Enter-Stage 'done'
 } catch {
     Test-Check 'run' "the $Scenario scenario ran to the end" { $false } { "$($_.Exception.Message) at $($_.InvocationInfo.PositionMessage)" }
 } finally {
+    Stop-Watchdog
+    $hang = Get-WatchdogReport
+    if ($hang) {
+        Write-Host $hang
+        Test-Check 'run' "the $Scenario scenario finished within $WatchdogMinutes minutes" { $false } { 'see hang.txt' }
+    }
     Save-Screen "$Out\screens\last.png" | Out-Null
     Get-ChildItem $paths.Logs -ErrorAction SilentlyContinue | Copy-Item -Destination $Out -ErrorAction SilentlyContinue
+    # Nothing the run started may outlive it: a process left behind can
+    # keep the step from ending.
+    $left = Stop-Leftovers
+    if ($left) { Write-Host "Ended what the run left running: $($left -join ', ')" }
 }
 $failed = Complete-Checks "Installer ($Scenario)" $Out
 # Explicit: Actions otherwise ends with the last native command's exit code.
