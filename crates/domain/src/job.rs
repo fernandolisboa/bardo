@@ -135,6 +135,11 @@ pub enum JobKind {
     /// provider's request as the external handle, so a resumed job polls
     /// it instead of paying again. The result waits for review.
     PerformedTake,
+    /// Deletes the files staged in the user's own bucket for take models
+    /// that are no longer needed (#194): a draft finished, replaced,
+    /// refused or past its deadline, or a capture removed. A file whose
+    /// delete fails stays listed for the next run.
+    StagingCleanup,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -163,7 +168,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 32] = [
+    pub const ALL: [JobKind; 33] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -196,6 +201,7 @@ impl JobKind {
         JobKind::ControlVideo,
         JobKind::TakePrompt,
         JobKind::PerformedTake,
+        JobKind::StagingCleanup,
     ];
 
     /// Stable name stored in the database.
@@ -233,6 +239,7 @@ impl JobKind {
             JobKind::ControlVideo => "control_video",
             JobKind::TakePrompt => "take_prompt",
             JobKind::PerformedTake => "performed_take",
+            JobKind::StagingCleanup => "staging_cleanup",
         }
     }
 }

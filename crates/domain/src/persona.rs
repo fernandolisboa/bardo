@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::{PersonaLook, ProfileId, RepositoryError, VoiceRef};
+use crate::{LookAsset, PersonaLook, ProfileId, Provider, RepositoryError, VoiceRef};
 
 uuid_id!(
     /// Identifies a persona.
@@ -436,6 +436,22 @@ pub trait PersonaRepository: Send + Sync {
     /// Drops the drawing waiting for review; one already gone is not an
     /// error.
     fn remove_pending_look(&self, persona: PersonaId) -> Result<(), RepositoryError>;
+
+    /// The look's entry in `provider`'s asset library (#194), as saved:
+    /// whether it still holds for the look is `LookAsset::holds_for`.
+    fn look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+    ) -> Result<Option<LookAsset>, RepositoryError>;
+
+    /// Saves the look's asset with `provider`, or removes it with `None`.
+    fn save_look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+        asset: Option<&LookAsset>,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: PersonaRepository + ?Sized> PersonaRepository for Arc<T> {
@@ -481,6 +497,23 @@ impl<T: PersonaRepository + ?Sized> PersonaRepository for Arc<T> {
 
     fn remove_pending_look(&self, persona: PersonaId) -> Result<(), RepositoryError> {
         (**self).remove_pending_look(persona)
+    }
+
+    fn look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+    ) -> Result<Option<LookAsset>, RepositoryError> {
+        (**self).look_asset(persona, provider)
+    }
+
+    fn save_look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+        asset: Option<&LookAsset>,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_look_asset(persona, provider, asset)
     }
 }
 

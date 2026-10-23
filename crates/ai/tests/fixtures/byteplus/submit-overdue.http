@@ -1,0 +1,4 @@
+HTTP/1.1 403 Forbidden
+content-type: application/json; charset=utf-8
+
+{"error":{"code":"AccountOverdueError","message":"The request failed because your account has an overdue balance. Request ID: 021761220000abcd03","param":"","type":"Forbidden"}}

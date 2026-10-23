@@ -245,6 +245,131 @@ impl PersonaLook {
     }
 }
 
+/// Which entry of the provider's asset library a look stands for (#194).
+/// ModelArk refuses real faces in uploaded pictures and offers these
+/// instead; which ones a look may use depends on where it came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LookAssetKind {
+    /// One of ModelArk's preset digital characters.
+    PresetCharacter,
+    /// A private virtual portrait the user made from the drawn look, which
+    /// ModelArk requires not to resemble any real person.
+    VirtualPortrait,
+    /// The user's own likeness, added through ModelArk's real-person
+    /// verification.
+    VerifiedLikeness,
+}
+
+impl LookAssetKind {
+    pub const ALL: [LookAssetKind; 3] = [
+        LookAssetKind::PresetCharacter,
+        LookAssetKind::VirtualPortrait,
+        LookAssetKind::VerifiedLikeness,
+    ];
+
+    /// Stable name stored in the database.
+    pub fn code(self) -> &'static str {
+        match self {
+            LookAssetKind::PresetCharacter => "preset_character",
+            LookAssetKind::VirtualPortrait => "virtual_portrait",
+            LookAssetKind::VerifiedLikeness => "verified_likeness",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<LookAssetKind> {
+        LookAssetKind::ALL.into_iter().find(|kind| kind.code() == code)
+    }
+
+    /// The kinds a look from `source` may use: a drawn look a preset
+    /// character or a virtual portrait, a photo of the user only their
+    /// verified likeness.
+    pub fn for_source(source: LookSource) -> &'static [LookAssetKind] {
+        match source {
+            LookSource::Drawn => &[LookAssetKind::PresetCharacter, LookAssetKind::VirtualPortrait],
+            LookSource::Imported => &[LookAssetKind::VerifiedLikeness],
+        }
+    }
+}
+
+/// Why a pasted asset id is not usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum LookAssetError {
+    #[error("the asset id is empty")]
+    Empty,
+    /// Not letters, digits, `-`, `_` or `.`, or over 128 characters.
+    #[error("the asset id is not one")]
+    Invalid,
+    /// The kind is not one the look may use.
+    #[error("this look cannot use that kind of asset")]
+    KindNotForLook,
+}
+
+impl LookAssetError {
+    pub const ALL: [LookAssetError; 3] = [
+        LookAssetError::Empty,
+        LookAssetError::Invalid,
+        LookAssetError::KindNotForLook,
+    ];
+}
+
+/// A look's entry in the provider's asset library, used in place of the
+/// image. It belongs to the user's account, so it is never exported, and
+/// it holds only for the image it was given for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LookAsset {
+    pub kind: LookAssetKind,
+    /// The id, without `asset://`.
+    pub id: String,
+    /// A fingerprint of the look's image it was given for.
+    pub image: String,
+}
+
+impl LookAsset {
+    pub const MAX_ID_CHARS: usize = 128;
+    pub const PREFIX: &str = "asset://";
+
+    /// Checks a pasted id (with or without `asset://`) for a look from
+    /// `source` whose image has fingerprint `image`.
+    pub fn parse(
+        kind: LookAssetKind,
+        input: &str,
+        source: LookSource,
+        image: &str,
+    ) -> Result<Self, LookAssetError> {
+        let input = input.trim();
+        let id = input.strip_prefix(Self::PREFIX).unwrap_or(input).trim();
+        if id.is_empty() {
+            return Err(LookAssetError::Empty);
+        }
+        if id.len() > Self::MAX_ID_CHARS
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        {
+            return Err(LookAssetError::Invalid);
+        }
+        if !LookAssetKind::for_source(source).contains(&kind) {
+            return Err(LookAssetError::KindNotForLook);
+        }
+        Ok(Self {
+            kind,
+            id: id.to_owned(),
+            image: image.to_owned(),
+        })
+    }
+
+    /// How the provider is told to use it.
+    pub fn uri(&self) -> String {
+        format!("{}{}", Self::PREFIX, self.id)
+    }
+
+    /// Whether it still stands for `look`: given for the image `look` has
+    /// now (fingerprint `image`), of a kind its source may use.
+    pub fn holds_for(&self, look: &PersonaLook, image: &str) -> bool {
+        self.image == image && LookAssetKind::for_source(look.source).contains(&self.kind)
+    }
+}
+
 /// The user's description of a look to draw: trimmed, not empty, within
 /// [`MAX_LOOK_DESCRIPTION`] characters.
 pub fn look_description(text: &str) -> Result<String, LookDescriptionError> {
@@ -285,6 +410,53 @@ mod tests {
         bytes.extend(height.to_be_bytes());
         bytes.extend(width.to_be_bytes());
         bytes
+    }
+
+    #[test]
+    fn asset_kinds_have_stable_codes_and_follow_the_looks_source() {
+        for kind in LookAssetKind::ALL {
+            assert_eq!(LookAssetKind::from_code(kind.code()), Some(kind));
+        }
+        assert_eq!(
+            LookAssetKind::for_source(LookSource::Imported),
+            [LookAssetKind::VerifiedLikeness]
+        );
+        assert!(!LookAssetKind::for_source(LookSource::Drawn).contains(&LookAssetKind::VerifiedLikeness));
+    }
+
+    #[test]
+    fn a_pasted_asset_id_loses_its_prefix_and_must_fit_the_look() {
+        let asset = LookAsset::parse(
+            LookAssetKind::VirtualPortrait,
+            " asset://asset-2026abc_1.x ",
+            LookSource::Drawn,
+            "print",
+        )
+        .unwrap();
+        assert_eq!(asset.id, "asset-2026abc_1.x");
+        assert_eq!(asset.uri(), "asset://asset-2026abc_1.x");
+        let parse = |kind, input: &str, source| LookAsset::parse(kind, input, source, "print");
+        assert_eq!(
+            parse(LookAssetKind::PresetCharacter, "asset://", LookSource::Drawn),
+            Err(LookAssetError::Empty)
+        );
+        assert_eq!(
+            parse(LookAssetKind::PresetCharacter, "a b", LookSource::Drawn),
+            Err(LookAssetError::Invalid)
+        );
+        assert_eq!(
+            parse(LookAssetKind::PresetCharacter, &"a".repeat(129), LookSource::Drawn),
+            Err(LookAssetError::Invalid)
+        );
+        assert_eq!(
+            parse(LookAssetKind::VerifiedLikeness, "me-1", LookSource::Drawn),
+            Err(LookAssetError::KindNotForLook)
+        );
+        assert_eq!(
+            parse(LookAssetKind::PresetCharacter, "char-1", LookSource::Imported),
+            Err(LookAssetError::KindNotForLook)
+        );
+        assert!(parse(LookAssetKind::VerifiedLikeness, "me-1", LookSource::Imported).is_ok());
     }
 
     #[test]

@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+
+{"id":"cgt-20261023120000-d7k2p","model":"dreamina-seedance-2-5-260628","status":"running","created_at":1792756800,"updated_at":1792756830,"draft":true,"error":null}

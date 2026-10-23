@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+
+{"id":"cgt-20261024090000-f1n4l","model":"dreamina-seedance-2-5-260628","status":"succeeded","content":{"video_url":"https://ark-content-generation-ap-southeast-1.tos-ap-southeast-1.bytepluses.com/dreamina-seedance-2-5/021761290000-f1n4l.mp4?X-Tos-Signature=def"},"usage":{"completion_tokens":1944000,"total_tokens":1944000},"created_at":1792832400,"updated_at":1792832700,"seed":1867302214,"resolution":"1080p","ratio":"16:9","duration":10,"framespersecond":24,"generate_audio":false,"draft":false,"draft_task_id":"cgt-20261023120000-d7k2p","error":null}

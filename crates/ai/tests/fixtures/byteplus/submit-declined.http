@@ -1,0 +1,4 @@
+HTTP/1.1 400 Bad Request
+content-type: application/json; charset=utf-8
+
+{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"The request failed because the input image may contain real person.Request ID: 021761220000abcdef","param":"","type":"BadRequest"}}

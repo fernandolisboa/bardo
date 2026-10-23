@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+
+{"id":"cgt-20261023120000-d7k2p","status":"failed","created_at":1792756800,"draft":true,"error":{"code":"InvalidParameter.TaskTypeMismatch","message":"The parameter omni_reference_task_type specified in the request is not valid: You requested the edit task type, but Seedance classified your task as reference based on your prompt and input."}}

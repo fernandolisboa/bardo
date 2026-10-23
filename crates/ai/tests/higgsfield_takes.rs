@@ -9,8 +9,8 @@ use bardo_ai::HiggsfieldTakes;
 use bardo_ai::higgsfield::{API_URL, DEFAULT_TAKE_MODEL, SEEDANCE_VIDEO_EDIT};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ClipHandle, ClipStatus, Money, Provider, ProviderFailureKind, StagedFile,
-    TakeGenerator, TakeInput, TakeMode, TakeRequest, TakeStep,
+    ApiKey, ClipHandle, Money, Provider, ProviderFailureKind, StagedFile,
+    TakeDone, TakeGenerator, TakeInput, TakeMode, TakeRequest, TakeStatus, TakeStep,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -42,6 +42,7 @@ fn request(model: &str, step: TakeStep, resolution: Option<&str>) -> TakeRequest
         prompt: "The character in the image talks to the camera in a dim study.".into(),
         video: StagedFile(CONTROL_URL.into()),
         look: StagedFile(LOOK_URL.into()),
+        draft_task: None,
     }
 }
 
@@ -219,17 +220,17 @@ fn a_moderated_take_is_declined_and_a_finished_one_downloads_without_the_key() {
     ]);
     let handle = ClipHandle(REQUEST_ID.into());
     match adapter.status(&key(), &handle).unwrap() {
-        ClipStatus::Failed(failure) => assert_eq!(failure.kind, ProviderFailureKind::Declined),
+        TakeStatus::Failed(failure) => assert_eq!(failure.kind, ProviderFailureKind::Declined),
         other => panic!("{other:?}"),
     }
     match adapter.status(&key(), &handle).unwrap() {
-        ClipStatus::Failed(failure) => {
+        TakeStatus::Failed(failure) => {
             assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
             assert!(failure.detail.contains("Generation failed"), "its reason");
         }
         other => panic!("{other:?}"),
     }
-    let ClipStatus::Done { video } = adapter.status(&key(), &handle).unwrap() else {
+    let TakeStatus::Done(TakeDone { video, .. }) = adapter.status(&key(), &handle).unwrap() else {
         panic!("done");
     };
     assert_eq!(video, VIDEO_URL);

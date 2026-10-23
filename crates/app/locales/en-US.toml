@@ -290,6 +290,7 @@ take_analysis = "Take analysis"
 control_video = "Control video"
 take_prompt = "Take prompt"
 performed_take = "Performed take"
+staging_cleanup = "Staged files cleanup"
 
 [job.state]
 queued = "Queued"

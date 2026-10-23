@@ -290,6 +290,7 @@ take_analysis = "Análise da tomada"
 control_video = "Vídeo de controle"
 take_prompt = "Prompt da tomada"
 performed_take = "Tomada interpretada"
+staging_cleanup = "Limpeza de arquivos enviados"
 
 [job.state]
 queued = "Na fila"

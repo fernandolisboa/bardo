@@ -13,10 +13,10 @@
 //! being the default.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ClipHandle, ClipModelRef, ClipStatus, GeneratedClip, Money, Provider, ProviderFailure,
+    ApiKey, ClipHandle, ClipModelRef, GeneratedClip, Metered, Money, Provider, ProviderFailure,
     TakeMode,
 };
 
@@ -69,6 +69,12 @@ pub struct TakeModel {
     /// Whether a final finishes the approved draft from the draft's own
     /// parameters; otherwise a final is a new take.
     pub finishes_draft: bool,
+    /// How long after it was sent a draft can still be finished, for a
+    /// model whose final finishes it (ModelArk: seven days).
+    pub draft_lifetime: Option<Duration>,
+    /// Whether it takes a look from the provider's own asset library
+    /// (`asset://`) in place of the image.
+    pub look_assets: bool,
     /// Whether its result keeps the take's framing (a video edit does), so
     /// the take's face is where it was: the cut starts a 9:16 crop on it
     /// (#193).
@@ -108,6 +114,14 @@ impl TakeModel {
         } else {
             TakeStep::Final
         }
+    }
+
+    /// Until when a draft sent at `sent` can be finished, for a model whose
+    /// final finishes its draft within a lifetime.
+    pub fn draft_deadline(&self, sent: SystemTime) -> Option<SystemTime> {
+        self.draft_lifetime
+            .filter(|_| self.finishes_draft)
+            .map(|lifetime| sent + lifetime)
     }
 
     /// Whether it makes a take of `length`.
@@ -167,6 +181,41 @@ pub struct TakeRequest {
     pub video: StagedFile,
     /// The persona's look.
     pub look: StagedFile,
+    /// For a final that finishes a draft: the draft's request. The model
+    /// reuses the draft's prompt and inputs, so they are not sent again.
+    pub draft_task: Option<ClipHandle>,
+}
+
+/// Where a take is on the provider's side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakeStatus {
+    Queued,
+    Running,
+    Done(TakeDone),
+    /// It ended without a take; the failure says why.
+    Failed(ProviderFailure),
+}
+
+/// A finished take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeDone {
+    /// Where to download it.
+    pub video: String,
+    /// What the provider says it used, when it says (ModelArk: the
+    /// video's tokens), recorded in place of the estimate.
+    pub usage: Option<Metered>,
+    /// The seed that made it, when the provider says.
+    pub seed: Option<i64>,
+}
+
+impl TakeDone {
+    pub fn at(video: impl Into<String>) -> Self {
+        Self {
+            video: video.into(),
+            usage: None,
+            seed: None,
+        }
+    }
 }
 
 /// Makes takes. Calls the network and blocks, so it runs inside a job.
@@ -182,9 +231,9 @@ pub trait TakeGenerator: Send + Sync {
     /// What the provider says `request` costs, when it says.
     fn quote(&self, key: &ApiKey, request: &TakeRequest) -> Option<Money>;
 
-    /// Starts the take. Submitting the same request again with the same
-    /// `submission` id returns the first submission instead of starting
-    /// (and charging for) another.
+    /// Starts the take. Where the provider is `idempotent`, submitting the
+    /// same request again with the same `submission` id returns the first
+    /// submission instead of starting (and charging for) another.
     fn submit(
         &self,
         key: &ApiKey,
@@ -192,10 +241,40 @@ pub trait TakeGenerator: Send + Sync {
         submission: &str,
     ) -> Result<ClipHandle, ProviderFailure>;
 
-    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure>;
+    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<TakeStatus, ProviderFailure>;
 
-    /// Downloads a finished take from where `ClipStatus::Done` said.
+    /// Downloads a finished take from where `TakeStatus::Done` said.
     fn download(&self, key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure>;
+
+    /// Whether a resubmission with the same id is safe (Higgsfield takes
+    /// an idempotency key). Otherwise a submission whose answer was lost is
+    /// looked for with `find_submitted` before sending it again.
+    fn idempotent(&self) -> bool {
+        true
+    }
+
+    /// The request the provider took for `request` since `since`, for a
+    /// provider that is not `idempotent`: `None` when it took none, a
+    /// failure when it cannot tell which.
+    fn find_submitted(
+        &self,
+        _key: &ApiKey,
+        _request: &TakeRequest,
+        _since: SystemTime,
+    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+        Ok(None)
+    }
+
+    /// Whether staged files stay where they are until `unstage` removes
+    /// them (the user's own bucket); otherwise the provider clears them.
+    fn keeps_staged(&self) -> bool {
+        false
+    }
+
+    /// Removes a staged file. Removing one already gone succeeds.
+    fn unstage(&self, _key: &ApiKey, _file: &StagedFile) -> Result<(), ProviderFailure> {
+        Ok(())
+    }
 
     /// How long to wait before status check number `polls` (from 0): a
     /// take takes minutes, so from five seconds up to fifteen.
@@ -231,12 +310,33 @@ impl<T: TakeGenerator + ?Sized> TakeGenerator for Arc<T> {
         (**self).submit(key, request, submission)
     }
 
-    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
+    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<TakeStatus, ProviderFailure> {
         (**self).status(key, handle)
     }
 
     fn download(&self, key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure> {
         (**self).download(key, video)
+    }
+
+    fn idempotent(&self) -> bool {
+        (**self).idempotent()
+    }
+
+    fn find_submitted(
+        &self,
+        key: &ApiKey,
+        request: &TakeRequest,
+        since: SystemTime,
+    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+        (**self).find_submitted(key, request, since)
+    }
+
+    fn keeps_staged(&self) -> bool {
+        (**self).keeps_staged()
+    }
+
+    fn unstage(&self, key: &ApiKey, file: &StagedFile) -> Result<(), ProviderFailure> {
+        (**self).unstage(key, file)
     }
 
     fn poll_delay(&self, polls: u32) -> Duration {
@@ -266,6 +366,8 @@ mod tests {
                 height: 1080,
             },
             finishes_draft: false,
+            draft_lifetime: None,
+            look_assets: false,
             keeps_framing: false,
             min_length: secs(4),
             max_length: secs(30),
@@ -361,7 +463,7 @@ mod tests {
             ) -> Result<ClipHandle, ProviderFailure> {
                 unreachable!()
             }
-            fn status(&self, _: &ApiKey, _: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
+            fn status(&self, _: &ApiKey, _: &ClipHandle) -> Result<TakeStatus, ProviderFailure> {
                 unreachable!()
             }
             fn download(&self, _: &ApiKey, _: &str) -> Result<GeneratedClip, ProviderFailure> {

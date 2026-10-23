@@ -103,12 +103,22 @@ pub struct TakeResult {
     /// A draft: when the user approved it. A final: when the user last
     /// used it.
     pub accepted_at: Option<SystemTime>,
+    /// The seed that made it, when the provider says (ModelArk).
+    pub seed: Option<i64>,
+    /// A draft whose final finishes it: until when it can be finished.
+    pub deadline: Option<SystemTime>,
 }
 
 impl TakeResult {
     /// Whether it was made for the control video `control` and `model`.
     pub fn fits(&self, capture: CaptureId, control: &str, model: &ClipModelRef) -> bool {
         self.capture == capture && self.control == control && self.model == *model
+    }
+
+    /// Whether it is a draft whose deadline passed at `now`: it can no
+    /// longer be finished.
+    pub fn expired(&self, now: SystemTime) -> bool {
+        self.deadline.is_some_and(|deadline| deadline <= now)
     }
 
     /// How much longer (positive) or shorter (negative) than `take` it

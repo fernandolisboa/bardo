@@ -28,6 +28,7 @@ fn fixture(name: &str) -> HttpResponse {
 fn key(provider: Provider) -> ApiKey {
     let text = match provider {
         Provider::Higgsfield => "key-id-0001:key-secret-0001",
+        Provider::BytePlus => "test-key-0001-abcdef|AKLTtest0001|secret-0001|bardo-takes|ap-southeast-1",
         _ => "test-key-0001-abcdef",
     };
     ApiKey::parse(provider, text).unwrap()
@@ -55,6 +56,10 @@ fn an_invalid_key_is_rejected_by_every_provider_with_its_message() {
             "API key not valid. Please pass a valid API key.",
         ),
         (Provider::Higgsfield, "Invalid credentials"),
+        (
+            Provider::BytePlus,
+            "The API key or AK/SK in the request is missing or invalid. Request ID: 021761220000abcd02",
+        ),
         (
             Provider::Kling,
             "Authentication error. The current API does not support AK/SK; please go to the console (https://kling.ai/dev/api-key) to create API key.",

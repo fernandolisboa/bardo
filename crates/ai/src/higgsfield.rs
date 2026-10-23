@@ -22,8 +22,8 @@ use std::time::Duration;
 use bardo_domain::{
     ApiKey, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef,
     ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, Money, Provider, ProviderFailure,
-    ProviderFailureKind, StagedFile, StagedImage, TakeGenerator, TakeInput, TakeMode, TakeModel,
-    TakeRequest, TakeTier,
+    ProviderFailureKind, StagedFile, StagedImage, TakeDone, TakeGenerator, TakeInput, TakeMode,
+    TakeModel, TakeRequest, TakeStatus, TakeTier,
 };
 use serde_json::{Map, Value, json};
 
@@ -198,6 +198,8 @@ pub fn take_models() -> Vec<TakeModel> {
             },
             // Higgsfield has no draft task or seed for these.
             finishes_draft: false,
+            draft_lifetime: None,
+            look_assets: false,
             keeps_framing: spec.keeps_framing,
             min_length: Duration::from_secs(spec.seconds.0),
             max_length: Duration::from_secs(spec.seconds.1),
@@ -691,8 +693,13 @@ impl<T: Transport> TakeGenerator for HiggsfieldClips<T> {
         parse_submission(&response)
     }
 
-    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
-        self.request_status(key, handle)
+    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<TakeStatus, ProviderFailure> {
+        Ok(match self.request_status(key, handle)? {
+            ClipStatus::Queued => TakeStatus::Queued,
+            ClipStatus::Running => TakeStatus::Running,
+            ClipStatus::Done { video } => TakeStatus::Done(TakeDone::at(video)),
+            ClipStatus::Failed(failure) => TakeStatus::Failed(failure),
+        })
     }
 
     /// The CDN gets no key.
