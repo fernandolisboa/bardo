@@ -1,0 +1,134 @@
+name: Vision spike
+
+# Issue #187: converts the pinned vision models, cuts the public-domain test
+# takes, and times vision-probe on Linux and on the Windows runner's CPU
+# (and DirectML, which on a runner with no graphics card shows how the
+# fallback behaves). Runs when the spike changes, or by hand.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - spikes/vision-probe/**
+      - .github/workflows/vision-spike.yml
+
+concurrency:
+  group: vision-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  convert:
+    name: Convert models and cut takes
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        # bash with pipefail, so `convert.py | tee` fails when the check does.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the pinned ffmpeg
+        run: cargo xtask fetch-ffmpeg
+      - name: Install the conversion tools
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r spikes/vision-probe/tools/requirements.txt
+      - name: Convert the models
+        run: |
+          mkdir -p models
+          python spikes/vision-probe/tools/convert.py models --depth-size 280x504 --depth-size 504x280 | tee models/convert.log
+      - name: Check the generated mesh edges match MediaPipe
+        run: |
+          python spikes/vision-probe/tools/gen_edges.py edges.rs
+          diff edges.rs spikes/vision-probe/src/edges.rs
+      - name: Cut the test takes
+        run: python spikes/vision-probe/tools/takes.py takes .ffmpeg/bin/ffmpeg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vision-inputs
+          path: |
+            models/*.onnx
+            models/convert.log
+            takes/take-*.mp4
+          retention-days: 7
+
+  bench:
+    name: Bench (${{ matrix.os }})
+    needs: convert
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            spikes/vision-probe
+      - name: Fetch the pinned ffmpeg
+        run: cargo xtask fetch-ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: vision-inputs
+      - name: Build vision-probe
+        working-directory: spikes/vision-probe
+        run: |
+          cargo fmt --check
+          cargo clippy --release --all-targets --locked -- -D warnings
+          cargo test --release --locked
+          cargo build --release --locked
+          ls -l target/release | grep -iE "vision-probe|\.dll|\.so" || true
+      - name: Load every model (CPU)
+        run: spikes/vision-probe/target/release/vision-probe info --models models --ep cpu
+      - name: Load every model (DirectML, falls back to the CPU when it cannot start)
+        if: runner.os == 'Windows'
+        run: spikes/vision-probe/target/release/vision-probe info --models models --ep directml
+      - name: Face mesh on DirectML (first 150 frames)
+        if: runner.os == 'Windows'
+        run: spikes/vision-probe/target/release/vision-probe face --models models --video takes/take-head-30s.mp4 --frames 150 --ep directml | tee directml-face.json
+      - name: Bench, 30 s 1080p30 take, CPU
+        run: |
+          spikes/vision-probe/target/release/vision-probe bench --models models --video takes/take-head-30s.mp4 --out bench-${{ runner.os }}.json
+          spikes/vision-probe/target/release/vision-probe face --models models --video takes/take-head-30s.mp4 --threads 1 > face-1-thread.json
+      - name: Mask and depth on the gestures take, CPU
+        run: |
+          P=spikes/vision-probe/target/release/vision-probe
+          $P mask --models models --video takes/take-gestures-15s.mp4 > gestures-mask.json
+          for v in v2 v2-ema video; do $P depth --models models --video takes/take-gestures-15s.mp4 --variant $v > gestures-depth-$v.json; done
+      - name: Put together the kit for the checks on a real Windows machine
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p kit/models kit/takes
+          cp spikes/vision-probe/target/release/vision-probe.exe kit/
+          cp spikes/vision-probe/target/release/*.dll kit/ 2>/dev/null || true
+          cp .ffmpeg/bin/* kit/
+          cp models/*.onnx kit/models/
+          cp takes/take-*.mp4 kit/takes/
+          ls -l kit kit/models
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: vision-probe-windows-kit
+          path: kit
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-bench-${{ runner.os }}
+          path: "*.json"
+          retention-days: 30

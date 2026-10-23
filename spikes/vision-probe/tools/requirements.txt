@@ -1,0 +1,15 @@
+# tools/convert.py, tools/gen_edges.py and tools/compare_face.py, pinned as
+# used for the numbers in docs/spikes/vision.md (Python 3.13, Linux x86-64).
+# PyTorch's CPU wheels: pip install --extra-index-url https://download.pytorch.org/whl/cpu
+easydict==1.13
+einops==0.8.2
+mediapipe==1.1.1
+numpy==2.5.4
+onnx==1.23.2
+onnxruntime==1.31.0
+opencv-python-headless==5.0.0.93
+tensorflow-cpu==2.21.0
+tf2onnx==1.17.0
+torch==2.14.1+cpu
+torchvision==0.29.1+cpu
+tqdm==4.70.1
