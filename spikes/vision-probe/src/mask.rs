@@ -129,7 +129,9 @@ impl Segmenter {
         self.runs += 1;
         let probs = out[0]
             .1
-            .chunks_exact(CLASSES)
+            .as_chunks::<CLASSES>()
+            .0
+            .iter()
             .map(|l| {
                 let max = l.iter().copied().fold(f32::MIN, f32::max);
                 let mut p = [0.0; CLASSES];
