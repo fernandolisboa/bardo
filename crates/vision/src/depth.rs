@@ -68,7 +68,7 @@ fn stretched(frame: &RgbFrame, width: usize, height: usize) -> Vec<u8> {
 fn normalize_into(rgb: &[u8], plane: usize, out: &mut Vec<f32>) {
     let start = out.len();
     out.resize(start + plane * 3, 0.0);
-    for (i, px) in rgb.chunks_exact(3).enumerate() {
+    for (i, px) in rgb.as_chunks::<3>().0.iter().enumerate() {
         for c in 0..3 {
             out[start + c * plane + i] = (f32::from(px[c]) / 255.0 - MEAN[c]) / STD[c];
         }

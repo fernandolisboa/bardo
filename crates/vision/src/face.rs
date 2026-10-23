@@ -492,7 +492,9 @@ impl OnnxFaceTracker {
         }
         let (w, h) = (frame.width as f32, frame.height as f32);
         let landmarks: Vec<[f32; 3]> = raw[..FACE_LANDMARKS * 3]
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|p| {
                 let ([x, y], _) = crop.to_image(p[0], p[1]);
                 [x / w, y / h, p[2] / crop.scale / w]

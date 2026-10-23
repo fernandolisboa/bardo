@@ -912,12 +912,10 @@ impl TakeAnalysisHandler {
                     .map_err(media_failure)?;
                 while let Some(frame) = source.next_frame().map_err(media_failure)? {
                     let normalized: Vec<u8> = frame
-                        .chunks_exact(2)
-                        .flat_map(|pair| {
-                            range
-                                .normalize(u16::from_le_bytes([pair[0], pair[1]]))
-                                .to_le_bytes()
-                        })
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .flat_map(|pair| range.normalize(u16::from_le_bytes(*pair)).to_le_bytes())
                         .collect();
                     depth_out.write(&normalized).map_err(media_failure)?;
                     written += 1;

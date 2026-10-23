@@ -32,7 +32,7 @@ impl OnnxSegmenter {
 fn mask_from_logits(logits: &[f32]) -> PersonMask {
     let mut person = Vec::with_capacity(SIZE * SIZE);
     let mut class = Vec::with_capacity(SIZE * SIZE);
-    for cell in logits.chunks_exact(CLASSES) {
+    for cell in logits.as_chunks::<CLASSES>().0 {
         let max = cell.iter().copied().fold(f32::MIN, f32::max);
         let mut p = [0.0f32; CLASSES];
         let mut sum = 0.0;
