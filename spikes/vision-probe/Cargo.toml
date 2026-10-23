@@ -1,0 +1,36 @@
+# Spike for issue #187: runs the local vision models (face mesh, depth,
+# person mask) from Rust through ONNX Runtime and measures them. Not part of
+# the app: it has its own workspace and lock file so `cargo test` at the root
+# never builds it. Results and the decision: docs/spikes/vision.md.
+[package]
+name = "vision-probe"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.92"
+license = "UNLICENSED"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pinned exactly, as the app will pin it. `download-binaries` fetches pyke's
+# ONNX Runtime build (1.24.2, linked statically) for the target at build
+# time; `directml` adds DirectML on Windows.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native"] }
+
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "directml"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+# Pixel loops read better indexed.
+needless_range_loop = "allow"
+
+[profile.release]
+debug = "line-tables-only"

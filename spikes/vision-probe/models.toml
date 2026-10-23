@@ -1,0 +1,77 @@
+# Draft manifest of the local vision models (issue #187), for the `vision`
+# crate (#190) to adopt as crates/vision/models.toml.
+#
+# Sources are what tools/convert.py downloads, each pinned by SHA-256 (or,
+# for upstream code, by commit). The [[onnx]] entries are the files Bardo
+# ships: made once by convert.py, then kept as assets of a
+# `vision-models-<n>` release of Bardo's own repository, as ffmpeg is
+# (crates/media/ffmpeg.toml). The app fetches only those, from the mirror:
+# no Python, TensorFlow or PyTorch at build or run time.
+#
+# Licenses: only Apache-2.0 or more permissive (issue #187, Decided 2).
+# Depth Anything V2 Base/Large and Video Depth Anything Base/Large are
+# CC-BY-NC-4.0 and must never be added.
+mirror = "https://github.com/fernandolisboa/bardo/releases/download/vision-models-1"
+
+[face_landmarker]
+# BlazeFace short range + 478-point face mesh + 52 blendshapes, in one
+# bundle (a zip of three .tflite files).
+url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+sha256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+license = "Apache-2.0"
+license_url = "https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker#models"
+
+[selfie_multiclass]
+# Background, hair, body skin, face skin, clothes, other; 256×256.
+url = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite"
+sha256 = "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+license = "Apache-2.0"
+license_url = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter#multiclass-model"
+
+[depth_anything_v2_small]
+url = "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/03876f8651c73a60fe4c2c48294e09fcb6838fcf/depth_anything_v2_vits.pth"
+sha256 = "715fade13be8f229f8a70cc02066f656f2423a59effd0579197bbf57860e1378"
+license = "Apache-2.0"
+license_url = "https://huggingface.co/depth-anything/Depth-Anything-V2-Small"
+
+[depth_anything_v2_small.code]
+repo = "https://github.com/DepthAnything/Depth-Anything-V2.git"
+commit = "a561b849ebae10a6f5ef49e26c83cbbcd36c71bf"
+license = "Apache-2.0"
+
+[video_depth_anything_small]
+url = "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/256875362cff76724b920335dfb4b29dd611f66e/video_depth_anything_vits.pth"
+sha256 = "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609"
+license = "Apache-2.0"
+license_url = "https://huggingface.co/depth-anything/Video-Depth-Anything-Small"
+
+[video_depth_anything_small.code]
+repo = "https://github.com/DepthAnything/Video-Depth-Anything.git"
+commit = "4f5ae23172ba60fd7bc11ef671cca678842c7072"
+license = "Apache-2.0"
+
+# Files convert.py writes (default sizes), with their SHA-256 from the run
+# recorded in docs/spikes/vision.md. Filled for the mirror release.
+[[onnx]]
+file = "face_detector.onnx"
+from = "face_landmarker"
+
+[[onnx]]
+file = "face_landmarks_detector.onnx"
+from = "face_landmarker"
+
+[[onnx]]
+file = "face_blendshapes.onnx"
+from = "face_landmarker"
+
+[[onnx]]
+file = "selfie_multiclass_256x256.onnx"
+from = "selfie_multiclass"
+
+[[onnx]]
+file = "depth_anything_v2_small_280x504.onnx"
+from = "depth_anything_v2_small"
+
+[[onnx]]
+file = "video_depth_anything_small_32x280x504.onnx"
+from = "video_depth_anything_small"
