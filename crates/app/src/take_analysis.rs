@@ -206,17 +206,49 @@ fn finished_files(
     }
 }
 
-/// Removes every analysis file of `capture`'s takes, at any revision they
-/// had: the capture is going. One that will not go (open in a player)
-/// stays.
+/// Removes what unfinished runs of a take's revision left, whatever their
+/// length: a cancelled or failed job's state and chunks stay until it
+/// resumes, and one whose take moved on never does.
+fn remove_runs(
+    files: &dyn ProjectFiles,
+    project: VideoProjectId,
+    capture: CaptureId,
+    position: u32,
+    revision: u32,
+) {
+    let base = file_base(capture, position, revision);
+    for part in AnalysisPart::ALL {
+        let _ = files.remove(project, &format!("{base}.{}.state", part.code()));
+    }
+    // Chunks are written in order, so the first missing one ends them.
+    for chunk in 0.. {
+        let names = [
+            format!("{base}.face.{chunk:04}.jsonl"),
+            format!("{base}.depth.{chunk:04}.mkv"),
+            format!("{base}.mask.{chunk:04}.mkv"),
+        ];
+        if !names.iter().any(|name| files.exists(project, name)) {
+            break;
+        }
+        for name in &names {
+            let _ = files.remove(project, name);
+        }
+    }
+}
+
+/// Removes every analysis file of `capture`'s takes, finished or not, at
+/// any revision they had: the capture is going. One that will not go (open
+/// in a player) stays.
 pub(crate) fn remove_analysis_files(files: &dyn ProjectFiles, capture: &Capture) {
     for (position, take) in capture.takes.as_slice().iter().enumerate() {
+        let position = position as u32;
         for revision in 1..=take.revision {
             for part in AnalysisPart::ALL {
-                for file in finished_files(capture.id, position as u32, revision, part) {
+                for file in finished_files(capture.id, position, revision, part) {
                     let _ = files.remove(capture.project, &file);
                 }
             }
+            remove_runs(files, capture.project, capture.id, position, revision);
         }
     }
 }
@@ -506,6 +538,18 @@ impl TakeAnalysisHandler {
         for revision in revisions {
             for file in finished_files(work.capture, work.position, revision, work.part) {
                 let _ = self.files.remove(work.project, &file);
+            }
+        }
+        if saved {
+            // Runs of the take's earlier revisions will not resume.
+            for revision in 1..work.revision {
+                remove_runs(
+                    self.files.as_ref(),
+                    work.project,
+                    work.capture,
+                    work.position,
+                    revision,
+                );
             }
         }
         Ok(())
@@ -1715,6 +1759,78 @@ mod tests {
                     .frames,
                 frames_of(&capture, index)
             );
+        }
+    }
+
+    #[test]
+    fn a_cancelled_run_leaves_no_files_once_its_take_moves_on_or_goes() {
+        let s = setup(13);
+        let seen = &s.h.vision.seen;
+        *seen.hold_at.lock().unwrap() = Some(100);
+        seen.hold.store(true, Ordering::SeqCst);
+        let (project, capture) = imported(&s);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while seen.holding.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < deadline, "never reached the 100th frame");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for job in s.app.jobs() {
+            if job.kind() == JobKind::TakeAnalysis && job.state() == JobState::Running {
+                s.app.cancel_job(job.id()).unwrap();
+            }
+        }
+        seen.hold.store(false, Ordering::SeqCst);
+        settled(&s.app, 2);
+        let run = |position: u32, revision: u32| {
+            let base = file_base(capture.id, position, revision);
+            [
+                format!("{base}.face.state"),
+                format!("{base}.face.0000.jsonl"),
+            ]
+        };
+        for position in 0..2 {
+            for file in run(position, 1) {
+                assert!(s.h.files.exists(project, &file), "{file}");
+            }
+        }
+
+        // The cut moves: the new revisions' analyses take the old runs.
+        s.app
+            .move_take_boundary(project, 0, BoundaryMove::Earlier)
+            .unwrap();
+        settled(&s.app, 4);
+        for position in 0..2 {
+            for file in run(position, 1) {
+                assert!(!s.h.files.exists(project, &file), "{file}");
+            }
+        }
+
+        // A run cancelled when the capture goes goes with it.
+        seen.hold.store(true, Ordering::SeqCst);
+        seen.holding.store(0, Ordering::SeqCst);
+        s.app
+            .move_take_boundary(project, 0, BoundaryMove::Later)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while seen.holding.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < deadline, "never reached the 100th frame");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for job in s.app.jobs() {
+            if job.kind() == JobKind::TakeAnalysis && job.state() == JobState::Running {
+                s.app.cancel_job(job.id()).unwrap();
+            }
+        }
+        seen.hold.store(false, Ordering::SeqCst);
+        settled(&s.app, 6);
+        let moved = s.app.narration(project).unwrap().capture.unwrap();
+        let revision = moved.takes.as_slice()[0].revision;
+        assert!(s.h.files.exists(project, &run(0, revision)[0]));
+        s.app.remove_capture(project).unwrap();
+        for position in 0..2 {
+            for file in run(position, revision) {
+                assert!(!s.h.files.exists(project, &file), "{file}");
+            }
         }
     }
 
