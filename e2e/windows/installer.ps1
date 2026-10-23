@@ -129,6 +129,10 @@ function Invoke-Fresh {
     $settingsFile = Join-Path $settingsDir 'cópia antiga.bardo-settings'
     Set-Content -Path $settingsFile -Value 'not a real settings file'
 
+    # PLANTED (#214 proof, reverted before merge): a run blocked where
+    # ending processes cannot free it.
+    Enter-Stage 'PLANTED: blocked forever'
+    [System.Threading.Thread]::Sleep([int]::MaxValue)
     # First install, through the wizard, with the agent ticked on the
     # command line (the wizard keeps it ticked).
     Enter-Stage 'first install through the wizard'
@@ -226,6 +230,10 @@ function Invoke-Upgrade {
     }
     $previousExe = Get-FileSha256 $paths.Exe
 
+    # PLANTED (#214 proof, reverted before merge): an unbounded wait on a
+    # wizard nobody clicks.
+    Enter-Stage 'PLANTED: waiting on a wizard forever'
+    (Start-Process -FilePath $Previous -PassThru).WaitForExit()
     # This build over it, while Bardo and its agent run.
     Enter-Stage 'this build over the running release'
     $code = Install-Bardo $Setup '' "$Out\upgrade.log"
