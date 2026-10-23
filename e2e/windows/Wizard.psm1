@@ -22,9 +22,10 @@ public static class BardoWizardWin32 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, string lParam);
-    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, string lParam, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
     [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr hwnd);
@@ -33,6 +34,34 @@ public static class BardoWizardWin32 {
     const uint WM_SETTEXT = 0x000C, WM_GETTEXT = 0x000D, WM_GETTEXTLENGTH = 0x000E, WM_COMMAND = 0x0111;
     const uint LB_GETTEXT = 0x0189, LB_GETTEXTLEN = 0x018A, LB_GETCOUNT = 0x018B;
     const int GWL_STYLE = -16, LBS_HASSTRINGS = 0x0040;
+
+    // Every message to the wizard gives up after 30 s and throws: a plain
+    // SendMessage to a window that stopped answering never returns (issue
+    // #214). A window that is gone reads as 0 or empty, as before.
+    const uint SMTO_NORMAL = 0x0000, TimeoutMs = 30000;
+    const int ERROR_TIMEOUT = 1460;
+
+    static IntPtr Answered(IntPtr sent, IntPtr result, uint msg) {
+        if (sent != IntPtr.Zero) return result;
+        if (Marshal.GetLastWin32Error() == ERROR_TIMEOUT)
+            throw new TimeoutException("the wizard did not answer message 0x" + msg.ToString("X4") + " within " + TimeoutMs / 1000 + " s");
+        return IntPtr.Zero;
+    }
+
+    static IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam) {
+        IntPtr result;
+        return Answered(SendMessageTimeout(hwnd, msg, wParam, lParam, SMTO_NORMAL, TimeoutMs, out result), result, msg);
+    }
+
+    static void SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam) {
+        IntPtr result;
+        Answered(SendMessageTimeout(hwnd, msg, wParam, lParam, SMTO_NORMAL, TimeoutMs, out result), result, msg);
+    }
+
+    static void SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, string lParam) {
+        IntPtr result;
+        Answered(SendMessageTimeout(hwnd, msg, wParam, lParam, SMTO_NORMAL, TimeoutMs, out result), result, msg);
+    }
 
     public static string ClassOf(IntPtr hwnd) {
         var name = new StringBuilder(256);
@@ -87,6 +116,12 @@ public static class BardoWizardWin32 {
 
 $script:Win32 = [BardoWizardWin32]
 
+# Throws once the installer job's watchdog (Watchdog.psm1) has fired.
+function Stop-IfWatchdogFired {
+    param([Parameter(Mandatory)][string]$What)
+    if ('BardoWatchdog' -as [type]) { [BardoWatchdog]::ThrowIfFired($What) }
+}
+
 # The wizard's window (its handle), once it shows: Inno Setup's loader
 # starts a second process that owns it, a TWizardForm titled
 # 'Setup - Bardo …'.
@@ -94,6 +129,7 @@ function Find-WizardWindow {
     param([int]$Seconds = 60)
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
+        Stop-IfWatchdogFired 'waiting for the setup wizard'
         $window = $script:Win32::TopWindows('TWizardForm') |
             Where-Object { $script:Win32::IsWindowVisible($_) -and $script:Win32::TextOf($_) -like 'Setup - Bardo*' } |
             Select-Object -First 1
@@ -168,6 +204,7 @@ function Wait-WizardPage {
     param([Parameter(Mandatory)]$Window, [Parameter(Mandatory)][string]$Text, [int]$Seconds = 120)
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
+        Stop-IfWatchdogFired "waiting for the wizard's '$Text'"
         if ((Get-WizardTexts $Window) -contains $Text) { return }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
@@ -181,6 +218,7 @@ function Invoke-WizardWalk {
     param([Parameter(Mandatory)]$Window, [scriptblock]$OnPage, [int]$MaxPages = 12)
     $pages = [System.Collections.Generic.List[object]]::new()
     for ($n = 0; $n -lt $MaxPages; $n++) {
+        Stop-IfWatchdogFired 'walking the wizard'
         Start-Sleep -Milliseconds 700
         $texts = Get-WizardTexts $Window
         $pages.Add($texts)
@@ -191,6 +229,8 @@ function Invoke-WizardWalk {
             # Copying the files takes a while.
             $deadline = (Get-Date).AddMinutes(5)
             while (-not (Find-WizardButton $Window '^&?Finish') -and (Get-Date) -lt $deadline) {
+                Stop-IfWatchdogFired 'waiting for the wizard to install'
+                if (-not $script:Win32::IsWindow($Window)) { throw 'the wizard closed before its finished page' }
                 Start-Sleep -Seconds 1
             }
             continue

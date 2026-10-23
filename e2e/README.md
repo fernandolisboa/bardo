@@ -31,6 +31,18 @@ Each job writes `results.json` (one row per check), screenshots and Bardo's
 logs to its artifact, and a table to the run's summary. A failed check fails
 the job; the remaining checks still run.
 
+A stuck run must not reach the job's timeout, which kills the job before the
+artifact upload and loses every log (issue #214). Each Checks step has a
+shorter timeout of its own, a setup that runs for 5 minutes is ended with a
+report beside its log (`*.hang.txt`), and a message to the wizard that gets
+no answer in 30 seconds fails the run instead of waiting on a hung window.
+The installer jobs also have a watchdog: after 10 minutes it writes what ran
+and which windows were open to `hang.txt`, ends the installers and Bardo,
+and stops the run at its next wait; a run still stuck 3 minutes later is
+ended with everything it started (the run is in a job object of its own).
+`stages.txt` shows the stage the run had reached, and the run ends whatever
+it left running.
+
 ## How the checks reach Bardo
 
 - **From outside**: files and folders, the uninstall entry in the registry,

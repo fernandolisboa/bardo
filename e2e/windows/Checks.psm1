@@ -34,11 +34,13 @@ function Test-Check {
     Write-Host "[$mark] $Id $What$(if ($note) { " ($note)" })"
 }
 
-# Waits up to `Seconds` for `Condition` to hold; whether it did.
+# Waits up to `Seconds` for `Condition` to hold; whether it did. Throws
+# once the installer job's watchdog (Watchdog.psm1) has fired.
 function Wait-Until {
     param([Parameter(Mandatory)][scriptblock]$Condition, [int]$Seconds = 30)
     $deadline = (Get-Date).AddSeconds($Seconds)
     do {
+        if ('BardoWatchdog' -as [type]) { [BardoWatchdog]::ThrowIfFired('a wait') }
         try { if (& $Condition) { return $true } } catch { }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
