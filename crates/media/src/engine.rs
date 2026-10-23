@@ -69,6 +69,15 @@ pub trait MediaEngine: Send + Sync {
     /// Composes a YouTube thumbnail into the JPEG at `destination`.
     fn compose_thumbnail(&self, spec: &ThumbnailSpec, destination: &Path)
     -> Result<(), MediaError>;
+
+    /// Rewrites the picture at `source` as a JPEG of the same size at
+    /// `destination`, within `max_bytes`.
+    fn fit_picture(
+        &self,
+        source: &Path,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError>;
 }
 
 /// The bundled ffmpeg, located the first time it is needed. A failed
@@ -169,5 +178,14 @@ impl MediaEngine for BundledFfmpeg {
         destination: &Path,
     ) -> Result<(), MediaError> {
         self.ffmpeg()?.compose_thumbnail(spec, destination)
+    }
+
+    fn fit_picture(
+        &self,
+        source: &Path,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError> {
+        self.ffmpeg()?.fit_picture(source, destination, max_bytes)
     }
 }

@@ -844,7 +844,9 @@ impl Bardo {
         let personas = self.personas().unwrap_or_default();
         for (index, persona) in personas.iter().enumerate() {
             if has(SettingsItem::Persona(index)) {
-                let package = persona_package::encode(&persona.details);
+                // Without its look: the settings file stays small, and a
+                // look travels in the persona's own package.
+                let package = persona_package::encode(&persona.details, None);
                 if let Ok(value) = serde_json::from_str(&package) {
                     contents.personas.push(value);
                 }
@@ -985,7 +987,8 @@ impl Bardo {
         }
         let personas = self.personas().unwrap_or_default();
         for (index, value) in contents.personas.iter().enumerate() {
-            let decoded = persona_package::decode(&value.to_string());
+            let decoded =
+                persona_package::decode(&value.to_string()).map(|package| package.details);
             let label = match &decoded {
                 Ok(details) => details.name().to_owned(),
                 Err(_) => value["persona"]["name"].as_str().unwrap_or("?").to_owned(),
@@ -1274,7 +1277,9 @@ impl Bardo {
 
     fn bring_persona(&self, value: &serde_json::Value) -> Result<(), Text> {
         let failed = Text::SettingsFileItemFailed;
-        let details = persona_package::decode(&value.to_string()).map_err(|_| failed)?;
+        let details = persona_package::decode(&value.to_string())
+            .map_err(|_| failed)?
+            .details;
         let existing = self
             .personas
             .list(self.profile.id)

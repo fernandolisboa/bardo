@@ -13,7 +13,7 @@ Uma persona é um narrador: uma voz da sua conta na ElevenLabs, um tom, um estil
 <a id="library"></a>
 ## Seus narradores
 
-A lista traz cada persona, com a voz dela. O Bardo vem com quatro, duas em inglês e duas em português; **Nova persona** cria a sua, e escolher uma a abre para edição. Salvar uma persona que alguns canais usam como padrão muda o narrador deles também, então o Bardo diz quais são esses canais e pergunta antes. Para mudar o narrador de um canal só, **Duplique** a persona e edite a cópia.
+A lista traz cada persona, com a voz dela. O Bardo vem com quatro, duas em inglês e duas em português; **Nova persona** cria a sua, e escolher uma a abre para edição. Salvar uma persona que alguns canais usam como padrão muda o narrador deles também, então o Bardo diz quais são esses canais e pergunta antes. Para mudar o narrador de um canal só, **Duplique** a persona e edite a cópia; a cópia fica com a aparência.
 
 <a id="voice"></a>
 ## A voz
@@ -43,9 +43,19 @@ Os presets definem como a ElevenLabs lê com esta voz:
 <a id="share"></a>
 ## Salvar e compartilhar
 
-**Criar persona** ou **Salvar alterações** guarda a persona. **Exportar para arquivo…** salva um pacote com a persona e uma referência à voz, nunca áudio ou chaves, para usar em outro computador; **Importar de arquivo…**, no topo, traz uma para cá. Quem importa precisa da mesma voz na própria conta da ElevenLabs: até o Bardo encontrá-la lá, a persona fica marcada como **Voz não verificada** ou **Voz indisponível** e não pode narrar.
+**Criar persona** ou **Salvar alterações** guarda a persona. **Exportar para arquivo…** salva um pacote com a persona, uma referência à voz e a aparência quando ela é desenhada, nunca áudio, chaves ou uma foto sua, para usar em outro computador; **Importar de arquivo…**, no topo, traz uma para cá. Quem importa precisa da mesma voz na própria conta da ElevenLabs: até o Bardo encontrá-la lá, a persona fica marcada como **Voz não verificada** ou **Voz indisponível** e não pode narrar.
 
 <a id="realistic"></a>
 ## Vozes realistas
 
 Marque **Voz sintética realista ou clone de uma pessoa real** quando a voz soa como uma pessoa real: um clone, ou uma voz profissional feita com gravações de alguém. Escolher uma voz clonada ou profissional já marca a opção. As redes pedem que esses vídeos sejam marcados como conteúdo alterado ou sintético, e o Bardo lembra você na exportação.
+
+<a id="look"></a>
+## A aparência
+
+A aparência é como esta persona aparece nos clipes de atuação. Uma persona sem aparência não pode atuar. Há dois tipos:
+
+- **Desenhada**: descreva o personagem em **Descreva o personagem** e escolha **Desenhar**. O Claude escreve um prompt de imagem a partir da sua descrição com o [modelo de prompt de aparência](templates.md), só para personagens originais e adultos: ele recusa uma pessoa real e identificável, uma criança ou um personagem protegido por direitos autorais e diz por quê, mesmo que o modelo tenha sido editado. Depois o Nano Banana desenha em formato vertical 2:3. As duas chamadas são estimadas antes de começar e registradas em [Custos](costs.md). O desenho espera revisão em **Novo desenho para revisar**: **Ficar com esta aparência** faz dele a aparência, **Descartar** joga fora, e **Desenhar de novo** troca por um novo. Você precisa das chaves do Claude e do Gemini ([Suas chaves de API](api-keys.md#providers)).
+- **Foto sua**: **Importar uma foto minha…** aceita um PNG ou JPEG em que só você aparece, da cintura para cima, de frente para a câmera, com fundo liso, de 300 a 6.000 px de lado e até 10 MB. Marque antes **Só eu apareço nesta foto**. Ela vira a aparência na hora e nunca vai num pacote.
+
+**Aparência realista** fica sempre marcada para uma foto sua, e marcada para um desenho fotorrealista: vídeos em que uma aparência realista atua precisam do rótulo de conteúdo alterado ou sintético das redes. **Remover aparência** apaga depois de perguntar; uma aparência desenhada só volta com um novo desenho. As mudanças nesta seção são salvas na hora, sem **Salvar alterações**. Uma persona importada de um pacote com aparência desenhada a traz como um desenho para revisar.

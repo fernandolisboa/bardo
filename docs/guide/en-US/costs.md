@@ -42,7 +42,7 @@ When a model ran without any price, its calls count as nothing, and the figure *
 <a id="channels"></a>
 ## Spend by channel
 
-**By channel** shows what each channel's videos cost this month, with a bar against the channel that spent the most. Calls made for no channel, like a persona's voice sample, count as **Unknown channel**.
+**By channel** shows what each channel's videos cost this month, with a bar against the channel that spent the most. Calls made for no channel, like a persona's voice sample or look, count as **Unknown channel**.
 
 <a id="videos"></a>
 ## The most expensive videos

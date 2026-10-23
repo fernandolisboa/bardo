@@ -22,6 +22,7 @@ There is one template per kind of generation:
 - **Thumbnail**: a long video's YouTube thumbnail text and the prompt for its background ([Thumbnail](uploading.md#thumbnail)).
 - **Chapters**: a long video's YouTube chapters, from the narration's sentences ([Chapters](uploading.md#chapters)).
 - **Localized version**: a version's script, adapted sentence by sentence for another language or country ([Versions in other languages](script.md#versions)). Besides the target channel's facts, it reads `{{source_language}}`, `{{source_country}}`, the original title and its numbered sentences.
+- **Look prompt**: the image prompt for a persona's drawn look, from your description ([The look](personas.md#look)). It reads `{{persona}}` and `{{look_description}}`, and it must keep declining real people.
 
 <a id="versions"></a>
 ## Versions

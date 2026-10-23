@@ -156,6 +156,7 @@ pub mod refs {
     pub const PERSONAS_SAMPLE: GuideRef = at("personas", "sample");
     pub const PERSONAS_SHARE: GuideRef = at("personas", "share");
     pub const PERSONAS_REALISTIC: GuideRef = at("personas", "realistic");
+    pub const PERSONAS_LOOK: GuideRef = at("personas", "look");
     pub const TEMPLATES_VERSIONS: GuideRef = at("templates", "versions");
     pub const TEMPLATES_FIELDS: GuideRef = at("templates", "fields");
     pub const TEMPLATES_VARIABLES: GuideRef = at("templates", "variables");
@@ -197,7 +198,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 69] = [
+    pub const ALL: [GuideRef; 70] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -229,6 +230,7 @@ pub mod refs {
         PERSONAS_SAMPLE,
         PERSONAS_SHARE,
         PERSONAS_REALISTIC,
+        PERSONAS_LOOK,
         TEMPLATES_VERSIONS,
         TEMPLATES_FIELDS,
         TEMPLATES_VARIABLES,

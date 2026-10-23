@@ -10,13 +10,13 @@ use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
 use bardo_domain::{
     ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionHighlight, CaptionStyle,
     ChannelFieldError, ContentLanguage, Country, DateOrder, Decibels, DecisionEngineId,
-    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, LocalTime, MetadataProblem,
-    Meter, MetricsSyncOnStart, Money, MoneyError, Month, MotionKind, MotionStrength,
-    MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError, PastedTokenError,
-    PersonaFieldError, PostLinkError, Provider, RateFieldError, SceneFieldError, ScheduleProblem,
-    Score, ScriptFieldError, Share, SignInFailureKind, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage,
-    UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
+    JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, LocalTime, LookDescriptionError,
+    LookImageError, MetadataProblem, Meter, MetricsSyncOnStart, Money, MoneyError, Month,
+    MotionKind, MotionStrength, MusicPromptFieldError, Network, NetworkAccountFieldError,
+    NicheSeedError, PastedTokenError, PersonaFieldError, PostLinkError, Provider, RateFieldError,
+    SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share, SignInFailureKind,
+    TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode,
+    TourId, TransitionKind, UiLanguage, UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
 };
 use bardo_domain::{
     ChapterFieldError, ChapterProblem, TextPlacement, ThumbnailFieldError, ThumbnailLook,
@@ -1309,6 +1309,55 @@ pub enum Text {
     StageExportStopped,
     PersonaRealisticVoice,
     PersonaRealisticVoiceHint,
+    LookTitle,
+    LookHint,
+    LookSaveFirst,
+    LookEmpty,
+    LookDrawnTag,
+    LookImportedTag,
+    LookFromDescription,
+    LookRemovePhotoConfirm,
+    LookNotLoaded,
+    LookDescription,
+    LookDescriptionPlaceholder,
+    LookDraw,
+    LookDrawAgain,
+    LookDrawHint,
+    LookDrawing,
+    LookDeclined,
+    LookFailed,
+    LookStopped,
+    LookPendingTitle,
+    LookPendingHint,
+    LookKeep,
+    LookDiscard,
+    LookImport,
+    LookImportTitle,
+    LookImportHint,
+    LookShowsMe,
+    LookChoosePhoto,
+    LookImportDialog,
+    LookCancel,
+    LookImported,
+    LookKept,
+    LookRemove,
+    LookRemoveConfirm,
+    LookRemoveYes,
+    LookRemoved,
+    LookRealistic,
+    LookRealisticHint,
+    PersonaExportedNoLook,
+    LookMissingClaudeKey,
+    LookMissingImageKey,
+    LookBusy,
+    LookNothingWaiting,
+    LookNone,
+    LookNotConfirmed,
+    LookUnreadable,
+    LookImageRefused,
+    LookNotSaved,
+    LookDescriptionError(LookDescriptionError),
+    LookImageReason(LookImageError),
     ExportInfo,
     ExportFigureRendered,
     ExportFigureMetadata,
@@ -3449,6 +3498,64 @@ impl Text {
             Text::StageExportStopped => "stage.note.export_stopped",
             Text::PersonaRealisticVoice => "persona.realistic_voice",
             Text::PersonaRealisticVoiceHint => "persona.realistic_voice_hint",
+            Text::LookTitle => "persona.look.title",
+            Text::LookHint => "persona.look.hint",
+            Text::LookSaveFirst => "persona.look.save_first",
+            Text::LookEmpty => "persona.look.empty",
+            Text::LookDrawnTag => "persona.look.drawn_tag",
+            Text::LookImportedTag => "persona.look.imported_tag",
+            Text::LookFromDescription => "persona.look.from_description",
+            Text::LookRemovePhotoConfirm => "persona.look.remove_photo_confirm",
+            Text::LookNotLoaded => "persona.look.not_loaded",
+            Text::LookDescription => "persona.look.description",
+            Text::LookDescriptionPlaceholder => "persona.look.description_placeholder",
+            Text::LookDraw => "persona.look.draw",
+            Text::LookDrawAgain => "persona.look.draw_again",
+            Text::LookDrawHint => "persona.look.draw_hint",
+            Text::LookDrawing => "persona.look.drawing",
+            Text::LookDeclined => "persona.look.declined",
+            Text::LookFailed => "persona.look.failed",
+            Text::LookStopped => "persona.look.stopped",
+            Text::LookPendingTitle => "persona.look.pending_title",
+            Text::LookPendingHint => "persona.look.pending_hint",
+            Text::LookKeep => "persona.look.keep",
+            Text::LookDiscard => "persona.look.discard",
+            Text::LookImport => "persona.look.import",
+            Text::LookImportTitle => "persona.look.import_title",
+            Text::LookImportHint => "persona.look.import_hint",
+            Text::LookShowsMe => "persona.look.shows_me",
+            Text::LookChoosePhoto => "persona.look.choose_photo",
+            Text::LookImportDialog => "persona.look.import_dialog",
+            Text::LookCancel => "persona.look.cancel",
+            Text::LookImported => "persona.look.imported",
+            Text::LookKept => "persona.look.kept",
+            Text::LookRemove => "persona.look.remove",
+            Text::LookRemoveConfirm => "persona.look.remove_confirm",
+            Text::LookRemoveYes => "persona.look.remove_yes",
+            Text::LookRemoved => "persona.look.removed",
+            Text::LookRealistic => "persona.look.realistic",
+            Text::LookRealisticHint => "persona.look.realistic_hint",
+            Text::PersonaExportedNoLook => "persona.exported_no_look",
+            Text::LookMissingClaudeKey => "persona.look.error.missing_claude_key",
+            Text::LookMissingImageKey => "persona.look.error.missing_image_key",
+            Text::LookBusy => "persona.look.error.busy",
+            Text::LookNothingWaiting => "persona.look.error.nothing_waiting",
+            Text::LookNone => "persona.look.error.none",
+            Text::LookNotConfirmed => "persona.look.error.not_confirmed",
+            Text::LookUnreadable => "persona.look.error.unreadable",
+            Text::LookImageRefused => "persona.look.error.image_refused",
+            Text::LookNotSaved => "persona.look.error.not_saved",
+            Text::LookDescriptionError(error) => match error {
+                LookDescriptionError::Required => "persona.look.error.description_required",
+                LookDescriptionError::TooLong => "persona.look.error.description_too_long",
+            },
+            Text::LookImageReason(error) => match error {
+                LookImageError::NotAnImage => "persona.look.image.not_an_image",
+                LookImageError::TooSmall { .. } => "persona.look.image.too_small",
+                LookImageError::TooLarge { .. } => "persona.look.image.too_large",
+                LookImageError::Shape { .. } => "persona.look.image.shape",
+                LookImageError::FileTooLarge(_) => "persona.look.image.file_too_large",
+            },
             Text::ExportInfo => "export.info",
             Text::ExportFigureRendered => "export.figure.rendered",
             Text::ExportFigureMetadata => "export.figure.metadata",
@@ -5580,6 +5687,79 @@ mod tests {
         texts.push(Text::StageExportStopped);
         texts.push(Text::PersonaRealisticVoice);
         texts.push(Text::PersonaRealisticVoiceHint);
+        texts.push(Text::LookTitle);
+        texts.push(Text::LookHint);
+        texts.push(Text::LookSaveFirst);
+        texts.push(Text::LookEmpty);
+        texts.push(Text::LookDrawnTag);
+        texts.push(Text::LookImportedTag);
+        texts.push(Text::LookFromDescription);
+        texts.push(Text::LookRemovePhotoConfirm);
+        texts.push(Text::LookNotLoaded);
+        texts.push(Text::LookDescription);
+        texts.push(Text::LookDescriptionPlaceholder);
+        texts.push(Text::LookDraw);
+        texts.push(Text::LookDrawAgain);
+        texts.push(Text::LookDrawHint);
+        texts.push(Text::LookDrawing);
+        texts.push(Text::LookDeclined);
+        texts.push(Text::LookFailed);
+        texts.push(Text::LookStopped);
+        texts.push(Text::LookPendingTitle);
+        texts.push(Text::LookPendingHint);
+        texts.push(Text::LookKeep);
+        texts.push(Text::LookDiscard);
+        texts.push(Text::LookImport);
+        texts.push(Text::LookImportTitle);
+        texts.push(Text::LookImportHint);
+        texts.push(Text::LookShowsMe);
+        texts.push(Text::LookChoosePhoto);
+        texts.push(Text::LookImportDialog);
+        texts.push(Text::LookCancel);
+        texts.push(Text::LookImported);
+        texts.push(Text::LookKept);
+        texts.push(Text::LookRemove);
+        texts.push(Text::LookRemoveConfirm);
+        texts.push(Text::LookRemoveYes);
+        texts.push(Text::LookRemoved);
+        texts.push(Text::LookRealistic);
+        texts.push(Text::LookRealisticHint);
+        texts.push(Text::PersonaExportedNoLook);
+        texts.push(Text::LookMissingClaudeKey);
+        texts.push(Text::LookMissingImageKey);
+        texts.push(Text::LookBusy);
+        texts.push(Text::LookNothingWaiting);
+        texts.push(Text::LookNone);
+        texts.push(Text::LookNotConfirmed);
+        texts.push(Text::LookUnreadable);
+        texts.push(Text::LookImageRefused);
+        texts.push(Text::LookNotSaved);
+        texts.extend(
+            [
+                LookDescriptionError::Required,
+                LookDescriptionError::TooLong,
+            ]
+            .map(Text::LookDescriptionError),
+        );
+        texts.extend(
+            [
+                LookImageError::NotAnImage,
+                LookImageError::TooSmall {
+                    width: 1,
+                    height: 1,
+                },
+                LookImageError::TooLarge {
+                    width: 1,
+                    height: 1,
+                },
+                LookImageError::Shape {
+                    width: 1,
+                    height: 1,
+                },
+                LookImageError::FileTooLarge(1),
+            ]
+            .map(Text::LookImageReason),
+        );
         texts.push(Text::ExportInfo);
         texts.push(Text::ExportFigureRendered);
         texts.push(Text::ExportFigureMetadata);

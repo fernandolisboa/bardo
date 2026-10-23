@@ -23,3 +23,6 @@ Synthetic, for edge cases: `generate-text-only.http` (text, no image),
 `generate-image-no-breakdown.http` (usage without the per-modality
 breakdown),
 `generate-not-an-image.http` (inline data that is not an image).
+
+Not an answer: `look-2x3.png` is a 400×600 gradient the app's fake image
+generator returns for a persona's look (#188).

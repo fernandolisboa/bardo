@@ -1,11 +1,12 @@
 //! Personas (ADR-0005, CONTEXT.md): reusable narrator identities owned by
 //! the user profile, independent of channels. A persona holds a voice
 //! reference, a tone, a script style and generation presets; a channel
-//! points at one as its default.
+//! points at one as its default. It may also have a look (#188,
+//! `persona_look`), kept apart since it is an image.
 
 use std::sync::Arc;
 
-use crate::{ProfileId, RepositoryError, VoiceRef};
+use crate::{PersonaLook, ProfileId, RepositoryError, VoiceRef};
 
 uuid_id!(
     /// Identifies a persona.
@@ -412,6 +413,29 @@ pub trait PersonaRepository: Send + Sync {
 
     /// Inserts every persona, or none of them.
     fn insert_all(&self, personas: &[Persona]) -> Result<(), RepositoryError>;
+
+    /// The persona's look (#188), if it has one.
+    fn look(&self, persona: PersonaId) -> Result<Option<PersonaLook>, RepositoryError>;
+
+    /// A drawing waiting for review beside the look, if any.
+    fn pending_look(&self, persona: PersonaId) -> Result<Option<PersonaLook>, RepositoryError>;
+
+    /// Makes `look` the persona's look, in place of any.
+    fn save_look(&self, look: &PersonaLook) -> Result<(), RepositoryError>;
+
+    /// Puts `look` up for review, in place of any drawing waiting.
+    fn save_pending_look(&self, look: &PersonaLook) -> Result<(), RepositoryError>;
+
+    /// Makes the drawing waiting for review the persona's look, in one
+    /// step. Returns whether one was waiting.
+    fn keep_pending_look(&self, persona: PersonaId) -> Result<bool, RepositoryError>;
+
+    /// Removes the persona's look; one already gone is not an error.
+    fn remove_look(&self, persona: PersonaId) -> Result<(), RepositoryError>;
+
+    /// Drops the drawing waiting for review; one already gone is not an
+    /// error.
+    fn remove_pending_look(&self, persona: PersonaId) -> Result<(), RepositoryError>;
 }
 
 impl<T: PersonaRepository + ?Sized> PersonaRepository for Arc<T> {
@@ -429,6 +453,34 @@ impl<T: PersonaRepository + ?Sized> PersonaRepository for Arc<T> {
 
     fn insert_all(&self, personas: &[Persona]) -> Result<(), RepositoryError> {
         (**self).insert_all(personas)
+    }
+
+    fn look(&self, persona: PersonaId) -> Result<Option<PersonaLook>, RepositoryError> {
+        (**self).look(persona)
+    }
+
+    fn pending_look(&self, persona: PersonaId) -> Result<Option<PersonaLook>, RepositoryError> {
+        (**self).pending_look(persona)
+    }
+
+    fn save_look(&self, look: &PersonaLook) -> Result<(), RepositoryError> {
+        (**self).save_look(look)
+    }
+
+    fn save_pending_look(&self, look: &PersonaLook) -> Result<(), RepositoryError> {
+        (**self).save_pending_look(look)
+    }
+
+    fn keep_pending_look(&self, persona: PersonaId) -> Result<bool, RepositoryError> {
+        (**self).keep_pending_look(persona)
+    }
+
+    fn remove_look(&self, persona: PersonaId) -> Result<(), RepositoryError> {
+        (**self).remove_look(persona)
+    }
+
+    fn remove_pending_look(&self, persona: PersonaId) -> Result<(), RepositoryError> {
+        (**self).remove_pending_look(persona)
     }
 }
 

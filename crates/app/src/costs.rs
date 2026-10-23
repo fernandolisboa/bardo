@@ -207,8 +207,9 @@ impl PlannedCall {
     }
 }
 
-/// What one call of `purpose` uses before Bardo has seen any.
-fn first_guess(purpose: CostPurpose) -> Metered {
+/// What one call of `purpose` to `provider` uses before Bardo has seen
+/// any.
+fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
     let tokens = |input_tokens, output_tokens| Metered {
         input_tokens,
         output_tokens,
@@ -255,6 +256,17 @@ fn first_guess(purpose: CostPurpose) -> Metered {
         },
         // The narration's sentences in, a dozen short titles out.
         CostPurpose::Chapters => tokens(4_000, 600),
+        // Claude writes a paragraph of prompt; the image provider draws it
+        // at 2K, as a scene's.
+        CostPurpose::PersonaLook => match provider {
+            Provider::Claude => tokens(700, 400),
+            _ => Metered {
+                input_tokens: 300,
+                output_tokens: 250,
+                image_tokens: 1_680,
+                ..Metered::default()
+            },
+        },
     }
 }
 
@@ -351,7 +363,8 @@ impl CostBook {
             .filter(|record| record.provider == call.provider)
             .map(|record| record.usage)
             .collect();
-        let mut usage = Metered::mean(&samples).unwrap_or_else(|| first_guess(call.purpose));
+        let mut usage =
+            Metered::mean(&samples).unwrap_or_else(|| first_guess(call.purpose, call.provider));
         if let Some(chars) = call.prompt_chars {
             usage.input_tokens = (chars as u64).div_ceil(CHARS_PER_TOKEN);
         }

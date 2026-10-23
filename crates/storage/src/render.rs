@@ -473,7 +473,8 @@ mod tests {
                 "DROP TABLE rendered_cut; DROP TABLE adapted_sentence;
                  DROP TABLE localized_audio; DROP TABLE localized_lane;
                  DROP TABLE localized_scene; DROP TABLE localized_sentence;
-                 DROP TABLE localization; PRAGMA user_version = 48;",
+                 DROP TABLE localization; DROP TABLE persona_look;
+                 PRAGMA user_version = 48;",
             )
             .unwrap();
             crate::migrations::run(&mut conn).unwrap();

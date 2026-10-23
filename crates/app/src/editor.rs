@@ -1961,6 +1961,8 @@ pub(crate) mod testing {
         pub(crate) renders: Mutex<Vec<RenderCall>>,
         /// The thumbnails composed, with where they went.
         pub(crate) thumbnails: Mutex<Vec<(ThumbnailSpec, PathBuf)>>,
+        /// The limits pictures were fitted within.
+        pub(crate) fitted: Mutex<Vec<u64>>,
     }
 
     impl FakeMedia {
@@ -2197,6 +2199,24 @@ pub(crate) mod testing {
                 .push((spec.clone(), destination.to_owned()));
             // Composed into a scratch file on disk, as ffmpeg does.
             std::fs::write(destination, b"jpeg")?;
+            Ok(())
+        }
+
+        fn fit_picture(
+            &self,
+            source: &Path,
+            destination: &Path,
+            max_bytes: u64,
+        ) -> Result<(), MediaError> {
+            self.check(source)?;
+            let (width, height) = bardo_domain::image_dimensions(&std::fs::read(source)?)
+                .ok_or_else(|| MediaError::Io(std::io::Error::other("not a picture")))?;
+            self.fitted.lock().unwrap().push(max_bytes);
+            // A baseline JPEG header of the same size, as ffmpeg keeps it.
+            let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
+            jpeg.extend((height as u16).to_be_bytes());
+            jpeg.extend((width as u16).to_be_bytes());
+            std::fs::write(destination, jpeg)?;
             Ok(())
         }
     }

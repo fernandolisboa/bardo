@@ -1,11 +1,12 @@
 use bardo_domain::{
-    GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaRepository,
-    ProfileId, Provider, RepositoryError, VoiceFlag, VoiceRef,
+    GenerationPresets, JobId, LookDrawing, LookImage, LookSource, Persona, PersonaDetails,
+    PersonaDraft, PersonaId, PersonaLook, PersonaRepository, ProfileId, Provider, RepositoryError,
+    TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
-use crate::{Database, boxed};
+use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_PERSONA: &str = "SELECT id, profile_id, name, voice_provider, voice_id, voice_name, \
      tone, script_style, stability, similarity, style, speed, voice_flag, realistic_voice FROM persona";
@@ -134,6 +135,173 @@ fn upsert(tx: &Transaction<'_>, persona: &Persona) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Where a look sits: the persona's own, or a drawing waiting for review.
+#[derive(Clone, Copy)]
+enum Slot {
+    Current,
+    Pending,
+}
+
+impl Slot {
+    fn code(self) -> &'static str {
+        match self {
+            Slot::Current => "current",
+            Slot::Pending => "pending",
+        }
+    }
+}
+
+const SELECT_LOOK: &str = "SELECT persona_id, image, source, realistic, description, prompt, \
+     template_id, template_number, writer_model, image_model, job_id, made_at FROM persona_look";
+
+/// A look row as stored, before domain checks.
+struct LookRow {
+    persona_id: String,
+    image: Vec<u8>,
+    source: String,
+    realistic: bool,
+    description: Option<String>,
+    prompt: Option<String>,
+    template_id: Option<String>,
+    template_number: Option<i64>,
+    writer_model: Option<String>,
+    image_model: Option<String>,
+    job_id: Option<String>,
+    made_at: i64,
+}
+
+impl LookRow {
+    fn read(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            persona_id: row.get(0)?,
+            image: row.get(1)?,
+            source: row.get(2)?,
+            realistic: row.get(3)?,
+            description: row.get(4)?,
+            prompt: row.get(5)?,
+            template_id: row.get(6)?,
+            template_number: row.get(7)?,
+            writer_model: row.get(8)?,
+            image_model: row.get(9)?,
+            job_id: row.get(10)?,
+            made_at: row.get(11)?,
+        })
+    }
+
+    /// Rebuilds the look through the domain's checks, so an image edited
+    /// outside the app cannot pass for one a take model reads.
+    fn into_look(self) -> Result<PersonaLook, RepositoryError> {
+        let image = LookImage::check(self.image).map_err(boxed)?;
+        let source: LookSource = self.source.parse().map_err(boxed)?;
+        let uuid = |text: &str| Uuid::parse_str(text).map_err(boxed);
+        let drawing = match self.prompt {
+            None => None,
+            Some(prompt) => Some(LookDrawing {
+                description: self.description.unwrap_or_default(),
+                prompt,
+                template: match (self.template_id, self.template_number) {
+                    (Some(id), Some(number)) => Some(TemplateUsed {
+                        id: TemplateVersionId::from(uuid(&id)?),
+                        number: u32::try_from(number).map_err(boxed)?,
+                    }),
+                    _ => None,
+                },
+                writer_model: self.writer_model.unwrap_or_default(),
+                image_model: self.image_model.unwrap_or_default(),
+                job: self
+                    .job_id
+                    .as_deref()
+                    .map(|id| uuid(id).map(JobId::from))
+                    .transpose()?,
+            }),
+        };
+        Ok(PersonaLook {
+            persona: PersonaId::from(uuid(&self.persona_id)?),
+            image,
+            source,
+            realistic: self.realistic,
+            drawing,
+            made_at: from_unix_millis(self.made_at),
+        })
+    }
+}
+
+impl Database {
+    fn look_in(
+        &self,
+        persona: PersonaId,
+        slot: Slot,
+    ) -> Result<Option<PersonaLook>, RepositoryError> {
+        let row = self
+            .conn()
+            .query_row(
+                &format!("{SELECT_LOOK} WHERE persona_id = ?1 AND slot = ?2"),
+                params![persona.to_string(), slot.code()],
+                LookRow::read,
+            )
+            .optional()
+            .map_err(boxed)?;
+        row.map(LookRow::into_look).transpose()
+    }
+
+    fn save_look_in(&self, look: &PersonaLook, slot: Slot) -> Result<(), RepositoryError> {
+        let drawing = look.drawing.as_ref();
+        self.conn()
+            .execute(
+                "INSERT INTO persona_look (persona_id, slot, image, format, width, height, source,
+                                           realistic, description, prompt, template_id,
+                                           template_number, writer_model, image_model, job_id,
+                                           made_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                 ON CONFLICT (persona_id, slot) DO UPDATE SET
+                     image = excluded.image,
+                     format = excluded.format,
+                     width = excluded.width,
+                     height = excluded.height,
+                     source = excluded.source,
+                     realistic = excluded.realistic,
+                     description = excluded.description,
+                     prompt = excluded.prompt,
+                     template_id = excluded.template_id,
+                     template_number = excluded.template_number,
+                     writer_model = excluded.writer_model,
+                     image_model = excluded.image_model,
+                     job_id = excluded.job_id,
+                     made_at = excluded.made_at",
+                params![
+                    look.persona.to_string(),
+                    slot.code(),
+                    look.image.bytes(),
+                    look.image.format().mime(),
+                    look.image.width(),
+                    look.image.height(),
+                    look.source.code(),
+                    look.realistic,
+                    drawing.map(|d| d.description.as_str()),
+                    drawing.map(|d| d.prompt.as_str()),
+                    drawing.and_then(|d| d.template).map(|t| t.id.to_string()),
+                    drawing.and_then(|d| d.template).map(|t| t.number),
+                    drawing.map(|d| d.writer_model.as_str()),
+                    drawing.map(|d| d.image_model.as_str()),
+                    drawing.and_then(|d| d.job).map(|job| job.to_string()),
+                    to_unix_millis(look.made_at),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn remove_look_in(&self, persona: PersonaId, slot: Slot) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM persona_look WHERE persona_id = ?1 AND slot = ?2",
+                params![persona.to_string(), slot.code()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+}
+
 impl PersonaRepository for Database {
     fn list(&self, owner: ProfileId) -> Result<Vec<Persona>, RepositoryError> {
         let conn = self.conn();
@@ -174,6 +342,58 @@ impl PersonaRepository for Database {
             upsert(&tx, persona).map_err(boxed)?;
         }
         tx.commit().map_err(boxed)
+    }
+
+    fn look(&self, persona: PersonaId) -> Result<Option<PersonaLook>, RepositoryError> {
+        self.look_in(persona, Slot::Current)
+    }
+
+    fn pending_look(&self, persona: PersonaId) -> Result<Option<PersonaLook>, RepositoryError> {
+        self.look_in(persona, Slot::Pending)
+    }
+
+    fn save_look(&self, look: &PersonaLook) -> Result<(), RepositoryError> {
+        self.save_look_in(look, Slot::Current)
+    }
+
+    fn save_pending_look(&self, look: &PersonaLook) -> Result<(), RepositoryError> {
+        self.save_look_in(look, Slot::Pending)
+    }
+
+    fn keep_pending_look(&self, persona: PersonaId) -> Result<bool, RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let id = persona.to_string();
+        let waiting: bool = tx
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM persona_look WHERE persona_id = ?1 AND slot = ?2)",
+                params![id, Slot::Pending.code()],
+                |row| row.get(0),
+            )
+            .map_err(boxed)?;
+        if !waiting {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM persona_look WHERE persona_id = ?1 AND slot = ?2",
+            params![id, Slot::Current.code()],
+        )
+        .map_err(boxed)?;
+        tx.execute(
+            "UPDATE persona_look SET slot = ?2 WHERE persona_id = ?1 AND slot = ?3",
+            params![id, Slot::Current.code(), Slot::Pending.code()],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)?;
+        Ok(true)
+    }
+
+    fn remove_look(&self, persona: PersonaId) -> Result<(), RepositoryError> {
+        self.remove_look_in(persona, Slot::Current)
+    }
+
+    fn remove_pending_look(&self, persona: PersonaId) -> Result<(), RepositoryError> {
+        self.remove_look_in(persona, Slot::Pending)
     }
 }
 
@@ -379,6 +599,120 @@ mod tests {
             .unwrap();
         let reloaded = ChannelRepository::get(&db, channel.id).unwrap().unwrap();
         assert_eq!(reloaded.details.default_persona(), None);
+    }
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        bytes.extend(width.to_be_bytes());
+        bytes.extend(height.to_be_bytes());
+        bytes.extend([8, 6, 0, 0, 0]);
+        bytes
+    }
+
+    fn drawn(persona: PersonaId, width: u32) -> PersonaLook {
+        PersonaLook::drawn(
+            persona,
+            LookImage::check(png(width, 1248)).unwrap(),
+            LookDrawing {
+                description: "A lighthouse keeper with a grey beard".into(),
+                prompt: "Waist-up portrait of an original character...".into(),
+                template: Some(TemplateUsed {
+                    id: TemplateVersionId::new(),
+                    number: 2,
+                }),
+                writer_model: "claude-test".into(),
+                image_model: "gemini-test".into(),
+                job: Some(JobId::new()),
+            },
+            true,
+            from_unix_millis(1_760_000_000_123),
+        )
+    }
+
+    #[test]
+    fn a_look_is_kept_apart_and_read_back_whole() {
+        let (db, owner) = database_with_profile();
+        let narrator = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &narrator).unwrap();
+        assert_eq!(db.look(narrator.id).unwrap(), None);
+
+        let look = drawn(narrator.id, 832);
+        db.save_look(&look).unwrap();
+        assert_eq!(db.look(narrator.id).unwrap(), Some(look.clone()));
+        assert_eq!(db.pending_look(narrator.id).unwrap(), None);
+
+        let photo = PersonaLook::imported(
+            narrator.id,
+            LookImage::check(png(900, 1200)).unwrap(),
+            from_unix_millis(1_760_000_000_000),
+        );
+        db.save_look(&photo).unwrap();
+        assert_eq!(db.look(narrator.id).unwrap(), Some(photo));
+        db.remove_look(narrator.id).unwrap();
+        db.remove_look(narrator.id).unwrap();
+        assert_eq!(db.look(narrator.id).unwrap(), None);
+    }
+
+    #[test]
+    fn a_drawing_waits_beside_the_look_until_kept_or_dropped() {
+        let (db, owner) = database_with_profile();
+        let narrator = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &narrator).unwrap();
+        assert!(!db.keep_pending_look(narrator.id).unwrap(), "none waiting");
+
+        let current = drawn(narrator.id, 832);
+        let waiting = drawn(narrator.id, 840);
+        db.save_look(&current).unwrap();
+        db.save_pending_look(&waiting).unwrap();
+        assert_eq!(db.look(narrator.id).unwrap(), Some(current.clone()));
+        assert_eq!(db.pending_look(narrator.id).unwrap(), Some(waiting.clone()));
+
+        assert!(db.keep_pending_look(narrator.id).unwrap());
+        assert_eq!(db.look(narrator.id).unwrap(), Some(waiting));
+        assert_eq!(db.pending_look(narrator.id).unwrap(), None);
+
+        db.save_pending_look(&current).unwrap();
+        db.remove_pending_look(narrator.id).unwrap();
+        assert_eq!(db.pending_look(narrator.id).unwrap(), None);
+        assert!(db.look(narrator.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_persona_takes_its_look_with_it() {
+        let (db, owner) = database_with_profile();
+        let narrator = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &narrator).unwrap();
+        db.save_look(&drawn(narrator.id, 832)).unwrap();
+        db.save_pending_look(&drawn(narrator.id, 840)).unwrap();
+        db.conn()
+            .execute(
+                "DELETE FROM persona WHERE id = ?1",
+                [narrator.id.to_string()],
+            )
+            .unwrap();
+        let left: i64 = db
+            .conn()
+            .query_row("SELECT count(*) FROM persona_look", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn an_image_edited_outside_bardo_fails_to_load() {
+        let (db, owner) = database_with_profile();
+        let narrator = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &narrator).unwrap();
+        db.save_look(&drawn(narrator.id, 832)).unwrap();
+        db.conn()
+            .execute("UPDATE persona_look SET image = x'474946383961'", [])
+            .unwrap();
+        assert!(db.look(narrator.id).is_err());
+        // A drawing has its prompt; a photo has none.
+        assert!(
+            db.conn()
+                .execute("UPDATE persona_look SET prompt = NULL", [])
+                .is_err()
+        );
     }
 
     #[test]

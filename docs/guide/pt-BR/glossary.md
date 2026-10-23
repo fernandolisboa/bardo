@@ -38,9 +38,11 @@ As palavras que o Bardo usa, em termos simples.
 
 **Persona**: um narrador que é seu: uma voz, um tom, um estilo de escrita e os ajustes da voz. O canal tem uma persona padrão, e cada vídeo pode usar outra.
 
+**Aparência da persona**: como uma persona aparece nos clipes de atuação: um personagem original desenhado a partir da sua descrição, ou uma foto sua. Uma aparência realista precisa do selo de conteúdo sintético das redes.
+
 **Amostra de voz**: um trecho curto para ouvir uma voz antes de narrar com ela. A prévia padrão do provedor é grátis; a leitura de uma frase sua com os ajustes da persona é uma chamada paga.
 
-**Pacote de persona**: uma persona salva num arquivo `.bardo-persona` para levar a outro computador. Nunca leva áudio nem chaves.
+**Pacote de persona**: uma persona salva num arquivo `.bardo-persona` para levar a outro computador, com a aparência quando ela é desenhada. Nunca leva áudio, chaves nem uma foto sua.
 
 **Projeto de vídeo**: um vídeo em produção, do roteiro aos posts. Começa quando você aprova uma ideia.
 

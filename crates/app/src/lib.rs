@@ -29,6 +29,7 @@ mod narration_import;
 mod narrations;
 mod navigation;
 mod network_accounts;
+mod persona_looks;
 mod persona_package;
 mod personas;
 mod provider_keys;
@@ -140,8 +141,11 @@ pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use navigation::{Destination, Pillar, SettingsTab};
 pub use network_accounts::NetworkAccountError;
+pub use persona_looks::{LookError, LookView};
 pub use persona_package::PackageError;
-pub use personas::{PersonaError, VoiceList, VoiceListing, VoiceStatus, persona_package_folder};
+pub use personas::{
+    PersonaError, PersonaExport, VoiceList, VoiceListing, VoiceStatus, persona_package_folder,
+};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use publications::{
     ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, OwnerAccess, PublicationError,
@@ -784,6 +788,15 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let look_handler = crate::persona_looks::PersonaLookHandler {
+            owner: profile.id,
+            personas: Arc::clone(&personas),
+            text: Arc::clone(&providers.text),
+            images: Arc::clone(&providers.images),
+            media: Arc::clone(&providers.media),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let chapters_handler = crate::chapters::ChaptersHandler {
             owner: profile.id,
             chapters: Arc::clone(&chapters),
@@ -886,6 +899,7 @@ impl Bardo {
                 music_prompts: music_prompt_handler,
                 music: music_handler,
                 thumbnails: thumbnail_handler,
+                looks: look_handler,
                 chapters: chapters_handler,
                 renders: render_handler,
                 metadata: metadata_handler,
@@ -1575,6 +1589,10 @@ pub(crate) mod testing {
     pub(crate) const SCENE_IMAGE: &[u8] =
         include_bytes!("../../ai/tests/fixtures/gemini/scene-16x9.png");
 
+    /// What the fake draws for a persona's look: a 400×600 PNG.
+    pub(crate) const LOOK_IMAGE: &[u8] =
+        include_bytes!("../../ai/tests/fixtures/gemini/look-2x3.png");
+
     /// Draws every prompt as `SCENE_IMAGE`; a prompt containing a word in
     /// `declined` is declined, and `failure` wins when set. Keeps the
     /// requests.
@@ -1585,6 +1603,8 @@ pub(crate) mod testing {
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
         /// How long each call takes, to catch a job mid-run.
         pub(crate) delay: Mutex<Duration>,
+        /// Portraits come back over the look's file limit.
+        pub(crate) oversized: std::sync::atomic::AtomicBool,
     }
 
     impl FakeImages {
@@ -1632,8 +1652,17 @@ pub(crate) mod testing {
                     format!("blocked: {word}"),
                 ));
             }
+            let bytes = if request.shape == bardo_domain::ImageShape::Portrait {
+                let mut look = LOOK_IMAGE.to_vec();
+                if self.oversized.load(std::sync::atomic::Ordering::SeqCst) {
+                    look.resize(bardo_domain::LOOK_MAX_BYTES as usize + 1, 0);
+                }
+                look
+            } else {
+                SCENE_IMAGE.to_vec()
+            };
             Ok(GeneratedImage {
-                bytes: SCENE_IMAGE.to_vec(),
+                bytes,
                 format: ImageFormat::Png,
                 model: "nano-banana-fake".into(),
                 usage: bardo_domain::Metered {
@@ -2280,6 +2309,41 @@ mod tests {
                 saved.retain(|p| p.id != persona.id);
                 saved.push(persona.clone());
             }
+            Ok(())
+        }
+
+        // These tests never give a persona a look.
+        fn look(
+            &self,
+            _: bardo_domain::PersonaId,
+        ) -> Result<Option<bardo_domain::PersonaLook>, RepositoryError> {
+            Ok(None)
+        }
+
+        fn pending_look(
+            &self,
+            _: bardo_domain::PersonaId,
+        ) -> Result<Option<bardo_domain::PersonaLook>, RepositoryError> {
+            Ok(None)
+        }
+
+        fn save_look(&self, _: &bardo_domain::PersonaLook) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        fn save_pending_look(&self, _: &bardo_domain::PersonaLook) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        fn keep_pending_look(&self, _: bardo_domain::PersonaId) -> Result<bool, RepositoryError> {
+            Ok(false)
+        }
+
+        fn remove_look(&self, _: bardo_domain::PersonaId) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        fn remove_pending_look(&self, _: bardo_domain::PersonaId) -> Result<(), RepositoryError> {
             Ok(())
         }
     }
