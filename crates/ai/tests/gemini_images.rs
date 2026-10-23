@@ -7,8 +7,8 @@ use bardo_ai::GeminiImages;
 use bardo_ai::gemini::{IMAGE_MODEL, IMAGE_SIZE, MODELS_URL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, AspectRatio, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Metered,
-    Provider, ProviderFailureKind,
+    ApiKey, AspectRatio, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Metered, Provider,
+    ProviderFailureKind,
 };
 use common::{Scripted, fixture, recording_sleeper};
 

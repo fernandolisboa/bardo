@@ -140,6 +140,8 @@ pub enum Control {
     PersonaRealistic,
     /// Personas: Save, Duplicate and Export.
     PersonaShare,
+    /// Personas: the look, drawn or a photo of the user.
+    PersonaLook,
     /// Templates: one button per kind of template.
     TemplateKinds,
     /// Templates: the instructions and the prompt.
@@ -717,14 +719,14 @@ pub const CLIPS: Tour = {
 };
 
 /// Personas: the library, a persona's voice, tone and script style,
-/// presets, sharing it, and the realistic voice flag.
+/// presets, sharing it, the realistic voice flag and its look.
 pub const PERSONAS: Tour = {
     const AT: Destination = Destination::Personas;
     const PAGE: &str = "personas";
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Personas,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
@@ -743,6 +745,9 @@ pub const PERSONAS: Tour = {
             on(AT, "realistic", control(Control::PersonaRealistic))
                 .missing(FORM)
                 .learn(PAGE, "realistic"),
+            on(AT, "look", control(Control::PersonaLook))
+                .missing(FORM)
+                .learn(PAGE, "look"),
         ],
     }
 };

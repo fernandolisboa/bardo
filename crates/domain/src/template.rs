@@ -145,10 +145,9 @@ impl TemplateKind {
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::NarrationSentences,
             ],
-            TemplateKind::LookPrompt => &[
-                TemplateVariable::Persona,
-                TemplateVariable::LookDescription,
-            ],
+            TemplateKind::LookPrompt => {
+                &[TemplateVariable::Persona, TemplateVariable::LookDescription]
+            }
         }
     }
 }

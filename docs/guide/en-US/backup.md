@@ -37,7 +37,7 @@ A settings file takes your keys, preferences, personas and channels to another c
 
 - **API keys** and **App credentials**, each saved one by name.
 - **Preferences and costs**: the interface language, theme and layout, whether Bardo offers tours, backs up every week and checks for updates, how post numbers sync, the lowest score of the cut suggestions shown, your budgets and the prices you changed.
-- **Personas** and **Channels**, each channel with its network accounts.
+- **Personas** (without their looks: a drawn look travels in the persona's own package) and **Channels**, each channel with its network accounts.
 - **Sign-ins**: an account's sign-in, which goes only with its channel. Usually leave these off and sign in again in the other copy. Some networks, X among them, keep only one copy signed in: the first copy to renew its sign-in signs the other out.
 
 Type a password of at least 10 characters twice and select **Save file…**. Bardo cannot recover a forgotten password: without it the file does not open. The file is encrypted with that password, so keep the file and the password apart; anyone with both can read your keys.

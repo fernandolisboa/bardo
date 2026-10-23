@@ -37,7 +37,7 @@ Um arquivo de configurações leva suas chaves, preferências, personas e canais
 
 - **Chaves de API** e **Credenciais de app**, cada uma salva pelo nome.
 - **Preferências e custos**: o idioma, o tema e o layout da interface, se o Bardo oferece tours, faz backup toda semana e procura atualizações, como os números dos posts sincronizam, a pontuação mínima das sugestões de corte, seus orçamentos e os preços que você mudou.
-- **Personas** e **Canais**, cada canal com suas contas nas redes.
+- **Personas** (sem a aparência: uma aparência desenhada vai no pacote da própria persona) e **Canais**, cada canal com suas contas nas redes.
 - **Logins**: o login de uma conta, que só vai junto com o canal dele. Em geral, deixe desmarcado e entre de novo na outra cópia. Algumas redes, como o X, mantêm só uma cópia conectada: a primeira que renovar o login desconecta a outra.
 
 Digite duas vezes uma senha de pelo menos 10 caracteres e selecione **Salvar arquivo…**. O Bardo não recupera uma senha esquecida: sem ela, o arquivo não abre. O arquivo é criptografado com essa senha, então guarde o arquivo e a senha separados; quem tiver os dois consegue ler suas chaves.

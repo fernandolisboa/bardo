@@ -302,7 +302,12 @@ mod tests {
     fn other_files_are_not_looks() {
         let mut webp = b"RIFF\0\0\0\0WEBPVP8X".to_vec();
         webp.extend([0; 16]);
-        for bytes in [b"GIF89a".to_vec(), webp, Vec::new(), png(10, 10)[..18].to_vec()] {
+        for bytes in [
+            b"GIF89a".to_vec(),
+            webp,
+            Vec::new(),
+            png(10, 10)[..18].to_vec(),
+        ] {
             assert_eq!(LookImage::check(bytes), Err(LookImageError::NotAnImage));
         }
     }
@@ -353,17 +358,13 @@ mod tests {
         let persona = PersonaId::new();
         let image = LookImage::check(png(832, 1248)).unwrap();
         let at = SystemTime::UNIX_EPOCH;
-        let drawn = PersonaLook::drawn(
-            persona,
-            image.clone(),
-            LookDrawing::default(),
-            false,
-            at,
-        );
+        let drawn = PersonaLook::drawn(persona, image.clone(), LookDrawing::default(), false, at);
         assert_eq!(drawn.source, LookSource::Drawn);
         assert!(!drawn.realistic);
         assert!(drawn.is_shareable());
-        assert!(PersonaLook::drawn(persona, image.clone(), LookDrawing::default(), true, at).realistic);
+        assert!(
+            PersonaLook::drawn(persona, image.clone(), LookDrawing::default(), true, at).realistic
+        );
         let photo = PersonaLook::imported(persona, image, at);
         assert!(photo.realistic);
         assert!(!photo.is_shareable(), "a photo is someone's likeness");

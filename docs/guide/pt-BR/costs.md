@@ -42,7 +42,7 @@ Quando um modelo rodou sem nenhum preço, as chamadas dele contam como zero, e o
 <a id="channels"></a>
 ## Gasto por canal
 
-**Por canal** mostra quanto os vídeos de cada canal custaram no mês, com uma barra comparada ao canal que mais gastou. Chamadas feitas sem canal, como a amostra de voz de uma persona, contam como **Canal desconhecido**.
+**Por canal** mostra quanto os vídeos de cada canal custaram no mês, com uma barra comparada ao canal que mais gastou. Chamadas feitas sem canal, como a amostra de voz ou a aparência de uma persona, contam como **Canal desconhecido**.
 
 <a id="videos"></a>
 ## Os vídeos mais caros

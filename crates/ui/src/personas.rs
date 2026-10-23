@@ -4,7 +4,8 @@
 //! system's file dialogs; an imported persona whose voice is not (yet)
 //! seen in the user's account shows a flag and how to fix it. Voices are
 //! heard right here: the provider's stock preview from the picker, and a
-//! sample read with the form's voice and presets below the presets.
+//! sample read with the form's voice and presets below the presets. The
+//! persona's look has its own section (`persona_look`) below the form.
 //! Rules, storage and the voice listing live in `bardo_app`; this file maps
 //! the form to a `PersonaDraft` and results back to the screen.
 
@@ -34,6 +35,7 @@ use gpui_kit::{
 
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
+use crate::persona_look::LookSection;
 use crate::shell::tr;
 use crate::spend::budget_question;
 use crate::{guide, layout};
@@ -147,7 +149,8 @@ enum SampleNote {
 enum Notice {
     Saved,
     Duplicated(String),
-    Exported(String),
+    /// Where it went, and whether a photo of the user stayed behind.
+    Exported(String, bool),
     Imported(String),
     Error(Text),
 }
@@ -196,6 +199,8 @@ pub struct PersonasScreen {
     /// Whether the note is about a stock preview, so it shows in the
     /// voice picker rather than below the presets.
     note_in_picker: bool,
+    /// The persona's look, below the form.
+    look: Entity<LookSection>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -205,6 +210,7 @@ impl PersonasScreen {
         let tone = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8));
         let script_style = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10));
         let sample_text = cx.new(|cx| InputState::new(window, cx));
+        let look = cx.new(|cx| LookSection::new(bardo.clone(), window, cx));
         let defaults = GenerationPresets::default();
         let sliders: Vec<_> = Preset::ALL
             .into_iter()
@@ -279,6 +285,7 @@ impl PersonasScreen {
             sample_note: None,
             sample_ask: None,
             note_in_picker: false,
+            look,
             _subscriptions: subscriptions,
         };
         screen.reload_list(cx);
@@ -406,6 +413,7 @@ impl PersonasScreen {
         self.usage.clear();
         self.reset_feedback();
         self.fill(&PersonaDraft::default(), window, cx);
+        self.look.update(cx, |look, cx| look.show(None, window, cx));
         cx.notify();
     }
 
@@ -418,6 +426,8 @@ impl PersonasScreen {
         self.reset_feedback();
         self.fill(&draft, window, cx);
         self.reload_usage(cx);
+        self.look
+            .update(cx, |look, cx| look.show(Some(id), window, cx));
         cx.notify();
     }
 
@@ -439,6 +449,8 @@ impl PersonasScreen {
                 // Show the normalized values (trimmed text).
                 self.fill(&PersonaDraft::from(&saved.details), window, cx);
                 self.reload_usage(cx);
+                self.look
+                    .update(cx, |look, cx| look.show(Some(saved.id), window, cx));
                 self.notice = Some(Notice::Saved);
             }
             Err(PersonaError::UsedByChannels(channels)) => {
@@ -496,8 +508,11 @@ impl PersonasScreen {
                 this.dialog = None;
                 match chosen {
                     Ok(Ok(Some(path))) => match this.bardo.read(cx).export_persona_to(id, &path) {
-                        Ok(()) => {
-                            this.notice = Some(Notice::Exported(path.display().to_string()));
+                        Ok(export) => {
+                            this.notice = Some(Notice::Exported(
+                                path.display().to_string(),
+                                export.photo_left_out,
+                            ));
                         }
                         Err(error) => this.show_error(&error),
                     },
@@ -1497,10 +1512,17 @@ impl PersonasScreen {
                         .text_with(Text::PersonaDuplicated, &[("name", name)])
                         .into(),
                 ),
-                Notice::Exported(path) => (
+                Notice::Exported(path, photo_left_out) => (
                     Tone::Success,
                     bardo
-                        .text_with(Text::PersonaExported, &[("path", path)])
+                        .text_with(
+                            if *photo_left_out {
+                                Text::PersonaExportedNoLook
+                            } else {
+                                Text::PersonaExported
+                            },
+                            &[("path", path)],
+                        )
                         .into(),
                 ),
                 Notice::Imported(name) => (
@@ -1557,6 +1579,11 @@ impl PersonasScreen {
                             scroll,
                         )),
                 )
+                .child(kit::anchor_in(
+                    TourAnchor::Control(Control::PersonaLook),
+                    self.look.clone(),
+                    scroll,
+                ))
                 .children(confirm)
                 .child(kit::anchor_in(
                     TourAnchor::Control(Control::PersonaShare),

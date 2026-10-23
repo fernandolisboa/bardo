@@ -38,9 +38,11 @@ The words Bardo uses, in plain terms.
 
 **Persona**: a narrator you own: a voice, a tone, a writing style and voice settings. A channel has a default one, and each video can use another.
 
+**Persona look**: the character a persona appears as in performed clips: an original character drawn from your description, or a photo of you. A realistic look needs the networks' synthetic-content label.
+
 **Voice sample**: a short clip to hear a voice before narrating with it. The provider's stock preview is free; a reading of your own sentence with the persona's settings is a paid call.
 
-**Persona package**: a persona saved to a `.bardo-persona` file to move to another computer. It never holds audio or keys.
+**Persona package**: a persona saved to a `.bardo-persona` file to move to another computer, with its look when it is a drawing. It never holds audio, keys or a photo of you.
 
 **Video project**: one video in production, from the script to its posts. It starts when you approve an idea.
 

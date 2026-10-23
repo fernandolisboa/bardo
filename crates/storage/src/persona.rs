@@ -227,7 +227,11 @@ impl LookRow {
 }
 
 impl Database {
-    fn look_in(&self, persona: PersonaId, slot: Slot) -> Result<Option<PersonaLook>, RepositoryError> {
+    fn look_in(
+        &self,
+        persona: PersonaId,
+        slot: Slot,
+    ) -> Result<Option<PersonaLook>, RepositoryError> {
         let row = self
             .conn()
             .query_row(

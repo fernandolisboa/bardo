@@ -13,7 +13,7 @@ A persona is a narrator: a voice from your ElevenLabs account, a tone, a script 
 <a id="library"></a>
 ## Your narrators
 
-The list holds every persona, with its voice. Bardo comes with four, two in English and two in Portuguese; **New persona** adds your own, and picking one opens it for editing. Saving a persona that some channels use as their default changes their narrator too, so Bardo names those channels and asks first. To change only one channel's narrator, **Duplicate** the persona and edit the copy.
+The list holds every persona, with its voice. Bardo comes with four, two in English and two in Portuguese; **New persona** adds your own, and picking one opens it for editing. Saving a persona that some channels use as their default changes their narrator too, so Bardo names those channels and asks first. To change only one channel's narrator, **Duplicate** the persona and edit the copy; the copy keeps the look.
 
 <a id="voice"></a>
 ## The voice
@@ -43,9 +43,19 @@ The presets set how ElevenLabs reads with this voice:
 <a id="share"></a>
 ## Saving and sharing
 
-**Create persona** or **Save changes** keeps it. **Export to file…** saves a package with the persona and a reference to its voice, never audio or keys, to use on another computer; **Import from file…** at the top brings one in. Whoever imports it needs the same voice in their own ElevenLabs account: until Bardo finds it there, the persona is marked **Voice not checked** or **Voice unavailable** and cannot narrate.
+**Create persona** or **Save changes** keeps it. **Export to file…** saves a package with the persona, a reference to its voice and its look when it is a drawing, never audio, keys or a photo of you, to use on another computer; **Import from file…** at the top brings one in. Whoever imports it needs the same voice in their own ElevenLabs account: until Bardo finds it there, the persona is marked **Voice not checked** or **Voice unavailable** and cannot narrate.
 
 <a id="realistic"></a>
 ## Realistic voices
 
 Tick **Realistic synthetic voice or clone of a real person** when the voice sounds like a real person: a clone, or a professional voice made from someone's recordings. Picking a cloned or professional voice ticks it for you. Networks ask you to label such videos as altered or synthetic content, and Bardo reminds you when you export.
+
+<a id="look"></a>
+## The look
+
+The look is the character this persona appears as in performed clips. A persona with no look cannot perform. There are two kinds:
+
+- **Drawn**: describe the character under **Describe the character** and choose **Draw**. Claude writes an image prompt from your description with the [look prompt template](templates.md), for an original character only: it declines a real, identifiable person or a copyrighted character and says why. Nano Banana then draws it in a tall 2:3 frame. Both calls are estimated before you start and recorded in [Costs](costs.md). The drawing waits for review under **New drawing to review**: **Keep this look** makes it the look, **Discard** drops it, and **Draw again** replaces it with a new one. You need Claude and Gemini keys ([Your API keys](api-keys.md#providers)).
+- **Photo of you**: **Import a photo of me…** takes a PNG or JPEG of you alone, from the waist up, facing the camera on a plain background, 300 to 6,000 px a side and at most 10 MB. Tick **This photo shows me, and only me** first. It becomes the look at once, and it never leaves in a package.
+
+**Realistic look** is on for a photo of you and for a photoreal drawing: videos where a realistic look performs need the networks' altered or synthetic content label. **Remove look** deletes it after asking; a drawn look costs a new drawing to get back.
