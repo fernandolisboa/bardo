@@ -14,8 +14,8 @@ use bardo_app::bardo_domain::{
 };
 use bardo_app::{
     AnalysisStatus, BudgetConsent, CaptureError, CaptureVoiceChoice, ChosenCapture, Control,
-    ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SpendEstimate, TakeAnalysisView,
-    Text, TourAnchor, take_source,
+    ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene, SpendEstimate,
+    Stage, TakeAnalysisView, Text, TourAnchor, take_source,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -56,8 +56,8 @@ pub(super) struct CaptureImport {
     pub(super) confirm_remove: bool,
     /// A take's control video being watched.
     pub(super) watching: Option<Watching>,
-    /// The take whose scene images are offered as its set.
-    pub(super) scene_picker: Option<usize>,
+    /// The take whose scene images are offered as its set, with them.
+    pub(super) scene_picker: Option<(usize, Vec<SetScene>)>,
     /// Choosing a set picture; dropping it stops waiting.
     pub(super) choosing_set: Option<Task<()>>,
 }
@@ -367,10 +367,22 @@ impl ProjectsScreen {
                 Ok(Err(_)) => (None, true),
                 Ok(Ok(None)) | Err(_) => (None, false),
             };
+            // Read and checked off this thread: it may be large.
+            let picture = match path {
+                Some(path) => Some(
+                    cx.background_executor()
+                        .spawn(async move { SetPicture::read(&path) })
+                        .await,
+                ),
+                None => None,
+            };
             let _ = this.update_in(cx, |this, window, cx| {
                 this.capture.choosing_set = None;
-                match path {
-                    Some(path) => this.set_take_set(index, SetChoice::Picture(path), window, cx),
+                match picture {
+                    Some(Ok(picture)) => {
+                        this.set_take_set(index, SetChoice::Picture(picture), window, cx)
+                    }
+                    Some(Err(error)) => this.capture.error = Some(error.message()),
                     None if failed => this.capture.error = Some(Text::FileDialogFailed),
                     None => {}
                 }
@@ -396,8 +408,7 @@ impl ProjectsScreen {
         }
         self.close_control(usize::MAX, window, cx);
         match self.bardo.read(cx).control_player(id, index) {
-            Ok(mut player) => {
-                player.play();
+            Ok(player) => {
                 self.capture.watching = Some(Watching {
                     take: index,
                     player,
@@ -428,20 +439,29 @@ impl ProjectsScreen {
         }
     }
 
+    /// Pauses the control video player, if one is playing.
+    pub(super) fn pause_control(&mut self) {
+        if let Some(watching) = self.capture.watching.as_mut() {
+            watching.player.stop();
+        }
+    }
+
     /// Moves the control video player on and swaps in a new picture when
-    /// one is due. A player whose take was built again since closes.
+    /// one is due. A player whose take was built again since, or off the
+    /// Capture stage, closes.
     pub(super) fn advance_control(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(watching) = self.capture.watching.as_ref() else {
             return;
         };
-        let current = self
-            .narration
-            .as_ref()
-            .and_then(|view| view.controls.get(watching.take))
-            .and_then(|view| view.built.as_ref())
-            .is_some_and(|built| {
-                self.bardo.read(cx).control_video_path(built) == watching.player.path()
-            });
+        let current = self.current_stage() == Some(Stage::Capture)
+            && self
+                .narration
+                .as_ref()
+                .and_then(|view| view.controls.get(watching.take))
+                .and_then(|view| view.built.as_ref())
+                .is_some_and(|built| {
+                    self.bardo.read(cx).control_video_path(built) == watching.player.path()
+                });
         if !current {
             self.close_control(usize::MAX, window, cx);
             return;
@@ -908,7 +928,7 @@ impl ProjectsScreen {
                                 &[
                                     ("start", &clock(take.start)),
                                     ("end", &clock(take.end)),
-                                    ("length", &format!("{:.1} s", take.length().as_secs_f64())),
+                                    ("length", &bardo.seconds(take.length())),
                                 ],
                             )),
                         ))
@@ -1228,20 +1248,10 @@ impl ProjectsScreen {
             ControlStatus::Ready { .. } => {
                 let built = view.built.as_ref();
                 let megabytes = built.map_or(0.0, |b| b.bytes as f64 / 1_000_000.0);
-                let length = self
-                    .narration
-                    .as_ref()
-                    .and_then(|n| n.capture.as_ref())
-                    .and_then(|c| c.takes.as_slice().get(index))
-                    .map_or(Duration::ZERO, |take| take.length());
+                let size =
+                    format!("{megabytes:.1}").replace('.', &bardo.text(Text::DecimalSeparator));
                 (
-                    bardo.text_with(
-                        Text::ControlReady,
-                        &[
-                            ("length", &format!("{:.1} s", length.as_secs_f64())),
-                            ("size", &format!("{megabytes:.1}")),
-                        ],
-                    ),
+                    bardo.text_with(Text::ControlReady, &[("size", &size)]),
                     None,
                     false,
                 )
@@ -1294,7 +1304,7 @@ impl ProjectsScreen {
         }
         if let Some(built) = view.built.as_ref().filter(|b| b.uncovered > 0) {
             section = section.child(kit::notice(
-                Tone::Warning,
+                Tone::Danger,
                 SharedString::from(bardo.text_with(
                     Text::ControlUncovered,
                     &[
@@ -1305,12 +1315,14 @@ impl ProjectsScreen {
                 cx,
             ));
         }
-        if let Some(ApprovalBlock::Length(_)) = view.block {
-            section = section.child(kit::notice(
-                Tone::Danger,
-                tr(bardo, Text::ControlLengthBlocked),
-                cx,
-            ));
+        // The uncovered frames say why above.
+        let blocked = match view.block {
+            Some(ApprovalBlock::SeveralFaces) => Some(Text::ControlSeveralFacesBlocked),
+            Some(ApprovalBlock::Length(_)) => Some(Text::ControlLengthBlocked),
+            Some(ApprovalBlock::Uncovered) | None => None,
+        };
+        if let Some(blocked) = blocked {
+            section = section.child(kit::notice(Tone::Danger, tr(bardo, blocked), cx));
         }
 
         if let ControlStatus::Ready { approved } = view.status {
@@ -1388,7 +1400,7 @@ impl ProjectsScreen {
                     row.child(guide::info(
                         bardo,
                         "capture-review-info",
-                        tr(bardo, Text::ControlHint),
+                        tr(bardo, Text::ControlReviewHint),
                         guide::refs::CAPTURE_REVIEW,
                     ))
                 });
@@ -1441,8 +1453,21 @@ impl ProjectsScreen {
                 match clicked.first() {
                     Some(0) => this.set_take_set(index, SetChoice::Room, window, cx),
                     Some(1) => {
-                        this.capture.scene_picker =
-                            (this.capture.scene_picker != Some(index)).then_some(index);
+                        let open = this
+                            .capture
+                            .scene_picker
+                            .as_ref()
+                            .is_some_and(|(take, _)| *take == index);
+                        this.capture.scene_picker = if open {
+                            None
+                        } else {
+                            let bardo = this.bardo.read(cx);
+                            let scenes = this
+                                .project
+                                .and_then(|project| bardo.set_scenes(project).ok())
+                                .unwrap_or_default();
+                            Some((index, scenes))
+                        };
                         cx.notify();
                     }
                     Some(2) => this.choose_set_picture(index, cx),
@@ -1470,11 +1495,12 @@ impl ProjectsScreen {
                     ))
                 }),
         );
-        if self.capture.scene_picker == Some(index) {
-            let scenes = self
-                .project
-                .and_then(|project| bardo.set_scenes(project).ok())
-                .unwrap_or_default();
+        if let Some((_, scenes)) = self
+            .capture
+            .scene_picker
+            .as_ref()
+            .filter(|(take, _)| *take == index)
+        {
             if scenes.is_empty() {
                 set = set.child(
                     div()

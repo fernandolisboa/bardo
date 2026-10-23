@@ -677,6 +677,7 @@ impl ProjectsScreen {
         self.reading_recording = false;
         self.recording = None;
         self.import_ask = None;
+        self.close_control(usize::MAX, window, cx);
         self.capture = capture::CaptureImport::default();
         self.music_loaded = None;
         self.music_error = None;
@@ -737,6 +738,7 @@ impl ProjectsScreen {
     fn pick_stage(&mut self, stage: Stage, cx: &mut Context<Self>) {
         if stage == Stage::Edit {
             if let Some(id) = self.project {
+                self.pause_control();
                 cx.emit(OpenEditor(id));
             }
         } else if stage.is_page() {

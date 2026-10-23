@@ -1235,6 +1235,15 @@ impl Bardo {
         mode: TakeMode,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        // The mode it has: nothing to build again.
+        if capture
+            .takes
+            .as_slice()
+            .get(index)
+            .is_some_and(|take| take.mode == mode)
+        {
+            return Ok(());
+        }
         capture.takes.set_mode(index, mode)?;
         self.captures
             .save_takes(capture.project, capture.id, &capture.takes)?;

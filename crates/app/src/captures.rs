@@ -121,7 +121,10 @@ impl CaptureError {
             CaptureError::Unsupported(problem) => Text::CaptureProblem(*problem),
             CaptureError::NoCapture => Text::CaptureMissing,
             CaptureError::ControlNotReady => Text::ControlNotReady,
-            CaptureError::NotApprovable(ApprovalBlock::SeveralFaces) => Text::CaptureTakeBlocked,
+            CaptureError::NotApprovable(ApprovalBlock::SeveralFaces) => {
+                Text::ControlSeveralFacesBlocked
+            }
+            CaptureError::NotApprovable(ApprovalBlock::Uncovered) => Text::ControlUncoveredBlocked,
             CaptureError::NotApprovable(ApprovalBlock::Length(_)) => Text::ControlLengthBlocked,
             CaptureError::SetUnreadable => Text::SetUnreadable,
             CaptureError::Boundary(_) => Text::CaptureNoCutPoint,

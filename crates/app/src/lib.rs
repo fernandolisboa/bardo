@@ -109,7 +109,9 @@ pub use connections::{
     ConnectionCheck, ConnectionError, ConnectionRenewal, ConnectionState, Disconnected,
     Disconnection, TokenConnect, TokenConnectResult, TokenConnected, YouTubeUpkeep,
 };
-pub use control_videos::{ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetScene};
+pub use control_videos::{
+    ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene,
+};
 pub use costs::{
     BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
     SpendRow, SpendSummary,

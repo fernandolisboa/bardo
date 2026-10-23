@@ -27,9 +27,9 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     ApprovalBlock, CONTROL_KEYFRAME_EVERY, Capture, CaptureId, CaptureRepository, ControlVideo,
     DepthHistogram, FACE_HOLD, FIGURE_FAR_PERMILLE, FIGURE_MASK_FROM, FIGURE_NEAR_PERMILLE, FPS,
-    FaceLandmarks, FaceMesh, Job, JobFailure, JobFailureKind, JobId, JobKind, JobRepository,
-    JobState, MAX_CONTROL_BYTES, Outbound, ProfileId, Progress, ProjectFiles, RgbFrame,
-    SET_EXTENSIONS, SetSource, Take, TakeMode, TakeSet, VideoCodec, VideoProjectId, approval_block,
+    FaceLandmarks, Job, JobFailure, JobFailureKind, JobId, JobKind, JobRepository, JobState,
+    MAX_CONTROL_BYTES, Outbound, ProfileId, Progress, ProjectFiles, RgbFrame, SET_EXTENSIONS,
+    SetSource, Take, TakeMode, TakeSet, VideoCodec, VideoProjectId, approval_block,
     control_bitrate, control_fingerprint, control_fps, control_size, face_cover, merged_checks,
     needed_analyses, take_frames,
 };
@@ -83,16 +83,20 @@ fn media_failure(error: MediaError) -> JobFailure {
 }
 
 /// The control video's file: the capture, the take (counted from 1), its
-/// revision and the fingerprint of what made it.
+/// revision, the fingerprint of what made it and the job making it, so two
+/// builds of one take never write the same file.
 pub(crate) fn control_file(
     capture: CaptureId,
     position: u32,
     revision: u32,
     fingerprint: &str,
+    job: JobId,
 ) -> String {
+    let job = job.to_string();
     format!(
-        "control-{capture}-{:03}-r{revision}-{fingerprint}.mp4",
-        position + 1
+        "control-{capture}-{:03}-r{revision}-{fingerprint}-{}.mp4",
+        position + 1,
+        &job[..8.min(job.len())]
     )
 }
 
@@ -279,7 +283,8 @@ enum Ground {
         last: Option<RgbFrame>,
     },
     /// A set image, the same on every frame.
-    Picture(RgbFrame),
+    /// The set image as RGBA, put on every frame.
+    Picture(Vec<u8>),
 }
 
 /// Runs control video jobs.
@@ -316,7 +321,13 @@ impl JobHandler for ControlVideoHandler {
             return Ok(());
         }
 
-        let file = control_file(capture, position, build.take.revision, &build.fingerprint);
+        let file = control_file(
+            capture,
+            position,
+            build.take.revision,
+            &build.fingerprint,
+            cx.id(),
+        );
         let destination = self.files.path(project, &file);
         let encoders = self.media.encoders().map_err(media_failure)?;
         let best = encoders.best(VideoCodec::H264).map_err(media_failure)?;
@@ -356,6 +367,14 @@ impl JobHandler for ControlVideoHandler {
             let _ = self.files.remove(project, &file);
             return Ok(());
         }
+        // Read again: another build of the take may have finished, or
+        // been approved, meanwhile.
+        let existing = self
+            .captures
+            .control_videos(project)
+            .map_err(unexpected)?
+            .into_iter()
+            .find(|control| control.position == position);
         let control = ControlVideo {
             project,
             capture,
@@ -466,20 +485,27 @@ impl ControlVideoHandler {
         let hold =
             (FACE_HOLD.as_millis() as u64 * u64::from(output.fps_milli) / 1_000_000) as usize;
         let cover = face_cover(&found, hold);
-        let mesh_at = |index: usize| -> Option<&FaceMesh> {
-            let covering = cover.get(index.min(cover.len().saturating_sub(1)))?;
-            landmarks.frames[(*covering)?].faces.first()
+        let cover_at = |index: usize| {
+            cover
+                .get(index.min(cover.len().saturating_sub(1)))
+                .copied()?
         };
+        let mesh_of = |frame: usize| landmarks.frames[frame].faces.first();
 
         let mut planes = match take.mode {
             TakeMode::Depth => Some(self.depth_planes(build, cx)?),
             TakeMode::Recording | TakeMode::Mesh => None,
         };
+        let mut canvas = Canvas::new(size.0, size.1)
+            .ok_or_else(|| MediaError::Parse("a control video with no picture".into()))?;
         let mut ground = match (take.mode, take.set.image()) {
-            (TakeMode::Depth, Some(image)) => Ground::Picture(
-                self.media
-                    .cover_picture(&self.files.path(project, image), size)?,
-            ),
+            (TakeMode::Depth, Some(image)) => {
+                let picture = self
+                    .media
+                    .cover_picture(&self.files.path(project, image), size)?;
+                canvas.put_rgb(&picture);
+                Ground::Picture(canvas.rgba().to_vec())
+            }
             _ => Ground::Room {
                 frames: self.media.video_frames(
                     &self.files.path(project, &capture.video_file),
@@ -491,8 +517,6 @@ impl ControlVideoHandler {
                 last: None,
             },
         };
-        let mut canvas = Canvas::new(size.0, size.1)
-            .ok_or_else(|| MediaError::Parse("a control video with no picture".into()))?;
         let mut sink = self.media.control_writer(destination, output, voice)?;
         let mut uncovered = 0;
         for index in 0..total {
@@ -507,10 +531,11 @@ impl ControlVideoHandler {
                     }
                     canvas.put_rgb(last.get_or_insert_with(|| RgbFrame::black(size.0, size.1)));
                 }
-                Ground::Picture(picture) => canvas.put_rgb(picture),
+                Ground::Picture(picture) => canvas.put_rgba(picture),
             }
-            let mesh = mesh_at(index as usize);
-            if mesh.is_none() {
+            let covering = cover_at(index as usize);
+            let mesh = covering.and_then(|c| mesh_of(c.nearest));
+            if mesh.is_none() && take.mode == TakeMode::Mesh {
                 uncovered += 1;
             }
             match &mut planes {
@@ -528,8 +553,12 @@ impl ControlVideoHandler {
                     }
                 }
                 None => {
-                    if let Some(mesh) = mesh {
-                        canvas.cover_face(mesh);
+                    if let (Some(covering), Some(mesh)) = (covering, mesh) {
+                        let growth = covering.growth(index as usize, hold);
+                        if let Some(other) = covering.other.and_then(mesh_of) {
+                            canvas.cover_face(other, growth);
+                        }
+                        canvas.cover_face(mesh, growth);
                         canvas.draw_mesh(mesh);
                     }
                 }
@@ -680,7 +709,52 @@ pub enum SetChoice {
     /// A scene's image, by its file in the project folder.
     Scene(String),
     /// A PNG or JPEG of the user's.
-    Picture(PathBuf),
+    Picture(SetPicture),
+}
+
+/// The largest set picture taken, in bytes and on its longer side.
+const MAX_SET_BYTES: u64 = 50_000_000;
+const MAX_SET_SIDE: u32 = 8_192;
+
+/// A PNG or JPEG of the user's, read and checked, to be a take's set.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SetPicture {
+    bytes: Vec<u8>,
+    extension: &'static str,
+}
+
+impl std::fmt::Debug for SetPicture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SetPicture({} bytes of {})",
+            self.bytes.len(),
+            self.extension
+        )
+    }
+}
+
+impl SetPicture {
+    /// Reads the picture at `path`: a `.png`, `.jpg` or `.jpeg` file that
+    /// is one, of at most 50 MB and 8192 px a side. It reads the whole
+    /// file, so it runs off the interface's thread.
+    pub fn read(path: &Path) -> Result<SetPicture, CaptureError> {
+        use std::io::Read as _;
+        path.extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .filter(|e| SET_EXTENSIONS.contains(&e.as_str()))
+            .ok_or(CaptureError::SetUnreadable)?;
+        let file = std::fs::File::open(path).map_err(|_| CaptureError::SetUnreadable)?;
+        let mut bytes = Vec::new();
+        file.take(MAX_SET_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| CaptureError::SetUnreadable)?;
+        if bytes.len() as u64 > MAX_SET_BYTES {
+            return Err(CaptureError::SetUnreadable);
+        }
+        let extension = picture_extension(&bytes)?;
+        Ok(SetPicture { bytes, extension })
+    }
 }
 
 /// A scene image a take's set can be.
@@ -769,6 +843,11 @@ impl Bardo {
                     (Some(_), None, None) => ControlStatus::NotBuilt,
                 };
                 let checks = needed.as_deref().and_then(merged_checks);
+                let block = approval_block(
+                    take,
+                    checks.as_ref(),
+                    built.as_ref().map_or(0, |b| b.uncovered),
+                );
                 ControlVideoView {
                     mode: take.mode,
                     set: take.set.clone(),
@@ -776,7 +855,7 @@ impl Bardo {
                     job: latest.filter(|job| job.state().is_active()).map(Job::id),
                     status,
                     built,
-                    block: approval_block(take, checks.as_ref()),
+                    block,
                     approval_lost: control.is_some_and(|c| {
                         let current = Some(&c.fingerprint) == fingerprint.as_ref();
                         if current {
@@ -899,6 +978,9 @@ impl Bardo {
             ))?
             .set
             .clone();
+        if old == TakeSet::Room && choice == SetChoice::Room {
+            return Ok(());
+        }
         let set = match choice {
             SetChoice::Room => TakeSet::Room,
             SetChoice::Scene(file) => {
@@ -922,17 +1004,11 @@ impl Bardo {
                     from: SetSource::Scene,
                 }
             }
-            SetChoice::Picture(path) => {
-                let extension = path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .filter(|e| SET_EXTENSIONS.contains(&e.as_str()))
-                    .ok_or(CaptureError::SetUnreadable)?;
-                let bytes = std::fs::read(&path).map_err(|_| CaptureError::SetUnreadable)?;
-                picture_extension(&bytes)?;
-                let name = set_file(&extension);
+            SetChoice::Picture(picture) => {
+                // The bytes checked are the ones kept.
+                let name = set_file(picture.extension);
                 self.files
-                    .copy_in(project, &name, &path)
+                    .write(project, &name, &picture.bytes)
                     .map_err(|_| CaptureError::SetUnreadable)?;
                 TakeSet::Image {
                     file: name,
@@ -961,7 +1037,7 @@ impl Bardo {
         self.files.path(control.project, &control.file)
     }
 
-    /// A player of take `index`'s control video as built.
+    /// A player of take `index`'s control video as built, playing.
     pub fn control_player(
         &self,
         project: VideoProjectId,
@@ -973,7 +1049,11 @@ impl Bardo {
             .get(index)
             .and_then(|view| view.built.clone())
             .ok_or(CaptureError::ControlNotReady)?;
-        let take = &capture.takes.as_slice()[index];
+        let take = capture
+            .takes
+            .as_slice()
+            .get(index)
+            .ok_or(CaptureError::ControlNotReady)?;
         let (width, height) = control_size(capture.video.width, capture.video.height);
         Ok(ControlPlayer::new(
             Arc::clone(&self.media),
@@ -985,9 +1065,12 @@ impl Bardo {
     }
 }
 
-/// The extension a set picture is saved with, from its bytes: PNG or JPEG.
+/// The extension a set picture is saved with, from its bytes: PNG or JPEG,
+/// at most [`MAX_SET_SIDE`] a side.
 fn picture_extension(bytes: &[u8]) -> Result<&'static str, CaptureError> {
-    if bardo_domain::image_dimensions(bytes).is_none() {
+    let fits = bardo_domain::image_dimensions(bytes)
+        .is_some_and(|(width, height)| width.max(height) <= MAX_SET_SIDE);
+    if !fits {
         return Err(CaptureError::SetUnreadable);
     }
     if bytes.starts_with(b"\x89PNG") {
@@ -1013,7 +1096,8 @@ struct Playing {
     started_at: Option<Instant>,
 }
 
-/// Plays a control video with its sound, from the start, for its review.
+/// Plays a control video with its sound, from the start, for its review:
+/// playing as soon as it is made.
 pub struct ControlPlayer {
     media: Arc<dyn MediaEngine>,
     audio: Arc<dyn AudioOutput>,
@@ -1021,8 +1105,6 @@ pub struct ControlPlayer {
     duration: Duration,
     size: FrameSize,
     playing: Option<Playing>,
-    /// The first picture, while it is coming.
-    still: Option<FrameStream>,
     /// Where playing got to.
     position: Duration,
     error: Option<Text>,
@@ -1045,11 +1127,10 @@ impl ControlPlayer {
             duration,
             size: FrameSize::new(side(width), side(height)),
             playing: None,
-            still: None,
             position: Duration::ZERO,
             error: None,
         };
-        player.show_first();
+        player.play();
         player
     }
 
@@ -1077,9 +1158,9 @@ impl ControlPlayer {
         self.playing.is_some()
     }
 
-    /// Whether `tick` has work: playing, or the first picture coming.
+    /// Whether `tick` has work: playing.
     pub fn needs_ticks(&self) -> bool {
-        self.playing.is_some() || self.still.is_some()
+        self.playing.is_some()
     }
 
     /// The control video as a plan: its picture, whole, and its sound.
@@ -1112,23 +1193,12 @@ impl ControlPlayer {
         }
     }
 
-    fn show_first(&mut self) {
-        match self
-            .media
-            .preview(&self.plan(), Duration::ZERO, self.size, (FPS, 1))
-        {
-            Ok(stream) => self.still = Some(stream),
-            Err(_) => self.error = Some(Text::ControlCannotPlay),
-        }
-    }
-
     /// Plays from the start.
     pub fn play(&mut self) {
         if self.playing.is_some() {
             return;
         }
         self.error = None;
-        self.still = None;
         self.position = Duration::ZERO;
         let plan = self.plan();
         let frames = match self
@@ -1175,20 +1245,6 @@ impl ControlPlayer {
     /// Moves playing on: call it every frame while `needs_ticks`. Returns
     /// a new picture to show, if there is one.
     pub fn tick(&mut self, now: Instant) -> Option<VideoFrame> {
-        if let Some(still) = &self.still {
-            return match still.poll_frame() {
-                FramePoll::Ready(frame) => {
-                    self.still = None;
-                    Some(frame)
-                }
-                FramePoll::Waiting => None,
-                FramePoll::Ended => {
-                    self.still = None;
-                    self.error = Some(Text::ControlCannotPlay);
-                    None
-                }
-            };
-        }
         let duration = self.duration;
         let playing = self.playing.as_mut()?;
         if playing.pending.is_none() {
@@ -1398,7 +1454,7 @@ mod tests {
     }
 
     #[test]
-    fn frames_with_no_face_near_enough_go_as_recorded_and_are_counted() {
+    fn mesh_frames_with_no_face_near_enough_are_counted_and_block_approval() {
         let s = setup(13);
         *s.h.vision.seen.faces.lock().unwrap() = Some(0);
         let (project, _) = imported(&s);
@@ -1408,6 +1464,18 @@ mod tests {
         let built = views[1].built.as_ref().unwrap();
         assert!(built.frames > 0);
         assert_eq!(built.uncovered, built.frames);
+        // They would show the face as recorded.
+        assert_eq!(views[1].block, Some(ApprovalBlock::Uncovered));
+        assert!(matches!(
+            s.app.approve_control_video(project, 1),
+            Err(CaptureError::NotApprovable(ApprovalBlock::Uncovered))
+        ));
+
+        // A depth figure shows no face as recorded.
+        s.app.set_take_mode(project, 1, TakeMode::Depth).unwrap();
+        let views = settled(&s.app, project);
+        assert_eq!(views[1].built.as_ref().unwrap().uncovered, 0);
+        assert_eq!(views[1].block, None);
     }
 
     #[test]
@@ -1465,7 +1533,7 @@ mod tests {
             ..take.clone()
         };
         assert_eq!(
-            approval_block(&long, None),
+            approval_block(&long, None, 0),
             Some(ApprovalBlock::Length(TakeFlag::TooLong))
         );
         assert_eq!(
@@ -1491,7 +1559,11 @@ mod tests {
         let picture = s._folders.path().join("Beach.PNG");
         std::fs::write(&picture, png(640, 360)).unwrap();
         s.app
-            .set_take_set(project, 0, SetChoice::Picture(picture.clone()))
+            .set_take_set(
+                project,
+                0,
+                SetChoice::Picture(SetPicture::read(&picture).unwrap()),
+            )
             .unwrap();
         let set = s.app.take_controls(project).unwrap()[0].set.clone();
         let TakeSet::Image { file, from } = &set else {
@@ -1544,20 +1616,19 @@ mod tests {
         settled(&s.app, project);
         let text = s._folders.path().join("notes.png");
         std::fs::write(&text, b"not a picture").unwrap();
-        for choice in [
-            SetChoice::Picture(text),
-            SetChoice::Picture(s._folders.path().join("gone.png")),
-            SetChoice::Scene("scene-1.png".into()),
-        ] {
-            assert!(matches!(
-                s.app.set_take_set(project, 1, choice),
-                Err(CaptureError::SetUnreadable)
-            ));
-        }
         let gif = s._folders.path().join("set.gif");
         std::fs::write(&gif, png(10, 10)).unwrap();
+        let huge = s._folders.path().join("huge.png");
+        std::fs::write(&huge, png(20_000, 10_000)).unwrap();
+        for path in [text, s._folders.path().join("gone.png"), gif, huge] {
+            assert!(
+                matches!(SetPicture::read(&path), Err(CaptureError::SetUnreadable)),
+                "{path:?}"
+            );
+        }
         assert!(matches!(
-            s.app.set_take_set(project, 1, SetChoice::Picture(gif)),
+            s.app
+                .set_take_set(project, 1, SetChoice::Scene("scene-1.png".into())),
             Err(CaptureError::SetUnreadable)
         ));
         assert!(s.app.set_scenes(project).unwrap().is_empty());
@@ -1575,7 +1646,11 @@ mod tests {
         jpeg.extend(640u16.to_be_bytes());
         std::fs::write(&picture, jpeg).unwrap();
         s.app
-            .set_take_set(project, 1, SetChoice::Picture(picture))
+            .set_take_set(
+                project,
+                1,
+                SetChoice::Picture(SetPicture::read(&picture).unwrap()),
+            )
             .unwrap();
         let set = s.app.take_controls(project).unwrap()[1].set.clone();
         let image = set.image().unwrap().to_owned();

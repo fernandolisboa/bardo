@@ -250,7 +250,7 @@ fn a_covered_face_shows_no_skin_inside_its_outline() {
             skin
         };
         skin_before += pixels_inside(frame);
-        canvas.cover_face(mesh);
+        canvas.cover_face(mesh, 0.0);
         canvas.draw_mesh(mesh);
         assert_eq!(
             pixels_inside(&canvas.rgb()),

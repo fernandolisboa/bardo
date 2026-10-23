@@ -74,6 +74,14 @@ impl Canvas {
         }
     }
 
+    /// Puts a frame given as [`Canvas::rgba`] gave it, at the canvas size.
+    pub fn put_rgba(&mut self, rgba: &[u8]) {
+        let data = self.pixmap.data_mut();
+        if rgba.len() == data.len() {
+            data.copy_from_slice(rgba);
+        }
+    }
+
     /// The frame as RGBA. Opaque, so premultiplied is the same.
     pub fn rgba(&self) -> &[u8] {
         self.pixmap.data()
@@ -109,10 +117,10 @@ impl Canvas {
             .collect()
     }
 
-    /// The outline grown by [`OVAL_GROWTH`] around its centre and raised
-    /// toward the hairline by [`OVAL_RAISE`] of the face's height: what
-    /// covers the face.
-    pub fn face_cover(&self, mesh: &FaceMesh) -> Vec<(f32, f32)> {
+    /// The outline grown by [`OVAL_GROWTH`] plus `growth` around its
+    /// centre and raised toward the hairline by [`OVAL_RAISE`] of the
+    /// face's height: what covers the face.
+    pub fn face_cover(&self, mesh: &FaceMesh, growth: f32) -> Vec<(f32, f32)> {
         let outline = self.face_outline(mesh);
         let n = outline.len().max(1) as f32;
         let centre = outline
@@ -132,17 +140,18 @@ impl Canvas {
             .map(|p| {
                 let lift = above(p).max(0.0) / highest * OVAL_RAISE * height;
                 (
-                    centre.0 + (p.0 - centre.0) * (1.0 + OVAL_GROWTH) + ux * lift,
-                    centre.1 + (p.1 - centre.1) * (1.0 + OVAL_GROWTH) + uy * lift,
+                    centre.0 + (p.0 - centre.0) * (1.0 + OVAL_GROWTH + growth) + ux * lift,
+                    centre.1 + (p.1 - centre.1) * (1.0 + OVAL_GROWTH + growth) + uy * lift,
                 )
             })
             .collect()
     }
 
-    /// Mesh mode: fills the face's covering with [`FACE_FILL`]. Draw the
-    /// mesh over it with [`Canvas::draw_mesh`].
-    pub fn cover_face(&mut self, mesh: &FaceMesh) {
-        if let Some(path) = polygon(&self.face_cover(mesh)) {
+    /// Mesh mode: fills the face's covering, grown by `growth` more of its
+    /// size, with [`FACE_FILL`]. Draw the mesh over it with
+    /// [`Canvas::draw_mesh`].
+    pub fn cover_face(&mut self, mesh: &FaceMesh, growth: f32) {
+        if let Some(path) = polygon(&self.face_cover(mesh, growth)) {
             self.pixmap.fill_path(
                 &path,
                 &paint(FACE_FILL),
@@ -169,7 +178,7 @@ impl Canvas {
             (edges::LEFT_EYEBROW, BROWS_LINES, width * 1.5),
             (edges::RIGHT_EYEBROW, BROWS_LINES, width * 1.5),
         ];
-        for (lines, color, width) in groups {
+        for (group, (lines, color, width)) in groups.into_iter().enumerate() {
             let mut builder = PathBuilder::new();
             for edge in lines {
                 let (a, b) = (
@@ -180,9 +189,16 @@ impl Canvas {
                 builder.line_to(b.0, b.1);
             }
             if let Some(path) = builder.finish() {
+                // The tessellation's ~1300 short lines meet at the
+                // landmarks anyway: square ends stroke twice as fast.
+                let line_cap = if group == 0 {
+                    tiny_skia::LineCap::Butt
+                } else {
+                    tiny_skia::LineCap::Round
+                };
                 let stroke = Stroke {
                     width,
-                    line_cap: tiny_skia::LineCap::Round,
+                    line_cap,
                     ..Stroke::default()
                 };
                 self.pixmap
@@ -211,7 +227,7 @@ impl Canvas {
             return;
         }
         let oval = face.and_then(|face| {
-            let path = polygon(&self.face_cover(face))?;
+            let path = polygon(&self.face_cover(face, 0.0))?;
             let mut oval = Mask::new(self.width(), self.height())?;
             oval.fill_path(&path, FillRule::Winding, true, Transform::identity());
             Some(oval)
@@ -220,29 +236,36 @@ impl Canvas {
         let rows = samples(h, dh);
         let span = f32::from(near.saturating_sub(far)).max(1.0);
         let colors = turbo_table();
+        // Where all four mask samples are at or under this, the figure is
+        // not there: most of the frame, skipped before any arithmetic.
+        let outside = (MASK_FROM * 255.0) as u8;
+        let oval = oval.as_ref().map(Mask::data);
         let data = self.pixmap.data_mut();
         for (y, &(y0, y1, fy)) in rows.iter().enumerate() {
+            let (top, bottom) = (y0 * dw, y1 * dw);
             for (x, &(x0, x1, fx)) in columns.iter().enumerate() {
-                let at = |plane: &dyn Fn(usize) -> f32| {
-                    let top = plane(y0 * dw + x0) * (1.0 - fx) + plane(y0 * dw + x1) * fx;
-                    let bottom = plane(y1 * dw + x0) * (1.0 - fx) + plane(y1 * dw + x1) * fx;
-                    top * (1.0 - fy) + bottom * fy
-                };
-                let person = at(&|i| f32::from(mask[i]) / 255.0);
-                let mut alpha = smoothstep(MASK_FROM, MASK_TO, person);
-                if let Some(oval) = &oval {
-                    alpha = alpha.max(f32::from(oval.data()[y * w + x]) / 255.0);
+                let corners = [top + x0, top + x1, bottom + x0, bottom + x1];
+                let covered = oval.map_or(0, |oval| oval[y * w + x]);
+                if covered == 0 && corners.iter().all(|&i| mask[i] <= outside) {
+                    continue;
                 }
+                let at = |a: f32, b: f32, c: f32, d: f32| {
+                    (a * (1.0 - fx) + b * fx) * (1.0 - fy) + (c * (1.0 - fx) + d * fx) * fy
+                };
+                let [a, b, c, d] = corners.map(|i| f32::from(mask[i]));
+                let person = at(a, b, c, d) / 255.0;
+                let alpha = smoothstep(MASK_FROM, MASK_TO, person).max(f32::from(covered) / 255.0);
                 if alpha <= 0.0 {
                     continue;
                 }
-                let value = at(&|i| f32::from(depth[i]));
-                let share = ((value - f32::from(far)) / span).clamp(0.0, 1.0);
-                let color = colors[(share * 255.0).round() as usize];
+                let [a, b, c, d] = corners.map(|i| f32::from(depth[i]));
+                let share = ((at(a, b, c, d) - f32::from(far)) / span).clamp(0.0, 1.0);
+                // Values are never negative: adding a half rounds.
+                let color = colors[(share * 255.0 + 0.5) as usize];
                 let pixel = &mut data[(y * w + x) * 4..][..3];
                 for (channel, figure) in pixel.iter_mut().zip(color) {
                     let mixed = f32::from(*channel) * (1.0 - alpha) + f32::from(figure) * alpha;
-                    *channel = mixed.round() as u8;
+                    *channel = (mixed + 0.5) as u8;
                 }
             }
         }
@@ -441,11 +464,11 @@ mod tests {
         let (width, height) = (320, 240);
         let mesh = face(width, height, 50.0, 70.0);
         let mut canvas = canvas_of(width, height, SKIN);
-        canvas.cover_face(&mesh);
+        canvas.cover_face(&mesh, 0.0);
         canvas.draw_mesh(&mesh);
 
         let outline = canvas.face_outline(&mesh);
-        let cover = canvas.face_cover(&mesh);
+        let cover = canvas.face_cover(&mesh, 0.0);
         let mut inside_count = 0;
         for y in 0..height {
             for x in 0..width {
@@ -467,6 +490,13 @@ mod tests {
         assert!(top < 120.0 - 70.0 * (1.0 + OVAL_GROWTH) - 15.0, "{top}");
         assert!(!looks_like_skin(pixel(&canvas, 160, 52)), "forehead");
         assert!(!looks_like_skin(pixel(&canvas, 160 + 54, 120)), "cheek");
+        // A borrowed covering grows by its growth.
+        let span = |c: &[(f32, f32)]| {
+            let xs = c.iter().map(|p| p.0);
+            xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+        };
+        let grown = canvas.face_cover(&mesh, 0.5);
+        assert!(span(&grown) > span(&cover) * 1.4, "{}", span(&grown));
         // Away from the face, the frame is as it was.
         assert_eq!(pixel(&canvas, 10, 10), SKIN);
         assert_eq!(pixel(&canvas, 300, 230), SKIN);

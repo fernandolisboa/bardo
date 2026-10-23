@@ -173,28 +173,72 @@ impl Outbound {
     }
 }
 
-/// For each frame, the frame whose face covers it: its own when `found`,
-/// else the nearest one with a face no more than `hold` frames away (the
-/// earlier when two are as near), else none.
-pub fn face_cover(found: &[bool], hold: usize) -> Vec<Option<usize>> {
+/// A borrowed face's cover grows by up to this much more of its size, in
+/// proportion to how far it was borrowed from: the head may have moved.
+pub const HELD_GROWTH: f32 = 0.5;
+
+/// Which found faces cover a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FaceCover {
+    /// The frame's own face, else the nearest one with a face no more
+    /// than the hold away (the earlier when two are as near).
+    pub nearest: usize,
+    /// For a frame between two faces within the hold, the one on the
+    /// other side: both are covered, so a head that moved stays under one.
+    pub other: Option<usize>,
+}
+
+impl FaceCover {
+    /// How much more than its own the cover of frame `index` grows, out
+    /// of `hold` frames: none for a frame's own face, [`HELD_GROWTH`] at
+    /// the full hold.
+    pub fn growth(self, index: usize, hold: usize) -> f32 {
+        if hold == 0 {
+            return 0.0;
+        }
+        HELD_GROWTH * index.abs_diff(self.nearest) as f32 / hold as f32
+    }
+}
+
+/// For each frame, the found faces that cover it ([`FaceCover`]), or none
+/// when no face is within `hold` frames.
+pub fn face_cover(found: &[bool], hold: usize) -> Vec<Option<FaceCover>> {
     let mut before = None;
-    let mut cover = Vec::with_capacity(found.len());
+    let mut earlier = Vec::with_capacity(found.len());
     for (index, &here) in found.iter().enumerate() {
         if here {
             before = Some(index);
         }
-        cover.push(before.filter(|&at| index - at <= hold));
+        earlier.push(before.filter(|&at| index - at <= hold));
     }
+    let mut cover = vec![None; found.len()];
     let mut after = None;
     for index in (0..found.len()).rev() {
         if found[index] {
             after = Some(index);
         }
         let later = after.filter(|&at| at - index <= hold);
-        cover[index] = match (cover[index], later) {
-            (Some(earlier), Some(later)) if later - index < index - earlier => Some(later),
-            (None, later) => later,
-            (earlier, _) => earlier,
+        cover[index] = match (earlier[index], later) {
+            _ if found[index] => Some(FaceCover {
+                nearest: index,
+                other: None,
+            }),
+            (Some(earlier), Some(later)) => Some(if later - index < index - earlier {
+                FaceCover {
+                    nearest: later,
+                    other: Some(earlier),
+                }
+            } else {
+                FaceCover {
+                    nearest: earlier,
+                    other: Some(later),
+                }
+            }),
+            (Some(nearest), None) | (None, Some(nearest)) => Some(FaceCover {
+                nearest,
+                other: None,
+            }),
+            (None, None) => None,
         };
     }
     cover
@@ -279,15 +323,25 @@ pub fn control_fingerprint(
 pub enum ApprovalBlock {
     /// More than one face in some frame: only the user may perform.
     SeveralFaces,
+    /// Mesh mode: some frames had no face near enough to cover, so they
+    /// would show the performer's face.
+    Uncovered,
     /// No take model takes it at this length.
     Length(TakeFlag),
 }
 
-/// Why `take`, with what its analyses found, cannot be approved, if
-/// anything.
-pub fn approval_block(take: &Take, checks: Option<&TakeChecks>) -> Option<ApprovalBlock> {
+/// Why `take`, with what its analyses found and the `uncovered` frames of
+/// its control video, cannot be approved, if anything.
+pub fn approval_block(
+    take: &Take,
+    checks: Option<&TakeChecks>,
+    uncovered: u32,
+) -> Option<ApprovalBlock> {
     if checks.is_some_and(TakeChecks::blocked) {
         return Some(ApprovalBlock::SeveralFaces);
+    }
+    if take.mode == TakeMode::Mesh && uncovered > 0 {
+        return Some(ApprovalBlock::Uncovered);
     }
     take.flag().map(ApprovalBlock::Length)
 }
@@ -305,8 +359,8 @@ pub struct ControlVideo {
     pub file: String,
     pub bytes: u64,
     pub frames: u32,
-    /// Mesh and Depth: frames with no face near enough to cover, which go
-    /// as they are.
+    /// Mesh: frames with no face near enough to cover, which would go as
+    /// recorded; such a build cannot be approved.
     pub uncovered: u32,
     /// The encoder's ffmpeg name.
     pub encoder: String,
@@ -403,19 +457,33 @@ mod tests {
     #[test]
     fn frames_without_a_face_borrow_the_nearest_within_the_hold() {
         let found = |pattern: &str| pattern.chars().map(|c| c == 'F').collect::<Vec<_>>();
-        assert_eq!(
-            face_cover(&found("F..F"), 2),
-            [Some(0), Some(0), Some(3), Some(3)]
-        );
+        let nearest = |pattern: &str, hold: usize| {
+            face_cover(&found(pattern), hold)
+                .iter()
+                .map(|cover| cover.map(|c| c.nearest))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(nearest("F..F", 2), [Some(0), Some(0), Some(3), Some(3)]);
         // Equally near: the earlier.
-        assert_eq!(face_cover(&found("F.F"), 1), [Some(0), Some(0), Some(2)]);
+        assert_eq!(nearest("F.F", 1), [Some(0), Some(0), Some(2)]);
         // Past the hold, nothing covers.
         assert_eq!(
-            face_cover(&found("F....F"), 1),
+            nearest("F....F", 1),
             [Some(0), Some(0), None, None, Some(5), Some(5)]
         );
-        assert_eq!(face_cover(&found("..."), 5), [None, None, None]);
-        assert_eq!(face_cover(&found(".F"), 0), [None, Some(1)]);
+        assert_eq!(nearest("...", 5), [None, None, None]);
+        assert_eq!(nearest(".F", 0), [None, Some(1)]);
+        // Between two faces within the hold, both cover; a frame's own
+        // face alone covers it.
+        let covers = face_cover(&found("F..F."), 2);
+        assert_eq!(covers[0].unwrap().other, None);
+        assert_eq!(covers[1].unwrap().other, Some(3));
+        assert_eq!(covers[2].unwrap().other, Some(0));
+        assert_eq!(covers[4].unwrap().other, None);
+        // A borrowed cover grows with the distance it was borrowed from.
+        assert_eq!(covers[0].unwrap().growth(0, 2), 0.0);
+        assert_eq!(covers[4].unwrap().growth(4, 2), HELD_GROWTH / 2.0);
+        assert_eq!(covers[4].unwrap().growth(4, 0), 0.0);
         assert!(face_cover(&[], 3).is_empty());
     }
 
@@ -517,27 +585,35 @@ mod tests {
     }
 
     #[test]
-    fn several_faces_or_a_length_no_model_takes_block_approval() {
+    fn several_faces_an_uncovered_face_or_a_length_no_model_takes_block_approval() {
         let ok = take(TakeMode::Mesh, TakeSet::Room);
         let fine = TakeChecks {
             frames: 10,
             no_face: 3,
             ..TakeChecks::default()
         };
-        assert_eq!(approval_block(&ok, Some(&fine)), None);
-        assert_eq!(approval_block(&ok, None), None);
+        assert_eq!(approval_block(&ok, Some(&fine), 0), None);
+        assert_eq!(approval_block(&ok, None, 0), None);
+        // Mesh frames left uncovered would show the face; elsewhere they
+        // show none.
+        assert_eq!(
+            approval_block(&ok, Some(&fine), 2),
+            Some(ApprovalBlock::Uncovered)
+        );
+        let depth = take(TakeMode::Depth, TakeSet::Room);
+        assert_eq!(approval_block(&depth, Some(&fine), 2), None);
         let crowded = TakeChecks {
             several_faces: 1,
             ..fine
         };
         assert_eq!(
-            approval_block(&ok, Some(&crowded)),
+            approval_block(&ok, Some(&crowded), 0),
             Some(ApprovalBlock::SeveralFaces)
         );
         let mut long = ok.clone();
         long.end = long.start + Duration::from_secs(31);
         assert_eq!(
-            approval_block(&long, Some(&fine)),
+            approval_block(&long, Some(&fine), 0),
             Some(ApprovalBlock::Length(TakeFlag::TooLong))
         );
     }

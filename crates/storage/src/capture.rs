@@ -493,13 +493,19 @@ impl CaptureRepository for Database {
 
     fn save_control_video(&self, video: &ControlVideo) -> Result<bool, RepositoryError> {
         // Kept only while the take is still there on the project's capture.
+        // An approval given meanwhile to a build of the same take, as it
+        // is, carries over.
         let saved = self
             .conn()
             .execute(
                 "INSERT OR REPLACE INTO control_video (project_id, capture_id, position,
                      fingerprint, file, bytes, frames, uncovered, encoder, built_at, job_id,
                      approved_at, replaced_approval)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                     COALESCE(?12, (SELECT approved_at FROM control_video
+                         WHERE project_id = ?1 AND capture_id = ?2 AND position = ?3
+                             AND fingerprint = ?4)),
+                     ?13
                  WHERE EXISTS (
                      SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
                      WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3)",
@@ -977,6 +983,17 @@ mod tests {
         let approved = db.control_videos(project.id).unwrap().remove(0);
         assert_eq!(approved.approved_at, Some(time(1_800_000_040)));
         assert!(approved.approved_for("aaaa"));
+
+        // Another build of the same take, started before the approval,
+        // keeps it.
+        let again = ControlVideo {
+            file: "again.mp4".into(),
+            ..first.clone()
+        };
+        assert!(db.save_control_video(&again).unwrap());
+        let kept = db.control_videos(project.id).unwrap().remove(0);
+        assert_eq!(kept.file, "again.mp4");
+        assert_eq!(kept.approved_at, Some(time(1_800_000_040)));
 
         // A new build replaces it, as the app says: unapproved, its
         // approval lost with the take it was for.

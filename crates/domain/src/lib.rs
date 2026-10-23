@@ -149,10 +149,10 @@ pub use connection::{
 pub use control_video::{
     ApprovalBlock, CONTROL_AUDIO_BITRATE, CONTROL_BUDGET_BYTES, CONTROL_KEYFRAME_EVERY,
     CONTROL_LONG_SIDE, CONTROL_SHORT_SIDE, ControlVideo, FACE_HOLD, FIGURE_FAR_PERMILLE,
-    FIGURE_MASK_FROM, FIGURE_NEAR_PERMILLE, MAX_CONTROL_BITRATE, MAX_CONTROL_BYTES,
-    MIN_CONTROL_BITRATE, Outbound, SET_EXTENSIONS, SetSource, TakeSet, approval_block,
-    control_bitrate, control_fingerprint, control_fps, control_size, face_cover, merged_checks,
-    needed_analyses,
+    FIGURE_MASK_FROM, FIGURE_NEAR_PERMILLE, FaceCover, HELD_GROWTH, MAX_CONTROL_BITRATE,
+    MAX_CONTROL_BYTES, MIN_CONTROL_BITRATE, Outbound, SET_EXTENSIONS, SetSource, TakeSet,
+    approval_block, control_bitrate, control_fingerprint, control_fps, control_size, face_cover,
+    merged_checks, needed_analyses,
 };
 pub use cost::{
     Cost, CostPurpose, CostRecord, CostRecordId, CostRepository, Meter, Metered, Money, MoneyError,
