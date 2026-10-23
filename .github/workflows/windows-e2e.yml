@@ -107,7 +107,6 @@ jobs:
           -Program build/Bardo/bardo.exe
           -Previous $(if (Test-Path previous) { (Get-ChildItem previous/Bardo-Setup-*-x64.exe | Select-Object -First 1).FullName } else { '' })
           -Out e2e-out
-          -WatchdogMinutes 2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
