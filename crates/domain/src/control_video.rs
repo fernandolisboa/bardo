@@ -495,6 +495,7 @@ mod tests {
             revision: 2,
             mode,
             set,
+            model: None,
         }
     }
 

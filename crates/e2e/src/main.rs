@@ -277,6 +277,7 @@ fn seed_channel(bardo: &Bardo) -> anyhow::Result<Value> {
             country: Country::UnitedStates,
             default_persona: None,
             clip_model: None,
+            take_model: None,
             caption_style: Default::default(),
             caption_highlight: Default::default(),
             transition: Default::default(),

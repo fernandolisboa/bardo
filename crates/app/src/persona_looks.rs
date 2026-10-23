@@ -287,6 +287,7 @@ impl PersonaLookHandler {
         let request = TextRequest {
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
+            images: Vec::new(),
             format: TextFormat::Json {
                 schema: WRITE_SCHEMA.to_owned(),
             },

@@ -23,6 +23,7 @@ There is one template per kind of generation:
 - **Chapters**: a long video's YouTube chapters, from the narration's sentences ([Chapters](uploading.md#chapters)).
 - **Localized version**: a version's script, adapted sentence by sentence for another language or country ([Versions in other languages](script.md#versions)). Besides the target channel's facts, it reads `{{source_language}}`, `{{source_country}}`, the original title and its numbered sentences.
 - **Look prompt**: the image prompt for a persona's drawn look, from your description ([The look](personas.md#look)). It reads `{{persona}}` and `{{look_description}}`, and it must keep declining real people.
+- **Take prompt**: the prompt a take model gets for one take of a capture ([The take's prompt](capture.md#take-prompt)). It reads `{{look}}`, `{{set}}`, `{{words}}` and `{{instruction}}`: what the model does with the take's mode, which the prompt should keep.
 
 <a id="versions"></a>
 ## Versions

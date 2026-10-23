@@ -362,6 +362,7 @@ impl SceneHandler {
         let request = TextRequest {
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
+            images: Vec::new(),
             format: TextFormat::Json {
                 schema: PLAN_SCHEMA.to_owned(),
             },
@@ -1085,6 +1086,7 @@ pub(crate) mod tests {
                 clips: std::iter::once(Arc::clone(&self.clips) as _)
                     .chain(self.more_clips.iter().cloned())
                     .collect(),
+                takes: vec![Arc::new(crate::testing::FakeTakes::default())],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),

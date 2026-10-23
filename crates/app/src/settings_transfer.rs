@@ -405,6 +405,9 @@ struct ChannelEntry {
     default_persona: Option<String>,
     #[serde(default)]
     clip_model: Option<ClipEntry>,
+    /// Missing from files made before performed takes: the default one.
+    #[serde(default)]
+    take_model: Option<ClipEntry>,
     #[serde(default)]
     caption_style: Option<String>,
     /// Missing from files made before transitions: the default one.
@@ -520,6 +523,12 @@ impl ChannelEntry {
             clip_model: match &self.clip_model {
                 Some(clip) => {
                     Some(ClipModelRef::new(clip.provider.parse().ok()?, &clip.model).ok()?)
+                }
+                None => None,
+            },
+            take_model: match &self.take_model {
+                Some(take) => {
+                    Some(ClipModelRef::new(take.provider.parse().ok()?, &take.model).ok()?)
                 }
                 None => None,
             },
@@ -892,6 +901,10 @@ impl Bardo {
                     provider: model.provider().code().to_owned(),
                     model: model.model().to_owned(),
                 }),
+                take_model: details.take_model().map(|model| ClipEntry {
+                    provider: model.provider().code().to_owned(),
+                    model: model.model().to_owned(),
+                }),
                 caption_style: Some(details.caption_style().code().to_owned()),
                 caption_highlight: Some(details.caption_highlight().code().to_owned()),
                 thumbnail_look: Some(details.thumbnail_look().code().to_owned()),
@@ -1010,8 +1023,11 @@ impl Bardo {
                 .any(|channel| channel.details.same_name(&entry.name));
             let problem = match entry.draft(None) {
                 None => Some(ItemProblem::NotReadable),
-                Some(draft) => match draft.clip_model {
-                    Some(model) if !self.offers_clip_model(&model) => {
+                Some(draft) => match (draft.clip_model, draft.take_model) {
+                    (Some(model), _) if !self.offers_clip_model(&model) => {
+                        Some(ItemProblem::ModelNotOffered)
+                    }
+                    (_, Some(model)) if !self.offers_take_model(&model) => {
                         Some(ItemProblem::ModelNotOffered)
                     }
                     _ => entry

@@ -1171,7 +1171,7 @@ impl Bardo {
     /// Queues the analyses take `index` of `capture` needs and has neither
     /// done nor under way. A failed or cancelled one is resumed when
     /// `resume`, else left for the user.
-    fn queue_take_analyses(
+    pub(crate) fn queue_take_analyses(
         &self,
         capture: &Capture,
         index: usize,
@@ -1235,6 +1235,9 @@ impl Bardo {
         mode: TakeMode,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         // The mode it has: nothing to build again.
         if capture
             .takes
@@ -1243,6 +1246,10 @@ impl Bardo {
             .is_some_and(|take| take.mode == mode)
         {
             return Ok(());
+        }
+        // Only a mode the take's model takes.
+        if !self.takes_mode(&capture, index, mode)? {
+            return Err(CaptureError::Performed(crate::PerformedBlock::ModeNotTaken));
         }
         capture.takes.set_mode(index, mode)?;
         self.captures
@@ -1664,6 +1671,10 @@ mod tests {
         let (project, capture) = imported(&s);
         settled(&s.app, 2);
 
+        // Depth is a mode of the video edit model.
+        s.app
+            .set_take_model(project, 0, Some(crate::testing::FakeTakes::edit()))
+            .unwrap();
         s.app.set_take_mode(project, 0, TakeMode::Depth).unwrap();
         settled(&s.app, 3);
         let views = s.app.take_analyses(project).unwrap();
@@ -1709,10 +1720,9 @@ mod tests {
                 .any(|a| a.part == AnalysisPart::Depth && a.depth_range.is_some())
         );
 
-        // Back to Recording: no depth to show.
-        s.app
-            .set_take_mode(project, 0, TakeMode::Recording)
-            .unwrap();
+        // Back to Recording, with the motion control model: no depth to
+        // show.
+        s.app.set_take_model(project, 0, None).unwrap();
         assert_eq!(s.app.take_analyses(project).unwrap()[0].depth, None);
     }
 

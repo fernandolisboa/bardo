@@ -31,6 +31,7 @@ mod narration_import;
 mod narrations;
 mod navigation;
 mod network_accounts;
+mod performed_takes;
 mod persona_looks;
 mod persona_package;
 mod personas;
@@ -149,6 +150,9 @@ pub use narration_import::{MAX_RECORDING_BYTES, Recording};
 pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
 pub use navigation::{Destination, Pillar, SettingsTab};
 pub use network_accounts::NetworkAccountError;
+pub use performed_takes::{
+    PerformedBlock, PerformedStep, PerformedTakeView, PerformedView, REFUSED as TAKE_REFUSED,
+};
 pub use persona_looks::{LookError, LookView};
 pub use persona_package::PackageError;
 pub use personas::{
@@ -439,6 +443,9 @@ pub struct Providers {
     /// Scene clips, one adapter per video provider (Higgsfield, then Google
     /// through the Gemini API).
     pub clips: Vec<Arc<dyn ClipGenerator>>,
+    /// Performed takes, one adapter per provider with take models
+    /// (Higgsfield).
+    pub takes: Vec<Arc<dyn bardo_domain::TakeGenerator>>,
     /// The local audio device, for playback.
     pub audio: Arc<dyn AudioOutput>,
     /// The bundled ffmpeg: proxies, waveforms and the editor's preview.
@@ -486,6 +493,7 @@ impl Providers {
                 Arc::new(bardo_ai::KlingClips::new()),
                 Arc::new(bardo_ai::GoogleClips::new()),
             ],
+            takes: vec![Arc::new(bardo_ai::HiggsfieldTakes::new())],
             audio: Arc::new(bardo_media::DeviceAudio),
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
             sign_ins: vec![
@@ -569,6 +577,7 @@ pub struct Bardo {
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
+    takes: Vec<Arc<dyn bardo_domain::TakeGenerator>>,
     decision_engines: decision_engines::DecisionEngines,
     uploaders: Vec<Arc<dyn VideoUploader>>,
     /// What the network's specs (a Reel's, TikTok's) found in each
@@ -796,6 +805,27 @@ impl Bardo {
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
         };
+        let take_prompt_handler = crate::performed_takes::TakePromptHandler {
+            owner: profile.id,
+            captures: Arc::clone(&captures),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+            text: Arc::clone(&providers.text),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
+        let performed_handler = crate::performed_takes::PerformedTakeHandler {
+            owner: profile.id,
+            captures: Arc::clone(&captures),
+            projects: Arc::clone(&themes),
+            channels: Arc::clone(&channels),
+            personas: Arc::clone(&personas),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+            generators: providers.takes.clone(),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let scene_handler = SceneHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
@@ -956,6 +986,8 @@ impl Bardo {
                 captures: capture_handler,
                 analyses: analysis_handler,
                 controls: control_handler,
+                take_prompts: take_prompt_handler,
+                performed: performed_handler,
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,
@@ -1016,6 +1048,7 @@ impl Bardo {
             market_data: providers.market_data,
             voices: providers.voices,
             clips: providers.clips,
+            takes: providers.takes,
             decision_engines,
             uploaders: providers.uploaders,
             spec_checks: std::sync::Mutex::default(),
@@ -1215,8 +1248,9 @@ pub(crate) mod testing {
         ImageFormat, ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market,
         MarketData, MarketSample, Money, MusicGenerator, MusicRequest, Niche, Provider,
         ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
-        SpeechSynthesizer, StagedImage, TextGenerator, TextRequest, TokenUsage, UploadSample,
-        Voice, VoiceLibrary, YesNoAnswer,
+        SpeechSynthesizer, StagedFile, StagedImage, TakeGenerator, TakeInput, TakeMode, TakeModel,
+        TakeRequest, TakeTier, TextGenerator, TextRequest, TokenUsage, UploadSample, Voice,
+        VoiceLibrary, YesNoAnswer,
     };
 
     use crate::Providers;
@@ -2286,6 +2320,162 @@ pub(crate) mod testing {
         }
     }
 
+    /// The bytes every fake performed take downloads as; tests teach the
+    /// fake ffprobe to read them.
+    pub(crate) const TAKE: &[u8] = b"performed-take";
+
+    /// A take model that makes takes without the network: a Kling-like
+    /// motion control model (Recording, no draft) and a Seedance-like
+    /// video edit (Mesh and Depth, 480p drafts). Keeps what was staged,
+    /// quoted and submitted; resending a submission id returns its first
+    /// request, as Higgsfield does with an idempotency key.
+    #[derive(Default)]
+    pub(crate) struct FakeTakes {
+        /// The mime type and size of each file staged.
+        pub(crate) staged: Mutex<Vec<(String, usize)>>,
+        pub(crate) quotes: Mutex<u32>,
+        pub(crate) requests: Mutex<Vec<(TakeRequest, String)>>,
+        pub(crate) polls: Mutex<Vec<String>>,
+        pub(crate) hold: std::sync::atomic::AtomicBool,
+        /// Higgsfield's moderation refuses every request while set.
+        pub(crate) refuse: std::sync::atomic::AtomicBool,
+        /// Every request fails on Higgsfield's side while set.
+        pub(crate) fail: std::sync::atomic::AtomicBool,
+        pub(crate) quote: Mutex<Option<Money>>,
+    }
+
+    impl FakeTakes {
+        pub(crate) const MOTION: &str = "fake/motion-control";
+        pub(crate) const EDIT: &str = "fake/video-edit";
+
+        pub(crate) fn submissions(&self) -> Vec<TakeRequest> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(request, _)| request.clone())
+                .collect()
+        }
+
+        /// The video edit model, as a take picks it.
+        pub(crate) fn edit() -> ClipModelRef {
+            ClipModelRef::new(Provider::Higgsfield, Self::EDIT).unwrap()
+        }
+
+        pub(crate) fn hold(&self, hold: bool) {
+            self.hold.store(hold, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl TakeGenerator for FakeTakes {
+        fn provider(&self) -> Provider {
+            Provider::Higgsfield
+        }
+
+        fn models(&self) -> Vec<TakeModel> {
+            let tier = |resolution: Option<&str>, height| TakeTier {
+                resolution: resolution.map(str::to_owned),
+                height,
+            };
+            let model = |name: &str, label: &str, modes: Vec<TakeMode>, draft| TakeModel {
+                id: ClipModelRef::new(Provider::Higgsfield, name).unwrap(),
+                name: label.into(),
+                modes,
+                draft,
+                final_tier: tier(None, 1080),
+                finishes_draft: false,
+                min_length: Duration::from_secs(3),
+                max_length: Duration::from_secs(30),
+                max_video_bytes: 100_000_000,
+                max_image_bytes: 10_000_000,
+            };
+            let mut edit = model(
+                Self::EDIT,
+                "Fake Video Edit",
+                vec![TakeMode::Mesh, TakeMode::Depth],
+                Some(tier(Some("480p"), 480)),
+            );
+            edit.final_tier = tier(Some("1080p"), 1080);
+            vec![
+                model(
+                    Self::MOTION,
+                    "Fake Motion Control",
+                    vec![TakeMode::Recording],
+                    None,
+                ),
+                edit,
+            ]
+        }
+
+        fn stage(
+            &self,
+            _key: &ApiKey,
+            input: TakeInput<'_>,
+        ) -> Result<StagedFile, ProviderFailure> {
+            let mut staged = self.staged.lock().unwrap();
+            staged.push((input.mime.to_owned(), input.bytes.len()));
+            Ok(StagedFile(format!("https://fake/input-{}", staged.len())))
+        }
+
+        fn quote(&self, _key: &ApiKey, _request: &TakeRequest) -> Option<Money> {
+            *self.quotes.lock().unwrap() += 1;
+            *self.quote.lock().unwrap()
+        }
+
+        fn submit(
+            &self,
+            _key: &ApiKey,
+            request: &TakeRequest,
+            submission: &str,
+        ) -> Result<ClipHandle, ProviderFailure> {
+            let mut requests = self.requests.lock().unwrap();
+            let index = match requests.iter().position(|(_, sent)| sent == submission) {
+                Some(index) => index,
+                None => {
+                    requests.push((request.clone(), submission.to_owned()));
+                    requests.len() - 1
+                }
+            };
+            Ok(ClipHandle(format!("take-{index}")))
+        }
+
+        fn status(
+            &self,
+            _key: &ApiKey,
+            handle: &ClipHandle,
+        ) -> Result<ClipStatus, ProviderFailure> {
+            self.polls.lock().unwrap().push(handle.0.clone());
+            if self.hold.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(ClipStatus::Running);
+            }
+            if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Declined,
+                    "Higgsfield's moderation declined the image or the clip",
+                )));
+            }
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::ProviderDown,
+                    "the generation failed",
+                )));
+            }
+            Ok(ClipStatus::Done {
+                video: format!("https://fake/{}.mp4", handle.0),
+            })
+        }
+
+        fn download(&self, _key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+            Ok(GeneratedClip {
+                bytes: TAKE.to_vec(),
+            })
+        }
+
+        fn poll_delay(&self, _polls: u32) -> Duration {
+            Duration::from_millis(5)
+        }
+    }
+
     /// Providers that never touch the network.
     pub(crate) fn providers() -> Providers {
         providers_with(Arc::new(FakeMarketData::default()))
@@ -2309,6 +2499,7 @@ pub(crate) mod testing {
             images: Arc::new(FakeImages::default()),
             music: Arc::new(FakeMusic::default()),
             clips: vec![Arc::new(FakeClips::default())],
+            takes: vec![Arc::new(FakeTakes::default())],
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             media: Arc::new(crate::editor::testing::FakeMedia::default()),
             sign_ins: Vec::new(),

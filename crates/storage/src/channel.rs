@@ -9,7 +9,8 @@ use crate::{Database, boxed};
 
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
-     transition_frames, video_format, motion, motion_strength, caption_highlight, thumbnail_look \
+     transition_frames, video_format, motion, motion_strength, caption_highlight, thumbnail_look, \
+     take_provider, take_model \
      FROM channel";
 
 /// A channel row before its themes are attached.
@@ -18,6 +19,7 @@ struct ChannelRow {
     profile_id: String,
     default_persona: Option<String>,
     clip_model: (Option<String>, Option<String>),
+    take_model: (Option<String>, Option<String>),
     caption_style: String,
     caption_highlight: String,
     thumbnail_look: String,
@@ -35,6 +37,7 @@ impl ChannelRow {
                 profile_id: row.get(1)?,
                 default_persona: row.get(7)?,
                 clip_model: (row.get(8)?, row.get(9)?),
+                take_model: (row.get(18)?, row.get(19)?),
                 caption_style: row.get(10)?,
                 caption_highlight: row.get(16)?,
                 thumbnail_look: row.get(17)?,
@@ -71,6 +74,7 @@ impl ChannelRow {
             .transpose()
             .map_err(boxed)?;
         draft.clip_model = clip_model(self.clip_model)?;
+        draft.take_model = clip_model(self.take_model)?;
         draft.caption_style = self.caption_style.parse().map_err(boxed)?;
         draft.caption_highlight = self.caption_highlight.parse().map_err(boxed)?;
         draft.thumbnail_look = self.thumbnail_look.parse().map_err(boxed)?;
@@ -162,9 +166,10 @@ impl ChannelRepository for Database {
             "INSERT INTO channel (id, profile_id, name, niche, aesthetic_notes, language, country,
                                   default_persona_id, clip_provider, clip_model, caption_style,
                                   transition, transition_frames, video_format, motion,
-                                  motion_strength, caption_highlight, thumbnail_look)
+                                  motion_strength, caption_highlight, thumbnail_look,
+                                  take_provider, take_model)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18)
+                     ?17, ?18, ?19, ?20)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -182,6 +187,8 @@ impl ChannelRepository for Database {
                  motion_strength = excluded.motion_strength,
                  caption_highlight = excluded.caption_highlight,
                  thumbnail_look = excluded.thumbnail_look,
+                 take_provider = excluded.take_provider,
+                 take_model = excluded.take_model,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -202,6 +209,8 @@ impl ChannelRepository for Database {
                 details.motion().strength.code(),
                 details.caption_highlight().code(),
                 details.thumbnail_look().code(),
+                details.take_model().map(|model| model.provider().code()),
+                details.take_model().map(ClipModelRef::model),
             ],
         )
         .map_err(boxed)?;
@@ -244,6 +253,10 @@ mod tests {
             default_persona: None,
             clip_model: Some(
                 ClipModelRef::new(Provider::Higgsfield, "kling-video/v2.6/pro/image-to-video")
+                    .unwrap(),
+            ),
+            take_model: Some(
+                ClipModelRef::new(Provider::Higgsfield, "bytedance/seedance-2.5/video-edit")
                     .unwrap(),
             ),
             caption_style: CaptionStyle::Boxed,

@@ -25,6 +25,8 @@ serde.workspace = true
 serde_json.workspace = true
 # Checks a downloaded update against its release (issue #144).
 sha2 = "0.10"
+# A private folder for the photo and frame a take sends (issue #192).
+tempfile = "3"
 thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true
@@ -36,9 +38,6 @@ zip.workspace = true
 # The Windows version in an exported diagnostic (issue #140).
 [target.'cfg(windows)'.dependencies]
 windows-version.workspace = true
-
-[dev-dependencies]
-tempfile = "3"
 
 [lints]
 workspace = true

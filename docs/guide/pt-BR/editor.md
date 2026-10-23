@@ -34,7 +34,7 @@ O corte corre da esquerda para a direita em cinco faixas:
 
 Clique na linha do tempo para mover o cursor de reprodução, e clique num item para selecioná-lo: o cursor vai até ele e o inspetor, à direita, mostra as propriedades. **Esc** limpa a seleção. Ctrl e a roda do mouse dão zoom, ou use − e + no fim da barra de ferramentas.
 
-O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe dela) e a **Mídia**: **Importar arquivos…** traz arquivos de vídeo e áudio do seu computador, e os botões de cada arquivo o colocam numa faixa, no cursor de reprodução. A música gerada na etapa Roteiro aparece aqui depois que você a usa ([Música a partir do prompt](script.md#generated-music)).
+O painel à esquerda lista as **Cenas** do projeto (clique numa para ir ao clipe dela) e a **Mídia**: **Importar arquivos…** traz arquivos de vídeo e áudio do seu computador, e os botões de cada arquivo o colocam numa faixa, no cursor de reprodução. A música gerada na etapa Roteiro aparece aqui depois que você a usa ([Música a partir do prompt](script.md#generated-music)), assim como cada clipe interpretado que você usa na etapa Captura ([Usar um clipe interpretado](capture.md#use)).
 
 <a id="cuts"></a>
 ## Cortar

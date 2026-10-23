@@ -126,6 +126,15 @@ pub enum JobKind {
     /// drawn over in Mesh or Depth mode from its analysis, with its
     /// stretch of the narration. Starts over on resume.
     ControlVideo,
+    /// Has Claude write one take's prompt for its take model (#192), from
+    /// the take prompt template and, for a take performed in the room, one
+    /// frame of its control video.
+    TakePrompt,
+    /// Has a take model make one take's draft or final (#192): hands the
+    /// control video and the look to the provider, submits, and keeps the
+    /// provider's request as the external handle, so a resumed job polls
+    /// it instead of paying again. The result waits for review.
+    PerformedTake,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -154,7 +163,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 30] = [
+    pub const ALL: [JobKind; 32] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -185,6 +194,8 @@ impl JobKind {
         JobKind::Capture,
         JobKind::TakeAnalysis,
         JobKind::ControlVideo,
+        JobKind::TakePrompt,
+        JobKind::PerformedTake,
     ];
 
     /// Stable name stored in the database.
@@ -220,6 +231,8 @@ impl JobKind {
             JobKind::Capture => "capture",
             JobKind::TakeAnalysis => "take_analysis",
             JobKind::ControlVideo => "control_video",
+            JobKind::TakePrompt => "take_prompt",
+            JobKind::PerformedTake => "performed_take",
         }
     }
 }

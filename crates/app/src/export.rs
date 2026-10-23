@@ -527,6 +527,7 @@ impl MetadataHandler {
         let request = TextRequest {
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
+            images: Vec::new(),
             format: TextFormat::Json {
                 schema: METADATA_SCHEMA.to_owned(),
             },
@@ -795,9 +796,13 @@ impl Bardo {
     /// its narrator's voice is flagged as a clone or a realistic synthetic
     /// voice, and the narration speaks with it, generated or a capture
     /// voiced with it (a recording the user imported, or a capture left in
-    /// their own voice, is their own voice).
+    /// their own voice, is their own voice); or its cut shows a performed
+    /// clip of a look that reads as a real person (#192).
     pub fn needs_disclosure(&self, project: VideoProjectId) -> Result<bool, ExportError> {
         let project = self.export_project(project)?;
+        if self.cut_performs_realistic_look(project.id)? {
+            return Ok(true);
+        }
         let own_voice = self
             .narrations
             .narration(project.id)?
@@ -817,6 +822,52 @@ impl Bardo {
         Ok(self
             .narrator(&project)?
             .is_some_and(|persona| persona.details.realistic_voice()))
+    }
+
+    /// Whether the project's cut, as the editor keeps it, shows a performed
+    /// clip of a look that reads as a real person: when it was made, or
+    /// now (a drawn look marked realistic later still asks for it).
+    fn cut_performs_realistic_look(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<bool, RepositoryError> {
+        let clips = self.media_assets.performed_clips(project)?;
+        if clips.is_empty() {
+            return Ok(false);
+        }
+        // When the look cannot be read, the disclosure errs on the side of
+        // being on.
+        let realistic_now = self
+            .performer_look(project)
+            .map_or(true, |look| look.is_some_and(|(_, look)| look.realistic));
+        let realistic: Vec<bardo_domain::MediaAssetId> = clips
+            .into_iter()
+            .filter(|clip| clip.realistic || realistic_now)
+            .map(|clip| clip.asset)
+            .collect();
+        if realistic.is_empty() {
+            return Ok(false);
+        }
+        let Some(saved) = self.timelines.saved_timeline(project)? else {
+            return Ok(false);
+        };
+        // A cut left behind by a new plan or narration starts over without
+        // the footage.
+        let plan = self.scene_plans.scene_plan(project)?.map(|plan| plan.id);
+        let narration = self.narrations.narration(project)?.map(|n| n.id);
+        if plan != Some(saved.scene_plan) || narration != Some(saved.narration) {
+            return Ok(false);
+        }
+        let files: Vec<String> = self
+            .media_assets
+            .media_assets(project)?
+            .into_iter()
+            .filter(|asset| realistic.contains(&asset.id))
+            .map(|asset| asset.file)
+            .collect();
+        Ok(saved.video.iter().any(|item| {
+            matches!(&item.picture, bardo_domain::Picture::Footage(file) if files.contains(file))
+        }))
     }
 
     /// What the job that wrote the current metadata cost, priced with

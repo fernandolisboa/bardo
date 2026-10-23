@@ -10,6 +10,10 @@
 //! Before submitting, the adapter asks the estimate endpoint what the clip
 //! costs, so the cost recorded is Higgsfield's own figure.
 //!
+//! The same protocol makes takes (#192): a take model gets a take's
+//! control video and the persona's look, both staged the same way, and
+//! the job asks the estimate before submitting.
+//!
 //! Credentials are one key `KEY_ID:KEY_SECRET`, sent as
 //! `Authorization: Key KEY_ID:KEY_SECRET`.
 
@@ -18,7 +22,8 @@ use std::time::Duration;
 use bardo_domain::{
     ApiKey, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef,
     ClipRequest, ClipStatus, ClipSubmission, GeneratedClip, Money, Provider, ProviderFailure,
-    ProviderFailureKind, StagedImage,
+    ProviderFailureKind, StagedFile, StagedImage, TakeGenerator, TakeInput, TakeMode, TakeModel,
+    TakeRequest, TakeTier,
 };
 use serde_json::{Map, Value, json};
 
@@ -105,6 +110,150 @@ pub fn models() -> Vec<ClipModel> {
             durations: (spec.durations)(),
         })
         .collect()
+}
+
+/// The take model a channel uses until the user picks another: Kling 3.0
+/// Motion Control at 1080p, the cheapest final (#192). Kling's 720p tier
+/// costs three quarters of it, so it makes no draft.
+pub const DEFAULT_TAKE_MODEL: &str = "kling-video/v3/motion-control/pro";
+
+/// Seedance 2.5's video edit, for control videos that show no face.
+pub const SEEDANCE_VIDEO_EDIT: &str = "bytedance/seedance-2.5/video-edit";
+
+/// What a take model's request looks like.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TakeKind {
+    /// Kling's motion control: the look as the character, the control
+    /// video as the motion.
+    MotionControl,
+    /// Seedance's video edit: the control video edited to show the look.
+    VideoEdit,
+}
+
+/// A take model Bardo offers, with its limits from Higgsfield's model
+/// pages (checked on 2026-10-23).
+struct TakeSpec {
+    model: &'static str,
+    name: &'static str,
+    kind: TakeKind,
+    modes: &'static [TakeMode],
+    /// The draft's resolution, for a model with a cheap tier.
+    draft: Option<(&'static str, u32)>,
+    /// The final's resolution, when the request names one, and height.
+    last: (Option<&'static str>, u32),
+    seconds: (u64, u64),
+    max_video_bytes: u64,
+    max_image_bytes: u64,
+}
+
+const TAKE_CATALOG: &[TakeSpec] = &[
+    TakeSpec {
+        model: DEFAULT_TAKE_MODEL,
+        name: "Kling 3.0 Motion Control",
+        kind: TakeKind::MotionControl,
+        modes: &[TakeMode::Recording],
+        draft: None,
+        last: (None, 1080),
+        seconds: (3, 30),
+        // Larger videos are compressed before generation.
+        max_video_bytes: 100_000_000,
+        max_image_bytes: 10_000_000,
+    },
+    TakeSpec {
+        model: SEEDANCE_VIDEO_EDIT,
+        name: "Seedance 2.5 Video Edit",
+        kind: TakeKind::VideoEdit,
+        modes: &[TakeMode::Mesh, TakeMode::Depth],
+        draft: Some(("480p", 480)),
+        last: (Some("1080p"), 1080),
+        // The source is normalized to at least 4 s and trimmed to 30 s.
+        seconds: (4, 30),
+        max_video_bytes: 100_000_000,
+        max_image_bytes: 10_000_000,
+    },
+];
+
+/// The take models Bardo offers through Higgsfield, the default first.
+pub fn take_models() -> Vec<TakeModel> {
+    TAKE_CATALOG
+        .iter()
+        .map(|spec| TakeModel {
+            id: ClipModelRef::new(Provider::Higgsfield, spec.model)
+                .expect("catalog models are valid"),
+            name: spec.name.to_owned(),
+            modes: spec.modes.to_vec(),
+            draft: spec.draft.map(|(resolution, height)| TakeTier {
+                resolution: Some(resolution.to_owned()),
+                height,
+            }),
+            final_tier: TakeTier {
+                resolution: spec.last.0.map(str::to_owned),
+                height: spec.last.1,
+            },
+            // Higgsfield has no draft task or seed for these.
+            finishes_draft: false,
+            min_length: Duration::from_secs(spec.seconds.0),
+            max_length: Duration::from_secs(spec.seconds.1),
+            max_video_bytes: spec.max_video_bytes,
+            max_image_bytes: spec.max_image_bytes,
+        })
+        .collect()
+}
+
+/// The JSON body a take model gets. The voice is inside the control
+/// video, and the provider's own sound is off: the take's voice is the
+/// only sound. The same request always makes the same body.
+pub fn take_body(request: &TakeRequest) -> Value {
+    let prompt: String = request.prompt.chars().take(MAX_PROMPT_CHARS).collect();
+    let kind = TAKE_CATALOG
+        .iter()
+        .find(|spec| spec.model == request.model)
+        .map(|spec| spec.kind);
+    match kind {
+        Some(TakeKind::MotionControl) | None => json!({
+            "prompt": prompt,
+            "image_url": request.look.0,
+            "video_url": request.video.0,
+            // The character moves and faces as the performer does.
+            "character_orientation": "video",
+            "keep_original_sound": "no",
+        }),
+        Some(TakeKind::VideoEdit) => {
+            let mut body = json!({
+                "prompt": prompt,
+                "video_url": request.video.0,
+                "image_urls": [request.look.0],
+                "generate_audio": false,
+            });
+            if let Some(resolution) = &request.resolution {
+                body["resolution"] = json!(resolution);
+            }
+            body
+        }
+    }
+}
+
+/// The request that starts a take. `submission` is the idempotency key.
+pub fn take_submit_request(key: &ApiKey, request: &TakeRequest, submission: &str) -> HttpRequest {
+    auth(
+        HttpRequest::post_json(
+            format!("{API_URL}/{}", request.model),
+            take_body(request).to_string(),
+        ),
+        key,
+    )
+    .header("idempotency-key", submission.to_owned())
+}
+
+/// The request that asks what a take would cost.
+pub fn take_estimate_request(key: &ApiKey, request: &TakeRequest) -> HttpRequest {
+    auth(
+        HttpRequest::post_json(
+            format!("{API_URL}/estimate/{}", request.model),
+            take_body(request).to_string(),
+        ),
+        key,
+    )
 }
 
 fn auth(request: HttpRequest, key: &ApiKey) -> HttpRequest {
@@ -377,25 +526,26 @@ impl<T: Transport> HiggsfieldClips<T> {
     }
 
     fn quote(&self, key: &ApiKey, request: &ClipRequest) -> Option<Money> {
-        let response = self.transport.send(&estimate_request(key, request)).ok()?;
+        self.estimate(&estimate_request(key, request))
+    }
+
+    fn estimate(&self, request: &HttpRequest) -> Option<Money> {
+        let response = self.transport.send(request).ok()?;
         if !(200..=299).contains(&response.status) {
             return None;
         }
         parse_estimate(&response)
     }
-}
 
-impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
-    fn provider(&self) -> Provider {
-        Provider::Higgsfield
-    }
-
-    fn models(&self) -> Vec<ClipModel> {
-        models()
-    }
-
-    fn stage_image(&self, key: &ApiKey, image: &ClipImage) -> Result<StagedImage, ProviderFailure> {
-        let mime = image.format.mime();
+    /// Hands `bytes` of `mime` type to Higgsfield's storage: asks for a
+    /// presigned upload URL, uploads without the key, and returns the
+    /// public URL models read it from.
+    fn stage_bytes(
+        &self,
+        key: &ApiKey,
+        bytes: &[u8],
+        mime: &str,
+    ) -> Result<String, ProviderFailure> {
         let response = self.send(&upload_url_request(key, mime))?;
         if !(200..=299).contains(&response.status) {
             return Err(higgsfield_failure(&response));
@@ -409,7 +559,7 @@ impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
             };
             upload = upload.header("content-type", content_type);
         }
-        upload.body = Some(image.bytes.clone());
+        upload.body = Some(bytes.to_vec());
         let stored = self
             .transport
             .send(&upload)
@@ -417,10 +567,60 @@ impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
         if !(200..=299).contains(&stored.status) {
             return Err(ProviderFailure::new(
                 ProviderFailureKind::ProviderDown,
-                format!("the image upload failed (HTTP {})", stored.status),
+                format!("the upload failed (HTTP {})", stored.status),
             ));
         }
-        Ok(StagedImage(public_url))
+        Ok(public_url)
+    }
+
+    fn request_status(
+        &self,
+        key: &ApiKey,
+        handle: &ClipHandle,
+    ) -> Result<ClipStatus, ProviderFailure> {
+        let response = self.send(&status_request(key, handle))?;
+        match response.status {
+            200..=299 => parse_status(&response),
+            // Gone for good, as far as this request goes.
+            404 => Ok(ClipStatus::Failed(unexpected(
+                "Higgsfield does not know this request",
+            ))),
+            _ => Err(higgsfield_failure(&response)),
+        }
+    }
+
+    /// The CDN gets no key.
+    fn fetch(&self, video: &str) -> Result<GeneratedClip, ProviderFailure> {
+        let response = self
+            .transport
+            .send_for_bytes(&HttpRequest::get(video), MAX_CLIP_BYTES)
+            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        match response.status {
+            200..=299 if is_mp4(&response.bytes) => Ok(GeneratedClip {
+                bytes: response.bytes,
+            }),
+            200..=299 => Err(unexpected("the download is not an MP4 clip")),
+            403 | 404 | 410 => Err(unexpected("the clip is no longer available to download")),
+            status => Err(ProviderFailure::new(
+                ProviderFailureKind::ProviderDown,
+                format!("the download failed (HTTP {status})"),
+            )),
+        }
+    }
+}
+
+impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
+    fn provider(&self) -> Provider {
+        Provider::Higgsfield
+    }
+
+    fn models(&self) -> Vec<ClipModel> {
+        models()
+    }
+
+    fn stage_image(&self, key: &ApiKey, image: &ClipImage) -> Result<StagedImage, ProviderFailure> {
+        self.stage_bytes(key, &image.bytes, image.format.mime())
+            .map(StagedImage)
     }
 
     fn submit(
@@ -441,34 +641,56 @@ impl<T: Transport> ClipGenerator for HiggsfieldClips<T> {
     }
 
     fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
-        let response = self.send(&status_request(key, handle))?;
-        match response.status {
-            200..=299 => parse_status(&response),
-            // Gone for good, as far as this request goes.
-            404 => Ok(ClipStatus::Failed(unexpected(
-                "Higgsfield does not know this request",
-            ))),
-            _ => Err(higgsfield_failure(&response)),
-        }
+        self.request_status(key, handle)
     }
 
     /// The CDN gets no key.
     fn download(&self, _key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure> {
-        let response = self
-            .transport
-            .send_for_bytes(&HttpRequest::get(video), MAX_CLIP_BYTES)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
-        match response.status {
-            200..=299 if is_mp4(&response.bytes) => Ok(GeneratedClip {
-                bytes: response.bytes,
-            }),
-            200..=299 => Err(unexpected("the download is not an MP4 clip")),
-            403 | 404 | 410 => Err(unexpected("the clip is no longer available to download")),
-            status => Err(ProviderFailure::new(
-                ProviderFailureKind::ProviderDown,
-                format!("the download failed (HTTP {status})"),
-            )),
+        self.fetch(video)
+    }
+}
+
+/// Makes takes with the take models Higgsfield serves, over HTTPS.
+pub type HiggsfieldTakes<T = UreqTransport> = HiggsfieldClips<T>;
+
+impl<T: Transport> TakeGenerator for HiggsfieldClips<T> {
+    fn provider(&self) -> Provider {
+        Provider::Higgsfield
+    }
+
+    fn models(&self) -> Vec<TakeModel> {
+        take_models()
+    }
+
+    fn stage(&self, key: &ApiKey, input: TakeInput<'_>) -> Result<StagedFile, ProviderFailure> {
+        self.stage_bytes(key, input.bytes, input.mime)
+            .map(StagedFile)
+    }
+
+    fn quote(&self, key: &ApiKey, request: &TakeRequest) -> Option<Money> {
+        self.estimate(&take_estimate_request(key, request))
+    }
+
+    fn submit(
+        &self,
+        key: &ApiKey,
+        request: &TakeRequest,
+        submission: &str,
+    ) -> Result<ClipHandle, ProviderFailure> {
+        let response = self.send(&take_submit_request(key, request, submission))?;
+        if !(200..=299).contains(&response.status) {
+            return Err(higgsfield_failure(&response));
         }
+        parse_submission(&response)
+    }
+
+    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
+        self.request_status(key, handle)
+    }
+
+    /// The CDN gets no key.
+    fn download(&self, _key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure> {
+        self.fetch(video)
     }
 }
 

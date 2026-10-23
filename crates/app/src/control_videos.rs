@@ -908,6 +908,9 @@ impl Bardo {
                 bardo_domain::BoundaryError::NoSuchTake,
             ));
         }
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         self.queue_control_video(&capture, index)
     }
 
@@ -969,6 +972,9 @@ impl Bardo {
         choice: SetChoice,
     ) -> Result<(), CaptureError> {
         let (mut capture, _) = self.current_capture(project)?;
+        if self.performed_busy(&capture, index) {
+            return Err(CaptureError::TakeBusy);
+        }
         let old = capture
             .takes
             .as_slice()
@@ -1097,11 +1103,18 @@ struct Playing {
 }
 
 /// Plays a control video with its sound, from the start, for its review:
-/// playing as soon as it is made.
+/// playing as soon as it is made. It also plays a take model's draft or
+/// final, with the control video's sound (the take's voice) in place of
+/// the provider's.
 pub struct ControlPlayer {
     media: Arc<dyn MediaEngine>,
     audio: Arc<dyn AudioOutput>,
     path: PathBuf,
+    /// Where the sound comes from, and how long the picture and the sound
+    /// are.
+    sound: PathBuf,
+    picture_duration: Duration,
+    sound_duration: Duration,
     duration: Duration,
     size: FrameSize,
     playing: Option<Playing>,
@@ -1116,6 +1129,19 @@ impl ControlPlayer {
         audio: Arc<dyn AudioOutput>,
         path: PathBuf,
         duration: Duration,
+        size: (u32, u32),
+    ) -> ControlPlayer {
+        Self::with_sound(media, audio, path.clone(), path, (duration, duration), size)
+    }
+
+    /// Plays the picture of `path` with the sound of `sound`, each as long
+    /// as given.
+    pub(crate) fn with_sound(
+        media: Arc<dyn MediaEngine>,
+        audio: Arc<dyn AudioOutput>,
+        path: PathBuf,
+        sound: PathBuf,
+        (picture_duration, sound_duration): (Duration, Duration),
         (width, height): (u32, u32),
     ) -> ControlPlayer {
         let scale = (f64::from(PLAYER_LONG_SIDE) / f64::from(width.max(height).max(1))).min(1.0);
@@ -1124,7 +1150,10 @@ impl ControlPlayer {
             media,
             audio,
             path,
-            duration,
+            sound,
+            picture_duration,
+            sound_duration,
+            duration: picture_duration.max(sound_duration),
             size: FrameSize::new(side(width), side(height)),
             playing: None,
             position: Duration::ZERO,
@@ -1169,16 +1198,16 @@ impl ControlPlayer {
             video: vec![VideoClip {
                 source: ClipSource::Video(self.path.clone()),
                 start: Duration::ZERO,
-                duration: self.duration,
+                duration: self.picture_duration,
                 framing: Framing::Fit,
                 transition: None,
                 motion: None,
             }],
             audio: vec![AudioTrack {
                 clips: vec![AudioClip {
-                    source: self.path.clone(),
+                    source: self.sound.clone(),
                     start: Duration::ZERO,
-                    duration: self.duration,
+                    duration: self.sound_duration,
                     at: Duration::ZERO,
                     gain_db: 0.0,
                     fade_in: Duration::ZERO,
@@ -1305,7 +1334,7 @@ impl ControlPlayer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::Ordering;
 
     use bardo_domain::{BoundaryMove, CONTROL_AUDIO_BITRATE, TakeFlag};
@@ -1317,10 +1346,10 @@ mod tests {
 
     /// A landscape recording at the smallest size a capture may have, so
     /// drawing its frames stays quick.
-    const SIZE: (u32, u32) = (1280, 720);
+    pub(crate) const SIZE: (u32, u32) = (1280, 720);
 
     /// A capture of two takes, imported.
-    fn imported(s: &Setup) -> (VideoProjectId, Capture) {
+    pub(crate) fn imported(s: &Setup) -> (VideoProjectId, Capture) {
         // 600 ms a character: long enough for two takes.
         *s.h.aligner.step.lock().unwrap() = Some(Duration::from_millis(600));
         let project = project(&s.app);
@@ -1331,7 +1360,7 @@ mod tests {
 
     /// Waits until no analysis or control video job is under way and every
     /// take's control video is built, or stopped.
-    fn settled(app: &Bardo, project: VideoProjectId) -> Vec<ControlVideoView> {
+    pub(crate) fn settled(app: &Bardo, project: VideoProjectId) -> Vec<ControlVideoView> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             let busy = app.jobs().into_iter().any(|job| {
@@ -1428,7 +1457,10 @@ mod tests {
         let recorded = settled(&s.app, project)[0].built.clone().unwrap();
         let before = calls(&s).len();
 
-        s.app.set_take_mode(project, 0, TakeMode::Mesh).unwrap();
+        // Mesh and Depth are modes of the video edit model.
+        s.app
+            .set_take_model(project, 0, Some(crate::testing::FakeTakes::edit()))
+            .unwrap();
         let views = settled(&s.app, project);
         let calls = calls(&s);
         assert_eq!(calls.len(), before + 1);
@@ -1459,7 +1491,10 @@ mod tests {
         *s.h.vision.seen.faces.lock().unwrap() = Some(0);
         let (project, _) = imported(&s);
         settled(&s.app, project);
-        s.app.set_take_mode(project, 1, TakeMode::Mesh).unwrap();
+        // Mesh and Depth are modes of the video edit model.
+        s.app
+            .set_take_model(project, 1, Some(crate::testing::FakeTakes::edit()))
+            .unwrap();
         let views = settled(&s.app, project);
         let built = views[1].built.as_ref().unwrap();
         assert!(built.frames > 0);
@@ -1505,7 +1540,10 @@ mod tests {
 
         // So does another mode, and approving the new build holds.
         s.app.approve_control_video(project, 0).unwrap();
-        s.app.set_take_mode(project, 0, TakeMode::Mesh).unwrap();
+        // Mesh and Depth are modes of the video edit model.
+        s.app
+            .set_take_model(project, 0, Some(crate::testing::FakeTakes::edit()))
+            .unwrap();
         let views = s.app.take_controls(project).unwrap();
         assert!(!views[0].is_approved());
         let views = settled(&s.app, project);
@@ -1578,6 +1616,11 @@ mod tests {
             Outbound::Recording
         );
 
+        // Depth is a mode of the video edit model.
+        s.app
+            .set_take_model(project, 0, Some(crate::testing::FakeTakes::edit()))
+            .unwrap();
+        settled(&s.app, project);
         s.h.media.control_decoded.lock().unwrap().clear();
         s.app.set_take_mode(project, 0, TakeMode::Depth).unwrap();
         let views = settled(&s.app, project);

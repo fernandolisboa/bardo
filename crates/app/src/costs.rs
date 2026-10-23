@@ -261,6 +261,11 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         CostPurpose::Chapters => tokens(4_000, 600),
         // Claude writes a paragraph of prompt; the image provider draws it
         // at 2K, as a scene's.
+        // The take's words and one frame of its control video in, a
+        // paragraph of prompt out.
+        CostPurpose::TakePrompt => tokens(2_500, 500),
+        // A 30-second take, the longest one.
+        CostPurpose::TakeDraft | CostPurpose::TakeFinal => Metered::video_seconds(30),
         CostPurpose::PersonaLook => match provider {
             Provider::Claude => tokens(700, 400),
             _ => Metered {

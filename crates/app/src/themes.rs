@@ -461,6 +461,7 @@ fn proposal_request(brief: &Brief, niche: &Niche, avoid: &[&str]) -> TextRequest
     TextRequest {
         instructions,
         prompt,
+        images: Vec::new(),
         format: TextFormat::Json {
             schema: PROPOSALS_SCHEMA.to_owned(),
         },
@@ -1258,6 +1259,7 @@ mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
+                takes: vec![Arc::new(crate::testing::FakeTakes::default())],
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::new(crate::editor::testing::FakeMedia::default()),
                 sign_ins: Vec::new(),

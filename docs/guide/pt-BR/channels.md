@@ -51,6 +51,7 @@ O formato define o tamanho do roteiro que o Claude escreve, o formato em que as 
 ## Modelo de vídeo, legendas, transições e movimento
 
 - **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google. Manter o padrão do provedor acompanha esse padrão quando ele muda. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
+- **Modelo de tomada**: o modelo que faz a persona interpretar cada tomada de uma captura, pelo Higgsfield: o Kling 3.0 Motion Control, a não ser que você escolha outro. Qualquer tomada pode escolher outro ([Clipe interpretado](capture.md#performed)).
 - **Estilo de legenda**: o visual das legendas nos projetos novos do canal. Cada projeto pode escolher outro estilo no [editor](editor.md#captions).
 - **Palavra falada**: a cor em que acende a palavra sendo dita, nos projetos novos do canal. **Amarelo** é o padrão de um canal novo; **Desligado** é onde começam os canais criados antes disso existir, para que seus cortes e renders fiquem como estavam. Cada projeto pode escolher outra cor no [editor](editor.md#captions).
 - **Transição padrão** e a **Duração** dela: o que o editor põe num corte quando você aperta **T** ou escolhe uma transição para um clipe; uma fusão de 0,5 s, a menos que você mude. Cada corte pode usar outra ([Transições](editor.md#transitions)).

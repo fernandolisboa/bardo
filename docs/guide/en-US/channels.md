@@ -51,6 +51,7 @@ The format decides how long Claude writes the script, the shape the scene images
 ## Video model, captions, transitions and motion
 
 - **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield, Kling or Google. Keeping the provider's default follows it when it changes. Any scene can pick another model at the [Clips](clips.md#model) stage.
+- **Take model**: the model that makes the persona perform each take of a capture, through Higgsfield: Kling 3.0 Motion Control unless you pick another. Any take can pick another ([Performed clip](capture.md#performed)).
 - **Caption style**: how captions look in the channel's new projects. Each project can pick another style in the [editor](editor.md#captions).
 - **Spoken word**: the color the word being said lights up in, in the channel's new projects. **Yellow** is the default for a new channel; **Off** is where channels made before this existed start, so their cuts and renders stay as they were. Each project can pick another color in the [editor](editor.md#captions).
 - **Default transition** and its **Length**: what the editor puts on a cut when you press **T** or pick a transition for a clip, a crossfade of 0.5 s unless you change it. Every cut can use another one ([Transitions](editor.md#transitions)).

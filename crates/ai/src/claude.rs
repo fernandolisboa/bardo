@@ -13,6 +13,7 @@ use bardo_domain::{
     ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextFormat,
     TextGenerator, TextRequest, TokenUsage,
 };
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
@@ -46,11 +47,32 @@ pub fn message_request(
         })?;
         output_config["format"] = json!({ "type": "json_schema", "schema": schema });
     }
+    let content = if request.images.is_empty() {
+        json!(request.prompt)
+    } else {
+        // Pictures first, then the task about them.
+        let mut blocks: Vec<Value> = request
+            .images
+            .iter()
+            .map(|image| {
+                json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image.format.mime(),
+                        "data": base64::engine::general_purpose::STANDARD.encode(&image.bytes),
+                    },
+                })
+            })
+            .collect();
+        blocks.push(json!({ "type": "text", "text": request.prompt }));
+        Value::Array(blocks)
+    };
     let mut body = json!({
         "model": MODEL,
         "max_tokens": MAX_TOKENS,
         "system": request.instructions,
-        "messages": [{ "role": "user", "content": request.prompt }],
+        "messages": [{ "role": "user", "content": content }],
         "output_config": output_config,
     });
     if with_fallback {

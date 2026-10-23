@@ -48,7 +48,7 @@ Uma tomada que não pode virar clipe interpretado diz por quê: **Passa de 30 se
 <a id="mode"></a>
 ## O modo da tomada
 
-Cada tomada tem um modo: o que o modelo de tomada recebe. **Gravação** envia a tomada como foi gravada. **Malha** cobre seu rosto com a malha desenhada. **Profundidade** mostra você como uma figura de profundidade sobre o cenário, e também precisa da profundidade e da máscara da pessoa da tomada. As tomadas novas começam em Gravação; escolha outro modo abaixo das palavras da tomada.
+Cada tomada tem um modo: o que o modelo de tomada recebe. **Gravação** envia a tomada como foi gravada. **Malha** cobre seu rosto com a malha desenhada. **Profundidade** mostra você como uma figura de profundidade sobre o cenário, e também precisa da profundidade e da máscara da pessoa da tomada. As tomadas novas começam no primeiro modo que o modelo de tomada delas aceita ([Clipe interpretado](#performed)): Gravação no modelo padrão. Escolha outro abaixo das palavras da tomada; um modo que o modelo da tomada não aceita fica apagado.
 
 <a id="analysis"></a>
 ## A análise
@@ -82,7 +82,7 @@ Mudar o modo ou o cenário da tomada, ou mover um corte, monta de novo. **Montar
 <a id="review"></a>
 ## Revisar e aprovar
 
-Abaixo da tomada, **Reproduzir** toca o vídeo de controle com o som, e uma linha diz o que sai do computador com ele: seu rosto, corpo e ambiente (Gravação); seu corpo e ambiente, não o rosto (Malha); ou sua silhueta e a geometria do rosto como figura de profundidade sobre o seu ambiente ou sobre a imagem de cenário (Profundidade). A voz da tomada sempre vai junto. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro dela também vai para o Claude descrever o seu ambiente quando a tomada for gerada.
+Abaixo da tomada, **Reproduzir** toca o vídeo de controle com o som, e uma linha diz o que sai do computador com ele: seu rosto, corpo e ambiente (Gravação); seu corpo e ambiente, não o rosto (Malha); ou sua silhueta e a geometria do rosto como figura de profundidade sobre o seu ambiente ou sobre a imagem de cenário (Profundidade). A voz da tomada sempre vai junto. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro do vídeo de controle também vai para o Claude descrever o seu ambiente quando o [prompt](#take-prompt) dela for escrito; em Gravação, esse quadro mostra você.
 
 **Aprovar** diz que esta tomada pode ir para o modelo de tomada; nada é pago por uma tomada antes da sua aprovação. A aprovação vale para o que você assistiu: mudar o modo, o cenário ou o corte da tomada, ou a análise dela rodar de novo, pede que você assista e aprove a nova montagem. Uma tomada com mais de um rosto, uma tomada em Malha com quadros descobertos ou uma tomada com uma duração que nenhum modelo de tomada aceita não pode ser aprovada.
 
@@ -90,6 +90,36 @@ Abaixo da tomada, **Reproduzir** toca o vídeo de controle com o som, e uma linh
 ## O cenário
 
 No modo Profundidade, **Cenário** escolhe onde você aparece: **Seu ambiente**, como gravado; uma **Imagem de cena** do projeto; ou **Importar imagem**, um PNG ou JPEG seu. A imagem é copiada para a pasta do projeto, então a tomada a mantém aconteça o que acontecer com a cena ou o arquivo. Sobre uma imagem, a imagem da gravação nunca é decodificada, e nenhum pixel dela sai do computador.
+
+<a id="performed"></a>
+## Clipe interpretado
+
+Depois que o vídeo de controle de uma tomada é aprovado, o modelo de tomada faz a persona interpretá-la: a [aparência](personas.md#look) da persona se mexe, fala e vira como você na tomada. As tomadas vão para o modelo de tomada do canal ([Canais](channels.md#defaults)); **Modelo de tomada**, abaixo da tomada, escolhe outro só para ela. Os dois rodam no Higgsfield com a sua chave do Higgsfield ([Suas chaves de API](api-keys.md#providers)):
+
+- **Kling 3.0 Motion Control**, o padrão, aceita tomadas em Gravação de 3 a 30 segundos e faz a versão final direto, em 1080p.
+- **Seedance 2.5 Video Edit** aceita tomadas em Malha e Profundidade de 4 a 30 segundos: primeiro um rascunho em 480p, depois a versão final em 1080p.
+
+Escolher um modelo que não aceita o modo da tomada passa a tomada para o primeiro modo do modelo, o que monta o vídeo de controle de novo para você aprovar. Nada pode ser feito enquanto a tomada for curta ou longa demais para o modelo, a persona não tiver aparência ou o vídeo de controle não estiver aprovado; a tomada diz qual.
+
+<a id="take-prompt"></a>
+## O prompt da tomada
+
+**Escrever prompt** faz o Claude escrever o prompt da tomada a partir do modelo **Prompt da tomada** ([Modelos](templates.md#kinds)): a descrição da aparência (uma foto não tem), o cenário, as palavras da tomada (para a interpretação, nunca citadas) e o que o modelo faz com o vídeo de controle. A não ser que a tomada esteja em Profundidade sobre uma imagem, um quadro do meio do vídeo de controle vai junto, para o Claude poder descrever o seu ambiente (o prompt o descreve sem ninguém nele). Em Gravação, esse quadro é da sua gravação e mostra você; a tomada avisa isso antes de você escrever o prompt. Edite o prompt como quiser, até 2.500 caracteres; **Escrever de novo** o substitui, edições incluídas. Um prompt vale para o vídeo de controle e o modelo para os quais foi escrito: aprovar uma nova montagem ou escolher outro modelo pede um novo.
+
+<a id="draft-final"></a>
+## Rascunho e versão final
+
+**Fazer rascunho** e **Fazer versão final** enviam o vídeo de controle, a aparência e o prompt ao Higgsfield; a estimativa abaixo deles é por segundo da tomada. A aparência sempre vai como um JPEG que o Bardo faz a partir dela, o que deixa de fora o que uma foto registra sobre onde e com o que foi tirada. O som do Higgsfield fica desligado: rascunhos e versões finais tocam com a voz da tomada, do vídeo de controle.
+
+- Um rascunho (Seedance) espera revisão: **Reproduzir rascunho**, depois **Aprovar rascunho**, ou **Refazer rascunho** para outro, que o substitui. Só um rascunho aprovado libera **Fazer versão final**; **Voltar aos rascunhos** desfaz a aprovação.
+- A versão final espera revisão do mesmo jeito: **Reproduzir versão final**, depois **Usar**. **Fazer de novo** faz outra, que a substitui. Uma versão final é cobrada mesmo que você não a use.
+
+Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **Parar de esperar** faz o Bardo parar de esperar, não o Higgsfield, que ainda pode terminar e cobrar: **Verificar de novo** retoma o mesmo pedido, como o Bardo faz depois de reiniciar, e nada novo pode ser feito para a tomada até lá. Quando o Higgsfield recusa o conteúdo, ou o pedido falha do lado dele, a tomada diz isso e nada é mudado nem enviado de novo sozinho: fazer de novo é um novo pedido pago, e só você o inicia.
+
+<a id="use"></a>
+## Usar um clipe interpretado
+
+**Usar** copia a versão final para a mídia do projeto como um clipe interpretado com o nome da tomada ("Clipe interpretado 1"), na aba **Mídia** do editor, de onde você o coloca no corte ([Linha do tempo e faixas](editor.md#timeline)). Cada **Usar** adiciona um, e a tomada os conta. Os clipes interpretados ficam quando a captura é removida, e as versões em outros idiomas não os levam. Quando a aparência da persona é realista, um corte com um dos clipes interpretados dela liga o [aviso de conteúdo sintético](uploading.md#disclosure).
 
 <a id="cuts"></a>
 ## Mover um corte
@@ -104,4 +134,4 @@ Quando o roteiro muda depois da captura, a narração dela fica desatualizada, e
 <a id="remove"></a>
 ## Remover
 
-**Remover captura** tira a gravação e suas tomadas do projeto. A narração feita com ela fica. O Bardo pergunta uma vez antes; para ter as tomadas de volta, importe a gravação de novo.
+**Remover captura** tira a gravação e suas tomadas do projeto, com os rascunhos e as versões finais delas. A narração feita com ela e os clipes interpretados que você usou ficam. O Bardo pergunta uma vez antes; para ter as tomadas de volta, importe a gravação de novo.

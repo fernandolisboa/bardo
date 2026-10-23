@@ -323,7 +323,7 @@ impl Bardo {
             .scripts
             .script(project.id)?
             .ok_or(NarrationError::NoScript)?;
-        if self.narration_busy(project.id) {
+        if self.narration_busy(project.id) || self.takes_busy(project.id) {
             return Err(NarrationError::Busy);
         }
         self.forget_abandoned_imports(project.id)?;

@@ -58,7 +58,7 @@ Each chapter shows its time in the cut as it is now (`m:ss`, or `h:mm:ss` from a
 <a id="disclosure"></a>
 ## Synthetic content
 
-When the narrator's voice is flagged as a clone or a realistic synthetic voice, each network asks you to say so, and Bardo reminds you on every network's post:
+When the narrator's voice is flagged as a clone or a realistic synthetic voice, or the cut uses a performed clip of a realistic look ([Using a performed clip](capture.md#use)), each network asks you to say so, and Bardo reminds you on every network's post:
 
 - **YouTube**: "Altered or synthetic content", which the upload review ticks for you.
 - **Instagram**: the AI info label, which the review ticks for you.

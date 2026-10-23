@@ -82,6 +82,16 @@ pub trait MediaEngine: Send + Sync {
         max_bytes: u64,
     ) -> Result<(), MediaError>;
 
+    /// Writes the frame of the video at `source` shown at `at` as a JPEG
+    /// at `destination`, within `max_bytes` (#192).
+    fn frame_picture(
+        &self,
+        source: &Path,
+        at: Duration,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError>;
+
     /// Writes the sound of the recording at `source` to `destination` as
     /// mono 16-bit WAV at 44.1 kHz.
     fn extract_sound(
@@ -263,6 +273,17 @@ impl MediaEngine for BundledFfmpeg {
         max_bytes: u64,
     ) -> Result<(), MediaError> {
         self.ffmpeg()?.fit_picture(source, destination, max_bytes)
+    }
+
+    fn frame_picture(
+        &self,
+        source: &Path,
+        at: Duration,
+        destination: &Path,
+        max_bytes: u64,
+    ) -> Result<(), MediaError> {
+        self.ffmpeg()?
+            .frame_picture(source, at, destination, max_bytes)
     }
 
     fn extract_sound(

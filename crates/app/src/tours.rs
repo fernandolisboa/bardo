@@ -124,8 +124,9 @@ pub enum Control {
     CaptureAnalysis,
     /// Capture: the first take's control video, its review and approval.
     CaptureControl,
-    /// Capture: moving the cut between two takes.
-    CaptureCut,
+    /// Capture: the first take's performed clip: its take model, prompt,
+    /// draft and final.
+    CapturePerformed,
     /// Capture: removing the capture.
     CaptureRemove,
     /// Scenes: planning them and drawing the missing images.
@@ -670,15 +671,16 @@ pub const NARRATION: Tour = {
     }
 };
 
-/// Capture: the recording and its voice, the takes, a take's mode,
-/// analysis and control video, moving a cut, and removing the capture.
+/// Capture: the recording and its voice, the takes and their cuts, a
+/// take's mode, analysis, control video and performed clip, and removing
+/// the capture.
 pub const CAPTURE: Tour = {
     const AT: Stage = Stage::Capture;
     const PAGE: &str = "capture";
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Capture,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "recording", control(Control::CaptureSummary))
@@ -696,10 +698,9 @@ pub const CAPTURE: Tour = {
             at_stage(AT, "control", control(Control::CaptureControl))
                 .missing(PAGE_PART)
                 .learn(PAGE, "control"),
-            // A single take has no cut to move.
-            at_stage(AT, "cut", control(Control::CaptureCut))
-                .missing(WhenMissing::Skip)
-                .learn(PAGE, "cuts"),
+            at_stage(AT, "performed", control(Control::CapturePerformed))
+                .missing(PAGE_PART)
+                .learn(PAGE, "performed"),
             at_stage(AT, "remove", control(Control::CaptureRemove))
                 .missing(PAGE_PART)
                 .learn(PAGE, "remove"),

@@ -38,7 +38,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Persona**: um narrador que é seu: uma voz, um tom, um estilo de escrita e os ajustes da voz. O canal tem uma persona padrão, e cada vídeo pode usar outra.
 
-**Aparência da persona**: como uma persona aparece nos clipes de atuação: um personagem original desenhado a partir da sua descrição, ou uma foto sua. Uma aparência realista precisa do selo de conteúdo sintético das redes.
+**Aparência da persona**: como uma persona aparece nos clipes interpretados: um personagem original desenhado a partir da sua descrição, ou uma foto sua. Uma aparência realista precisa do selo de conteúdo sintético das redes.
 
 **Amostra de voz**: um trecho curto para ouvir uma voz antes de narrar com ela. A prévia padrão do provedor é grátis; a leitura de uma frase sua com os ajustes da persona é uma chamada paga.
 
@@ -69,6 +69,12 @@ As palavras que o Bardo usa, em termos simples.
 **Vídeo de controle**: o que o modelo de uma tomada recebe dela, montado no seu computador, de graça: a tomada no modo dela, com o trecho da narração. Você assiste e aprova antes de qualquer coisa ser paga pela tomada.
 
 **Cenário**: onde você aparece numa tomada em Profundidade: o seu ambiente como gravado, uma imagem de cena do projeto ou uma imagem sua.
+
+**Modelo de tomada**: o modelo que faz a persona interpretar uma tomada a partir do vídeo de controle e da aparência da persona, como o Kling 3.0 Motion Control ou o Seedance 2.5 Video Edit pelo Higgsfield. Definido por canal, mudável por tomada; ele decide em quais modos uma tomada pode estar.
+
+**Prompt da tomada**: o que um modelo de tomada recebe sobre uma tomada: a aparência, o cenário e a interpretação. O Claude o escreve a partir do modelo de texto **Prompt da tomada** (veja Modelos), e você o edita.
+
+**Clipe interpretado**: a versão final de uma tomada, feita pelo modelo de tomada, revisada e usada: ela entra na mídia do projeto para o editor. Os rascunhos, quando o modelo os faz, vêm antes e são aprovados antes da versão final.
 
 **Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
 
@@ -142,7 +148,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Publicação**: um vídeo enviado ou agendado para uma conta na rede, enviado pelo Bardo ou postado por você e ligado pelo endereço do post.
 
-**Aviso de conteúdo sintético**: o selo que as redes pedem em vídeos com uma voz de IA realista. O Bardo liga o aviso quando a narração usou uma persona marcada como voz realista.
+**Aviso de conteúdo sintético**: o selo que as redes pedem em vídeos com uma voz ou uma pessoa de IA realista. O Bardo liga o aviso quando a narração usou uma persona marcada como voz realista, ou o corte usa um clipe interpretado de uma aparência realista.
 
 **Horário de publicação**: quando o próprio Bardo publica um post agendado no Instagram. O Bardo precisa estar aberto nessa hora, ou o agente em segundo plano rodando.
 

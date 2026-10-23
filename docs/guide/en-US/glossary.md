@@ -70,6 +70,12 @@ The words Bardo uses, in plain terms.
 
 **Set**: where you appear in a Depth take: your room as recorded, a scene image of the project, or a picture of yours.
 
+**Take model**: the model that makes the persona perform a take from its control video and the persona's look, such as Kling 3.0 Motion Control or Seedance 2.5 Video Edit through Higgsfield. Set per channel, changeable per take; it decides which modes a take can be in.
+
+**Take prompt**: what a take model is told about a take: the look, the set and the delivery. Claude writes it from a template, and you edit it.
+
+**Performed clip**: a take's final, made by its take model, reviewed and used: it joins the project's media for the editor. Drafts, where the model makes them, come first and are approved before the final.
+
 **Scene plan**: the narration split into scenes, each with an image prompt.
 
 **Scene**: a stretch of the narration with one image, and optionally a clip.
@@ -142,7 +148,7 @@ The words Bardo uses, in plain terms.
 
 **Publication**: a video sent or scheduled to one network account, uploaded by Bardo or posted by you and linked by its address.
 
-**Synthetic-content disclosure**: the label networks ask for on videos with a realistic AI voice. Bardo turns it on when the narration used a persona marked as a realistic voice.
+**Synthetic-content disclosure**: the label networks ask for on videos with a realistic AI voice or person. Bardo turns it on when the narration used a persona marked as a realistic voice, or the cut uses a performed clip of a realistic look.
 
 **Due time**: when Bardo itself publishes a scheduled Instagram post. Bardo has to be open then, or the background agent running.
 

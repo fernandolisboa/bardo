@@ -296,6 +296,7 @@ impl ChaptersHandler {
         let request = TextRequest {
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
+            images: Vec::new(),
             format: TextFormat::Json {
                 schema: CHAPTERS_SCHEMA.to_owned(),
             },

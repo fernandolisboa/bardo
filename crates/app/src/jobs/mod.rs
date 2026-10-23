@@ -46,6 +46,8 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) captures: crate::captures::CaptureHandler,
     pub(crate) analyses: crate::take_analysis::TakeAnalysisHandler,
     pub(crate) controls: crate::control_videos::ControlVideoHandler,
+    pub(crate) take_prompts: crate::performed_takes::TakePromptHandler,
+    pub(crate) performed: crate::performed_takes::PerformedTakeHandler,
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
     pub(crate) proxies: ProxyHandler,
@@ -79,6 +81,8 @@ pub(crate) fn built_in_handlers(
         captures,
         analyses,
         controls,
+        take_prompts,
+        performed,
         scenes,
         clips,
         proxies,
@@ -110,6 +114,8 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Capture, Arc::new(captures));
     handlers.insert(JobKind::TakeAnalysis, Arc::new(analyses));
     handlers.insert(JobKind::ControlVideo, Arc::new(controls));
+    handlers.insert(JobKind::TakePrompt, Arc::new(take_prompts));
+    handlers.insert(JobKind::PerformedTake, Arc::new(performed));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);

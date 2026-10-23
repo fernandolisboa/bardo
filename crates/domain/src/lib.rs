@@ -75,6 +75,7 @@ mod network;
 mod network_account;
 mod owner_metrics;
 mod performance;
+mod performed;
 mod persona;
 mod persona_look;
 mod post_insights;
@@ -92,6 +93,7 @@ mod schedule;
 mod script;
 mod speech;
 mod take_analysis;
+mod take_model;
 mod template;
 mod text;
 mod theme;
@@ -241,6 +243,10 @@ pub use performance::{
     EvidenceScope, FIRST_WEEK, FIRST_WEEK_LATEST_SYNC, FIRST_WEEK_MIN_AGE, FirstWeek,
     PastPerformance, PerformanceEvidence, PerformanceReason, PublishedVideo, Standing, first_week,
 };
+pub use performed::{
+    LENGTH_TOLERANCE, MAX_TAKE_PROMPT, PerformedClip, TakePrompt, TakePromptError, TakeResult,
+    take_prompt_text,
+};
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
     PersonaRepository, VoiceFlag,
@@ -311,12 +317,15 @@ pub use take_analysis::{
     RgbFrame, TakeAnalysis, TakeChecks, TakeMode, VisionError, VisionModels, analysis_fps,
     distinct_faces, take_frame_time, take_frames,
 };
+pub use take_model::{
+    StagedFile, TakeGenerator, TakeInput, TakeModel, TakeRequest, TakeStep, TakeTier, take_model_of,
+};
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,
     TemplateProblem, TemplateRepository, TemplateValues, TemplateVariable, TemplateVersion,
     TemplateVersionId, UnknownTemplateKind,
 };
-pub use text::{GeneratedText, TextFormat, TextGenerator, TextRequest, TokenUsage};
+pub use text::{GeneratedText, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage};
 pub use theme::{
     Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
     ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,

@@ -23,6 +23,9 @@ pub enum ChannelError {
     /// The chosen video model is not one the providers offer.
     #[error("video model not offered")]
     ClipModelNotOffered,
+    /// The chosen take model is not one the providers offer.
+    #[error("take model not offered")]
+    TakeModelNotOffered,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -37,6 +40,7 @@ impl ChannelError {
             ChannelError::NotFound => Some(Text::ChannelNotFound),
             ChannelError::PersonaNotFound => Some(Text::ChannelPersonaNotFound),
             ChannelError::ClipModelNotOffered => Some(Text::ChannelClipModelNotOffered),
+            ChannelError::TakeModelNotOffered => Some(Text::ChannelTakeModelNotOffered),
             ChannelError::Repository(_) => Some(Text::ChannelNotSaved),
         }
     }
@@ -98,6 +102,13 @@ impl Bardo {
     fn ensure_offered_clip_model(&self, details: &ChannelDetails) -> Result<(), ChannelError> {
         match details.clip_model() {
             Some(model) if !self.offers_clip_model(model) => Err(ChannelError::ClipModelNotOffered),
+            _ => self.ensure_offered_take_model(details),
+        }
+    }
+
+    fn ensure_offered_take_model(&self, details: &ChannelDetails) -> Result<(), ChannelError> {
+        match details.take_model() {
+            Some(model) if !self.offers_take_model(model) => Err(ChannelError::TakeModelNotOffered),
             _ => Ok(()),
         }
     }
@@ -186,6 +197,7 @@ mod tests {
             country: Country::UnitedStates,
             default_persona: None,
             clip_model: None,
+            take_model: None,
             caption_style: Default::default(),
             caption_highlight: Default::default(),
             transition: Default::default(),

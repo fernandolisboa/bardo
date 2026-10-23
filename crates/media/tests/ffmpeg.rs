@@ -1408,6 +1408,59 @@ fn a_picture_too_large_is_kept_as_a_jpeg_of_the_same_size() {
 }
 
 #[test]
+fn a_fitted_picture_carries_no_exif() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("fit-exif");
+    let plain = dir.join("plain.jpg");
+    let made = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg("color=c=orange:s=400x600")
+        .args(["-frames:v", "1"])
+        .arg(&plain)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    // A photo's EXIF segment, with a GPS marker, right after the JPEG's
+    // start.
+    let mut exif = b"Exif\0\0MM\0*\0\0\0\x08GPSLatitude=48.8584".to_vec();
+    let length = (exif.len() + 2) as u16;
+    let mut photo = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    photo.extend(length.to_be_bytes());
+    photo.append(&mut exif);
+    photo.extend(&std::fs::read(&plain).unwrap()[2..]);
+    let tagged = dir.join("photo.jpg");
+    std::fs::write(&tagged, &photo).unwrap();
+
+    let sent = dir.join("sent.jpg");
+    ffmpeg.fit_picture(&tagged, &sent, 10_000_000).unwrap();
+    let bytes = std::fs::read(&sent).unwrap();
+    assert_eq!(bardo_domain::image_dimensions(&bytes), Some((400, 600)));
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(!has(b"Exif"), "no EXIF segment");
+    assert!(!has(b"GPSLatitude"), "no position");
+}
+
+#[test]
+fn a_frame_of_a_video_is_taken_as_a_jpeg() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("frame-picture");
+    let source = fixture("clip-a.mp4");
+    let info = ffmpeg.probe(&source).unwrap();
+    let video = info.video.unwrap();
+    let frame = dir.join("frame.jpg");
+    ffmpeg
+        .frame_picture(&source, info.duration / 2, &frame, 5_000_000)
+        .unwrap();
+    let bytes = std::fs::read(&frame).unwrap();
+    assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "a JPEG");
+    assert_eq!(
+        bardo_domain::image_dimensions(&bytes),
+        Some((video.width, video.height))
+    );
+    assert!(!dir.join("frame.partial.jpg").exists());
+}
+
+#[test]
 fn a_recordings_sound_is_extracted_as_mono_wav_at_cd_rate() {
     let ffmpeg = ffmpeg();
     let dir = scratch("extract-sound");

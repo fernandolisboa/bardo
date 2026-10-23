@@ -34,7 +34,7 @@ The cut runs left to right on five tracks:
 
 Click the timeline to move the playhead, and click an item to select it: the playhead goes there and the inspector on the right shows its properties. **Esc** clears the selection. Ctrl and the scroll wheel zoom, or use − and + at the end of the toolbar.
 
-The bin on the left lists the project's **Scenes** (click one to jump to its clip) and its **Media**: **Import files…** adds video and audio files from your computer, and each file's buttons put it on a track at the playhead. Music generated at the Script stage shows here once you use it ([Music from the prompt](script.md#generated-music)).
+The bin on the left lists the project's **Scenes** (click one to jump to its clip) and its **Media**: **Import files…** adds video and audio files from your computer, and each file's buttons put it on a track at the playhead. Music generated at the Script stage shows here once you use it ([Music from the prompt](script.md#generated-music)), and so does each performed clip you use at the Capture stage ([Using a performed clip](capture.md#use)).
 
 <a id="cuts"></a>
 ## Cutting
