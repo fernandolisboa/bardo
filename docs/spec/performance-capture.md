@@ -109,9 +109,10 @@ Prices change. Each model is priced from the provider's quote when it gives one,
 - **Crate.** A new crate, `vision`, depending only on `domain`, holds adapters behind three ports: face tracker, depth estimator and person segmenter. They run ONNX Runtime through the `ort` crate, on DirectML with a Windows graphics card and on the CPU otherwise.
 - **Models.** All are Apache-2.0:
   - MediaPipe Face Landmarker (BlazeFace short-range detector, the 478-point face mesh, the blendshape model), converted to ONNX;
-  - Depth Anything V2 Small, or Video Depth Anything Small if per-frame depth flickers;
+  - Video Depth Anything Small at 280×504 (504×280 for vertical takes), which flickers five times less than Depth Anything V2 Small per frame; V2 Small smoothed over time where the 4.5 GB it needs on the CPU are not free;
   - MediaPipe's multiclass selfie segmenter for the person mask, since a take has one performer near the camera. A SAM-class video segmenter comes in only if reviews show masks failing.
-- **Pinning.** Each model's source, SHA-256 and license are pinned in a manifest like `crates/media/ffmpeg.toml`. An xtask fetches them, they are mirrored as release assets, and the installer bundles them. A spike confirms the choice and measures speed first.
+- **Pinning.** Each model's source, SHA-256 and license are pinned in a manifest like `crates/media/ffmpeg.toml`. An xtask fetches them, they are mirrored as release assets, and the installer bundles them. The spike (#187: `docs/spikes/vision.md`, ADR-0024) confirmed the choice and measured speed: on a 4-core CPU, about 20 s of analysis per 30 s take for Mesh mode and 6.5 min for Depth mode.
+- **Small faces.** A face as small as in a standing shot (13 % of the frame's height in the spike) is too small for the face detector in the whole frame; Bardo searches again around the person mask's face.
 - **`face_landmarks.json`**, per take, holds:
   - the format version;
   - the source (file, width, height, frame rate, frame count);

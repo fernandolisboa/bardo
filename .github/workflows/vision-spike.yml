@@ -106,6 +106,21 @@ jobs:
           P=spikes/vision-probe/target/release/vision-probe
           $P mask --models models --video takes/take-gestures-15s.mp4 > gestures-mask.json
           for v in v2 v2-ema video; do $P depth --models models --video takes/take-gestures-15s.mp4 --variant $v > gestures-depth-$v.json; done
+      - name: Put together the kit for the checks on a real Windows machine
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p kit/models kit/takes
+          cp spikes/vision-probe/target/release/vision-probe.exe kit/
+          cp spikes/vision-probe/target/release/*.dll kit/ 2>/dev/null || true
+          cp .ffmpeg/bin/* kit/
+          cp models/*.onnx kit/models/
+          cp takes/take-*.mp4 kit/takes/
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: vision-probe-windows-kit
+          path: kit
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:

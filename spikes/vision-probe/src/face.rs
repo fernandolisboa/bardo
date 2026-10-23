@@ -348,9 +348,10 @@ impl FaceTracker {
     }
 
     /// Faces found by BlazeFace in an upright region of the frame, in
-    /// coordinates of the whole frame. A face under about a tenth of the
-    /// frame's height is too small for the short-range model in the whole
-    /// frame; in a region around the head it is not.
+    /// coordinates of the whole frame. A face as small as in a standing
+    /// shot (13 % of the frame's height in the spike's take) is missed by the
+    /// short-range model in the whole frame; in a region around the head it
+    /// is found.
     pub fn detect_in(&mut self, frame: &Frame, region: &Rect) -> Result<Vec<Detection>> {
         let t = std::time::Instant::now();
         let crop = crop_tensor(frame, region, DETECTOR_SIZE, -1.0, 1.0, &mut self.det_in);
