@@ -724,6 +724,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bardo-vision"
+version = "0.1.1"
+dependencies = [
+ "bardo-domain",
+]
+
+[[package]]
 name = "base62"
 version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

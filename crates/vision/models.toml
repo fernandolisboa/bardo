@@ -1,0 +1,113 @@
+# The local vision models Bardo runs (ADR-0024, issue #190).
+#
+# Sources are what tools/convert.py downloads, each pinned by SHA-256 (or,
+# for upstream code, by commit). The [[model]] entries are the files Bardo
+# ships: made once by convert.py, with their weights kept as float16 and
+# read back as float32 (half the size, the same arithmetic), then kept as
+# assets of the `vision-models-<n>` release of Bardo's repository, as
+# ffmpeg is (crates/media/ffmpeg.toml). The vision-models workflow makes
+# that release when `mirror` names one that does not exist yet.
+# `cargo xtask fetch-models` downloads the files into `.models/` and checks
+# each against its SHA-256; the installer bundles them. tf2onnx's output is
+# not the same byte for byte from run to run, so the mirrored files, not a
+# new conversion, are the pin.
+#
+# Licenses: only Apache-2.0 or more permissive. Depth Anything V2
+# Base/Large and Video Depth Anything Base/Large are CC-BY-NC-4.0 and must
+# never be added.
+mirror = "https://github.com/fernandolisboa/bardo/releases/download/vision-models-1"
+
+[sources.face_landmarker]
+# BlazeFace short range + 478-point face mesh + 52 blendshapes, in one
+# bundle (a zip of three .tflite files).
+name = "MediaPipe Face Landmarker"
+version = "float16/1"
+url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+sha256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+license = "Apache-2.0"
+license_url = "https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker#models"
+
+[sources.selfie_multiclass]
+# Background, hair, body skin, face skin, clothes, other; 256×256.
+name = "MediaPipe selfie multiclass segmenter"
+version = "float32/1"
+url = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite"
+sha256 = "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
+license = "Apache-2.0"
+license_url = "https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter#multiclass-model"
+
+[sources.depth_anything_v2_small]
+name = "Depth Anything V2 Small"
+version = "03876f8"
+url = "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/03876f8651c73a60fe4c2c48294e09fcb6838fcf/depth_anything_v2_vits.pth"
+sha256 = "715fade13be8f229f8a70cc02066f656f2423a59effd0579197bbf57860e1378"
+license = "Apache-2.0"
+license_url = "https://huggingface.co/depth-anything/Depth-Anything-V2-Small"
+
+[sources.depth_anything_v2_small.code]
+repo = "https://github.com/DepthAnything/Depth-Anything-V2.git"
+commit = "a561b849ebae10a6f5ef49e26c83cbbcd36c71bf"
+license = "Apache-2.0"
+
+[sources.video_depth_anything_small]
+name = "Video Depth Anything Small"
+version = "2568753"
+url = "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/256875362cff76724b920335dfb4b29dd611f66e/video_depth_anything_vits.pth"
+sha256 = "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609"
+license = "Apache-2.0"
+license_url = "https://huggingface.co/depth-anything/Video-Depth-Anything-Small"
+
+[sources.video_depth_anything_small.code]
+repo = "https://github.com/DepthAnything/Video-Depth-Anything.git"
+commit = "4f5ae23172ba60fd7bc11ef671cca678842c7072"
+license = "Apache-2.0"
+
+# The files Bardo ships. `sha256` and `size` are those of the mirrored
+# files; empty until the mirror release exists.
+[[model]]
+file = "face_detector.onnx"
+from = "face_landmarker"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "face_landmarks_detector.onnx"
+from = "face_landmarker"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "face_blendshapes.onnx"
+from = "face_landmarker"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "selfie_multiclass_256x256.onnx"
+from = "selfie_multiclass"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "depth_anything_v2_small_280x504.onnx"
+from = "depth_anything_v2_small"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "depth_anything_v2_small_504x280.onnx"
+from = "depth_anything_v2_small"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "video_depth_anything_small_32x280x504.onnx"
+from = "video_depth_anything_small"
+sha256 = ""
+size = 0
+
+[[model]]
+file = "video_depth_anything_small_32x504x280.onnx"
+from = "video_depth_anything_small"
+sha256 = ""
+size = 0
