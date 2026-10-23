@@ -125,8 +125,8 @@ pub use diagnostics::{
     diagnostics_folder,
 };
 pub use editor::{
-    BinScene, ClipMedia, ClipProblem, ClipShows, ClipView, CutBasis, EditAction, Editor,
-    EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
+    BinScene, ClipMedia, ClipPerformance, ClipProblem, ClipShows, ClipView, CutBasis, EditAction,
+    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
     media_framing, preview_size,
 };
 pub use export::{
@@ -2384,6 +2384,7 @@ pub(crate) mod testing {
                 draft,
                 final_tier: tier(None, 1080),
                 finishes_draft: false,
+                keeps_framing: false,
                 min_length: Duration::from_secs(3),
                 max_length: Duration::from_secs(30),
                 max_video_bytes: 100_000_000,
@@ -2396,6 +2397,7 @@ pub(crate) mod testing {
                 Some(tier(Some("480p"), 480)),
             );
             edit.final_tier = tier(Some("1080p"), 1080);
+            edit.keeps_framing = true;
             vec![
                 model(
                     Self::MOTION,

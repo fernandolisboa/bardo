@@ -57,6 +57,7 @@ fn the_take_models_are_kling_motion_control_then_seedance_video_edit() {
     assert_eq!(kling.draft, None, "its cheap tier costs three quarters");
     assert_eq!(kling.final_tier.height, 1080);
     assert_eq!(kling.first_step(), TakeStep::Final);
+    assert!(!kling.keeps_framing, "its picture follows the look");
     assert!(kling.fits(Duration::from_secs(30)));
     assert!(!kling.fits(Duration::from_secs(31)));
     assert_eq!(kling.max_image_bytes, 10_000_000);
@@ -75,6 +76,10 @@ fn the_take_models_are_kling_motion_control_then_seedance_video_edit() {
         format!("{SEEDANCE_VIDEO_EDIT}/1080p")
     );
     assert!(!seedance.finishes_draft, "Higgsfield has no draft task");
+    assert!(
+        seedance.keeps_framing,
+        "a video edit keeps the take's framing"
+    );
     assert!(!seedance.fits(Duration::from_millis(3_900)));
 }
 

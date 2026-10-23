@@ -148,6 +148,11 @@ impl Shift {
         self.0 == 0
     }
 
+    /// How far, in seconds: negative when earlier.
+    pub fn seconds(self) -> f64 {
+        self.0 as f64 / 1e9
+    }
+
     /// `time` moved by this shift; `None` before zero.
     pub fn move_time(self, time: Duration) -> Option<Duration> {
         let moved = Self::nanos(time).checked_add(self.0)?;
@@ -278,6 +283,15 @@ pub enum Edit {
     /// Sets the motion of every video item, in order: how one motion, or a
     /// varied pattern, goes on every still at once, and its undo.
     SetMotions(Vec<Option<Motion>>),
+    /// Puts `items` in place of the `count` video items from `index`: how
+    /// a stretch of the video track is covered at once (a performed clip
+    /// put on the cut, a scene picture over part of it, #193), and its
+    /// undo.
+    Replace {
+        index: usize,
+        count: usize,
+        items: Vec<VideoItem>,
+    },
 }
 
 /// Why an edit was not made. The timeline is left as it was.
@@ -305,6 +319,10 @@ pub enum EditError {
     /// A caption needs some text, and not too much.
     #[error("the caption text is empty or too long")]
     InvalidText,
+    /// A performed clip goes where the cut plays its narration, and the
+    /// cut has cut that moment away.
+    #[error("the cut does not play that narration")]
+    NotHeard,
 }
 
 impl Timeline {
@@ -568,6 +586,11 @@ impl Timeline {
             Edit::SetTransitions(transitions) => self.set_transitions(transitions)?,
             Edit::SetMotion { index, motion } => self.set_motion(*index, *motion)?,
             Edit::SetMotions(motions) => self.set_motions(motions)?,
+            Edit::Replace {
+                index,
+                count,
+                items,
+            } => self.replace(*index, *count, items)?,
         };
         self.relayout();
         Ok(undo)
@@ -801,6 +824,32 @@ impl Timeline {
             _ => return Err(EditError::WrongTrack),
         }
         Ok(Edit::Delete { track, index })
+    }
+
+    fn replace(
+        &mut self,
+        index: usize,
+        count: usize,
+        items: &[VideoItem],
+    ) -> Result<Edit, EditError> {
+        if index + count > self.video.len() {
+            return Err(EditError::NoSuchItem);
+        }
+        if items.iter().any(|item| item.duration < min_length()) {
+            return Err(EditError::OutsideItem);
+        }
+        if count == 0 && items.is_empty() {
+            return Err(EditError::NoChange);
+        }
+        let removed: Vec<VideoItem> = self
+            .video
+            .splice(index..index + count, items.iter().cloned())
+            .collect();
+        Ok(Edit::Replace {
+            index,
+            count: items.len(),
+            items: removed,
+        })
     }
 
     fn set_lane(&mut self, lane: AudioLane, mix: LaneMix) -> Result<Edit, EditError> {

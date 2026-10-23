@@ -1473,6 +1473,7 @@ nothing_to_cut = "Nothing to cut there: put the playhead inside a clip, or selec
 cannot_edit = "That edit does not fit there."
 edit_not_saved = "Could not save the edit, so the cut is as it was."
 caption_text = "A caption needs some text, up to 200 characters."
+performed_not_heard = "The cut leaves out where this take is narrated, so the clip has nowhere to go. Put that narration back on A1 first."
 
 [editor.media]
 import = "Import files…"
@@ -1487,12 +1488,31 @@ add_hint = "Adds at the playhead, on that track."
 import_failed = "{file}: {reason}"
 audio = "Audio"
 video = "Video"
+take = "Take {n}"
+put_on_cut = "Put on the cut"
+performed_rough_cut = "Use performed clips in a new rough cut"
+performed_rough_cut_hint = "When the cut starts over, each take plays its performed clip in sync with the narration, with scene pictures between. Put on the cut places one on the cut you have now."
 
 [editor.media.error]
 unreadable = "The file could not be read. Check that it is still there."
 unsupported = "Not an audio or video file Bardo can play, or the file is damaged."
 too_short = "The file is too short to place on the timeline."
 not_saved = "The file could not be copied into the project. Check the free disk space and try again."
+
+[editor.performed]
+title = "Performed take {n}"
+in_sync = "In sync with the narration"
+early = "{time} early"
+late = "{time} late"
+unheard = "Its narration is cut away"
+put_back = "Put back in sync"
+put_back_hint = "Moves it, and the cut after it, by lengthening or shortening the clip before it."
+cannot_sync = "Nothing before it can take the difference: trim the clips before it by hand."
+cover = "Cover with a scene picture"
+cover_hint = "Shows a scene over the performance from the playhead; the rest of the take plays on in sync. Undo brings the take back whole."
+cover_scene = "Scene"
+cover_length = "Length"
+cover_button = "Cover from the playhead"
 
 [music]
 title = "Music prompt"
@@ -2842,6 +2862,10 @@ body = "The frame shape of the whole cut. In 9:16, the selected clip shows its c
 [tour.editor-more.motion]
 title = "Motion on stills"
 body = "A still moves: a slow zoom or pan over its picture while it shows, so the video does not play as a slideshow. Select a still to pick its motion and strength in the inspector, or vary every still at once."
+
+[tour.editor-more.performed]
+title = "Performed clips"
+body = "A performed clip plays your own delivery, so it must stay with the narration it was made from. Select one to see whether it is in sync, put it back in sync, or cover part of it with a scene picture."
 
 [tour.editor-more.suggestions]
 title = "Cut suggestions"

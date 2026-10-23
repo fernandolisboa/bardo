@@ -27,14 +27,15 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelId, ChannelRepository,
-    ClipHandle, ClipModelRef, ClipStatus, CostPurpose, ImageFormat, Job, JobFailure,
+    ClipHandle, ClipModelRef, ClipStatus, CostPurpose, FaceLandmarks, ImageFormat, Job, JobFailure,
     JobFailureKind, JobId, JobKind, JobState, LookSource, MAX_TAKE_PROMPT, MediaAsset,
     MediaAssetId, MediaAssetRepository, MediaKind, Metered, Money, Outbound, PerformedClip,
     PersonaId, PersonaLook, PersonaRepository, PictureSize, ProfileId, ProjectFiles, Provider,
     ProviderFailure, RepositoryError, SecretStore, StagedFile, TakeGenerator, TakeInput, TakeMode,
-    TakeModel, TakePrompt, TakePromptError, TakeRequest, TakeResult, TakeStep, TemplateKind,
-    TemplateUsed, TemplateValues, TemplateVariable, TemplateVersionId, TextFormat, TextGenerator,
-    TextImage, TextRequest, ThemeRepository, VideoProjectId, take_model_of, take_prompt_text,
+    TakeModel, TakePrompt, TakePromptError, TakeRequest, TakeResult, TakeStep, TakeStretch,
+    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersionId, TextFormat,
+    TextGenerator, TextImage, TextRequest, ThemeRepository, VideoProjectId, take_model_of,
+    take_prompt_text,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -1673,6 +1674,7 @@ impl Bardo {
             })),
             imported_at: now,
         };
+        let take = &capture.takes.as_slice()[index];
         let clip = PerformedClip {
             asset: id,
             project,
@@ -1681,6 +1683,12 @@ impl Bardo {
             model: made.model.clone(),
             realistic: made.realistic,
             used_at: now,
+            stretch: Some(TakeStretch {
+                narration: capture.narration,
+                start: take.start,
+                end: take.end,
+            }),
+            face: self.performed_face(&capture, index, &made.model),
         };
         if let Err(error) = self.media_assets.save_performed_clip(&asset, &clip) {
             let _ = self.files.remove(project, &file);
@@ -1698,6 +1706,32 @@ impl Bardo {
             tracing::warn!(%error, "the used final could not be marked");
         }
         Ok(asset)
+    }
+
+    /// Where the performer's face is over take `index`, in thousandths of
+    /// the picture, when `model` keeps the take's framing (#193): the cut
+    /// starts a 9:16 crop on it. `None` keeps the crop centered.
+    fn performed_face(
+        &self,
+        capture: &Capture,
+        index: usize,
+        model: &ClipModelRef,
+    ) -> Option<(u16, u16)> {
+        let keeps = self
+            .take_models()
+            .iter()
+            .any(|offered| offered.id == *model && offered.keeps_framing);
+        if !keeps {
+            return None;
+        }
+        let take = capture.takes.as_slice().get(index)?;
+        let file = crate::take_analysis::face_file(capture.id, index as u32, take.revision);
+        let bytes = self.files.read(capture.project, &file).ok()?;
+        let (x, y) = FaceLandmarks::from_json(&String::from_utf8_lossy(&bytes))
+            .ok()?
+            .face_center()?;
+        let thousandths = |share: f32| (share.clamp(0.0, 1.0) * 1_000.0).round() as u16;
+        Some((thousandths(x), thousandths(y)))
     }
 
     /// Where a draft or final is on disk.
@@ -1946,6 +1980,18 @@ mod tests {
         assert_eq!(clips.len(), 1);
         assert!(clips[0].realistic);
         assert_eq!(clips[0].capture, capture.id);
+        // It belongs to its take's stretch of the narration; motion control
+        // follows the look's framing, so no face to start a crop on.
+        let take = &capture.takes.as_slice()[0];
+        assert_eq!(
+            clips[0].stretch,
+            Some(bardo_domain::TakeStretch {
+                narration: capture.narration,
+                start: take.start,
+                end: take.end,
+            })
+        );
+        assert_eq!(clips[0].face, None);
         assert_eq!(view(&s, project, 0).used, 1);
         let again = s.app.use_performed_take(project, 0).unwrap();
         assert_ne!(again.file, asset.file);
@@ -2038,6 +2084,15 @@ mod tests {
                 (CostPurpose::TakeDraft, "fake/video-edit/480p".to_owned()),
                 (CostPurpose::TakeFinal, "fake/video-edit/1080p".to_owned()),
             ]
+        );
+
+        // A video edit keeps the take's framing: the clip keeps where the
+        // face is, from the take's face mesh.
+        s.app.use_performed_take(project, 0).unwrap();
+        let face = s.h.db.performed_clips(project).unwrap()[0].face;
+        assert!(
+            face.is_some_and(|(x, y)| x <= 1_000 && y <= 1_000),
+            "{face:?}"
         );
 
         s.app.back_to_take_drafts(project, 0).unwrap();

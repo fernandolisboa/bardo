@@ -13,7 +13,8 @@
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    CaptureId, ClipModelRef, JobId, MediaAssetId, Money, TakeStep, TemplateUsed, VideoProjectId,
+    CaptureId, ClipModelRef, JobId, MediaAssetId, Money, NarrationId, TakeStep, TemplateUsed,
+    VideoProjectId,
 };
 
 /// The longest take prompt, in characters (Kling truncates past it).
@@ -131,6 +132,21 @@ pub struct PerformedClip {
     /// The look reads as a real person.
     pub realistic: bool,
     pub used_at: SystemTime,
+    /// Where it belongs in the narration (#193); `None` for a clip used
+    /// before that whose capture was gone.
+    pub stretch: Option<TakeStretch>,
+    /// Where the performer's face is in its picture, in thousandths
+    /// across and down, when its take model keeps the take's framing.
+    pub face: Option<(u16, u16)>,
+}
+
+/// A take's stretch of the narration it was cut from: a performed clip's
+/// first frame belongs to its start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TakeStretch {
+    pub narration: NarrationId,
+    pub start: Duration,
+    pub end: Duration,
 }
 
 #[cfg(test)]

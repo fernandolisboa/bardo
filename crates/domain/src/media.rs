@@ -166,6 +166,16 @@ pub trait MediaAssetRepository: Send + Sync {
         asset: &MediaAsset,
         clip: &PerformedClip,
     ) -> Result<(), RepositoryError>;
+
+    /// Whether a new rough cut of the project puts its performed clips on
+    /// (#193); on until the user turns it off.
+    fn performed_in_rough_cut(&self, project: VideoProjectId) -> Result<bool, RepositoryError>;
+
+    fn set_performed_in_rough_cut(
+        &self,
+        project: VideoProjectId,
+        on: bool,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: MediaAssetRepository + ?Sized> MediaAssetRepository for Arc<T> {
@@ -190,6 +200,18 @@ impl<T: MediaAssetRepository + ?Sized> MediaAssetRepository for Arc<T> {
         clip: &PerformedClip,
     ) -> Result<(), RepositoryError> {
         (**self).save_performed_clip(asset, clip)
+    }
+
+    fn performed_in_rough_cut(&self, project: VideoProjectId) -> Result<bool, RepositoryError> {
+        (**self).performed_in_rough_cut(project)
+    }
+
+    fn set_performed_in_rough_cut(
+        &self,
+        project: VideoProjectId,
+        on: bool,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_performed_in_rough_cut(project, on)
     }
 }
 

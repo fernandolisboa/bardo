@@ -69,6 +69,10 @@ pub struct TakeModel {
     /// Whether a final finishes the approved draft from the draft's own
     /// parameters; otherwise a final is a new take.
     pub finishes_draft: bool,
+    /// Whether its result keeps the take's framing (a video edit does), so
+    /// the take's face is where it was: the cut starts a 9:16 crop on it
+    /// (#193).
+    pub keeps_framing: bool,
     /// The take lengths it accepts.
     pub min_length: Duration,
     pub max_length: Duration,
@@ -262,6 +266,7 @@ mod tests {
                 height: 1080,
             },
             finishes_draft: false,
+            keeps_framing: false,
             min_length: secs(4),
             max_length: secs(30),
             max_video_bytes: 100_000_000,

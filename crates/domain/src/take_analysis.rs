@@ -899,6 +899,38 @@ impl FaceFrame {
 }
 
 impl FaceLandmarks {
+    /// Where the face is over the take, as fractions of the frame across
+    /// and down: the median, over the frames with a face, of the center of
+    /// its mesh's bounding box. `None` when no frame has one.
+    pub fn face_center(&self) -> Option<(f32, f32)> {
+        let (mut xs, mut ys): (Vec<f32>, Vec<f32>) = self
+            .frames
+            .iter()
+            .filter_map(|frame| frame.faces.first())
+            .filter_map(|face| {
+                let finite = face
+                    .landmarks
+                    .iter()
+                    .filter(|point| point[0].is_finite() && point[1].is_finite());
+                let (mut low, mut high) = ([f32::MAX; 2], [f32::MIN; 2]);
+                let mut any = false;
+                for point in finite {
+                    any = true;
+                    for axis in 0..2 {
+                        low[axis] = low[axis].min(point[axis]);
+                        high[axis] = high[axis].max(point[axis]);
+                    }
+                }
+                any.then(|| ((low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0))
+            })
+            .unzip();
+        let median = |values: &mut Vec<f32>| {
+            values.sort_by(f32::total_cmp);
+            values[values.len() / 2].clamp(0.0, 1.0)
+        };
+        (!xs.is_empty()).then(|| (median(&mut xs), median(&mut ys)))
+    }
+
     /// The file, with `frames` already written one JSON object each
     /// ([`FaceFrame::to_json`]), so a long take is put together from its
     /// chunks without reading them back.
@@ -1367,6 +1399,38 @@ mod tests {
             0.75
         );
         assert_eq!(value["source"]["fps"], 29.97);
+    }
+
+    #[test]
+    fn the_face_center_is_the_median_of_its_boxes() {
+        let mut file = landmarks_file();
+        let shifted = |dx: f32| {
+            let mut face = mesh(0.3, 0.0);
+            for point in &mut face.landmarks {
+                point[0] += dx;
+            }
+            face
+        };
+        file.frames = [0.0, -0.3, 0.2, 0.25, 0.3]
+            .iter()
+            .map(|&dx| FaceFrame {
+                at: Duration::ZERO,
+                faces: vec![shifted(dx)],
+                detected: None,
+            })
+            .chain([FaceFrame {
+                at: Duration::ZERO,
+                faces: Vec::new(),
+                detected: None,
+            }])
+            .collect();
+        // Boxes centered at 0.5 + dx: the median is 0.7, a jump to 0.2
+        // left out; down, the box runs 0.35 to 0.65.
+        let (x, y) = file.face_center().expect("a face");
+        assert!((x - 0.7).abs() < 1e-5, "{x}");
+        assert!((y - 0.5).abs() < 1e-5, "{y}");
+        file.frames.retain(|frame| frame.faces.is_empty());
+        assert_eq!(file.face_center(), None);
     }
 
     #[test]

@@ -8,7 +8,7 @@ tour: editor
 
 # The editor
 
-The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/projects/edit) stage of a project, once the scenes are planned and narrated, and **Projects** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills and cut suggestions.
+The editor is where the scenes and the narration become a cut: you trim it, mix its sound, caption it and frame it, then send it to the render. It opens over the whole window from the [Edit](bardo:go/projects/edit) stage of a project, once the scenes are planned and narrated, and **Projects** at its top left takes you back. The cut saves itself after every edit. [Show me the editor](bardo:tour/editor), or [part 2 of the tour](bardo:tour/editor-more) for the mix, captions, framing, motion on stills, performed clips and cut suggestions.
 
 F1 opens this guide over the editor, and **Back to the editor** returns to it as you left it. Esc closes a tour; the **Editor tour** button in the top bar (Shift+F1) takes it back to the step it closed on.
 
@@ -34,7 +34,7 @@ The cut runs left to right on five tracks:
 
 Click the timeline to move the playhead, and click an item to select it: the playhead goes there and the inspector on the right shows its properties. **Esc** clears the selection. Ctrl and the scroll wheel zoom, or use − and + at the end of the toolbar.
 
-The bin on the left lists the project's **Scenes** (click one to jump to its clip) and its **Media**: **Import files…** adds video and audio files from your computer, and each file's buttons put it on a track at the playhead. Music generated at the Script stage shows here once you use it ([Music from the prompt](script.md#generated-music)), and so does each performed clip you use at the Capture stage ([Using a performed clip](capture.md#use)).
+The bin on the left lists the project's **Scenes** (click one to jump to its clip) and its **Media**: **Import files…** adds video and audio files from your computer, and each file's buttons put it on a track at the playhead. Music generated at the Script stage shows here once you use it ([Music from the prompt](script.md#generated-music)), and so does each performed clip you use at the Capture stage ([Using a performed clip](capture.md#use)), whose **Put on the cut** places it in sync with its take ([Performed clips](#performed)).
 
 <a id="cuts"></a>
 ## Cutting
@@ -131,6 +131,19 @@ Select a still and pick its motion in the inspector, or **None** to keep it stil
 The motion moves over the picture as it is framed: the 9:16 window in a vertical cut, the whole picture in a 16:9 one. Where the picture shows with bars (**Fit** in 9:16, or a tall picture in 16:9), the bars move with it. It lasts the clip's whole time on screen, transitions included, so the picture never stops while it shows. Splitting a still gives each piece the whole motion. Clips move on their own, so motion plays on stills only: a scene that gets a clip keeps its still's motion unplayed, and plays it again if the scene shows its still once more.
 
 The preview and the render draw the motion the same way, smoothly to a fraction of a pixel; a moving still takes a little longer to render than one that stays still.
+
+<a id="performed"></a>
+## Performed clips
+
+A [performed clip](capture.md#use) plays your own delivery of a take, so it only works where the cut plays that take's narration. In the **Media** tab each one is tagged with its take ("Take 2"), and **Put on the cut** places it on V1 where the cut plays the start of its take, covering what lies there for the clip's length. When the cut has left that part of the narration out, Bardo says so and places nothing: put the narration back on A1 first.
+
+**Use performed clips in a new rough cut**, at the top of the **Media** tab once the narration has performed clips, makes each new rough cut (a new narration, or the cut started over) play the latest performed clip of every take in sync, with the scene pictures between them. The cut you have now stays as it is.
+
+Select a performed clip and the inspector says whether it plays with its narration: **In sync with the narration**, how far early or late (to the hundredth of a second, a frame shows), or that its narration is cut away. A trim, a move or a reorder before it shifts it. **Put back in sync** moves it, and the cut after it, by lengthening or shortening the clip before it; when that clip has no room for the difference, trim the clips before it by hand. A clip that is off sync says so on V1 too.
+
+**Cover with a scene picture** shows a scene over part of the performance (B-roll): pick the **Scene** (the one under the playhead at first) and the **Length** (0.5 to 10 s), then **Cover from the playhead**. The cover stops where the clip ends, and the rest of the take plays on in sync after it. Undo brings the take back whole.
+
+In a 9:16 cut, a clip whose model keeps your framing starts with its crop window on your face, as it was found when the take was analyzed; a motion-control clip starts centered, like other footage. A performed clip of a narration the project no longer uses is plain footage: no take, no sync. A version in another language shows the scene pictures where this cut plays performed clips, since they speak this language.
 
 <a id="suggestions"></a>
 ## Cut suggestions

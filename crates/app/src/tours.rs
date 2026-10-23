@@ -189,6 +189,8 @@ pub enum Control {
     EditorAspect,
     /// Editor: the inspector's motion of a selected still.
     EditorMotion,
+    /// Editor: the inspector's sync and cover of a selected performed clip.
+    EditorPerformed,
     /// Editor: AI cut suggestions.
     EditorSuggestions,
     /// Editor: the YouTube video's retention over the cut.
@@ -862,14 +864,14 @@ pub const EDITOR: Tour = {
 };
 
 /// The editor, part two: the mix, captions, framing, motion on stills,
-/// cut suggestions and leaving to render. Offered once part one is
+/// performed clips, cut suggestions and leaving to render. Offered once part one is
 /// completed or dismissed.
 pub const EDITOR_MORE: Tour = {
     const AT: Stage = Stage::Edit;
     const PAGE: &str = "editor";
     Tour {
         id: TourId::EditorMore,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "mix", control(Control::EditorMix)).learn(PAGE, "mix"),
@@ -881,6 +883,10 @@ pub const EDITOR_MORE: Tour = {
             at_stage(AT, "motion", control(Control::EditorMotion))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "motion"),
+            // Shown with a performed clip selected; else the inspector.
+            at_stage(AT, "performed", control(Control::EditorPerformed))
+                .missing(WhenMissing::LightPart(TourAnchor::Inspector))
+                .learn(PAGE, "performed"),
             at_stage(AT, "suggestions", control(Control::EditorSuggestions))
                 .learn(PAGE, "suggestions"),
             // Hidden while the cut is empty.

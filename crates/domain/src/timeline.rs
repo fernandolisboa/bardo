@@ -268,6 +268,9 @@ pub struct Timeline {
     pub(crate) mix: Mix,
     pub(crate) captions: Captions,
     pub(crate) aspect: AspectRatio,
+    /// Where the project's performed clips belong in the narration
+    /// (`crate::PerformedPlace`): not saved with the cut, read with it.
+    pub(crate) performed: Vec<crate::PerformedPlace>,
 }
 
 impl Timeline {
@@ -343,6 +346,7 @@ impl Timeline {
             mix: Mix::default(),
             captions,
             aspect,
+            performed: Vec::new(),
         }
     }
 
@@ -464,6 +468,7 @@ impl Timeline {
             mix: saved.mix,
             captions,
             aspect: saved.aspect,
+            performed: Vec::new(),
         };
         timeline.relayout();
         timeline.holds_together().then_some(timeline)

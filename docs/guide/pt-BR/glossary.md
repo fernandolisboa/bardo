@@ -74,7 +74,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Prompt da tomada**: o que um modelo de tomada recebe sobre uma tomada: a aparência, o cenário e a interpretação. O Claude o escreve a partir do modelo de texto **Prompt da tomada** (veja Modelos), e você o edita.
 
-**Clipe interpretado**: a versão final de uma tomada, feita pelo modelo de tomada, revisada e usada: ela entra na mídia do projeto para o editor. Os rascunhos, quando o modelo os faz, vêm antes e são aprovados antes da versão final.
+**Clipe interpretado**: a versão final de uma tomada, feita pelo modelo de tomada, revisada e usada: ela entra na mídia do projeto, de onde vai para o corte em sincronia com a narração da tomada. Os rascunhos, quando o modelo os faz, vêm antes e são aprovados antes da versão final.
 
 **Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
 
@@ -104,6 +104,10 @@ As palavras que o Bardo usa, em termos simples.
 **Transição**: como a imagem passa de um clipe para o seguinte em volta de um corte: uma fusão, uma passagem pelo preto ou pelo branco, uma cortina, um deslize ou um zoom. Fica centrada no corte, então o corte e a narração ficam onde estão.
 
 **Movimento (Ken Burns)**: um zoom ou pan lento sobre uma imagem parada enquanto ela aparece, para um vídeo de imagens não virar um slideshow. Definido por imagem, com uma intensidade; os cortes novos de um canal variam o movimento de cena em cena.
+
+**Em sincronia**: um clipe interpretado cujo primeiro quadro toca onde o corte toca o início da narração da tomada. Um corte ou uma movimentação antes dele o deixa adiantado ou atrasado; **Voltar à sincronia** o traz de volta.
+
+**Cobertura (B-roll)**: a imagem de uma cena mostrada sobre parte de um clipe interpretado, a partir do cursor de reprodução, enquanto o resto da tomada segue em sincronia.
 
 **Mixagem**: o volume de cada trilha de áudio, com mudo e solo.
 

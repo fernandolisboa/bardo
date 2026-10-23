@@ -1443,4 +1443,72 @@ mod tests {
         assert!(db.take_prompts(project.id).unwrap().is_empty());
         assert!(db.take_results(project.id).unwrap().is_empty());
     }
+
+    #[test]
+    fn clips_used_before_their_stretch_was_kept_take_it_from_their_capture() {
+        use bardo_domain::{
+            AssetSource, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, PerformedClip,
+            PictureSize,
+        };
+        let (db, project) = setup();
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let saved = capture(&project, &narration, CaptureVoice::Own);
+        db.save_capture(&saved).unwrap();
+        let used = |position: u32, capture: CaptureId| {
+            let asset = MediaAsset {
+                id: MediaAssetId::new(),
+                project: project.id,
+                owner: project.owner,
+                kind: MediaKind::Video,
+                source: AssetSource::Performed,
+                file: format!("media-{position}-{capture}.mp4"),
+                name: "Performed clip".into(),
+                duration: Duration::from_secs(3),
+                picture: Some(PictureSize::new(1920, 1080)),
+                imported_at: time(1_800_000_020),
+            };
+            let clip = PerformedClip {
+                asset: asset.id,
+                project: project.id,
+                capture,
+                position,
+                model: seedance(),
+                realistic: false,
+                used_at: time(1_800_000_020 + u64::from(position)),
+                stretch: None,
+                face: None,
+            };
+            db.save_performed_clip(&asset, &clip).unwrap();
+        };
+        used(0, saved.id);
+        // One of a capture that is gone.
+        used(3, CaptureId::new());
+        {
+            // As the database was before migration 56.
+            let mut conn = db.conn();
+            conn.execute_batch(
+                "ALTER TABLE performed_clip DROP COLUMN face_y;
+                 ALTER TABLE performed_clip DROP COLUMN face_x;
+                 ALTER TABLE performed_clip DROP COLUMN take_end_ms;
+                 ALTER TABLE performed_clip DROP COLUMN take_start_ms;
+                 ALTER TABLE performed_clip DROP COLUMN narration_id;
+                 DROP TABLE performed_rough_cut;
+                 PRAGMA user_version = 55;",
+            )
+            .unwrap();
+            crate::migrations::run(&mut conn).unwrap();
+        }
+        let clips = db.performed_clips(project.id).unwrap();
+        let take = &saved.takes.as_slice()[0];
+        assert_eq!(
+            clips[0].stretch,
+            Some(bardo_domain::TakeStretch {
+                narration: narration.id,
+                start: take.start,
+                end: take.end,
+            })
+        );
+        assert_eq!(clips[1].stretch, None, "its capture is gone");
+    }
 }

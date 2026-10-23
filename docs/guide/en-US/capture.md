@@ -119,7 +119,7 @@ A line says how much longer or shorter than the take a result came out. **Stop w
 <a id="use"></a>
 ## Using a performed clip
 
-**Use** copies the final into the project's media as a performed clip named after its take ("Performed clip 1"), in the editor's **Media** tab, where you put it on the cut ([Timeline and tracks](editor.md#timeline)). Each **Use** adds one, and the take counts them. Performed clips stay when the capture is removed, and versions in other languages do not carry them. When the persona's look is realistic, a cut with one of its performed clips turns the [synthetic-content disclosure](uploading.md#disclosure) on.
+**Use** copies the final into the project's media as a performed clip named after its take ("Performed clip 1"), in the editor's **Media** tab, where **Put on the cut** places it in sync with the narration of its take ([Performed clips](editor.md#performed)). Each **Use** adds one, and the take counts them. Performed clips stay when the capture is removed, and versions in other languages do not carry them. When the persona's look is realistic, a cut with one of its performed clips turns the [synthetic-content disclosure](uploading.md#disclosure) on.
 
 <a id="cuts"></a>
 ## Moving a cut

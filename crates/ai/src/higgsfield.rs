@@ -141,6 +141,8 @@ struct TakeSpec {
     draft: Option<(&'static str, u32)>,
     /// The final's resolution, when the request names one, and height.
     last: (Option<&'static str>, u32),
+    /// Whether its picture keeps the control video's framing.
+    keeps_framing: bool,
     seconds: (u64, u64),
     max_video_bytes: u64,
     max_image_bytes: u64,
@@ -154,6 +156,8 @@ const TAKE_CATALOG: &[TakeSpec] = &[
         modes: &[TakeMode::Recording],
         draft: None,
         last: (None, 1080),
+        // Its picture follows the look's framing.
+        keeps_framing: false,
         seconds: (3, 30),
         // Larger videos are compressed before generation.
         max_video_bytes: 100_000_000,
@@ -166,6 +170,8 @@ const TAKE_CATALOG: &[TakeSpec] = &[
         modes: &[TakeMode::Mesh, TakeMode::Depth],
         draft: Some(("480p", 480)),
         last: (Some("1080p"), 1080),
+        // It edits the control video in place.
+        keeps_framing: true,
         // The source is normalized to at least 4 s and trimmed to 30 s.
         seconds: (4, 30),
         max_video_bytes: 100_000_000,
@@ -192,6 +198,7 @@ pub fn take_models() -> Vec<TakeModel> {
             },
             // Higgsfield has no draft task or seed for these.
             finishes_draft: false,
+            keeps_framing: spec.keeps_framing,
             min_length: Duration::from_secs(spec.seconds.0),
             max_length: Duration::from_secs(spec.seconds.1),
             max_video_bytes: spec.max_video_bytes,

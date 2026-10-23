@@ -31,8 +31,8 @@ use std::time::{Duration, Instant};
 use bardo_app::bardo_domain::{
     AspectRatio, AudioLane, CaptionHighlight, CaptionStyle, CropPosition, DUCK_RANGE, Decibels,
     Ducking, Edge, FPS, Framing, GAIN_RANGE, Generation, ItemRef, LaneMix, MediaKind, Motion,
-    MotionKind, MotionStrength, PictureSize, Track, Transition, TransitionKind, VideoProjectId,
-    crop_window, frame_time, timecode,
+    MotionKind, MotionStrength, PerformedSync, PictureSize, Track, Transition, TransitionKind,
+    VideoProjectId, crop_window, frame_time, timecode,
 };
 use bardo_app::{
     Bardo, ClipMedia, ClipProblem, ClipShows, ClipView, Control, EditAction, Editor, EditorView,
@@ -70,6 +70,10 @@ const COMPACT_SIDE_WIDTH: f32 = 260.;
 const GAIN_STEP: Decibels = Decibels::from_tenths(5);
 const DUCK_STEP: Decibels = Decibels::from_tenths(10);
 const FADE_STEP: Duration = Duration::from_millis(100);
+/// What a cover over a performed clip starts at, steps by and reaches.
+const COVER_LENGTH: Duration = Duration::from_secs(2);
+const COVER_STEP: Duration = Duration::from_millis(500);
+const COVER_LONGEST: Duration = Duration::from_secs(10);
 /// What one click of the crop position's − or + moves: 5% of the room.
 const CROP_STEP: i32 = 50;
 /// A scene picture as the preview draws it (16:9), for placing a crop
@@ -130,6 +134,9 @@ use tokens::*;
 /// What the caption style swatches draw their sample on: a dark picture.
 const CAPTION_SAMPLE_GROUND: u32 = 0x1C1C1E;
 
+/// What a stepper or switch does when clicked.
+type Click = Rc<dyn Fn(&mut EditorScreen, &mut Context<EditorScreen>)>;
+
 /// The bin's tabs (caption styles live in the caption inspector).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BinTab {
@@ -179,6 +186,11 @@ pub struct EditorScreen {
     retention: retention::RetentionState,
     /// The inspector's body, so a tour can scroll a control into view.
     inspector_scroll: ScrollHandle,
+    /// The scene picked to cover a performed clip with, by the clip's
+    /// index: else the scene the playhead is over.
+    cover_scene: Option<(usize, usize)>,
+    /// How long a cover over a performed clip runs.
+    cover_length: Duration,
     _poll: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -239,6 +251,8 @@ impl EditorScreen {
             cuts: suggestions::CutsState::default(),
             retention: retention::RetentionState::default(),
             inspector_scroll: ScrollHandle::new(),
+            cover_scene: None,
+            cover_length: COVER_LENGTH,
             _poll: poll,
             _subscriptions: subscriptions,
         };
@@ -457,6 +471,19 @@ impl EditorScreen {
             self.error = bardo
                 .read(cx)
                 .edit(editor, action)
+                .err()
+                .map(|error| error.message());
+            cx.notify();
+        }
+    }
+
+    /// Makes a new rough cut put the performed clips on, or not.
+    fn set_performed_in_rough_cut(&mut self, on: bool, cx: &mut Context<Self>) {
+        let Self { bardo, editor, .. } = self;
+        if let Some(editor) = editor.as_mut() {
+            self.error = bardo
+                .read(cx)
+                .set_performed_in_rough_cut(editor, on)
                 .err()
                 .map(|error| error.message());
             cx.notify();
@@ -1069,6 +1096,29 @@ impl EditorScreen {
                         Text::EditorMediaImportFailed,
                         &[("file", file), ("reason", &bardo.text(*reason))],
                     )))
+            }))
+            // Only once the narration has performed clips.
+            .children(view.filter(|view| view.has_performed).map(|view| {
+                let on = view.performed_in_rough_cut;
+                let click: Click = Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                    this.set_performed_in_rough_cut(!on, cx)
+                });
+                v_flex()
+                    .gap_1()
+                    .pt_1()
+                    .child(self.switch(
+                        "media-performed-rough-cut",
+                        tr(bardo, Text::EditorMediaPerformedRoughCut),
+                        on,
+                        click,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(color(TEXT_3))
+                            .child(tr(bardo, Text::EditorMediaPerformedRoughCutHint)),
+                    )
             }));
         let media = view.map_or(&[][..], |view| view.media.as_slice());
         let rows: Vec<AnyElement> = media
@@ -1077,7 +1127,7 @@ impl EditorScreen {
             .map(|(row, media)| {
                 let asset = &media.asset;
                 let audio = asset.kind == MediaKind::Audio;
-                let kind = match asset.picture {
+                let mut kind = match asset.picture {
                     Some(picture) => format!(
                         "{} · {}×{}",
                         bardo.text(Text::EditorMediaVideo),
@@ -1086,6 +1136,12 @@ impl EditorScreen {
                     ),
                     None => bardo.text(Text::EditorMediaAudio).into_owned(),
                 };
+                if let Some(take) = media.take {
+                    kind = format!(
+                        "{} · {kind}",
+                        bardo.text_with(Text::EditorMediaTake, &[("n", &take.to_string())])
+                    );
+                }
                 let state = match &media.media {
                     ClipMedia::Ready => None,
                     ClipMedia::Building => Some((Text::EditorProxyBuilding, TEXT_2)),
@@ -1107,19 +1163,30 @@ impl EditorScreen {
                         })
                 };
                 // One button per track the domain lets this kind of media on.
-                let actions =
-                    h_flex()
-                        .flex_wrap()
-                        .gap_1()
-                        .children(asset.kind.tracks().iter().filter_map(|&track| {
-                            let (button, text) = match track {
-                                Track::Music => ("media-music", Text::EditorMediaAddMusic),
-                                Track::Sfx => ("media-sfx", Text::EditorMediaAddSfx),
-                                Track::Video => ("media-video", Text::EditorMediaAddVideo),
-                                Track::Narration | Track::Captions => return None,
-                            };
-                            Some(place(button, text, track))
-                        }));
+                // A take's clip goes where the cut plays its take.
+                let put_on_cut = media.take.map(|_| {
+                    tool_button(("media-put-on-cut", row), editing, false)
+                        .h(px(22.))
+                        .border_1()
+                        .border_color(color(OUTLINE))
+                        .child(tr(bardo, Text::EditorMediaPutOnCut))
+                        .when(editing, |button| {
+                            button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.edit(EditAction::PutOnCut { asset: id }, cx);
+                            }))
+                        })
+                });
+                let actions = h_flex().flex_wrap().gap_1().children(put_on_cut).children(
+                    asset.kind.tracks().iter().filter_map(|&track| {
+                        let (button, text) = match track {
+                            Track::Music => ("media-music", Text::EditorMediaAddMusic),
+                            Track::Sfx => ("media-sfx", Text::EditorMediaAddSfx),
+                            Track::Video => ("media-video", Text::EditorMediaAddVideo),
+                            Track::Narration | Track::Captions => return None,
+                        };
+                        Some(place(button, text, track))
+                    }),
+                );
                 v_flex()
                     .id(("bin-media", row))
                     .gap_1()
@@ -1812,6 +1879,12 @@ impl EditorScreen {
                         self.editor
                             .as_ref()
                             .and_then(Editor::selected_clip)
+                            .and_then(|index| self.render_performed_controls(index, cx)),
+                    )
+                    .children(
+                        self.editor
+                            .as_ref()
+                            .and_then(Editor::selected_clip)
                             .and_then(|index| self.render_transition_controls(index, cx)),
                     )
                     .children(
@@ -2096,18 +2169,35 @@ impl EditorScreen {
         more: Option<EditAction>,
         cx: &Context<Self>,
     ) -> AnyElement {
+        let edit = |action: EditAction| -> Click {
+            Rc::new(move |this: &mut Self, cx: &mut Context<Self>| this.edit(action, cx))
+        };
+        self.step_row(id, name, value, less.map(edit), more.map(edit), cx)
+    }
+
+    /// A name, a value and − and + buttons that do `less` and `more`
+    /// (greyed out when `None`).
+    fn step_row(
+        &self,
+        id: &'static str,
+        name: SharedString,
+        value: String,
+        less: Option<Click>,
+        more: Option<Click>,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let mono = cx.theme().mono_font_family.clone();
-        let button = |suffix: usize, glyph: IconName, action: Option<EditAction>| {
-            tool_button((id, suffix), action.is_some(), false)
+        let button = |suffix: usize, glyph: IconName, click: Option<Click>| {
+            tool_button((id, suffix), click.is_some(), false)
                 .h(px(24.))
                 .min_w(px(24.))
                 .px_1()
                 .border_1()
                 .border_color(color(OUTLINE))
                 .child(icon(glyph, TEXT_2).size_3())
-                .when_some(action, |button, action| {
+                .when_some(click, |button, click| {
                     button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.edit(action, cx);
+                        click(this, cx);
                     }))
                 })
         };
@@ -2327,6 +2417,127 @@ impl EditorScreen {
         )
     }
 
+    /// A selected performed clip: whether it plays with the narration it
+    /// was made from, putting it back in sync, and covering part of it
+    /// with a scene picture from the playhead.
+    fn render_performed_controls(&self, index: usize, cx: &Context<Self>) -> Option<AnyElement> {
+        let bardo = self.bardo.read(cx);
+        let editor = self.editor.as_ref()?;
+        let view = editor.view();
+        let performance = view.clips.get(index)?.performance.as_ref()?;
+        let hint = |text: SharedString| {
+            div()
+                .text_size(px(11.))
+                .text_color(color(TEXT_3))
+                .child(text)
+        };
+        let (state, ink) = sync_line(bardo, performance.sync);
+        let off = matches!(performance.sync, PerformedSync::Off(_));
+        let can_sync = off && performance.can_sync;
+        let put_back = tool_button("performed-sync", can_sync, false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(tr(bardo, Text::EditorPerformedPutBack))
+            .when(can_sync, |button| {
+                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.edit(EditAction::PutBackInSync { index }, cx);
+                }))
+            });
+        // The scene picked for this clip, else the one under the playhead.
+        let scene = self
+            .cover_scene
+            .filter(|(clip, _)| *clip == index)
+            .map(|(_, scene)| scene)
+            .or_else(|| view.scene_under(editor.playhead()));
+        let position =
+            scene.and_then(|scene| view.scenes.iter().position(|bin| bin.index == scene));
+        let pick = |to: Option<usize>| -> Option<Click> {
+            let scene = view.scenes.get(to?)?.index;
+            Some(Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                this.cover_scene = Some((index, scene));
+                cx.notify();
+            }))
+        };
+        let scenes = self.step_row(
+            "performed-cover-scene",
+            tr(bardo, Text::EditorPerformedCoverScene),
+            scene.map_or_else(
+                || "—".to_owned(),
+                |scene| bardo.text_with(Text::EditorSceneLabel, &[("n", &(scene + 1).to_string())]),
+            ),
+            pick(position.and_then(|at| at.checked_sub(1))),
+            pick(position.map(|at| at + 1)),
+            cx,
+        );
+        let length = self.cover_length;
+        let lengthen = |to: Duration| -> Click {
+            Rc::new(move |this: &mut Self, cx: &mut Context<Self>| {
+                this.cover_length = to;
+                cx.notify();
+            })
+        };
+        let lengths = self.step_row(
+            "performed-cover-length",
+            tr(bardo, Text::EditorPerformedCoverLength),
+            bardo.seconds(length),
+            (length > COVER_STEP).then(|| lengthen(length - COVER_STEP)),
+            (length < COVER_LONGEST).then(|| lengthen((length + COVER_STEP).min(COVER_LONGEST))),
+            cx,
+        );
+        let cover = tool_button("performed-cover", scene.is_some(), false)
+            .border_1()
+            .border_color(color(OUTLINE))
+            .child(tr(bardo, Text::EditorPerformedCoverButton))
+            .when_some(scene, |button, scene| {
+                button.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    let reach = this.timeline.snap_reach();
+                    let length = this.cover_length;
+                    this.edit(
+                        EditAction::Cover {
+                            scene,
+                            length,
+                            reach,
+                        },
+                        cx,
+                    );
+                }))
+            });
+        Some(
+            v_flex()
+                .id("performed")
+                .gap_1p5()
+                .child(label(
+                    bardo.text_with(
+                        Text::EditorPerformedTitle,
+                        &[("n", &performance.take.to_string())],
+                    ),
+                    TEXT_3,
+                ))
+                .child(label(state, ink).whitespace_normal())
+                .when(off, |section| {
+                    section.child(h_flex().child(put_back)).child(hint(tr(
+                        bardo,
+                        if performance.can_sync {
+                            Text::EditorPerformedPutBackHint
+                        } else {
+                            Text::EditorPerformedCannotSync
+                        },
+                    )))
+                })
+                .child(label(tr(bardo, Text::EditorPerformedCover), TEXT_3))
+                .child(scenes)
+                .child(lengths)
+                .child(h_flex().child(cover))
+                .child(hint(tr(bardo, Text::EditorPerformedCoverHint)))
+                .tour_anchor(
+                    TourAnchor::Control(Control::EditorPerformed),
+                    Side::Left,
+                    Some(&self.inspector_scroll),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// How the view moves over a selected still: none or one of the
     /// motions, its strength, and putting it (or a varied pattern) on every
     /// still. A clip only says it moves on its own; a clip with no picture
@@ -2448,6 +2659,20 @@ impl EditorScreen {
         action: EditAction,
         cx: &Context<Self>,
     ) -> AnyElement {
+        let click: Click =
+            Rc::new(move |this: &mut Self, cx: &mut Context<Self>| this.edit(action, cx));
+        self.switch(id, name, on, click, cx)
+    }
+
+    /// A toggle row: a name and an on/off pill that does `click`.
+    fn switch(
+        &self,
+        id: &'static str,
+        name: SharedString,
+        on: bool,
+        click: Click,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         h_flex()
             .id(id)
             .justify_between()
@@ -2471,7 +2696,7 @@ impl EditorScreen {
                         TEXT_3
                     }))),
             )
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.edit(action, cx)))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| click(this, cx)))
             .into_any_element()
     }
 
@@ -2771,6 +2996,36 @@ fn problem_line(bardo: &Bardo, problem: &ClipProblem) -> String {
             &[("name", name), ("file", file), ("reason", &reason)],
         ),
     }
+}
+
+/// Whether a performed clip plays with its narration, and in what ink.
+pub(crate) fn sync_line(bardo: &Bardo, sync: PerformedSync) -> (SharedString, EditorColor) {
+    match sync {
+        PerformedSync::InSync => (tr(bardo, Text::EditorPerformedInSync), TEXT_2),
+        PerformedSync::Off(off) => {
+            let text = if off.seconds() > 0. {
+                Text::EditorPerformedLate
+            } else {
+                Text::EditorPerformedEarly
+            };
+            let time = hundredths(bardo, off.seconds().abs());
+            (bardo.text_with(text, &[("time", &time)]).into(), ACCENT)
+        }
+        PerformedSync::Unheard => (tr(bardo, Text::EditorPerformedUnheard), ERROR),
+    }
+}
+
+/// `seconds` with two decimals, in the interface language: a frame's
+/// difference shows.
+fn hundredths(bardo: &Bardo, seconds: f64) -> String {
+    let hundredths = (seconds * 100.).round() as u64;
+    let n = format!(
+        "{}{}{:02}",
+        hundredths / 100,
+        bardo.text(Text::DecimalSeparator),
+        hundredths % 100
+    );
+    bardo.text_with(Text::EditorSeconds, &[("n", &n)])
 }
 
 /// A clip's name: its scene, or the imported file's name.
