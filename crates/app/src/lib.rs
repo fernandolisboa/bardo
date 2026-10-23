@@ -5,6 +5,7 @@ mod about;
 mod agent;
 mod appearance;
 mod backup;
+mod captures;
 mod channels;
 mod chapters;
 mod clips;
@@ -62,7 +63,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    AgentTask, BackupStore, ChannelRepository, ChapterRepository, ClipGenerator, ConnectionSecrets,
+    AgentTask, BackupStore, CaptureRepository, ChannelRepository, ChapterRepository, ClipGenerator, ConnectionSecrets,
     ConsentReceiver, CostRepository, CutSuggestionRepository, DecisionEngine, ExportFiles,
     ExportRepository, ImageGenerator, InsightsReader, JobRepository, KeyChecker, LayoutId,
     LocalizationRepository, MarketData, MediaAssetRepository, MusicGenerator,
@@ -70,10 +71,10 @@ use bardo_domain::{
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
     Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
-    SecretStore, SpeechAligner, SpeechSynthesizer, TemplateRepository, TextGenerator,
+    SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber, TemplateRepository, TextGenerator,
     ThemeRepository, ThumbnailRepository, TimelineRepository, TourProgressRepository, UiLanguage,
-    UiThemePreference, UserProfile, VideoStats, VideoUploader, VoiceLibrary, VoicePreviews,
-    VoiceSampleStore, YouTubeDataStore, Zone, running_since,
+    UiThemePreference, UserProfile, VideoStats, VideoUploader, VoiceChanger, VoiceIsolator, VoiceLibrary,
+    VoicePreviews, VoiceSampleStore, YouTubeDataStore, Zone, running_since,
 };
 use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed};
 use bardo_media::{AudioOutput, MediaEngine};
@@ -96,6 +97,9 @@ pub use backup::{
 pub use bardo_domain;
 /// How each caption style looks, for the editor's style swatches.
 pub use bardo_media::ffmpeg::{CaptionLook, caption_look, highlight_colour};
+pub use captures::{
+    CaptureError, CaptureReader, CaptureVoiceChoice, ChosenCapture, take_source,
+};
 pub use channels::ChannelError;
 pub use chapters::{ChapterRow, ChaptersError, ChaptersView};
 pub use clips::{ClipsView, SceneClipView};
@@ -246,6 +250,8 @@ pub struct Repositories {
     pub personas: Arc<dyn PersonaRepository>,
     /// Narrations and their word timings. Shared with the job queue.
     pub narrations: Arc<dyn NarrationRepository>,
+    /// Each project's capture and its takes. Shared with the job queue.
+    pub captures: Arc<dyn CaptureRepository>,
     /// Scene plans, their prompts and images. Shared with the job queue.
     pub scene_plans: Arc<dyn ScenePlanRepository>,
     /// The cuts made in the editor.
@@ -358,6 +364,7 @@ impl Repositories {
             scripts: Arc::clone(&db) as _,
             personas: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
+            captures: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
@@ -411,6 +418,15 @@ pub struct Providers {
     /// Word timings of narration the user recorded (ElevenLabs forced
     /// alignment).
     pub aligner: Arc<dyn SpeechAligner>,
+    /// The words of a capture's sound, to check it follows the script
+    /// (ElevenLabs speech-to-text).
+    pub transcriber: Arc<dyn SpeechTranscriber>,
+    /// A capture's speech in the persona's voice (ElevenLabs Voice
+    /// Changer).
+    pub voice_changer: Arc<dyn VoiceChanger>,
+    /// A capture's speech in the user's own voice, cleaned (ElevenLabs
+    /// Voice Isolator).
+    pub voice_isolator: Arc<dyn VoiceIsolator>,
     /// Scene images (Nano Banana, through the Gemini API).
     pub images: Arc<dyn ImageGenerator>,
     /// The video's music (ElevenLabs Music).
@@ -452,6 +468,9 @@ impl Providers {
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
             previews: Arc::new(bardo_ai::ElevenLabsPreviews::new()),
             aligner: Arc::new(bardo_ai::ElevenLabsAlignment::new()),
+            transcriber: Arc::new(bardo_ai::ElevenLabsTranscription::new()),
+            voice_changer: Arc::new(bardo_ai::ElevenLabsVoiceChanger::new()),
+            voice_isolator: Arc::new(bardo_ai::ElevenLabsVoiceIsolator::new()),
             images: Arc::new(bardo_ai::GeminiImages::new()),
             music: Arc::new(bardo_ai::ElevenLabsMusic::new()),
             clips: vec![
@@ -514,6 +533,7 @@ pub struct Bardo {
     scripts: Arc<dyn ScriptRepository>,
     personas: Arc<dyn PersonaRepository>,
     narrations: Arc<dyn NarrationRepository>,
+    captures: Arc<dyn CaptureRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
     timelines: Arc<dyn TimelineRepository>,
     media_assets: Arc<dyn MediaAssetRepository>,
@@ -629,6 +649,7 @@ impl Bardo {
             scripts,
             personas,
             narrations,
+            captures,
             scene_plans,
             timelines,
             media_assets,
@@ -723,6 +744,7 @@ impl Bardo {
         let narration_handler = NarrationHandler {
             owner: profile.id,
             narrations: Arc::clone(&narrations),
+            captures: Arc::clone(&captures),
             files: Arc::clone(&files),
             speech: Arc::clone(&providers.speech),
             secrets: Arc::clone(&secrets),
@@ -731,7 +753,21 @@ impl Bardo {
         let import_handler = NarrationImportHandler {
             owner: profile.id,
             narrations: Arc::clone(&narrations),
+            captures: Arc::clone(&captures),
             files: Arc::clone(&files),
+            aligner: Arc::clone(&providers.aligner),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
+        let capture_handler = crate::captures::CaptureHandler {
+            owner: profile.id,
+            captures: Arc::clone(&captures),
+            narrations: Arc::clone(&narrations),
+            files: Arc::clone(&files),
+            media: Arc::clone(&providers.media),
+            transcriber: Arc::clone(&providers.transcriber),
+            voice_changer: Arc::clone(&providers.voice_changer),
+            voice_isolator: Arc::clone(&providers.voice_isolator),
             aligner: Arc::clone(&providers.aligner),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
@@ -893,6 +929,7 @@ impl Bardo {
                 localizations: localization_handler,
                 narrations: narration_handler,
                 imports: import_handler,
+                captures: capture_handler,
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,
@@ -926,6 +963,7 @@ impl Bardo {
             scripts,
             personas,
             narrations,
+            captures,
             scene_plans,
             timelines,
             media_assets,
@@ -2238,6 +2276,9 @@ pub(crate) mod testing {
             speech: Arc::new(FakeSpeech::default()),
             previews: Arc::new(NoPreviews),
             aligner: Arc::new(crate::narration_import::testing::FakeAligner::default()),
+                transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
+                voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
+                voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
             images: Arc::new(FakeImages::default()),
             music: Arc::new(FakeMusic::default()),
             clips: vec![Arc::new(FakeClips::default())],
@@ -2365,6 +2406,7 @@ mod tests {
             scripts: Arc::clone(&db) as _,
             personas: Arc::new(FakePersonas::default()),
             narrations: Arc::clone(&db) as _,
+            captures: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,

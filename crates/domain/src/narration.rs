@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::{
-    Alignment, GenerationPresets, JobId, ProfileId, Provider, RepositoryError, Script, ScriptText,
+    Alignment, CaptureVoice, GenerationPresets, JobId, ProfileId, Provider, RepositoryError, Script, ScriptText,
     VideoProjectId, VoiceRef,
 };
 
@@ -322,6 +322,19 @@ pub enum NarrationSource {
         /// The aligner, as the provider named it.
         model: String,
     },
+    /// The user read the script on camera (a capture, #189); its speech
+    /// was voiced and a provider timed its words.
+    Captured {
+        /// The recording's name as the user had it.
+        file_name: String,
+        /// Whose voice it speaks with.
+        voice: CaptureVoice,
+        /// The model that voiced it (voice changer or isolator), as the
+        /// provider named it.
+        model: String,
+        /// The provider that timed the words.
+        aligner: Provider,
+    },
 }
 
 impl NarrationSource {
@@ -330,15 +343,19 @@ impl NarrationSource {
         match self {
             NarrationSource::Generated { voice, .. } => voice.provider(),
             NarrationSource::Imported { aligner, .. } => *aligner,
+            NarrationSource::Captured { voice, aligner, .. } => match voice {
+                CaptureVoice::Persona { voice, .. } => voice.provider(),
+                CaptureVoice::Own => *aligner,
+            },
         }
     }
 
     /// The model that spoke or timed the narration.
     pub fn model(&self) -> &str {
         match self {
-            NarrationSource::Generated { model, .. } | NarrationSource::Imported { model, .. } => {
-                model
-            }
+            NarrationSource::Generated { model, .. }
+            | NarrationSource::Imported { model, .. }
+            | NarrationSource::Captured { model, .. } => model,
         }
     }
 }

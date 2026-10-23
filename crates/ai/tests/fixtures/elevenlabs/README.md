@@ -53,3 +53,27 @@ with a real key):
   copyrighted material, with its `prompt_suggestion`.
 - `music-missing-permission.http`, `music-quota-exceeded.http`,
   `music-rate-limited.http`.
+
+Captures (#189): speech-to-text (`POST /v1/speech-to-text`), the Voice
+Changer (`POST /v1/voice-changer/{voice_id}`) and the Voice Isolator
+(`POST /v1/audio-isolation`).
+
+Recorded on 2026-10-23 from the live API with an invalid key:
+
+- `stt-rejected.http`, `voice-changer-rejected.http`,
+  `isolation-rejected.http`.
+- `isolation-missing-file.http`: the validation error of a form without
+  its audio (422, `detail` as a list).
+
+Written from the documented response shapes, because recording them needs
+a real key and paid calls (re-record when importing a capture misbehaves
+with a real key):
+
+- `stt-words.http`: "Hi, you. It is 1969." as words, with the spacing
+  entries and a sound event (`audio_event`) between them.
+- `voice-changer-audio.http`, `isolation-audio.http`: a text body standing
+  in for the MP3 bytes.
+- `voice-changer-voice-not-found.http`.
+
+Synthetic, for edge cases: `stt-no-words.http`, `stt-rate-limited.http`,
+`voice-changer-rate-limited.http`, `voice-changer-empty.http`.

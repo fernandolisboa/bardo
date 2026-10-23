@@ -16,6 +16,9 @@ use crate::{Bardo, ExportSummary, NarrationView, RenderSummary, ScenesView, Scri
 pub enum Stage {
     Script,
     Narration,
+    /// The takes of a capture (#189): shown only while the narration is a
+    /// capture's.
+    Capture,
     Scenes,
     Clips,
     Edit,
@@ -24,9 +27,10 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const ALL: [Stage; 7] = [
+    pub const ALL: [Stage; 8] = [
         Stage::Script,
         Stage::Narration,
+        Stage::Capture,
         Stage::Scenes,
         Stage::Clips,
         Stage::Edit,
@@ -41,6 +45,7 @@ impl Stage {
             self,
             Stage::Script
                 | Stage::Narration
+                | Stage::Capture
                 | Stage::Scenes
                 | Stage::Clips
                 | Stage::Render
@@ -53,6 +58,7 @@ impl Stage {
         match self {
             Stage::Script => "script",
             Stage::Narration => "narration",
+            Stage::Capture => "capture",
             Stage::Scenes => "scenes",
             Stage::Clips => "clips",
             Stage::Edit => "edit",
@@ -92,6 +98,10 @@ pub enum StageNote {
     NarrationMissing,
     NarrationStale,
     NarrationLength(Duration),
+    /// A capture's takes, none flagged.
+    Takes(usize),
+    /// A capture's takes that cannot go to a take model as they are.
+    TakesFlagged(usize),
     ScenesMissing,
     ScenesStale,
     /// A version's carried scenes wait to be placed on its narration.
@@ -154,7 +164,8 @@ impl StageStatus {
 }
 
 /// Every stage of a project, in order, from its script, narration, scenes,
-/// renders and exports as the projects screen loads them.
+/// renders and exports as the projects screen loads them. The Capture
+/// stage is there only while the narration is a capture's.
 pub fn project_stages(
     script: &ScriptView,
     narration: &NarrationView,
@@ -205,6 +216,29 @@ pub fn project_stages(
             ),
         }
     };
+
+    let capture_stage = narration.capture.as_ref().map(|capture| {
+        let flagged = capture.takes.flagged();
+        if narration.stale {
+            StageStatus::new(
+                Stage::Capture,
+                StageState::Attention,
+                StageNote::NarrationStale,
+            )
+        } else if flagged > 0 {
+            StageStatus::new(
+                Stage::Capture,
+                StageState::Attention,
+                StageNote::TakesFlagged(flagged),
+            )
+        } else {
+            StageStatus::new(
+                Stage::Capture,
+                StageState::Done,
+                StageNote::Takes(capture.takes.len()),
+            )
+        }
+    });
 
     let plan = scenes.plan.as_ref();
     let scene_list = plan.map_or(&[][..], |plan| plan.scenes());
@@ -344,15 +378,17 @@ pub fn project_stages(
         StageStatus::new(Stage::Publish, StageState::Open, StageNote::ExportReady)
     };
 
-    vec![
-        script_stage,
-        narration_stage,
-        scenes_stage,
-        clips_stage,
-        edit_stage,
-        render_stage,
-        publish_stage,
-    ]
+    [script_stage, narration_stage]
+        .into_iter()
+        .chain(capture_stage)
+        .chain([
+            scenes_stage,
+            clips_stage,
+            edit_stage,
+            render_stage,
+            publish_stage,
+        ])
+        .collect()
 }
 
 impl Bardo {
@@ -375,6 +411,8 @@ impl Bardo {
                 let seconds = length.as_secs();
                 format!("{}:{:02}", seconds / 60, seconds % 60)
             }
+            StageNote::Takes(takes) => n(Text::StageTakes, takes),
+            StageNote::TakesFlagged(takes) => n(Text::StageTakesFlagged, takes),
             StageNote::ScenesMissing => self.text(Text::StageScenesMissing).into_owned(),
             StageNote::ScenesStale => self.text(Text::StageScenesStale).into_owned(),
             StageNote::ScenesToPlace => self.text(Text::StageScenesToPlace).into_owned(),
@@ -511,9 +549,13 @@ mod tests {
         let app = h.start();
         let stages = stages(&app, &project(&app));
 
+        // The Capture stage shows only with a capture.
         assert_eq!(
             stages.iter().map(|s| s.stage).collect::<Vec<_>>(),
             Stage::ALL
+                .into_iter()
+                .filter(|stage| *stage != Stage::Capture)
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             of(&stages, Stage::Script),
@@ -737,9 +779,9 @@ mod tests {
         let done = |stage| StageStatus::new(stage, StageState::Done, StageNote::Working);
         let mut stages: Vec<_> = Stage::ALL.into_iter().map(done).collect();
         assert_eq!(opening_stage(&stages), Stage::Publish);
-        stages[6] = StageStatus::locked(Stage::Publish, StageNote::After(Stage::Render));
+        stages[7] = StageStatus::locked(Stage::Publish, StageNote::After(Stage::Render));
         assert_eq!(opening_stage(&stages), Stage::Render);
-        stages[5] = StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit));
+        stages[6] = StageStatus::locked(Stage::Render, StageNote::After(Stage::Edit));
         assert_eq!(opening_stage(&stages), Stage::Clips);
     }
 

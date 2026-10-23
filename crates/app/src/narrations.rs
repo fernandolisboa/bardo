@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    Alignment, ApiKey, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind,
+    Alignment, ApiKey, Capture, CaptureRepository, CharTiming, CostPurpose, GenerationPresets, Job, JobFailure, JobFailureKind,
     JobId, JobKind, Metered, Narration, NarrationId, NarrationRepository, NarrationSource, Persona,
     ProfileId, Progress, ProjectFiles, Provider, RepositoryError, Script, ScriptText, SecretStore,
     SpeechRequest, SpeechSynthesizer, VideoProject, VideoProjectId, VoiceFlag, VoiceRef,
@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
+use crate::captures::CapturePayload;
 use crate::narration_import::ImportPayload;
 use crate::{Bardo, KeyState, Text};
 
@@ -112,8 +113,11 @@ pub struct NarrationView {
     pub narration: Option<Narration>,
     /// Whether the script changed since the narration read it.
     pub stale: bool,
-    /// The project's latest narration job: generating or importing.
+    /// The project's latest narration job: generating, importing or
+    /// capturing.
     pub job: Option<Job>,
+    /// The capture whose speech the narration is, if it is one.
+    pub capture: Option<Capture>,
     /// Who reads the next narration: the project's own persona, else the
     /// channel's default. A flagged one cannot read it yet.
     pub persona: Option<Persona>,
@@ -270,6 +274,7 @@ fn part_record(narration: NarrationId, index: usize) -> String {
 pub(crate) struct NarrationHandler {
     pub(crate) owner: ProfileId,
     pub(crate) narrations: Arc<dyn NarrationRepository>,
+    pub(crate) captures: Arc<dyn CaptureRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) speech: Arc<dyn SpeechSynthesizer>,
     pub(crate) secrets: Arc<dyn SecretStore>,
@@ -384,6 +389,8 @@ impl NarrationHandler {
         let previous = self.narrations.narration(project).map_err(unexpected)?;
         self.narrations
             .save_narration(&narration)
+            .map_err(unexpected)?;
+        crate::captures::forget_capture(&*self.captures, &*self.files, project, narration.id)
             .map_err(unexpected)?;
         // Leftovers only cost disk space: a file that will not go (open in
         // a player) stays rather than failing a finished narration.
@@ -537,6 +544,9 @@ impl Bardo {
             JobKind::NarrationImport => {
                 ImportPayload::parse(job.payload()).is_ok_and(|p| p.project == project)
             }
+            JobKind::Capture => {
+                CapturePayload::parse(job.payload()).is_ok_and(|p| p.project == project)
+            }
             _ => false,
         })
     }
@@ -581,6 +591,7 @@ impl Bardo {
             None => None,
         };
         Ok(NarrationView {
+            capture: self.capture_of(narration.as_ref(), project.id)?,
             estimate,
             script: script.map(|script| script.text().clone()),
             narration,
@@ -809,6 +820,7 @@ pub(crate) mod tests {
 
     use super::testing::FakeAudioOutput;
     use super::*;
+    use crate::captures::testing::{FakeTranscriber, FakeVoiceChanger, FakeVoiceIsolator};
     use crate::narration_import::testing::FakeAligner;
     use crate::testing::{
         FakeDecisionEngine, FakeKeyChecker, FakeMarketData, FakeSpeech, FakeTextGenerator,
@@ -829,6 +841,10 @@ pub(crate) mod tests {
         pub(crate) text: Arc<FakeTextGenerator>,
         pub(crate) audio: Arc<FakeAudioOutput>,
         pub(crate) secrets: Arc<MemorySecretStore>,
+        pub(crate) media: Arc<crate::editor::testing::FakeMedia>,
+        pub(crate) transcriber: Arc<FakeTranscriber>,
+        pub(crate) voice_changer: Arc<FakeVoiceChanger>,
+        pub(crate) voice_isolator: Arc<FakeVoiceIsolator>,
     }
 
     impl Harness {
@@ -845,6 +861,10 @@ pub(crate) mod tests {
                 text: Arc::default(),
                 audio: Arc::default(),
                 secrets: Arc::default(),
+                media: Arc::default(),
+                transcriber: Arc::default(),
+                voice_changer: Arc::default(),
+                voice_isolator: Arc::default(),
             }
         }
 
@@ -860,11 +880,14 @@ pub(crate) mod tests {
                 speech: Arc::clone(&self.speech) as _,
                 previews: Arc::new(crate::testing::NoPreviews),
                 aligner: Arc::clone(&self.aligner) as _,
+                transcriber: Arc::clone(&self.transcriber) as _,
+                voice_changer: Arc::clone(&self.voice_changer) as _,
+                voice_isolator: Arc::clone(&self.voice_isolator) as _,
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
                 audio: Arc::clone(&self.audio) as _,
-                media: Arc::new(crate::editor::testing::FakeMedia::default()),
+                media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
@@ -1123,6 +1146,7 @@ pub(crate) mod tests {
         let handler = NarrationHandler {
             owner: app.profile().id,
             narrations: Arc::clone(&h.db) as _,
+            captures: Arc::clone(&h.db) as _,
             files: Arc::clone(&h.files),
             speech: Arc::clone(&h.speech) as _,
             secrets: Arc::clone(&h.secrets) as _,

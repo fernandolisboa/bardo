@@ -1,0 +1,5 @@
+HTTP/2 200
+server: uvicorn
+content-type: application/json
+
+{"language_code":"eng","language_probability":0.98,"text":""}

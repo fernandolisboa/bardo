@@ -15,6 +15,7 @@ The guide Bardo shows on its Guide screen (F1), in two languages, also published
 | [Projects and stages](en-US/projects.md) | [Projetos e etapas](pt-BR/projects.md) |
 | [Script](en-US/script.md) | [Roteiro](pt-BR/script.md) |
 | [Narration](en-US/narration.md) | [Narração](pt-BR/narration.md) |
+| [Performance capture](en-US/capture.md) | [Captura de atuação](pt-BR/capture.md) |
 | [Scenes and images](en-US/scenes.md) | [Cenas e imagens](pt-BR/scenes.md) |
 | [Clips](en-US/clips.md) | [Clipes](pt-BR/clips.md) |
 | [Personas](en-US/personas.md) | [Personas](pt-BR/personas.md) |
@@ -48,7 +49,7 @@ The guide Bardo shows on its Guide screen (F1), in two languages, also published
 ## Writing a page
 
 - One Markdown file per page, with the same file name in `en-US/` and `pt-BR/`. en-US sets the structure; pt-BR is written in natural Portuguese, not word for word.
-- Front matter: `id` (the file name), `title`, `group` (`getting-started`, `strategy`, `production`, `editing`, `publishing`, `costs` or `reference`), the `place` the page explains, if any (`research`, `projects/script`, `settings/networks`), and the `tour` that shows it, if any (`welcome`, `research`, `themes`, `performance`, `projects`, `script`, `narration`, `scenes`, `clips`, `personas`, `templates`, `editor`, `render`, `channels`, `accounts`, `networks`, `publish`, `missed`, `costs`, `jobs`, `keys`, `appearance`, `metrics-sync`, `background-agent`, `about`, `backup`).
+- Front matter: `id` (the file name), `title`, `group` (`getting-started`, `strategy`, `production`, `editing`, `publishing`, `costs` or `reference`), the `place` the page explains, if any (`research`, `projects/script`, `settings/networks`), and the `tour` that shows it, if any (`welcome`, `research`, `themes`, `performance`, `projects`, `script`, `narration`, `capture`, `scenes`, `clips`, `personas`, `templates`, `editor`, `render`, `channels`, `accounts`, `networks`, `publish`, `missed`, `costs`, `jobs`, `keys`, `appearance`, `metrics-sync`, `background-agent`, `about`, `backup`).
 - A `# Title` equal to the front matter's title, an optional introduction, then sections: each `## Heading` right after an `<a id="section-id"></a>` line. Both languages have the same sections, in the same order, with the same ids.
 - Links: another page as `page.md#section` (the app also reads `bardo:guide/page#section`, but only the first works on GitHub), a section of this page as `#section`, a place in Bardo as `bardo:go/<place>`, a tour as `bardo:tour/<tour>`. Anything else must be an `https://` address.
 - Add a new page to `GUIDE_PAGES` in `crates/app/src/guide.rs`, which embeds it in the app. The tests in that file fail on a missing translation, a different section or a broken link.

@@ -17,7 +17,8 @@ pub mod youtube_stats;
 
 pub use claude::ClaudeTextGenerator;
 pub use elevenlabs::{
-    ElevenLabsAlignment, ElevenLabsMusic, ElevenLabsPreviews, ElevenLabsSpeech, ElevenLabsVoices,
+    ElevenLabsAlignment, ElevenLabsMusic, ElevenLabsPreviews, ElevenLabsSpeech,
+    ElevenLabsTranscription, ElevenLabsVoiceChanger, ElevenLabsVoiceIsolator, ElevenLabsVoices,
 };
 pub use gemini::GeminiImages;
 pub use github_releases::GitHubReleases;

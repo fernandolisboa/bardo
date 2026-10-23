@@ -112,6 +112,16 @@ pub enum Control {
     NarrationPlayer,
     /// Narration: importing a recording.
     NarrationImport,
+    /// Narration: importing a capture, a recording of the user on camera.
+    NarrationCapture,
+    /// Capture: the recording, its voice and the user's confirmation.
+    CaptureSummary,
+    /// Capture: the takes.
+    CaptureTakes,
+    /// Capture: moving the cut between two takes.
+    CaptureCut,
+    /// Capture: removing the capture.
+    CaptureRemove,
     /// Scenes: planning them and drawing the missing images.
     ScenesPlan,
     /// Scenes: All and Pending over the scenes.
@@ -623,14 +633,14 @@ pub const SCRIPT: Tour = {
 };
 
 /// Narration: generating it with the narrator's voice, playing it, when
-/// it is out of date, importing a recording.
+/// it is out of date, importing a recording or a capture.
 pub const NARRATION: Tour = {
     const AT: Stage = Stage::Narration;
     const PAGE: &str = "narration";
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Narration,
-        version: 1,
+        version: 2,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             // A running job, or a narrator whose voice cannot read yet,
@@ -647,6 +657,37 @@ pub const NARRATION: Tour = {
             at_stage(AT, "import", control(Control::NarrationImport))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "import"),
+            at_stage(AT, "capture", control(Control::NarrationCapture))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "capture"),
+        ],
+    }
+};
+
+/// Capture: the recording and its voice, the takes, moving a cut, and
+/// removing the capture.
+pub const CAPTURE: Tour = {
+    const AT: Stage = Stage::Capture;
+    const PAGE: &str = "capture";
+    const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
+    Tour {
+        id: TourId::Capture,
+        version: 1,
+        place: Some(TourPlace::Stage(AT)),
+        steps: &[
+            at_stage(AT, "recording", control(Control::CaptureSummary))
+                .missing(PAGE_PART)
+                .learn(PAGE, "voice"),
+            at_stage(AT, "takes", control(Control::CaptureTakes))
+                .missing(PAGE_PART)
+                .learn(PAGE, "takes"),
+            // A single take has no cut to move.
+            at_stage(AT, "cut", control(Control::CaptureCut))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "cuts"),
+            at_stage(AT, "remove", control(Control::CaptureRemove))
+                .missing(PAGE_PART)
+                .learn(PAGE, "remove"),
         ],
     }
 };
@@ -1295,7 +1336,7 @@ pub const BACKUP: Tour = {
 
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 27] = [
+    pub const ALL: [&'static Tour; 28] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -1303,6 +1344,7 @@ impl Tour {
         &PROJECTS,
         &SCRIPT,
         &NARRATION,
+        &CAPTURE,
         &SCENES,
         &CLIPS,
         &PERSONAS,
@@ -1334,6 +1376,7 @@ impl Tour {
             TourId::Projects => &PROJECTS,
             TourId::Script => &SCRIPT,
             TourId::Narration => &NARRATION,
+            TourId::Capture => &CAPTURE,
             TourId::Scenes => &SCENES,
             TourId::Clips => &CLIPS,
             TourId::Personas => &PERSONAS,
@@ -2388,6 +2431,7 @@ mod tests {
         let stages = [
             (Stage::Script, TourId::Script),
             (Stage::Narration, TourId::Narration),
+            (Stage::Capture, TourId::Capture),
             (Stage::Scenes, TourId::Scenes),
             (Stage::Clips, TourId::Clips),
             (Stage::Edit, TourId::Editor),

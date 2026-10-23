@@ -6,6 +6,7 @@
 
 mod agent_task;
 mod backup;
+mod capture;
 mod channel;
 mod connection;
 mod cost;

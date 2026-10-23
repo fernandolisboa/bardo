@@ -474,6 +474,7 @@ mod tests {
                  DROP TABLE localized_audio; DROP TABLE localized_lane;
                  DROP TABLE localized_scene; DROP TABLE localized_sentence;
                  DROP TABLE localization; DROP TABLE persona_look;
+                 DROP TABLE capture_take; DROP TABLE capture;
                  PRAGMA user_version = 48;",
             )
             .unwrap();

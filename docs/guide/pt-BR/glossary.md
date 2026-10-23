@@ -58,6 +58,10 @@ As palavras que o Bardo usa, em termos simples.
 
 **Tempo das palavras**: quando cada palavra da narração é falada. É o que conduz as legendas, a palavra destacada e onde os cortes se encaixam.
 
+**Captura**: uma gravação sua lendo o roteiro diante da câmera. A fala vira a narração, na voz da persona ou na sua, e ela é dividida em tomadas.
+
+**Tomada**: um trecho de uma captura, de 4 a 30 segundos de fim de frase a fim de frase, que vira um clipe interpretado.
+
 **Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
 
 **Cena**: um trecho da narração com uma imagem e, se quiser, um clipe.

@@ -516,6 +516,14 @@ pub enum CostPurpose {
     /// Claude writing a persona look's prompt, and the image provider
     /// drawing it (#188).
     PersonaLook,
+    /// Speech-to-text checking that a capture's speech follows the script
+    /// (#189).
+    ScriptCheck,
+    /// A capture's speech converted into the persona's voice (#189).
+    VoiceChange,
+    /// A capture's speech cleaned of every other sound, in the user's own
+    /// voice (#189).
+    VoiceIsolation,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -566,7 +574,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 18] = [
+    pub const ALL: [CostPurpose; 21] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -585,6 +593,9 @@ impl CostPurpose {
         CostPurpose::ThumbnailImage,
         CostPurpose::Chapters,
         CostPurpose::PersonaLook,
+        CostPurpose::ScriptCheck,
+        CostPurpose::VoiceChange,
+        CostPurpose::VoiceIsolation,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -608,6 +619,9 @@ impl CostPurpose {
             CostPurpose::ThumbnailImage => "thumbnail_image",
             CostPurpose::Chapters => "chapters",
             CostPurpose::PersonaLook => "persona_look",
+            CostPurpose::ScriptCheck => "script_check",
+            CostPurpose::VoiceChange => "voice_change",
+            CostPurpose::VoiceIsolation => "voice_isolation",
         }
     }
 }

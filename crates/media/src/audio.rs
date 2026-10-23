@@ -3,6 +3,7 @@
 //! file is still recognized. MP3 and uncompressed WAV are read without
 //! ffmpeg; other formats wait for it (ADR-0001).
 
+use std::ops::Range;
 use std::time::Duration;
 
 use crate::mp3;
@@ -92,7 +93,18 @@ pub fn probe(bytes: &[u8]) -> Result<AudioInfo, ProbeError> {
 const WAV_FORMATS: [u16; 2] = [1, 3];
 const WAV_EXTENSIBLE: u16 = 0xFFFE;
 
-fn wav_duration(bytes: &[u8]) -> Result<Duration, ProbeError> {
+/// Where a WAV file keeps its format and its samples.
+struct WavLayout {
+    /// The whole `fmt ` chunk, header included.
+    format: Range<usize>,
+    rate: u32,
+    /// Bytes per sample frame (every channel).
+    align: u16,
+    /// The samples that are there.
+    data: Range<usize>,
+}
+
+fn wav_layout(bytes: &[u8]) -> Result<WavLayout, ProbeError> {
     let u16_at = |at: usize| {
         bytes
             .get(at..at.checked_add(2)?)
@@ -104,7 +116,7 @@ fn wav_duration(bytes: &[u8]) -> Result<Duration, ProbeError> {
             .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     };
     let mut at: usize = 12;
-    let mut block: Option<(u32, u16)> = None;
+    let mut block: Option<(Range<usize>, u32, u16)> = None;
     while let (Some(id), Some(size)) = (
         bytes.get(at..at.saturating_add(4)),
         u32_at(at.saturating_add(4)),
@@ -122,20 +134,26 @@ fn wav_duration(bytes: &[u8]) -> Result<Duration, ProbeError> {
                 if !WAV_FORMATS.contains(&format) || rate == 0 || align == 0 {
                     return Err(ProbeError::UnsupportedFormat);
                 }
-                block = Some((rate, align));
+                let end = body
+                    .saturating_add(size as usize)
+                    .min(bytes.len());
+                block = Some((at..end, rate, align));
             }
             b"data" => {
-                let (rate, align) = block.ok_or(ProbeError::UnsupportedFormat)?;
+                let (format, rate, align) = block.ok_or(ProbeError::UnsupportedFormat)?;
                 // Recorders that stream may leave the size unset or too big;
                 // the bytes that are there are what plays.
                 let len = (size as usize).min(bytes.len() - body);
-                let samples = (len / usize::from(align)) as u64;
-                if samples == 0 {
+                let len = len - len % usize::from(align);
+                if len == 0 {
                     return Err(ProbeError::NoAudio);
                 }
-                return Ok(Duration::from_nanos(
-                    samples * 1_000_000_000 / u64::from(rate),
-                ));
+                return Ok(WavLayout {
+                    format,
+                    rate,
+                    align,
+                    data: body..body + len,
+                });
             }
             _ => {}
         }
@@ -144,6 +162,50 @@ fn wav_duration(bytes: &[u8]) -> Result<Duration, ProbeError> {
         at = body.saturating_add(size).saturating_add(size & 1);
     }
     Err(ProbeError::NoAudio)
+}
+
+fn wav_duration(bytes: &[u8]) -> Result<Duration, ProbeError> {
+    let layout = wav_layout(bytes)?;
+    let samples = (layout.data.len() / usize::from(layout.align)) as u64;
+    Ok(Duration::from_nanos(
+        samples * 1_000_000_000 / u64::from(layout.rate),
+    ))
+}
+
+/// The stretch `span` of a WAV file, as a WAV file of the same format:
+/// what a provider that takes a limited length at once is sent in parts.
+/// Cut on whole sample frames; a span past the end stops at it.
+pub fn wav_slice(bytes: &[u8], span: Range<Duration>) -> Result<Vec<u8>, ProbeError> {
+    if !(bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE")) {
+        return Err(ProbeError::UnsupportedFormat);
+    }
+    let layout = wav_layout(bytes)?;
+    let align = usize::from(layout.align);
+    let frames = layout.data.len() / align;
+    let frame_at = |at: Duration| {
+        let frame = at.as_nanos() * u128::from(layout.rate) / 1_000_000_000;
+        usize::try_from(frame).unwrap_or(usize::MAX).min(frames)
+    };
+    let (first, last) = (frame_at(span.start), frame_at(span.end));
+    let samples =
+        &bytes[layout.data.start + first * align..layout.data.start + last.max(first) * align];
+    let format = &bytes[layout.format.clone()];
+    let mut wav = Vec::with_capacity(12 + format.len() + 8 + samples.len() + 1);
+    wav.extend_from_slice(b"RIFF");
+    let riff = 4 + format.len() + (format.len() & 1) + 8 + samples.len() + (samples.len() & 1);
+    wav.extend_from_slice(&(riff as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(format);
+    if format.len() & 1 == 1 {
+        wav.push(0);
+    }
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+    wav.extend_from_slice(samples);
+    if samples.len() & 1 == 1 {
+        wav.push(0);
+    }
+    Ok(wav)
 }
 
 #[cfg(test)]
@@ -254,6 +316,45 @@ pub(crate) mod tests {
         let mut wav = silent_wav(1);
         wav[40..44].copy_from_slice(&u32::MAX.to_le_bytes()); // JUNK size
         assert_eq!(probe(&wav), Err(ProbeError::NoAudio));
+    }
+
+    #[test]
+    fn a_wav_is_sliced_on_sample_frames_keeping_its_format() {
+        let mut wav = silent_wav(3);
+        // Mark each second so the slice can be checked: 8,000 frames of
+        // two bytes a second.
+        let data = wav.len() - 48_000;
+        for second in 0..3u8 {
+            let at = data + usize::from(second) * 16_000;
+            wav[at..at + 16_000].fill(second + 1);
+        }
+        let ms = Duration::from_millis;
+        let middle = wav_slice(&wav, ms(1_000)..ms(2_000)).unwrap();
+        let info = probe(&middle).unwrap();
+        assert_eq!(info.format, AudioFormat::Wav);
+        assert_eq!(info.duration, ms(1_000));
+        assert!(middle.ends_with(&[2u8; 16_000]));
+        assert_eq!(&middle[..4], b"RIFF");
+        assert_eq!(
+            u32::from_le_bytes(middle[4..8].try_into().unwrap()) as usize,
+            middle.len() - 8
+        );
+
+        // Past the end stops at it; an empty span is an empty file.
+        assert_eq!(
+            probe(&wav_slice(&wav, ms(2_500)..ms(9_000)).unwrap())
+                .unwrap()
+                .duration,
+            ms(500)
+        );
+        assert_eq!(
+            probe(&wav_slice(&wav, ms(500)..ms(500)).unwrap()),
+            Err(ProbeError::NoAudio)
+        );
+        assert_eq!(
+            wav_slice(TONE, ms(0)..ms(100)),
+            Err(ProbeError::UnsupportedFormat)
+        );
     }
 
     #[test]

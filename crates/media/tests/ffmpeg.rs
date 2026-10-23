@@ -1405,3 +1405,36 @@ fn a_picture_too_large_is_kept_as_a_jpeg_of_the_same_size() {
     assert!(!tiny.exists());
     assert!(!dir.join("tiny.partial.jpg").exists());
 }
+
+#[test]
+fn a_recordings_sound_is_extracted_as_mono_wav_at_cd_rate() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("extract-sound");
+    let sound = dir.join("capture.audio.wav");
+    let recorder = Recorder::default();
+    ffmpeg
+        .extract_sound(&fixture("clip-a.mp4"), &sound, &recorder)
+        .unwrap();
+    let bytes = std::fs::read(&sound).unwrap();
+    let info = bardo_media::audio::probe(&bytes).unwrap();
+    assert_eq!(info.format, bardo_media::AudioFormat::Wav);
+    let clip = ffmpeg.probe(&fixture("clip-a.mp4")).unwrap();
+    assert!(close(info.duration, clip.duration.as_secs_f64(), 0.05));
+    let probed = ffmpeg.probe(&sound).unwrap();
+    let audio = probed.audio.unwrap();
+    assert_eq!(
+        (audio.codec.as_str(), audio.sample_rate, audio.channels),
+        ("pcm_s16le", bardo_media::ffmpeg::SOUND_RATE, 1)
+    );
+    assert!(probed.video.is_none(), "no picture goes with it");
+    assert!(!dir.join("capture.audio.partial.wav").exists());
+
+    // A file without sound is refused before ffmpeg writes anything.
+    let silent = dir.join("still.wav");
+    assert!(
+        ffmpeg
+            .extract_sound(&fixture("still-640x360.png"), &silent, &())
+            .is_err()
+    );
+    assert!(!silent.exists());
+}

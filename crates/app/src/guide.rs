@@ -45,6 +45,7 @@ pub(crate) const GUIDE_PAGES: &[PageSource] = &[
     page!("projects"),
     page!("script"),
     page!("narration"),
+    page!("capture"),
     page!("scenes"),
     page!("clips"),
     page!("personas"),

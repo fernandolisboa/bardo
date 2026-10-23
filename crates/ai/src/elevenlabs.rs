@@ -18,6 +18,14 @@
 //! character of the text. ElevenLabs bills it like speech-to-text, per
 //! hour of audio, and says nothing of it in the answer.
 //!
+//! Captures (#189): speech-to-text (`POST /v1/speech-to-text`, Scribe)
+//! checks a recording follows its script; the Voice Changer
+//! (`POST /v1/voice-changer/{voice_id}`) speaks it again in a persona's
+//! voice, keeping its timing; the Voice Isolator (`POST /v1/audio-isolation`)
+//! keeps only the user's own voice. Each takes the recording as a form and
+//! the last two answer with audio bytes. Speech-to-text is billed per hour
+//! of audio, the other two per minute.
+//!
 //! Music (`POST /v1/music`, ADR-0015): an instrumental track composed from
 //! the video's music prompt, as long as asked, answered as MP3 bytes.
 //! ElevenLabs opens the Music API to paid plans only, and bills it by the
@@ -26,9 +34,11 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    AlignedSpeech, Alignment, AlignmentRequest, ApiKey, CharTiming, ComposedMusic, MusicGenerator,
-    MusicRequest, Provider, ProviderFailure, ProviderFailureKind, Speech, SpeechAligner,
-    SpeechRequest, SpeechSynthesizer, Voice, VoiceCategory, VoiceLibrary, VoicePreviews, VoiceRef,
+    AlignedSpeech, Alignment, AlignmentRequest, ApiKey, ChangedSpeech, CharTiming, ComposedMusic,
+    GenerationPresets, HeardWord, MusicGenerator, MusicRequest, Provider, ProviderFailure,
+    ProviderFailureKind, Speech, SpeechAligner, SpeechRequest, SpeechSynthesizer,
+    SpeechTranscriber, Transcript, TranscriptionRequest, Voice, VoiceCategory, VoiceChangeRequest,
+    VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceRef,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -462,11 +472,7 @@ pub const MAX_ALIGNMENT_BYTES: u64 = 1_000_000_000 - 1;
 
 /// The request that aligns `request.audio` with `request.text`.
 pub fn alignment_request(key: &ApiKey, request: &AlignmentRequest<'_>) -> HttpRequest {
-    let content_type = match request.file_name.rsplit_once('.') {
-        Some((_, extension)) if extension.eq_ignore_ascii_case("wav") => "audio/wav",
-        Some((_, extension)) if extension.eq_ignore_ascii_case("mp3") => "audio/mpeg",
-        _ => "application/octet-stream",
-    };
+    let content_type = audio_type(request.file_name);
     HttpRequest::post_multipart(
         ALIGNMENT_URL,
         &[
@@ -583,26 +589,10 @@ impl<T: Transport> SpeechAligner for ElevenLabsAlignment<T> {
             )
             .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
         if !(200..=299).contains(&response.status) {
-            return Err(alignment_failure(&response));
+            return Err(form_failure(&response));
         }
         parse_alignment(&response)
     }
-}
-
-/// A refused alignment. A 400 or 422 means ElevenLabs could not use the
-/// file or text (its message says which), not that the key is wrong.
-fn alignment_failure(response: &HttpResponse) -> ProviderFailure {
-    if matches!(response.status, 400 | 422) {
-        let body: Value = serde_json::from_str(&response.body).unwrap_or_default();
-        let detail = body["detail"]["message"]
-            .as_str()
-            .or_else(|| body["detail"][0]["msg"].as_str())
-            .or_else(|| body["detail"].as_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("HTTP {}", response.status));
-        return unexpected(format!("the recording was not accepted: {detail}"));
-    }
-    failure(Provider::ElevenLabs, response)
 }
 
 pub const MUSIC_URL: &str = "https://api.elevenlabs.io/v1/music";
@@ -722,5 +712,426 @@ impl<T: Transport> MusicGenerator for ElevenLabsMusic<T> {
             (self.sleep)(self.backoff.delay(retry, &response));
             retry += 1;
         }
+    }
+}
+
+/// The media type a recording's file name says it is, for forms.
+fn audio_type(file_name: &str) -> &'static str {
+    match file_name.rsplit_once('.') {
+        Some((_, extension)) if extension.eq_ignore_ascii_case("wav") => "audio/wav",
+        Some((_, extension)) if extension.eq_ignore_ascii_case("mp3") => "audio/mpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+/// A refused form: a 400 or 422 means ElevenLabs could not use the file
+/// (its message says why), not that the key is wrong.
+fn form_failure(response: &HttpResponse) -> ProviderFailure {
+    if matches!(response.status, 400 | 422) {
+        let body: Value = serde_json::from_str(&response.body).unwrap_or_default();
+        let detail = body["detail"]["message"]
+            .as_str()
+            .or_else(|| body["detail"][0]["msg"].as_str())
+            .or_else(|| body["detail"].as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("HTTP {}", response.status));
+        return unexpected(format!("the recording was not accepted: {detail}"));
+    }
+    failure(Provider::ElevenLabs, response)
+}
+
+/// Sends `call` and keeps its answer as audio bytes, retrying as the
+/// backoff says on a rate limit or an outage.
+fn audio_answer<T: Transport>(
+    transport: &T,
+    backoff: &Backoff,
+    sleep: &Sleeper,
+    call: &HttpRequest,
+    max_bytes: u64,
+) -> Result<Vec<u8>, ProviderFailure> {
+    let mut retry = 0;
+    loop {
+        let answer = transport
+            .send_for_bytes(call, max_bytes)
+            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        if (200..=299).contains(&answer.status) {
+            if answer.bytes.is_empty() {
+                return Err(unexpected("the answer has no audio"));
+            }
+            return Ok(answer.bytes);
+        }
+        // An error answer is a short JSON text.
+        let response = HttpResponse::new(answer.status, String::from_utf8_lossy(&answer.bytes));
+        if retry >= backoff.retries || !Backoff::is_retryable(&response) {
+            return Err(form_failure(&response));
+        }
+        (sleep)(backoff.delay(retry, &response));
+        retry += 1;
+    }
+}
+
+pub const TRANSCRIPTION_URL: &str = "https://api.elevenlabs.io/v1/speech-to-text";
+/// Scribe v2: word timestamps in every language Bardo writes, billed per
+/// hour of audio.
+pub const TRANSCRIPTION_MODEL: &str = "scribe_v2";
+
+/// The request that transcribes `request.audio`, word by word, with no
+/// sound events or speakers.
+pub fn transcription_request(key: &ApiKey, request: &TranscriptionRequest<'_>) -> HttpRequest {
+    let mut parts = vec![
+        FormPart::Text {
+            name: "model_id",
+            value: TRANSCRIPTION_MODEL,
+        },
+        FormPart::File {
+            name: "file",
+            file_name: request.file_name,
+            content_type: audio_type(request.file_name),
+            bytes: request.audio,
+        },
+        FormPart::Text {
+            name: "timestamps_granularity",
+            value: "word",
+        },
+        FormPart::Text {
+            name: "tag_audio_events",
+            value: "false",
+        },
+        FormPart::Text {
+            name: "diarize",
+            value: "false",
+        },
+    ];
+    if let Some(language) = request.language {
+        parts.push(FormPart::Text {
+            name: "language_code",
+            value: language,
+        });
+    }
+    HttpRequest::post_multipart(TRANSCRIPTION_URL, &parts).header("xi-api-key", key.expose())
+}
+
+/// Reads a successful transcription: its words, without the spacing and
+/// sound events between them.
+pub fn parse_transcription(response: &HttpResponse) -> Result<Transcript, ProviderFailure> {
+    let body: Value = serde_json::from_str(&response.body)
+        .map_err(|error| unexpected(format!("unreadable transcript: {error}")))?;
+    let entries = body["words"]
+        .as_array()
+        .ok_or_else(|| unexpected("the answer has no words"))?;
+    let seconds = |value: &Value| {
+        value
+            .as_f64()
+            .filter(|s| s.is_finite() && *s >= 0.0)
+            .map(Duration::from_secs_f64)
+            .ok_or_else(|| unexpected("a timing is not a time"))
+    };
+    let words = entries
+        .iter()
+        .filter(|entry| entry["type"].as_str().unwrap_or("word") == "word")
+        .filter_map(|entry| {
+            let text = entry["text"].as_str()?.trim();
+            (!text.is_empty()).then(|| (text.to_owned(), entry))
+        })
+        .map(|(text, entry)| {
+            let start = seconds(&entry["start"])?;
+            Ok(HeardWord {
+                text,
+                start,
+                end: seconds(&entry["end"])?.max(start),
+            })
+        })
+        .collect::<Result<_, ProviderFailure>>()?;
+    Ok(Transcript {
+        words,
+        model: TRANSCRIPTION_MODEL.to_owned(),
+    })
+}
+
+/// Transcribes recordings with ElevenLabs over HTTPS.
+pub struct ElevenLabsTranscription<T = UreqTransport> {
+    transport: T,
+    backoff: Backoff,
+    sleep: Sleeper,
+}
+
+impl ElevenLabsTranscription {
+    /// Uploading fifteen minutes of WAV over a slow connection takes a
+    /// while; the transcription itself is quick.
+    pub const TIMEOUT: Duration = Duration::from_secs(30 * 60);
+    /// The words of the longest capture, with headroom.
+    pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
+
+    pub fn new() -> Self {
+        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+    }
+}
+
+impl Default for ElevenLabsTranscription {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsTranscription<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self {
+            transport,
+            backoff: Backoff::default(),
+            sleep: thread_sleeper(),
+        }
+    }
+
+    /// Replaces how the adapter waits between retries (tests record the
+    /// waits instead).
+    pub fn with_sleeper(mut self, sleep: Sleeper) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> SpeechTranscriber for ElevenLabsTranscription<T> {
+    fn transcribe(
+        &self,
+        key: &ApiKey,
+        request: &TranscriptionRequest<'_>,
+    ) -> Result<Transcript, ProviderFailure> {
+        let response = self
+            .backoff
+            .send(
+                &self.transport,
+                &transcription_request(key, request),
+                &self.sleep,
+            )
+            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        if !(200..=299).contains(&response.status) {
+            return Err(form_failure(&response));
+        }
+        parse_transcription(&response)
+    }
+}
+
+pub const VOICE_CHANGER_URL: &str = "https://api.elevenlabs.io/v1/voice-changer";
+/// The speech-to-speech model ElevenLabs recommends for every language,
+/// English included.
+pub const VOICE_CHANGER_MODEL: &str = "eleven_multilingual_sts_v2";
+/// The longest speech the voice changer takes at once is 5 minutes; parts
+/// stop short of it.
+pub const VOICE_CHANGER_MAX: Duration = Duration::from_secs(290);
+/// Five minutes of MP3 at 128 kbit/s is under 5 MB.
+pub const MAX_CHANGED_BYTES: u64 = 24 * 1024 * 1024;
+
+/// The request that speaks `request.audio` again in `voice`, keeping its
+/// timing: the persona's presets go with it, but never its speed, which
+/// would move the words off the performer's lips. ElevenLabs removes the
+/// background in the same call.
+pub fn voice_change_request(
+    key: &ApiKey,
+    voice: &VoiceRef,
+    presets: GenerationPresets,
+    request: &VoiceChangeRequest<'_>,
+) -> HttpRequest {
+    let ratio = |percent: u8| f64::from(percent) / 100.0;
+    let settings = json!({
+        "stability": ratio(presets.stability),
+        "similarity_boost": ratio(presets.similarity),
+        "style": ratio(presets.style),
+        "use_speaker_boost": true,
+    })
+    .to_string();
+    HttpRequest::post_multipart(
+        format!(
+            "{VOICE_CHANGER_URL}/{}?output_format={OUTPUT_FORMAT}",
+            voice.id()
+        ),
+        &[
+            FormPart::File {
+                name: "audio",
+                file_name: request.file_name,
+                content_type: audio_type(request.file_name),
+                bytes: request.audio,
+            },
+            FormPart::Text {
+                name: "model_id",
+                value: VOICE_CHANGER_MODEL,
+            },
+            FormPart::Text {
+                name: "voice_settings",
+                value: &settings,
+            },
+            FormPart::Text {
+                name: "remove_background_noise",
+                value: "true",
+            },
+        ],
+    )
+    .header("xi-api-key", key.expose())
+}
+
+/// Converts speech into a persona's voice with ElevenLabs over HTTPS.
+pub struct ElevenLabsVoiceChanger<T = UreqTransport> {
+    transport: T,
+    backoff: Backoff,
+    sleep: Sleeper,
+}
+
+impl ElevenLabsVoiceChanger {
+    /// Uploading a part and converting it takes the provider a minute or
+    /// two.
+    pub const TIMEOUT: Duration = Duration::from_secs(600);
+
+    pub fn new() -> Self {
+        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_CHANGED_BYTES))
+    }
+}
+
+impl Default for ElevenLabsVoiceChanger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsVoiceChanger<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self {
+            transport,
+            backoff: Backoff::default(),
+            sleep: thread_sleeper(),
+        }
+    }
+
+    /// Replaces how the adapter waits between retries (tests record the
+    /// waits instead).
+    pub fn with_sleeper(mut self, sleep: Sleeper) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> VoiceChanger for ElevenLabsVoiceChanger<T> {
+    fn max_length(&self) -> Duration {
+        VOICE_CHANGER_MAX
+    }
+
+    fn change(
+        &self,
+        key: &ApiKey,
+        voice: &VoiceRef,
+        presets: GenerationPresets,
+        request: &VoiceChangeRequest<'_>,
+    ) -> Result<ChangedSpeech, ProviderFailure> {
+        if voice.provider() != Provider::ElevenLabs {
+            return Err(unexpected(format!("{voice} is not an ElevenLabs voice")));
+        }
+        let audio = audio_answer(
+            &self.transport,
+            &self.backoff,
+            &self.sleep,
+            &voice_change_request(key, voice, presets, request),
+            MAX_CHANGED_BYTES,
+        )?;
+        Ok(ChangedSpeech {
+            audio,
+            model: VOICE_CHANGER_MODEL.to_owned(),
+        })
+    }
+}
+
+pub const ISOLATION_URL: &str = "https://api.elevenlabs.io/v1/audio-isolation";
+/// ElevenLabs names no model for the voice isolator; its costs are kept
+/// under this name.
+pub const ISOLATION_MODEL: &str = "audio_isolation";
+/// The voice of the longest capture, with headroom: fifteen minutes of
+/// WAV at 48 kHz is under 90 MB.
+pub const MAX_ISOLATED_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The request that keeps only the voice of `request.audio`.
+pub fn isolation_request(key: &ApiKey, request: &VoiceChangeRequest<'_>) -> HttpRequest {
+    HttpRequest::post_multipart(
+        ISOLATION_URL,
+        &[
+            FormPart::File {
+                name: "audio",
+                file_name: request.file_name,
+                content_type: audio_type(request.file_name),
+                bytes: request.audio,
+            },
+            FormPart::Text {
+                name: "file_format",
+                value: "other",
+            },
+        ],
+    )
+    .header("xi-api-key", key.expose())
+}
+
+/// Keeps only the voice of a recording with ElevenLabs over HTTPS.
+pub struct ElevenLabsVoiceIsolator<T = UreqTransport> {
+    transport: T,
+    backoff: Backoff,
+    sleep: Sleeper,
+}
+
+impl ElevenLabsVoiceIsolator {
+    /// Uploading fifteen minutes of WAV and cleaning it takes a while.
+    pub const TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+    pub fn new() -> Self {
+        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_ISOLATED_BYTES))
+    }
+}
+
+impl Default for ElevenLabsVoiceIsolator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Transport> ElevenLabsVoiceIsolator<T> {
+    pub fn with_transport(transport: T) -> Self {
+        Self {
+            transport,
+            backoff: Backoff::default(),
+            sleep: thread_sleeper(),
+        }
+    }
+
+    /// Replaces how the adapter waits between retries (tests record the
+    /// waits instead).
+    pub fn with_sleeper(mut self, sleep: Sleeper) -> Self {
+        self.sleep = sleep;
+        self
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+}
+
+impl<T: Transport> VoiceIsolator for ElevenLabsVoiceIsolator<T> {
+    fn isolate(
+        &self,
+        key: &ApiKey,
+        request: &VoiceChangeRequest<'_>,
+    ) -> Result<ChangedSpeech, ProviderFailure> {
+        let audio = audio_answer(
+            &self.transport,
+            &self.backoff,
+            &self.sleep,
+            &isolation_request(key, request),
+            MAX_ISOLATED_BYTES,
+        )?;
+        Ok(ChangedSpeech {
+            audio,
+            model: ISOLATION_MODEL.to_owned(),
+        })
     }
 }

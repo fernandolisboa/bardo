@@ -31,3 +31,8 @@ When the script is saved or replaced after the narration was made, the narration
 ## Importing a recording
 
 Recorded the script yourself? **Import recording** takes an MP3 or uncompressed WAV file of up to 500 MB. Bardo shows its name and length and what timing it costs, and **Use this recording** has ElevenLabs time its words against the current script, billed per hour of audio. It replaces the current narration once its words are timed. Read the script as written, so the timing matches.
+
+<a id="capture"></a>
+## Importing a capture
+
+Recorded yourself reading the script on camera? **Import capture** takes the video: its speech becomes the narration, in the persona's voice or your own, and the recording is split into takes at the [Capture](bardo:go/projects/capture) stage. See [Performance capture](capture.md).

@@ -263,6 +263,7 @@ theme_ranking = "Ranqueamento de temas"
 script_generation = "Geração de roteiro"
 narration = "Narração"
 narration_import = "Importação de narração"
+capture = "Importação de captura"
 scene_plan = "Plano de cenas"
 scene_images = "Imagens das cenas"
 scene_clips = "Clipes das cenas"
@@ -306,6 +307,7 @@ files = "Um arquivo não pôde ser lido ou gravado. Confira se a pasta existe e 
 cut_short = "O Bardo fechou antes de terminar. Comece de novo."
 restored = "Isto estava em andamento quando o backup foi feito, então o Bardo não retomou depois da restauração. Confira na rede: se o post não estiver lá, tente de novo."
 checksum = "O instalador não confere com o checksum publicado na versão, então o Bardo não o guardou. Tente de novo; se acontecer outra vez, relate o problema."
+off_script = "A gravação não segue o roteiro de perto o bastante. Grave de novo lendo o roteiro atual e importe."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -597,6 +599,53 @@ recording_unreadable = "Não foi possível ler o arquivo. Confira se ele ainda e
 recording_unsupported = "O Bardo importa gravações em MP3 e WAV sem compressão. Converta o arquivo para um deles e importe de novo."
 recording_empty = "O arquivo não tem áudio."
 recording_too_large = "O arquivo passa de 500 MB. Exporte em MP3 e importe de novo."
+
+[capture]
+import = "Importar captura"
+import_dialog = "Importar captura"
+import_hint = "Gravou você mesmo lendo o roteiro diante da câmera? Importe o MP4 ou MOV. A fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas."
+chosen = "{file}: {size}, {fps} fps, {length}."
+voice = "Voz"
+voice_persona = "Voz de {persona} ({voice})"
+voice_own = "Minha própria voz, limpa de música e ruído do ambiente"
+voice_own_short = "Minha própria voz"
+confirm = "Esta gravação mostra só a mim."
+steps = "A ElevenLabs confere se a fala segue o roteiro antes de dar a voz, depois marca o tempo das palavras. Só o som sai deste computador."
+use = "Importar esta captura"
+running = "Conferindo sua gravação com o roteiro…"
+replaces_note = "Gerar ou importar outra narração remove a captura."
+source = "Capturada"
+summary = "{file} · {size}, {fps} fps, {length}"
+confirmed = "Você confirmou: “{text}”"
+coverage = "Diz {percent}% do roteiro na ordem."
+takes = "Tomadas"
+takes_hint = "Cada tomada vira um clipe interpretado, de 4 a 30 segundos. As tomadas são cortadas em fins de frase ou pausas; mova um corte para o anterior ou o seguinte."
+take = "Tomada {n}"
+take_span = "{start} a {end} · {length}"
+take_ok = "Pronta"
+take_too_long = "Passa de 30 segundos sem pausa para cortar. Grave esta fala de novo com uma pausa."
+take_too_short = "Menos de 4 segundos. Mova um corte para aumentá-la."
+cut_earlier = "Cortar antes"
+cut_later = "Cortar depois"
+stale = "O roteiro mudou depois desta captura. Grave de novo com o roteiro atual e importe."
+remove = "Remover captura"
+remove_hint = "Remove a gravação e suas tomadas do projeto. A narração fica."
+
+[capture.error]
+no_persona = "Nenhuma persona dá voz a este projeto: escolha um narrador para ele, ou uma persona padrão para o canal. Ou use a sua própria voz."
+not_confirmed = "Confirme que a gravação mostra só você para importá-la."
+missing = "Este projeto não tem captura."
+no_cut_point = "Não há fim de frase ou pausa para onde mover o corte nesse sentido."
+not_saved = "Não foi possível salvar a captura. Tente de novo."
+
+[capture.problem]
+not_mp4_or_mov = "O Bardo importa capturas em MP4 ou MOV. Exporte a gravação em um deles."
+no_video = "O arquivo não tem imagem que o Bardo consiga ler. Importe um vídeo seu lendo o roteiro."
+no_audio = "O arquivo não tem som. Grave de novo com o microfone ligado."
+too_short = "A gravação tem menos de 4 segundos."
+too_long = "A gravação passa de 15 minutos. Divida o roteiro em vídeos mais curtos."
+frame_rate = "Grave a 24 até 60 quadros por segundo."
+too_small = "Grave em 720p ou mais."
 
 [scenes]
 title = "Cenas, imagens e clipes"
@@ -1369,6 +1418,8 @@ terminal_dark = "Terminal · escuro"
 budgets_used = "{percent}% dos orçamentos do mês"
 
 [stage.note]
+takes = "{n} tomadas"
+takes_flagged = "{n} para corrigir"
 render_ready = "Pronto para revisar"
 rendered = "Arquivos: {n}"
 render_outdated = "Desatualizados: {n}"
@@ -1440,6 +1491,7 @@ settings = "Configurações"
 [stage.name]
 script = "Roteiro"
 narration = "Narração"
+capture = "Captura"
 scenes = "Cenas"
 clips = "Clipes"
 edit = "Edição"
@@ -1449,6 +1501,7 @@ publish = "Publicação"
 [stage.after]
 script = "Depois do roteiro"
 narration = "Depois da narração"
+capture = "Depois da captura"
 scenes = "Depois das cenas"
 clips = "Depois dos clipes"
 edit = "Depois da edição"
@@ -2430,6 +2483,29 @@ body = "Quando o roteiro muda depois que a narração foi feita, ela é marcada 
 [tour.narration.import]
 title = "Importe uma gravação"
 body = "Gravou o roteiro você mesmo? Importe em MP3 ou WAV, e a ElevenLabs marca o tempo de cada palavra conforme o roteiro."
+
+[tour.narration.capture]
+title = "Importe uma captura"
+body = "Gravou você mesmo lendo o roteiro diante da câmera? Importe o vídeo: a fala vira a narração, na voz da persona ou na sua, e a gravação é dividida em tomadas."
+
+[tour.capture]
+name = "Tour da captura"
+
+[tour.capture.recording]
+title = "Sua gravação"
+body = "A gravação que você importou, a voz que a fala recebeu e a frase que você confirmou. A fala dela é a narração do projeto."
+
+[tour.capture.takes]
+title = "As tomadas"
+body = "A gravação é dividida em tomadas de 4 a 30 segundos em fins de frase e pausas. Cada uma vira um clipe interpretado; uma tomada que não pode virar diz por quê."
+
+[tour.capture.cut]
+title = "Mova um corte"
+body = "Cortar antes ou Cortar depois move o corte entre duas tomadas para o fim de frase ou a pausa anterior ou seguinte."
+
+[tour.capture.remove]
+title = "Remova"
+body = "Remover a captura tira a gravação e suas tomadas do projeto. A narração feita com ela fica."
 
 [tour.scenes]
 name = "Tour das Cenas"

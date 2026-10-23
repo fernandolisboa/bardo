@@ -1963,6 +1963,10 @@ pub(crate) mod testing {
         pub(crate) thumbnails: Mutex<Vec<(ThumbnailSpec, PathBuf)>>,
         /// The limits pictures were fitted within.
         pub(crate) fitted: Mutex<Vec<u64>>,
+        /// What extracting a recording's sound writes; it fails without.
+        pub(crate) sound: Mutex<Option<Vec<u8>>>,
+        /// The recordings whose sound was extracted.
+        pub(crate) extracted: Mutex<Vec<PathBuf>>,
     }
 
     impl FakeMedia {
@@ -2217,6 +2221,27 @@ pub(crate) mod testing {
             jpeg.extend((height as u16).to_be_bytes());
             jpeg.extend((width as u16).to_be_bytes());
             std::fs::write(destination, jpeg)?;
+            Ok(())
+        }
+
+        fn extract_sound(
+            &self,
+            source: &Path,
+            destination: &Path,
+            monitor: &dyn Monitor,
+        ) -> Result<(), MediaError> {
+            self.check(source)?;
+            if monitor.should_stop() {
+                return Err(MediaError::Cancelled);
+            }
+            let sound = self
+                .sound
+                .lock()
+                .unwrap()
+                .clone()
+                .ok_or_else(|| MediaError::Parse("the file has no audio stream".into()))?;
+            self.extracted.lock().unwrap().push(source.to_owned());
+            std::fs::write(destination, sound)?;
             Ok(())
         }
     }

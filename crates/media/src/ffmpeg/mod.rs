@@ -15,6 +15,7 @@ mod probe;
 mod process;
 mod proxy;
 mod render;
+mod sound;
 mod thumbnail;
 mod waveform;
 
@@ -33,6 +34,7 @@ pub use render::{
     AudioClip, AudioTrack, ClipSource, Dip, Duck, Framing, Loudness, LoudnessTarget, Motion,
     Output, RenderPlan, Transition, VideoClip, View,
 };
+pub use sound::SOUND_RATE;
 pub use thumbnail::ThumbnailSpec;
 pub use waveform::Waveform;
 

@@ -44,6 +44,7 @@ mod appearance;
 mod backup;
 mod budget;
 mod caption;
+mod capture;
 mod channel;
 mod chapters;
 mod clip;
@@ -116,6 +117,13 @@ pub use budget::{Budget, BudgetLevel, Month};
 pub use caption::{
     Caption, CaptionHighlight, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS,
     SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_lines, caption_text,
+};
+pub use capture::{
+    BoundaryError, BoundaryMove, CAPTURE_EXTENSIONS, Capture, CaptureConfirmation, CaptureId,
+    CaptureProblem, CaptureRepository, CaptureVideo, CaptureVoice, CutKind, HeardWord,
+    InvalidTakes, MAX_CAPTURE, MAX_CAPTURE_FPS, MAX_TAKE, MIN_CAPTURE, MIN_CAPTURE_FPS,
+    MIN_CAPTURE_SIDE, MIN_SCRIPT_COVERAGE, MIN_TAKE, MIN_TAKE_PAUSE, RecordingFacts, TAKE_PADDING,
+    Take, TakeFlag, TakeSource, Takes, audio_parts, script_coverage,
 };
 pub use channel::{
     Channel, ChannelDetails, ChannelDraft, ChannelFieldError, ChannelId, ChannelRepository,
@@ -280,8 +288,9 @@ pub use script::{
     ScriptText,
 };
 pub use speech::{
-    AlignedSpeech, Alignment, AlignmentRequest, CharTiming, Speech, SpeechAligner, SpeechRequest,
-    SpeechSynthesizer, split_for_speech,
+    AlignedSpeech, Alignment, AlignmentRequest, ChangedSpeech, CharTiming, Speech, SpeechAligner,
+    SpeechRequest, SpeechSynthesizer, SpeechTranscriber, Transcript, TranscriptionRequest,
+    VoiceChangeRequest, VoiceChanger, VoiceIsolator, split_for_speech,
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,

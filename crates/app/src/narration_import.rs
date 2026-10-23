@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    AlignmentRequest, ApiKey, CostPurpose, Job, JobFailure, JobFailureKind, JobId, JobKind,
+    AlignmentRequest, ApiKey, CaptureRepository, CostPurpose, Job, JobFailure, JobFailureKind, JobId, JobKind,
     Metered, Narration, NarrationId, NarrationRepository, NarrationSource, ProfileId, Progress,
     ProjectFiles, Provider, ScriptText, SecretStore, SpeechAligner, VideoProjectId, WordTimings,
 };
@@ -141,6 +141,7 @@ fn audio_file(narration: NarrationId, format: AudioFormat) -> String {
 pub(crate) struct NarrationImportHandler {
     pub(crate) owner: ProfileId,
     pub(crate) narrations: Arc<dyn NarrationRepository>,
+    pub(crate) captures: Arc<dyn CaptureRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) aligner: Arc<dyn SpeechAligner>,
     pub(crate) secrets: Arc<dyn SecretStore>,
@@ -283,6 +284,8 @@ impl NarrationImportHandler {
         self.narrations
             .save_narration(&narration)
             .map_err(unexpected)?;
+        crate::captures::forget_capture(&*self.captures, &*self.files, project, narration.id)
+            .map_err(unexpected)?;
         // A file that will not go (open in a player) stays rather than
         // failing a finished import.
         if let Some(previous) = previous.filter(|p| p.audio_file != narration.audio_file) {
@@ -387,12 +390,13 @@ pub(crate) mod testing {
         pub(crate) text: String,
     }
 
-    /// Times each character of the text 50 ms after the one before;
-    /// `failure` wins when set. Keeps the requests.
+    /// Times each character of the text 50 ms (or `step`) after the one
+    /// before; `failure` wins when set. Keeps the requests.
     #[derive(Default)]
     pub(crate) struct FakeAligner {
         pub(crate) requests: Mutex<Vec<SeenAlignment>>,
         pub(crate) failure: Mutex<Option<ProviderFailure>>,
+        pub(crate) step: Mutex<Option<Duration>>,
     }
 
     impl FakeAligner {
@@ -415,7 +419,11 @@ pub(crate) mod testing {
             if let Some(failure) = self.failure.lock().unwrap().clone() {
                 return Err(failure);
             }
-            let step = Duration::from_millis(50);
+            let step = self
+                .step
+                .lock()
+                .unwrap()
+                .unwrap_or(Duration::from_millis(50));
             Ok(AlignedSpeech {
                 alignment: Alignment {
                     chars: request
@@ -825,6 +833,7 @@ mod tests {
         NarrationImportHandler {
             owner: app.profile().id,
             narrations: Arc::clone(&h.db) as _,
+            captures: Arc::clone(&h.db) as _,
             files: Arc::clone(&h.files),
             aligner: Arc::clone(&h.aligner) as _,
             secrets: Arc::clone(&h.secrets) as _,

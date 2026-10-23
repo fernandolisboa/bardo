@@ -24,6 +24,8 @@ pub enum TourId {
     Script,
     /// The Narration stage's tour.
     Narration,
+    /// The Capture stage's tour.
+    Capture,
     /// The Scenes stage's tour.
     Scenes,
     /// The Clips stage's tour.
@@ -70,7 +72,7 @@ pub enum TourId {
 }
 
 impl TourId {
-    pub const ALL: [TourId; 27] = [
+    pub const ALL: [TourId; 28] = [
         TourId::Welcome,
         TourId::Research,
         TourId::Themes,
@@ -78,6 +80,7 @@ impl TourId {
         TourId::Projects,
         TourId::Script,
         TourId::Narration,
+        TourId::Capture,
         TourId::Scenes,
         TourId::Clips,
         TourId::Personas,
@@ -109,6 +112,7 @@ impl TourId {
             TourId::Projects => "projects",
             TourId::Script => "script",
             TourId::Narration => "narration",
+            TourId::Capture => "capture",
             TourId::Scenes => "scenes",
             TourId::Clips => "clips",
             TourId::Personas => "personas",

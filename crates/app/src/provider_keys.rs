@@ -377,6 +377,7 @@ mod tests {
                 scripts: Arc::clone(&self.db) as _,
                 personas: Arc::clone(&self.db) as _,
                 narrations: Arc::clone(&self.db) as _,
+                captures: Arc::clone(&self.db) as _,
                 scene_plans: Arc::clone(&self.db) as _,
                 timelines: Arc::clone(&self.db) as _,
                 media_assets: Arc::clone(&self.db) as _,

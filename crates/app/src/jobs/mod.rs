@@ -43,6 +43,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) localizations: LocalizationHandler,
     pub(crate) narrations: NarrationHandler,
     pub(crate) imports: NarrationImportHandler,
+    pub(crate) captures: crate::captures::CaptureHandler,
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
     pub(crate) proxies: ProxyHandler,
@@ -73,6 +74,7 @@ pub(crate) fn built_in_handlers(
         localizations,
         narrations,
         imports,
+        captures,
         scenes,
         clips,
         proxies,
@@ -101,6 +103,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Localization, Arc::new(localizations));
     handlers.insert(JobKind::Narration, Arc::new(narrations));
     handlers.insert(JobKind::NarrationImport, Arc::new(imports));
+    handlers.insert(JobKind::Capture, Arc::new(captures));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);
@@ -1504,6 +1507,7 @@ mod tests {
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
+            captures: Arc::clone(db) as _,
             scene_plans: Arc::clone(db) as _,
             timelines: Arc::clone(db) as _,
             media_assets: Arc::clone(db) as _,

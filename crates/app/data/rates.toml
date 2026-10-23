@@ -27,6 +27,19 @@ characters = "0.10"
 [elevenlabs."forced_alignment"]
 audio_seconds = "0.22"
 
+# A capture's speech (checked on 2026-10-23), per hour of audio: Scribe
+# speech-to-text checks it follows the script (US$ 0.22 per hour), the
+# Voice Changer gives it the persona's voice and the Voice Isolator cleans
+# the user's own (US$ 0.12 per minute each).
+[elevenlabs."scribe_v2"]
+audio_seconds = "0.22"
+
+[elevenlabs."eleven_multilingual_sts_v2"]
+audio_seconds = "7.20"
+
+[elevenlabs."audio_isolation"]
+audio_seconds = "7.20"
+
 # ElevenLabs Music over the API: US$ 0.15 per minute of music (checked on
 # 2026-10-19), per hour here like the other audio.
 [elevenlabs."music_v1"]
