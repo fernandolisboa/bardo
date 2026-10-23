@@ -23,6 +23,7 @@ use crate::music_prompts::MusicPromptHandler;
 use crate::music_tracks::MusicHandler;
 use crate::narration_import::NarrationImportHandler;
 use crate::narrations::NarrationHandler;
+use crate::persona_looks::PersonaLookHandler;
 use crate::proxies::ProxyHandler;
 use crate::publications::MetricsSyncHandler;
 use crate::render::RenderHandler;
@@ -48,6 +49,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) music_prompts: MusicPromptHandler,
     pub(crate) music: MusicHandler,
     pub(crate) thumbnails: ThumbnailHandler,
+    pub(crate) looks: PersonaLookHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
@@ -77,6 +79,7 @@ pub(crate) fn built_in_handlers(
         music_prompts,
         music,
         thumbnails,
+        looks,
         chapters,
         renders,
         metadata,
@@ -108,6 +111,7 @@ pub(crate) fn built_in_handlers(
     let thumbnails = Arc::new(thumbnails);
     handlers.insert(JobKind::Thumbnail, Arc::clone(&thumbnails) as _);
     handlers.insert(JobKind::ThumbnailImage, thumbnails);
+    handlers.insert(JobKind::PersonaLook, Arc::new(looks));
     handlers.insert(JobKind::Chapters, Arc::new(chapters));
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));

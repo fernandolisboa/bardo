@@ -244,6 +244,34 @@ the channel's visual style in every prompt so the images look like one video. Fr
 The images are original: no recognizable real people, logos, brands or copyrighted characters, \
 and no text, captions or watermarks in the image. Keep them safe for advertisers.";
 
+const LOOK_PROMPT_INSTRUCTIONS: &str = "\
+You write the prompt an image model draws a persona's look from: the character a faceless \
+channel's narrator appears as on screen, driven later by the creator's own motion. You are given \
+the persona and the user's description of the character.
+
+The character is original. When the description asks for a real, identifiable person (a \
+celebrity, a public figure, anyone named, or someone's likeness) or for a copyrighted or \
+trademarked character, write no prompt: say in `declined`, in one or two sentences in the \
+description's language, that you will not draw a real or existing character and that an original \
+one can be described instead. Otherwise leave `declined` empty.
+
+The prompt is in English, whatever the description's language. It shows one character from the \
+waist up, head and both hands in view, facing the camera with a neutral expression and the mouth \
+closed, on a plain, evenly lit background, in a tall portrait frame (2:3). Describe the face, \
+age, build, hair, clothes and style precisely, so the same character can be drawn again. Nothing \
+else is in the picture: no text, logos, watermarks or other people. Keep it safe for advertisers.
+
+Set `photoreal` to true when the prompt asks for a photographic, realistic person, and to false \
+for an illustration, a 3D render, a cartoon or any other stylized look.";
+
+const LOOK_PROMPT_PROMPT: &str = "\
+Persona: {{persona}}
+
+The user's description of the character:
+{{look_description}}
+
+Write the prompt for this persona's look.";
+
 /// Bardo's earlier defaults for `kind`, oldest first.
 fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
     let (instructions, prompt) = match kind {
@@ -253,7 +281,8 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
         | TemplateKind::Metadata
         | TemplateKind::Thumbnail
         | TemplateKind::Chapters
-        | TemplateKind::Localization => return Vec::new(),
+        | TemplateKind::Localization
+        | TemplateKind::LookPrompt => return Vec::new(),
     };
     vec![TemplateBody::new(kind, instructions, prompt).expect("the retired templates are valid")]
 }
@@ -303,6 +332,7 @@ pub fn default_template(kind: TemplateKind) -> TemplateBody {
         TemplateKind::Thumbnail => (THUMBNAIL_INSTRUCTIONS, THUMBNAIL_PROMPT),
         TemplateKind::Chapters => (CHAPTERS_INSTRUCTIONS, CHAPTERS_PROMPT),
         TemplateKind::Localization => (LOCALIZATION_INSTRUCTIONS, LOCALIZATION_PROMPT),
+        TemplateKind::LookPrompt => (LOOK_PROMPT_INSTRUCTIONS, LOOK_PROMPT_PROMPT),
     };
     TemplateBody::new(kind, instructions, prompt).expect("the default templates are valid")
 }

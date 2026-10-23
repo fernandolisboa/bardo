@@ -74,6 +74,7 @@ mod network_account;
 mod owner_metrics;
 mod performance;
 mod persona;
+mod persona_look;
 mod post_insights;
 mod profile;
 mod provider_key;
@@ -160,7 +161,8 @@ pub use format::{UnknownVideoFormat, VideoFormat};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{
-    GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, image_dimensions, shape_of,
+    GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, ImageShape, image_dimensions,
+    shape_of,
 };
 pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
@@ -224,6 +226,11 @@ pub use performance::{
 pub use persona::{
     GenerationPresets, Persona, PersonaDetails, PersonaDraft, PersonaFieldError, PersonaId,
     PersonaRepository, VoiceFlag,
+};
+pub use persona_look::{
+    LOOK_MAX_BYTES, LOOK_MAX_RATIO_TENTHS, LOOK_MAX_SIDE, LOOK_MIN_RATIO_TENTHS, LOOK_MIN_SIDE,
+    LookDescriptionError, LookDrawing, LookImage, LookImageError, LookSource,
+    MAX_LOOK_DESCRIPTION, PersonaLook, UnknownLookSource, look_description,
 };
 pub use post_insights::{
     Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,

@@ -38,10 +38,13 @@ pub enum TemplateKind {
     /// A video's script adapted, sentence by sentence, for another
     /// channel's language and country (#184).
     Localization,
+    /// The prompt a persona's look is drawn from, written from the user's
+    /// description (#188).
+    LookPrompt,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 7] = [
+    pub const ALL: [TemplateKind; 8] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -49,6 +52,7 @@ impl TemplateKind {
         TemplateKind::Thumbnail,
         TemplateKind::Chapters,
         TemplateKind::Localization,
+        TemplateKind::LookPrompt,
     ];
 
     /// Stable name stored in the database.
@@ -61,6 +65,7 @@ impl TemplateKind {
             TemplateKind::Thumbnail => "thumbnail",
             TemplateKind::Chapters => "chapters",
             TemplateKind::Localization => "localization",
+            TemplateKind::LookPrompt => "look_prompt",
         }
     }
 
@@ -140,6 +145,10 @@ impl TemplateKind {
                 TemplateVariable::ThemeTitle,
                 TemplateVariable::NarrationSentences,
             ],
+            TemplateKind::LookPrompt => &[
+                TemplateVariable::Persona,
+                TemplateVariable::LookDescription,
+            ],
         }
     }
 }
@@ -207,10 +216,12 @@ pub enum TemplateVariable {
     SourceLanguage,
     /// The audience country a localized version is adapted from.
     SourceCountry,
+    /// What the user wrote about the character a persona's look shows.
+    LookDescription,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 19] = [
+    pub const ALL: [TemplateVariable; 20] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -230,6 +241,7 @@ impl TemplateVariable {
         TemplateVariable::VideoTitle,
         TemplateVariable::SourceLanguage,
         TemplateVariable::SourceCountry,
+        TemplateVariable::LookDescription,
     ];
 
     /// The name written between the braces.
@@ -254,6 +266,7 @@ impl TemplateVariable {
             TemplateVariable::VideoTitle => "video_title",
             TemplateVariable::SourceLanguage => "source_language",
             TemplateVariable::SourceCountry => "source_country",
+            TemplateVariable::LookDescription => "look_description",
         }
     }
 

@@ -47,14 +47,39 @@ impl ImageFormat {
     }
 }
 
+/// The shape of a drawn image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageShape {
+    /// A video frame: the video's format (#179).
+    Frame(AspectRatio),
+    /// 2:3, taller than wide: a persona's look (#188).
+    Portrait,
+}
+
+impl ImageShape {
+    /// The width-to-height ratio as providers write it, e.g. `2:3`.
+    pub fn code(self) -> &'static str {
+        match self {
+            ImageShape::Frame(aspect) => aspect.code(),
+            ImageShape::Portrait => "2:3",
+        }
+    }
+}
+
+impl From<AspectRatio> for ImageShape {
+    fn from(aspect: AspectRatio) -> Self {
+        ImageShape::Frame(aspect)
+    }
+}
+
 /// What to draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRequest {
     /// The whole description: subject, setting, style. Providers see one
     /// prompt at a time, with no memory of earlier ones.
     pub prompt: String,
-    /// The frame shape: the video's format (#179).
-    pub aspect: AspectRatio,
+    /// The image's shape: a frame of the video's format, or a portrait.
+    pub shape: ImageShape,
 }
 
 /// The width and height of a PNG, JPEG or WebP file, read from its header;
@@ -149,9 +174,8 @@ pub struct GeneratedImage {
     pub usage: Metered,
 }
 
-/// Draws images. Every image is a wide 16:9 frame, the source every video
-/// format is cropped from. Calls the network and blocks, so it runs inside
-/// a job.
+/// Draws images in the shape asked for. Calls the network and blocks, so
+/// it runs inside a job.
 pub trait ImageGenerator: Send + Sync {
     fn generate(
         &self,
@@ -190,6 +214,13 @@ mod tests {
         for format in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Webp] {
             assert_eq!(ImageFormat::from_mime(format.mime()), Some(format));
         }
+    }
+
+    #[test]
+    fn shapes_have_their_ratio() {
+        assert_eq!(ImageShape::from(AspectRatio::Vertical).code(), "9:16");
+        assert_eq!(ImageShape::from(AspectRatio::Landscape).code(), "16:9");
+        assert_eq!(ImageShape::Portrait.code(), "2:3");
     }
 }
 

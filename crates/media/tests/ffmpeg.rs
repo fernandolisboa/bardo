@@ -1374,3 +1374,34 @@ fn a_thumbnail_covers_the_frame_and_draws_its_text() {
         "{corner:?} vs {bare:?}"
     );
 }
+
+#[test]
+fn a_picture_too_large_is_kept_as_a_jpeg_of_the_same_size() {
+    let ffmpeg = ffmpeg();
+    let dir = scratch("fit-picture");
+    // Noise compresses badly, as a detailed drawing does.
+    let noisy = dir.join("noisy.png");
+    let made = std::process::Command::new(ffmpeg.ffmpeg_path())
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+        .arg("nullsrc=s=848x1264,geq=lum='random(1)*255':cb=128:cr=128")
+        .args(["-frames:v", "1"])
+        .arg(&noisy)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let png = std::fs::metadata(&noisy).unwrap().len();
+    let limit = png / 2;
+    let fitted = dir.join("look.jpg");
+    ffmpeg.fit_picture(&noisy, &fitted, limit).unwrap();
+    let bytes = std::fs::read(&fitted).unwrap();
+    assert!(bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "a JPEG");
+    assert!((bytes.len() as u64) <= limit, "{} > {limit}", bytes.len());
+    assert_eq!(bardo_domain::image_dimensions(&bytes), Some((848, 1264)));
+    assert!(!dir.join("look.partial.jpg").exists());
+
+    // A limit no quality reaches is an error, and leaves nothing behind.
+    let tiny = dir.join("tiny.jpg");
+    assert!(ffmpeg.fit_picture(&noisy, &tiny, 100).is_err());
+    assert!(!tiny.exists());
+    assert!(!dir.join("tiny.partial.jpg").exists());
+}

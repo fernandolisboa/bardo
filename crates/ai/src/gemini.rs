@@ -2,8 +2,9 @@
 //! (`models.generateContent`).
 //!
 //! One request per image, answered with the image inline (base64), so a
-//! large answer is allowed. Images come back 16:9 at 2K, enough for a
-//! 1080p frame with room for a slow zoom or a 9:16 crop. Every image the
+//! large answer is allowed. Images come back in the shape asked for at 2K:
+//! enough for a 1080p frame with room for a slow zoom, or a persona's look
+//! that take models read in detail. Every image the
 //! model draws carries Google's SynthID watermark.
 
 use std::time::Duration;
@@ -24,13 +25,13 @@ pub const MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/m
 pub const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
 pub const IMAGE_SIZE: &str = "2K";
 
-/// The request that draws `request.prompt` in `request.aspect`.
+/// The request that draws `request.prompt` in `request.shape`.
 pub fn image_request(key: &ApiKey, request: &ImageRequest) -> HttpRequest {
     let body = json!({
         "contents": [{ "role": "user", "parts": [{ "text": request.prompt }] }],
         "generationConfig": {
             "responseModalities": ["IMAGE"],
-            "imageConfig": { "aspectRatio": request.aspect.code(), "imageSize": IMAGE_SIZE },
+            "imageConfig": { "aspectRatio": request.shape.code(), "imageSize": IMAGE_SIZE },
         },
     });
     HttpRequest::post_json(

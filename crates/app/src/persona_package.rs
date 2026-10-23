@@ -1,10 +1,16 @@
-//! The persona package (PRD stories 17-19): one persona as a small JSON
-//! file the user moves to another machine or profile. It carries what the
-//! persona says and how it sounds (name, tone, script style, presets) and
-//! a reference to its voice (provider, voice id, voice name). It never
+//! The persona package (PRD stories 17-19): one persona as a JSON file the
+//! user moves to another machine or profile. It carries what the persona
+//! says and how it sounds (name, tone, script style, presets) and a
+//! reference to its voice (provider, voice id, voice name). It never
 //! carries audio, provider keys or ids from the exporting machine: the
 //! voice stays in its provider account, and the importer's own account
 //! has to have it before the persona can narrate.
+//!
+//! Version 2 (#188) adds the persona's look when it is a drawing: the image
+//! as base64, the description and prompt it was drawn from, and whether it
+//! is realistic. A photo of the user is someone's likeness and never goes,
+//! nor does any provider's asset id. A persona with no drawn look is still
+//! written as version 1, so older releases import it.
 //!
 //! The format is versioned. A reader accepts every version up to its own
 //! and refuses newer ones with a message to update Bardo, so an older
@@ -24,21 +30,27 @@
 //! }
 //! ```
 
-use bardo_domain::{GenerationPresets, PersonaDetails, PersonaDraft, Provider, VoiceRef};
+use bardo_domain::{
+    GenerationPresets, LookImage, PersonaDetails, PersonaDraft, PersonaLook, Provider, VoiceRef,
+};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 /// Names the format, so another app's JSON is not mistaken for a persona.
 pub const FORMAT: &str = "bardo-persona";
 
 /// The newest version this build writes and reads.
-pub const VERSION: u64 = 1;
+pub const VERSION: u64 = 2;
+
+/// The version of a package without a look, which every release reads.
+const WITHOUT_LOOK: u64 = 1;
 
 /// The file extension the save and open dialogs suggest.
 pub const EXTENSION: &str = "bardo-persona";
 
-/// Packages are a few kilobytes; anything far larger is not one, and is
-/// not read into memory.
-pub const MAX_BYTES: u64 = 256 * 1024;
+/// A package is a few kilobytes, or up to a look's 10 MB as base64 with a
+/// look; anything larger is not one, and is not read into memory.
+pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Why a file cannot be imported as a persona.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -79,6 +91,37 @@ struct PersonaV1 {
     /// Written only when set, so packages of other voices read as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     realistic_voice: bool,
+    /// A drawn look, from version 2 on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    look: Option<LookV2>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LookV2 {
+    /// The image file as base64.
+    image: String,
+    /// The image's type, for people reading the file: `image/png` or
+    /// `image/jpeg`. The image itself says which.
+    media_type: String,
+    description: String,
+    prompt: String,
+    realistic: bool,
+}
+
+/// A drawn look as a package carries it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackagedLook {
+    pub image: LookImage,
+    pub description: String,
+    pub prompt: String,
+    pub realistic: bool,
+}
+
+/// What a package holds: the persona, and its look when it is a drawing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    pub details: PersonaDetails,
+    pub look: Option<PackagedLook>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -97,13 +140,28 @@ struct PresetsV1 {
 }
 
 /// The package for a persona, as pretty-printed JSON so a user can read
-/// what it carries before sharing it.
-pub fn encode(details: &PersonaDetails) -> String {
+/// what it carries before sharing it. `look` goes only when it is a
+/// drawing; the package is version 1 without one.
+pub fn encode(details: &PersonaDetails, look: Option<&PersonaLook>) -> String {
     let voice = details.voice();
     let presets = details.presets();
+    let look = look.filter(|look| look.is_shareable()).map(|look| {
+        let drawing = look.drawing.clone().unwrap_or_default();
+        LookV2 {
+            image: base64::engine::general_purpose::STANDARD.encode(look.image.bytes()),
+            media_type: look.image.format().mime().to_owned(),
+            description: drawing.description,
+            prompt: drawing.prompt,
+            realistic: look.realistic,
+        }
+    });
     let envelope = Envelope {
         format: FORMAT.to_owned(),
-        version: VERSION,
+        version: if look.is_some() {
+            VERSION
+        } else {
+            WITHOUT_LOOK
+        },
         persona: PersonaV1 {
             name: details.name().to_owned(),
             voice: VoiceV1 {
@@ -120,6 +178,7 @@ pub fn encode(details: &PersonaDetails) -> String {
                 speed: presets.speed,
             },
             realistic_voice: details.realistic_voice(),
+            look,
         },
     };
     let mut json = serde_json::to_string_pretty(&envelope).expect("a persona package serializes");
@@ -127,8 +186,8 @@ pub fn encode(details: &PersonaDetails) -> String {
     json
 }
 
-/// Reads a package back into valid persona details.
-pub fn decode(text: &str) -> Result<PersonaDetails, PackageError> {
+/// Reads a package back into valid persona details, and its look.
+pub fn decode(text: &str) -> Result<Package, PackageError> {
     let header: Header = serde_json::from_str(text).map_err(|_| PackageError::NotAPackage)?;
     if header.format != FORMAT || header.version == 0 {
         return Err(PackageError::NotAPackage);
@@ -139,6 +198,22 @@ pub fn decode(text: &str) -> Result<PersonaDetails, PackageError> {
     let envelope: Envelope<PersonaV1> =
         serde_json::from_str(text).map_err(|_| PackageError::NotAPackage)?;
     let persona = envelope.persona;
+    // Version 1 has no look; one written there anyway is not read.
+    let look = match persona.look.filter(|_| header.version >= 2) {
+        None => None,
+        Some(look) => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(look.image.as_bytes())
+                .map_err(|_| PackageError::InvalidPersona)?;
+            let image = LookImage::check(bytes).map_err(|_| PackageError::InvalidPersona)?;
+            Some(PackagedLook {
+                image,
+                description: look.description,
+                prompt: look.prompt,
+                realistic: look.realistic,
+            })
+        }
+    };
     let provider: Provider = persona
         .voice
         .provider
@@ -146,7 +221,7 @@ pub fn decode(text: &str) -> Result<PersonaDetails, PackageError> {
         .map_err(|_| PackageError::InvalidPersona)?;
     let voice = VoiceRef::new(provider, &persona.voice.id, &persona.voice.name)
         .map_err(|_| PackageError::InvalidPersona)?;
-    PersonaDetails::validate(PersonaDraft {
+    let details = PersonaDetails::validate(PersonaDraft {
         name: persona.name,
         voice: Some(voice),
         tone: persona.tone,
@@ -159,7 +234,8 @@ pub fn decode(text: &str) -> Result<PersonaDetails, PackageError> {
         },
         realistic_voice: persona.realistic_voice,
     })
-    .map_err(|_| PackageError::InvalidPersona)
+    .map_err(|_| PackageError::InvalidPersona)?;
+    Ok(Package { details, look })
 }
 
 /// A file name for the package: the persona's name without characters
@@ -216,18 +292,113 @@ mod tests {
         .unwrap()
     }
 
+    /// The details alone, from a package without a look.
+    fn decode_details(text: &str) -> Result<PersonaDetails, PackageError> {
+        decode(text).map(|package| {
+            assert_eq!(package.look, None);
+            package.details
+        })
+    }
+
+    fn encode_details(details: &PersonaDetails) -> String {
+        encode(details, None)
+    }
+
+    const LOOK: &[u8] = include_bytes!("../../ai/tests/fixtures/gemini/look-2x3.png");
+
+    fn drawn_look(realistic: bool) -> PersonaLook {
+        PersonaLook::drawn(
+            bardo_domain::PersonaId::new(),
+            LookImage::check(LOOK.to_vec()).unwrap(),
+            bardo_domain::LookDrawing {
+                description: "Uma faroleira de cabelo grisalho".into(),
+                prompt: "Waist-up portrait of an original lighthouse keeper".into(),
+                template: None,
+                writer_model: "claude-test".into(),
+                image_model: "gemini-test".into(),
+                job: Some(bardo_domain::JobId::new()),
+            },
+            realistic,
+            std::time::SystemTime::UNIX_EPOCH,
+        )
+    }
+
     #[test]
     fn a_package_round_trips_exactly() {
         let original = details();
-        assert_eq!(decode(&encode(&original)), Ok(original));
+        assert_eq!(decode_details(&encode_details(&original)), Ok(original));
         for persona in bardo_domain::Persona::defaults(bardo_domain::ProfileId::new()) {
-            assert_eq!(decode(&encode(&persona.details)), Ok(persona.details));
+            assert_eq!(
+                decode_details(&encode_details(&persona.details)),
+                Ok(persona.details)
+            );
         }
     }
 
     #[test]
+    fn a_drawn_look_travels_in_version_2() {
+        let look = drawn_look(true);
+        let package = encode(&details(), Some(&look));
+        let json: serde_json::Value = serde_json::from_str(&package).unwrap();
+        assert_eq!(json["version"], 2);
+        assert_eq!(json["persona"]["look"]["media_type"], "image/png");
+        let read = decode(&package).unwrap();
+        assert_eq!(read.details, details());
+        assert_eq!(
+            read.look,
+            Some(PackagedLook {
+                image: look.image.clone(),
+                description: "Uma faroleira de cabelo grisalho".into(),
+                prompt: "Waist-up portrait of an original lighthouse keeper".into(),
+                realistic: true,
+            })
+        );
+        // Only what the look is: no ids, models or jobs from this machine.
+        let mut keys: Vec<_> = json["persona"]["look"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["description", "image", "media_type", "prompt", "realistic"]
+        );
+    }
+
+    #[test]
+    fn a_photo_of_the_user_never_leaves() {
+        let mut photo = drawn_look(true);
+        photo.source = bardo_domain::LookSource::Imported;
+        photo.drawing = None;
+        let package = encode(&details(), Some(&photo));
+        assert!(!package.contains("\"look\""), "{package}");
+        assert!(package.contains("\"version\": 1"), "older Bardo reads it");
+        assert_eq!(decode(&package).unwrap().look, None);
+    }
+
+    #[test]
+    fn an_edited_look_is_refused() {
+        let package = encode(&details(), Some(&drawn_look(false)));
+        let mut json: serde_json::Value = serde_json::from_str(&package).unwrap();
+        for image in ["not base64!", "R0lGODlh"] {
+            json["persona"]["look"]["image"] = image.into();
+            assert_eq!(
+                decode(&json.to_string()),
+                Err(PackageError::InvalidPersona),
+                "{image}"
+            );
+        }
+        // A look in a version 1 package is not one this format has.
+        let mut older: serde_json::Value = serde_json::from_str(&package).unwrap();
+        older["version"] = 1.into();
+        assert_eq!(decode(&older.to_string()).unwrap().look, None);
+    }
+
+    #[test]
     fn the_package_is_readable_json_with_a_format_and_version() {
-        let json: serde_json::Value = serde_json::from_str(&encode(&details())).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&encode_details(&details())).unwrap();
         assert_eq!(json["format"], "bardo-persona");
         assert_eq!(json["version"], 1);
         assert_eq!(json["persona"]["voice"]["provider"], "elevenlabs");
@@ -237,7 +408,7 @@ mod tests {
 
     #[test]
     fn the_package_carries_only_the_persona_fields() {
-        let json: serde_json::Value = serde_json::from_str(&encode(&details())).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&encode_details(&details())).unwrap();
         let keys = |value: &serde_json::Value| -> Vec<String> {
             let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();
             keys.sort();
@@ -265,22 +436,26 @@ mod tests {
     #[test]
     fn the_realistic_voice_flag_is_written_only_when_set() {
         let stock = &bardo_domain::Persona::defaults(bardo_domain::ProfileId::new())[0].details;
-        assert!(!encode(stock).contains("realistic_voice"));
+        assert!(!encode_details(stock).contains("realistic_voice"));
         // A package written before the flag existed reads as unflagged.
-        let mut older: serde_json::Value = serde_json::from_str(&encode(&details())).unwrap();
+        let mut older: serde_json::Value =
+            serde_json::from_str(&encode_details(&details())).unwrap();
         older["persona"]
             .as_object_mut()
             .unwrap()
             .remove("realistic_voice");
         let older = older.to_string();
         assert!(!older.contains("realistic_voice"), "{older}");
-        assert_eq!(decode(&older).map(|d| d.realistic_voice()), Ok(false));
+        assert_eq!(
+            decode_details(&older).map(|d| d.realistic_voice()),
+            Ok(false)
+        );
     }
 
     #[test]
     fn a_newer_version_is_refused_with_its_number() {
-        let newer = encode(&details()).replace("\"version\": 1", "\"version\": 2");
-        assert_eq!(decode(&newer), Err(PackageError::NewerVersion(2)));
+        let newer = encode_details(&details()).replace("\"version\": 1", "\"version\": 3");
+        assert_eq!(decode(&newer), Err(PackageError::NewerVersion(3)));
         // Even when the rest is something this build cannot read at all.
         let alien = r#"{"format": "bardo-persona", "version": 7, "persona": {"voices": []}}"#;
         assert_eq!(decode(alien), Err(PackageError::NewerVersion(7)));
@@ -310,7 +485,7 @@ mod tests {
 
     #[test]
     fn an_edited_package_cannot_smuggle_in_an_invalid_persona() {
-        let package = encode(&details());
+        let package = encode_details(&details());
         for (from, to) in [
             (
                 "\"name\": \"Narradora Documental (pt-BR)\"",
@@ -332,8 +507,9 @@ mod tests {
 
     #[test]
     fn unknown_fields_of_a_known_version_are_ignored() {
-        let package = encode(&details()).replacen('{', "{\n  \"exported_by\": \"Bardo\",", 1);
-        assert_eq!(decode(&package), Ok(details()));
+        let package =
+            encode_details(&details()).replacen('{', "{\n  \"exported_by\": \"Bardo\",", 1);
+        assert_eq!(decode_details(&package), Ok(details()));
     }
 
     #[test]

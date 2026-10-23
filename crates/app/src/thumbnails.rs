@@ -395,7 +395,7 @@ impl ThumbnailHandler {
         let key = self.key(Provider::Gemini)?;
         let request = ImageRequest {
             prompt: payload.prompt.clone(),
-            aspect: AspectRatio::Landscape,
+            shape: AspectRatio::Landscape.into(),
         };
         let image = self.images.generate(&key, &request).map_err(|failure| {
             JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))
@@ -960,7 +960,7 @@ pub(crate) mod tests {
         assert_eq!(job.kind(), JobKind::ThumbnailImage);
         let request = h.images.requests.lock().unwrap()[0].clone();
         assert_eq!(request.prompt, "A lone probe, wide");
-        assert_eq!(request.aspect, AspectRatio::Landscape);
+        assert_eq!(request.shape, AspectRatio::Landscape.into());
 
         let view = app.thumbnail(project.id).unwrap();
         assert_eq!(view.backgrounds.len(), 1);

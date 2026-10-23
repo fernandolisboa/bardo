@@ -485,7 +485,7 @@ impl SceneHandler {
             let prompt = scene.prompt().as_str().to_owned();
             let request = ImageRequest {
                 prompt: prompt.clone(),
-                aspect,
+                shape: aspect.into(),
             };
             match self.images.generate(key, &request) {
                 Ok(image) => {

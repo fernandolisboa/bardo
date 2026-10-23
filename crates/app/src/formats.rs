@@ -115,7 +115,7 @@ mod tests {
         assert!(
             drawn
                 .iter()
-                .all(|request| request.aspect == AspectRatio::Vertical)
+                .all(|request| request.shape == AspectRatio::Vertical.into())
         );
 
         assert_eq!(
@@ -159,7 +159,7 @@ mod tests {
         assert!(
             drawn
                 .iter()
-                .all(|request| request.aspect == AspectRatio::Landscape)
+                .all(|request| request.shape == AspectRatio::Landscape.into())
         );
 
         app.add_network_account(

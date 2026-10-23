@@ -108,6 +108,10 @@ pub enum JobKind {
     /// is saved with copies of the source's pictures and media. Or, for a
     /// version, adapts its script again for review.
     Localization,
+    /// Draws a persona's look (#188): Claude writes the image prompt from
+    /// the user's description, then the image provider draws it, and the
+    /// drawing waits for review.
+    PersonaLook,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -136,7 +140,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 26] = [
+    pub const ALL: [JobKind; 27] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -163,6 +167,7 @@ impl JobKind {
         JobKind::ThumbnailImage,
         JobKind::Chapters,
         JobKind::Localization,
+        JobKind::PersonaLook,
     ];
 
     /// Stable name stored in the database.
@@ -194,6 +199,7 @@ impl JobKind {
             JobKind::ThumbnailImage => "thumbnail_image",
             JobKind::Chapters => "chapters",
             JobKind::Localization => "localization",
+            JobKind::PersonaLook => "persona_look",
         }
     }
 }

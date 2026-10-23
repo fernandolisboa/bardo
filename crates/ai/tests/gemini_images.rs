@@ -7,8 +7,8 @@ use bardo_ai::GeminiImages;
 use bardo_ai::gemini::{IMAGE_MODEL, IMAGE_SIZE, MODELS_URL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, AspectRatio, ImageFormat, ImageGenerator, ImageRequest, Metered, Provider,
-    ProviderFailureKind,
+    ApiKey, AspectRatio, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Metered,
+    Provider, ProviderFailureKind,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -23,7 +23,7 @@ fn key() -> ApiKey {
 fn request() -> ImageRequest {
     ImageRequest {
         prompt: PROMPT.into(),
-        aspect: AspectRatio::Landscape,
+        shape: AspectRatio::Landscape.into(),
     }
 }
 
@@ -59,7 +59,7 @@ fn sends_the_prompt_for_one_wide_image_with_the_key_in_a_header() {
 fn a_short_asks_for_a_tall_image() {
     let adapter = images(&["generate-image"]);
     let tall = ImageRequest {
-        aspect: AspectRatio::Vertical,
+        shape: AspectRatio::Vertical.into(),
         ..request()
     };
     adapter.generate(&key(), &tall).unwrap();
@@ -68,6 +68,19 @@ fn a_short_asks_for_a_tall_image() {
         sent.body["generationConfig"]["imageConfig"]["aspectRatio"],
         "9:16"
     );
+}
+
+#[test]
+fn a_persona_look_asks_for_a_portrait() {
+    let adapter = images(&["generate-image"]);
+    let portrait = ImageRequest {
+        shape: ImageShape::Portrait,
+        ..request()
+    };
+    adapter.generate(&key(), &portrait).unwrap();
+    let config = &adapter.transport().sent()[0].body["generationConfig"]["imageConfig"];
+    assert_eq!(config["aspectRatio"], "2:3");
+    assert_eq!(config["imageSize"], IMAGE_SIZE);
 }
 
 #[test]

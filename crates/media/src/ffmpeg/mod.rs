@@ -10,6 +10,7 @@
 mod captions;
 mod encoders;
 mod frames;
+mod picture;
 mod probe;
 mod process;
 mod proxy;

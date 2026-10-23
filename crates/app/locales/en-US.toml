@@ -281,6 +281,7 @@ thumbnail = "Thumbnail text"
 thumbnail_image = "Thumbnail background"
 chapters = "Chapters"
 localization = "Version in another language"
+persona_look = "Persona look"
 
 [job.state]
 queued = "Queued"
@@ -714,6 +715,7 @@ metadata = "Metadata"
 thumbnail = "Thumbnail"
 chapters = "Chapters"
 localization = "Localized version"
+look_prompt = "Look prompt"
 
 [templates.variable]
 channel_name = "The channel's name."
@@ -735,6 +737,7 @@ frame_shape = "The shape of the pictures, from the video's format: tall (9:16) f
 video_title = "The video's title on YouTube once the metadata is written, else its working title."
 source_language = "The language the version is adapted from: the source channel's."
 source_country = "The audience country the version is adapted from: the source channel's."
+look_description = "The user's description of the persona's look."
 
 [templates.error]
 not_saved = "Could not save the template. Try again."
@@ -792,9 +795,67 @@ imported_suffix = "imported"
 export = "Export to file…"
 export_hint = "Exports a package with the persona and a reference to its voice, never audio or keys. Whoever imports it needs the same voice in their own ElevenLabs account."
 exported = "Exported to {path}."
+exported_no_look = "Exported to {path}. The look stayed here: it is a photo of you, and a photo never leaves in a package."
 imported = "Imported {name}."
 realistic_voice = "Realistic synthetic voice or clone of a real person"
 realistic_voice_hint = "Tick it when the voice sounds like a real person: a clone, or a professional voice made from someone's recordings. Networks ask you to label such videos as altered or synthetic content; Bardo reminds you at export. Picking a cloned or professional voice ticks it."
+
+[persona.look]
+title = "Look"
+hint = "The character this persona appears as in performed clips: an original character drawn from your description, or a photo of you. A persona with no look cannot perform."
+save_first = "Create the persona first to give it a look."
+empty = "No look yet. Draw one from a description, or import a photo of yourself."
+drawn_tag = "Drawn"
+imported_tag = "Photo of you"
+prompt_label = "Drawn from: {prompt}"
+description = "Describe the character"
+description_placeholder = "e.g. a lighthouse keeper in her sixties, grey braid, oilskin coat, watercolor illustration"
+draw = "Draw"
+draw_again = "Draw again"
+draw_hint = "Claude writes the image prompt with look prompt template version {n}, for an original character only, then Nano Banana draws it in a tall 2:3 frame. Both calls are recorded in Costs."
+drawing = "Drawing the look: Claude writes the prompt, then Nano Banana draws it."
+declined = "Not drawn: {reason}"
+failed = "The drawing did not finish. The Jobs panel has the details."
+stopped = "The drawing was stopped."
+pending_title = "New drawing to review"
+pending_hint = "It becomes the look only if you keep it. Drawing again replaces it."
+keep = "Keep this look"
+discard = "Discard"
+import = "Import a photo of me…"
+import_title = "Import a photo of yourself"
+import_hint = "Only a photo of you, alone, can be a look: from the waist up, facing the camera, on a plain background. PNG or JPEG, 300 to 6,000 px a side, at most 10 MB. It never leaves in a persona package."
+shows_me = "This photo shows me, and only me"
+choose_photo = "Choose photo…"
+import_dialog = "Choose a photo of yourself"
+cancel = "Cancel"
+imported = "Your photo is now this persona's look."
+kept = "The drawing is now this persona's look."
+remove = "Remove look"
+remove_confirm = "Remove this look? A drawn look costs a new drawing to get back."
+remove_yes = "Remove"
+removed = "The look was removed."
+realistic = "Realistic look (reads as a real person)"
+realistic_hint = "On for a photo of you and for a photoreal drawing. Videos where a realistic look performs need the networks' altered or synthetic content label."
+
+[persona.look.error]
+missing_claude_key = "Save your Claude key under Settings to draw a look: Claude writes its prompt."
+missing_image_key = "Save your Gemini key under Settings to draw a look: Nano Banana draws it."
+busy = "This persona's look is already being drawn."
+nothing_waiting = "No drawing is waiting for review."
+none = "This persona has no look."
+not_confirmed = "Confirm the photo shows you, and only you."
+unreadable = "Could not read that file."
+image_refused = "That photo cannot be a look."
+not_saved = "Could not save the look. Try again."
+description_required = "Describe the character to draw."
+description_too_long = "Use at most 1,000 characters."
+
+[persona.look.image]
+not_an_image = "Use a PNG or JPEG file."
+too_small = "It is {width}×{height} px; each side needs at least 300 px."
+too_large = "It is {width}×{height} px; each side can be at most 6,000 px."
+shape = "It is {width}×{height} px: too narrow or too wide. Keep it between 2:5 and 5:2."
+file_too_large = "The file has {mb} MB; the most is 10 MB."
 
 [persona.voice_flag]
 unchecked_tag = "Voice not checked"
@@ -2448,6 +2509,10 @@ body = "Save, duplicate, or export the persona to a file for another computer; I
 [tour.personas.realistic]
 title = "Realistic voice"
 body = "Tick it when the voice sounds like a real person, such as a clone. Networks ask you to label such videos as synthetic content, and Bardo reminds you at export."
+
+[tour.personas.look]
+title = "Look"
+body = "The character this persona appears as in performed clips. Draw an original character from a description, review it and keep it, or import a photo of yourself. A photo of you never leaves in a package."
 
 [tour.templates]
 name = "Templates tour"

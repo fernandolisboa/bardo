@@ -16,13 +16,20 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, Persona, PersonaDetails, PersonaDraft, PersonaFieldError,
-    PersonaId, Provider, ProviderFailure, Redactor, RepositoryError, VideoProject, VideoProjectId,
-    Voice, VoiceFlag, VoiceLibrary, VoiceRef,
+    ApiKey, Channel, ChannelId, LookDrawing, Persona, PersonaDetails, PersonaDraft,
+    PersonaFieldError, PersonaId, PersonaLook, Provider, ProviderFailure, Redactor,
+    RepositoryError, VideoProject, VideoProjectId, Voice, VoiceFlag, VoiceLibrary, VoiceRef,
 };
 
-use crate::persona_package::{self, PackageError};
+use crate::persona_package::{self, Package, PackageError};
 use crate::{AppError, Bardo, ProviderKeyError, Text};
+
+/// What exporting a persona did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PersonaExport {
+    /// The persona's look is a photo of the user, so it stayed here.
+    pub photo_left_out: bool,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PersonaError {
@@ -233,14 +240,20 @@ impl Bardo {
             ..Persona::new(self.profile.id, details)
         };
         self.personas.save(&copy)?;
+        // Same look; a drawing waiting for review stays with the original.
+        if let Some(look) = self.personas.look(original.id)? {
+            self.personas.save_look(&look.for_persona(copy.id))?;
+        }
         Ok(copy)
     }
 
     /// The persona's package: what another machine or profile imports.
-    /// It holds no keys, audio or ids, only the persona and its voice
-    /// reference.
+    /// It holds no keys, audio or ids, only the persona, its voice
+    /// reference and its look when that is a drawing.
     pub fn export_persona(&self, id: PersonaId) -> Result<String, PersonaError> {
-        Ok(persona_package::encode(&self.own_persona(id)?.details))
+        let persona = self.own_persona(id)?;
+        let look = self.personas.look(id)?;
+        Ok(persona_package::encode(&persona.details, look.as_ref()))
     }
 
     /// The file name the save dialog suggests for the persona's package.
@@ -248,15 +261,25 @@ impl Bardo {
         Ok(persona_package::file_name(&self.own_persona(id)?.details))
     }
 
-    /// Writes the persona's package to `path`, which the user chose.
-    pub fn export_persona_to(&self, id: PersonaId, path: &Path) -> Result<(), PersonaError> {
+    /// Writes the persona's package to `path`, which the user chose. Says
+    /// whether the persona's look stayed behind: a photo of the user
+    /// never leaves.
+    pub fn export_persona_to(
+        &self,
+        id: PersonaId,
+        path: &Path,
+    ) -> Result<PersonaExport, PersonaError> {
         let package = self.export_persona(id)?;
         std::fs::write(path, package).map_err(|error| {
             tracing::warn!(%error, "could not write a persona package");
             PersonaError::ExportFailed(error.to_string())
         })?;
-        tracing::info!("exported a persona package");
-        Ok(())
+        let photo_left_out = self
+            .personas
+            .look(id)?
+            .is_some_and(|look| !look.is_shareable());
+        tracing::info!(photo_left_out, "exported a persona package");
+        Ok(PersonaExport { photo_left_out })
     }
 
     /// Adds the packaged persona to the profile's library as a new
@@ -265,7 +288,7 @@ impl Bardo {
     /// flags it unavailable, and without a listing it stays unchecked
     /// until the next one (`record_voice_list`).
     pub fn import_persona(&self, package: &str) -> Result<Persona, PersonaError> {
-        let details = persona_package::decode(package)?;
+        let Package { details, look } = persona_package::decode(package)?;
         let taken = self.personas.list(self.profile.id)?;
         let details = if taken
             .iter()
@@ -287,6 +310,21 @@ impl Bardo {
             ..Persona::new(self.profile.id, details)
         };
         self.personas.save(&persona)?;
+        if let Some(look) = look {
+            let drawing = LookDrawing {
+                description: look.description,
+                prompt: look.prompt,
+                ..LookDrawing::default()
+            };
+            let look = PersonaLook::drawn(
+                persona.id,
+                look.image,
+                drawing,
+                look.realistic,
+                crate::publications::whole_millis(SystemTime::now()),
+            );
+            self.personas.save_look(&look)?;
+        }
         tracing::info!(flag = ?persona.voice_flag, "imported a persona package");
         Ok(persona)
     }
@@ -947,11 +985,11 @@ mod tests {
         let newer = app
             .export_persona(before[0].id)
             .unwrap()
-            .replace("\"version\": 1", "\"version\": 2");
+            .replace("\"version\": 1", "\"version\": 3");
         let error = app.import_persona(&newer).unwrap_err();
         assert!(matches!(
             error,
-            PersonaError::Package(PackageError::NewerVersion(2))
+            PersonaError::Package(PackageError::NewerVersion(3))
         ));
         assert_eq!(error.form_message(), Some(Text::PersonaPackageNewer));
         assert!(

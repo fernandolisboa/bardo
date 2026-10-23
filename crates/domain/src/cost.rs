@@ -513,6 +513,9 @@ pub enum CostPurpose {
     ThumbnailImage,
     /// Claude writing a long video's YouTube chapters.
     Chapters,
+    /// Claude writing a persona look's prompt, and the image provider
+    /// drawing it (#188).
+    PersonaLook,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -563,7 +566,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 17] = [
+    pub const ALL: [CostPurpose; 18] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -581,6 +584,7 @@ impl CostPurpose {
         CostPurpose::Thumbnail,
         CostPurpose::ThumbnailImage,
         CostPurpose::Chapters,
+        CostPurpose::PersonaLook,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -603,6 +607,7 @@ impl CostPurpose {
             CostPurpose::Thumbnail => "thumbnail",
             CostPurpose::ThumbnailImage => "thumbnail_image",
             CostPurpose::Chapters => "chapters",
+            CostPurpose::PersonaLook => "persona_look",
         }
     }
 }

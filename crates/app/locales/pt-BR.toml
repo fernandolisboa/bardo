@@ -281,6 +281,7 @@ thumbnail = "Texto da miniatura"
 thumbnail_image = "Fundo da miniatura"
 chapters = "Capítulos"
 localization = "Versão em outro idioma"
+persona_look = "Aparência da persona"
 
 [job.state]
 queued = "Na fila"
@@ -714,6 +715,7 @@ metadata = "Metadados"
 thumbnail = "Miniatura"
 chapters = "Capítulos"
 localization = "Versão localizada"
+look_prompt = "Prompt de aparência"
 
 [templates.variable]
 channel_name = "O nome do canal."
@@ -735,6 +737,7 @@ frame_shape = "O formato das imagens, pelo formato do vídeo: em pé (9:16) para
 video_title = "O título do vídeo no YouTube depois que os metadados forem escritos; antes disso, o título provisório."
 source_language = "O idioma de onde a versão é adaptada: o do canal de origem."
 source_country = "O país do público de onde a versão é adaptada: o do canal de origem."
+look_description = "A descrição que você deu da aparência da persona."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -792,9 +795,67 @@ imported_suffix = "importada"
 export = "Exportar para arquivo…"
 export_hint = "Exporta um pacote com a persona e uma referência à voz dela, nunca áudio nem chaves. Quem importar precisa ter a mesma voz na própria conta ElevenLabs."
 exported = "Exportada para {path}."
+exported_no_look = "Exportada para {path}. A aparência ficou aqui: é uma foto sua, e uma foto nunca vai num pacote."
 imported = "{name} importada."
 realistic_voice = "Voz sintética realista ou clone de uma pessoa real"
 realistic_voice_hint = "Marque quando a voz soa como uma pessoa real: um clone, ou uma voz profissional feita a partir das gravações de alguém. As redes pedem que esses vídeos sejam marcados como conteúdo alterado ou sintético; o Bardo lembra você na exportação. Escolher uma voz clonada ou profissional marca a opção."
+
+[persona.look]
+title = "Aparência"
+hint = "O personagem que esta persona mostra nos clipes atuados: um personagem original desenhado a partir da sua descrição, ou uma foto sua. Uma persona sem aparência não pode atuar."
+save_first = "Crie a persona primeiro para dar uma aparência a ela."
+empty = "Ainda sem aparência. Desenhe uma a partir de uma descrição ou importe uma foto sua."
+drawn_tag = "Desenhada"
+imported_tag = "Foto sua"
+prompt_label = "Desenhada a partir de: {prompt}"
+description = "Descreva o personagem"
+description_placeholder = "ex.: uma faroleira de uns sessenta anos, trança grisalha, capa de oleado, ilustração em aquarela"
+draw = "Desenhar"
+draw_again = "Desenhar de novo"
+draw_hint = "O Claude escreve o prompt da imagem com a versão {n} do template de aparência, só para personagens originais, e o Nano Banana desenha em formato vertical 2:3. As duas chamadas ficam registradas em Custos."
+drawing = "Desenhando a aparência: o Claude escreve o prompt e o Nano Banana desenha."
+declined = "Não desenhada: {reason}"
+failed = "O desenho não terminou. O painel de Tarefas tem os detalhes."
+stopped = "O desenho foi interrompido."
+pending_title = "Novo desenho para revisar"
+pending_hint = "Ele só vira a aparência se você ficar com ele. Desenhar de novo o substitui."
+keep = "Ficar com esta aparência"
+discard = "Descartar"
+import = "Importar uma foto minha…"
+import_title = "Importar uma foto sua"
+import_hint = "Só uma foto em que apareça você, e mais ninguém, pode ser a aparência: da cintura para cima, de frente para a câmera, com fundo liso. PNG ou JPEG, de 300 a 6.000 px de lado, até 10 MB. Ela nunca vai junto num pacote de persona."
+shows_me = "Esta foto mostra a mim, e só a mim"
+choose_photo = "Escolher foto…"
+import_dialog = "Escolha uma foto sua"
+cancel = "Cancelar"
+imported = "Sua foto agora é a aparência desta persona."
+kept = "O desenho agora é a aparência desta persona."
+remove = "Remover aparência"
+remove_confirm = "Remover esta aparência? Uma aparência desenhada só volta com um novo desenho, que é pago."
+remove_yes = "Remover"
+removed = "A aparência foi removida."
+realistic = "Aparência realista (parece uma pessoa real)"
+realistic_hint = "Ligado para uma foto sua e para um desenho fotorrealista. Vídeos em que uma aparência realista atua precisam do rótulo de conteúdo alterado ou sintético das redes."
+
+[persona.look.error]
+missing_claude_key = "Salve sua chave do Claude em Configurações para desenhar uma aparência: o Claude escreve o prompt."
+missing_image_key = "Salve sua chave do Gemini em Configurações para desenhar uma aparência: o Nano Banana desenha."
+busy = "A aparência desta persona já está sendo desenhada."
+nothing_waiting = "Nenhum desenho está esperando revisão."
+none = "Esta persona não tem aparência."
+not_confirmed = "Confirme que a foto mostra você, e só você."
+unreadable = "Não foi possível ler esse arquivo."
+image_refused = "Essa foto não pode ser a aparência."
+not_saved = "Não foi possível salvar a aparência. Tente de novo."
+description_required = "Descreva o personagem a desenhar."
+description_too_long = "Use no máximo 1.000 caracteres."
+
+[persona.look.image]
+not_an_image = "Use um arquivo PNG ou JPEG."
+too_small = "Ela tem {width}×{height} px; cada lado precisa de pelo menos 300 px."
+too_large = "Ela tem {width}×{height} px; cada lado pode ter no máximo 6.000 px."
+shape = "Ela tem {width}×{height} px: estreita ou larga demais. Mantenha entre 2:5 e 5:2."
+file_too_large = "O arquivo tem {mb} MB; o máximo é 10 MB."
 
 [persona.voice_flag]
 unchecked_tag = "Voz não verificada"
@@ -2448,6 +2509,10 @@ body = "Salve, duplique ou exporte a persona para um arquivo, para usar em outro
 [tour.personas.realistic]
 title = "Voz realista"
 body = "Marque quando a voz soa como uma pessoa real, como um clone. As redes pedem que esses vídeos sejam marcados como conteúdo sintético, e o Bardo lembra você na exportação."
+
+[tour.personas.look]
+title = "Aparência"
+body = "O personagem que esta persona mostra nos clipes atuados. Desenhe um personagem original a partir de uma descrição, revise e fique com ele, ou importe uma foto sua. Uma foto sua nunca vai num pacote."
 
 [tour.templates]
 name = "Tour dos Modelos"
