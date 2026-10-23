@@ -35,6 +35,7 @@ function Get-BardoPaths {
 # copy), after `Report` gets what ran and which windows were open.
 function Invoke-Setup {
     param([Parameter(Mandatory)][string]$Path, [string[]]$Arguments = @(), [int]$Minutes = 5, [string]$Report)
+    [BardoWatchdog]::ThrowIfFired((Split-Path -Leaf $Path))
     $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
     if (-not $process.WaitForExit($Minutes * 60 * 1000)) {
         $name = Split-Path -Leaf $Path
@@ -70,7 +71,8 @@ function Uninstall-Bardo {
 # Bardo's window.
 function Get-BardoProcesses {
     param([ValidateSet('Agent', 'Window', 'Any')][string]$Kind = 'Any')
-    $all = @(Get-CimInstance Win32_Process -Filter "Name = 'bardo.exe'")
+    # Bounded: a killed process cannot free a stuck WMI query.
+    $all = @(Get-CimInstance Win32_Process -Filter "Name = 'bardo.exe'" -OperationTimeoutSec 30)
     switch ($Kind) {
         'Agent' { return @($all | Where-Object { $_.CommandLine -match '--agent' }) }
         'Window' { return @($all | Where-Object { $_.CommandLine -notmatch '--(agent|uninstall)' }) }

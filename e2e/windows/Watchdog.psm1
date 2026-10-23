@@ -32,21 +32,80 @@ public static class BardoWatchdog {
     // Reads a window's text without sending it a message, so a hung window
     // cannot block the report.
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int InternalGetWindowText(IntPtr hwnd, StringBuilder text, int max);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, int length);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, int length, IntPtr returned);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+    const int JobObjectBasicLimitInformation = 2, JobObjectBasicProcessIdList = 3;
+    // Lets a process that asks to leave the job leave it, instead of failing
+    // to start.
+    const int JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800;
 
     static readonly object gate = new object();
     static Timer timer;
-    static int fired;
+    static int fired, reported;
+    // The job this process and everything it starts belong to, even once
+    // their parent is gone: ending the job ends them all.
+    static IntPtr job = IntPtr.Zero;
 
     public static bool Fired { get { return Volatile.Read(ref fired) == 1; } }
+    public static bool Reported { get { return Volatile.Read(ref reported) == 1; } }
 
     // After `seconds`, reports to `report` and ends the processes `names`
-    // match; after `graceSeconds` more without a Disarm, ends this process.
-    public static void Arm(int seconds, int graceSeconds, string report, string[] names) {
+    // match; after `graceSeconds` more without a Disarm, ends this process
+    // and everything it started. Whether this process is in its own job.
+    public static bool Arm(int seconds, int graceSeconds, string report, string[] names) {
         lock (gate) {
             Disarm();
             Volatile.Write(ref fired, 0);
+            Volatile.Write(ref reported, 0);
+            if (job == IntPtr.Zero) {
+                try { Contain(); } catch (Exception) { }
+            }
             timer = new Timer(_ => Fire(graceSeconds, report, names), null, seconds * 1000L, Timeout.Infinite);
+            return job != IntPtr.Zero;
         }
+    }
+
+    static void Contain() {
+        var created = CreateJobObject(IntPtr.Zero, null);
+        if (created == IntPtr.Zero) return;
+        // JOBOBJECT_BASIC_LIMIT_INFORMATION is 64 bytes on x64, LimitFlags at 16.
+        var limits = Marshal.AllocHGlobal(64);
+        try {
+            for (int i = 0; i < 64; i += 8) Marshal.WriteInt64(limits, i, 0);
+            Marshal.WriteInt32(limits, 16, JOB_OBJECT_LIMIT_BREAKAWAY_OK);
+            if (SetInformationJobObject(created, JobObjectBasicLimitInformation, limits, 64) &&
+                AssignProcessToJobObject(created, Process.GetCurrentProcess().Handle)) job = created;
+        } finally {
+            Marshal.FreeHGlobal(limits);
+        }
+    }
+
+    // Ends every process in this process's job but this one; their ids.
+    public static int[] KillContained() {
+        var ended = new List<int>();
+        if (job == IntPtr.Zero) return ended.ToArray();
+        // JOBOBJECT_BASIC_PROCESS_ID_LIST: two DWORDs, then the ids.
+        const int capacity = 1024, size = 8 + capacity * 8;
+        var list = Marshal.AllocHGlobal(size);
+        try {
+            if (!QueryInformationJobObject(job, JobObjectBasicProcessIdList, list, size, IntPtr.Zero)) return ended.ToArray();
+            int count = Marshal.ReadInt32(list, 4), self = Environment.ProcessId;
+            for (int i = 0; i < count && i < capacity; i++) {
+                int id = (int)Marshal.ReadInt64(list, 8 + i * 8);
+                if (id == self) continue;
+                try {
+                    using (var process = Process.GetProcessById(id)) { process.Kill(); }
+                    ended.Add(id);
+                } catch (Exception) { }
+            }
+        } finally {
+            Marshal.FreeHGlobal(list);
+        }
+        return ended.ToArray();
     }
 
     public static void Disarm() {
@@ -56,17 +115,25 @@ public static class BardoWatchdog {
     }
 
     static void Fire(int graceSeconds, string report, string[] names) {
+        // Set first, so the run stops at its next wait instead of going on.
         Volatile.Write(ref fired, 1);
         // An exception here would end the run at once, without its results.
         try { Report(report, "The run outlived its budget."); }
         catch (Exception e) { Append(report, "The run outlived its budget; no report: " + e.Message); }
         Append(report, "Ended: " + string.Join(", ", Kill(names)));
+        Volatile.Write(ref reported, 1);
         Thread.Sleep(graceSeconds * 1000);
         lock (gate) {
             if (timer == null) return;
         }
-        Append(report, "Still stuck " + graceSeconds + " s later: the run is ended.");
-        Process.GetCurrentProcess().Kill();
+        Append(report, "Still stuck " + graceSeconds + " s later: the run is ended, with everything it started.");
+        // A child left without its parent could keep the step from ending.
+        if (job == IntPtr.Zero || !TerminateJobObject(job, 1)) Process.GetCurrentProcess().Kill();
+    }
+
+    // Throws once the watchdog fired, so a wait stops instead of running on.
+    public static void ThrowIfFired(string what) {
+        if (Fired) throw new TimeoutException("the watchdog stopped the run: " + what);
     }
 
     static bool Matches(string name, string[] names) {
@@ -163,7 +230,8 @@ $script:Folder = $null
 function Start-Watchdog {
     param([Parameter(Mandatory)][int]$Minutes, [int]$GraceMinutes = 3, [Parameter(Mandatory)][string]$Folder)
     $script:Folder = (New-Item -ItemType Directory -Force $Folder).FullName
-    [BardoWatchdog]::Arm($Minutes * 60, $GraceMinutes * 60, (Join-Path $script:Folder 'hang.txt'), $script:Leftovers)
+    $contained = [BardoWatchdog]::Arm($Minutes * 60, $GraceMinutes * 60, (Join-Path $script:Folder 'hang.txt'), $script:Leftovers)
+    if (-not $contained) { Write-Host 'The run is not in a job of its own: only the processes named in $Leftovers can be ended.' }
 }
 
 function Stop-Watchdog { [BardoWatchdog]::Disarm() }
@@ -171,6 +239,9 @@ function Stop-Watchdog { [BardoWatchdog]::Disarm() }
 # Whether the watchdog fired, and what it found.
 function Get-WatchdogReport {
     if (-not [BardoWatchdog]::Fired) { return $null }
+    # The run can get here while the watchdog is still writing.
+    $deadline = (Get-Date).AddSeconds(60)
+    while (-not [BardoWatchdog]::Reported -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
     return Get-Content -Raw -ErrorAction SilentlyContinue (Join-Path $script:Folder 'hang.txt')
 }
 
@@ -191,9 +262,13 @@ function Save-ProcessReport {
     [BardoWatchdog]::Report($Path, $Why)
 }
 
-# Ends whatever a run left running (see $Leftovers); what it ended.
+# Ends whatever a run left running: what $Leftovers names and every
+# process it started (through its job), even one whose parent is gone;
+# what it ended.
 function Stop-Leftovers {
-    return @([BardoWatchdog]::Kill($script:Leftovers))
+    $named = @([BardoWatchdog]::Kill($script:Leftovers))
+    $started = @([BardoWatchdog]::KillContained() | ForEach-Object { "process $_" })
+    return @($named + $started)
 }
 
 Export-ModuleMember -Function Start-Watchdog, Stop-Watchdog, Get-WatchdogReport, Enter-Stage, Save-ProcessReport, Stop-Leftovers
