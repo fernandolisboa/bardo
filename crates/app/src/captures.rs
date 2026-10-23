@@ -31,11 +31,11 @@ use bardo_domain::{
     Alignment, AlignmentRequest, ApiKey, BoundaryError, BoundaryMove, Capture, CaptureConfirmation,
     CaptureId, CaptureProblem, CaptureRepository, CaptureVideo, CaptureVoice, CharTiming,
     CostPurpose, GenerationPresets, HeardWord, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId, NarrationRepository, NarrationSource,
-    Persona, ProfileId, Progress, ProjectFiles, Provider, ProviderFailure, RecordingFacts,
-    RepositoryError, ScriptText, SecretStore, SpeechAligner, SpeechTranscriber, TakeSource, Takes,
-    TranscriptionRequest, VideoProjectId, VoiceChangeRequest, VoiceChanger, VoiceFlag,
-    VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
+    JobRepository, MIN_SCRIPT_COVERAGE, Metered, Narration, NarrationId, NarrationRepository,
+    NarrationSource, Persona, ProfileId, Progress, ProjectFiles, Provider, ProviderFailure,
+    RecordingFacts, RepositoryError, ScriptText, SecretStore, SpeechAligner, SpeechTranscriber,
+    TakeSource, Takes, TranscriptionRequest, VideoProjectId, VoiceChangeRequest, VoiceChanger,
+    VoiceFlag, VoiceIsolator, VoiceRef, WordTimings, audio_parts, script_coverage,
 };
 use bardo_media::ffmpeg::{MediaError, Monitor};
 use bardo_media::{MediaEngine, audio, mp3};
@@ -440,6 +440,8 @@ pub(crate) struct CaptureHandler {
     pub(crate) aligner: Arc<dyn SpeechAligner>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
+    /// Where the takes' face mesh jobs are queued once they exist.
+    pub(crate) jobs: Arc<dyn JobRepository>,
 }
 
 impl JobHandler for CaptureHandler {
@@ -860,9 +862,14 @@ impl CaptureHandler {
         if let Some(previous) = previous.filter(|p| p.audio_file != narration.audio_file) {
             crate::proxies::remove_media(self.files.as_ref(), project, &previous.audio_file);
         }
-        if let Some(previous) = previous_capture.filter(|p| p.video_file != capture.video_file) {
-            let _ = self.files.remove(project, &previous.video_file);
+        if let Some(previous) = previous_capture.filter(|p| p.id != capture.id) {
+            if previous.video_file != capture.video_file {
+                let _ = self.files.remove(project, &previous.video_file);
+            }
+            crate::take_analysis::remove_analysis_files(self.files.as_ref(), &previous);
         }
+        // The face mesh runs on every take as soon as it exists.
+        crate::take_analysis::queue_face_analyses(self.owner, &capture, self.jobs.as_ref());
         Ok(())
     }
 }
@@ -906,6 +913,7 @@ pub(crate) fn forget_capture(
     captures.delete_capture(project)?;
     // One that will not go (open in a player) is left behind.
     let _ = files.remove(project, &capture.video_file);
+    crate::take_analysis::remove_analysis_files(files, &capture);
     Ok(())
 }
 
@@ -1093,7 +1101,7 @@ impl Bardo {
 
     /// The project's capture with the narration it made, when that is
     /// still the project's narration.
-    fn current_capture(
+    pub(crate) fn current_capture(
         &self,
         project: VideoProjectId,
     ) -> Result<(Capture, Narration), CaptureError> {
@@ -1126,7 +1134,8 @@ impl Bardo {
             .move_boundary(&take_source(&narration), index, to)?;
         self.captures
             .save_takes(capture.project, capture.id, &capture.takes)?;
-        Ok(())
+        // Their analyses are stale now.
+        self.reanalyze_around(&capture, index)
     }
 
     /// Removes the project's capture and its video; the narration its
@@ -1138,6 +1147,7 @@ impl Bardo {
         }
         self.captures.delete_capture(capture.project)?;
         let _ = self.files.remove(capture.project, &capture.video_file);
+        crate::take_analysis::remove_analysis_files(self.files.as_ref(), &capture);
         Ok(())
     }
 
@@ -1287,7 +1297,7 @@ pub(crate) mod testing {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::Ordering;
 
     use bardo_domain::{
@@ -1324,15 +1334,15 @@ mod tests {
 
     /// A test with project folders on disk (ffmpeg writes the sound there)
     /// and a folder of the user's to record into.
-    struct Setup {
-        h: Harness,
-        app: Bardo,
+    pub(crate) struct Setup {
+        pub(crate) h: Harness,
+        pub(crate) app: Bardo,
         user: tempfile::TempDir,
-        _folders: tempfile::TempDir,
+        pub(crate) _folders: tempfile::TempDir,
     }
 
     /// Records `seconds` of sound reading the script, one word a second.
-    fn setup(seconds: u32) -> Setup {
+    pub(crate) fn setup(seconds: u32) -> Setup {
         let folders = tempfile::tempdir().unwrap();
         let h = Harness::with_files(Arc::new(LocalProjectFiles::new(folders.path())));
         *h.media.sound.lock().unwrap() = Some(silent_wav(seconds));
@@ -1380,7 +1390,7 @@ mod tests {
         }
 
         /// A phone recording: 1080 × 1920 at 29.97 fps with sound.
-        fn chosen(&self, seconds: u64) -> ChosenCapture {
+        pub(crate) fn chosen(&self, seconds: u64) -> ChosenCapture {
             let path = self.recording(
                 "Take 1.MOV",
                 info(seconds, Some((1080, 1920, (30_000, 1001))), true),
@@ -1401,7 +1411,7 @@ mod tests {
             wait_done(&self.app, id)
         }
 
-        fn imported(
+        pub(crate) fn imported(
             &self,
             project: VideoProjectId,
             voice: CaptureVoiceChoice,

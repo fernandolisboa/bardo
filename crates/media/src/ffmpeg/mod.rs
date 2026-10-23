@@ -17,6 +17,7 @@ mod proxy;
 mod render;
 mod sound;
 mod thumbnail;
+mod vision;
 mod waveform;
 
 use std::ffi::OsStr;
@@ -36,6 +37,9 @@ pub use render::{
 };
 pub use sound::SOUND_RATE;
 pub use thumbnail::ThumbnailSpec;
+pub use vision::{
+    ANALYSIS_MAX_SIDE, FrameSource, GrayDepth, GraySink, GraySource, MemoryFrames, analysis_size,
+};
 pub use waveform::Waveform;
 
 /// The oldest ffmpeg whose flags and filters Bardo relies on. The bundled

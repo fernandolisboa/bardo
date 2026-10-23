@@ -283,6 +283,7 @@ thumbnail_image = "Fundo da miniatura"
 chapters = "Capítulos"
 localization = "Versão em outro idioma"
 persona_look = "Aparência da persona"
+take_analysis = "Análise da tomada"
 
 [job.state]
 queued = "Na fila"
@@ -308,6 +309,7 @@ cut_short = "O Bardo fechou antes de terminar. Comece de novo."
 restored = "Isto estava em andamento quando o backup foi feito, então o Bardo não retomou depois da restauração. Confira na rede: se o post não estiver lá, tente de novo."
 checksum = "O instalador não confere com o checksum publicado na versão, então o Bardo não o guardou. Tente de novo; se acontecer outra vez, relate o problema."
 off_script = "A gravação não segue o roteiro de perto o bastante. Grave de novo lendo o roteiro atual e importe."
+vision_models = "Os modelos de rosto, profundidade e máscara estão faltando, danificados ou não rodaram. Reinstale o Bardo para recolocá-los e tente de novo."
 
 [job.error]
 not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
@@ -634,7 +636,43 @@ remove_hint = "Remove a gravação e suas tomadas do projeto. A narração fica.
 remove_confirm = "Remover a gravação e suas tomadas? A narração fica; para ter as tomadas de volta, importe a gravação de novo."
 remove_keep = "Manter"
 take_flagged = "A corrigir"
+take_blocked = "Não pode seguir"
+mode_label = "Modo"
+mode_hint = "O que o modelo de tomada recebe desta tomada: a gravação como está, seu rosto coberto pela malha desenhada, ou você como uma figura de profundidade sobre o cenário. Profundidade também analisa a profundidade e a máscara da pessoa."
 voice_persona_none = "A voz da persona"
+
+[capture.mode]
+recording = "Gravação"
+mesh = "Malha"
+depth = "Profundidade"
+
+[capture.analysis]
+hint = "O Bardo analisa cada tomada neste computador, de graça: a malha do rosto de toda tomada, e a profundidade e a máscara da pessoa das tomadas no modo Profundidade. Nada sai do computador."
+not_started = "{part}: ainda não analisada."
+queued = "{part}: aguardando a vez."
+running = "{part}: {percent}% {device}."
+running_left = "{part}: {percent}% {device}, falta cerca de {left}."
+done = "{part}: pronta {device}."
+cancelled = "{part}: parada. Retomar continua de onde parou."
+failed = "{part}: não terminou."
+on_gpu = "na placa de vídeo"
+on_cpu = "no processador"
+cpu_note = "Sem placa de vídeo utilizável, o processador faz a análise. Demora mais, mas funciona."
+redone = "O corte mudou, então esta tomada é analisada de novo."
+analyze = "Analisar"
+resume = "Retomar"
+
+[capture.analysis.part]
+face = "Malha do rosto"
+depth = "Profundidade e máscara"
+
+[capture.check]
+no_face = "Nenhum rosto em {n} de {frames} quadros."
+several_faces = "Mais de um rosto em {n} quadros. Só você pode aparecer na gravação: grave esta tomada de novo sozinho."
+small_face = "O rosto ocupa menos de 15% da altura do quadro em {n} quadros. Chegue mais perto da câmera."
+turned = "A cabeça está virada mais de 45° em {n} quadros."
+mask_jumps = "A máscara da pessoa salta mais de 20% em {n} quadros."
+passed = "Checagens ok: um rosto, grande o bastante, de frente para a câmera."
 
 [capture.error]
 no_persona = "Nenhuma persona dá voz a este projeto: escolha um narrador para ele, ou uma persona padrão para o canal. Ou use a sua própria voz."
@@ -2504,6 +2542,14 @@ body = "A gravação que você importou, a voz que a fala recebeu e a frase que 
 [tour.capture.takes]
 title = "As tomadas"
 body = "A gravação é dividida em tomadas de 4 a 30 segundos em fins de frase e pausas. Cada uma vira um clipe interpretado; uma tomada que não pode virar diz por quê."
+
+[tour.capture.mode]
+title = "O modo"
+body = "Gravação, Malha ou Profundidade: o que o modelo de tomada recebe desta tomada. A malha do rosto roda em toda tomada; Profundidade também precisa da profundidade e da máscara da pessoa."
+
+[tour.capture.analysis]
+title = "A análise"
+body = "O Bardo analisa cada tomada neste computador, de graça, na placa de vídeo quando pode. Cada parte mostra o progresso e o tempo que falta; as checagens abaixo dizem o que gravar de novo."
 
 [tour.capture.cut]
 title = "Mova um corte"

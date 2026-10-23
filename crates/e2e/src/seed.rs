@@ -7,7 +7,7 @@
 //!   theme ideas; niche research for four seeds; a project ready to render
 //!   and publish ("The probe that never came back"): a 24 s narration
 //!   captured from a recording of the user and voiced by the persona's
-//!   realistic voice, with word timings and takes, five scenes with
+//!   realistic voice, with word timings and analyzed takes, five scenes with
 //!   stills, imported music, a sound effect and portrait footage on the
 //!   cut, a music prompt and every network's title and text. X renders
 //!   landscape at 720p.
@@ -548,6 +548,28 @@ fn capture(
         job: None,
     };
     db.save_capture(&capture)?;
+    // Each take's face mesh, as the analysis on the graphics card would
+    // have left it; the second take turns away for a moment.
+    for (index, take) in capture.takes.as_slice().iter().enumerate() {
+        let frames = ((take.end - take.start).as_secs_f64() * 30.0).round() as u32;
+        db.save_analysis(&TakeAnalysis {
+            project: project.id,
+            capture: capture.id,
+            position: index as u32,
+            revision: take.revision,
+            part: AnalysisPart::Face,
+            device: Device::Gpu,
+            model: "MediaPipe Face Landmarker float16 v1".into(),
+            checks: TakeChecks {
+                frames,
+                turned: if index == 1 { 12 } else { 0 },
+                ..TakeChecks::default()
+            },
+            depth_range: None,
+            finished_at: now,
+            job: None,
+        })?;
+    }
     Ok(())
 }
 

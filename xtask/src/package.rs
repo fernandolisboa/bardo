@@ -2,11 +2,15 @@
 //!
 //! 1. Builds `bardo.exe` in release (skip with `--no-build`).
 //! 2. Fetches the pinned ffmpeg (ADR-0007).
-//! 3. Stages the installed layout in `target/package/Bardo/`:
-//!    `bardo.exe`, `ffmpeg\` (ffmpeg, ffprobe, their DLLs unmodified,
-//!    `LICENSE.txt` and `SOURCE.txt`), and `THIRD-PARTY-NOTICES.html`
-//!    made by `cargo about` for the crates `bardo.exe` is built from.
-//! 4. Where Inno Setup 6 is installed, compiles `installer/bardo.iss` into
+//! 3. Fetches the pinned vision models (ADR-0024).
+//! 4. Stages the installed layout in `target/package/Bardo/`:
+//!    `bardo.exe` with the ONNX Runtime library it loads beside it
+//!    (`DirectML.dll` on Windows), `ffmpeg\` (ffmpeg, ffprobe, their DLLs
+//!    unmodified, `LICENSE.txt` and `SOURCE.txt`), `models\` (the vision
+//!    models, each checked against its pin, and `NOTICES.txt` with their
+//!    sources and licenses), and `THIRD-PARTY-NOTICES.html` made by
+//!    `cargo about` for the crates `bardo.exe` is built from.
+//! 5. Where Inno Setup 6 is installed, compiles `installer/bardo.iss` into
 //!    `target/package/Bardo-Setup-<version>-x64.exe`, with its SHA-256 next
 //!    to it (skip with `--no-installer`).
 //!
@@ -52,6 +56,11 @@ pub const STAGE_DIR: &str = "Bardo";
 pub const FFMPEG_DIR: &str = "ffmpeg";
 pub const NOTICES: &str = "THIRD-PARTY-NOTICES.html";
 pub const FFMPEG_SOURCE: &str = "SOURCE.txt";
+pub const MODELS_DIR: &str = "models";
+pub const MODELS_NOTICES: &str = "NOTICES.txt";
+/// The libraries ONNX Runtime loads at run time, copied beside `bardo.exe`
+/// by `ort`'s build: DirectML on Windows (linked statically otherwise).
+pub const RUNTIME_LIBRARIES: [&str; 1] = ["DirectML.dll"];
 
 pub fn package(workspace: &Path, options: &Options) -> anyhow::Result<()> {
     let version = workspace_version(workspace)?;
@@ -70,15 +79,31 @@ pub fn package(workspace: &Path, options: &Options) -> anyhow::Result<()> {
     }
     crate::ffmpeg::fetch(workspace, None)?;
     let manifest = Manifest::read(workspace)?;
+    let models_dir = workspace.join(".models");
+    crate::models::fetch(workspace, Some(models_dir.clone()))?;
+    let models = crate::models::Manifest::read(workspace)?;
 
     let out = target.join("package");
     let stage_dir = out.join(STAGE_DIR);
-    let program = target.join("release").join(executable("bardo"));
+    let release = target.join("release");
+    let program = release.join(executable("bardo"));
+    let libraries: Vec<PathBuf> = if cfg!(windows) {
+        RUNTIME_LIBRARIES
+            .iter()
+            .map(|name| release.join(name))
+            .collect()
+    } else {
+        Vec::new()
+    };
     stage(
         &Sources {
             program: &program,
+            libraries: &libraries,
             ffmpeg_bin: &workspace.join(".ffmpeg").join("bin"),
             ffmpeg_source: &source_offer(&manifest),
+            models_dir: &models_dir,
+            models: &models.model,
+            models_notices: &models.notices(),
         },
         &stage_dir,
     )?;
@@ -123,6 +148,13 @@ pub struct Sources<'a> {
     pub ffmpeg_bin: &'a Path,
     /// The text of `ffmpeg\SOURCE.txt`.
     pub ffmpeg_source: &'a str,
+    /// Libraries that go beside the program, each required.
+    pub libraries: &'a [PathBuf],
+    /// `.models` as `fetch-models` leaves it, and the files it must hold.
+    pub models_dir: &'a Path,
+    pub models: &'a [crate::models::Model],
+    /// The text of `models\NOTICES.txt`.
+    pub models_notices: &'a str,
 }
 
 /// Fills `dir` (emptied first) with the installed layout.
@@ -163,6 +195,29 @@ pub fn stage(sources: &Sources, dir: &Path) -> anyhow::Result<()> {
         ),
     }
     fs::write(ffmpeg.join(FFMPEG_SOURCE), sources.ffmpeg_source)?;
+    for library in sources.libraries {
+        let name = library.file_name().context("a library has a file name")?;
+        fs::copy(library, dir.join(name)).with_context(|| {
+            format!(
+                "copying {}: build bardo-ui in release on Windows first",
+                library.display()
+            )
+        })?;
+    }
+    let models = dir.join(MODELS_DIR);
+    fs::create_dir_all(&models)?;
+    for model in sources.models {
+        let path = sources.models_dir.join(&model.file);
+        if !crate::models::matches(&path, model) {
+            bail!(
+                "{} is missing or not the pinned file: run cargo xtask fetch-models",
+                path.display()
+            );
+        }
+        fs::copy(&path, models.join(&model.file))
+            .with_context(|| format!("copying {}", model.file))?;
+    }
+    fs::write(models.join(MODELS_NOTICES), sources.models_notices)?;
     Ok(())
 }
 
@@ -315,6 +370,44 @@ mod tests {
         }
     }
 
+    /// A models folder with one pinned file, `abc`.
+    fn fake_models(dir: &Path) -> (PathBuf, Vec<crate::models::Model>) {
+        let models = dir.join("models-src");
+        fs::create_dir_all(&models).unwrap();
+        fs::write(models.join("face.onnx"), "abc").unwrap();
+        let pin = crate::models::Model {
+            file: "face.onnx".into(),
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+            size: 3,
+        };
+        (models, vec![pin])
+    }
+
+    #[test]
+    fn a_stage_without_a_pinned_model_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let program = temp.path().join("bardo.exe");
+        fs::write(&program, "bardo").unwrap();
+        let bin = temp.path().join("bin");
+        fake_ffmpeg(&bin);
+        let (models_dir, models) = fake_models(temp.path());
+        fs::write(models_dir.join("face.onnx"), "abd").unwrap();
+        let error = stage(
+            &Sources {
+                program: &program,
+                libraries: &[],
+                ffmpeg_bin: &bin,
+                ffmpeg_source: "offer",
+                models_dir: &models_dir,
+                models: &models,
+                models_notices: "notices",
+            },
+            &temp.path().join("stage"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("fetch-models"), "{error}");
+    }
+
     #[test]
     fn the_stage_holds_the_installed_layout() {
         let temp = tempfile::tempdir().unwrap();
@@ -325,11 +418,18 @@ mod tests {
         let dir = temp.path().join("stage");
         fs::create_dir_all(dir.join("old")).unwrap();
 
+        let library = temp.path().join("DirectML.dll");
+        fs::write(&library, "directml").unwrap();
+        let (models_dir, models) = fake_models(temp.path());
         stage(
             &Sources {
                 program: &program,
+                libraries: std::slice::from_ref(&library),
                 ffmpeg_bin: &bin,
                 ffmpeg_source: "offer",
+                models_dir: &models_dir,
+                models: &models,
+                models_notices: "notices",
             },
             &dir,
         )
@@ -340,12 +440,15 @@ mod tests {
         assert_eq!(
             names,
             [
+                "DirectML.dll",
                 "bardo.exe",
                 "ffmpeg/LICENSE.txt",
                 "ffmpeg/SOURCE.txt",
                 "ffmpeg/avcodec-62.dll",
                 "ffmpeg/ffmpeg.exe",
                 "ffmpeg/ffprobe.exe",
+                "models/NOTICES.txt",
+                "models/face.onnx",
             ],
             "no ffplay, nothing left from before"
         );
@@ -364,11 +467,16 @@ mod tests {
         let bin = temp.path().join("bin");
         fake_ffmpeg(&bin);
         fs::remove_file(bin.join("LICENSE.txt")).unwrap();
+        let (models_dir, models) = fake_models(temp.path());
         let error = stage(
             &Sources {
                 program: &program,
+                libraries: &[],
                 ffmpeg_bin: &bin,
                 ffmpeg_source: "offer",
+                models_dir: &models_dir,
+                models: &models,
+                models_notices: "notices",
             },
             &temp.path().join("stage"),
         )

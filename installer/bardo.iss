@@ -94,6 +94,8 @@ Name: "backgroundagent"; Description: "{cm:AgentTask}"; GroupDescription: "{cm:A
 [InstallDelete]
 ; A newer ffmpeg may drop a DLL: never leave an old one beside the new.
 Type: filesandordirs; Name: "{app}\ffmpeg"
+; Same for the vision models: a newer pin may rename or drop one.
+Type: filesandordirs; Name: "{app}\models"
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

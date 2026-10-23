@@ -1079,6 +1079,7 @@ pub(crate) mod tests {
                 transcriber: Arc::new(crate::captures::testing::FakeTranscriber::default()),
                 voice_changer: Arc::new(crate::captures::testing::FakeVoiceChanger::default()),
                 voice_isolator: Arc::new(crate::captures::testing::FakeVoiceIsolator::default()),
+                vision: Arc::new(crate::take_analysis::testing::FakeVision::default()),
                 images: Arc::clone(&self.images) as _,
                 music: Arc::clone(&self.music) as _,
                 clips: std::iter::once(Arc::clone(&self.clips) as _)

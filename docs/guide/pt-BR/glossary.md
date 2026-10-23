@@ -62,6 +62,10 @@ As palavras que o Bardo usa, em termos simples.
 
 **Tomada**: um trecho de uma captura, de 4 a 30 segundos de fim de frase a fim de frase, que vira um clipe interpretado.
 
+**Modo da tomada**: o que o modelo da tomada recebe: Gravação (a tomada como foi gravada), Malha (seu rosto coberto pela malha desenhada) ou Profundidade (você como uma figura de profundidade sobre o cenário).
+
+**Análise da tomada**: a malha do rosto de toda tomada, e a profundidade e a máscara da pessoa de uma tomada no modo Profundidade, calculadas no seu computador, de graça, com as checagens que encontrou.
+
 **Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
 
 **Cena**: um trecho da narração com uma imagem e, se quiser, um clipe.

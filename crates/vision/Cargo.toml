@@ -9,6 +9,22 @@ publish.workspace = true
 
 [dependencies]
 bardo-domain.workspace = true
+serde.workspace = true
+sha2 = "0.10"
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+toml.workspace = true
+tracing.workspace = true
+# Pinned exactly (ADR-0024). `download-binaries` fetches pyke's ONNX
+# Runtime build (1.24.2, linked statically) for the target at build time;
+# `directml` adds DirectML on Windows, whose DLL `copy-dylibs` puts next
+# to the executable.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls"] }
+
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "directml"] }
+
+[dev-dependencies]
+bardo-media.workspace = true
 
 [lints]
 workspace = true

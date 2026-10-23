@@ -62,6 +62,10 @@ The words Bardo uses, in plain terms.
 
 **Take**: a stretch of a capture, 4 to 30 seconds from sentence end to sentence end, that becomes one performed clip.
 
+**Take mode**: what a take's model receives: Recording (the take as recorded), Mesh (your face covered by its drawn mesh) or Depth (you as a depth figure over the set).
+
+**Take analysis**: the face mesh of every take, and the depth and person mask of a take in Depth mode, worked out on your computer, free, with the checks it found.
+
 **Scene plan**: the narration split into scenes, each with an image prompt.
 
 **Scene**: a stretch of the narration with one image, and optionally a clip.

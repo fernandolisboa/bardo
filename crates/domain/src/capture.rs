@@ -13,8 +13,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::narration::key;
 use crate::{
-    GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError, VideoProjectId, VoiceRef,
-    WordTiming, spoken_words,
+    GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError, TakeAnalysis, TakeMode,
+    VideoProjectId, VoiceRef, WordTiming, spoken_words,
 };
 
 uuid_id!(
@@ -311,6 +311,7 @@ impl TakeSource<'_> {
             start: span.start,
             end: span.end,
             revision,
+            mode: TakeMode::default(),
         }
     }
 }
@@ -343,6 +344,8 @@ pub struct Take {
     /// Goes up each time the take's stretch changes, so work made from an
     /// earlier stretch can tell it is stale.
     pub revision: u32,
+    /// What the take model receives for it (#190).
+    pub mode: TakeMode,
 }
 
 impl Take {
@@ -380,6 +383,8 @@ pub struct InvalidTakes;
 pub enum BoundaryError {
     #[error("no such boundary")]
     NoSuchBoundary,
+    #[error("no such take")]
+    NoSuchTake,
     /// No cut point that leaves both takes a word.
     #[error("no cut point that way")]
     NoCutPoint,
@@ -503,8 +508,15 @@ impl Takes {
         target.map(|word| word + 1).ok_or(BoundaryError::NoCutPoint)
     }
 
+    /// Gives take `index` `mode`. Its stretch, and so its revision, stay.
+    pub fn set_mode(&mut self, index: usize, mode: TakeMode) -> Result<(), BoundaryError> {
+        let take = self.0.get_mut(index).ok_or(BoundaryError::NoSuchTake)?;
+        take.mode = mode;
+        Ok(())
+    }
+
     /// Moves the boundary after take `index` to the previous or next cut
-    /// point. Both takes get a new revision.
+    /// point. Both takes get a new revision and keep their modes.
     pub fn move_boundary(
         &mut self,
         source: &TakeSource<'_>,
@@ -513,8 +525,14 @@ impl Takes {
     ) -> Result<(), BoundaryError> {
         let at = self.boundary_target(source, index, to)?;
         let (before, after) = (&self.0[index], &self.0[index + 1]);
-        let earlier = source.take(before.words.start..at, before.revision + 1);
-        let later = source.take(at..after.words.end, after.revision + 1);
+        let earlier = Take {
+            mode: before.mode,
+            ..source.take(before.words.start..at, before.revision + 1)
+        };
+        let later = Take {
+            mode: after.mode,
+            ..source.take(at..after.words.end, after.revision + 1)
+        };
         self.0[index] = earlier;
         self.0[index + 1] = later;
         Ok(())
@@ -624,8 +642,17 @@ pub trait CaptureRepository: Send + Sync {
         takes: &Takes,
     ) -> Result<(), RepositoryError>;
 
-    /// Removes the project's capture, if any.
+    /// Removes the project's capture, if any, with its analyses.
     fn delete_capture(&self, project: VideoProjectId) -> Result<(), RepositoryError>;
+
+    /// The finished analyses of the project's capture's takes, current or
+    /// stale ([`TakeAnalysis::fits`]).
+    fn analyses(&self, project: VideoProjectId) -> Result<Vec<TakeAnalysis>, RepositoryError>;
+
+    /// Keeps `analysis` as its take's analysis of its part, replacing the
+    /// one before, while the project's capture is still its capture and
+    /// the take is still at its revision. Returns whether it was kept.
+    fn save_analysis(&self, analysis: &TakeAnalysis) -> Result<bool, RepositoryError>;
 }
 
 impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
@@ -648,6 +675,14 @@ impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
 
     fn delete_capture(&self, project: VideoProjectId) -> Result<(), RepositoryError> {
         (**self).delete_capture(project)
+    }
+
+    fn analyses(&self, project: VideoProjectId) -> Result<Vec<TakeAnalysis>, RepositoryError> {
+        (**self).analyses(project)
+    }
+
+    fn save_analysis(&self, analysis: &TakeAnalysis) -> Result<bool, RepositoryError> {
+        (**self).save_analysis(analysis)
     }
 }
 
@@ -1035,12 +1070,44 @@ mod tests {
     }
 
     #[test]
+    fn a_take_keeps_its_mode_when_its_cut_moves() {
+        let text = sentences(6, 12);
+        let words = timed(&text, 0.4, 0.1, &[]);
+        let source = TakeSource {
+            text: &text,
+            words: &words,
+            duration: words.last().unwrap().end,
+        };
+        let mut takes = Takes::split(&source);
+        assert_eq!(takes.len(), 2);
+        assert!(
+            takes
+                .as_slice()
+                .iter()
+                .all(|t| t.mode == TakeMode::Recording)
+        );
+        takes.set_mode(1, TakeMode::Depth).expect("take 1");
+        assert_eq!(takes.as_slice()[1].mode, TakeMode::Depth);
+        assert_eq!(takes.as_slice()[1].revision, 1, "same stretch");
+        takes
+            .move_boundary(&source, 0, BoundaryMove::Earlier)
+            .unwrap();
+        assert_eq!(takes.as_slice()[0].mode, TakeMode::Recording);
+        assert_eq!(takes.as_slice()[1].mode, TakeMode::Depth);
+        assert_eq!(
+            takes.set_mode(2, TakeMode::Mesh),
+            Err(BoundaryError::NoSuchTake)
+        );
+    }
+
+    #[test]
     fn stored_takes_must_cover_the_words_in_order() {
         let take = |words: Range<usize>| Take {
             words,
             start: s(0.0),
             end: s(1.0),
             revision: 1,
+            mode: TakeMode::Recording,
         };
         assert!(Takes::restore(10, vec![take(0..4), take(4..10)]).is_ok());
         assert!(Takes::restore(0, vec![]).is_ok());

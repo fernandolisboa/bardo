@@ -67,47 +67,47 @@ license = "Apache-2.0"
 [[model]]
 file = "face_detector.onnx"
 from = "face_landmarker"
-sha256 = ""
-size = 0
+sha256 = "d316b66c081e4c3559799f36d867634071ae45fb372690bc509bfe9a55b3e84c"
+size = 224033
 
 [[model]]
 file = "face_landmarks_detector.onnx"
 from = "face_landmarker"
-sha256 = ""
-size = 0
+sha256 = "e245948ae228f075740bc1f136ce1558d1a94dd876f50a70ccd4978ad066c951"
+size = 2550548
 
 [[model]]
 file = "face_blendshapes.onnx"
 from = "face_landmarker"
-sha256 = ""
-size = 0
+sha256 = "cd054203e5e2ff573a6cbf0e42610c9cd58f55d8e19f7eb78a198cb2393614f5"
+size = 988723
 
 [[model]]
 file = "selfie_multiclass_256x256.onnx"
 from = "selfie_multiclass"
-sha256 = ""
-size = 0
+sha256 = "abb7f1ba4acf288608865f974b41ab77062d4fde837cd12da37275751be8b985"
+size = 8357313
 
 [[model]]
 file = "depth_anything_v2_small_280x504.onnx"
 from = "depth_anything_v2_small"
-sha256 = ""
-size = 0
+sha256 = "d8f223bfd1e24e7ab615746b0bde4ad1b7a42a9efb32f79a67b1a52815e77477"
+size = 49554767
 
 [[model]]
 file = "depth_anything_v2_small_504x280.onnx"
 from = "depth_anything_v2_small"
-sha256 = ""
-size = 0
+sha256 = "123f34f84606e90458e35522913a7a69566a1f7297e9941ad4e3fa1d4d668cd3"
+size = 49554767
 
 [[model]]
 file = "video_depth_anything_small_32x280x504.onnx"
 from = "video_depth_anything_small"
-sha256 = ""
-size = 0
+sha256 = "523b7769f1d6c399ecd11ccc21ab7e4db2a8cbe404c2dca6022a142a85d8fdd6"
+size = 58401478
 
 [[model]]
 file = "video_depth_anything_small_32x504x280.onnx"
 from = "video_depth_anything_small"
-sha256 = ""
-size = 0
+sha256 = "f3dd41043efcb193f6e5f151225873c0a82fd67eb40cdfa100f6b6546f7cd462"
+size = 58401478
