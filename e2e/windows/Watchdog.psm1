@@ -62,26 +62,45 @@ public static class BardoWatchdog {
             Volatile.Write(ref fired, 0);
             Volatile.Write(ref reported, 0);
             if (job == IntPtr.Zero) {
-                try { Contain(); } catch (Exception) { }
+                try { Contain(); } catch (Exception e) { ContainNote = e.Message; }
             }
             timer = new Timer(_ => Fire(graceSeconds, report, names), null, seconds * 1000L, Timeout.Infinite);
             return job != IntPtr.Zero;
         }
     }
 
+    // Why this process is not in a job of its own, when it is not.
+    public static string ContainNote { get; private set; }
+
     static void Contain() {
+        // With breakaway allowed first; a job nested in the runner's may
+        // refuse that, so then without.
+        if (TryContain(true) || TryContain(false)) ContainNote = null;
+    }
+
+    static bool TryContain(bool breakawayOk) {
         var created = CreateJobObject(IntPtr.Zero, null);
-        if (created == IntPtr.Zero) return;
-        // JOBOBJECT_BASIC_LIMIT_INFORMATION is 64 bytes on x64, LimitFlags at 16.
-        var limits = Marshal.AllocHGlobal(64);
-        try {
-            for (int i = 0; i < 64; i += 8) Marshal.WriteInt64(limits, i, 0);
-            Marshal.WriteInt32(limits, 16, JOB_OBJECT_LIMIT_BREAKAWAY_OK);
-            if (SetInformationJobObject(created, JobObjectBasicLimitInformation, limits, 64) &&
-                AssignProcessToJobObject(created, Process.GetCurrentProcess().Handle)) job = created;
-        } finally {
-            Marshal.FreeHGlobal(limits);
+        if (created == IntPtr.Zero) { ContainNote = "CreateJobObject failed: " + Marshal.GetLastWin32Error(); return false; }
+        if (breakawayOk) {
+            // JOBOBJECT_BASIC_LIMIT_INFORMATION is 64 bytes on x64, LimitFlags at 16.
+            var limits = Marshal.AllocHGlobal(64);
+            try {
+                for (int i = 0; i < 64; i += 8) Marshal.WriteInt64(limits, i, 0);
+                Marshal.WriteInt32(limits, 16, JOB_OBJECT_LIMIT_BREAKAWAY_OK);
+                if (!SetInformationJobObject(created, JobObjectBasicLimitInformation, limits, 64)) {
+                    ContainNote = "SetInformationJobObject failed: " + Marshal.GetLastWin32Error();
+                    return false;
+                }
+            } finally {
+                Marshal.FreeHGlobal(limits);
+            }
         }
+        if (!AssignProcessToJobObject(created, Process.GetCurrentProcess().Handle)) {
+            ContainNote = "AssignProcessToJobObject" + (breakawayOk ? " (breakaway allowed)" : "") + " failed: " + Marshal.GetLastWin32Error();
+            return false;
+        }
+        job = created;
+        return true;
     }
 
     // Ends every process in this process's job but this one; their ids.
@@ -231,7 +250,9 @@ function Start-Watchdog {
     param([Parameter(Mandatory)][int]$Minutes, [int]$GraceMinutes = 3, [Parameter(Mandatory)][string]$Folder)
     $script:Folder = (New-Item -ItemType Directory -Force $Folder).FullName
     $contained = [BardoWatchdog]::Arm($Minutes * 60, $GraceMinutes * 60, (Join-Path $script:Folder 'hang.txt'), $script:Leftovers)
-    if (-not $contained) { Write-Host 'The run is not in a job of its own: only the processes named in $Leftovers can be ended.' }
+    if (-not $contained) {
+        Write-Host "The run is not in a job of its own ($([BardoWatchdog]::ContainNote)): only the processes named in `$Leftovers can be ended."
+    }
 }
 
 function Stop-Watchdog { [BardoWatchdog]::Disarm() }
