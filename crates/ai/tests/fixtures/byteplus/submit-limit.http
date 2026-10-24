@@ -1,0 +1,4 @@
+HTTP/1.1 429 Too Many Requests
+content-type: application/json; charset=utf-8
+
+{"error":{"code":"SetLimitExceeded","message":"Your account [2100123456] has reached the set inference limit for the [dreamina-seedance-2-5] model, and the model service has been paused.","param":"","type":"TooManyRequests"}}

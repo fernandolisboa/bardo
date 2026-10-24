@@ -1,6 +1,6 @@
-//! Performed takes (#192, docs/spec/performance-capture.md): once a take's
-//! control video is approved, a take model on Higgsfield makes the persona
-//! perform it.
+//! Performed takes (#192, #194, docs/spec/performance-capture.md): once a
+//! take's control video is approved, a take model on Higgsfield or on
+//! BytePlus ModelArk makes the persona perform it.
 //!
 //! - **Take model.** A channel picks the model its takes go to; any take can
 //!   pick another. A take's mode must be one its model takes.
@@ -11,10 +11,20 @@
 //! - **Draft and final.** Where the model has a cheap tier, a draft comes
 //!   first and is approved before the final. Each is a paid job: the
 //!   control video and the look (always re-encoded as a JPEG, which drops
-//!   a photo's metadata) are staged, Higgsfield's quote is asked, and the
-//!   request id is saved before any waiting, so a restart (or a retry of a
-//!   cancelled job) polls the same request instead of paying again.
-//!   Cancelling stops the waiting, not Higgsfield.
+//!   a photo's metadata) are staged, the provider's quote is asked, and
+//!   the request id is saved before any waiting, so a restart (or a retry
+//!   of a cancelled job) polls the same request instead of paying again.
+//!   Cancelling stops the waiting, not the provider.
+//! - **Drafts finished (ModelArk).** Where a model's final finishes its
+//!   draft, the final names only the draft's task, within the draft's
+//!   deadline; past it, only a new draft can be made. ModelArk takes no
+//!   idempotency key: the send time is saved first, and a send whose
+//!   answer was lost is looked for in the task list before sending again.
+//! - **Staged files (ModelArk).** The files go to the user's own bucket and
+//!   stay there until Bardo deletes them: once the final is made, the
+//!   draft is replaced, the job fails, the capture goes, or at the
+//!   deadline. A look the provider's asset library holds goes by its id;
+//!   a photo of the user needs its verified likeness there.
 //! - **Use.** A reviewed final is copied into the project's media as a
 //!   performed clip, for the editor's media bin.
 //!
@@ -27,12 +37,13 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelId, ChannelRepository,
-    ClipHandle, ClipModelRef, ClipStatus, CostPurpose, FaceLandmarks, ImageFormat, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, JobState, LookSource, MAX_TAKE_PROMPT, MediaAsset,
-    MediaAssetId, MediaAssetRepository, MediaKind, Metered, Money, Outbound, PerformedClip,
-    PersonaId, PersonaLook, PersonaRepository, PictureSize, ProfileId, ProjectFiles, Provider,
-    ProviderFailure, RepositoryError, SecretStore, StagedFile, TakeGenerator, TakeInput, TakeMode,
-    TakeModel, TakePrompt, TakePromptError, TakeRequest, TakeResult, TakeStep, TakeStretch,
+    ClipHandle, ClipModelRef, CostPurpose, FaceLandmarks, ImageFormat, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, JobRepository, JobState, LookAssetKind, LookSource,
+    MAX_TAKE_PROMPT, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, Metered, Money,
+    Outbound, PerformedClip, PersonaId, PersonaLook, PersonaRepository, PictureSize, ProfileId,
+    ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, SecretStore,
+    StagedFile, StagedUpload, StagingRepository, TakeGenerator, TakeInput, TakeMode, TakeModel,
+    TakePrompt, TakePromptError, TakeRequest, TakeResult, TakeStatus, TakeStep, TakeStretch,
     TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersionId, TextFormat,
     TextGenerator, TextImage, TextRequest, ThemeRepository, VideoProjectId, take_model_of,
     take_prompt_text,
@@ -49,16 +60,22 @@ use crate::publications::whole_millis;
 use crate::scenes::{id, parse, to_json, unexpected};
 use crate::{Bardo, KeyState};
 
-/// The provider take models run on.
-const PROVIDER: Provider = Provider::Higgsfield;
-
-/// How many status checks in a row may fail on Higgsfield's side before
+/// How many status checks in a row may fail on the provider's side before
 /// the job gives up for now (the queue retries it later, polling the same
 /// request).
 const MAX_HICCUPS: u32 = 10;
 
-/// What a refusal says: Higgsfield gives no reason.
+/// What a refusal on Higgsfield says: it gives no reason.
 pub const REFUSED: &str = "Higgsfield refused the content.";
+
+/// How long staged files that were never sent stay usable for a first
+/// send: older ones are staged again, so a draft's deadline (counted from
+/// staging) starts close to its send.
+const RESTAGE_AFTER: Duration = Duration::from_secs(60 * 60);
+
+/// How long a staged file is kept for a model whose drafts have no
+/// deadline.
+const STAGED_FOR: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The largest frame sent to Claude, in bytes.
 const MAX_FRAME_BYTES: u64 = 4_000_000;
@@ -107,16 +124,20 @@ pub enum PerformedBlock {
     Length,
     /// The persona that performs has no look.
     NoLook,
+    /// The look is a photo of the user, and the model needs its verified
+    /// likeness from the provider's asset library.
+    NoVerifiedLikeness,
     /// The take's control video is not approved as it is now.
     ControlNotApproved,
 }
 
 impl PerformedBlock {
-    pub const ALL: [PerformedBlock; 5] = [
+    pub const ALL: [PerformedBlock; 6] = [
         PerformedBlock::NoModel,
         PerformedBlock::ModeNotTaken,
         PerformedBlock::Length,
         PerformedBlock::NoLook,
+        PerformedBlock::NoVerifiedLikeness,
         PerformedBlock::ControlNotApproved,
     ];
 
@@ -127,6 +148,7 @@ impl PerformedBlock {
             PerformedBlock::ModeNotTaken => "mode_not_taken",
             PerformedBlock::Length => "length",
             PerformedBlock::NoLook => "no_look",
+            PerformedBlock::NoVerifiedLikeness => "no_verified_likeness",
             PerformedBlock::ControlNotApproved => "control_not_approved",
         }
     }
@@ -157,6 +179,12 @@ pub struct PerformedTakeView {
     /// they are now, and on disk.
     pub draft: Option<TakeResult>,
     pub final_take: Option<TakeResult>,
+    /// Whether its draft is past its deadline: it can no longer be
+    /// finished, only made again.
+    pub expired: bool,
+    /// Whether its draft already has the final that finishes it: the same
+    /// draft would make the same final, so only a new draft goes on.
+    pub finished: bool,
     /// Its latest prompt job, and its latest draft or final job with the
     /// step it makes: one under way, else one made for its control video
     /// and model as they are now.
@@ -165,7 +193,7 @@ pub struct PerformedTakeView {
     /// Whether a prompt or a performed take of it is being made.
     pub busy: bool,
     /// Whether its latest draft or final job stopped (or failed) after
-    /// Higgsfield took the request: checking again polls it, and nothing
+    /// the provider took the request: checking again polls it, and nothing
     /// new is paid for until then.
     pub pending: bool,
     /// The next paid step, and what it would cost.
@@ -253,6 +281,19 @@ struct TakePayload {
     persona: String,
     /// The take's length in whole seconds, as estimated.
     seconds: u32,
+    /// For a final that finishes its draft: the draft's request, job,
+    /// look and realism, and until when it can be finished (Unix time in
+    /// milliseconds). Nothing is staged for it.
+    #[serde(default)]
+    draft_task: Option<String>,
+    #[serde(default)]
+    draft_job: Option<String>,
+    #[serde(default)]
+    draft_look: Option<String>,
+    #[serde(default)]
+    draft_realistic: bool,
+    #[serde(default)]
+    draft_deadline: Option<u64>,
 }
 
 /// Picks the take out of a prompt or take job's payload.
@@ -303,13 +344,23 @@ struct TakeState {
     /// failed save does not count it again.
     #[serde(default)]
     recorded: bool,
+    /// When the first file was staged, and when the submission was about to
+    /// be sent to a provider without an idempotency key (Unix time in
+    /// milliseconds): an attempt that finds it set looks for the request
+    /// before sending again.
+    #[serde(default)]
+    staged_at: Option<u64>,
+    #[serde(default)]
+    sent_at: Option<u64>,
 }
 
-/// Whether a take job's saved state holds a request Higgsfield took.
+/// Whether a take job's saved state holds a request the provider took,
+/// or one it may have taken: sent to a provider without an idempotency
+/// key and its answer lost. Either is checked again, never sent anew.
 fn has_request(job: &Job) -> bool {
     job.external_handle()
         .and_then(|saved| serde_json::from_str::<TakeState>(saved).ok())
-        .is_some_and(|state| state.request.is_some())
+        .is_some_and(|state| state.request.is_some() || state.sent_at.is_some())
 }
 
 impl TakeState {
@@ -323,8 +374,9 @@ impl TakeState {
 
     /// Whether a submission that failed with `kind` surely made nothing,
     /// so the next attempt may be a new one. Any other failure (an answer
-    /// that could not be read, Higgsfield down) resends the same
-    /// submission, which Higgsfield answers with the first one.
+    /// that could not be read, the provider down) resends the same
+    /// submission, which Higgsfield answers with the first one (ModelArk's
+    /// task list is looked at first).
     fn refused(kind: JobFailureKind) -> bool {
         matches!(
             kind,
@@ -364,6 +416,16 @@ fn take_file(capture: CaptureId, position: u32, step: TakeStep, job: JobId) -> S
     )
 }
 
+/// `at` in milliseconds since the Unix epoch, as job states keep times.
+fn unix_millis(at: SystemTime) -> u64 {
+    at.duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis() as u64)
+}
+
+fn from_unix_millis(millis: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
+}
+
 /// The take's length in whole seconds, rounded up: what it is billed by.
 fn billed_seconds(length: Duration) -> u32 {
     length.as_millis().div_ceil(1000) as u32
@@ -384,7 +446,7 @@ fn fit_prompt(text: &str) -> String {
 }
 
 /// A short fingerprint of a look's bytes.
-fn look_print(bytes: &[u8]) -> String {
+pub(crate) fn look_print(bytes: &[u8]) -> String {
     let digest = sha2::Sha256::digest(bytes);
     digest[..8]
         .iter()
@@ -408,12 +470,105 @@ fn key_of(
         })
 }
 
-fn provider_failure(failure: ProviderFailure) -> JobFailure {
-    let kind = JobFailureKind::from(failure.kind);
-    if kind == JobFailureKind::Declined {
-        return JobFailure::new(kind, REFUSED);
+/// How a take provider is named in failures.
+fn provider_name(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Higgsfield => "Higgsfield",
+        Provider::BytePlus => "BytePlus",
+        other => other.code(),
     }
-    JobFailure::new(kind, format!("Higgsfield: {}", failure.detail))
+}
+
+fn provider_failure(provider: Provider, failure: ProviderFailure) -> JobFailure {
+    let kind = JobFailureKind::from(failure.kind);
+    match (kind, provider) {
+        (JobFailureKind::Declined, Provider::Higgsfield) => JobFailure::new(kind, REFUSED),
+        // ModelArk says which rule and why, in its own words: the take
+        // names the provider beside them.
+        (JobFailureKind::Declined, _) => JobFailure::new(kind, failure.detail),
+        _ => JobFailure::new(
+            kind,
+            format!("{}: {}", provider_name(provider), failure.detail),
+        ),
+    }
+}
+
+/// Deletes the staged files that are due (given up or past their time)
+/// with the take generator that staged them, and forgets them. Files of a
+/// provider without a saved key wait. Returns the first failure that may
+/// pass, so a cleanup job tries again; the others are logged.
+pub(crate) fn sweep_staged(
+    owner: ProfileId,
+    staging: &dyn StagingRepository,
+    generators: &[Arc<dyn TakeGenerator>],
+    secrets: &dyn SecretStore,
+    now: SystemTime,
+) -> Result<(), JobFailure> {
+    let due = staging.staged_due(owner, now).map_err(unexpected)?;
+    let mut keys: Vec<(Provider, Option<ApiKey>)> = Vec::new();
+    let mut first = None;
+    for upload in due {
+        let Some(generator) = generators
+            .iter()
+            .find(|generator| generator.provider() == upload.provider && generator.keeps_staged())
+        else {
+            // Nothing can delete it any more.
+            staging.remove_staged(&upload.file).map_err(unexpected)?;
+            continue;
+        };
+        let key = match keys
+            .iter()
+            .find(|(provider, _)| *provider == upload.provider)
+        {
+            Some((_, key)) => key.clone(),
+            None => {
+                let key = secrets.get(owner, upload.provider).ok().flatten();
+                keys.push((upload.provider, key.clone()));
+                key
+            }
+        };
+        let Some(key) = key else {
+            continue;
+        };
+        match generator.unstage(&key, &StagedFile(upload.file.clone())) {
+            Ok(()) => staging.remove_staged(&upload.file).map_err(unexpected)?,
+            // Not in the bucket the saved key names (it changed): the
+            // bucket's own expiry rule removes it.
+            Err(failure) if failure.kind == ProviderFailureKind::NotAllowed => {
+                tracing::warn!(detail = %failure.detail, "a staged file cannot be deleted");
+                staging.remove_staged(&upload.file).map_err(unexpected)?;
+            }
+            Err(failure) => {
+                tracing::warn!(detail = %failure.detail, "a staged file was not deleted yet");
+                let failure = provider_failure(upload.provider, failure);
+                if first.is_none() && failure.kind.is_transient() {
+                    first = Some(failure);
+                }
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
+}
+
+/// Deletes staged files that are due, at startup and after a capture
+/// goes.
+pub(crate) struct StagingCleanupHandler {
+    pub(crate) owner: ProfileId,
+    pub(crate) staging: Arc<dyn StagingRepository>,
+    pub(crate) generators: Vec<Arc<dyn TakeGenerator>>,
+    pub(crate) secrets: Arc<dyn SecretStore>,
+}
+
+impl JobHandler for StagingCleanupHandler {
+    fn run(&self, _payload: &str, _cx: &mut JobContext) -> Result<(), JobFailure> {
+        sweep_staged(
+            self.owner,
+            self.staging.as_ref(),
+            &self.generators,
+            self.secrets.as_ref(),
+            SystemTime::now(),
+        )
+    }
 }
 
 /// Whether take `position` of capture `capture`, the project's, still has
@@ -619,6 +774,9 @@ pub(crate) struct PerformedTakeHandler {
     pub(crate) personas: Arc<dyn PersonaRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) media: Arc<dyn MediaEngine>,
+    pub(crate) staging: Arc<dyn StagingRepository>,
+    /// To tell a request of this job from another take's.
+    pub(crate) jobs: Arc<dyn JobRepository>,
     pub(crate) generators: Vec<Arc<dyn TakeGenerator>>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
@@ -677,7 +835,7 @@ impl JobHandler for PerformedTakeHandler {
             Some(saved) => parse(saved)?,
             None => TakeState::default(),
         };
-        TakeRun {
+        let mut run = TakeRun {
             handler: self,
             payload,
             project,
@@ -687,12 +845,24 @@ impl JobHandler for PerformedTakeHandler {
             generator,
             key,
             state,
-        }
-        .run(cx)
+        };
+        // Files given up earlier go first, and what this run gave up after.
+        run.sweep();
+        let made = run.run(cx);
+        run.sweep();
+        made
     }
 }
 
 impl TakeRun<'_> {
+    fn provider(&self) -> Provider {
+        self.generator.provider()
+    }
+
+    fn failure(&self, failure: ProviderFailure) -> JobFailure {
+        provider_failure(self.provider(), failure)
+    }
+
     fn run(&mut self, cx: &mut JobContext) -> Result<(), JobFailure> {
         if self.state.request.is_none() && !self.submit(cx)? {
             return Ok(());
@@ -704,30 +874,30 @@ impl TakeRun<'_> {
                 return Ok(());
             }
             match self.generator.status(&self.key, &request) {
-                Ok(ClipStatus::Queued | ClipStatus::Running) => hiccups = 0,
-                Ok(ClipStatus::Done { video }) => {
+                Ok(TakeStatus::Queued | TakeStatus::Running) => hiccups = 0,
+                Ok(TakeStatus::Done(done)) => {
                     // The take is made and paid: whatever goes wrong now,
                     // the next attempt polls the same request again.
-                    match self.generator.download(&self.key, &video) {
-                        Ok(clip) => return self.save(&clip.bytes, cx),
+                    match self.generator.download(&self.key, &done.video) {
+                        Ok(clip) => return self.save(&clip.bytes, done.usage, done.seed, cx),
                         Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                             hiccups += 1;
                             if hiccups >= MAX_HICCUPS {
-                                return Err(provider_failure(failure));
+                                return Err(self.failure(failure));
                             }
                         }
-                        Err(failure) => return Err(provider_failure(failure)),
+                        Err(failure) => return Err(self.failure(failure)),
                     }
                 }
-                Ok(ClipStatus::Failed(failure)) => return self.ended(failure, cx),
+                Ok(TakeStatus::Failed(failure)) => return self.ended(failure, cx),
                 Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                     hiccups += 1;
                     if hiccups >= MAX_HICCUPS {
-                        return Err(provider_failure(failure));
+                        return Err(self.failure(failure));
                     }
                 }
                 // The key or the account: retrying polls the same request.
-                Err(failure) => return Err(provider_failure(failure)),
+                Err(failure) => return Err(self.failure(failure)),
             }
             if !cx.sleep(self.generator.poll_delay(polls)) {
                 return Ok(());
@@ -741,13 +911,46 @@ impl TakeRun<'_> {
             .map_err(unexpected)
     }
 
+    /// Deletes the staged files that are due, where the provider keeps
+    /// them. Best effort: what is not deleted now is deleted later.
+    fn sweep(&self) {
+        if !self.generator.keeps_staged() {
+            return;
+        }
+        let handler = self.handler;
+        if let Err(failure) = sweep_staged(
+            handler.owner,
+            handler.staging.as_ref(),
+            std::slice::from_ref(&self.generator),
+            handler.secrets.as_ref(),
+            SystemTime::now(),
+        ) {
+            tracing::warn!(detail = %failure.detail, "staged files were not deleted yet");
+        }
+    }
+
+    /// Gives up the files `job` staged: they are deleted at the next sweep.
+    fn release(&self, job: JobId) -> Result<(), JobFailure> {
+        self.handler
+            .staging
+            .release_staged_by(job, SystemTime::now())
+            .map_err(unexpected)
+    }
+
+    /// Forgets the submission, giving up what it staged, so the next
+    /// attempt starts a new one.
+    fn restart(&mut self, cx: &mut JobContext) -> Result<(), JobFailure> {
+        self.release(cx.id())?;
+        self.state.restart();
+        self.save_state(cx)
+    }
+
     /// The request ended without a take: a retry by the user submits it
     /// again, a new paid request, so the queue never retries it on its
     /// own.
     fn ended(&mut self, failure: ProviderFailure, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.state.restart();
-        self.save_state(cx)?;
-        let failure = provider_failure(failure);
+        self.restart(cx)?;
+        let failure = self.failure(failure);
         if failure.kind.is_transient() {
             return Err(JobFailure::new(
                 JobFailureKind::UnexpectedAnswer,
@@ -800,46 +1003,40 @@ impl TakeRun<'_> {
             .is_some_and(|model| model.id == self.model.id))
     }
 
-    /// Stages what is not staged yet, asks the quote and submits. `false`
-    /// when stopped before anything was paid.
+    /// Stages what is not staged yet (nothing for a final that finishes
+    /// its draft), asks the quote and submits. `false` when stopped before
+    /// anything was paid.
     fn submit(&mut self, cx: &mut JobContext) -> Result<bool, JobFailure> {
         // Nothing paid yet: the take must still be the one approved.
         if !self.still_approved()? {
             return Err(take_changed());
         }
-        if self.state.video.is_none() {
-            let bytes = self
-                .handler
-                .files
-                .read(self.project, &self.payload.control_file)
-                .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))?;
-            if bytes.len() as u64 > self.model.max_video_bytes {
-                return Err(JobFailure::new(
-                    JobFailureKind::Media,
-                    format!(
-                        "the control video is over the take model's {} MB",
-                        self.model.max_video_bytes / 1_000_000
-                    ),
-                ));
-            }
-            let staged = self.stage(&bytes, "video/mp4")?;
-            self.state.video = Some(staged);
-            self.save_state(cx)?;
+        // Past the draft's deadline a final is not sent; one already sent
+        // whose answer was lost is still looked for.
+        let past_deadline = self.payload.draft_task.is_some()
+            && self
+                .payload
+                .draft_deadline
+                .is_some_and(|deadline| SystemTime::now() >= from_unix_millis(deadline));
+        let too_late = || {
+            JobFailure::new(
+                JobFailureKind::NotAllowed,
+                "the draft can no longer be finished; make a new draft",
+            )
+        };
+        if past_deadline && self.state.sent_at.is_none() {
+            return Err(too_late());
         }
-        if self.state.look.is_none() {
-            let persona: PersonaId = id(&self.payload.persona)?;
-            let look = self
-                .handler
-                .personas
-                .look(persona)
-                .map_err(unexpected)?
-                .ok_or_else(|| JobFailure::unexpected("the persona has no look"))?;
-            let jpeg = self.fit_look(&look)?;
-            let staged = self.stage(&jpeg, "image/jpeg")?;
-            self.state.look = Some(staged);
-            self.state.look_print = Some(look_print(look.image.bytes()));
-            self.state.realistic = look.realistic;
-            self.save_state(cx)?;
+        if self.payload.draft_task.is_some() {
+            self.state.look_print = self.payload.draft_look.clone();
+            self.state.realistic = self.payload.draft_realistic;
+        } else if let Err(failure) = self.stage_inputs(cx) {
+            // A retry reuses what was staged; a failure that ends the job
+            // lets it go.
+            if !failure.kind.is_transient() {
+                self.restart(cx)?;
+            }
+            return Err(failure);
         }
         let request = self.request();
         if !self.state.quoted {
@@ -849,6 +1046,43 @@ impl TakeRun<'_> {
         }
         if cx.should_stop() {
             return Ok(false);
+        }
+        if !self.generator.idempotent() {
+            if let Some(sent) = self.state.sent_at {
+                // An earlier attempt may have sent it and lost the answer.
+                let found = self
+                    .generator
+                    .find_submitted(&self.key, &request, from_unix_millis(sent))
+                    .map_err(|failure| self.failure(failure))?;
+                // Requests another take or job holds are theirs.
+                let mut unknown = Vec::new();
+                for handle in found {
+                    if !self.known_request(&handle, cx.id())? {
+                        unknown.push(handle);
+                    }
+                }
+                match unknown.as_slice() {
+                    [] if past_deadline => return Err(too_late()),
+                    [] => {}
+                    [handle] => {
+                        self.state.request = Some(handle.0.clone());
+                        self.save_state(cx)?;
+                        return Ok(true);
+                    }
+                    _ => {
+                        return Err(JobFailure::new(
+                            JobFailureKind::UnexpectedAnswer,
+                            format!(
+                                "{}: several takes were sent at that time, so Bardo sent \
+                                 nothing again; look at the provider's task list",
+                                provider_name(self.provider())
+                            ),
+                        ));
+                    }
+                }
+            }
+            self.state.sent_at = Some(unix_millis(SystemTime::now()));
+            self.save_state(cx)?;
         }
         let submission = format!(
             "{}-{}-{}-{}",
@@ -865,19 +1099,153 @@ impl TakeRun<'_> {
             }
             Err(failure) => {
                 if TakeState::refused(JobFailureKind::from(failure.kind)) {
-                    self.state.restart();
-                    self.save_state(cx)?;
+                    self.restart(cx)?;
                 }
-                Err(provider_failure(failure))
+                Err(self.failure(failure))
             }
         }
     }
 
-    fn stage(&self, bytes: &[u8], mime: &str) -> Result<String, JobFailure> {
-        self.generator
+    /// Stages the control video and the look, unless staged already. Files
+    /// staged long ago and never sent are staged again first.
+    fn stage_inputs(&mut self, cx: &mut JobContext) -> Result<(), JobFailure> {
+        if self.generator.keeps_staged()
+            && self.state.request.is_none()
+            && self.state.sent_at.is_none()
+            && self.state.staged_at.is_some_and(|staged| {
+                SystemTime::now()
+                    .duration_since(from_unix_millis(staged))
+                    .is_ok_and(|age| age > RESTAGE_AFTER)
+            })
+        {
+            self.release(cx.id())?;
+            self.state.video = None;
+            self.state.look = None;
+            self.state.look_print = None;
+            self.state.staged_at = None;
+            self.save_state(cx)?;
+        }
+        if self.state.video.is_none() {
+            let bytes = self
+                .handler
+                .files
+                .read(self.project, &self.payload.control_file)
+                .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))?;
+            if bytes.len() as u64 > self.model.max_video_bytes {
+                return Err(JobFailure::new(
+                    JobFailureKind::Media,
+                    format!(
+                        "the control video is over the take model's {} MB",
+                        self.model.max_video_bytes / 1_000_000
+                    ),
+                ));
+            }
+            let staged = self.stage(&bytes, "video/mp4", cx)?;
+            self.state.video = Some(staged);
+            self.save_state(cx)?;
+        }
+        if self.state.look.is_none() {
+            let persona: PersonaId = id(&self.payload.persona)?;
+            let personas = &self.handler.personas;
+            let look = personas
+                .look(persona)
+                .map_err(unexpected)?
+                .ok_or_else(|| JobFailure::unexpected("the persona has no look"))?;
+            let print = look_print(look.image.bytes());
+            let asset = if self.model.look_assets {
+                personas
+                    .look_asset(persona, self.provider())
+                    .map_err(unexpected)?
+                    .filter(|asset| asset.holds_for(&look, &print))
+            } else {
+                None
+            };
+            let sent = match asset {
+                // The provider's own library holds it: nothing to stage.
+                Some(asset) => asset.uri(),
+                None if self.model.look_assets && look.source == LookSource::Imported => {
+                    return Err(JobFailure::new(
+                        JobFailureKind::NotAllowed,
+                        format!(
+                            "{} needs the photo's verified likeness: add its asset id on the \
+                             persona's look",
+                            provider_name(self.provider())
+                        ),
+                    ));
+                }
+                None => {
+                    let jpeg = self.fit_look(&look)?;
+                    self.stage(&jpeg, "image/jpeg", cx)?
+                }
+            };
+            self.state.look = Some(sent);
+            self.state.look_print = Some(print);
+            self.state.realistic = look.realistic;
+            self.save_state(cx)?;
+        }
+        Ok(())
+    }
+
+    /// Hands a file to the provider. One staged in the user's own storage
+    /// is listed first, so it is deleted however the job ends.
+    fn stage(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+        cx: &mut JobContext,
+    ) -> Result<String, JobFailure> {
+        let staged = self
+            .generator
             .stage(&self.key, TakeInput { bytes, mime })
-            .map(|staged| staged.0)
-            .map_err(provider_failure)
+            .map_err(|failure| self.failure(failure))?;
+        if self.generator.keeps_staged() {
+            let now = whole_millis(SystemTime::now());
+            let listed = self.handler.staging.add_staged(&StagedUpload {
+                file: staged.0.clone(),
+                owner: self.handler.owner,
+                provider: self.provider(),
+                project: self.project,
+                capture: self.capture,
+                position: self.payload.position,
+                job: cx.id(),
+                staged_at: now,
+                expires_at: now + self.model.draft_lifetime.unwrap_or(STAGED_FOR),
+                released_at: None,
+            });
+            if let Err(error) = listed {
+                // Not listed, so nothing would ever delete it.
+                let _ = self.generator.unstage(&self.key, &staged);
+                return Err(unexpected(error));
+            }
+            if self.state.staged_at.is_none() {
+                self.state.staged_at = Some(unix_millis(now));
+            }
+        }
+        Ok(staged.0)
+    }
+
+    /// Whether `handle` is the request of another take: a result of the
+    /// project, or another take job's.
+    fn known_request(&self, handle: &ClipHandle, job: JobId) -> Result<bool, JobFailure> {
+        let handler = self.handler;
+        if handler
+            .captures
+            .take_results(self.project)
+            .map_err(unexpected)?
+            .iter()
+            .any(|made| made.request == handle.0)
+        {
+            return Ok(true);
+        }
+        Ok(handler
+            .jobs
+            .list(handler.owner)
+            .map_err(unexpected)?
+            .iter()
+            .filter(|other| other.kind() == JobKind::PerformedTake && other.id() != job)
+            .filter_map(|other| other.external_handle())
+            .filter_map(|saved| serde_json::from_str::<TakeState>(saved).ok())
+            .any(|state| state.request.as_deref() == Some(handle.0.as_str())))
     }
 
     fn request(&self) -> TakeRequest {
@@ -888,6 +1256,7 @@ impl TakeRun<'_> {
             prompt: self.payload.prompt.clone(),
             video: StagedFile(self.state.video.clone().unwrap_or_default()),
             look: StagedFile(self.state.look.clone().unwrap_or_default()),
+            draft_task: self.payload.draft_task.clone().map(ClipHandle),
         }
     }
 
@@ -910,10 +1279,18 @@ impl TakeRun<'_> {
             .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
     }
 
-    /// Records the take's cost (once) and saves it as the take's draft or
-    /// final; the one it replaces goes. A take that changed while it was
-    /// made keeps what it has: the result is paid for but not kept.
-    fn save(&mut self, bytes: &[u8], cx: &mut JobContext) -> Result<(), JobFailure> {
+    /// Records the take's cost (once, from what the provider says it used
+    /// when it says) and saves it as the take's draft or final; the one it
+    /// replaces goes, and so do the staged files nothing needs any more. A
+    /// take that changed while it was made keeps what it has: the result
+    /// is paid for but not kept.
+    fn save(
+        &mut self,
+        bytes: &[u8],
+        usage: Option<Metered>,
+        seed: Option<i64>,
+        cx: &mut JobContext,
+    ) -> Result<(), JobFailure> {
         let files = &self.handler.files;
         let file = take_file(self.capture, self.payload.position, self.step, cx.id());
         files
@@ -925,7 +1302,10 @@ impl TakeRun<'_> {
                 let _ = files.remove(self.project, &file);
                 return Err(JobFailure::new(
                     JobFailureKind::UnexpectedAnswer,
-                    "Higgsfield: the take is not a video",
+                    format!(
+                        "{}: the take is not a video",
+                        provider_name(self.provider())
+                    ),
                 ));
             }
             Err(error) => {
@@ -937,13 +1317,14 @@ impl TakeRun<'_> {
         if !self.state.recorded {
             self.handler.costs.record_for_project(
                 PaidCall {
-                    provider: PROVIDER,
+                    provider: self.provider(),
                     model: &self.payload.priced_model,
                     purpose: match self.step {
                         TakeStep::Draft => CostPurpose::TakeDraft,
                         TakeStep::Final => CostPurpose::TakeFinal,
                     },
-                    usage: Metered::video_seconds(u64::from(self.payload.seconds)),
+                    usage: usage
+                        .unwrap_or_else(|| Metered::video_seconds(u64::from(self.payload.seconds))),
                     job: Some(cx.id()),
                     reported: quote,
                 },
@@ -969,6 +1350,17 @@ impl TakeRun<'_> {
             }),
             _ => None,
         };
+        // A draft can be finished until its files' links (and the
+        // provider's record of it) run out.
+        let deadline = match self.step {
+            TakeStep::Draft => self
+                .state
+                .staged_at
+                .or(self.state.sent_at)
+                .and_then(|from| self.model.draft_deadline(from_unix_millis(from)))
+                .map(whole_millis),
+            TakeStep::Final => None,
+        };
         let result = TakeResult {
             project: self.project,
             capture: self.capture,
@@ -988,6 +1380,8 @@ impl TakeRun<'_> {
             made_at: whole_millis(SystemTime::now()),
             job: Some(cx.id()),
             accepted_at: None,
+            seed,
+            deadline,
         };
         if !captures.save_take_result(&result).map_err(unexpected)? {
             // The take is gone.
@@ -996,6 +1390,13 @@ impl TakeRun<'_> {
         }
         if let Some(replaced) = replaced.filter(|old| old.file != file) {
             let _ = files.remove(self.project, &replaced.file);
+            if let Some(job) = replaced.job.filter(|job| *job != cx.id()) {
+                self.release(job)?;
+            }
+        }
+        // The draft's files served their final.
+        if let Some(draft) = &self.payload.draft_job {
+            self.release(id(draft)?)?;
         }
         Ok(())
     }
@@ -1021,8 +1422,14 @@ fn take_of(job: &Job) -> Option<TakeOf> {
         .flatten()
 }
 
-/// The calls a take's next step makes.
-fn step_calls(model: &TakeModel, next: PerformedStep, length: Duration) -> Vec<PlannedCall> {
+/// The calls a take's next step makes. A model billed by tokens counts
+/// them from the take's `frame` (its control video's width and height).
+fn step_calls(
+    model: &TakeModel,
+    next: PerformedStep,
+    length: Duration,
+    frame: (u32, u32),
+) -> Vec<PlannedCall> {
     match next {
         PerformedStep::Prompt => {
             vec![PlannedCall::new(
@@ -1031,8 +1438,8 @@ fn step_calls(model: &TakeModel, next: PerformedStep, length: Duration) -> Vec<P
                 1,
             )]
         }
-        PerformedStep::Make(step) => vec![
-            PlannedCall::new(
+        PerformedStep::Make(step) => {
+            let call = PlannedCall::new(
                 model.id.provider(),
                 match step {
                     TakeStep::Draft => CostPurpose::TakeDraft,
@@ -1040,24 +1447,31 @@ fn step_calls(model: &TakeModel, next: PerformedStep, length: Duration) -> Vec<P
                 },
                 1,
             )
-            .with_model(&model.priced_model(step))
-            .with_video_seconds(billed_seconds(length)),
-        ],
+            .with_model(&model.priced_model(step));
+            // A model billed in tokens is priced by those alone: a rate
+            // table has no seconds rate for it.
+            vec![match model.estimated_tokens(step, length, frame) {
+                Some(tokens) => call.with_output_tokens(tokens),
+                None => call.with_video_seconds(billed_seconds(length)),
+            }]
+        }
     }
 }
 
 /// What a take's next paid step is: its prompt, then its draft until one
-/// is approved (where the model makes drafts), then its final.
+/// is approved (where the model makes drafts) and can still be finished,
+/// then its final.
 fn next_step(
     model: Option<&TakeModel>,
     prompt: Option<&TakePrompt>,
     draft: Option<&TakeResult>,
+    now: SystemTime,
 ) -> PerformedStep {
     if prompt.is_none() {
         return PerformedStep::Prompt;
     }
     let drafts = model.is_some_and(|model| model.draft.is_some());
-    if drafts && draft.is_none_or(|draft| draft.accepted_at.is_none()) {
+    if drafts && draft.is_none_or(|draft| draft.accepted_at.is_none() || draft.expired(now)) {
         PerformedStep::Make(TakeStep::Draft)
     } else {
         PerformedStep::Make(TakeStep::Final)
@@ -1065,6 +1479,34 @@ fn next_step(
 }
 
 impl Bardo {
+    /// Queues a cleanup of the staged files that are due, unless one is
+    /// queued or none is due.
+    pub(crate) fn queue_staging_cleanup(&self) {
+        let due = self
+            .staging
+            .staged_due(self.profile.id, SystemTime::now())
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "could not read the staged files");
+                Vec::new()
+            });
+        let queued = self
+            .jobs()
+            .iter()
+            .any(|job| job.kind() == JobKind::StagingCleanup && job.state().is_active());
+        if due.is_empty() || queued {
+            return;
+        }
+        let job = Job::new(self.profile.id, JobKind::StagingCleanup, "{}".to_owned());
+        if let Err(error) = self.jobs.enqueue(job) {
+            tracing::warn!(%error, "could not queue the staged files' cleanup");
+        }
+    }
+
+    /// When a draft's deadline is, on this computer's clock.
+    pub fn take_deadline_text(&self, at: SystemTime) -> String {
+        self.backup_time_text(at)
+    }
+
     /// Every take model offered, the default first.
     pub fn take_models(&self) -> Vec<TakeModel> {
         self.takes
@@ -1171,6 +1613,24 @@ impl Bardo {
         let channel_ref = self.channel_take_ref(channel)?;
         let channel_model = take_model_of(&models, channel_ref.as_ref(), None).cloned();
         let look = self.performer_look(project)?;
+        // The looks the providers' asset libraries hold for it.
+        let likeness = |model: &TakeModel| -> Result<bool, CaptureError> {
+            let Some((persona, look)) = &look else {
+                return Ok(true);
+            };
+            if !model.look_assets || look.source != LookSource::Imported {
+                return Ok(true);
+            }
+            let print = look_print(look.image.bytes());
+            Ok(self
+                .personas
+                .look_asset(*persona, model.id.provider())?
+                .is_some_and(|asset| {
+                    asset.kind == LookAssetKind::VerifiedLikeness && asset.holds_for(look, &print)
+                }))
+        };
+        let frame = bardo_domain::control_size(capture.video.width, capture.video.height);
+        let now = SystemTime::now();
         let prompts = self.captures.take_prompts(project)?;
         let results = self.captures.take_results(project)?;
         let used = self.media_assets.performed_clips(project)?;
@@ -1189,6 +1649,7 @@ impl Bardo {
                 (Some(model), _) if !model.takes(take.mode) => Some(PerformedBlock::ModeNotTaken),
                 (Some(model), _) if !model.fits(take.length()) => Some(PerformedBlock::Length),
                 _ if look.is_none() => Some(PerformedBlock::NoLook),
+                (Some(model), _) if !likeness(model)? => Some(PerformedBlock::NoVerifiedLikeness),
                 (_, None) => Some(PerformedBlock::ControlNotApproved),
                 _ => None,
             };
@@ -1215,6 +1676,13 @@ impl Bardo {
                     .cloned()
             };
             let (draft, final_take) = (result(TakeStep::Draft), result(TakeStep::Final));
+            let finished = model.as_ref().is_some_and(|model| model.finishes_draft)
+                && draft
+                    .as_ref()
+                    .zip(final_take.as_ref())
+                    .is_some_and(|(draft, made)| {
+                        draft.accepted_at.is_some() && made.made_at >= draft.made_at
+                    });
             let of_take = || jobs.iter().filter(|(_, of)| of.position == position);
             let busy = of_take().any(|(job, _)| job.state().is_active());
             // One under way, else the latest made for the take as it is now:
@@ -1234,14 +1702,21 @@ impl Bardo {
             let pending = job.as_ref().is_some_and(|(job, _)| {
                 matches!(job.state(), JobState::Failed | JobState::Cancelled) && has_request(job)
             });
-            let next = next_step(model.as_ref(), prompt.as_ref(), draft.as_ref());
+            let next = next_step(
+                model.as_ref(),
+                prompt.as_ref(),
+                draft.as_ref().filter(|_| !finished),
+                now,
+            );
             let estimate = match (&model, block) {
                 (Some(model), None) => {
-                    Some(self.estimate(&step_calls(model, next, take.length()))?)
+                    Some(self.estimate(&step_calls(model, next, take.length(), frame))?)
                 }
                 _ => None,
             };
+            let expired = draft.as_ref().is_some_and(|draft| draft.expired(now));
             takes.push(PerformedTakeView {
+                finished,
                 follows_channel: take.model.is_none()
                     || take.model.as_ref() == channel_model.as_ref().map(|m| &m.id),
                 model,
@@ -1249,6 +1724,7 @@ impl Bardo {
                 prompt,
                 draft,
                 final_take,
+                expired,
                 prompt_job,
                 job,
                 busy,
@@ -1432,7 +1908,7 @@ impl Bardo {
             .body
             .render(&values)
             .map_err(|missing| CaptureError::Repository(RepositoryError(Box::new(missing))))?;
-        let calls = step_calls(model, PerformedStep::Prompt, take.length());
+        let calls = step_calls(model, PerformedStep::Prompt, take.length(), (0, 0));
         if let Err(estimate) = self.check_budget(&calls, consent)? {
             return Err(CaptureError::OverBudget(estimate));
         }
@@ -1485,8 +1961,9 @@ impl Bardo {
 
     /// Starts a job in which take `index`'s model makes its draft or
     /// final from its prompt, its approved control video and the persona's
-    /// look. A final needs an approved draft where the model makes drafts.
-    /// Past Higgsfield's budget it needs `consent`.
+    /// look. A final needs an approved draft where the model makes drafts,
+    /// and finishes it within its deadline where the model's final
+    /// finishes its draft. Past the provider's budget it needs `consent`.
     pub fn make_performed_take(
         &self,
         project: VideoProjectId,
@@ -1511,6 +1988,15 @@ impl Bardo {
         {
             return Err(CaptureError::DraftNotApproved);
         }
+        let finishes = (step == TakeStep::Final && model.finishes_draft)
+            .then_some(view.draft.as_ref())
+            .flatten();
+        if finishes.is_some_and(|draft| draft.expired(SystemTime::now())) {
+            return Err(CaptureError::DraftExpired);
+        }
+        if finishes.is_some() && view.finished {
+            return Err(CaptureError::DraftFinished);
+        }
         self.require_take_key(model.id.provider())?;
         let take = &capture.takes.as_slice()[index];
         let controls = self.control_views(&capture)?;
@@ -1521,7 +2007,8 @@ impl Bardo {
         let (persona, _) = self
             .performer_look(project)?
             .ok_or(CaptureError::Performed(PerformedBlock::NoLook))?;
-        let calls = step_calls(model, PerformedStep::Make(step), take.length());
+        let frame = bardo_domain::control_size(capture.video.width, capture.video.height);
+        let calls = step_calls(model, PerformedStep::Make(step), take.length(), frame);
         if let Err(estimate) = self.check_budget(&calls, consent)? {
             return Err(CaptureError::OverBudget(estimate));
         }
@@ -1541,13 +2028,27 @@ impl Bardo {
             template_number: prompt.template.map(|t| t.number),
             persona: persona.to_string(),
             seconds: billed_seconds(take.length()),
+            draft_task: finishes.map(|draft| draft.request.clone()),
+            draft_job: finishes
+                .and_then(|draft| draft.job)
+                .map(|job| job.to_string()),
+            draft_look: finishes.map(|draft| draft.look.clone()),
+            draft_realistic: finishes.is_some_and(|draft| draft.realistic),
+            draft_deadline: finishes.and_then(|draft| draft.deadline).map(unix_millis),
         };
+        // Files an earlier attempt staged and never sent are not needed.
+        let now = SystemTime::now();
+        for (old, of) in self.performed_jobs(&capture) {
+            if of.position == payload.position && !old.state().is_active() && !has_request(&old) {
+                self.staging.release_staged_by(old.id(), now)?;
+            }
+        }
         let job = Job::new(self.profile.id, JobKind::PerformedTake, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
     }
 
     /// Checks again on take `index`'s draft or final job that stopped (or
-    /// failed) after Higgsfield took its request: it polls that request,
+    /// failed) after the provider took its request: it polls that request,
     /// paying nothing new.
     pub fn check_take_again(
         &self,
@@ -1611,6 +2112,10 @@ impl Bardo {
         at: Option<SystemTime>,
     ) -> Result<(), CaptureError> {
         let (_, view) = self.performed_take(project, index)?;
+        // A draft past its deadline can no longer lead to a final.
+        if step == TakeStep::Draft && at.is_some() && view.expired {
+            return Err(CaptureError::DraftExpired);
+        }
         let made = match step {
             TakeStep::Draft => view.draft.as_ref(),
             TakeStep::Final => view.final_take.as_ref(),
@@ -1775,7 +2280,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Instant;
 
-    use bardo_domain::{ChannelDraft, CostRepository, JobState};
+    use bardo_domain::{ChannelDraft, CostRepository, JobState, StagingRepository};
     use bardo_media::ffmpeg::{MediaInfo, VideoStream};
 
     use super::*;
@@ -1799,6 +2304,33 @@ mod tests {
     fn takes_are_billed_by_the_second_rounded_up() {
         assert_eq!(billed_seconds(Duration::from_millis(12_001)), 13);
         assert_eq!(billed_seconds(Duration::from_secs(12)), 12);
+    }
+
+    #[test]
+    fn seedance_on_modelark_is_estimated_in_tokens_at_its_rates() {
+        let seedance = &bardo_ai::byteplus::take_models()[0];
+        let rates = bardo_domain::RateTable::with_changes(crate::costs::default_rates(), &[]);
+        let length = Duration::from_secs(10);
+        for (step, height, price) in [
+            (TakeStep::Draft, 480u64, 6_400_000u64),
+            (TakeStep::Final, 1080, 7_000_000),
+        ] {
+            let calls = step_calls(seedance, PerformedStep::Make(step), length, (720, 1280));
+            let tokens = calls[0].output_tokens.unwrap();
+            let long = (height * 1280 + 360) / 720;
+            assert_eq!(tokens, 20 * height * long * 24 / 1024, "{step:?}");
+            // Priced by its tokens alone, nothing else metered.
+            assert_eq!(calls[0].video_seconds, None, "{step:?}");
+            let usage = Metered {
+                output_tokens: tokens,
+                ..Metered::default()
+            };
+            assert_eq!(
+                rates.price(Provider::BytePlus, &calls[0].model, &usage),
+                Some(Money::from_micros(tokens * price / 1_000_000)),
+                "{step:?}"
+            );
+        }
     }
 
     /// A capture of two takes with the Higgsfield key saved and the
@@ -2327,6 +2859,367 @@ mod tests {
                 .as_slice()
                 .iter()
                 .all(|take| take.mode == TakeMode::Mesh)
+        );
+    }
+
+    const BYTEPLUS_FIELDS: [&str; 5] = [
+        "0b6c2f6e-5a1d-4f3e-9d2a-7c8b9e0f1a2b",
+        "AKLTNjA0ZTVkMmY0YmQ2",
+        "TVRWa1pUVTBNRGM9Pz8+/abc=",
+        "bardo-takes",
+        "ap-southeast-1",
+    ];
+
+    /// `ready` with the BytePlus fields saved, take 0 on the ModelArk-like
+    /// model and the narrator's photo look held as a verified likeness,
+    /// its control video approved and its prompt written.
+    fn on_modelark() -> (Setup, VideoProjectId, Capture) {
+        let (mut s, project, capture) = ready();
+        let [api, ak, sk, bucket, region] = BYTEPLUS_FIELDS;
+        s.app
+            .save_byteplus_key(api, ak, sk, bucket, region)
+            .unwrap();
+        with_look(&s);
+        s.app
+            .set_take_model(project, 0, Some(crate::testing::FakeModelArk::edit()))
+            .unwrap();
+        settled(&s.app, project);
+        s.app.approve_control_video(project, 0).unwrap();
+        let persona = documentary_narrator(&s.app).id;
+        assert_eq!(
+            view(&s, project, 0).block,
+            Some(PerformedBlock::NoVerifiedLikeness),
+            "a photo goes only as a verified likeness"
+        );
+        assert!(matches!(
+            s.app.set_look_asset(
+                persona,
+                Provider::BytePlus,
+                LookAssetKind::VirtualPortrait,
+                "asset-1"
+            ),
+            Err(crate::LookError::Asset(
+                bardo_domain::LookAssetError::KindNotForLook
+            ))
+        ));
+        s.app
+            .set_look_asset(
+                persona,
+                Provider::BytePlus,
+                LookAssetKind::VerifiedLikeness,
+                " asset://asset-20261023-me ",
+            )
+            .unwrap();
+        assert_eq!(view(&s, project, 0).block, None);
+        prompt_written(&s, project, 0, "The host speaks.");
+        (s, project, capture)
+    }
+
+    fn byteplus_costs(s: &Setup, project: VideoProjectId) -> Vec<(CostPurpose, String, u64)> {
+        s.h.db
+            .project_costs(project)
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.provider == Provider::BytePlus)
+            .map(|record| (record.purpose, record.model, record.usage.output_tokens))
+            .collect()
+    }
+
+    #[test]
+    fn a_modelark_final_finishes_its_draft_and_the_drafts_files_go() {
+        let (s, project, capture) = on_modelark();
+        let fake = &s.h.modelark;
+        let before = SystemTime::now();
+        // Estimated from the take's frame, in tokens, and priced by them
+        // alone.
+        s.app
+            .save_rate(
+                Provider::BytePlus,
+                crate::testing::FakeModelArk::EDIT,
+                bardo_domain::Meter::OutputTokens,
+                "6.40",
+            )
+            .unwrap();
+        let waiting = view(&s, project, 0);
+        assert_eq!(waiting.next, PerformedStep::Make(TakeStep::Draft));
+        let estimate = waiting.estimate.unwrap();
+        assert!(estimate.providers[0].amount.is_some(), "{estimate:?}");
+        assert!(estimate.total() > Money::ZERO);
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        // Only the control video is staged: the library holds the look.
+        let staged = fake.staged.lock().unwrap().clone();
+        assert_eq!(staged.len(), 1);
+        let sent = fake.requests.lock().unwrap()[0].clone();
+        assert_eq!(sent.look.0, "asset://asset-20261023-me");
+        assert_eq!(sent.video.0, staged[0]);
+        assert_eq!(sent.draft_task, None);
+        let draft = view(&s, project, 0).draft.unwrap();
+        assert_eq!(draft.seed, Some(crate::testing::FakeModelArk::SEED));
+        let deadline = draft.deadline.unwrap();
+        let week = Duration::from_secs(7 * 24 * 3600);
+        assert!(deadline >= before + week - Duration::from_secs(1));
+        assert!(deadline <= SystemTime::now() + week);
+        assert!(draft.realistic);
+        assert!(
+            fake.unstaged.lock().unwrap().is_empty(),
+            "kept for the final"
+        );
+
+        s.app.approve_take_draft(project, 0).unwrap();
+        let approved = view(&s, project, 0);
+        assert_eq!(approved.next, PerformedStep::Make(TakeStep::Final));
+        assert!(!approved.expired);
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        let requests = fake.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 2);
+        let finished = &requests[1];
+        assert_eq!(finished.draft_task, Some(ClipHandle(draft.request.clone())));
+        assert_eq!(finished.resolution.as_deref(), Some("1080p"));
+        assert_eq!(fake.staged.lock().unwrap().len(), 1, "nothing staged again");
+        let final_take = view(&s, project, 0).final_take.unwrap();
+        assert_eq!(final_take.look, draft.look);
+        assert!(final_take.realistic);
+        assert_eq!(final_take.deadline, None);
+        // The draft's files went once the final was made.
+        assert_eq!(*fake.unstaged.lock().unwrap(), staged);
+        assert!(
+            s.h.db
+                .staged_due(s.app.profile().id, SystemTime::now() + week * 2)
+                .unwrap()
+                .is_empty()
+        );
+        // The tokens ModelArk reported are what Costs records.
+        let edit = crate::testing::FakeModelArk::EDIT;
+        assert_eq!(
+            byteplus_costs(&s, project),
+            [
+                (
+                    CostPurpose::TakeDraft,
+                    format!("{edit}/480p"),
+                    crate::testing::FakeModelArk::TOKENS
+                ),
+                (
+                    CostPurpose::TakeFinal,
+                    format!("{edit}/1080p"),
+                    crate::testing::FakeModelArk::TOKENS
+                ),
+            ]
+        );
+        let _ = capture;
+    }
+
+    #[test]
+    fn a_look_asset_holds_for_its_look_only() {
+        let (s, project, _) = on_modelark();
+        let persona = documentary_narrator(&s.app).id;
+        let held = s.app.persona_look(persona).unwrap().assets;
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].0, Provider::BytePlus);
+        assert_eq!(held[0].1.as_ref().unwrap().id, "asset-20261023-me");
+        assert!(matches!(
+            s.app.set_look_asset(
+                persona,
+                Provider::Higgsfield,
+                LookAssetKind::VerifiedLikeness,
+                "asset-1"
+            ),
+            Err(crate::LookError::NoAssetLibrary(Provider::Higgsfield))
+        ));
+        // Another photo is another look: the asset no longer stands for it.
+        let path = s._folders.path().join("me-again.png");
+        let mut other = LOOK_IMAGE.to_vec();
+        other.extend_from_slice(b"another");
+        std::fs::write(&path, &other).unwrap();
+        s.app.import_look(persona, &path, true).unwrap();
+        assert_eq!(s.app.persona_look(persona).unwrap().assets[0].1, None);
+        assert_eq!(
+            view(&s, project, 0).block,
+            Some(PerformedBlock::NoVerifiedLikeness)
+        );
+        s.app
+            .remove_look_asset(persona, Provider::BytePlus)
+            .unwrap();
+        assert_eq!(
+            s.h.db.look_asset(persona, Provider::BytePlus).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_draft_past_its_deadline_offers_only_a_new_draft() {
+        let (s, project, _) = on_modelark();
+        made(&s, project, 0, TakeStep::Draft);
+        s.app.approve_take_draft(project, 0).unwrap();
+        let draft = view(&s, project, 0).draft.unwrap();
+        s.h.db
+            .save_take_result(&TakeResult {
+                deadline: Some(SystemTime::now() - Duration::from_secs(1)),
+                ..draft
+            })
+            .unwrap();
+        let expired = view(&s, project, 0);
+        assert!(expired.expired);
+        assert_eq!(expired.next, PerformedStep::Make(TakeStep::Draft));
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask),
+            Err(CaptureError::DraftExpired)
+        ));
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert!(!view(&s, project, 0).expired);
+        // The draft it replaced gave up its files.
+        let staged = s.h.modelark.staged.lock().unwrap().clone();
+        assert_eq!(staged.len(), 2);
+        assert_eq!(*s.h.modelark.unstaged.lock().unwrap(), [staged[0].clone()]);
+    }
+
+    #[test]
+    fn a_send_whose_answer_was_lost_is_found_in_the_task_list() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        fake.lose_answer.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(fake.requests.lock().unwrap().len(), 1, "paid once");
+        assert_eq!(fake.lookups.lock().unwrap().len(), 1);
+        assert_eq!(view(&s, project, 0).draft.unwrap().request, "cgt-task-1");
+    }
+
+    #[test]
+    fn a_lost_send_leaves_out_what_another_take_holds() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        made(&s, project, 0, TakeStep::Draft);
+        s.app
+            .set_take_model(project, 1, Some(crate::testing::FakeModelArk::edit()))
+            .unwrap();
+        settled(&s.app, project);
+        s.app.approve_control_video(project, 1).unwrap();
+        prompt_written(&s, project, 1, "The host leans in.");
+        // The list shows take 1's draft too; take 2 adopts only its own.
+        fake.lose_answer.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 1, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(fake.requests.lock().unwrap().len(), 2, "each paid once");
+        assert_eq!(view(&s, project, 1).draft.unwrap().request, "cgt-task-2");
+        assert_eq!(view(&s, project, 0).draft.unwrap().request, "cgt-task-1");
+    }
+
+    #[test]
+    fn a_draft_makes_one_final_and_then_a_new_draft_is_due() {
+        let (s, project, _) = on_modelark();
+        made(&s, project, 0, TakeStep::Draft);
+        s.app.approve_take_draft(project, 0).unwrap();
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        // The same draft would make the same final, and its files are gone.
+        let finished = view(&s, project, 0);
+        assert!(finished.finished);
+        assert_eq!(finished.next, PerformedStep::Make(TakeStep::Draft));
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask),
+            Err(CaptureError::DraftFinished)
+        ));
+        // A new draft, once approved, can be finished again.
+        made(&s, project, 0, TakeStep::Draft);
+        assert!(!view(&s, project, 0).finished);
+        s.app.approve_take_draft(project, 0).unwrap();
+        assert_eq!(
+            view(&s, project, 0).next,
+            PerformedStep::Make(TakeStep::Final)
+        );
+    }
+
+    #[test]
+    fn a_draft_past_its_deadline_cannot_be_approved() {
+        let (s, project, _) = on_modelark();
+        made(&s, project, 0, TakeStep::Draft);
+        let draft = view(&s, project, 0).draft.unwrap();
+        s.h.db
+            .save_take_result(&TakeResult {
+                deadline: Some(SystemTime::now() - Duration::from_secs(1)),
+                ..draft
+            })
+            .unwrap();
+        assert!(matches!(
+            s.app.approve_take_draft(project, 0),
+            Err(CaptureError::DraftExpired)
+        ));
+    }
+
+    #[test]
+    fn a_send_without_an_answer_is_checked_again_never_sent_anew() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        // Sent, its answer lost, and the task list out of reach each time.
+        fake.lose_answer.store(true, Ordering::SeqCst);
+        fake.lookup_fails.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(fake.requests.lock().unwrap().len(), 1);
+        assert!(view(&s, project, 0).pending);
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Draft, BudgetConsent::Ask),
+            Err(CaptureError::TakePending)
+        ));
+        // Checking again finds it, paying nothing new.
+        fake.lookup_fails.store(false, Ordering::SeqCst);
+        s.app.check_take_again(project, 0).unwrap();
+        let ended = wait_done(&s.app, job.id());
+        assert_eq!(ended.state(), JobState::Done, "{:?}", ended.failure());
+        assert_eq!(fake.requests.lock().unwrap().len(), 1, "paid once");
+    }
+
+    #[test]
+    fn a_modelark_refusal_says_why_and_its_files_go() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        fake.refuse.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::Declined);
+        assert_eq!(
+            failure.detail,
+            "InputVideoSensitiveContentDetected: the input video may contain a real face"
+        );
+        assert_eq!(*fake.unstaged.lock().unwrap(), *fake.staged.lock().unwrap());
+        assert!(byteplus_costs(&s, project).is_empty());
+    }
+
+    #[test]
+    fn a_removed_capture_gives_up_its_staged_files() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        made(&s, project, 0, TakeStep::Draft);
+        settled(&s.app, project);
+        // The bucket is down: the files wait for a later cleanup.
+        fake.keep_files.store(true, Ordering::SeqCst);
+        s.app.remove_capture(project).unwrap();
+        let cleanup = s
+            .app
+            .jobs()
+            .into_iter()
+            .find(|job| job.kind() == JobKind::StagingCleanup)
+            .expect("a cleanup is queued");
+        let ended = wait_done(&s.app, cleanup.id());
+        assert_eq!(ended.state(), JobState::Failed);
+        assert!(fake.unstaged.lock().unwrap().is_empty());
+        fake.keep_files.store(false, Ordering::SeqCst);
+        s.app.retry_job(cleanup.id()).unwrap();
+        let ended = wait_done(&s.app, cleanup.id());
+        assert_eq!(ended.state(), JobState::Done, "{:?}", ended.failure());
+        assert_eq!(*fake.unstaged.lock().unwrap(), *fake.staged.lock().unwrap());
+        assert!(
+            s.h.db
+                .staged_due(s.app.profile().id, SystemTime::now())
+                .unwrap()
+                .is_empty()
         );
     }
 

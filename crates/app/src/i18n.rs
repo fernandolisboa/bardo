@@ -20,7 +20,8 @@ use bardo_domain::{
     UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
 };
 use bardo_domain::{
-    ChapterFieldError, ChapterProblem, TextPlacement, ThumbnailFieldError, ThumbnailLook,
+    BytePlusField, BytePlusFieldError, ChapterFieldError, ChapterProblem, LookAssetError,
+    LookAssetKind, TextPlacement, ThumbnailFieldError, ThumbnailLook,
 };
 
 /// Every string the UI shows. Adding a variant without adding its key to all
@@ -307,6 +308,10 @@ pub enum Text {
     SetupCopied,
     ProviderKeysHint,
     ProviderName(Provider),
+    BytePlusFieldLabel(BytePlusField),
+    BytePlusFieldError(BytePlusFieldError),
+    BytePlusFieldsInvalid,
+    BytePlusCardNote,
     ProviderPurpose(Provider),
     ProviderKeyPlaceholder(Provider),
     KeyNotSet,
@@ -657,8 +662,14 @@ pub enum Text {
     PerformedPending,
     PerformedMissingClaudeKey,
     PerformedMissingHiggsfieldKey,
+    PerformedMissingBytePlusKey,
     PerformedNothing,
     PerformedDraftFirst,
+    PerformedDraftExpired,
+    PerformedDraftFinished,
+    /// Placeholder: `{when}`.
+    TakeDraftDeadline,
+    TakeDraftFinishNote,
     TakeModelGone,
     /// Placeholder: `{n}` (the take, from 1).
     PerformedClipName,
@@ -1550,6 +1561,19 @@ pub enum Text {
     LookNotSaved,
     LookDescriptionError(LookDescriptionError),
     LookImageReason(LookImageError),
+    LookAssetTitle,
+    LookAssetHint,
+    LookAssetKindLabel,
+    LookAssetKindName(LookAssetKind),
+    LookAssetIdLabel,
+    LookAssetIdPlaceholder,
+    LookAssetSave,
+    LookAssetRemove,
+    /// Placeholders: `{kind}`, `{id}`.
+    LookAssetHeld,
+    LookAssetSaved,
+    LookAssetRemoved,
+    LookAssetError(LookAssetError),
     ExportInfo,
     ExportFigureRendered,
     ExportFigureMetadata,
@@ -2614,6 +2638,17 @@ impl Text {
             Text::ProviderPurpose(provider) => {
                 return format!("provider.{}.purpose", provider.code()).into();
             }
+            Text::BytePlusFieldLabel(field) => {
+                return format!("provider_keys.byteplus.field.{}", field.code()).into();
+            }
+            Text::BytePlusFieldError(BytePlusFieldError::Required(_)) => {
+                "provider_keys.byteplus.required"
+            }
+            Text::BytePlusFieldError(BytePlusFieldError::Invalid(field)) => {
+                return format!("provider_keys.byteplus.invalid.{}", field.code()).into();
+            }
+            Text::BytePlusFieldsInvalid => "provider_keys.byteplus.fields_invalid",
+            Text::BytePlusCardNote => "provider_keys.byteplus.note",
             Text::ProviderKeyPlaceholder(provider) => {
                 return format!("provider.{}.placeholder", provider.code()).into();
             }
@@ -2635,6 +2670,7 @@ impl Text {
                 ApiKeyError::TooLong => "api_key.error.too_long",
                 ApiKeyError::InvalidCharacters => "api_key.error.invalid_characters",
                 ApiKeyError::NotIdAndSecret => "api_key.error.not_id_and_secret",
+                ApiKeyError::NotBytePlusCredentials => "api_key.error.not_byteplus_credentials",
             },
             Text::ProviderKeyNotSet => "provider_keys.error.not_set",
             Text::SettingsNetworksTab => "settings.networks_tab",
@@ -3053,8 +3089,13 @@ impl Text {
             Text::PerformedPending => "capture.performed.pending",
             Text::PerformedMissingClaudeKey => "capture.performed.missing_claude_key",
             Text::PerformedMissingHiggsfieldKey => "capture.performed.missing_higgsfield_key",
+            Text::PerformedMissingBytePlusKey => "capture.performed.missing_byteplus_key",
             Text::PerformedNothing => "capture.performed.nothing",
             Text::PerformedDraftFirst => "capture.performed.draft_first",
+            Text::PerformedDraftExpired => "capture.performed.draft_expired",
+            Text::PerformedDraftFinished => "capture.performed.draft_finished",
+            Text::TakeDraftDeadline => "capture.performed.draft_deadline",
+            Text::TakeDraftFinishNote => "capture.performed.draft_finish_note",
             Text::TakeModelGone => "capture.performed.model_gone",
             Text::PerformedClipName => "capture.performed.clip_name",
             Text::TakePromptLabel => "capture.performed.prompt_label",
@@ -3934,6 +3975,24 @@ impl Text {
             Text::LookUnreadable => "persona.look.error.unreadable",
             Text::LookImageRefused => "persona.look.error.image_refused",
             Text::LookNotSaved => "persona.look.error.not_saved",
+            Text::LookAssetTitle => "persona.look.asset.title",
+            Text::LookAssetHint => "persona.look.asset.hint",
+            Text::LookAssetKindLabel => "persona.look.asset.kind",
+            Text::LookAssetKindName(kind) => {
+                return format!("persona.look.asset.kind_name.{}", kind.code()).into();
+            }
+            Text::LookAssetIdLabel => "persona.look.asset.id",
+            Text::LookAssetIdPlaceholder => "persona.look.asset.id_placeholder",
+            Text::LookAssetSave => "persona.look.asset.save",
+            Text::LookAssetRemove => "persona.look.asset.remove",
+            Text::LookAssetHeld => "persona.look.asset.held",
+            Text::LookAssetSaved => "persona.look.asset.saved",
+            Text::LookAssetRemoved => "persona.look.asset.removed",
+            Text::LookAssetError(error) => match error {
+                LookAssetError::Empty => "persona.look.asset.error.empty",
+                LookAssetError::Invalid => "persona.look.asset.error.invalid",
+                LookAssetError::KindNotForLook => "persona.look.asset.error.kind_not_for_look",
+            },
             Text::LookDescriptionError(error) => match error {
                 LookDescriptionError::Required => "persona.look.error.description_required",
                 LookDescriptionError::TooLong => "persona.look.error.description_too_long",
@@ -6311,6 +6370,31 @@ mod tests {
         texts.push(Text::LookUnreadable);
         texts.push(Text::LookImageRefused);
         texts.push(Text::LookNotSaved);
+        texts.extend([
+            Text::LookAssetTitle,
+            Text::LookAssetHint,
+            Text::LookAssetKindLabel,
+            Text::LookAssetIdLabel,
+            Text::LookAssetIdPlaceholder,
+            Text::LookAssetSave,
+            Text::LookAssetRemove,
+            Text::LookAssetHeld,
+            Text::LookAssetSaved,
+            Text::LookAssetRemoved,
+        ]);
+        texts.extend(LookAssetKind::ALL.map(Text::LookAssetKindName));
+        texts.extend(LookAssetError::ALL.map(Text::LookAssetError));
+        texts.extend(BytePlusField::ALL.map(Text::BytePlusFieldLabel));
+        texts.extend(BytePlusFieldError::all().map(Text::BytePlusFieldError));
+        texts.extend([
+            Text::BytePlusFieldsInvalid,
+            Text::BytePlusCardNote,
+            Text::PerformedMissingBytePlusKey,
+            Text::PerformedDraftExpired,
+            Text::PerformedDraftFinished,
+            Text::TakeDraftDeadline,
+            Text::TakeDraftFinishNote,
+        ]);
         texts.extend(
             [
                 LookDescriptionError::Required,

@@ -103,12 +103,22 @@ pub struct TakeResult {
     /// A draft: when the user approved it. A final: when the user last
     /// used it.
     pub accepted_at: Option<SystemTime>,
+    /// The seed that made it, when the provider says (ModelArk).
+    pub seed: Option<i64>,
+    /// A draft whose final finishes it: until when it can be finished.
+    pub deadline: Option<SystemTime>,
 }
 
 impl TakeResult {
     /// Whether it was made for the control video `control` and `model`.
     pub fn fits(&self, capture: CaptureId, control: &str, model: &ClipModelRef) -> bool {
         self.capture == capture && self.control == control && self.model == *model
+    }
+
+    /// Whether it is a draft whose deadline passed at `now`: it can no
+    /// longer be finished.
+    pub fn expired(&self, now: SystemTime) -> bool {
+        self.deadline.is_some_and(|deadline| deadline <= now)
     }
 
     /// How much longer (positive) or shorter (negative) than `take` it
@@ -208,8 +218,20 @@ mod tests {
             made_at: SystemTime::UNIX_EPOCH,
             job: None,
             accepted_at: None,
+            seed: None,
+            deadline: None,
         };
         assert!(result.fits(capture, "abc", &kling));
+        assert!(
+            !result.expired(SystemTime::now()),
+            "no deadline, never expires"
+        );
+        let draft = TakeResult {
+            deadline: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
+            ..result.clone()
+        };
+        assert!(!draft.expired(SystemTime::UNIX_EPOCH + Duration::from_secs(99)));
+        assert!(draft.expired(SystemTime::UNIX_EPOCH + Duration::from_secs(100)));
         assert!(!result.fits(capture, "abc", &seedance));
         assert_eq!(result.difference(Duration::from_secs(9)), 200);
         assert_eq!(result.difference(Duration::from_secs(10)), -800);

@@ -13,10 +13,10 @@
 //! being the default.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::{
-    ApiKey, ClipHandle, ClipModelRef, ClipStatus, GeneratedClip, Money, Provider, ProviderFailure,
+    ApiKey, ClipHandle, ClipModelRef, GeneratedClip, Metered, Money, Provider, ProviderFailure,
     TakeMode,
 };
 
@@ -69,6 +69,17 @@ pub struct TakeModel {
     /// Whether a final finishes the approved draft from the draft's own
     /// parameters; otherwise a final is a new take.
     pub finishes_draft: bool,
+    /// How long after it was sent a draft can still be finished, for a
+    /// model whose final finishes it (ModelArk: seven days).
+    pub draft_lifetime: Option<Duration>,
+    /// Whether it takes a look from the provider's own asset library
+    /// (`asset://`) in place of the image.
+    pub look_assets: bool,
+    /// For a model billed by its video's tokens, the frame rate they are
+    /// counted at (ModelArk: 24): a take of `L` seconds in and out at
+    /// `W` × `H` is `2 × L × W × H × rate / 1024` tokens. `None` for a
+    /// model billed per second.
+    pub token_frame_rate: Option<u32>,
     /// Whether its result keeps the take's framing (a video edit does), so
     /// the take's face is where it was: the cut starts a 9:16 crop on it
     /// (#193).
@@ -108,6 +119,33 @@ impl TakeModel {
         } else {
             TakeStep::Final
         }
+    }
+
+    /// Until when a draft sent at `sent` can be finished, for a model whose
+    /// final finishes its draft within a lifetime.
+    pub fn draft_deadline(&self, sent: SystemTime) -> Option<SystemTime> {
+        self.draft_lifetime
+            .filter(|_| self.finishes_draft)
+            .map(|lifetime| sent + lifetime)
+    }
+
+    /// The tokens `step` of a take of `length` would be billed, for a
+    /// model billed by tokens: the take's frame (`width` × `height`)
+    /// scaled to the tier's short side, its seconds counted in and out.
+    pub fn estimated_tokens(
+        &self,
+        step: TakeStep,
+        length: Duration,
+        (width, height): (u32, u32),
+    ) -> Option<u64> {
+        let rate = u128::from(self.token_frame_rate?);
+        let short = u128::from(self.tier(step)?.height);
+        let (long_side, short_side) = (width.max(height), width.min(height).max(1));
+        let long =
+            (short * u128::from(long_side) + u128::from(short_side) / 2) / u128::from(short_side);
+        let pixels = short * long;
+        let tokens = 2 * length.as_millis() * pixels * rate / (1024 * 1000);
+        Some(u64::try_from(tokens).unwrap_or(u64::MAX))
     }
 
     /// Whether it makes a take of `length`.
@@ -167,6 +205,41 @@ pub struct TakeRequest {
     pub video: StagedFile,
     /// The persona's look.
     pub look: StagedFile,
+    /// For a final that finishes a draft: the draft's request. The model
+    /// reuses the draft's prompt and inputs, so they are not sent again.
+    pub draft_task: Option<ClipHandle>,
+}
+
+/// Where a take is on the provider's side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakeStatus {
+    Queued,
+    Running,
+    Done(TakeDone),
+    /// It ended without a take; the failure says why.
+    Failed(ProviderFailure),
+}
+
+/// A finished take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeDone {
+    /// Where to download it.
+    pub video: String,
+    /// What the provider says it used, when it says (ModelArk: the
+    /// video's tokens), recorded in place of the estimate.
+    pub usage: Option<Metered>,
+    /// The seed that made it, when the provider says.
+    pub seed: Option<i64>,
+}
+
+impl TakeDone {
+    pub fn at(video: impl Into<String>) -> Self {
+        Self {
+            video: video.into(),
+            usage: None,
+            seed: None,
+        }
+    }
 }
 
 /// Makes takes. Calls the network and blocks, so it runs inside a job.
@@ -182,9 +255,9 @@ pub trait TakeGenerator: Send + Sync {
     /// What the provider says `request` costs, when it says.
     fn quote(&self, key: &ApiKey, request: &TakeRequest) -> Option<Money>;
 
-    /// Starts the take. Submitting the same request again with the same
-    /// `submission` id returns the first submission instead of starting
-    /// (and charging for) another.
+    /// Starts the take. Where the provider is `idempotent`, submitting the
+    /// same request again with the same `submission` id returns the first
+    /// submission instead of starting (and charging for) another.
     fn submit(
         &self,
         key: &ApiKey,
@@ -192,10 +265,40 @@ pub trait TakeGenerator: Send + Sync {
         submission: &str,
     ) -> Result<ClipHandle, ProviderFailure>;
 
-    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure>;
+    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<TakeStatus, ProviderFailure>;
 
-    /// Downloads a finished take from where `ClipStatus::Done` said.
+    /// Downloads a finished take from where `TakeStatus::Done` said.
     fn download(&self, key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure>;
+
+    /// Whether a resubmission with the same id is safe (Higgsfield takes
+    /// an idempotency key). Otherwise a submission whose answer was lost is
+    /// looked for with `find_submitted` before sending it again.
+    fn idempotent(&self) -> bool {
+        true
+    }
+
+    /// Every request the provider took like `request` since `since`, for
+    /// a provider that is not `idempotent`: the caller leaves out the ones
+    /// it knows and decides.
+    fn find_submitted(
+        &self,
+        _key: &ApiKey,
+        _request: &TakeRequest,
+        _since: SystemTime,
+    ) -> Result<Vec<ClipHandle>, ProviderFailure> {
+        Ok(Vec::new())
+    }
+
+    /// Whether staged files stay where they are until `unstage` removes
+    /// them (the user's own bucket); otherwise the provider clears them.
+    fn keeps_staged(&self) -> bool {
+        false
+    }
+
+    /// Removes a staged file. Removing one already gone succeeds.
+    fn unstage(&self, _key: &ApiKey, _file: &StagedFile) -> Result<(), ProviderFailure> {
+        Ok(())
+    }
 
     /// How long to wait before status check number `polls` (from 0): a
     /// take takes minutes, so from five seconds up to fifteen.
@@ -231,12 +334,33 @@ impl<T: TakeGenerator + ?Sized> TakeGenerator for Arc<T> {
         (**self).submit(key, request, submission)
     }
 
-    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
+    fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<TakeStatus, ProviderFailure> {
         (**self).status(key, handle)
     }
 
     fn download(&self, key: &ApiKey, video: &str) -> Result<GeneratedClip, ProviderFailure> {
         (**self).download(key, video)
+    }
+
+    fn idempotent(&self) -> bool {
+        (**self).idempotent()
+    }
+
+    fn find_submitted(
+        &self,
+        key: &ApiKey,
+        request: &TakeRequest,
+        since: SystemTime,
+    ) -> Result<Vec<ClipHandle>, ProviderFailure> {
+        (**self).find_submitted(key, request, since)
+    }
+
+    fn keeps_staged(&self) -> bool {
+        (**self).keeps_staged()
+    }
+
+    fn unstage(&self, key: &ApiKey, file: &StagedFile) -> Result<(), ProviderFailure> {
+        (**self).unstage(key, file)
     }
 
     fn poll_delay(&self, polls: u32) -> Duration {
@@ -266,6 +390,9 @@ mod tests {
                 height: 1080,
             },
             finishes_draft: false,
+            draft_lifetime: None,
+            look_assets: false,
+            token_frame_rate: None,
             keeps_framing: false,
             min_length: secs(4),
             max_length: secs(30),
@@ -307,6 +434,51 @@ mod tests {
         assert_eq!(
             seedance.priced_model(TakeStep::Final),
             "seedance/edit/1080p"
+        );
+    }
+
+    #[test]
+    fn a_draft_lasts_its_lifetime_only_where_the_final_finishes_it() {
+        let sent = SystemTime::UNIX_EPOCH + secs(1_800_000_000);
+        let mut seedance = model("seedance/edit", &[TakeMode::Mesh], true);
+        seedance.draft_lifetime = Some(secs(7 * 24 * 3600));
+        assert_eq!(seedance.draft_deadline(sent), None, "a final is a new take");
+        seedance.finishes_draft = true;
+        assert_eq!(
+            seedance.draft_deadline(sent),
+            Some(sent + secs(7 * 24 * 3600))
+        );
+    }
+
+    #[test]
+    fn tokens_count_the_seconds_in_and_out_at_the_tiers_frame() {
+        let mut seedance = model("seedance/edit", &[TakeMode::Mesh], true);
+        let ten = secs(10);
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Final, ten, (720, 1280)),
+            None,
+            "billed per second"
+        );
+        seedance.token_frame_rate = Some(24);
+        // 1080 × 1920, 24 frames a second, 20 seconds in all.
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Final, ten, (720, 1280)),
+            Some(20 * 1080 * 1920 * 24 / 1024)
+        );
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Final, ten, (1280, 720)),
+            Some(20 * 1080 * 1920 * 24 / 1024),
+            "landscape the same"
+        );
+        // 480 × 853 (ModelArk's 854 rounds the other way).
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Draft, ten, (720, 1280)),
+            Some(20 * 480 * 853 * 24 / 1024)
+        );
+        let kling = model("kling/mc/pro", &[TakeMode::Recording], false);
+        assert_eq!(
+            kling.estimated_tokens(TakeStep::Draft, ten, (720, 1280)),
+            None
         );
     }
 
@@ -361,7 +533,7 @@ mod tests {
             ) -> Result<ClipHandle, ProviderFailure> {
                 unreachable!()
             }
-            fn status(&self, _: &ApiKey, _: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
+            fn status(&self, _: &ApiKey, _: &ClipHandle) -> Result<TakeStatus, ProviderFailure> {
                 unreachable!()
             }
             fn download(&self, _: &ApiKey, _: &str) -> Result<GeneratedClip, ProviderFailure> {

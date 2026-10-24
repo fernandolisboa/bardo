@@ -1,0 +1,4 @@
+HTTP/1.1 400 Bad Request
+content-type: application/json; charset=utf-8
+
+{"error":{"code":"InvalidParameter","message":"The parameter `duration` specified in the request is not valid: duration must be -1 for video edit. Request id: 021761220000abcd01","param":"duration","type":"BadRequest"}}

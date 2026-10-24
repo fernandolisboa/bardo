@@ -31,6 +31,7 @@ mod scene;
 mod script;
 mod secrets;
 mod setup_choices;
+mod staging;
 mod template;
 mod theme;
 mod thumbnail;

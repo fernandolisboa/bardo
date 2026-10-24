@@ -154,6 +154,7 @@ pub mod refs {
     pub const CAPTURE_PERFORMED: GuideRef = at("capture", "performed");
     pub const CAPTURE_TAKE_PROMPT: GuideRef = at("capture", "take-prompt");
     pub const CAPTURE_DRAFT_FINAL: GuideRef = at("capture", "draft-final");
+    pub const CAPTURE_BYTEPLUS: GuideRef = at("capture", "byteplus");
     pub const CAPTURE_REMOVE: GuideRef = at("capture", "remove");
     pub const SCENES_PLAN: GuideRef = at("scenes", "plan");
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
@@ -168,6 +169,7 @@ pub mod refs {
     pub const PERSONAS_SHARE: GuideRef = at("personas", "share");
     pub const PERSONAS_REALISTIC: GuideRef = at("personas", "realistic");
     pub const PERSONAS_LOOK: GuideRef = at("personas", "look");
+    pub const PERSONAS_LOOK_ASSET: GuideRef = at("personas", "look-asset");
     pub const TEMPLATES_VERSIONS: GuideRef = at("templates", "versions");
     pub const TEMPLATES_FIELDS: GuideRef = at("templates", "fields");
     pub const TEMPLATES_VARIABLES: GuideRef = at("templates", "variables");
@@ -209,7 +211,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 81] = [
+    pub const ALL: [GuideRef; 83] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -239,6 +241,7 @@ pub mod refs {
         CAPTURE_PERFORMED,
         CAPTURE_TAKE_PROMPT,
         CAPTURE_DRAFT_FINAL,
+        CAPTURE_BYTEPLUS,
         CAPTURE_REMOVE,
         SCENES_PLAN,
         SCENES_REDRAW,
@@ -253,6 +256,7 @@ pub mod refs {
         PERSONAS_SHARE,
         PERSONAS_REALISTIC,
         PERSONAS_LOOK,
+        PERSONAS_LOOK_ASSET,
         TEMPLATES_VERSIONS,
         TEMPLATES_FIELDS,
         TEMPLATES_VARIABLES,

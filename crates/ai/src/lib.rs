@@ -1,6 +1,7 @@
 //! Adapters for the decision engine, generative providers, voices, market
 //! data, public video statistics and Bardo's own releases.
 
+pub mod byteplus;
 pub mod claude;
 pub mod elevenlabs;
 pub mod gemini;
@@ -15,6 +16,7 @@ pub mod market;
 pub mod retry;
 pub mod youtube_stats;
 
+pub use byteplus::BytePlusTakes;
 pub use claude::ClaudeTextGenerator;
 pub use elevenlabs::{
     ElevenLabsAlignment, ElevenLabsMusic, ElevenLabsPreviews, ElevenLabsSpeech,

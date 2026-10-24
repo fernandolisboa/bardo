@@ -18,6 +18,7 @@ Bardo has no AI of its own and no account to sign up for. It works with your acc
 - **Gemini** makes scene images (Nano Banana) and video clips (Veo, Gemini Omni Flash). You need it for the scene images and to draw a persona's [look](personas.md#look), and for clips only if you use Google's models.
 - **Higgsfield** makes video clips through the models it offers. You need it only for clips, if you pick its models.
 - **Kling** makes video clips straight from Kling's own models (Kling 3.0, 2.6 and 2.5 Turbo). You need it only for clips, if you pick its models.
+- **BytePlus ModelArk** makes performed clips with Seedance 2.5 straight from ModelArk, whose final finishes the approved draft. You need it only for performed clips, if you pick that take model. Its card takes the ModelArk key and an object storage bucket of yours for the take's files.
 - **TypeSafe (JEV)** is the decision engine: it ranks video ideas and scores cut suggestions. You need it to rank ideas and suggest cuts.
 - **YouTube Data API** gives niche research and public video statistics. You need it for research and your posts' public numbers.
 

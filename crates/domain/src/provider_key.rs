@@ -21,6 +21,9 @@ pub enum Provider {
     Higgsfield,
     /// Video clips straight from Kling's own API.
     Kling,
+    /// Performed takes straight from BytePlus ModelArk (Seedance 2.5 with
+    /// its draft mode), staged in the user's own TOS bucket.
+    BytePlus,
     /// The decision engine (JEV).
     TypeSafe,
     /// Market research and public video statistics.
@@ -33,12 +36,13 @@ pub enum Provider {
 
 impl Provider {
     /// In the order the settings screen lists them.
-    pub const ALL: [Provider; 8] = [
+    pub const ALL: [Provider; 9] = [
         Provider::Claude,
         Provider::ElevenLabs,
         Provider::Gemini,
         Provider::Higgsfield,
         Provider::Kling,
+        Provider::BytePlus,
         Provider::TypeSafe,
         Provider::YouTubeData,
         Provider::X,
@@ -52,6 +56,7 @@ impl Provider {
             Provider::Gemini => "gemini",
             Provider::Higgsfield => "higgsfield",
             Provider::Kling => "kling",
+            Provider::BytePlus => "byteplus",
             Provider::TypeSafe => "typesafe",
             Provider::YouTubeData => "youtube-data",
             Provider::X => "x",
@@ -122,15 +127,20 @@ pub enum ApiKeyError {
     /// Higgsfield credentials are a key ID and a secret, joined by a colon.
     #[error("expected KEY_ID:KEY_SECRET")]
     NotIdAndSecret,
+    /// BytePlus credentials are five fields joined by `|` (the settings
+    /// card joins them).
+    #[error("expected API_KEY|ACCESS_KEY_ID|SECRET_ACCESS_KEY|BUCKET|REGION")]
+    NotBytePlusCredentials,
 }
 
 impl ApiKeyError {
-    pub const ALL: [ApiKeyError; 5] = [
+    pub const ALL: [ApiKeyError; 6] = [
         ApiKeyError::Required,
         ApiKeyError::TooShort,
         ApiKeyError::TooLong,
         ApiKeyError::InvalidCharacters,
         ApiKeyError::NotIdAndSecret,
+        ApiKeyError::NotBytePlusCredentials,
     ];
 }
 
@@ -171,6 +181,9 @@ impl ApiKey {
                 _ => return Err(ApiKeyError::NotIdAndSecret),
             }
         }
+        if provider == Provider::BytePlus {
+            crate::byteplus::check_key(key)?;
+        }
         Ok(Self(key.to_owned()))
     }
 
@@ -182,15 +195,27 @@ impl ApiKey {
     /// The last four characters, so the user can tell which key is saved
     /// without the screen showing it.
     pub fn hint(&self) -> String {
-        let start = self.0.len().saturating_sub(4);
-        format!("…{}", &self.0[start..])
+        // A BytePlus key ends with its bucket and region: the API key's
+        // end tells keys apart.
+        let shown = crate::byteplus::secret_parts(&self.0).map_or(self.0.as_str(), |[api, ..]| api);
+        let start = shown.len().saturating_sub(4);
+        format!("…{}", &shown[start..])
     }
 
     /// Every string that must never reach a log: the whole key and, for
     /// keys made of parts (`KEY_ID:KEY_SECRET`), each part long enough to
-    /// mask safely, since a part can travel alone.
+    /// mask safely, since a part can travel alone. Of a BytePlus key, its
+    /// three secret fields (not the bucket or region).
     pub fn sensitive_parts(&self) -> Vec<&str> {
         let mut parts = vec![self.0.as_str()];
+        if let Some(secrets) = crate::byteplus::secret_parts(&self.0) {
+            parts.extend(
+                secrets
+                    .into_iter()
+                    .filter(|part| part.len() >= Self::MIN_CHARS),
+            );
+            return parts;
+        }
         if self.0.contains(':') {
             parts.extend(
                 self.0
@@ -397,6 +422,7 @@ mod tests {
                 Provider::Gemini,
                 Provider::Higgsfield,
                 Provider::Kling,
+                Provider::BytePlus,
                 Provider::TypeSafe,
                 Provider::YouTubeData
             ]

@@ -54,7 +54,7 @@ O Bardo só envia dados aos serviços que você configurou, com as suas própria
 
 - **YouTube** (Google): seus vídeos e metadados quando você envia, e os pedidos acima.
 - **Os provedores de IA que você usa**: o Claude, da Anthropic, escreve ideias de tema e roteiros, e o JEV, da TypeSafe, ranqueia ideias. Para isso, o Bardo manda para eles os dados do seu canal e alguns números calculados a partir de dados do YouTube: as notas de concorrência e tendência de um nicho, a mediana de visualizações por dia e o volume de envios, e as visualizações da primeira semana dos vídeos anteriores do seu canal. Nenhum vídeo, título, comentário ou canal lido do YouTube é enviado.
-- **Os outros provedores** (ElevenLabs, Gemini, Higgsfield, Kling, Instagram, TikTok) recebem só o que você manda para narração, imagens, clipes e posts; nada disso vem do YouTube.
+- **Os outros provedores** (ElevenLabs, Gemini, Higgsfield, Kling, BytePlus, Instagram, TikTok) recebem só o que você manda para narração, imagens, clipes e posts; nada disso vem do YouTube. Para clipes interpretados na BytePlus, o vídeo de controle e a aparência da tomada vão antes para um bucket seu de armazenamento de objetos, com nomes aleatórios, e o Bardo os apaga assim que o ModelArk não precisa mais deles ([No BytePlus ModelArk](capture.md#byteplus)).
 
 Cada um desses serviços trata o que recebe pela sua própria política de privacidade. Nada vai para quem faz o Bardo nem para mais ninguém. [Exportar diagnóstico](about.md#diagnostics) gera um arquivo que só você decide compartilhar, com toda chave, token e nome de conta mascarados.
 

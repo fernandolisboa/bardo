@@ -1,0 +1,4 @@
+HTTP/1.1 403 Forbidden
+content-type: application/json
+
+{"Code":"SignatureDoesNotMatch","Message":"The request signature we calculated does not match the signature you provided. Check your key and signing method.","RequestId":"0a1b2c41"}

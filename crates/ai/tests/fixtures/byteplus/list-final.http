@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+
+{"items":[{"id":"cgt-20261024090000-f1n4l","status":"running","created_at":1792832401,"draft":false,"draft_task_id":"cgt-20261023120000-d7k2p"},{"id":"cgt-20261024090000-other","status":"running","created_at":1792832402,"draft":false,"draft_task_id":"cgt-20261020000000-zzzzz"},{"id":"cgt-20261024090000-dr2","status":"running","created_at":1792832403,"draft":true}],"total":3}

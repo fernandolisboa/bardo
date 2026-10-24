@@ -1,7 +1,7 @@
 use bardo_domain::{
-    GenerationPresets, JobId, LookDrawing, LookImage, LookSource, Persona, PersonaDetails,
-    PersonaDraft, PersonaId, PersonaLook, PersonaRepository, ProfileId, Provider, RepositoryError,
-    TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
+    GenerationPresets, JobId, LookAsset, LookAssetKind, LookDrawing, LookImage, LookSource,
+    Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaLook, PersonaRepository, ProfileId,
+    Provider, RepositoryError, TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -395,6 +395,65 @@ impl PersonaRepository for Database {
     fn remove_pending_look(&self, persona: PersonaId) -> Result<(), RepositoryError> {
         self.remove_look_in(persona, Slot::Pending)
     }
+
+    fn look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+    ) -> Result<Option<LookAsset>, RepositoryError> {
+        let row: Option<(String, String, String)> = self
+            .conn()
+            .query_row(
+                "SELECT kind, asset_id, image FROM persona_look_asset
+                 WHERE persona_id = ?1 AND provider = ?2",
+                params![persona.to_string(), provider.code()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(boxed)?;
+        row.map(|(kind, id, image)| {
+            Ok(LookAsset {
+                kind: LookAssetKind::from_code(&kind).ok_or_else(|| {
+                    boxed(std::io::Error::other(format!(
+                        "unknown look asset kind {kind}"
+                    )))
+                })?,
+                id,
+                image,
+            })
+        })
+        .transpose()
+    }
+
+    fn save_look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+        asset: Option<&LookAsset>,
+    ) -> Result<(), RepositoryError> {
+        let conn = self.conn();
+        match asset {
+            Some(asset) => conn.execute(
+                "INSERT INTO persona_look_asset (persona_id, provider, kind, asset_id, image)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (persona_id, provider) DO UPDATE SET
+                     kind = excluded.kind, asset_id = excluded.asset_id, image = excluded.image",
+                params![
+                    persona.to_string(),
+                    provider.code(),
+                    asset.kind.code(),
+                    asset.id,
+                    asset.image
+                ],
+            ),
+            None => conn.execute(
+                "DELETE FROM persona_look_asset WHERE persona_id = ?1 AND provider = ?2",
+                params![persona.to_string(), provider.code()],
+            ),
+        }
+        .map_err(boxed)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -442,6 +501,46 @@ mod tests {
             Some(saved.clone())
         );
         assert_eq!(PersonaRepository::list(&db, owner).unwrap(), [saved]);
+    }
+
+    #[test]
+    fn a_look_asset_is_kept_per_provider_and_goes_with_its_persona() {
+        let (db, owner) = database_with_profile();
+        let saved = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &saved).unwrap();
+        assert_eq!(db.look_asset(saved.id, Provider::BytePlus).unwrap(), None);
+        let asset = LookAsset {
+            kind: LookAssetKind::VirtualPortrait,
+            id: "asset-20261023-7f3a".into(),
+            image: "fp-look".into(),
+        };
+        db.save_look_asset(saved.id, Provider::BytePlus, Some(&asset))
+            .unwrap();
+        let replaced = LookAsset {
+            kind: LookAssetKind::PresetCharacter,
+            ..asset
+        };
+        db.save_look_asset(saved.id, Provider::BytePlus, Some(&replaced))
+            .unwrap();
+        assert_eq!(
+            db.look_asset(saved.id, Provider::BytePlus).unwrap(),
+            Some(replaced.clone())
+        );
+        assert_eq!(db.look_asset(saved.id, Provider::Higgsfield).unwrap(), None);
+        db.save_look_asset(saved.id, Provider::BytePlus, None)
+            .unwrap();
+        assert_eq!(db.look_asset(saved.id, Provider::BytePlus).unwrap(), None);
+        db.save_look_asset(saved.id, Provider::BytePlus, Some(&replaced))
+            .unwrap();
+        let conn = db.conn();
+        conn.execute("DELETE FROM persona WHERE id = ?1", [saved.id.to_string()])
+            .unwrap();
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM persona_look_asset", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[test]

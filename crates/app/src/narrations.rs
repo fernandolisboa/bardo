@@ -282,6 +282,7 @@ pub(crate) struct NarrationHandler {
     pub(crate) owner: ProfileId,
     pub(crate) narrations: Arc<dyn NarrationRepository>,
     pub(crate) captures: Arc<dyn CaptureRepository>,
+    pub(crate) staging: Arc<dyn bardo_domain::StagingRepository>,
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) speech: Arc<dyn SpeechSynthesizer>,
     pub(crate) secrets: Arc<dyn SecretStore>,
@@ -334,6 +335,7 @@ impl NarrationHandler {
         {
             return crate::captures::forget_capture(
                 &*self.captures,
+                &*self.staging,
                 &*self.files,
                 project,
                 saved.id,
@@ -404,8 +406,14 @@ impl NarrationHandler {
         self.narrations
             .save_narration(&narration)
             .map_err(unexpected)?;
-        crate::captures::forget_capture(&*self.captures, &*self.files, project, narration.id)
-            .map_err(unexpected)?;
+        crate::captures::forget_capture(
+            &*self.captures,
+            &*self.staging,
+            &*self.files,
+            project,
+            narration.id,
+        )
+        .map_err(unexpected)?;
         // Leftovers only cost disk space: a file that will not go (open in
         // a player) stays rather than failing a finished narration.
         for index in 0..parts.len() {
@@ -879,6 +887,7 @@ pub(crate) mod tests {
         pub(crate) voice_isolator: Arc<FakeVoiceIsolator>,
         pub(crate) vision: Arc<crate::take_analysis::testing::FakeVision>,
         pub(crate) takes: Arc<crate::testing::FakeTakes>,
+        pub(crate) modelark: Arc<crate::testing::FakeModelArk>,
     }
 
     impl Harness {
@@ -901,6 +910,7 @@ pub(crate) mod tests {
                 voice_isolator: Arc::default(),
                 vision: Arc::default(),
                 takes: Arc::default(),
+                modelark: Arc::default(),
             }
         }
 
@@ -923,7 +933,10 @@ pub(crate) mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
-                takes: vec![Arc::clone(&self.takes) as _],
+                takes: vec![
+                    Arc::clone(&self.takes) as _,
+                    Arc::clone(&self.modelark) as _,
+                ],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
@@ -1185,6 +1198,7 @@ pub(crate) mod tests {
             owner: app.profile().id,
             narrations: Arc::clone(&h.db) as _,
             captures: Arc::clone(&h.db) as _,
+            staging: Arc::clone(&h.db) as _,
             files: Arc::clone(&h.files),
             speech: Arc::clone(&h.speech) as _,
             secrets: Arc::clone(&h.secrets) as _,

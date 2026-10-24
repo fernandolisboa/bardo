@@ -16,8 +16,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bardo_app::bardo_domain::{
-    AppCredentialsFieldError, DecisionEngineId, KeyCheckOutcome, LayoutId, MetricsSyncOnStart,
-    Network, Provider, ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
+    AppCredentialsFieldError, BYTEPLUS_DEFAULT_REGION, BytePlusField, BytePlusFieldError,
+    DecisionEngineId, KeyCheckOutcome, LayoutId, MetricsSyncOnStart, Network, Provider,
+    ThemeFamily, ThemeMode, UiLanguage, UiTheme, UiThemePreference,
 };
 use bardo_app::{
     AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, DisplayInfo, GpuInfo,
@@ -196,6 +197,24 @@ fn display_info(window: &Window, cx: &App) -> DisplayInfo {
     }
 }
 
+/// The BytePlus card's five fields, saved together as its one key
+/// (ADR-0025), and the errors each shows until edited.
+struct BytePlusFields {
+    inputs: Vec<(BytePlusField, Entity<InputState>)>,
+    errors: Vec<BytePlusFieldError>,
+}
+
+impl BytePlusFields {
+    fn input(&self, field: BytePlusField) -> &Entity<InputState> {
+        &self
+            .inputs
+            .iter()
+            .find(|(of, _)| *of == field)
+            .expect("every field has an input")
+            .1
+    }
+}
+
 /// What the screen holds for one network's app credentials.
 struct CredentialsRow {
     client_id: Entity<InputState>,
@@ -213,6 +232,7 @@ pub struct SettingsScreen {
     /// The setup screen's block was copied.
     copied: bool,
     rows: HashMap<Provider, KeyRow>,
+    byteplus: BytePlusFields,
     credentials: HashMap<Network, CredentialsRow>,
     /// The light and dark slots of "follow Windows".
     light_theme: ThemeSelect,
@@ -273,6 +293,31 @@ impl SettingsScreen {
                 (provider, row)
             })
             .collect();
+        let inputs = BytePlusField::ALL
+            .into_iter()
+            .map(|field| {
+                let input = cx.new(|cx| {
+                    // The secrets never show on screen, even while typed.
+                    let mut input = InputState::new(window, cx).masked(field.is_secret());
+                    if field == BytePlusField::Region {
+                        input.set_value(BYTEPLUS_DEFAULT_REGION, window, cx);
+                    }
+                    input
+                });
+                subscriptions.push(cx.subscribe(&input, move |this, _, event, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.byteplus.errors.retain(|error| error.field() != field);
+                        this.row_mut(Provider::BytePlus).error = None;
+                        cx.notify();
+                    }
+                }));
+                (field, input)
+            })
+            .collect();
+        let byteplus = BytePlusFields {
+            inputs,
+            errors: Vec::new(),
+        };
         let credentials = Network::sign_in_networks()
             .map(|network| {
                 let client_id = cx.new(|cx| InputState::new(window, cx));
@@ -395,6 +440,7 @@ impl SettingsScreen {
             setup: None,
             copied: false,
             rows,
+            byteplus,
             credentials,
             light_theme,
             dark_theme,
@@ -703,6 +749,43 @@ impl SettingsScreen {
                 input.update(cx, |input, cx| input.set_value("", window, cx));
             }
             Err(error) => row.error = Some(error.message()),
+        }
+        cx.notify();
+    }
+
+    /// Saves the BytePlus card's fields as its one key; the secrets are
+    /// cleared once saved, the bucket and region stay.
+    fn save_byteplus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let typed: Vec<String> = self
+            .byteplus
+            .inputs
+            .iter()
+            .map(|(_, input)| input.read(cx).value().to_string())
+            .collect();
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result =
+                bardo.save_byteplus_key(&typed[0], &typed[1], &typed[2], &typed[3], &typed[4]);
+            cx.notify();
+            result
+        });
+        match result {
+            Ok(()) => {
+                self.byteplus.errors.clear();
+                for (field, input) in &self.byteplus.inputs {
+                    if field.is_secret() {
+                        input.update(cx, |input, cx| input.set_value("", window, cx));
+                    }
+                }
+                let row = self.row_mut(Provider::BytePlus);
+                row.error = None;
+                row.testing = None;
+            }
+            Err(error) => {
+                if let bardo_app::ProviderKeyError::BytePlusFields(fields) = &error {
+                    self.byteplus.errors = fields.clone();
+                }
+                self.row_mut(Provider::BytePlus).error = Some(error.message());
+            }
         }
         cx.notify();
     }
@@ -1035,6 +1118,7 @@ impl SettingsScreen {
                 cx,
             )
         });
+        let byteplus = (provider == Provider::BytePlus).then(|| self.render_byteplus_fields(cx));
         let bardo = self.bardo.read(cx);
         let tokens = look(cx).tokens;
         let row = &self.rows[&provider];
@@ -1091,19 +1175,22 @@ impl SettingsScreen {
         };
         // No key yet: saving is the one thing to do here. With a key,
         // replacing and testing are equals, and removing stays quiet.
-        let save =
-            Button::new(("save-key", provider as usize))
-                .label(tr(
-                    bardo,
-                    if saved {
-                        Text::ReplaceKey
-                    } else {
-                        Text::SaveKey
-                    },
-                ))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+        let save = Button::new(("save-key", provider as usize))
+            .label(tr(
+                bardo,
+                if saved {
+                    Text::ReplaceKey
+                } else {
+                    Text::SaveKey
+                },
+            ))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if provider == Provider::BytePlus {
+                    this.save_byteplus(window, cx)
+                } else {
                     this.save(provider, window, cx)
-                }));
+                }
+            }));
         let save = if saved {
             save.outline()
         } else {
@@ -1156,10 +1243,14 @@ impl SettingsScreen {
                     .child(div().flex_none().child(state)),
             )
             .children(consent)
+            .children(byteplus)
             .child(
                 h_flex()
                     .gap_2()
-                    .child(div().flex_1().child(Input::new(&row.input)))
+                    .flex_wrap()
+                    .when(provider != Provider::BytePlus, |actions| {
+                        actions.child(div().flex_1().min_w(px(200.)).child(Input::new(&row.input)))
+                    })
                     .child(save)
                     // Hidden, not disabled, until there is a key to act on.
                     .when(saved, |actions| {
@@ -1200,6 +1291,54 @@ impl SettingsScreen {
         } else {
             card.into_any_element()
         }
+    }
+
+    /// The BytePlus card's fields: the ModelArk key, the access key pair
+    /// and the bucket with its region, each with what is wrong with it.
+    fn render_byteplus_fields(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let tokens = look(cx).tokens;
+        let field = |field: BytePlusField| {
+            let error = self
+                .byteplus
+                .errors
+                .iter()
+                .find(|error| error.field() == field)
+                .map(|error| {
+                    div()
+                        .text_xs()
+                        .text_color(tokens.danger)
+                        .child(tr(bardo, Text::BytePlusFieldError(*error)))
+                });
+            v_flex()
+                .flex_1()
+                .min_w(px(220.))
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .child(tr(bardo, Text::BytePlusFieldLabel(field))),
+                )
+                .child(Input::new(self.byteplus.input(field)))
+                .children(error)
+        };
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap_3()
+                    .children(BytePlusField::ALL.map(field)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tokens.text2)
+                    .child(tr(bardo, Text::BytePlusCardNote)),
+            )
+            .into_any_element()
     }
 
     fn render_keys(&self, cx: &mut Context<Self>) -> AnyElement {

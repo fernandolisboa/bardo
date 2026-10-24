@@ -111,6 +111,17 @@ video_seconds = "0.123"
 [higgsfield."bytedance/seedance-2.5/video-edit/1080p"]
 video_seconds = "0.680"
 
+# Seedance 2.5 straight from BytePlus ModelArk (checked on 2026-10-23), per
+# million tokens of the video it makes: with a video in, US$ 6.40 up to
+# 720p and US$ 7.00 at 1080p. A take's tokens are its seconds in and out
+# times width × height × 24 frames / 1024; ModelArk reports them, and a
+# take below its minimum is billed the minimum.
+[byteplus."dreamina-seedance-2-5-260628/480p"]
+output_tokens = "6.40"
+
+[byteplus."dreamina-seedance-2-5-260628/1080p"]
+output_tokens = "7.00"
+
 # Kling bills each clip per second of video from prepaid resource packages,
 # by model and resolution, with sound off; these are its published list
 # prices (checked on 2026-10-20, 1 unit = US$ 0.14). Kling quotes nothing

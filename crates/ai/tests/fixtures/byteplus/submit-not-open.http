@@ -1,0 +1,4 @@
+HTTP/1.1 404 Not Found
+content-type: application/json; charset=utf-8
+
+{"error":{"code":"ModelNotOpen","message":"Your account 2100123456 has not activated the model dreamina-seedance-2-5. Please activate the model service in the Ark Console.","param":"","type":"NotFound"}}

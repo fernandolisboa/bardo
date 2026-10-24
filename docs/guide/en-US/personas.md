@@ -59,3 +59,13 @@ The look is the character this persona appears as in performed clips. A persona 
 - **Photo of you**: **Import a photo of me…** takes a PNG or JPEG of you alone, from the waist up, facing the camera on a plain background, 300 to 6,000 px a side and at most 10 MB. Tick **This photo shows me, and only me** first. It becomes the look at once, and it never leaves in a package.
 
 **Realistic look** is always ticked for a photo of you, and ticked for a photoreal drawing: videos where a realistic look performs need the networks' altered or synthetic content label. **Remove look** deletes it after asking; a drawn look costs a new drawing to get back. Changes in this section save at once, without **Save changes**. A persona imported from a package with a drawn look brings it as a drawing to review.
+
+<a id="look-asset"></a>
+## BytePlus asset library
+
+Seedance 2.5 on BytePlus ModelArk refuses real faces in what it is sent, and can take a look from your ModelArk asset library by its id instead of the image ([Getting each API key](get-api-keys.md#byteplus) says how to add one). Under **BytePlus asset library**, pick the **Kind**, paste the **Asset id** (with or without `asset://`) and select **Save asset**:
+
+- A **photo of you** takes only your **Verified likeness**, the one ModelArk verified as you. Until it has one, its takes cannot be sent to BytePlus.
+- A **drawn look** can take a **Preset character** from ModelArk's library or a **Virtual portrait** you made there, or go as its image with no asset at all.
+
+An id holds for this look only: it no longer holds once you pick a new drawing or photo. **Remove asset** sends the image again. The id stays on this computer: it never leaves in a persona package or the settings file, and duplicating the persona does not copy it.

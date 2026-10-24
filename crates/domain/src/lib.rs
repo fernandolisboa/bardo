@@ -43,6 +43,7 @@ mod agent_task;
 mod appearance;
 mod backup;
 mod budget;
+mod byteplus;
 mod caption;
 mod capture;
 mod channel;
@@ -93,6 +94,7 @@ mod scene;
 mod schedule;
 mod script;
 mod speech;
+mod staging;
 mod take_analysis;
 mod take_model;
 mod template;
@@ -119,6 +121,10 @@ pub use backup::{
     BackupStore, MediaSize, ProgressReport, RestoreOutcome, SavedBackup,
 };
 pub use budget::{Budget, BudgetLevel, Month};
+pub use byteplus::{
+    BYTEPLUS_DEFAULT_REGION, BYTEPLUS_SEPARATOR, BytePlusCredentials, BytePlusField,
+    BytePlusFieldError, is_bucket_name,
+};
 pub use caption::{
     Caption, CaptionHighlight, CaptionStyle, Captions, LINE_RULES, LineRules, MAX_CAPTION_CHARS,
     SavedCaptions, UnknownCaptionHighlight, UnknownCaptionStyle, caption_lines, caption_text,
@@ -255,8 +261,9 @@ pub use persona::{
 };
 pub use persona_look::{
     LOOK_MAX_BYTES, LOOK_MAX_RATIO_TENTHS, LOOK_MAX_SIDE, LOOK_MIN_RATIO_TENTHS, LOOK_MIN_SIDE,
-    LookDescriptionError, LookDrawing, LookImage, LookImageError, LookSource, MAX_LOOK_DESCRIPTION,
-    MAX_LOOK_PROMPT, PersonaLook, UnknownLookSource, look_description,
+    LookAsset, LookAssetError, LookAssetKind, LookDescriptionError, LookDrawing, LookImage,
+    LookImageError, LookSource, MAX_LOOK_DESCRIPTION, MAX_LOOK_PROMPT, PersonaLook,
+    UnknownLookSource, look_description,
 };
 pub use post_insights::{
     Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,
@@ -310,6 +317,7 @@ pub use speech::{
     SpeechRequest, SpeechSynthesizer, SpeechTranscriber, Transcript, TranscriptionRequest,
     VoiceChangeRequest, VoiceChanger, VoiceIsolator, split_for_speech,
 };
+pub use staging::{StagedUpload, StagingRepository};
 pub use take_analysis::{
     ANALYSIS_CHUNK_FRAMES, AnalysisPart, BLENDSHAPE_NAMES, DEPTH_FAR_PERMILLE, DEPTH_NEAR_PERMILLE,
     DepthEstimator, DepthHistogram, DepthMap, DepthRange, DepthScale, Device, FACE_FILE_VERSION,
@@ -320,7 +328,8 @@ pub use take_analysis::{
     distinct_faces, take_frame_time, take_frames,
 };
 pub use take_model::{
-    StagedFile, TakeGenerator, TakeInput, TakeModel, TakeRequest, TakeStep, TakeTier, take_model_of,
+    StagedFile, TakeDone, TakeGenerator, TakeInput, TakeModel, TakeRequest, TakeStatus, TakeStep,
+    TakeTier, take_model_of,
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,

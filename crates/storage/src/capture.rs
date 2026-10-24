@@ -658,7 +658,8 @@ impl CaptureRepository for Database {
             .prepare(
                 "SELECT capture_id, position, step, control, take_provider, take_model,
                      priced_model, prompt, template_id, template_number, look, realistic,
-                     request, cost_micros, file, duration_ms, made_at, job_id, accepted_at
+                     request, cost_micros, file, duration_ms, made_at, job_id, accepted_at,
+                     seed, deadline
                  FROM take_result WHERE project_id = ?1 ORDER BY position, step = 'final'",
             )
             .map_err(boxed)?;
@@ -685,6 +686,8 @@ impl CaptureRepository for Database {
                     made_at: row.get(16)?,
                     job: row.get(17)?,
                     accepted_at: row.get(18)?,
+                    seed: row.get(19)?,
+                    deadline: row.get(20)?,
                 })
             })
             .map_err(boxed)?;
@@ -700,9 +703,9 @@ impl CaptureRepository for Database {
                 "INSERT OR REPLACE INTO take_result (project_id, capture_id, position, step,
                      control, take_provider, take_model, priced_model, prompt, template_id,
                      template_number, look, realistic, request, cost_micros, file, duration_ms,
-                     made_at, job_id, accepted_at)
+                     made_at, job_id, accepted_at, seed, deadline)
                  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20
+                     ?17, ?18, ?19, ?20, ?21, ?22
                  WHERE EXISTS (
                      SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
                      WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3)",
@@ -729,6 +732,8 @@ impl CaptureRepository for Database {
                     to_unix_millis(result.made_at),
                     result.job.map(|job| job.to_string()),
                     result.accepted_at.map(to_unix_millis),
+                    result.seed,
+                    result.deadline.map(to_unix_millis),
                 ],
             )
             .map_err(boxed)?;
@@ -788,6 +793,8 @@ struct ResultRow {
     made_at: i64,
     job: Option<String>,
     accepted_at: Option<i64>,
+    seed: Option<i64>,
+    deadline: Option<i64>,
 }
 
 impl ResultRow {
@@ -828,6 +835,8 @@ impl ResultRow {
             made_at: from_unix_millis(self.made_at),
             job: self.job.as_deref().map(uuid).transpose()?.map(JobId::from),
             accepted_at: self.accepted_at.map(from_unix_millis),
+            seed: self.seed,
+            deadline: self.deadline.map(from_unix_millis),
         })
     }
 }
@@ -1347,6 +1356,8 @@ mod tests {
             made_at: time(1_800_000_070),
             job: Some(JobId::new()),
             accepted_at: None,
+            seed: None,
+            deadline: None,
         }
     }
 
@@ -1379,7 +1390,11 @@ mod tests {
         assert!(db.save_take_prompt(&edited).unwrap());
         assert_eq!(db.take_prompts(project.id).unwrap(), [edited]);
 
-        let draft = result(&saved, 0, TakeStep::Draft, "aaaa");
+        let draft = TakeResult {
+            seed: Some(4_166_412_507),
+            deadline: Some(time(1_800_604_870)),
+            ..result(&saved, 0, TakeStep::Draft, "aaaa")
+        };
         let final_take = result(&saved, 0, TakeStep::Final, "aaaa");
         assert!(db.save_take_result(&final_take).unwrap());
         assert!(db.save_take_result(&draft).unwrap());
@@ -1488,11 +1503,15 @@ mod tests {
         used(0, saved.id);
         // One of a capture that is gone.
         used(3, CaptureId::new());
-        // As the database was before migration 56, then migrated.
+        // As the database was before migration 56 (and the ones after), then
+        // migrated.
         let migrate = |before: &str| {
             let mut conn = db.conn();
             conn.execute_batch(&format!(
                 "{before}
+                 DROP TABLE take_staging; DROP TABLE persona_look_asset;
+                 ALTER TABLE take_result DROP COLUMN deadline;
+                 ALTER TABLE take_result DROP COLUMN seed;
                  ALTER TABLE performed_clip DROP COLUMN face_y;
                  ALTER TABLE performed_clip DROP COLUMN face_x;
                  ALTER TABLE performed_clip DROP COLUMN take_end_ms;

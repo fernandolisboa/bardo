@@ -2,23 +2,26 @@
 //! appears as in performed clips. Shows the look and a drawing waiting for
 //! review beside it, draws one from a description (with the budget
 //! question), imports a photo of the user once they confirm it shows them,
-//! and marks the look realistic or removes it. Rules, storage and the
-//! drawing job live in `bardo_app`; this file maps them to the screen.
+//! and marks the look realistic or removes it. Where a take model takes
+//! looks from its provider's asset library (BytePlus), it also keeps the
+//! asset id that stands for the look. Rules, storage and the drawing job
+//! live in `bardo_app`; this file maps them to the screen.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{
-    ImageFormat, JobFailureKind, JobId, JobState, LookImageError, LookSource, PersonaId,
-    PersonaLook,
+    ImageFormat, JobFailureKind, JobId, JobState, LookAssetKind, LookImageError, LookSource,
+    PersonaId, PersonaLook, Provider,
 };
 use bardo_app::{Bardo, BudgetConsent, LookError, LookView, SpendEstimate, Text};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, StyledExt as _, h_flex,
+    v_flex,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -43,6 +46,8 @@ enum Notice {
     Kept,
     Imported,
     Removed,
+    AssetSaved,
+    AssetRemoved,
     /// The action failed, and, for a refused photo, why.
     Error(Text, Option<LookImageError>),
 }
@@ -83,6 +88,9 @@ pub struct LookSection {
     pending: Option<Shown>,
     description: Entity<TextareaState>,
     description_error: Option<Text>,
+    /// The asset id typed for the look, and the kind picked for it.
+    asset_id: Entity<InputState>,
+    asset_kind: Option<LookAssetKind>,
     /// A drawing past the budget, waiting for the user's answer.
     ask: Option<SpendEstimate>,
     /// The import card is open, with whether the user ticked that the
@@ -101,6 +109,7 @@ pub struct LookSection {
 impl LookSection {
     pub fn new(bardo: Entity<Bardo>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let description = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6));
+        let asset_id = cx.new(|cx| InputState::new(window, cx));
         let poll = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL_EVERY).await;
@@ -120,6 +129,14 @@ impl LookSection {
             cx.observe_in(&bardo, window, |this, _, window, cx| {
                 this.relabel(window, cx)
             }),
+            cx.subscribe(&asset_id, |this, _, event, cx| {
+                if matches!(event, InputEvent::Change)
+                    && matches!(this.notice, Some(Notice::Error(..)))
+                {
+                    this.notice = None;
+                    cx.notify();
+                }
+            }),
         ];
         let revision = bardo.read(cx).jobs_revision();
         let mut section = Self {
@@ -133,6 +150,8 @@ impl LookSection {
             pending: None,
             description,
             description_error: None,
+            asset_id,
+            asset_kind: None,
             ask: None,
             importing: None,
             removing: false,
@@ -162,6 +181,9 @@ impl LookSection {
             self.removing = false;
             self.notice = None;
             self.dialog = None;
+            self.asset_kind = None;
+            self.asset_id
+                .update(cx, |input, cx| input.set_value("", window, cx));
         }
         self.load(cx);
         if changed {
@@ -181,6 +203,10 @@ impl LookSection {
     fn relabel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = tr(self.bardo.read(cx), Text::LookDescriptionPlaceholder);
         self.description.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
+        let placeholder = tr(self.bardo.read(cx), Text::LookAssetIdPlaceholder);
+        self.asset_id.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx)
         });
         cx.notify();
@@ -760,6 +786,181 @@ impl LookSection {
             .into_any_element()
     }
 
+    /// Saves the typed asset id, of the picked kind, for the look.
+    fn save_asset(
+        &mut self,
+        provider: Provider,
+        kind: LookAssetKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(persona) = self.persona else {
+            return;
+        };
+        let typed = self.asset_id.read(cx).value().to_string();
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.set_look_asset(persona, provider, kind, &typed);
+            cx.notify();
+            result
+        });
+        match result {
+            Ok(_) => {
+                self.notice = Some(Notice::AssetSaved);
+                self.asset_id
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            Err(error) => self.fail(&error, cx),
+        }
+        self.load(cx);
+        cx.notify();
+    }
+
+    fn remove_asset(&mut self, provider: Provider, cx: &mut Context<Self>) {
+        let Some(persona) = self.persona else {
+            return;
+        };
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.remove_look_asset(persona, provider);
+            cx.notify();
+            result
+        });
+        match result {
+            Ok(()) => self.notice = Some(Notice::AssetRemoved),
+            Err(error) => self.fail(&error, cx),
+        }
+        self.load(cx);
+        cx.notify();
+    }
+
+    /// Each asset library that can stand for the look: the asset it holds,
+    /// or the kind and id to give it.
+    fn render_assets(&self, view: &LookView, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(shown) = &self.look else {
+            return Vec::new();
+        };
+        let source = shown.look.source;
+        let kinds = LookAssetKind::for_source(source);
+        let picked = self
+            .asset_kind
+            .filter(|kind| kinds.contains(kind))
+            .unwrap_or(kinds[0]);
+        let mut wells = Vec::new();
+        for (provider, held) in view.assets.clone() {
+            let bardo = self.bardo.read(cx);
+            let muted = cx.theme().muted_foreground;
+            let header = h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_medium()
+                        .child(tr(bardo, Text::LookAssetTitle)),
+                )
+                .child(guide::info(
+                    bardo,
+                    "persona-look-asset-info",
+                    tr(bardo, Text::LookAssetHint),
+                    guide::refs::PERSONAS_LOOK_ASSET,
+                ));
+            let body: AnyElement = match held {
+                Some(asset) => h_flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_sm().child(SharedString::from(bardo.text_with(
+                        Text::LookAssetHeld,
+                        &[
+                            ("kind", &bardo.text(Text::LookAssetKindName(asset.kind))),
+                            ("id", &asset.id),
+                        ],
+                    ))))
+                    .child(
+                        Button::new(("remove-look-asset", provider as usize))
+                            .small()
+                            .ghost()
+                            .label(tr(bardo, Text::LookAssetRemove))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.remove_asset(provider, cx)
+                            })),
+                    )
+                    .into_any_element(),
+                None => {
+                    let kind_picker = h_flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(bardo, Text::LookAssetKindLabel)),
+                        )
+                        .children(kinds.iter().map(|&kind| {
+                            Button::new(SharedString::from(format!(
+                                "look-asset-kind-{}",
+                                kind.code()
+                            )))
+                            .xsmall()
+                            .outline()
+                            .selected(kind == picked)
+                            .label(tr(bardo, Text::LookAssetKindName(kind)))
+                            .on_click(cx.listener(
+                                move |this, _: &ClickEvent, _, cx| {
+                                    this.asset_kind = Some(kind);
+                                    cx.notify();
+                                },
+                            ))
+                        }));
+                    v_flex()
+                        .gap_2()
+                        .child(kind_picker)
+                        .child(
+                            h_flex()
+                                .flex_wrap()
+                                .gap_2()
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w(px(200.))
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(tr(bardo, Text::LookAssetIdLabel)),
+                                        )
+                                        .child(Input::new(&self.asset_id).small()),
+                                )
+                                .child(
+                                    h_flex().items_end().child(
+                                        Button::new(("save-look-asset", provider as usize))
+                                            .small()
+                                            .outline()
+                                            .label(tr(bardo, Text::LookAssetSave))
+                                            .on_click(cx.listener(
+                                                move |this, _: &ClickEvent, window, cx| {
+                                                    this.save_asset(provider, picked, window, cx)
+                                                },
+                                            )),
+                                    ),
+                                ),
+                        )
+                        .into_any_element()
+                }
+            };
+            wells.push(
+                kit::well(cx)
+                    .p_3()
+                    .gap_2()
+                    .child(header)
+                    .child(body)
+                    .into_any_element(),
+            );
+        }
+        wells
+    }
+
     fn render_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
@@ -768,6 +969,8 @@ impl LookSection {
             Notice::Kept => (Tone::Success, Text::LookKept, None),
             Notice::Imported => (Tone::Success, Text::LookImported, None),
             Notice::Removed => (Tone::Neutral, Text::LookRemoved, None),
+            Notice::AssetSaved => (Tone::Success, Text::LookAssetSaved, None),
+            Notice::AssetRemoved => (Tone::Neutral, Text::LookAssetRemoved, None),
             Notice::Error(text, reason) => (Tone::Danger, text, reason),
         };
         let reason = reason.map(|reason| {
@@ -837,6 +1040,7 @@ impl Render for LookSection {
             );
         };
         let look = self.render_look(cx);
+        let assets = self.render_assets(&view, cx);
         let pending = self
             .pending
             .as_ref()
@@ -848,6 +1052,7 @@ impl Render for LookSection {
             .map(|shows_me| self.render_import(shows_me, cx));
         let notice = self.render_notice(cx);
         card.child(look)
+            .children(assets)
             .children(pending)
             .children(job)
             .child(draw)

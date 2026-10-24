@@ -44,6 +44,15 @@ pub fn check_request(provider: Provider, key: &ApiKey) -> Option<HttpRequest> {
             "https://api-singapore.klingai.com/tasks?external_task_ids={NO_SUCH_KLING_TASK}"
         ))
         .header("authorization", format!("Bearer {key}")),
+        // Its storage half is a second request: see `byteplus::check_key`.
+        Provider::BytePlus => {
+            let key = ApiKey::parse(Provider::BytePlus, key).ok()?;
+            let credentials = bardo_domain::BytePlusCredentials::of(&key)?;
+            crate::byteplus::status_request(
+                &credentials,
+                &bardo_domain::ClipHandle(crate::byteplus::NO_SUCH_TASK.into()),
+            )
+        }
         Provider::TypeSafe => HttpRequest::get("https://api.typesafe.ai/v1/models")
             .header("authorization", format!("Bearer {key}")),
         // The header keeps the key out of the URL, and so out of any error
@@ -61,7 +70,7 @@ pub fn classify(provider: Provider, response: &HttpResponse) -> KeyCheck {
     let body: Value = serde_json::from_str(&response.body).unwrap_or(Value::Null);
     let outcome = match (provider, response.status) {
         (_, 200..=299) => KeyCheckOutcome::Valid,
-        (Provider::Higgsfield, 404) => KeyCheckOutcome::Valid,
+        (Provider::Higgsfield | Provider::BytePlus, 404) => KeyCheckOutcome::Valid,
         (Provider::Higgsfield, 403) => KeyCheckOutcome::LimitReached,
         (Provider::Kling, 400 | 404) if (1200..=1203).contains(&kling_code(&body)) => {
             KeyCheckOutcome::Valid
@@ -201,6 +210,9 @@ impl<T: Transport> HttpKeyChecker<T> {
 
 impl<T: Transport> KeyChecker for HttpKeyChecker<T> {
     fn check(&self, provider: Provider, key: &ApiKey) -> KeyCheck {
+        if provider == Provider::BytePlus {
+            return crate::byteplus::check_key(&self.transport, key, std::time::SystemTime::now());
+        }
         let Some(request) = check_request(provider, key) else {
             return KeyCheck::new(
                 KeyCheckOutcome::Unexpected,

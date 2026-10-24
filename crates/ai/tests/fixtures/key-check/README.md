@@ -18,3 +18,8 @@ them needs a real key (re-record when a check misbehaves with a real key):
   `kling-no-units.http`.
 
 Synthetic, for edge cases: `proxy-error-page.http`, `unknown-status.http`.
+
+BytePlus (#194): `byteplus-valid.http` (404 for a task that cannot exist)
+and `byteplus-rejected.http` (401) are written from ModelArk's documented
+error shape, like the other BytePlus fixtures; the storage half of the
+check is tested in `tests/byteplus.rs`.
