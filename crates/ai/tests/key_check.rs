@@ -28,7 +28,9 @@ fn fixture(name: &str) -> HttpResponse {
 fn key(provider: Provider) -> ApiKey {
     let text = match provider {
         Provider::Higgsfield => "key-id-0001:key-secret-0001",
-        Provider::BytePlus => "test-key-0001-abcdef|AKLTtest0001|secret-0001|bardo-takes|ap-southeast-1",
+        Provider::BytePlus => {
+            "test-key-0001-abcdef|AKLTtest0001|secret-0001|bardo-takes|ap-southeast-1"
+        }
         _ => "test-key-0001-abcdef",
     };
     ApiKey::parse(provider, text).unwrap()

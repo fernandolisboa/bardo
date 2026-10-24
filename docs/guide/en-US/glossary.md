@@ -70,11 +70,15 @@ The words Bardo uses, in plain terms.
 
 **Set**: where you appear in a Depth take: your room as recorded, a scene image of the project, or a picture of yours.
 
-**Take model**: the model that makes the persona perform a take from its control video and the persona's look, such as Kling 3.0 Motion Control or Seedance 2.5 Video Edit through Higgsfield. Set per channel, changeable per take; it decides which modes a take can be in.
+**Take model**: the model that makes the persona perform a take from its control video and the persona's look, such as Kling 3.0 Motion Control through Higgsfield or Seedance 2.5 Video Edit through Higgsfield or straight from BytePlus ModelArk. Set per channel, changeable per take; it decides which modes a take can be in.
 
 **Take prompt**: what a take model is told about a take: the look, the set and the delivery. Claude writes it from a template, and you edit it.
 
 **Performed clip**: a take's final, made by its take model, reviewed and used: it joins the project's media, where it goes on the cut in sync with its take's narration. Drafts, where the model makes them, come first and are approved before the final.
+
+**Draft deadline**: on BytePlus ModelArk, when a draft can no longer be finished: seven days after Bardo sent it. Past it, only a new draft can be made.
+
+**Asset id**: a look's id in your ModelArk asset library (`asset://…`), sent to Seedance on BytePlus instead of the look's image: your verified likeness for a photo of you, or a preset character or virtual portrait for a drawn look.
 
 **Scene plan**: the narration split into scenes, each with an image prompt.
 

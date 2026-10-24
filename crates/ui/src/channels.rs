@@ -6,7 +6,7 @@
 use bardo_app::bardo_domain::{
     CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel,
     ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength,
-    PersonaId, ThumbnailLook, Transition, TransitionKind, VideoFormat, frame_time,
+    PersonaId, TakeModel, ThumbnailLook, Transition, TransitionKind, VideoFormat, frame_time,
 };
 use std::rc::Rc;
 
@@ -85,18 +85,29 @@ fn take_model_choices(bardo: &Bardo) -> SearchableVec<Choice<Option<ClipModelRef
     let models = bardo.take_models();
     let default = models.first().map(|model| Choice {
         value: None,
-        title: SharedString::from(
-            bardo.text_with(Text::ChannelClipModelDefault, &[("model", &model.name)]),
-        ),
+        title: SharedString::from(bardo.text_with(
+            Text::ChannelClipModelDefault,
+            &[("model", &take_model_title(bardo, model))],
+        )),
     });
     SearchableVec::new(
         default
             .into_iter()
             .chain(models.iter().map(|model| Choice {
-                title: SharedString::from(model.name.clone()),
+                title: SharedString::from(take_model_title(bardo, model)),
                 value: Some(model.id.clone()),
             }))
             .collect::<Vec<_>>(),
+    )
+}
+
+/// A take model by name and provider: Seedance 2.5 comes through
+/// Higgsfield and from BytePlus.
+pub(crate) fn take_model_title(bardo: &Bardo, model: &TakeModel) -> String {
+    format!(
+        "{} · {}",
+        model.name,
+        bardo.text(Text::ProviderName(model.id.provider()))
     )
 }
 

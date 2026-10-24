@@ -232,14 +232,8 @@ mod tests {
 
     #[test]
     fn the_five_fields_make_one_key_and_come_back_apart() {
-        let key = BytePlusCredentials::compose(
-            &format!(" {API}\n"),
-            AK,
-            SK,
-            "bardo-takes",
-            "",
-        )
-        .unwrap();
+        let key =
+            BytePlusCredentials::compose(&format!(" {API}\n"), AK, SK, "bardo-takes", "").unwrap();
         let found = BytePlusCredentials::of(&key).unwrap();
         assert_eq!(found.api_key, API);
         assert_eq!(found.access_key_id, AK);
@@ -251,7 +245,8 @@ mod tests {
 
     #[test]
     fn each_field_says_what_is_wrong_with_it() {
-        let errors = BytePlusCredentials::compose("", "has space", SK, "Bad_Bucket", "ap|x").unwrap_err();
+        let errors =
+            BytePlusCredentials::compose("", "has space", SK, "Bad_Bucket", "ap|x").unwrap_err();
         assert_eq!(
             errors,
             [
@@ -261,8 +256,8 @@ mod tests {
                 BytePlusFieldError::Invalid(BytePlusField::Region),
             ]
         );
-        let short = BytePlusCredentials::compose(API, AK, "short", "ab", "ap-southeast-1")
-            .unwrap_err();
+        let short =
+            BytePlusCredentials::compose(API, AK, "short", "ab", "ap-southeast-1").unwrap_err();
         assert_eq!(
             short,
             [
@@ -302,8 +297,8 @@ mod tests {
 
     #[test]
     fn the_hint_and_the_masked_parts_come_from_the_secret_fields() {
-        let key = BytePlusCredentials::compose(API, AK, SK, "bardo-takes", "ap-southeast-1")
-            .unwrap();
+        let key =
+            BytePlusCredentials::compose(API, AK, SK, "bardo-takes", "ap-southeast-1").unwrap();
         assert_eq!(key.hint(), "…1a2b");
         let parts = key.sensitive_parts();
         for part in [API, AK, SK] {

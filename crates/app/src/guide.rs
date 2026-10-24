@@ -815,6 +815,7 @@ impl SetupTarget {
                     Provider::Gemini => &["gemini"],
                     Provider::Higgsfield => &["higgsfield"],
                     Provider::Kling => &["kling"],
+                    Provider::BytePlus => &["byteplus"],
                     Provider::TypeSafe => &["typesafe"],
                     Provider::YouTubeData => &["youtube-data"],
                     // No key: X is reached through the connected account.

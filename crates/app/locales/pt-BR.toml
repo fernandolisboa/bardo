@@ -361,6 +361,25 @@ jev = "JEV (TypeSafe)"
 not_set = "Salve uma chave antes de testá-la."
 store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
 
+[provider_keys.byteplus]
+note = "Os cinco ficam salvos juntos no Gerenciador de Credenciais do Windows. A chave de acesso só assina links curtos para o bucket: ela nunca sai do computador. O Bardo apaga do bucket os arquivos de cada tomada assim que não precisa mais deles."
+fields_invalid = "Corrija os campos marcados abaixo."
+required = "Preencha este campo."
+
+[provider_keys.byteplus.field]
+api_key = "Chave de API do ModelArk"
+access_key_id = "ID da chave de acesso"
+secret_access_key = "Chave de acesso secreta"
+bucket = "Bucket do TOS"
+region = "Região"
+
+[provider_keys.byteplus.invalid]
+api_key = "Cole a chave de API inteira: pelo menos 8 caracteres, sem espaços."
+access_key_id = "Cole o ID da chave de acesso inteiro: pelo menos 8 caracteres, sem espaços."
+secret_access_key = "Cole a chave de acesso secreta inteira: pelo menos 8 caracteres, sem espaços."
+bucket = "Nomes de bucket têm de 3 a 63 letras minúsculas, dígitos e hífens, sem começar nem terminar com hífen."
+region = "Use o código da região, como ap-southeast-1."
+
 [provider.claude]
 name = "Claude"
 purpose = "Roteiros, títulos, descrições e prompts para modelos de imagem e vídeo."
@@ -385,6 +404,11 @@ placeholder = "ID da chave:chave secreta"
 name = "Kling"
 purpose = "Clipes de vídeo direto do Kling (Kling 3.0, 2.6 e 2.5 Turbo), pagos com os seus pacotes de recursos do Kling."
 placeholder = "Sua chave de API do Kling"
+
+[provider.byteplus]
+name = "BytePlus ModelArk"
+purpose = "Clipes interpretados com o Seedance 2.5 direto do ModelArk, com rascunhos baratos que a versão final completa. Os arquivos passam por um bucket seu."
+placeholder = "Chave de API do ModelArk"
 
 [provider.typesafe]
 name = "TypeSafe (JEV)"
@@ -416,6 +440,7 @@ too_short = "Isto é curto demais para ser uma chave de API."
 too_long = "Use no máximo 512 caracteres."
 invalid_characters = "Chaves não têm espaços, quebras de linha nem acentos."
 not_id_and_secret = "Cole o ID da chave e a chave secreta unidos por dois-pontos: KEY_ID:KEY_SECRET."
+not_byteplus_credentials = "Preencha os cinco campos da BytePlus."
 
 [research]
 title = "Pesquisa"
@@ -723,11 +748,15 @@ hint = "O modelo de tomada faz a persona interpretar esta tomada, a partir do v�
 model_label = "Modelo de tomada"
 model_channel = "{model} (do canal)"
 busy = "Já há algo sendo feito para esta tomada."
-pending = "O Higgsfield recebeu o pedido desta tomada. Verifique de novo antes de fazer outro: ele ainda pode terminar e cobrar."
+pending = "O provedor recebeu o pedido desta tomada. Verifique de novo antes de fazer outro: ele ainda pode terminar e cobrar."
 missing_claude_key = "Salve uma chave do Claude em Configurações para escrever os prompts das tomadas."
 missing_higgsfield_key = "Salve uma chave do Higgsfield em Configurações para fazer clipes interpretados."
+missing_byteplus_key = "Salve os campos do BytePlus ModelArk em Configurações para fazer clipes interpretados."
 nothing = "Nada foi feito para esta tomada ainda."
 draft_first = "Aprove um rascunho antes: a versão final vem depois dele."
+draft_expired = "Este rascunho passou do prazo e não pode mais ser completado. Faça um rascunho novo."
+draft_deadline = "Faça a versão final até {when}. Depois disso, só um rascunho novo pode ser feito."
+draft_finish_note = "Um rascunho barato em 480p vem antes. A versão final completa o rascunho aprovado em 1080p, com as mesmas entradas, em até sete dias."
 model_gone = "Esse modelo de tomada não é mais oferecido. Escolha outro."
 clip_name = "Clipe interpretado {n}"
 prompt_label = "Prompt"
@@ -753,14 +782,14 @@ back_to_drafts = "Voltar aos rascunhos"
 use = "Usar"
 play_draft = "Reproduzir rascunho"
 play_final = "Reproduzir versão final"
-making_draft = "O Higgsfield está fazendo o rascunho…"
-making_final = "O Higgsfield está fazendo a versão final…"
+making_draft = "{provider} está fazendo o rascunho…"
+making_final = "{provider} está fazendo a versão final…"
 queued = "Aguardando para começar."
 stop_waiting = "Parar de esperar"
-stopped = "Parou de esperar. O Higgsfield ainda pode terminar e cobrar: Verificar de novo retoma o mesmo pedido, e nada novo é pago até lá."
+stopped = "Parou de esperar. {provider} ainda pode terminar e cobrar: Verificar de novo retoma o mesmo pedido, e nada novo é pago até lá."
 check_again = "Verificar de novo"
 failed = "Não foi feito: {reason}"
-refused = "O Higgsfield recusou o conteúdo. Nada foi mudado nem enviado de novo."
+refused = "{provider} recusou o conteúdo. Nada foi mudado nem enviado de novo."
 draft_ready = "Rascunho: {seconds}. Assista com a voz da tomada e depois aprove ou faça outro."
 draft_approved = "Rascunho aprovado."
 final_ready = "Versão final: {seconds}. Assista com a voz da tomada antes de usar."
@@ -768,7 +797,7 @@ longer = "{seconds} mais longo que a tomada."
 shorter = "{seconds} mais curto que a tomada."
 draft_note = "Um rascunho barato vem antes; aprove-o para fazer a versão final em 1080p."
 final_paid_note = "A versão final é paga mesmo que você não a use."
-make_hint = "Cada rascunho e versão final é um job pago do Higgsfield, estimado por segundo da tomada. Assista com a voz da tomada antes de aprovar ou usar. Depois de parar de esperar, Verificar de novo retoma o mesmo pedido em vez de pagar outro."
+make_hint = "Cada rascunho e versão final é um job pago do provedor do modelo de tomada, estimado pela duração da tomada (por segundo no Higgsfield, por token na BytePlus). Assista com a voz da tomada antes de aprovar ou usar. Depois de parar de esperar, Verificar de novo retoma o mesmo pedido em vez de pagar outro."
 used = "Na aba Mídia do editor: {n}."
 used_now = "Adicionado à aba Mídia do editor. Coloque-o no corte a partir dela."
 realistic_note = "A aparência parece uma pessoa real: um corte que usa os clipes interpretados dela liga o aviso de conteúdo sintético."
@@ -778,6 +807,7 @@ no_model = "Nenhum modelo de tomada é oferecido."
 mode_not_taken = "O modelo desta tomada não aceita o modo dela. Escolha um dos modos que ele aceita antes de pagar qualquer coisa."
 length = "Esta tomada é mais curta ou mais longa do que o modelo dela faz. Mova um corte antes."
 no_look = "A persona ainda não tem aparência. Desenhe ou importe uma na tela Personas."
+no_verified_likeness = "Este modelo só aceita uma foto sua como a sua semelhança verificada na biblioteca de assets da BytePlus. Adicione o id do asset na aparência da persona, na tela Personas, ou use uma aparência desenhada."
 control_not_approved = "Aprove o vídeo de controle da tomada antes."
 
 [capture.check]
@@ -1062,6 +1092,28 @@ image_refused = "Essa foto não pode ser a aparência."
 not_saved = "Não foi possível salvar a aparência. Tente de novo."
 description_required = "Descreva o personagem a desenhar."
 description_too_long = "Use no máximo 1.000 caracteres."
+
+[persona.look.asset]
+title = "Biblioteca de assets da BytePlus"
+hint = "O Seedance 2.5 na BytePlus pode usar esta aparência pelo id dela na sua biblioteca de assets do ModelArk, no lugar da imagem. Uma foto sua precisa disso: só a sua semelhança verificada. Uma aparência desenhada pode usar um personagem pronto ou um retrato virtual, ou ir como imagem. Um id vale só para esta aparência; uma aparência nova precisa do seu próprio."
+kind = "Tipo"
+id = "Id do asset"
+id_placeholder = "asset-20261023…"
+save = "Salvar asset"
+remove = "Remover asset"
+held = "Na biblioteca como {kind}: {id}"
+saved = "Salvo: as tomadas na BytePlus enviam este asset no lugar da imagem."
+removed = "Removido: as tomadas na BytePlus voltam a enviar a imagem."
+
+[persona.look.asset.kind_name]
+preset_character = "Personagem pronto"
+virtual_portrait = "Retrato virtual"
+verified_likeness = "Semelhança verificada"
+
+[persona.look.asset.error]
+empty = "Cole o id do asset."
+invalid = "Isso não é um id de asset: letras, dígitos, hífens, sublinhados e pontos, até 128."
+kind_not_for_look = "Uma foto sua só aceita a sua semelhança verificada; uma aparência desenhada, um personagem pronto ou um retrato virtual."
 
 [persona.look.image]
 not_an_image = "Use um arquivo PNG ou JPEG."
@@ -2698,7 +2750,7 @@ body = "O que o modelo de tomada recebe desta tomada, montado aqui de graça dep
 
 [tour.capture.performed]
 title = "O clipe interpretado"
-body = "O modelo de tomada faz a persona interpretar a tomada aprovada: o Claude escreve o prompt, um rascunho vem antes quando o modelo faz um, depois a versão final. Assista a cada um com a voz da tomada; Usar adiciona a versão final à aba Mídia do editor."
+body = "O modelo de tomada faz a persona interpretar a tomada aprovada: o Claude escreve o prompt, um rascunho vem antes quando o modelo faz um, depois a versão final. Um rascunho que a versão final completa mostra o prazo dele. Assista a cada um com a voz da tomada; Usar adiciona a versão final à aba Mídia do editor."
 
 [tour.capture.remove]
 title = "Remova"
@@ -2787,7 +2839,7 @@ body = "Marque quando a voz soa como uma pessoa real, como um clone. As redes pe
 
 [tour.personas.look]
 title = "Aparência"
-body = "Como esta persona aparece nos clipes de atuação. Desenhe um personagem original a partir de uma descrição, revise e fique com ele, ou importe uma foto sua. Uma foto sua nunca vai num pacote."
+body = "Como esta persona aparece nos clipes de atuação. Desenhe um personagem original a partir de uma descrição, revise e fique com ele, ou importe uma foto sua. Uma foto sua nunca vai num pacote. Para o Seedance na BytePlus, a aparência também pode ir pelo id dela na sua biblioteca de assets do ModelArk."
 
 [tour.templates]
 name = "Tour dos Modelos"
@@ -3103,7 +3155,7 @@ body = "Escolha o motor que ranqueia as ideias de vídeo e pontua as sugestões 
 
 [tour.keys.card]
 title = "Uma chave por provedor"
-body = "Cada cartão diz o que o provedor faz por você. Cole a chave que você criou no site dele e salve; uma tela que precisa de uma chave que falta avisa."
+body = "Cada cartão diz o que o provedor faz por você. Cole a chave que você criou no site dele e salve; a BytePlus pede cinco campos, a chave dela e o seu bucket. Uma tela que precisa de uma chave que falta avisa."
 
 [tour.keys.setup]
 title = "Passo a passo"

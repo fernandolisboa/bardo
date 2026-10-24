@@ -59,3 +59,13 @@ A aparência é como esta persona aparece nos clipes de atuação. Uma persona s
 - **Foto sua**: **Importar uma foto minha…** aceita um PNG ou JPEG em que só você aparece, da cintura para cima, de frente para a câmera, com fundo liso, de 300 a 6.000 px de lado e até 10 MB. Marque antes **Só eu apareço nesta foto**. Ela vira a aparência na hora e nunca vai num pacote.
 
 **Aparência realista** fica sempre marcada para uma foto sua, e marcada para um desenho fotorrealista: vídeos em que uma aparência realista atua precisam do rótulo de conteúdo alterado ou sintético das redes. **Remover aparência** apaga depois de perguntar; uma aparência desenhada só volta com um novo desenho. As mudanças nesta seção são salvas na hora, sem **Salvar alterações**. Uma persona importada de um pacote com aparência desenhada a traz como um desenho para revisar.
+
+<a id="look-asset"></a>
+## Biblioteca de assets da BytePlus
+
+O Seedance 2.5 no BytePlus ModelArk recusa rostos reais no que recebe, e pode usar uma aparência da sua biblioteca de assets do ModelArk pelo id dela no lugar da imagem ([Como obter cada chave de API](get-api-keys.md#byteplus) explica como adicionar uma). Em **Biblioteca de assets da BytePlus**, escolha o **Tipo**, cole o **Id do asset** (com ou sem `asset://`) e escolha **Salvar asset**:
+
+- Uma **foto sua** só aceita a sua **Semelhança verificada**, a que o ModelArk verificou como sendo você. Enquanto ela não tiver uma, as tomadas dela não podem ser enviadas à BytePlus.
+- Uma **aparência desenhada** pode usar um **Personagem pronto** da biblioteca do ModelArk ou um **Retrato virtual** que você fez lá, ou ir como imagem, sem asset nenhum.
+
+Um id vale só para esta aparência: um desenho ou uma foto nova o apaga. **Remover asset** volta a enviar a imagem. O id fica neste computador: nunca vai num pacote de persona nem no arquivo de configurações, e duplicar a persona não o copia.

@@ -1,8 +1,7 @@
 use bardo_domain::{
     GenerationPresets, JobId, LookAsset, LookAssetKind, LookDrawing, LookImage, LookSource,
-    Persona, PersonaDetails,
-    PersonaDraft, PersonaId, PersonaLook, PersonaRepository, ProfileId, Provider, RepositoryError,
-    TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
+    Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaLook, PersonaRepository, ProfileId,
+    Provider, RepositoryError, TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -415,7 +414,9 @@ impl PersonaRepository for Database {
         row.map(|(kind, id, image)| {
             Ok(LookAsset {
                 kind: LookAssetKind::from_code(&kind).ok_or_else(|| {
-                    boxed(std::io::Error::other(format!("unknown look asset kind {kind}")))
+                    boxed(std::io::Error::other(format!(
+                        "unknown look asset kind {kind}"
+                    )))
                 })?,
                 id,
                 image,
@@ -526,7 +527,8 @@ mod tests {
             Some(replaced.clone())
         );
         assert_eq!(db.look_asset(saved.id, Provider::Higgsfield).unwrap(), None);
-        db.save_look_asset(saved.id, Provider::BytePlus, None).unwrap();
+        db.save_look_asset(saved.id, Provider::BytePlus, None)
+            .unwrap();
         assert_eq!(db.look_asset(saved.id, Provider::BytePlus).unwrap(), None);
         db.save_look_asset(saved.id, Provider::BytePlus, Some(&replaced))
             .unwrap();

@@ -70,11 +70,15 @@ As palavras que o Bardo usa, em termos simples.
 
 **Cenário**: onde você aparece numa tomada em Profundidade: o seu ambiente como gravado, uma imagem de cena do projeto ou uma imagem sua.
 
-**Modelo de tomada**: o modelo que faz a persona interpretar uma tomada a partir do vídeo de controle e da aparência da persona, como o Kling 3.0 Motion Control ou o Seedance 2.5 Video Edit pelo Higgsfield. Definido por canal, mudável por tomada; ele decide em quais modos uma tomada pode estar.
+**Modelo de tomada**: o modelo que faz a persona interpretar uma tomada a partir do vídeo de controle e da aparência da persona, como o Kling 3.0 Motion Control pelo Higgsfield ou o Seedance 2.5 Video Edit pelo Higgsfield ou direto do BytePlus ModelArk. Definido por canal, mudável por tomada; ele decide em quais modos uma tomada pode estar.
 
 **Prompt da tomada**: o que um modelo de tomada recebe sobre uma tomada: a aparência, o cenário e a interpretação. O Claude o escreve a partir do modelo de texto **Prompt da tomada** (veja Modelos), e você o edita.
 
 **Clipe interpretado**: a versão final de uma tomada, feita pelo modelo de tomada, revisada e usada: ela entra na mídia do projeto, de onde vai para o corte em sincronia com a narração da tomada. Os rascunhos, quando o modelo os faz, vêm antes e são aprovados antes da versão final.
+
+**Prazo do rascunho**: no BytePlus ModelArk, quando um rascunho não pode mais ser completado: sete dias depois de o Bardo enviá-lo. Depois disso, só um rascunho novo pode ser feito.
+
+**Id do asset**: o id de uma aparência na sua biblioteca de assets do ModelArk (`asset://…`), enviado ao Seedance na BytePlus no lugar da imagem da aparência: a sua semelhança verificada para uma foto sua, ou um personagem pronto ou retrato virtual para uma aparência desenhada.
 
 **Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
 

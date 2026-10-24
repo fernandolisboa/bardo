@@ -879,6 +879,7 @@ pub(crate) mod tests {
         pub(crate) voice_isolator: Arc<FakeVoiceIsolator>,
         pub(crate) vision: Arc<crate::take_analysis::testing::FakeVision>,
         pub(crate) takes: Arc<crate::testing::FakeTakes>,
+        pub(crate) modelark: Arc<crate::testing::FakeModelArk>,
     }
 
     impl Harness {
@@ -901,6 +902,7 @@ pub(crate) mod tests {
                 voice_isolator: Arc::default(),
                 vision: Arc::default(),
                 takes: Arc::default(),
+                modelark: Arc::default(),
             }
         }
 
@@ -923,7 +925,10 @@ pub(crate) mod tests {
                 images: Arc::new(crate::testing::FakeImages::default()),
                 music: Arc::new(crate::testing::FakeMusic::default()),
                 clips: vec![Arc::new(crate::testing::FakeClips::default())],
-                takes: vec![Arc::clone(&self.takes) as _],
+                takes: vec![
+                    Arc::clone(&self.takes) as _,
+                    Arc::clone(&self.modelark) as _,
+                ],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),

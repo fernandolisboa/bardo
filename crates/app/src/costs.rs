@@ -154,6 +154,9 @@ pub(crate) struct PlannedCall {
     pub(crate) video_seconds: Option<u32>,
     /// Seconds of audio, when known before the job.
     pub(crate) audio_seconds: Option<u64>,
+    /// Output tokens, when known before the job (a take model billed by
+    /// its video's tokens).
+    pub(crate) output_tokens: Option<u64>,
 }
 
 impl PlannedCall {
@@ -165,6 +168,7 @@ impl PlannedCall {
             Provider::TypeSafe => bardo_ai::jev::MODEL,
             Provider::Higgsfield => bardo_ai::higgsfield::DEFAULT_MODEL,
             Provider::Kling => bardo_ai::kling::DEFAULT_MODEL,
+            Provider::BytePlus => bardo_ai::byteplus::MODEL,
             Provider::YouTubeData => "",
             Provider::X => bardo_domain::X_POST,
         };
@@ -177,6 +181,7 @@ impl PlannedCall {
             characters: None,
             video_seconds: None,
             audio_seconds: None,
+            output_tokens: None,
         }
     }
 
@@ -188,6 +193,11 @@ impl PlannedCall {
 
     pub(crate) fn with_video_seconds(mut self, seconds: u32) -> Self {
         self.video_seconds = Some(seconds);
+        self
+    }
+
+    pub(crate) fn with_output_tokens(mut self, tokens: u64) -> Self {
+        self.output_tokens = Some(tokens);
         self
     }
 
@@ -264,6 +274,11 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // The take's words and one frame of its control video in, a
         // paragraph of prompt out.
         CostPurpose::TakePrompt => tokens(2_500, 500),
+        // ModelArk bills the video's tokens, which each estimate counts
+        // from the take itself.
+        CostPurpose::TakeDraft | CostPurpose::TakeFinal if provider == Provider::BytePlus => {
+            Metered::default()
+        }
         // A 30-second take, the longest one.
         CostPurpose::TakeDraft | CostPurpose::TakeFinal => Metered::video_seconds(30),
         CostPurpose::PersonaLook => match provider {
@@ -384,6 +399,9 @@ impl CostBook {
         }
         if let Some(seconds) = call.audio_seconds {
             usage.audio_seconds = seconds;
+        }
+        if let Some(tokens) = call.output_tokens {
+            usage.output_tokens = tokens;
         }
         Ok(usage.times(call.calls))
     }

@@ -277,7 +277,9 @@ impl LookAssetKind {
     }
 
     pub fn from_code(code: &str) -> Option<LookAssetKind> {
-        LookAssetKind::ALL.into_iter().find(|kind| kind.code() == code)
+        LookAssetKind::ALL
+            .into_iter()
+            .find(|kind| kind.code() == code)
     }
 
     /// The kinds a look from `source` may use: a drawn look a preset
@@ -285,7 +287,10 @@ impl LookAssetKind {
     /// verified likeness.
     pub fn for_source(source: LookSource) -> &'static [LookAssetKind] {
         match source {
-            LookSource::Drawn => &[LookAssetKind::PresetCharacter, LookAssetKind::VirtualPortrait],
+            LookSource::Drawn => &[
+                LookAssetKind::PresetCharacter,
+                LookAssetKind::VirtualPortrait,
+            ],
             LookSource::Imported => &[LookAssetKind::VerifiedLikeness],
         }
     }
@@ -421,7 +426,10 @@ mod tests {
             LookAssetKind::for_source(LookSource::Imported),
             [LookAssetKind::VerifiedLikeness]
         );
-        assert!(!LookAssetKind::for_source(LookSource::Drawn).contains(&LookAssetKind::VerifiedLikeness));
+        assert!(
+            !LookAssetKind::for_source(LookSource::Drawn)
+                .contains(&LookAssetKind::VerifiedLikeness)
+        );
     }
 
     #[test]
@@ -437,7 +445,11 @@ mod tests {
         assert_eq!(asset.uri(), "asset://asset-2026abc_1.x");
         let parse = |kind, input: &str, source| LookAsset::parse(kind, input, source, "print");
         assert_eq!(
-            parse(LookAssetKind::PresetCharacter, "asset://", LookSource::Drawn),
+            parse(
+                LookAssetKind::PresetCharacter,
+                "asset://",
+                LookSource::Drawn
+            ),
             Err(LookAssetError::Empty)
         );
         assert_eq!(
@@ -445,7 +457,11 @@ mod tests {
             Err(LookAssetError::Invalid)
         );
         assert_eq!(
-            parse(LookAssetKind::PresetCharacter, &"a".repeat(129), LookSource::Drawn),
+            parse(
+                LookAssetKind::PresetCharacter,
+                &"a".repeat(129),
+                LookSource::Drawn
+            ),
             Err(LookAssetError::Invalid)
         );
         assert_eq!(
@@ -453,10 +469,21 @@ mod tests {
             Err(LookAssetError::KindNotForLook)
         );
         assert_eq!(
-            parse(LookAssetKind::PresetCharacter, "char-1", LookSource::Imported),
+            parse(
+                LookAssetKind::PresetCharacter,
+                "char-1",
+                LookSource::Imported
+            ),
             Err(LookAssetError::KindNotForLook)
         );
-        assert!(parse(LookAssetKind::VerifiedLikeness, "me-1", LookSource::Imported).is_ok());
+        assert!(
+            parse(
+                LookAssetKind::VerifiedLikeness,
+                "me-1",
+                LookSource::Imported
+            )
+            .is_ok()
+        );
     }
 
     #[test]

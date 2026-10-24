@@ -1683,6 +1683,13 @@ impl ProjectsScreen {
         let small = |text: SharedString| div().text_xs().child(text);
         let busy = view.is_busy();
         let blocked = view.block.is_some();
+        // The provider the take model runs on, as the texts name it.
+        let provider = view.model.as_ref().map(|model| model.id.provider());
+        let provider_name = provider
+            .map(|provider| bardo.text(Text::ProviderName(provider)).into_owned())
+            .unwrap_or_default();
+        let with_provider =
+            |text: Text| SharedString::from(bardo.text_with(text, &[("provider", &provider_name)]));
         let info = |id: &'static str, hint: Text, at| {
             (index == 0).then(|| guide::info(bardo, id, tr(bardo, hint), at))
         };
@@ -1712,10 +1719,11 @@ impl ProjectsScreen {
             .items_center()
             .child(small(tr(bardo, Text::TakeModelLabel)).text_color(muted));
         for (number, model) in performed.models.iter().enumerate() {
+            let title = crate::channels::take_model_title(bardo, model);
             let label = if Some(&model.id) == channel {
-                bardo.text_with(Text::TakeModelChannelTag, &[("model", &model.name)])
+                bardo.text_with(Text::TakeModelChannelTag, &[("model", &title)])
             } else {
-                model.name.clone()
+                title
             };
             let picked = view.model.as_ref().is_some_and(|own| own.id == model.id);
             let id = model.id.clone();
@@ -1904,7 +1912,7 @@ impl ProjectsScreen {
                         .flex_wrap()
                         .items_center()
                         .child(Spinner::new().xsmall())
-                        .child(small(tr(bardo, text)))
+                        .child(small(with_provider(text)))
                         .child(
                             Button::new(("stop-take", index))
                                 .ghost()
@@ -1920,16 +1928,29 @@ impl ProjectsScreen {
                 section = section
                     .child(kit::notice(
                         Tone::Info,
-                        tr(bardo, Text::TakeStoppedWaiting),
+                        with_provider(Text::TakeStoppedWaiting),
                         cx,
                     ))
                     .child(h_flex().child(check_again()));
             }
             Some((job, _)) if job.state() == JobState::Failed => {
                 let failure = job.failure();
-                if failure.is_some_and(|failure| failure.kind == JobFailureKind::Declined) {
-                    section =
-                        section.child(kit::notice(Tone::Danger, tr(bardo, Text::TakeRefused), cx));
+                if let Some(failure) =
+                    failure.filter(|failure| failure.kind == JobFailureKind::Declined)
+                {
+                    section = section
+                        .child(kit::notice(
+                            Tone::Danger,
+                            with_provider(Text::TakeRefused),
+                            cx,
+                        ))
+                        // ModelArk says which rule and why; Higgsfield does
+                        // not.
+                        .when(failure.detail != bardo_app::TAKE_REFUSED, |section| {
+                            section.child(
+                                small(SharedString::from(failure.detail.clone())).text_color(muted),
+                            )
+                        });
                 } else {
                     let reason = failure.map_or_else(String::new, |failure| {
                         bardo
@@ -2037,6 +2058,22 @@ impl ProjectsScreen {
                             Text::TakeDraftReady
                         }),
                     ));
+                    // A draft the final finishes has a deadline.
+                    if view.expired {
+                        section = section.child(kit::notice(
+                            Tone::Warning,
+                            tr(bardo, Text::PerformedDraftExpired),
+                            cx,
+                        ));
+                    } else if let Some(deadline) = draft.deadline {
+                        section = section.child(
+                            small(SharedString::from(bardo.text_with(
+                                Text::TakeDraftDeadline,
+                                &[("when", &bardo.take_deadline_text(deadline))],
+                            )))
+                            .text_color(muted),
+                        );
+                    }
                     if let Some(watching) = watching(TakeStep::Draft) {
                         section = section.child(render_player(bardo, watching, muted));
                     }
@@ -2060,6 +2097,15 @@ impl ProjectsScreen {
                                     });
                                 })),
                         )
+                        // Past its deadline, only a new draft goes on.
+                        .when(view.expired, |row| {
+                            row.child(make(
+                                "regenerate-draft",
+                                Text::RegenerateTakeDraft,
+                                TakeStep::Draft,
+                                true,
+                            ))
+                        })
                     } else {
                         row.child(
                             Button::new(("approve-draft", index))
@@ -2083,8 +2129,17 @@ impl ProjectsScreen {
                     section = section.child(row);
                 }
                 None => {
+                    let note = if view
+                        .model
+                        .as_ref()
+                        .is_some_and(|model| model.finishes_draft)
+                    {
+                        Text::TakeDraftFinishNote
+                    } else {
+                        Text::TakeDraftNote
+                    };
                     section = section
-                        .child(small(tr(bardo, Text::TakeDraftNote)).text_color(muted))
+                        .child(small(tr(bardo, note)).text_color(muted))
                         .when(view.prompt.is_some(), |section| {
                             section.child(h_flex().child(make(
                                 "make-draft",
@@ -2165,7 +2220,16 @@ impl ProjectsScreen {
                 .children(info(
                     "capture-draft-final-info",
                     Text::TakeMakeHint,
-                    guide::refs::CAPTURE_DRAFT_FINAL,
+                    // What ModelArk changes has its own section.
+                    if view
+                        .model
+                        .as_ref()
+                        .is_some_and(|model| model.finishes_draft)
+                    {
+                        guide::refs::CAPTURE_BYTEPLUS
+                    } else {
+                        guide::refs::CAPTURE_DRAFT_FINAL
+                    },
                 )),
         );
         if let Some((_, step, estimate)) = self

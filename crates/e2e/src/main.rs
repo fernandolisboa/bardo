@@ -208,6 +208,10 @@ fn fixture_key(provider: Provider, profile: &str) -> String {
         .collect();
     match provider {
         Provider::Higgsfield => format!("e2e-key-id-{tail}:e2e-key-secret-{tail}"),
+        // The five fields saved as one (ADR-0025).
+        Provider::BytePlus => {
+            format!("e2e-byteplus-key-{tail}|e2e-ak-{tail}|e2e-sk-{tail}|e2e-bucket|ap-southeast-1")
+        }
         other => format!("e2e-{}-key-{tail}", other.code()),
     }
 }

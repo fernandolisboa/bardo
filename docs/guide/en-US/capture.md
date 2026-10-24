@@ -94,10 +94,11 @@ In Depth mode, **Set** picks where you appear: **Your room**, as recorded; a **S
 <a id="performed"></a>
 ## Performed clip
 
-Once a take's control video is approved, its take model makes the persona perform it: the persona's [look](personas.md#look) moves, speaks and turns as you do in the take. Takes go to the channel's take model ([Channels](channels.md#defaults)); **Take model** under the take picks another for that take alone. Both run on Higgsfield with your Higgsfield key ([Your API keys](api-keys.md#providers)):
+Once a take's control video is approved, its take model makes the persona perform it: the persona's [look](personas.md#look) moves, speaks and turns as you do in the take. Takes go to the channel's take model ([Channels](channels.md#defaults)); **Take model** under the take picks another for that take alone. Each model is named with the provider it runs on, with your key there ([Your API keys](api-keys.md#providers)):
 
-- **Kling 3.0 Motion Control**, the default, takes Recording takes of 3 to 30 seconds and makes the final straight away, at 1080p.
-- **Seedance 2.5 Video Edit** takes Mesh and Depth takes of 4 to 30 seconds: a draft at 480p first, then the final at 1080p.
+- **Kling 3.0 Motion Control · Higgsfield**, the default, takes Recording takes of 3 to 30 seconds and makes the final straight away, at 1080p.
+- **Seedance 2.5 Video Edit · Higgsfield** takes Mesh and Depth takes of 4 to 30 seconds: a draft at 480p first, then the final at 1080p, made anew.
+- **Seedance 2.5 Video Edit · BytePlus ModelArk** takes the same takes, straight from ModelArk: a draft at 480p, then a final that finishes that same draft at 1080p, so the final keeps what you approved in the draft. See [On BytePlus ModelArk](#byteplus).
 
 Picking a model that does not take the take's mode switches the take to the model's first mode, which builds its control video again for you to approve. Nothing can be made while the take is too short or too long for its model, the persona has no look, or the control video is not approved; the take says which.
 
@@ -109,12 +110,24 @@ Picking a model that does not take the take's mode switches the take to the mode
 <a id="draft-final"></a>
 ## Draft and final
 
-**Make draft** and **Make final** send the control video, the look and the prompt to Higgsfield; the estimate under them is per second of the take. The look always goes as a JPEG Bardo makes from it, which leaves out what a photo records about where and with what it was taken. Higgsfield's sound is off: drafts and finals play with the take's voice, from the control video.
+**Make draft** and **Make final** send the control video, the look and the prompt to the take model's provider; the estimate under them is per second of the take (in tokens on BytePlus). The look goes as a JPEG Bardo makes from it, which leaves out what a photo records about where and with what it was taken, unless it goes by its asset id on BytePlus. The provider's sound is off: drafts and finals play with the take's voice, from the control video.
 
 - A draft (Seedance) waits for review: **Play draft**, then **Approve draft**, or **Regenerate draft** for another one, which replaces it. Only an approved draft lets you **Make final**; **Back to drafts** takes the approval back.
 - A final waits for review the same way: **Play final**, then **Use**. **Make it again** makes another, which replaces it. A final is billed whether you use it or not.
 
-A line says how much longer or shorter than the take a result came out. **Stop waiting** stops Bardo waiting, not Higgsfield, which may still finish and bill it: **Check again** picks up the same request, as Bardo does after a restart, and nothing new can be made for the take until then. When Higgsfield refuses the content, or the request fails on its side, the take says so and nothing is changed or sent again on its own: making it again is a new paid request, and only you start it.
+A line says how much longer or shorter than the take a result came out. **Stop waiting** stops Bardo waiting, not the provider, which may still finish and bill it: **Check again** picks up the same request, as Bardo does after a restart, and nothing new can be made for the take until then. When the provider refuses the content, or the request fails on its side, the take says so (with the provider's reason when it gives one) and nothing is changed or sent again on its own: making it again is a new paid request, and only you start it.
+
+<a id="byteplus"></a>
+## On BytePlus ModelArk
+
+Seedance 2.5 straight from ModelArk needs the **BytePlus ModelArk** card's five fields ([Getting each API key](get-api-keys.md#byteplus)). What changes there:
+
+- **The final finishes the draft.** **Make final** sends ModelArk only the approved draft's task, and ModelArk makes the final from the draft's own prompt, inputs and seed. Approving another draft, or regenerating it, makes that one the draft the final finishes.
+- **A deadline.** ModelArk finishes a draft only within seven days, so the draft shows the date and time to make its final by. Past it, **Make final** is not offered and the take asks for a new draft; an approved draft past its deadline offers **Regenerate draft**.
+- **Your bucket.** ModelArk reads the control video, and the look unless it goes by its asset id, only from a link. Bardo uploads them to your bucket under random names in `bardo/takes/`, with links that last seven days at most, and deletes them once they are no longer needed: when the final is made, when a new draft replaces the old one, when a draft fails or is refused, when the capture is removed, and at the latest when the draft's seven days are up. A delete that fails is tried again later; the bucket's lifecycle rule is the backstop.
+- **A photo of you needs your verified likeness.** Seedance refuses real faces, so a take whose persona has a photo look is sent only once the look holds your verified likeness from ModelArk's asset library ([The look](personas.md#look-asset)).
+- **Costs in tokens.** ModelArk bills the video's tokens: about US$ 3.70 for a 30-second draft and US$ 20 for its final. [Costs](costs.md) records the tokens ModelArk reports.
+- **A lost answer is found again.** ModelArk has no way to tell a repeated request from a new one, so Bardo saves the time right before each send. If Bardo stops before ModelArk's answer arrives, the next attempt looks in ModelArk's task list for that request and waits for it instead of paying again. If it finds several, it sends nothing and asks you to look at the task list in ModelArk.
 
 <a id="use"></a>
 ## Using a performed clip

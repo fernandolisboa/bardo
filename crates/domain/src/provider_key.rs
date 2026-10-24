@@ -209,7 +209,11 @@ impl ApiKey {
     pub fn sensitive_parts(&self) -> Vec<&str> {
         let mut parts = vec![self.0.as_str()];
         if let Some(secrets) = crate::byteplus::secret_parts(&self.0) {
-            parts.extend(secrets.into_iter().filter(|part| part.len() >= Self::MIN_CHARS));
+            parts.extend(
+                secrets
+                    .into_iter()
+                    .filter(|part| part.len() >= Self::MIN_CHARS),
+            );
             return parts;
         }
         if self.0.contains(':') {

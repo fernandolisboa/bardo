@@ -91,10 +91,10 @@ mod repository;
 mod research;
 mod runner;
 mod scene;
-mod staging;
 mod schedule;
 mod script;
 mod speech;
+mod staging;
 mod take_analysis;
 mod take_model;
 mod template;
@@ -262,8 +262,8 @@ pub use persona::{
 pub use persona_look::{
     LOOK_MAX_BYTES, LOOK_MAX_RATIO_TENTHS, LOOK_MAX_SIDE, LOOK_MIN_RATIO_TENTHS, LOOK_MIN_SIDE,
     LookAsset, LookAssetError, LookAssetKind, LookDescriptionError, LookDrawing, LookImage,
-    LookImageError, LookSource, MAX_LOOK_DESCRIPTION,
-    MAX_LOOK_PROMPT, PersonaLook, UnknownLookSource, look_description,
+    LookImageError, LookSource, MAX_LOOK_DESCRIPTION, MAX_LOOK_PROMPT, PersonaLook,
+    UnknownLookSource, look_description,
 };
 pub use post_insights::{
     Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,
@@ -317,6 +317,7 @@ pub use speech::{
     SpeechRequest, SpeechSynthesizer, SpeechTranscriber, Transcript, TranscriptionRequest,
     VoiceChangeRequest, VoiceChanger, VoiceIsolator, split_for_speech,
 };
+pub use staging::{StagedUpload, StagingRepository};
 pub use take_analysis::{
     ANALYSIS_CHUNK_FRAMES, AnalysisPart, BLENDSHAPE_NAMES, DEPTH_FAR_PERMILLE, DEPTH_NEAR_PERMILLE,
     DepthEstimator, DepthHistogram, DepthMap, DepthRange, DepthScale, Device, FACE_FILE_VERSION,
@@ -326,7 +327,6 @@ pub use take_analysis::{
     RgbFrame, TakeAnalysis, TakeChecks, TakeMode, VisionError, VisionModels, analysis_fps,
     distinct_faces, take_frame_time, take_frames,
 };
-pub use staging::{StagedUpload, StagingRepository};
 pub use take_model::{
     StagedFile, TakeDone, TakeGenerator, TakeInput, TakeModel, TakeRequest, TakeStatus, TakeStep,
     TakeTier, take_model_of,

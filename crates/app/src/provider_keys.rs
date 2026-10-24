@@ -24,6 +24,9 @@ pub enum ProviderKeyError {
     /// privacy policy (ADR-0012).
     #[error("the privacy policy is not accepted")]
     PrivacyNotAccepted,
+    /// Fields of the BytePlus card are not usable; each says why.
+    #[error("invalid BytePlus fields")]
+    BytePlusFields(Vec<bardo_domain::BytePlusFieldError>),
 }
 
 impl ProviderKeyError {
@@ -34,6 +37,7 @@ impl ProviderKeyError {
             ProviderKeyError::NotSet => Text::ProviderKeyNotSet,
             ProviderKeyError::Store(_) => Text::ProviderKeyStoreFailed,
             ProviderKeyError::PrivacyNotAccepted => Text::PrivacyNotAccepted,
+            ProviderKeyError::BytePlusFields(_) => Text::BytePlusFieldsInvalid,
         }
     }
 }
@@ -228,6 +232,31 @@ impl Bardo {
         input: &str,
     ) -> Result<(), ProviderKeyError> {
         let key = ApiKey::parse(provider, input)?;
+        self.save_parsed_key(provider, key)
+    }
+
+    /// Saves the BytePlus card's five fields together as its one key
+    /// (ADR-0025). An empty region is the default one.
+    pub fn save_byteplus_key(
+        &mut self,
+        api_key: &str,
+        access_key_id: &str,
+        secret_access_key: &str,
+        bucket: &str,
+        region: &str,
+    ) -> Result<(), ProviderKeyError> {
+        let key = bardo_domain::BytePlusCredentials::compose(
+            api_key,
+            access_key_id,
+            secret_access_key,
+            bucket,
+            region,
+        )
+        .map_err(ProviderKeyError::BytePlusFields)?;
+        self.save_parsed_key(Provider::BytePlus, key)
+    }
+
+    fn save_parsed_key(&mut self, provider: Provider, key: ApiKey) -> Result<(), ProviderKeyError> {
         if provider == Provider::YouTubeData && !self.profile.accepted_privacy() {
             return Err(ProviderKeyError::PrivacyNotAccepted);
         }
@@ -378,6 +407,7 @@ mod tests {
                 personas: Arc::clone(&self.db) as _,
                 narrations: Arc::clone(&self.db) as _,
                 captures: Arc::clone(&self.db) as _,
+                staging: Arc::clone(&self.db) as _,
                 scene_plans: Arc::clone(&self.db) as _,
                 timelines: Arc::clone(&self.db) as _,
                 media_assets: Arc::clone(&self.db) as _,
@@ -504,6 +534,53 @@ mod tests {
         );
         assert_eq!(harness.stored(&app, Provider::Higgsfield), None);
         assert_eq!(state(&app, Provider::Higgsfield), KeyState::NotSet);
+    }
+
+    #[test]
+    fn the_byteplus_fields_are_saved_as_one_key_and_masked_apart() {
+        let harness = Harness::new();
+        let mut app = harness.start();
+        let (api, ak, sk) = (
+            "0b6c2f6e-5a1d-4f3e-9d2a-7c8b9e0f1a2b",
+            "AKLTNjA0ZTVkMmY0YmQ2",
+            "TVRWa1pUVTBNRGM9Pz8+/abc=",
+        );
+        let error = app
+            .save_byteplus_key(api, "", sk, "Bad_Bucket", "")
+            .unwrap_err();
+        assert_eq!(error.message(), Text::BytePlusFieldsInvalid);
+        let ProviderKeyError::BytePlusFields(fields) = error else {
+            panic!("field errors expected");
+        };
+        assert_eq!(
+            fields,
+            [
+                bardo_domain::BytePlusFieldError::Required(
+                    bardo_domain::BytePlusField::AccessKeyId
+                ),
+                bardo_domain::BytePlusFieldError::Invalid(bardo_domain::BytePlusField::Bucket),
+            ]
+        );
+        assert_eq!(harness.stored(&app, Provider::BytePlus), None);
+
+        app.save_byteplus_key(api, ak, sk, "bardo-takes", "")
+            .unwrap();
+        assert_eq!(
+            harness.stored(&app, Provider::BytePlus).as_deref(),
+            Some(format!("{api}|{ak}|{sk}|bardo-takes|ap-southeast-1").as_str())
+        );
+        assert_eq!(
+            state(&app, Provider::BytePlus),
+            KeyState::Saved {
+                hint: "…1a2b".into()
+            }
+        );
+        let masked = app
+            .redactor()
+            .redact(&format!("signed with {ak} and {sk} for {api}"));
+        for secret in [api, ak, sk] {
+            assert!(!masked.contains(secret), "{masked}");
+        }
     }
 
     #[test]

@@ -94,10 +94,11 @@ No modo Profundidade, **Cenário** escolhe onde você aparece: **Seu ambiente**,
 <a id="performed"></a>
 ## Clipe interpretado
 
-Depois que o vídeo de controle de uma tomada é aprovado, o modelo de tomada faz a persona interpretá-la: a [aparência](personas.md#look) da persona se mexe, fala e vira como você na tomada. As tomadas vão para o modelo de tomada do canal ([Canais](channels.md#defaults)); **Modelo de tomada**, abaixo da tomada, escolhe outro só para ela. Os dois rodam no Higgsfield com a sua chave do Higgsfield ([Suas chaves de API](api-keys.md#providers)):
+Depois que o vídeo de controle de uma tomada é aprovado, o modelo de tomada faz a persona interpretá-la: a [aparência](personas.md#look) da persona se mexe, fala e vira como você na tomada. As tomadas vão para o modelo de tomada do canal ([Canais](channels.md#defaults)); **Modelo de tomada**, abaixo da tomada, escolhe outro só para ela. Cada modelo aparece com o provedor em que roda, com a sua chave de lá ([Suas chaves de API](api-keys.md#providers)):
 
-- **Kling 3.0 Motion Control**, o padrão, aceita tomadas em Gravação de 3 a 30 segundos e faz a versão final direto, em 1080p.
-- **Seedance 2.5 Video Edit** aceita tomadas em Malha e Profundidade de 4 a 30 segundos: primeiro um rascunho em 480p, depois a versão final em 1080p.
+- **Kling 3.0 Motion Control · Higgsfield**, o padrão, aceita tomadas em Gravação de 3 a 30 segundos e faz a versão final direto, em 1080p.
+- **Seedance 2.5 Video Edit · Higgsfield** aceita tomadas em Malha e Profundidade de 4 a 30 segundos: primeiro um rascunho em 480p, depois a versão final em 1080p, feita do zero.
+- **Seedance 2.5 Video Edit · BytePlus ModelArk** aceita as mesmas tomadas, direto do ModelArk: um rascunho em 480p, depois uma versão final que completa esse mesmo rascunho em 1080p, então a versão final mantém o que você aprovou no rascunho. Veja [No BytePlus ModelArk](#byteplus).
 
 Escolher um modelo que não aceita o modo da tomada passa a tomada para o primeiro modo do modelo, o que monta o vídeo de controle de novo para você aprovar. Nada pode ser feito enquanto a tomada for curta ou longa demais para o modelo, a persona não tiver aparência ou o vídeo de controle não estiver aprovado; a tomada diz qual.
 
@@ -109,12 +110,24 @@ Escolher um modelo que não aceita o modo da tomada passa a tomada para o primei
 <a id="draft-final"></a>
 ## Rascunho e versão final
 
-**Fazer rascunho** e **Fazer versão final** enviam o vídeo de controle, a aparência e o prompt ao Higgsfield; a estimativa abaixo deles é por segundo da tomada. A aparência sempre vai como um JPEG que o Bardo faz a partir dela, o que deixa de fora o que uma foto registra sobre onde e com o que foi tirada. O som do Higgsfield fica desligado: rascunhos e versões finais tocam com a voz da tomada, do vídeo de controle.
+**Fazer rascunho** e **Fazer versão final** enviam o vídeo de controle, a aparência e o prompt ao provedor do modelo de tomada; a estimativa abaixo deles é por segundo da tomada (em tokens na BytePlus). A aparência vai como um JPEG que o Bardo faz a partir dela, o que deixa de fora o que uma foto registra sobre onde e com o que foi tirada, a não ser que vá pelo id do asset na BytePlus. O som do provedor fica desligado: rascunhos e versões finais tocam com a voz da tomada, do vídeo de controle.
 
 - Um rascunho (Seedance) espera revisão: **Reproduzir rascunho**, depois **Aprovar rascunho**, ou **Refazer rascunho** para outro, que o substitui. Só um rascunho aprovado libera **Fazer versão final**; **Voltar aos rascunhos** desfaz a aprovação.
 - A versão final espera revisão do mesmo jeito: **Reproduzir versão final**, depois **Usar**. **Fazer de novo** faz outra, que a substitui. Uma versão final é cobrada mesmo que você não a use.
 
-Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **Parar de esperar** faz o Bardo parar de esperar, não o Higgsfield, que ainda pode terminar e cobrar: **Verificar de novo** retoma o mesmo pedido, como o Bardo faz depois de reiniciar, e nada novo pode ser feito para a tomada até lá. Quando o Higgsfield recusa o conteúdo, ou o pedido falha do lado dele, a tomada diz isso e nada é mudado nem enviado de novo sozinho: fazer de novo é um novo pedido pago, e só você o inicia.
+Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **Parar de esperar** faz o Bardo parar de esperar, não o provedor, que ainda pode terminar e cobrar: **Verificar de novo** retoma o mesmo pedido, como o Bardo faz depois de reiniciar, e nada novo pode ser feito para a tomada até lá. Quando o provedor recusa o conteúdo, ou o pedido falha do lado dele, a tomada diz isso (com o motivo do provedor, quando ele dá um) e nada é mudado nem enviado de novo sozinho: fazer de novo é um novo pedido pago, e só você o inicia.
+
+<a id="byteplus"></a>
+## No BytePlus ModelArk
+
+O Seedance 2.5 direto do ModelArk precisa dos cinco campos do cartão **BytePlus ModelArk** ([Como obter cada chave de API](get-api-keys.md#byteplus)). O que muda lá:
+
+- **A versão final completa o rascunho.** **Fazer versão final** envia ao ModelArk só a tarefa do rascunho aprovado, e o ModelArk faz a versão final com o prompt, as entradas e a semente do próprio rascunho. Aprovar outro rascunho, ou refazê-lo, faz dele o rascunho que a versão final completa.
+- **Um prazo.** O ModelArk só completa um rascunho em até sete dias, então o rascunho mostra a data e a hora até quando fazer a versão final. Depois disso, **Fazer versão final** não aparece e a tomada pede um rascunho novo; um rascunho aprovado fora do prazo oferece **Refazer rascunho**.
+- **O seu bucket.** O ModelArk só lê o vídeo de controle, e a aparência quando ela não vai pelo id do asset, por um link. O Bardo envia os dois ao seu bucket com nomes aleatórios em `bardo/takes/`, com links que duram no máximo sete dias, e os apaga assim que não são mais necessários: quando a versão final fica pronta, quando um rascunho novo substitui o antigo, quando um rascunho falha ou é recusado, quando a captura é removida e, no mais tardar, quando os sete dias do rascunho acabam. Uma exclusão que falha é tentada de novo depois; a regra de ciclo de vida do bucket é a garantia.
+- **Uma foto sua precisa da sua semelhança verificada.** O Seedance recusa rostos reais, então uma tomada cuja persona tem uma foto como aparência só é enviada quando a aparência tem a sua semelhança verificada da biblioteca de assets do ModelArk ([A aparência](personas.md#look-asset)).
+- **Custos em tokens.** O ModelArk cobra os tokens do vídeo: cerca de US$ 3,70 por um rascunho de 30 segundos e US$ 20 pela versão final dele. [Custos](costs.md) registra os tokens que o ModelArk informa.
+- **Uma resposta perdida é achada de novo.** O ModelArk não tem como distinguir um pedido repetido de um novo, então o Bardo salva a hora logo antes de cada envio. Se o Bardo parar antes de a resposta do ModelArk chegar, a próxima tentativa procura esse pedido na lista de tarefas do ModelArk e espera por ele em vez de pagar de novo. Se achar vários, não envia nada e pede que você olhe a lista de tarefas no ModelArk.
 
 <a id="use"></a>
 ## Usar um clipe interpretado

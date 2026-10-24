@@ -361,6 +361,25 @@ jev = "JEV (TypeSafe)"
 not_set = "Save a key before testing it."
 store_failed = "Could not reach Windows Credential Manager. Try again."
 
+[provider_keys.byteplus]
+note = "All five are saved together in Windows Credential Manager. The access key only signs short links to the bucket: it never leaves the computer. Bardo deletes each take's files from the bucket once it no longer needs them."
+fields_invalid = "Fix the fields marked below."
+required = "Fill this in."
+
+[provider_keys.byteplus.field]
+api_key = "ModelArk API key"
+access_key_id = "Access key ID"
+secret_access_key = "Secret access key"
+bucket = "TOS bucket"
+region = "Region"
+
+[provider_keys.byteplus.invalid]
+api_key = "Paste the whole API key: at least 8 characters, no spaces."
+access_key_id = "Paste the whole access key ID: at least 8 characters, no spaces."
+secret_access_key = "Paste the whole secret access key: at least 8 characters, no spaces."
+bucket = "Bucket names are 3 to 63 lowercase letters, digits and hyphens, not starting or ending with a hyphen."
+region = "Use the region's code, such as ap-southeast-1."
+
 [provider.claude]
 name = "Claude"
 purpose = "Scripts, titles, descriptions and prompts for image and video models."
@@ -385,6 +404,11 @@ placeholder = "Key ID:Key secret"
 name = "Kling"
 purpose = "Video clips straight from Kling (Kling 3.0, 2.6 and 2.5 Turbo), paid from your Kling resource packages."
 placeholder = "Your Kling API key"
+
+[provider.byteplus]
+name = "BytePlus ModelArk"
+purpose = "Performed clips with Seedance 2.5 straight from ModelArk, with cheap drafts the final finishes. Their files go through a bucket of yours."
+placeholder = "ModelArk API key"
 
 [provider.typesafe]
 name = "TypeSafe (JEV)"
@@ -416,6 +440,7 @@ too_short = "This is too short to be an API key."
 too_long = "Use at most 512 characters."
 invalid_characters = "Keys have no spaces, line breaks or accented characters."
 not_id_and_secret = "Paste the key ID and the secret joined by a colon: KEY_ID:KEY_SECRET."
+not_byteplus_credentials = "Fill in all five BytePlus fields."
 
 [research]
 title = "Research"
@@ -723,11 +748,15 @@ hint = "The take model makes the persona perform this take, from its approved co
 model_label = "Take model"
 model_channel = "{model} (channel)"
 busy = "Something is already being made for this take."
-pending = "Higgsfield took this take's request. Check again before making another: it may still finish and bill it."
+pending = "The provider took this take's request. Check again before making another: it may still finish and bill it."
 missing_claude_key = "Save a Claude key under Settings to write take prompts."
 missing_higgsfield_key = "Save a Higgsfield key under Settings to make performed clips."
+missing_byteplus_key = "Save the BytePlus ModelArk fields under Settings to make performed clips."
 nothing = "Nothing was made for this take yet."
 draft_first = "Approve a draft first: the final is made after it."
+draft_expired = "This draft is past its deadline and can no longer be finished. Make a new draft."
+draft_deadline = "Make its final by {when}. After that, only a new draft can be made."
+draft_finish_note = "A cheap 480p draft comes first. The final finishes the approved draft at 1080p, from the same inputs, within seven days."
 model_gone = "That take model is no longer offered. Pick another one."
 clip_name = "Performed clip {n}"
 prompt_label = "Prompt"
@@ -753,14 +782,14 @@ back_to_drafts = "Back to drafts"
 use = "Use"
 play_draft = "Play draft"
 play_final = "Play final"
-making_draft = "Higgsfield is making the draft…"
-making_final = "Higgsfield is making the final…"
+making_draft = "{provider} is making the draft…"
+making_final = "{provider} is making the final…"
 queued = "Waiting to start."
 stop_waiting = "Stop waiting"
-stopped = "Stopped waiting. Higgsfield may still finish it and bill it: Check again picks up the same request, and nothing new is paid until then."
+stopped = "Stopped waiting. {provider} may still finish it and bill it: Check again picks up the same request, and nothing new is paid until then."
 check_again = "Check again"
 failed = "It was not made: {reason}"
-refused = "Higgsfield refused the content. Nothing was changed or sent again."
+refused = "{provider} refused the content. Nothing was changed or sent again."
 draft_ready = "Draft: {seconds}. Watch it with the take's voice, then approve it or make another."
 draft_approved = "Draft approved."
 final_ready = "Final: {seconds}. Watch it with the take's voice before using it."
@@ -768,7 +797,7 @@ longer = "{seconds} longer than the take."
 shorter = "{seconds} shorter than the take."
 draft_note = "A cheap draft comes first; approve it to make the final at 1080p."
 final_paid_note = "The final is paid even if you do not use it."
-make_hint = "Each draft and final is a paid Higgsfield job, estimated per second of the take. Watch it with the take's voice before you approve or use it. After you stop waiting, Check again picks up the same request instead of paying for another."
+make_hint = "Each draft and final is a paid job of the take model's provider, estimated from the take's length (per second on Higgsfield, per token on BytePlus). Watch it with the take's voice before you approve or use it. After you stop waiting, Check again picks up the same request instead of paying for another."
 used = "In the editor's Media tab: {n}."
 used_now = "Added to the editor's Media tab. Place it on the cut from there."
 realistic_note = "The look reads as a real person: a cut that uses its performed clips turns the synthetic-content disclosure on."
@@ -778,6 +807,7 @@ no_model = "No take model is offered."
 mode_not_taken = "This take's model does not take its mode. Pick one of the modes it takes before anything is paid."
 length = "This take is shorter or longer than its model makes. Move a cut first."
 no_look = "The persona has no look yet. Draw or import one on the Personas screen."
+no_verified_likeness = "This model takes a photo of you only as your verified likeness from the BytePlus asset library. Add its asset id under the persona's look on the Personas screen, or use a drawn look."
 control_not_approved = "Approve the take's control video first."
 
 [capture.check]
@@ -1062,6 +1092,28 @@ image_refused = "That photo cannot be a look."
 not_saved = "Could not save the look. Try again."
 description_required = "Describe the character to draw."
 description_too_long = "Use at most 1,000 characters."
+
+[persona.look.asset]
+title = "BytePlus asset library"
+hint = "Seedance 2.5 on BytePlus can take this look from your ModelArk asset library by its id instead of the image. A photo of you needs it: only your verified likeness. A drawn look can use a preset character or a virtual portrait, or go as the image. An id holds for this look only; a new look needs its own."
+kind = "Kind"
+id = "Asset id"
+id_placeholder = "asset-20261023…"
+save = "Save asset"
+remove = "Remove asset"
+held = "In the library as {kind}: {id}"
+saved = "Saved: takes on BytePlus send this asset instead of the image."
+removed = "Removed: takes on BytePlus send the image again."
+
+[persona.look.asset.kind_name]
+preset_character = "Preset character"
+virtual_portrait = "Virtual portrait"
+verified_likeness = "Verified likeness"
+
+[persona.look.asset.error]
+empty = "Paste the asset id."
+invalid = "That is not an asset id: letters, digits, hyphens, underscores and dots, up to 128."
+kind_not_for_look = "A photo of you takes only your verified likeness; a drawn look a preset character or a virtual portrait."
 
 [persona.look.image]
 not_an_image = "Use a PNG or JPEG file."
@@ -2698,7 +2750,7 @@ body = "What the take model receives for this take, built here for free once the
 
 [tour.capture.performed]
 title = "Its performed clip"
-body = "The take model makes the persona perform the approved take: Claude writes the prompt, a draft comes first where the model makes one, then the final. Watch each with the take's voice; Use adds the final to the editor's Media tab."
+body = "The take model makes the persona perform the approved take: Claude writes the prompt, a draft comes first where the model makes one, then the final. A draft that the final finishes shows its deadline. Watch each with the take's voice; Use adds the final to the editor's Media tab."
 
 [tour.capture.remove]
 title = "Remove it"
@@ -2787,7 +2839,7 @@ body = "Tick it when the voice sounds like a real person, such as a clone. Netwo
 
 [tour.personas.look]
 title = "Look"
-body = "The character this persona appears as in performed clips. Draw an original character from a description, review it and keep it, or import a photo of yourself. A photo of you never leaves in a package."
+body = "The character this persona appears as in performed clips. Draw an original character from a description, review it and keep it, or import a photo of yourself. A photo of you never leaves in a package. For Seedance on BytePlus, the look can also go by its id in your ModelArk asset library."
 
 [tour.templates]
 name = "Templates tour"
@@ -3103,7 +3155,7 @@ body = "Pick the engine that ranks video ideas and scores cut suggestions. It ca
 
 [tour.keys.card]
 title = "One key per provider"
-body = "Each card says what the provider does for you. Paste the key you created on its site and save; a screen that needs a missing key says so."
+body = "Each card says what the provider does for you. Paste the key you created on its site and save; BytePlus takes five fields, its key and your bucket. A screen that needs a missing key says so."
 
 [tour.keys.setup]
 title = "Step by step"

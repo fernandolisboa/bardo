@@ -9,8 +9,8 @@ use bardo_ai::HiggsfieldTakes;
 use bardo_ai::higgsfield::{API_URL, DEFAULT_TAKE_MODEL, SEEDANCE_VIDEO_EDIT};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ClipHandle, Money, Provider, ProviderFailureKind, StagedFile,
-    TakeDone, TakeGenerator, TakeInput, TakeMode, TakeRequest, TakeStatus, TakeStep,
+    ApiKey, ClipHandle, Money, Provider, ProviderFailureKind, StagedFile, TakeDone, TakeGenerator,
+    TakeInput, TakeMode, TakeRequest, TakeStatus, TakeStep,
 };
 use common::{Scripted, fixture, recording_sleeper};
 

@@ -11,8 +11,8 @@ use bardo_ai::byteplus::{API_URL, MODEL, check_key, object_of, presign, take_bod
 use bardo_ai::http::Method;
 use bardo_domain::{
     ApiKey, BytePlusCredentials, ClipHandle, KeyCheckOutcome, Metered, Provider,
-    ProviderFailureKind, StagedFile, TakeGenerator, TakeInput, TakeMode, TakeRequest,
-    TakeStatus, TakeStep,
+    ProviderFailureKind, StagedFile, TakeGenerator, TakeInput, TakeMode, TakeRequest, TakeStatus,
+    TakeStep,
 };
 use common::{Scripted, fixture, recording_sleeper};
 
@@ -102,7 +102,14 @@ fn seedance_takes_mesh_and_depth_and_its_final_finishes_the_draft_within_seven_d
 fn links_are_signed_as_the_byteplus_sdk_signs_them() {
     let key = ApiKey::parse(
         Provider::BytePlus,
-        &[API_KEY, ACCESS_KEY, "testSK", "bardo-takes", "ap-southeast-1"].join("|"),
+        &[
+            API_KEY,
+            ACCESS_KEY,
+            "testSK",
+            "bardo-takes",
+            "ap-southeast-1",
+        ]
+        .join("|"),
     )
     .unwrap();
     let credentials = BytePlusCredentials::of(&key).unwrap();
@@ -152,10 +159,18 @@ fn staging_uploads_to_the_bucket_and_returns_a_seven_day_link() {
     let sent = takes.transport().sent();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].method, Method::Put);
-    assert!(sent[0].url.starts_with(&format!("https://{HOST}/{OBJECT}?")));
+    assert!(
+        sent[0]
+            .url
+            .starts_with(&format!("https://{HOST}/{OBJECT}?"))
+    );
     assert!(sent[0].url.contains("X-Tos-Expires=900"));
     assert_eq!(sent[0].header("content-type"), Some("video/mp4"));
-    assert_eq!(sent[0].header("authorization"), None, "no key in the upload");
+    assert_eq!(
+        sent[0].header("authorization"),
+        None,
+        "no key in the upload"
+    );
     assert_eq!(sent[0].raw_body, b"control-video");
     assert!(!sent[0].url.contains(SECRET_KEY));
     assert!(staged.0.starts_with(&format!("https://{HOST}/{OBJECT}?")));
@@ -182,7 +197,11 @@ fn a_bucket_that_refuses_the_upload_says_so() {
             )
             .unwrap_err();
         assert_eq!(failure.kind, kind, "{answer}");
-        assert!(failure.detail.starts_with("the bucket: "), "{}", failure.detail);
+        assert!(
+            failure.detail.starts_with("the bucket: "),
+            "{}",
+            failure.detail
+        );
     }
 }
 
@@ -259,25 +278,48 @@ fn refused_submissions_say_why() {
             ProviderFailureKind::Declined,
             "InputImageSensitiveContentDetected.PrivacyInformation: The request failed because the input image may contain real person.",
         ),
-        ("submit-invalid", ProviderFailureKind::Unexpected, "InvalidParameter: "),
-        ("submit-rejected", ProviderFailureKind::Rejected, "AuthenticationError"),
-        ("submit-overdue", ProviderFailureKind::LimitReached, "AccountOverdueError"),
-        ("submit-not-open", ProviderFailureKind::NotAllowed, "ModelNotOpen"),
-        ("submit-limit", ProviderFailureKind::LimitReached, "SetLimitExceeded"),
+        (
+            "submit-invalid",
+            ProviderFailureKind::Unexpected,
+            "InvalidParameter: ",
+        ),
+        (
+            "submit-rejected",
+            ProviderFailureKind::Rejected,
+            "AuthenticationError",
+        ),
+        (
+            "submit-overdue",
+            ProviderFailureKind::LimitReached,
+            "AccountOverdueError",
+        ),
+        (
+            "submit-not-open",
+            ProviderFailureKind::NotAllowed,
+            "ModelNotOpen",
+        ),
+        (
+            "submit-limit",
+            ProviderFailureKind::LimitReached,
+            "SetLimitExceeded",
+        ),
     ] {
         let failure = takes(&[answer])
             .submit(&key(), &draft(), "job-1")
             .unwrap_err();
         assert_eq!(failure.kind, kind, "{answer}");
-        assert!(failure.detail.contains(said), "{answer}: {}", failure.detail);
+        assert!(
+            failure.detail.contains(said),
+            "{answer}: {}",
+            failure.detail
+        );
     }
 }
 
 #[test]
 fn a_submission_is_never_retried_on_its_own() {
     let overloaded = bardo_ai::http::HttpResponse::new(503, "{}");
-    let takes = BytePlusTakes::with_transport(Scripted::new(vec![overloaded]))
-        .with_clock(noon);
+    let takes = BytePlusTakes::with_transport(Scripted::new(vec![overloaded])).with_clock(noon);
     let failure = takes.submit(&key(), &draft(), "job-1").unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
     assert_eq!(takes.transport().sent().len(), 1);
@@ -317,16 +359,30 @@ fn tasks_that_end_without_a_take_say_why() {
     };
     let refused = failed("status-failed-refused");
     assert_eq!(refused.kind, ProviderFailureKind::Declined);
-    assert!(refused.detail.starts_with("OutputVideoSensitiveContentDetected: "));
+    assert!(
+        refused
+            .detail
+            .starts_with("OutputVideoSensitiveContentDetected: ")
+    );
     assert_eq!(
         failed("status-failed-mismatch").kind,
         ProviderFailureKind::Unexpected
     );
     let down = failed("status-failed");
     assert_eq!(down.kind, ProviderFailureKind::ProviderDown);
-    assert!(down.detail.contains("InternalServiceError"), "{}", down.detail);
-    assert_eq!(failed("status-expired").kind, ProviderFailureKind::ProviderDown);
-    assert_eq!(failed("status-unknown").kind, ProviderFailureKind::Unexpected);
+    assert!(
+        down.detail.contains("InternalServiceError"),
+        "{}",
+        down.detail
+    );
+    assert_eq!(
+        failed("status-expired").kind,
+        ProviderFailureKind::ProviderDown
+    );
+    assert_eq!(
+        failed("status-unknown").kind,
+        ProviderFailureKind::Unexpected
+    );
     assert_eq!(
         takes(&["status-succeeded-no-video"])
             .status(&key(), &handle)
@@ -367,7 +423,9 @@ fn a_lost_submission_is_found_in_the_task_list_once_and_only_once() {
 #[test]
 fn a_take_downloads_without_a_key() {
     let takes = takes(&["download-take", "download-expired"]);
-    let clip = takes.download(&key(), "https://ark.example/take.mp4").unwrap();
+    let clip = takes
+        .download(&key(), "https://ark.example/take.mp4")
+        .unwrap();
     assert_eq!(&clip.bytes[4..8], b"ftyp");
     assert_eq!(takes.transport().sent()[0].header("authorization"), None);
     assert_eq!(
@@ -391,7 +449,11 @@ fn unstaging_deletes_the_file_and_a_file_already_gone_is_fine() {
     );
     let sent = takes.transport().sent();
     assert_eq!(sent[0].method, Method::Delete);
-    assert!(sent[0].url.starts_with(&format!("https://{HOST}/{OBJECT}?")));
+    assert!(
+        sent[0]
+            .url
+            .starts_with(&format!("https://{HOST}/{OBJECT}?"))
+    );
     // Nothing outside Bardo's own folder of the named bucket is touched.
     for other in [
         format!("https://other-bucket.tos-ap-southeast-1.bytepluses.com/{OBJECT}"),
@@ -411,16 +473,47 @@ fn the_key_check_asks_modelark_and_the_bucket_for_nothing_that_exists() {
         Scripted::new(names.iter().map(|name| fixture("byteplus", name)).collect())
     };
     let valid = answers(&["status-unknown", "tos-no-such-key"]);
-    assert_eq!(check_key(&valid, &key(), noon()).outcome, KeyCheckOutcome::Valid);
+    assert_eq!(
+        check_key(&valid, &key(), noon()).outcome,
+        KeyCheckOutcome::Valid
+    );
     let sent = valid.sent();
-    assert!(sent[0].url.ends_with("/contents/generations/tasks/cgt-bardo-key-check"));
-    assert!(sent[1].url.starts_with(&format!("https://{HOST}/bardo/key-check?")));
+    assert!(
+        sent[0]
+            .url
+            .ends_with("/contents/generations/tasks/cgt-bardo-key-check")
+    );
+    assert!(
+        sent[1]
+            .url
+            .starts_with(&format!("https://{HOST}/bardo/key-check?"))
+    );
     for (names, outcome, part) in [
-        (&["submit-rejected"][..], KeyCheckOutcome::Rejected, "ModelArk: "),
-        (&["submit-overdue"][..], KeyCheckOutcome::LimitReached, "ModelArk: "),
-        (&["status-unknown", "tos-signature"][..], KeyCheckOutcome::Rejected, "TOS: "),
-        (&["status-unknown", "tos-denied"][..], KeyCheckOutcome::NotAllowed, "TOS: "),
-        (&["status-unknown", "tos-no-such-bucket"][..], KeyCheckOutcome::NotAllowed, "TOS: "),
+        (
+            &["submit-rejected"][..],
+            KeyCheckOutcome::Rejected,
+            "ModelArk: ",
+        ),
+        (
+            &["submit-overdue"][..],
+            KeyCheckOutcome::LimitReached,
+            "ModelArk: ",
+        ),
+        (
+            &["status-unknown", "tos-signature"][..],
+            KeyCheckOutcome::Rejected,
+            "TOS: ",
+        ),
+        (
+            &["status-unknown", "tos-denied"][..],
+            KeyCheckOutcome::NotAllowed,
+            "TOS: ",
+        ),
+        (
+            &["status-unknown", "tos-no-such-bucket"][..],
+            KeyCheckOutcome::NotAllowed,
+            "TOS: ",
+        ),
     ] {
         let check = check_key(&answers(names), &key(), noon());
         assert_eq!(check.outcome, outcome, "{names:?}");

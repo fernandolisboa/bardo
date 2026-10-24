@@ -74,8 +74,8 @@ use bardo_domain::{
     NetworkConnectionRepository, NetworkSignIn, NicheResearchRepository, OwnerAnalytics, Persona,
     PersonaRepository, ProfileRepository, ProjectFiles, PublicationRepository, RUNNER_ALIVE,
     Redactor, RenderRepository, RepositoryError, RunnerRole, ScenePlanRepository, ScriptRepository,
-    SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber, TemplateRepository,
-    TextGenerator, ThemeRepository, ThumbnailRepository, TimelineRepository,
+    SecretStore, SpeechAligner, SpeechSynthesizer, SpeechTranscriber, StagingRepository,
+    TemplateRepository, TextGenerator, ThemeRepository, ThumbnailRepository, TimelineRepository,
     TourProgressRepository, UiLanguage, UiThemePreference, UserProfile, VideoStats, VideoUploader,
     VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
     Zone, running_since,
@@ -261,6 +261,9 @@ pub struct Repositories {
     pub narrations: Arc<dyn NarrationRepository>,
     /// Each project's capture and its takes. Shared with the job queue.
     pub captures: Arc<dyn CaptureRepository>,
+    /// Files take models read, staged in the user's own storage until
+    /// they are deleted. Shared with the job queue.
+    pub staging: Arc<dyn StagingRepository>,
     /// Scene plans, their prompts and images. Shared with the job queue.
     pub scene_plans: Arc<dyn ScenePlanRepository>,
     /// The cuts made in the editor.
@@ -374,6 +377,7 @@ impl Repositories {
             personas: Arc::clone(&db) as _,
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
+            staging: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,
@@ -444,7 +448,7 @@ pub struct Providers {
     /// through the Gemini API).
     pub clips: Vec<Arc<dyn ClipGenerator>>,
     /// Performed takes, one adapter per provider with take models
-    /// (Higgsfield).
+    /// (Higgsfield, BytePlus ModelArk).
     pub takes: Vec<Arc<dyn bardo_domain::TakeGenerator>>,
     /// The local audio device, for playback.
     pub audio: Arc<dyn AudioOutput>,
@@ -493,7 +497,10 @@ impl Providers {
                 Arc::new(bardo_ai::KlingClips::new()),
                 Arc::new(bardo_ai::GoogleClips::new()),
             ],
-            takes: vec![Arc::new(bardo_ai::HiggsfieldTakes::new())],
+            takes: vec![
+                Arc::new(bardo_ai::HiggsfieldTakes::new()),
+                Arc::new(bardo_ai::BytePlusTakes::new()),
+            ],
             audio: Arc::new(bardo_media::DeviceAudio),
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
             sign_ins: vec![
@@ -551,6 +558,7 @@ pub struct Bardo {
     personas: Arc<dyn PersonaRepository>,
     narrations: Arc<dyn NarrationRepository>,
     captures: Arc<dyn CaptureRepository>,
+    staging: Arc<dyn StagingRepository>,
     scene_plans: Arc<dyn ScenePlanRepository>,
     timelines: Arc<dyn TimelineRepository>,
     media_assets: Arc<dyn MediaAssetRepository>,
@@ -668,6 +676,7 @@ impl Bardo {
             personas,
             narrations,
             captures,
+            staging,
             scene_plans,
             timelines,
             media_assets,
@@ -822,9 +831,17 @@ impl Bardo {
             personas: Arc::clone(&personas),
             files: Arc::clone(&files),
             media: Arc::clone(&providers.media),
+            staging: Arc::clone(&staging),
+            jobs: Arc::clone(&jobs),
             generators: providers.takes.clone(),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
+        };
+        let staging_handler = crate::performed_takes::StagingCleanupHandler {
+            owner: profile.id,
+            staging: Arc::clone(&staging),
+            generators: providers.takes.clone(),
+            secrets: Arc::clone(&secrets),
         };
         let scene_handler = SceneHandler {
             owner: profile.id,
@@ -988,6 +1005,7 @@ impl Bardo {
                 controls: control_handler,
                 take_prompts: take_prompt_handler,
                 performed: performed_handler,
+                staging: staging_handler,
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,
@@ -1022,6 +1040,7 @@ impl Bardo {
             personas,
             narrations,
             captures,
+            staging,
             scene_plans,
             timelines,
             media_assets,
@@ -1079,6 +1098,9 @@ impl Bardo {
         .inspect(|bardo| {
             bardo.mark_restored_connections();
             bardo.prune_installers();
+            if bardo.role == RunnerRole::App {
+                bardo.queue_staging_cleanup();
+            }
         })
     }
 
@@ -1248,9 +1270,9 @@ pub(crate) mod testing {
         ImageFormat, ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market,
         MarketData, MarketSample, Money, MusicGenerator, MusicRequest, Niche, Provider,
         ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
-        SpeechSynthesizer, StagedFile, StagedImage, TakeGenerator, TakeInput, TakeMode, TakeModel,
-        TakeRequest, TakeTier, TextGenerator, TextRequest, TokenUsage, UploadSample, Voice,
-        VoiceLibrary, YesNoAnswer,
+        SpeechSynthesizer, StagedFile, StagedImage, TakeDone, TakeGenerator, TakeInput, TakeMode,
+        TakeModel, TakeRequest, TakeStatus, TakeTier, TextGenerator, TextRequest, TokenUsage,
+        UploadSample, Voice, VoiceLibrary, YesNoAnswer,
     };
 
     use crate::Providers;
@@ -2384,6 +2406,9 @@ pub(crate) mod testing {
                 draft,
                 final_tier: tier(None, 1080),
                 finishes_draft: false,
+                draft_lifetime: None,
+                look_assets: false,
+                token_frame_rate: None,
                 keeps_framing: false,
                 min_length: Duration::from_secs(3),
                 max_length: Duration::from_secs(30),
@@ -2445,26 +2470,27 @@ pub(crate) mod testing {
             &self,
             _key: &ApiKey,
             handle: &ClipHandle,
-        ) -> Result<ClipStatus, ProviderFailure> {
+        ) -> Result<TakeStatus, ProviderFailure> {
             self.polls.lock().unwrap().push(handle.0.clone());
             if self.hold.load(std::sync::atomic::Ordering::SeqCst) {
-                return Ok(ClipStatus::Running);
+                return Ok(TakeStatus::Running);
             }
             if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
-                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                return Ok(TakeStatus::Failed(ProviderFailure::new(
                     bardo_domain::ProviderFailureKind::Declined,
                     "Higgsfield's moderation declined the image or the clip",
                 )));
             }
             if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
-                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                return Ok(TakeStatus::Failed(ProviderFailure::new(
                     bardo_domain::ProviderFailureKind::ProviderDown,
                     "the generation failed",
                 )));
             }
-            Ok(ClipStatus::Done {
-                video: format!("https://fake/{}.mp4", handle.0),
-            })
+            Ok(TakeStatus::Done(TakeDone::at(format!(
+                "https://fake/{}.mp4",
+                handle.0
+            ))))
         }
 
         fn download(&self, _key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
@@ -2475,6 +2501,176 @@ pub(crate) mod testing {
 
         fn poll_delay(&self, _polls: u32) -> Duration {
             Duration::from_millis(5)
+        }
+    }
+
+    /// A ModelArk-like take model without the network: a video edit whose
+    /// final finishes its 480p draft within seven days, billed by tokens,
+    /// with no idempotency key and files staged in the user's own bucket.
+    #[derive(Default)]
+    pub(crate) struct FakeModelArk {
+        /// Each file staged, and each one deleted.
+        pub(crate) staged: Mutex<Vec<String>>,
+        pub(crate) unstaged: Mutex<Vec<String>>,
+        pub(crate) requests: Mutex<Vec<TakeRequest>>,
+        /// The task list looked at, since when.
+        pub(crate) lookups: Mutex<Vec<SystemTime>>,
+        /// The next submission is taken and its answer lost.
+        pub(crate) lose_answer: std::sync::atomic::AtomicBool,
+        /// Its moderation refuses every request while set.
+        pub(crate) refuse: std::sync::atomic::AtomicBool,
+        /// Deleting staged files fails while set.
+        pub(crate) keep_files: std::sync::atomic::AtomicBool,
+    }
+
+    impl FakeModelArk {
+        pub(crate) const EDIT: &str = "fake-seedance-edit";
+        /// The tokens every take reports.
+        pub(crate) const TOKENS: u64 = 1_234_567;
+        pub(crate) const SEED: i64 = 4_166_412_507;
+
+        pub(crate) fn edit() -> ClipModelRef {
+            ClipModelRef::new(Provider::BytePlus, Self::EDIT).unwrap()
+        }
+    }
+
+    impl TakeGenerator for FakeModelArk {
+        fn provider(&self) -> Provider {
+            Provider::BytePlus
+        }
+
+        fn models(&self) -> Vec<TakeModel> {
+            vec![TakeModel {
+                id: Self::edit(),
+                name: "Fake Seedance Edit".into(),
+                modes: vec![TakeMode::Mesh, TakeMode::Depth],
+                draft: Some(TakeTier {
+                    resolution: Some("480p".into()),
+                    height: 480,
+                }),
+                final_tier: TakeTier {
+                    resolution: Some("1080p".into()),
+                    height: 1080,
+                },
+                finishes_draft: true,
+                draft_lifetime: Some(Duration::from_secs(7 * 24 * 3600)),
+                look_assets: true,
+                token_frame_rate: Some(24),
+                keeps_framing: true,
+                min_length: Duration::from_secs(4),
+                max_length: Duration::from_secs(30),
+                max_video_bytes: 200_000_000,
+                max_image_bytes: 10_000_000,
+            }]
+        }
+
+        fn stage(
+            &self,
+            _key: &ApiKey,
+            input: TakeInput<'_>,
+        ) -> Result<StagedFile, ProviderFailure> {
+            let mut staged = self.staged.lock().unwrap();
+            let extension = if input.mime == "video/mp4" {
+                "mp4"
+            } else {
+                "jpg"
+            };
+            let link = format!(
+                "https://bucket.fake/bardo/takes/{}.{extension}?signed",
+                staged.len() + 1
+            );
+            staged.push(link.clone());
+            Ok(StagedFile(link))
+        }
+
+        fn quote(&self, _key: &ApiKey, _request: &TakeRequest) -> Option<Money> {
+            None
+        }
+
+        fn submit(
+            &self,
+            _key: &ApiKey,
+            request: &TakeRequest,
+            _submission: &str,
+        ) -> Result<ClipHandle, ProviderFailure> {
+            if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Declined,
+                    "InputVideoSensitiveContentDetected: the input video may contain a real face",
+                ));
+            }
+            let mut requests = self.requests.lock().unwrap();
+            requests.push(request.clone());
+            if self
+                .lose_answer
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unreachable,
+                    "the connection dropped",
+                ));
+            }
+            Ok(ClipHandle(format!("cgt-task-{}", requests.len())))
+        }
+
+        fn status(
+            &self,
+            _key: &ApiKey,
+            _handle: &ClipHandle,
+        ) -> Result<TakeStatus, ProviderFailure> {
+            Ok(TakeStatus::Done(TakeDone {
+                video: "https://fake/take.mp4".into(),
+                usage: Some(bardo_domain::Metered {
+                    output_tokens: Self::TOKENS,
+                    ..bardo_domain::Metered::default()
+                }),
+                seed: Some(Self::SEED),
+            }))
+        }
+
+        fn download(&self, _key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+            Ok(GeneratedClip {
+                bytes: TAKE.to_vec(),
+            })
+        }
+
+        fn poll_delay(&self, _polls: u32) -> Duration {
+            Duration::from_millis(5)
+        }
+
+        fn idempotent(&self) -> bool {
+            false
+        }
+
+        fn find_submitted(
+            &self,
+            _key: &ApiKey,
+            request: &TakeRequest,
+            since: SystemTime,
+        ) -> Result<Option<ClipHandle>, ProviderFailure> {
+            self.lookups.lock().unwrap().push(since);
+            let requests = self.requests.lock().unwrap();
+            Ok(requests
+                .iter()
+                .rposition(|sent| {
+                    sent.step == request.step && sent.draft_task == request.draft_task
+                })
+                .map(|index| ClipHandle(format!("cgt-task-{}", index + 1))))
+        }
+
+        fn keeps_staged(&self) -> bool {
+            true
+        }
+
+        fn unstage(&self, _key: &ApiKey, file: &StagedFile) -> Result<(), ProviderFailure> {
+            if self.keep_files.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unreachable,
+                    "the bucket did not answer",
+                ));
+            }
+            self.unstaged.lock().unwrap().push(file.0.clone());
+            Ok(())
         }
     }
 
@@ -2607,6 +2803,23 @@ mod tests {
         fn remove_pending_look(&self, _: bardo_domain::PersonaId) -> Result<(), RepositoryError> {
             Ok(())
         }
+
+        fn look_asset(
+            &self,
+            _: bardo_domain::PersonaId,
+            _: bardo_domain::Provider,
+        ) -> Result<Option<bardo_domain::LookAsset>, RepositoryError> {
+            Ok(None)
+        }
+
+        fn save_look_asset(
+            &self,
+            _: bardo_domain::PersonaId,
+            _: bardo_domain::Provider,
+            _: Option<&bardo_domain::LookAsset>,
+        ) -> Result<(), RepositoryError> {
+            Ok(())
+        }
     }
 
     fn start(profiles: &FakeProfiles, locale: Option<&str>) -> Bardo {
@@ -2627,6 +2840,7 @@ mod tests {
             personas: Arc::new(FakePersonas::default()),
             narrations: Arc::clone(&db) as _,
             captures: Arc::clone(&db) as _,
+            staging: Arc::clone(&db) as _,
             scene_plans: Arc::clone(&db) as _,
             timelines: Arc::clone(&db) as _,
             media_assets: Arc::clone(&db) as _,

@@ -83,7 +83,9 @@ function Invoke-App {
     Test-Check 'S3.06' 'the keys show only their last characters' {
         foreach ($key in $saved.keys.PSObject.Properties) {
             $hint = $state.keys.($key.Name).hint
-            if (-not $state.keys.($key.Name).saved -or $hint.Length -gt 5 -or -not $key.Value.EndsWith($hint.TrimStart([char]0x2026))) {
+            # BytePlus shows its API key's end, the first of its five fields.
+            $shown = if ($key.Name -eq 'byteplus') { $key.Value.Split('|')[0] } else { $key.Value }
+            if (-not $state.keys.($key.Name).saved -or $hint.Length -gt 5 -or -not $shown.EndsWith($hint.TrimStart([char]0x2026))) {
                 throw "$($key.Name): $hint"
             }
         }

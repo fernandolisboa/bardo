@@ -13,7 +13,11 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 const SELECT: &str = "SELECT file, profile_id, provider, project_id, capture_id, position, \
      job_id, staged_at, expires_at, released_at FROM take_staging";
 
-fn read(row: &Row<'_>) -> rusqlite::Result<(Vec<String>, i64, [i64; 2], Option<i64>)> {
+/// A row as read: its texts, its position, staged and expiry times and
+/// release time.
+type StagedRow = (Vec<String>, i64, [i64; 2], Option<i64>);
+
+fn read(row: &Row<'_>) -> rusqlite::Result<StagedRow> {
     Ok((
         vec![
             row.get(0)?,
@@ -34,7 +38,7 @@ fn id(text: &str) -> Result<Uuid, RepositoryError> {
 }
 
 fn upload(
-    (texts, position, [staged, expires], released): (Vec<String>, i64, [i64; 2], Option<i64>),
+    (texts, position, [staged, expires], released): StagedRow,
 ) -> Result<StagedUpload, RepositoryError> {
     let [file, owner, provider, project, capture, job] = <[String; 6]>::try_from(texts)
         .map_err(|_| boxed(std::io::Error::other("a staged file row is short")))?;
@@ -174,7 +178,8 @@ mod tests {
         let week = Duration::from_secs(7 * 24 * 3600);
         db.add_staged(&staged("video", job, week)).unwrap();
         db.add_staged(&staged("look", job, week)).unwrap();
-        db.add_staged(&staged("old", other_job, Duration::ZERO)).unwrap();
+        db.add_staged(&staged("old", other_job, Duration::ZERO))
+            .unwrap();
         assert_eq!(db.staged_by(job).unwrap().len(), 2);
         let due = |at| -> Vec<String> {
             db.staged_due(profile.id, at)
@@ -184,7 +189,8 @@ mod tests {
                 .collect()
         };
         assert_eq!(due(now), ["old"]);
-        db.release_staged_by(job, now + Duration::from_secs(5)).unwrap();
+        db.release_staged_by(job, now + Duration::from_secs(5))
+            .unwrap();
         assert_eq!(due(now), ["old"]);
         assert_eq!(due(now + Duration::from_secs(5)), ["look", "old", "video"]);
         db.remove_staged("old").unwrap();

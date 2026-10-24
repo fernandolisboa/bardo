@@ -21,10 +21,11 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, CostPurpose, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind,
-    JobId, JobKind, LOOK_MAX_BYTES, LookDescriptionError, LookDrawing, LookImage, LookImageError,
-    LookSource, PersonaId, PersonaLook, PersonaRepository, ProfileId, Provider, RenderedPrompt,
-    RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, look_description,
+    JobId, JobKind, LOOK_MAX_BYTES, LookAsset, LookAssetError, LookAssetKind, LookDescriptionError,
+    LookDrawing, LookImage, LookImageError, LookSource, PersonaId, PersonaLook, PersonaRepository,
+    ProfileId, Provider, RenderedPrompt, RepositoryError, SecretStore, TemplateKind, TemplateUsed,
+    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat,
+    TextGenerator, TextRequest, look_description,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -66,6 +67,12 @@ pub enum LookError {
     /// The photo is not one every take model reads.
     #[error("the photo cannot be a look: {0}")]
     Image(LookImageError),
+    /// The pasted asset id cannot stand for the look.
+    #[error("the asset cannot stand for the look: {0}")]
+    Asset(LookAssetError),
+    /// No take model of the provider takes looks from its asset library.
+    #[error("{0} takes no looks from an asset library")]
+    NoAssetLibrary(Provider),
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -87,6 +94,8 @@ impl LookError {
             LookError::NotConfirmed => Text::LookNotConfirmed,
             LookError::Unreadable(_) => Text::LookUnreadable,
             LookError::Image(_) => Text::LookImageRefused,
+            LookError::Asset(error) => Text::LookAssetError(*error),
+            LookError::NoAssetLibrary(_) => Text::LookNotSaved,
             LookError::Template(error) => error.message(),
             LookError::Repository(_) => Text::LookNotSaved,
         }
@@ -115,6 +124,9 @@ pub struct LookView {
     pub template: TemplateVersion,
     /// What drawing a look would cost: Claude's prompt and the drawing.
     pub estimate: SpendEstimate,
+    /// Each provider whose take models take a look from its asset
+    /// library, with the asset that stands for the look as it is now.
+    pub assets: Vec<(Provider, Option<LookAsset>)>,
 }
 
 impl LookView {
@@ -463,14 +475,87 @@ impl Bardo {
         let template = self.current_template(TemplateKind::LookPrompt)?;
         // The estimate does not depend on the description's few words.
         let rendered = self.render_look_prompt(&found, "", &template)?;
+        let look = self.stored_look(self.personas.look(persona));
+        let mut assets = Vec::new();
+        for provider in self.asset_providers() {
+            let held = match &look {
+                Some(look) => self.held_asset(persona, provider, look)?,
+                None => None,
+            };
+            assets.push((provider, held));
+        }
         Ok(LookView {
             persona,
-            look: self.stored_look(self.personas.look(persona)),
+            look,
             pending: self.stored_look(self.personas.pending_look(persona)),
             job: self.persona_look_job(persona),
             estimate: self.estimate(&draw_calls(&rendered))?,
             template,
+            assets,
         })
+    }
+
+    /// The providers whose take models take looks from their asset
+    /// library, in settings order.
+    fn asset_providers(&self) -> Vec<Provider> {
+        let mut providers: Vec<Provider> = self
+            .take_models()
+            .iter()
+            .filter(|model| model.look_assets)
+            .map(|model| model.id.provider())
+            .collect();
+        providers.dedup();
+        providers
+    }
+
+    /// The asset `provider`'s library holds for `look`, when it still
+    /// stands for it.
+    fn held_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+        look: &PersonaLook,
+    ) -> Result<Option<LookAsset>, LookError> {
+        let print = crate::performed_takes::look_print(look.image.bytes());
+        Ok(self
+            .personas
+            .look_asset(persona, provider)?
+            .filter(|asset| asset.holds_for(look, &print)))
+    }
+
+    /// Makes the asset `input` (an id, with or without `asset://`) of
+    /// `kind` in `provider`'s library stand for the persona's look as it
+    /// is now: take models there send it in place of the image. It is never
+    /// exported, and a new look needs its own.
+    pub fn set_look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+        kind: LookAssetKind,
+        input: &str,
+    ) -> Result<LookAsset, LookError> {
+        self.look_persona(persona)?;
+        if !self.asset_providers().contains(&provider) {
+            return Err(LookError::NoAssetLibrary(provider));
+        }
+        let look = self.personas.look(persona)?.ok_or(LookError::NoLook)?;
+        let print = crate::performed_takes::look_print(look.image.bytes());
+        let asset = LookAsset::parse(kind, input, look.source, &print).map_err(LookError::Asset)?;
+        self.personas
+            .save_look_asset(persona, provider, Some(&asset))?;
+        tracing::info!(provider = provider.code(), "saved a look asset");
+        Ok(asset)
+    }
+
+    /// Forgets the asset that stands for the persona's look in
+    /// `provider`'s library: take models there send the image again.
+    pub fn remove_look_asset(
+        &self,
+        persona: PersonaId,
+        provider: Provider,
+    ) -> Result<(), LookError> {
+        self.look_persona(persona)?;
+        Ok(self.personas.save_look_asset(persona, provider, None)?)
     }
 
     /// Starts a job in which Claude writes the look's prompt from

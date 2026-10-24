@@ -90,6 +90,8 @@ pub fn take_models() -> Vec<TakeModel> {
         finishes_draft: true,
         draft_lifetime: Some(DRAFT_LIFETIME),
         look_assets: true,
+        // Billed by the video's tokens, counted at 24 frames a second.
+        token_frame_rate: Some(24),
         // It edits the control video in place.
         keeps_framing: true,
         // Video edit takes 4 to 30 seconds.
@@ -840,7 +842,10 @@ mod tests {
     fn dates_and_paths_are_written_as_tos_signs_them() {
         let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_640_995_200);
         assert_eq!(tos_date(at), "20220101T000000Z");
-        assert_eq!(percent("bardo/takes/a b.mp4", true), "bardo/takes/a%20b.mp4");
+        assert_eq!(
+            percent("bardo/takes/a b.mp4", true),
+            "bardo/takes/a%20b.mp4"
+        );
         assert_eq!(percent("a/b", false), "a%2Fb");
     }
 }

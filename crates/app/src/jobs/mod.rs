@@ -48,6 +48,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) controls: crate::control_videos::ControlVideoHandler,
     pub(crate) take_prompts: crate::performed_takes::TakePromptHandler,
     pub(crate) performed: crate::performed_takes::PerformedTakeHandler,
+    pub(crate) staging: crate::performed_takes::StagingCleanupHandler,
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
     pub(crate) proxies: ProxyHandler,
@@ -83,6 +84,7 @@ pub(crate) fn built_in_handlers(
         controls,
         take_prompts,
         performed,
+        staging,
         scenes,
         clips,
         proxies,
@@ -116,6 +118,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::ControlVideo, Arc::new(controls));
     handlers.insert(JobKind::TakePrompt, Arc::new(take_prompts));
     handlers.insert(JobKind::PerformedTake, Arc::new(performed));
+    handlers.insert(JobKind::StagingCleanup, Arc::new(staging));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);
@@ -1524,6 +1527,7 @@ mod tests {
             personas: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
             captures: Arc::clone(db) as _,
+            staging: Arc::clone(db) as _,
             scene_plans: Arc::clone(db) as _,
             timelines: Arc::clone(db) as _,
             media_assets: Arc::clone(db) as _,

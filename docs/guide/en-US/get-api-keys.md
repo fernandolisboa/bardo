@@ -14,6 +14,58 @@ A few things hold for every provider:
 - **Keep it to yourself.** Paste it only into Bardo; Bardo keeps it in Windows Credential Manager and masks it everywhere else.
 - **Test it.** After saving, **Test key** makes the cheapest call that needs the key and says what is wrong, if anything.
 
+<a id="byteplus"></a>
+## BytePlus ModelArk
+
+You need this only for performed clips with Seedance 2.5 straight from BytePlus ModelArk, which makes a cheap 480p draft and then finishes that same draft at 1080p. ModelArk reads a take's control video only from a link, so Bardo also puts the take's files for a while in an object storage (TOS) bucket of yours. The card has five fields: the ModelArk API key, an access key ID and its secret, the bucket and the region.
+
+1. Open the [BytePlus console](https://console.byteplus.com/) and sign in, or create an account. Complete the account's verification when the console asks: ModelArk's Seedance models and TOS need a verified account.
+2. Add funds on the [Billing overview](https://console.byteplus.com/finance/overview). ModelArk turns Seedance 2.5 on only for a verified account with at least US$ 30 in Credits, an AI Savings Plan of US$ 30 or more, or a resource pack for the model. Each take is billed in tokens: about US$ 3.70 for a 30-second draft and US$ 20 for its final.
+3. Open ModelArk's [Model activation](https://ai.byteplus.com/ark/region:ap-southeast-1/openManagement?LLM=%7B%7D&advancedActiveKey=model) and activate **Dreamina Seedance 2.5**. Stay in the region `ap-southeast-1`, the one in the page's address.
+4. Open [API key management](https://ai.byteplus.com/ark/region:ap-southeast-1/apiKey?apikey=%7B%7D), create an API key and name it (for example `Bardo`). Copy the key.
+5. Create the bucket. Open the [TOS console](https://console.byteplus.com/tos/bucket), select **Buckets** on the left and then **Create bucket**. Set:
+   - **Name**: any free name, such as `bardo-takes-` followed by a few letters of your own (lowercase letters, digits and hyphens);
+   - **Region**: `ap-southeast-1`, the same as ModelArk;
+   - **Versioning**: off;
+   - **Bucket policy**: **Private**.
+
+   Leave the rest as it is and select **Create**.
+6. Add a lifecycle rule, so that nothing stays in the bucket if Bardo cannot delete it (for example, while the computer is off for weeks). In the bucket, select **Basic configurations › Lifecycle**, then **Create rule**, and set:
+   - **Rule name**: `bardo-takes`;
+   - **Status**: **Enable**;
+   - **Impact Scope**: **Specify prefix**, `bardo/takes/`;
+   - **Effective policy**: **Last modified time**;
+   - **Latest file version expiration policy**: on, **Specify days**, `8`, and delete.
+
+   Select **Create** and then **OK**. Bardo deletes each take's files itself as soon as it no longer needs them; this rule is only the backstop.
+7. Create an access key that reaches only that bucket. Open **IAM** from your user name at the top of the console, select **Permission policy** and then **Create policy**, name it `bardo-takes` and paste this as its content, with your bucket's name in place of `BUCKET` (twice):
+
+   ```json
+   {
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": ["tos:HeadBucket"],
+         "Resource": ["trn:tos:::BUCKET"]
+       },
+       {
+         "Effect": "Allow",
+         "Action": ["tos:PutObject", "tos:GetObject", "tos:DeleteObject"],
+         "Resource": ["trn:tos:::BUCKET/bardo/takes/*"]
+       }
+     ]
+   }
+   ```
+
+   Select **Submit**. Then select **User management › User** and **Create new user**, name it `bardo`, turn on **Programmatic access** and leave **Console access** off, select **Next**, add the `bardo-takes` policy, select **Next** and **Submit**. On the user's **Access key** tab, select **Create access key** and copy the access key ID and the secret access key. The secret shows only this once.
+8. Fill in the **BytePlus ModelArk** card in [Settings › API keys](bardo:go/settings/keys): the API key, the access key ID, the secret access key, the bucket's name and the region (`ap-southeast-1`, unless you made the bucket elsewhere). Select **Save key**, then **Test key**. The test asks ModelArk for a task that cannot exist and checks the bucket, which costs nothing worth counting.
+
+Seedance 2.5 refuses real faces in what it is sent, so a photo of you goes through ModelArk's asset library instead, by its id on the persona's look (Personas › The look). A drawn look can go as its image, or by an asset id too. In ModelArk's [Model Playground](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-5-260628):
+
+- **Your own likeness**: select the **My assets** tab below the input box, then **Real-human** and **Add real-human assets**, and follow the steps: you verify yourself on your phone and upload clear, front-facing pictures. Accept the asset when it shows as authorized, open it and copy its asset ID once its status is **Active**.
+- **A preset character**: select the **Digital Character Library** tab, pick a character and copy its asset ID. It replaces a drawn look's face with ModelArk's character.
+- **A virtual portrait**: if ModelArk offers you a private virtual portrait under **My assets**, made from your drawn look, copy its asset ID the same way. ModelArk requires it not to resemble any real person.
+
 <a id="claude"></a>
 ## Claude
 

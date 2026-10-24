@@ -218,8 +218,20 @@ mod tests {
             made_at: SystemTime::UNIX_EPOCH,
             job: None,
             accepted_at: None,
+            seed: None,
+            deadline: None,
         };
         assert!(result.fits(capture, "abc", &kling));
+        assert!(
+            !result.expired(SystemTime::now()),
+            "no deadline, never expires"
+        );
+        let draft = TakeResult {
+            deadline: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
+            ..result.clone()
+        };
+        assert!(!draft.expired(SystemTime::UNIX_EPOCH + Duration::from_secs(99)));
+        assert!(draft.expired(SystemTime::UNIX_EPOCH + Duration::from_secs(100)));
         assert!(!result.fits(capture, "abc", &seedance));
         assert_eq!(result.difference(Duration::from_secs(9)), 200);
         assert_eq!(result.difference(Duration::from_secs(10)), -800);

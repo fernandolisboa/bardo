@@ -75,6 +75,11 @@ pub struct TakeModel {
     /// Whether it takes a look from the provider's own asset library
     /// (`asset://`) in place of the image.
     pub look_assets: bool,
+    /// For a model billed by its video's tokens, the frame rate they are
+    /// counted at (ModelArk: 24): a take of `L` seconds in and out at
+    /// `W` × `H` is `2 × L × W × H × rate / 1024` tokens. `None` for a
+    /// model billed per second.
+    pub token_frame_rate: Option<u32>,
     /// Whether its result keeps the take's framing (a video edit does), so
     /// the take's face is where it was: the cut starts a 9:16 crop on it
     /// (#193).
@@ -122,6 +127,25 @@ impl TakeModel {
         self.draft_lifetime
             .filter(|_| self.finishes_draft)
             .map(|lifetime| sent + lifetime)
+    }
+
+    /// The tokens `step` of a take of `length` would be billed, for a
+    /// model billed by tokens: the take's frame (`width` × `height`)
+    /// scaled to the tier's short side, its seconds counted in and out.
+    pub fn estimated_tokens(
+        &self,
+        step: TakeStep,
+        length: Duration,
+        (width, height): (u32, u32),
+    ) -> Option<u64> {
+        let rate = u128::from(self.token_frame_rate?);
+        let short = u128::from(self.tier(step)?.height);
+        let (long_side, short_side) = (width.max(height), width.min(height).max(1));
+        let long =
+            (short * u128::from(long_side) + u128::from(short_side) / 2) / u128::from(short_side);
+        let pixels = short * long;
+        let tokens = 2 * length.as_millis() * pixels * rate / (1024 * 1000);
+        Some(u64::try_from(tokens).unwrap_or(u64::MAX))
     }
 
     /// Whether it makes a take of `length`.
@@ -368,6 +392,7 @@ mod tests {
             finishes_draft: false,
             draft_lifetime: None,
             look_assets: false,
+            token_frame_rate: None,
             keeps_framing: false,
             min_length: secs(4),
             max_length: secs(30),
@@ -409,6 +434,51 @@ mod tests {
         assert_eq!(
             seedance.priced_model(TakeStep::Final),
             "seedance/edit/1080p"
+        );
+    }
+
+    #[test]
+    fn a_draft_lasts_its_lifetime_only_where_the_final_finishes_it() {
+        let sent = SystemTime::UNIX_EPOCH + secs(1_800_000_000);
+        let mut seedance = model("seedance/edit", &[TakeMode::Mesh], true);
+        seedance.draft_lifetime = Some(secs(7 * 24 * 3600));
+        assert_eq!(seedance.draft_deadline(sent), None, "a final is a new take");
+        seedance.finishes_draft = true;
+        assert_eq!(
+            seedance.draft_deadline(sent),
+            Some(sent + secs(7 * 24 * 3600))
+        );
+    }
+
+    #[test]
+    fn tokens_count_the_seconds_in_and_out_at_the_tiers_frame() {
+        let mut seedance = model("seedance/edit", &[TakeMode::Mesh], true);
+        let ten = secs(10);
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Final, ten, (720, 1280)),
+            None,
+            "billed per second"
+        );
+        seedance.token_frame_rate = Some(24);
+        // 1080 × 1920, 24 frames a second, 20 seconds in all.
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Final, ten, (720, 1280)),
+            Some(20 * 1080 * 1920 * 24 / 1024)
+        );
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Final, ten, (1280, 720)),
+            Some(20 * 1080 * 1920 * 24 / 1024),
+            "landscape the same"
+        );
+        // 480 × 853 (ModelArk's 854 rounds the other way).
+        assert_eq!(
+            seedance.estimated_tokens(TakeStep::Draft, ten, (720, 1280)),
+            Some(20 * 480 * 853 * 24 / 1024)
+        );
+        let kling = model("kling/mc/pro", &[TakeMode::Recording], false);
+        assert_eq!(
+            kling.estimated_tokens(TakeStep::Draft, ten, (720, 1280)),
+            None
         );
     }
 

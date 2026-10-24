@@ -200,6 +200,7 @@ pub fn take_models() -> Vec<TakeModel> {
             finishes_draft: false,
             draft_lifetime: None,
             look_assets: false,
+            token_frame_rate: None,
             keeps_framing: spec.keeps_framing,
             min_length: Duration::from_secs(spec.seconds.0),
             max_length: Duration::from_secs(spec.seconds.1),
