@@ -166,9 +166,10 @@ impl<'a> BytePlusCredentials<'a> {
         bucket: &str,
         region: &str,
     ) -> Result<ApiKey, Vec<BytePlusFieldError>> {
+        // TOS's docs also name regions as their host part (`tos-…`).
         let region = match region.trim() {
             "" => BYTEPLUS_DEFAULT_REGION,
-            region => region,
+            region => region.strip_prefix("tos-").unwrap_or(region),
         };
         let fields = [
             (BytePlusField::ApiKey, api_key.trim()),

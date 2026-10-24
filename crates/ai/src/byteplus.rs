@@ -61,8 +61,9 @@ const STAGING_PREFIX: &str = "bardo/takes/";
 /// A task id no task has, for the free key check.
 pub const NO_SUCH_TASK: &str = "cgt-bardo-key-check";
 
-/// An object no bucket has, for the key check's storage half.
-const NO_SUCH_OBJECT: &str = "bardo/key-check";
+/// The object the key check writes, reads and deletes, under the prefix
+/// the guide's access policy covers.
+const KEY_CHECK_OBJECT: &str = "bardo/takes/key-check.txt";
 
 /// How far before the saved send time a task found in the list may have
 /// been created: the two clocks differ a little.
@@ -165,11 +166,27 @@ fn bearer(request: HttpRequest, credentials: &BytePlusCredentials<'_>) -> HttpRe
 }
 
 /// The request that starts a draft or final.
-pub fn submit_request(credentials: &BytePlusCredentials<'_>, request: &TakeRequest) -> HttpRequest {
+/// The submission, with each staged file's link signed for ModelArk to
+/// read at `at`. Bardo keeps only the unsigned links: a signed one names
+/// the access key and opens the file to whoever holds it.
+pub fn submit_request(
+    credentials: &BytePlusCredentials<'_>,
+    request: &TakeRequest,
+    at: SystemTime,
+) -> HttpRequest {
+    let signed = |file: &StagedFile| match object_of(credentials, &file.0) {
+        Some(object) => StagedFile(presign(credentials, Method::Get, &object, LINK_SECONDS, at)),
+        None => file.clone(),
+    };
+    let request = TakeRequest {
+        video: signed(&request.video),
+        look: signed(&request.look),
+        ..request.clone()
+    };
     bearer(
         HttpRequest::post_json(
             format!("{API_URL}/contents/generations/tasks"),
-            take_body(request).to_string(),
+            take_body(&request).to_string(),
         ),
         credentials,
     )
@@ -190,7 +207,7 @@ pub fn status_request(credentials: &BytePlusCredentials<'_>, handle: &ClipHandle
 pub fn list_request(credentials: &BytePlusCredentials<'_>, model: &str) -> HttpRequest {
     bearer(
         HttpRequest::get(format!(
-            "{API_URL}/contents/generations/tasks?page_num=1&page_size=100&filter.model={}",
+            "{API_URL}/contents/generations/tasks?page_num=1&page_size=500&filter.model={}",
             percent(model, false)
         )),
         credentials,
@@ -248,8 +265,14 @@ pub fn modelark_failure(response: &HttpResponse) -> ProviderFailure {
         400 if refused(&code) => ProviderFailureKind::Declined,
         400 | 422 => ProviderFailureKind::Unexpected,
         401 => ProviderFailureKind::Rejected,
-        403 if code == "AccountOverdueError" => ProviderFailureKind::LimitReached,
+        403 if code == "AccountOverdueError" || code.ends_with("ServiceOverdue") => {
+            ProviderFailureKind::LimitReached
+        }
         403 | 404 => ProviderFailureKind::NotAllowed,
+        // ModelArk busy, not a limit of the user's.
+        429 if code == "ServerOverloaded" || code == "RequestBurstTooFast" => {
+            ProviderFailureKind::ProviderDown
+        }
         429 => ProviderFailureKind::LimitReached,
         500..=599 => ProviderFailureKind::ProviderDown,
         _ => ProviderFailureKind::Unexpected,
@@ -346,7 +369,7 @@ pub fn parse_list(
     response: &HttpResponse,
     request: &TakeRequest,
     since: SystemTime,
-) -> Result<Option<ClipHandle>, ProviderFailure> {
+) -> Result<Vec<ClipHandle>, ProviderFailure> {
     let body = json_body(response)?;
     let items = body["items"]
         .as_array()
@@ -368,14 +391,10 @@ pub fn parse_list(
         })
         .filter_map(|item| item["id"].as_str().filter(|id| is_task_id(id)))
         .collect();
-    match found.as_slice() {
-        [] => Ok(None),
-        [one] => Ok(Some(ClipHandle((*one).to_owned()))),
-        _ => Err(unexpected(
-            "BytePlus has several takes sent at that time, so Bardo sent nothing again; \
-             look at the task list in ModelArk",
-        )),
-    }
+    Ok(found
+        .into_iter()
+        .map(|id| ClipHandle(id.to_owned()))
+        .collect())
 }
 
 // TOS, the user's bucket.
@@ -574,27 +593,31 @@ pub fn check_key(transport: &dyn Transport, key: &ApiKey, at: SystemTime) -> Key
             return KeyCheck::new(KeyCheckOutcome::Unreachable, Some(error.0));
         }
     }
-    let probe = HttpRequest::get(presign(
-        &credentials,
-        Method::Get,
-        NO_SUCH_OBJECT,
-        SHORT_LINK_SECONDS,
-        at,
-    ));
-    match transport.send(&probe) {
-        Ok(response) if (200..=299).contains(&response.status) => {
-            KeyCheck::new(KeyCheckOutcome::Valid, None)
+    // The three things takes do with the bucket, on a file of its own:
+    // a few storage requests, worth a fraction of a cent.
+    let link = |method| {
+        presign(
+            &credentials,
+            method,
+            KEY_CHECK_OBJECT,
+            SHORT_LINK_SECONDS,
+            at,
+        )
+    };
+    let probes = [
+        HttpRequest::put(link(Method::Put), b"bardo".to_vec())
+            .header("content-type", "text/plain".to_owned()),
+        HttpRequest::get(link(Method::Get)),
+        HttpRequest::delete(link(Method::Delete)),
+    ];
+    for probe in &probes {
+        match transport.send(probe) {
+            Ok(response) if (200..=299).contains(&response.status) => {}
+            Ok(response) => return failure_check("TOS", tos_failure(&response)),
+            Err(error) => return KeyCheck::new(KeyCheckOutcome::Unreachable, Some(error.0)),
         }
-        Ok(response)
-            if response.status == 404
-                && !response.body.contains("NoSuchBucket")
-                && !response.body.contains("BucketNotFound") =>
-        {
-            KeyCheck::new(KeyCheckOutcome::Valid, None)
-        }
-        Ok(response) => failure_check("TOS", tos_failure(&response)),
-        Err(error) => KeyCheck::new(KeyCheckOutcome::Unreachable, Some(error.0)),
     }
+    KeyCheck::new(KeyCheckOutcome::Valid, None)
 }
 
 fn failure_check(part: &str, failure: ProviderFailure) -> KeyCheck {
@@ -707,12 +730,10 @@ impl<T: Transport> TakeGenerator for BytePlusTakes<T> {
         if !(200..=299).contains(&stored.status) {
             return Err(tos_failure(&stored));
         }
-        Ok(StagedFile(presign(
-            &credentials,
-            Method::Get,
-            &object,
-            LINK_SECONDS,
-            now,
+        // Unsigned: the submission signs it (`submit_request`).
+        Ok(StagedFile(format!(
+            "https://{}/{object}",
+            tos_host(&credentials)
         )))
     }
 
@@ -732,7 +753,7 @@ impl<T: Transport> TakeGenerator for BytePlusTakes<T> {
         let credentials = credentials(key)?;
         let response = self
             .transport
-            .send(&submit_request(&credentials, request))
+            .send(&submit_request(&credentials, request, (self.clock)()))
             .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
         if !(200..=299).contains(&response.status) {
             return Err(modelark_failure(&response));
@@ -781,7 +802,7 @@ impl<T: Transport> TakeGenerator for BytePlusTakes<T> {
         key: &ApiKey,
         request: &TakeRequest,
         since: SystemTime,
-    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+    ) -> Result<Vec<ClipHandle>, ProviderFailure> {
         let credentials = credentials(key)?;
         let response = self.send(&list_request(&credentials, &request.model))?;
         if !(200..=299).contains(&response.status) {
@@ -812,6 +833,12 @@ impl<T: Transport> TakeGenerator for BytePlusTakes<T> {
         let response = self.send(&request)?;
         match response.status {
             200..=299 | 404 => Ok(()),
+            // The key may not delete there: the file stays listed and is
+            // tried again, rather than forgotten as gone.
+            403 => Err(ProviderFailure {
+                kind: ProviderFailureKind::Rejected,
+                ..tos_failure(&response)
+            }),
             _ => Err(tos_failure(&response)),
         }
     }

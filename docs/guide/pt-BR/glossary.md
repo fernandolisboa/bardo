@@ -76,7 +76,7 @@ As palavras que o Bardo usa, em termos simples.
 
 **Clipe interpretado**: a versão final de uma tomada, feita pelo modelo de tomada, revisada e usada: ela entra na mídia do projeto, de onde vai para o corte em sincronia com a narração da tomada. Os rascunhos, quando o modelo os faz, vêm antes e são aprovados antes da versão final.
 
-**Prazo do rascunho**: no BytePlus ModelArk, quando um rascunho não pode mais ser completado: sete dias depois de o Bardo enviá-lo. Depois disso, só um rascunho novo pode ser feito.
+**Prazo do rascunho**: no BytePlus ModelArk, quando um rascunho não pode mais ser completado: sete dias depois de o Bardo subir os arquivos dele. Depois disso, só um rascunho novo pode ser feito.
 
 **Id do asset**: o id de uma aparência na sua biblioteca de assets do ModelArk (`asset://…`), enviado ao Seedance na BytePlus no lugar da imagem da aparência: a sua semelhança verificada para uma foto sua, ou um personagem pronto ou retrato virtual para uma aparência desenhada.
 

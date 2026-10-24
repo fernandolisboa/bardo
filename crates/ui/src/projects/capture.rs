@@ -2065,6 +2065,10 @@ impl ProjectsScreen {
                             tr(bardo, Text::PerformedDraftExpired),
                             cx,
                         ));
+                    } else if view.finished {
+                        section = section.child(
+                            small(tr(bardo, Text::PerformedDraftFinished)).text_color(muted),
+                        );
                     } else if let Some(deadline) = draft.deadline {
                         section = section.child(
                             small(SharedString::from(bardo.text_with(
@@ -2097,8 +2101,9 @@ impl ProjectsScreen {
                                     });
                                 })),
                         )
-                        // Past its deadline, only a new draft goes on.
-                        .when(view.expired, |row| {
+                        // Past its deadline, or finished, only a new draft
+                        // goes on.
+                        .when(view.expired || view.finished, |row| {
                             row.child(make(
                                 "regenerate-draft",
                                 Text::RegenerateTakeDraft,
@@ -2106,6 +2111,13 @@ impl ProjectsScreen {
                                 true,
                             ))
                         })
+                    } else if view.expired {
+                        row.child(make(
+                            "regenerate-draft",
+                            Text::RegenerateTakeDraft,
+                            TakeStep::Draft,
+                            true,
+                        ))
                     } else {
                         row.child(
                             Button::new(("approve-draft", index))

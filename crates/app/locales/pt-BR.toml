@@ -363,7 +363,7 @@ store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windo
 
 [provider_keys.byteplus]
 note = "Os cinco ficam salvos juntos no Gerenciador de Credenciais do Windows. A chave de acesso só assina links curtos para o bucket: ela nunca sai do computador. O Bardo apaga do bucket os arquivos de cada tomada assim que não precisa mais deles."
-fields_invalid = "Corrija os campos marcados abaixo."
+fields_invalid = "Corrija os campos marcados acima."
 required = "Preencha este campo."
 
 [provider_keys.byteplus.field]
@@ -754,6 +754,7 @@ missing_higgsfield_key = "Salve uma chave do Higgsfield em Configurações para 
 missing_byteplus_key = "Salve os campos do BytePlus ModelArk em Configurações para fazer clipes interpretados."
 nothing = "Nada foi feito para esta tomada ainda."
 draft_first = "Aprove um rascunho antes: a versão final vem depois dele."
+draft_finished = "A versão final deste rascunho já foi feita, e o mesmo rascunho faria a mesma versão final. Faça um rascunho novo para ter outra."
 draft_expired = "Este rascunho passou do prazo e não pode mais ser completado. Faça um rascunho novo."
 draft_deadline = "Faça a versão final até {when}. Depois disso, só um rascunho novo pode ser feito."
 draft_finish_note = "Um rascunho barato em 480p vem antes. A versão final completa o rascunho aprovado em 1080p, com as mesmas entradas, em até sete dias."

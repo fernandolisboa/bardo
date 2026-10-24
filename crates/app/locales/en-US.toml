@@ -363,7 +363,7 @@ store_failed = "Could not reach Windows Credential Manager. Try again."
 
 [provider_keys.byteplus]
 note = "All five are saved together in Windows Credential Manager. The access key only signs short links to the bucket: it never leaves the computer. Bardo deletes each take's files from the bucket once it no longer needs them."
-fields_invalid = "Fix the fields marked below."
+fields_invalid = "Fix the fields marked above."
 required = "Fill this in."
 
 [provider_keys.byteplus.field]
@@ -755,6 +755,7 @@ missing_byteplus_key = "Save the BytePlus ModelArk fields under Settings to make
 nothing = "Nothing was made for this take yet."
 draft_first = "Approve a draft first: the final is made after it."
 draft_expired = "This draft is past its deadline and can no longer be finished. Make a new draft."
+draft_finished = "This draft's final is made, and the same draft would make the same final. Make a new draft for another."
 draft_deadline = "Make its final by {when}. After that, only a new draft can be made."
 draft_finish_note = "A cheap 480p draft comes first. The final finishes the approved draft at 1080p, from the same inputs, within seven days."
 model_gone = "That take model is no longer offered. Pick another one."

@@ -76,7 +76,7 @@ The words Bardo uses, in plain terms.
 
 **Performed clip**: a take's final, made by its take model, reviewed and used: it joins the project's media, where it goes on the cut in sync with its take's narration. Drafts, where the model makes them, come first and are approved before the final.
 
-**Draft deadline**: on BytePlus ModelArk, when a draft can no longer be finished: seven days after Bardo sent it. Past it, only a new draft can be made.
+**Draft deadline**: on BytePlus ModelArk, when a draft can no longer be finished: seven days after Bardo uploaded its files. Past it, only a new draft can be made.
 
 **Asset id**: a look's id in your ModelArk asset library (`asset://…`), sent to Seedance on BytePlus instead of the look's image: your verified likeness for a photo of you, or a preset character or virtual portrait for a drawn look.
 

@@ -124,6 +124,9 @@ pub enum CaptureError {
     /// The draft is past its deadline: only a new draft can be made.
     #[error("the draft can no longer be finished")]
     DraftExpired,
+    /// The draft already has the final that finishes it.
+    #[error("the draft already has its final")]
+    DraftFinished,
     /// Nothing made for the take to review or use.
     #[error("nothing was made for the take")]
     NoTakeResult,
@@ -171,6 +174,7 @@ impl CaptureError {
             CaptureError::NoDrafts | CaptureError::NoTakeResult => Text::PerformedNothing,
             CaptureError::DraftNotApproved => Text::PerformedDraftFirst,
             CaptureError::DraftExpired => Text::PerformedDraftExpired,
+            CaptureError::DraftFinished => Text::PerformedDraftFinished,
             CaptureError::Template(error) => error.message(),
             CaptureError::Boundary(_) => Text::CaptureNoCutPoint,
             CaptureError::Repository(_) => Text::CaptureNotSaved,
@@ -981,6 +985,7 @@ impl CaptureHandler {
 /// Called by the narration jobs once their narration is saved.
 pub(crate) fn forget_capture(
     captures: &dyn CaptureRepository,
+    staging: &dyn bardo_domain::StagingRepository,
     files: &dyn ProjectFiles,
     project: VideoProjectId,
     kept: NarrationId,
@@ -994,6 +999,8 @@ pub(crate) fn forget_capture(
     let controls = captures.control_videos(project)?;
     let results = captures.take_results(project)?;
     captures.delete_capture(project)?;
+    // Its files in the user's bucket go at the next cleanup.
+    staging.release_staged_for(capture.id, std::time::SystemTime::now())?;
     // One that will not go (open in a player) is left behind.
     let _ = files.remove(project, &capture.video_file);
     crate::take_analysis::remove_analysis_files(files, &capture);

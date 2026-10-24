@@ -50,8 +50,9 @@ fn takes(answers: &[&str]) -> BytePlusTakes<Scripted> {
         .with_names(Arc::new(|| "0f8e2c1a".to_owned()))
 }
 
+/// A staged file as Bardo keeps it: unsigned.
 fn link(object: &str) -> String {
-    format!("https://{HOST}/{object}?X-Tos-Algorithm=TOS4-HMAC-SHA256&X-Tos-Signature=x")
+    format!("https://{HOST}/{object}")
 }
 
 fn draft() -> TakeRequest {
@@ -173,8 +174,9 @@ fn staging_uploads_to_the_bucket_and_returns_a_seven_day_link() {
     );
     assert_eq!(sent[0].raw_body, b"control-video");
     assert!(!sent[0].url.contains(SECRET_KEY));
-    assert!(staged.0.starts_with(&format!("https://{HOST}/{OBJECT}?")));
-    assert!(staged.0.contains("X-Tos-Expires=604800"));
+    // Kept unsigned: a signed link names the access key and opens the
+    // file to whoever holds it.
+    assert_eq!(staged.0, format!("https://{HOST}/{OBJECT}"));
     let key = key();
     let credentials = BytePlusCredentials::of(&key).unwrap();
     assert_eq!(object_of(&credentials, &staged.0).as_deref(), Some(OBJECT));
@@ -262,10 +264,25 @@ fn a_submission_sends_the_api_key_and_returns_the_task() {
         sent[0].header("authorization"),
         Some(format!("Bearer {API_KEY}").as_str())
     );
+    let body = String::from_utf8_lossy(&sent[0].raw_body).into_owned();
     assert!(
-        !String::from_utf8_lossy(&sent[0].raw_body).contains(SECRET_KEY),
+        !body.contains(SECRET_KEY),
         "the storage key never goes to ModelArk"
     );
+    // The staged files go signed for ModelArk to read, for seven days.
+    let sent: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let key = key();
+    let credentials = BytePlusCredentials::of(&key).unwrap();
+    for (index, field, object) in [
+        (1, "video_url", OBJECT),
+        (2, "image_url", "bardo/takes/5d2e.jpg"),
+    ] {
+        assert_eq!(
+            sent["content"][index][field]["url"],
+            presign(&credentials, Method::Get, object, 604_800, noon()),
+            "{field}"
+        );
+    }
     assert!(!takes.idempotent());
     assert!(takes.keeps_staged());
 }
@@ -338,7 +355,7 @@ fn a_finished_task_gives_its_video_tokens_and_seed() {
     assert_eq!(
         done.usage,
         Some(Metered {
-            output_tokens: 384_300,
+            output_tokens: 192_150,
             ..Metered::default()
         })
     );
@@ -393,30 +410,31 @@ fn tasks_that_end_without_a_take_say_why() {
 }
 
 #[test]
-fn a_lost_submission_is_found_in_the_task_list_once_and_only_once() {
+fn a_lost_submission_is_looked_for_in_the_task_list() {
     let since = noon();
     let found = takes(&["list-one"])
         .find_submitted(&key(), &draft(), since)
         .unwrap();
-    assert_eq!(found, Some(ClipHandle(DRAFT_ID.into())));
+    assert_eq!(found, [ClipHandle(DRAFT_ID.into())]);
     let takes_none = takes(&["list-none"]);
     assert_eq!(
         takes_none.find_submitted(&key(), &draft(), since).unwrap(),
-        None
+        []
     );
     let sent = takes_none.transport().sent();
     assert!(sent[0].url.contains(&format!("filter.model={MODEL}")));
+    // All of them, for Bardo to leave out the ones it knows.
     let several = takes(&["list-several"])
         .find_submitted(&key(), &draft(), since)
-        .unwrap_err();
-    assert!(several.detail.contains("several"), "{}", several.detail);
+        .unwrap();
+    assert!(several.len() > 1, "{several:?}");
     // A final is found by its draft.
     let later = SystemTime::UNIX_EPOCH + Duration::from_secs(1_792_832_400);
     assert_eq!(
         takes(&["list-final"])
             .find_submitted(&key(), &final_of(DRAFT_ID), later)
             .unwrap(),
-        Some(ClipHandle(FINAL_ID.into()))
+        [ClipHandle(FINAL_ID.into())]
     );
 }
 
@@ -443,9 +461,11 @@ fn unstaging_deletes_the_file_and_a_file_already_gone_is_fine() {
     let file = StagedFile(link(OBJECT));
     takes.unstage(&key(), &file).unwrap();
     takes.unstage(&key(), &file).unwrap();
+    // A key that may not delete leaves the file to try again, not as
+    // gone.
     assert_eq!(
         takes.unstage(&key(), &file).unwrap_err().kind,
-        ProviderFailureKind::NotAllowed
+        ProviderFailureKind::Rejected
     );
     let sent = takes.transport().sent();
     assert_eq!(sent[0].method, Method::Delete);
@@ -472,7 +492,7 @@ fn the_key_check_asks_modelark_and_the_bucket_for_nothing_that_exists() {
     let answers = |names: &[&str]| {
         Scripted::new(names.iter().map(|name| fixture("byteplus", name)).collect())
     };
-    let valid = answers(&["status-unknown", "tos-no-such-key"]);
+    let valid = answers(&["status-unknown", "tos-stored", "tos-read", "tos-deleted"]);
     assert_eq!(
         check_key(&valid, &key(), noon()).outcome,
         KeyCheckOutcome::Valid
@@ -483,11 +503,20 @@ fn the_key_check_asks_modelark_and_the_bucket_for_nothing_that_exists() {
             .url
             .ends_with("/contents/generations/tasks/cgt-bardo-key-check")
     );
-    assert!(
-        sent[1]
-            .url
-            .starts_with(&format!("https://{HOST}/bardo/key-check?"))
-    );
+    // It writes, reads and deletes a file of its own, under the prefix
+    // the guide's access policy covers.
+    for (sent, method) in sent[1..]
+        .iter()
+        .zip([Method::Put, Method::Get, Method::Delete])
+    {
+        assert_eq!(sent.method, method);
+        assert!(
+            sent.url
+                .starts_with(&format!("https://{HOST}/bardo/takes/key-check.txt?")),
+            "{}",
+            sent.url
+        );
+    }
     for (names, outcome, part) in [
         (
             &["submit-rejected"][..],
@@ -511,6 +540,11 @@ fn the_key_check_asks_modelark_and_the_bucket_for_nothing_that_exists() {
         ),
         (
             &["status-unknown", "tos-no-such-bucket"][..],
+            KeyCheckOutcome::NotAllowed,
+            "TOS: ",
+        ),
+        (
+            &["status-unknown", "tos-stored", "tos-read", "tos-denied"][..],
             KeyCheckOutcome::NotAllowed,
             "TOS: ",
         ),

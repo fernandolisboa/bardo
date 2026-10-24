@@ -26,7 +26,7 @@ takes misbehave with a real key:
   `status-expired.http`.
 - `list-one.http`, `list-none.http`, `list-several.http`,
   `list-final.http`.
-- `tos-stored.http`, `tos-deleted.http`, `tos-no-such-key.http`,
+- `tos-stored.http`, `tos-read.http`, `tos-deleted.http`, `tos-no-such-key.http`,
   `tos-no-such-bucket.http`, `tos-signature.http`, `tos-denied.http`.
   TOS answers errors as JSON (`Code`, `Message`); the adapter reads XML
   too.

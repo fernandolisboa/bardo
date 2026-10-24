@@ -38,16 +38,11 @@ Você só precisa disto para clipes interpretados com o Seedance 2.5 direto do B
    - **Latest file version expiration policy**: ligada, **Specify days**, `8`, e apagar.
 
    Escolha **Create** e depois **OK**. O Bardo apaga sozinho os arquivos de cada tomada assim que não precisa mais deles; esta regra é só a garantia.
-7. Crie uma chave de acesso que só alcança esse bucket. Abra o **IAM** pelo seu nome de usuário no alto do console, escolha **Permission policy** e depois **Create policy**, dê o nome `bardo-takes` e cole isto como conteúdo, com o nome do seu bucket no lugar de `BUCKET` (duas vezes):
+7. Crie uma chave de acesso que só alcança esse bucket. Abra o **IAM** pelo seu nome de usuário no alto do console, escolha **Permission policy** e depois **Create policy**, dê o nome `bardo-takes` e cole isto como conteúdo, com o nome do seu bucket no lugar de `BUCKET`:
 
    ```json
    {
      "Statement": [
-       {
-         "Effect": "Allow",
-         "Action": ["tos:HeadBucket"],
-         "Resource": ["trn:tos:::BUCKET"]
-       },
        {
          "Effect": "Allow",
          "Action": ["tos:PutObject", "tos:GetObject", "tos:DeleteObject"],
@@ -58,7 +53,7 @@ Você só precisa disto para clipes interpretados com o Seedance 2.5 direto do B
    ```
 
    Escolha **Submit**. Depois escolha **User management › User** e **Create new user**, dê o nome `bardo`, ligue **Programmatic access** e deixe **Console access** desligado, escolha **Next**, adicione a política `bardo-takes`, escolha **Next** e **Submit**. Na aba **Access key** do usuário, escolha **Create access key** e copie o ID da chave de acesso e a chave de acesso secreta. O segredo aparece só desta vez.
-8. Preencha o cartão **BytePlus ModelArk** em [Configurações › Chaves de API](bardo:go/settings/keys): a chave de API, o ID da chave de acesso, a chave de acesso secreta, o nome do bucket e a região (`ap-southeast-1`, a não ser que você tenha criado o bucket em outra). Escolha **Salvar chave** e depois **Testar chave**. O teste pede ao ModelArk uma tarefa que não pode existir e confere o bucket, o que não custa nada que conte.
+8. Preencha o cartão **BytePlus ModelArk** em [Configurações › Chaves de API](bardo:go/settings/keys): a chave de API, o ID da chave de acesso, a chave de acesso secreta, o nome do bucket e a região (`ap-southeast-1`, a não ser que você tenha criado o bucket em outra). Escolha **Salvar chave** e depois **Testar chave**. O teste pede ao ModelArk uma tarefa que não pode existir e grava, lê e apaga um arquivo pequeno em `bardo/takes/`, o que custa quase nada. Para trocar qualquer um dos cinco depois, preencha os cinco de novo.
 
 O Seedance 2.5 recusa rostos reais no que recebe, então uma foto sua vai pela biblioteca de assets do ModelArk, pelo id dela na aparência da persona (Personas › A aparência). Uma aparência desenhada pode ir como imagem, ou também por um id de asset. No [Model Playground](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-5-260628) do ModelArk:
 

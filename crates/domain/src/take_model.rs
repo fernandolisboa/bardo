@@ -277,16 +277,16 @@ pub trait TakeGenerator: Send + Sync {
         true
     }
 
-    /// The request the provider took for `request` since `since`, for a
-    /// provider that is not `idempotent`: `None` when it took none, a
-    /// failure when it cannot tell which.
+    /// Every request the provider took like `request` since `since`, for
+    /// a provider that is not `idempotent`: the caller leaves out the ones
+    /// it knows and decides.
     fn find_submitted(
         &self,
         _key: &ApiKey,
         _request: &TakeRequest,
         _since: SystemTime,
-    ) -> Result<Option<ClipHandle>, ProviderFailure> {
-        Ok(None)
+    ) -> Result<Vec<ClipHandle>, ProviderFailure> {
+        Ok(Vec::new())
     }
 
     /// Whether staged files stay where they are until `unstage` removes
@@ -351,7 +351,7 @@ impl<T: TakeGenerator + ?Sized> TakeGenerator for Arc<T> {
         key: &ApiKey,
         request: &TakeRequest,
         since: SystemTime,
-    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+    ) -> Result<Vec<ClipHandle>, ProviderFailure> {
         (**self).find_submitted(key, request, since)
     }
 

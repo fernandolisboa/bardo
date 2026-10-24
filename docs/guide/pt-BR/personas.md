@@ -68,4 +68,4 @@ O Seedance 2.5 no BytePlus ModelArk recusa rostos reais no que recebe, e pode us
 - Uma **foto sua** só aceita a sua **Semelhança verificada**, a que o ModelArk verificou como sendo você. Enquanto ela não tiver uma, as tomadas dela não podem ser enviadas à BytePlus.
 - Uma **aparência desenhada** pode usar um **Personagem pronto** da biblioteca do ModelArk ou um **Retrato virtual** que você fez lá, ou ir como imagem, sem asset nenhum.
 
-Um id vale só para esta aparência: um desenho ou uma foto nova o apaga. **Remover asset** volta a enviar a imagem. O id fica neste computador: nunca vai num pacote de persona nem no arquivo de configurações, e duplicar a persona não o copia.
+Um id vale só para esta aparência: deixa de valer quando você escolhe um desenho ou uma foto nova. **Remover asset** volta a enviar a imagem. O id fica neste computador: nunca vai num pacote de persona nem no arquivo de configurações, e duplicar a persona não o copia.

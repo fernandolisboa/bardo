@@ -182,6 +182,9 @@ pub struct PerformedTakeView {
     /// Whether its draft is past its deadline: it can no longer be
     /// finished, only made again.
     pub expired: bool,
+    /// Whether its draft already has the final that finishes it: the same
+    /// draft would make the same final, so only a new draft goes on.
+    pub finished: bool,
     /// Its latest prompt job, and its latest draft or final job with the
     /// step it makes: one under way, else one made for its control video
     /// and model as they are now.
@@ -351,11 +354,13 @@ struct TakeState {
     sent_at: Option<u64>,
 }
 
-/// Whether a take job's saved state holds a request Higgsfield took.
+/// Whether a take job's saved state holds a request the provider took,
+/// or one it may have taken: sent to a provider without an idempotency
+/// key and its answer lost. Either is checked again, never sent anew.
 fn has_request(job: &Job) -> bool {
     job.external_handle()
         .and_then(|saved| serde_json::from_str::<TakeState>(saved).ok())
-        .is_some_and(|state| state.request.is_some())
+        .is_some_and(|state| state.request.is_some() || state.sent_at.is_some())
 }
 
 impl TakeState {
@@ -478,15 +483,9 @@ fn provider_failure(provider: Provider, failure: ProviderFailure) -> JobFailure 
     let kind = JobFailureKind::from(failure.kind);
     match (kind, provider) {
         (JobFailureKind::Declined, Provider::Higgsfield) => JobFailure::new(kind, REFUSED),
-        // ModelArk says which rule and why.
-        (JobFailureKind::Declined, _) => JobFailure::new(
-            kind,
-            format!(
-                "{} refused the content: {}",
-                provider_name(provider),
-                failure.detail
-            ),
-        ),
+        // ModelArk says which rule and why, in its own words: the take
+        // names the provider beside them.
+        (JobFailureKind::Declined, _) => JobFailure::new(kind, failure.detail),
         _ => JobFailure::new(
             kind,
             format!("{}: {}", provider_name(provider), failure.detail),
@@ -1012,21 +1011,32 @@ impl TakeRun<'_> {
         if !self.still_approved()? {
             return Err(take_changed());
         }
-        if self.payload.draft_task.is_some() {
-            if self
+        // Past the draft's deadline a final is not sent; one already sent
+        // whose answer was lost is still looked for.
+        let past_deadline = self.payload.draft_task.is_some()
+            && self
                 .payload
                 .draft_deadline
-                .is_some_and(|deadline| SystemTime::now() >= from_unix_millis(deadline))
-            {
-                return Err(JobFailure::new(
-                    JobFailureKind::NotAllowed,
-                    "the draft can no longer be finished; make a new draft",
-                ));
-            }
+                .is_some_and(|deadline| SystemTime::now() >= from_unix_millis(deadline));
+        let too_late = || {
+            JobFailure::new(
+                JobFailureKind::NotAllowed,
+                "the draft can no longer be finished; make a new draft",
+            )
+        };
+        if past_deadline && self.state.sent_at.is_none() {
+            return Err(too_late());
+        }
+        if self.payload.draft_task.is_some() {
             self.state.look_print = self.payload.draft_look.clone();
             self.state.realistic = self.payload.draft_realistic;
-        } else {
-            self.stage_inputs(cx)?;
+        } else if let Err(failure) = self.stage_inputs(cx) {
+            // A retry reuses what was staged; a failure that ends the job
+            // lets it go.
+            if !failure.kind.is_transient() {
+                self.restart(cx)?;
+            }
+            return Err(failure);
         }
         let request = self.request();
         if !self.state.quoted {
@@ -1044,20 +1054,31 @@ impl TakeRun<'_> {
                     .generator
                     .find_submitted(&self.key, &request, from_unix_millis(sent))
                     .map_err(|failure| self.failure(failure))?;
-                if let Some(handle) = found {
-                    if self.known_request(&handle, cx.id())? {
+                // Requests another take or job holds are theirs.
+                let mut unknown = Vec::new();
+                for handle in found {
+                    if !self.known_request(&handle, cx.id())? {
+                        unknown.push(handle);
+                    }
+                }
+                match unknown.as_slice() {
+                    [] if past_deadline => return Err(too_late()),
+                    [] => {}
+                    [handle] => {
+                        self.state.request = Some(handle.0.clone());
+                        self.save_state(cx)?;
+                        return Ok(true);
+                    }
+                    _ => {
                         return Err(JobFailure::new(
                             JobFailureKind::UnexpectedAnswer,
                             format!(
-                                "{}: the take sent at that time belongs to another take, so \
-                                 Bardo sent nothing again; look at the provider's task list",
+                                "{}: several takes were sent at that time, so Bardo sent \
+                                 nothing again; look at the provider's task list",
                                 provider_name(self.provider())
                             ),
                         ));
                     }
-                    self.state.request = Some(handle.0);
-                    self.save_state(cx)?;
-                    return Ok(true);
                 }
             }
             self.state.sent_at = Some(unix_millis(SystemTime::now()));
@@ -1655,6 +1676,13 @@ impl Bardo {
                     .cloned()
             };
             let (draft, final_take) = (result(TakeStep::Draft), result(TakeStep::Final));
+            let finished = model.as_ref().is_some_and(|model| model.finishes_draft)
+                && draft
+                    .as_ref()
+                    .zip(final_take.as_ref())
+                    .is_some_and(|(draft, made)| {
+                        draft.accepted_at.is_some() && made.made_at >= draft.made_at
+                    });
             let of_take = || jobs.iter().filter(|(_, of)| of.position == position);
             let busy = of_take().any(|(job, _)| job.state().is_active());
             // One under way, else the latest made for the take as it is now:
@@ -1674,7 +1702,12 @@ impl Bardo {
             let pending = job.as_ref().is_some_and(|(job, _)| {
                 matches!(job.state(), JobState::Failed | JobState::Cancelled) && has_request(job)
             });
-            let next = next_step(model.as_ref(), prompt.as_ref(), draft.as_ref(), now);
+            let next = next_step(
+                model.as_ref(),
+                prompt.as_ref(),
+                draft.as_ref().filter(|_| !finished),
+                now,
+            );
             let estimate = match (&model, block) {
                 (Some(model), None) => {
                     Some(self.estimate(&step_calls(model, next, take.length(), frame))?)
@@ -1683,6 +1716,7 @@ impl Bardo {
             };
             let expired = draft.as_ref().is_some_and(|draft| draft.expired(now));
             takes.push(PerformedTakeView {
+                finished,
                 follows_channel: take.model.is_none()
                     || take.model.as_ref() == channel_model.as_ref().map(|m| &m.id),
                 model,
@@ -1960,6 +1994,9 @@ impl Bardo {
         if finishes.is_some_and(|draft| draft.expired(SystemTime::now())) {
             return Err(CaptureError::DraftExpired);
         }
+        if finishes.is_some() && view.finished {
+            return Err(CaptureError::DraftFinished);
+        }
         self.require_take_key(model.id.provider())?;
         let take = &capture.takes.as_slice()[index];
         let controls = self.control_views(&capture)?;
@@ -1999,6 +2036,13 @@ impl Bardo {
             draft_realistic: finishes.is_some_and(|draft| draft.realistic),
             draft_deadline: finishes.and_then(|draft| draft.deadline).map(unix_millis),
         };
+        // Files an earlier attempt staged and never sent are not needed.
+        let now = SystemTime::now();
+        for (old, of) in self.performed_jobs(&capture) {
+            if of.position == payload.position && !old.state().is_active() && !has_request(&old) {
+                self.staging.release_staged_by(old.id(), now)?;
+            }
+        }
         let job = Job::new(self.profile.id, JobKind::PerformedTake, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
     }
@@ -2068,6 +2112,10 @@ impl Bardo {
         at: Option<SystemTime>,
     ) -> Result<(), CaptureError> {
         let (_, view) = self.performed_take(project, index)?;
+        // A draft past its deadline can no longer lead to a final.
+        if step == TakeStep::Draft && at.is_some() && view.expired {
+            return Err(CaptureError::DraftExpired);
+        }
         let made = match step {
             TakeStep::Draft => view.draft.as_ref(),
             TakeStep::Final => view.final_take.as_ref(),
@@ -3041,6 +3089,93 @@ mod tests {
     }
 
     #[test]
+    fn a_lost_send_leaves_out_what_another_take_holds() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        made(&s, project, 0, TakeStep::Draft);
+        s.app
+            .set_take_model(project, 1, Some(crate::testing::FakeModelArk::edit()))
+            .unwrap();
+        settled(&s.app, project);
+        s.app.approve_control_video(project, 1).unwrap();
+        prompt_written(&s, project, 1, "The host leans in.");
+        // The list shows take 1's draft too; take 2 adopts only its own.
+        fake.lose_answer.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 1, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(fake.requests.lock().unwrap().len(), 2, "each paid once");
+        assert_eq!(view(&s, project, 1).draft.unwrap().request, "cgt-task-2");
+        assert_eq!(view(&s, project, 0).draft.unwrap().request, "cgt-task-1");
+    }
+
+    #[test]
+    fn a_draft_makes_one_final_and_then_a_new_draft_is_due() {
+        let (s, project, _) = on_modelark();
+        made(&s, project, 0, TakeStep::Draft);
+        s.app.approve_take_draft(project, 0).unwrap();
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        // The same draft would make the same final, and its files are gone.
+        let finished = view(&s, project, 0);
+        assert!(finished.finished);
+        assert_eq!(finished.next, PerformedStep::Make(TakeStep::Draft));
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask),
+            Err(CaptureError::DraftFinished)
+        ));
+        // A new draft, once approved, can be finished again.
+        made(&s, project, 0, TakeStep::Draft);
+        assert!(!view(&s, project, 0).finished);
+        s.app.approve_take_draft(project, 0).unwrap();
+        assert_eq!(
+            view(&s, project, 0).next,
+            PerformedStep::Make(TakeStep::Final)
+        );
+    }
+
+    #[test]
+    fn a_draft_past_its_deadline_cannot_be_approved() {
+        let (s, project, _) = on_modelark();
+        made(&s, project, 0, TakeStep::Draft);
+        let draft = view(&s, project, 0).draft.unwrap();
+        s.h.db
+            .save_take_result(&TakeResult {
+                deadline: Some(SystemTime::now() - Duration::from_secs(1)),
+                ..draft
+            })
+            .unwrap();
+        assert!(matches!(
+            s.app.approve_take_draft(project, 0),
+            Err(CaptureError::DraftExpired)
+        ));
+    }
+
+    #[test]
+    fn a_send_without_an_answer_is_checked_again_never_sent_anew() {
+        let (s, project, _) = on_modelark();
+        let fake = &s.h.modelark;
+        // Sent, its answer lost, and the task list out of reach each time.
+        fake.lose_answer.store(true, Ordering::SeqCst);
+        fake.lookup_fails.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(fake.requests.lock().unwrap().len(), 1);
+        assert!(view(&s, project, 0).pending);
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Draft, BudgetConsent::Ask),
+            Err(CaptureError::TakePending)
+        ));
+        // Checking again finds it, paying nothing new.
+        fake.lookup_fails.store(false, Ordering::SeqCst);
+        s.app.check_take_again(project, 0).unwrap();
+        let ended = wait_done(&s.app, job.id());
+        assert_eq!(ended.state(), JobState::Done, "{:?}", ended.failure());
+        assert_eq!(fake.requests.lock().unwrap().len(), 1, "paid once");
+    }
+
+    #[test]
     fn a_modelark_refusal_says_why_and_its_files_go() {
         let (s, project, _) = on_modelark();
         let fake = &s.h.modelark;
@@ -3051,8 +3186,7 @@ mod tests {
         assert_eq!(failure.kind, JobFailureKind::Declined);
         assert_eq!(
             failure.detail,
-            "BytePlus refused the content: InputVideoSensitiveContentDetected: the input video \
-             may contain a real face"
+            "InputVideoSensitiveContentDetected: the input video may contain a real face"
         );
         assert_eq!(*fake.unstaged.lock().unwrap(), *fake.staged.lock().unwrap());
         assert!(byteplus_costs(&s, project).is_empty());

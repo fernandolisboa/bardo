@@ -68,4 +68,4 @@ Seedance 2.5 on BytePlus ModelArk refuses real faces in what it is sent, and can
 - A **photo of you** takes only your **Verified likeness**, the one ModelArk verified as you. Until it has one, its takes cannot be sent to BytePlus.
 - A **drawn look** can take a **Preset character** from ModelArk's library or a **Virtual portrait** you made there, or go as its image with no asset at all.
 
-An id holds for this look only: a new drawing or photo clears it. **Remove asset** sends the image again. The id stays on this computer: it never leaves in a persona package or the settings file, and duplicating the persona does not copy it.
+An id holds for this look only: it no longer holds once you pick a new drawing or photo. **Remove asset** sends the image again. The id stays on this computer: it never leaves in a persona package or the settings file, and duplicating the persona does not copy it.

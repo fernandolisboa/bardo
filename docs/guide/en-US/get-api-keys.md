@@ -38,16 +38,11 @@ You need this only for performed clips with Seedance 2.5 straight from BytePlus 
    - **Latest file version expiration policy**: on, **Specify days**, `8`, and delete.
 
    Select **Create** and then **OK**. Bardo deletes each take's files itself as soon as it no longer needs them; this rule is only the backstop.
-7. Create an access key that reaches only that bucket. Open **IAM** from your user name at the top of the console, select **Permission policy** and then **Create policy**, name it `bardo-takes` and paste this as its content, with your bucket's name in place of `BUCKET` (twice):
+7. Create an access key that reaches only that bucket. Open **IAM** from your user name at the top of the console, select **Permission policy** and then **Create policy**, name it `bardo-takes` and paste this as its content, with your bucket's name in place of `BUCKET`:
 
    ```json
    {
      "Statement": [
-       {
-         "Effect": "Allow",
-         "Action": ["tos:HeadBucket"],
-         "Resource": ["trn:tos:::BUCKET"]
-       },
        {
          "Effect": "Allow",
          "Action": ["tos:PutObject", "tos:GetObject", "tos:DeleteObject"],
@@ -58,7 +53,7 @@ You need this only for performed clips with Seedance 2.5 straight from BytePlus 
    ```
 
    Select **Submit**. Then select **User management › User** and **Create new user**, name it `bardo`, turn on **Programmatic access** and leave **Console access** off, select **Next**, add the `bardo-takes` policy, select **Next** and **Submit**. On the user's **Access key** tab, select **Create access key** and copy the access key ID and the secret access key. The secret shows only this once.
-8. Fill in the **BytePlus ModelArk** card in [Settings › API keys](bardo:go/settings/keys): the API key, the access key ID, the secret access key, the bucket's name and the region (`ap-southeast-1`, unless you made the bucket elsewhere). Select **Save key**, then **Test key**. The test asks ModelArk for a task that cannot exist and checks the bucket, which costs nothing worth counting.
+8. Fill in the **BytePlus ModelArk** card in [Settings › API keys](bardo:go/settings/keys): the API key, the access key ID, the secret access key, the bucket's name and the region (`ap-southeast-1`, unless you made the bucket elsewhere). Select **Save key**, then **Test key**. The test asks ModelArk for a task that cannot exist and writes, reads and deletes a small file in `bardo/takes/`, which costs next to nothing. To change any of the five later, fill in all five again.
 
 Seedance 2.5 refuses real faces in what it is sent, so a photo of you goes through ModelArk's asset library instead, by its id on the persona's look (Personas › The look). A drawn look can go as its image, or by an asset id too. In ModelArk's [Model Playground](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-5-260628):
 

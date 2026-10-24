@@ -666,6 +666,7 @@ pub enum Text {
     PerformedNothing,
     PerformedDraftFirst,
     PerformedDraftExpired,
+    PerformedDraftFinished,
     /// Placeholder: `{when}`.
     TakeDraftDeadline,
     TakeDraftFinishNote,
@@ -3092,6 +3093,7 @@ impl Text {
             Text::PerformedNothing => "capture.performed.nothing",
             Text::PerformedDraftFirst => "capture.performed.draft_first",
             Text::PerformedDraftExpired => "capture.performed.draft_expired",
+            Text::PerformedDraftFinished => "capture.performed.draft_finished",
             Text::TakeDraftDeadline => "capture.performed.draft_deadline",
             Text::TakeDraftFinishNote => "capture.performed.draft_finish_note",
             Text::TakeModelGone => "capture.performed.model_gone",
@@ -6389,6 +6391,7 @@ mod tests {
             Text::BytePlusCardNote,
             Text::PerformedMissingBytePlusKey,
             Text::PerformedDraftExpired,
+            Text::PerformedDraftFinished,
             Text::TakeDraftDeadline,
             Text::TakeDraftFinishNote,
         ]);

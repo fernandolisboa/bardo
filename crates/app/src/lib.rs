@@ -772,6 +772,7 @@ impl Bardo {
             owner: profile.id,
             narrations: Arc::clone(&narrations),
             captures: Arc::clone(&captures),
+            staging: Arc::clone(&staging),
             files: Arc::clone(&files),
             speech: Arc::clone(&providers.speech),
             secrets: Arc::clone(&secrets),
@@ -781,6 +782,7 @@ impl Bardo {
             owner: profile.id,
             narrations: Arc::clone(&narrations),
             captures: Arc::clone(&captures),
+            staging: Arc::clone(&staging),
             files: Arc::clone(&files),
             aligner: Arc::clone(&providers.aligner),
             secrets: Arc::clone(&secrets),
@@ -2517,6 +2519,8 @@ pub(crate) mod testing {
         pub(crate) lookups: Mutex<Vec<SystemTime>>,
         /// The next submission is taken and its answer lost.
         pub(crate) lose_answer: std::sync::atomic::AtomicBool,
+        /// Its task list does not answer while set.
+        pub(crate) lookup_fails: std::sync::atomic::AtomicBool,
         /// Its moderation refuses every request while set.
         pub(crate) refuse: std::sync::atomic::AtomicBool,
         /// Deleting staged files fails while set.
@@ -2647,15 +2651,23 @@ pub(crate) mod testing {
             _key: &ApiKey,
             request: &TakeRequest,
             since: SystemTime,
-        ) -> Result<Option<ClipHandle>, ProviderFailure> {
+        ) -> Result<Vec<ClipHandle>, ProviderFailure> {
             self.lookups.lock().unwrap().push(since);
+            if self.lookup_fails.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unreachable,
+                    "the task list did not answer",
+                ));
+            }
             let requests = self.requests.lock().unwrap();
             Ok(requests
                 .iter()
-                .rposition(|sent| {
+                .enumerate()
+                .filter(|(_, sent)| {
                     sent.step == request.step && sent.draft_task == request.draft_task
                 })
-                .map(|index| ClipHandle(format!("cgt-task-{}", index + 1))))
+                .map(|(index, _)| ClipHandle(format!("cgt-task-{}", index + 1)))
+                .collect())
         }
 
         fn keeps_staged(&self) -> bool {
