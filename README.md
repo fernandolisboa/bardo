@@ -15,7 +15,7 @@ AI-assisted, not automatic: AI speeds up research, scripting, media generation a
 
 ## Installing
 
-Download `Bardo-Setup-<version>-x64.exe` from [Releases](https://github.com/fernandolisboa/bardo/releases) and run it: it installs for your Windows user, with no administrator rights, and brings FFmpeg with it. See the guide's [Installing Bardo](docs/guide/en-US/install.md) and [ADR-0009](docs/adr/0009-windows-installer.md).
+Download `Bardo-Setup-<version>-x64.exe` from [Releases](https://github.com/fernandolisboa/bardo/releases) and run it: it installs for your Windows user, with no administrator rights, and brings FFmpeg with it. See the guide's [Installing Bardo](docs/guide/en-US/install.md) and [ADR-0009](docs/adr/0009-windows-installer.md). What changed in each version is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Development
 
