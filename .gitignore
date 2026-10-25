@@ -3,3 +3,4 @@ target/
 .env
 .ffmpeg/
 .models/
+__pycache__/
