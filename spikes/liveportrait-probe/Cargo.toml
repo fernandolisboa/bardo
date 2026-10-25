@@ -1,0 +1,37 @@
+# Spike for issue #242: runs LivePortrait's networks from Rust through ONNX
+# Runtime, with the face found by Bardo's own MediaPipe face tracker
+# (`bardo-vision`), and measures them. Not part of the app: it has its own
+# workspace and lock file so `cargo test` at the root never builds it.
+# Results and the decision: docs/spikes/liveportrait.md.
+[package]
+name = "liveportrait-probe"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.92"
+license = "UNLICENSED"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+bardo-domain = { path = "../../crates/domain" }
+bardo-vision = { path = "../../crates/vision" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The pin of ADR-0024, as `bardo-vision` has it.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls"] }
+
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "directml"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+# Pixel loops read better indexed.
+needless_range_loop = "allow"
+
+[profile.release]
+debug = "line-tables-only"

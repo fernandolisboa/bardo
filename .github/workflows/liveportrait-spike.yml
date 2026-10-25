@@ -1,0 +1,141 @@
+name: LivePortrait spike
+
+# Issue #242: converts LivePortrait's pinned networks to ONNX, cuts the
+# public-domain test take, and runs liveportrait-probe on Linux and on the
+# Windows runner's CPU (and DirectML, which on a runner with no graphics
+# card shows how the fallback behaves). The Windows job also puts together
+# the kit for the checks on the reference machine. Runs when the spike
+# changes, or by hand.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - spikes/liveportrait-probe/**
+      - .github/workflows/liveportrait-spike.yml
+
+concurrency:
+  group: liveportrait-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  convert:
+    name: Convert models and cut the take
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        # bash with pipefail, so `convert.py | tee` fails when a check does.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the pinned ffmpeg
+        run: cargo xtask fetch-ffmpeg
+      - name: Install the conversion tools
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r spikes/liveportrait-probe/tools/requirements.txt
+      - name: Convert the networks
+        run: |
+          mkdir -p lp-models
+          python spikes/liveportrait-probe/tools/convert.py lp-models --fp16 | tee lp-models/convert.log
+      - name: Cut the test take
+        run: python spikes/liveportrait-probe/tools/takes.py takes .ffmpeg/bin/ffmpeg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: liveportrait-inputs
+          path: |
+            lp-models/*.onnx
+            lp-models/*.png
+            lp-models/*.json
+            lp-models/convert.log
+            lp-models/SHA256SUMS
+            takes/take-*.mp4
+          retention-days: 7
+
+  probe:
+    name: Probe (${{ matrix.os }})
+    needs: convert
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      P: spikes/liveportrait-probe/target/release/liveportrait-probe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            spikes/liveportrait-probe
+      - name: Fetch the pinned ffmpeg
+        run: cargo xtask fetch-ffmpeg
+      - name: Cache the pinned vision models
+        uses: actions/cache@v4
+        with:
+          path: .models
+          key: models-${{ hashFiles('crates/vision/models.toml') }}
+      - name: Fetch the pinned vision models (MediaPipe's face mesh)
+        run: cargo xtask fetch-models
+      - uses: actions/download-artifact@v4
+        with:
+          name: liveportrait-inputs
+      - name: Build liveportrait-probe
+        working-directory: spikes/liveportrait-probe
+        run: |
+          cargo fmt --check
+          cargo clippy --release --all-targets --locked -- -D warnings
+          cargo test --release --locked
+          cargo build --release --locked
+      - name: Load and run every network (CPU)
+        run: $P info --models lp-models --ep cpu --placement --out info-cpu-${{ runner.os }}.json
+      - name: Load and run every network (DirectML, falls back to the CPU when it cannot start)
+        if: runner.os == 'Windows'
+        run: $P info --models lp-models --ep directml --placement --out info-directml.json
+      - name: Animate the Mona Lisa look by the take (first 30 frames, CPU)
+        run: $P animate --models lp-models --vision .models --take takes/take-head-20s.mp4 --look spikes/liveportrait-probe/looks/mona-lisa.jpg --frames 30 --out mona-lisa-${{ runner.os }}.mp4 --side-by-side mona-lisa-sbs-${{ runner.os }}.mp4 --report animate-${{ runner.os }}.json
+      - name: Animate the take's first frame by the take (first 30 frames, CPU, against the take)
+        run: $P animate --models lp-models --vision .models --take takes/take-head-20s.mp4 --self --frames 30 --out self-${{ runner.os }}.mp4 --report self-${{ runner.os }}.json
+      - name: The same with the GridSample warping module
+        run: $P animate --models lp-models --vision .models --take takes/take-head-20s.mp4 --self --frames 10 --warp warping_module_gridsample --out self-gridsample-${{ runner.os }}.mp4 --report self-gridsample-${{ runner.os }}.json
+      - name: Put together the kit for the checks on a real Windows machine
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p kit/models kit/vision kit/takes kit/looks
+          cp spikes/liveportrait-probe/target/release/liveportrait-probe.exe kit/
+          cp spikes/liveportrait-probe/target/release/*.dll kit/ 2>/dev/null || true
+          cp .ffmpeg/bin/* kit/
+          cp lp-models/*.onnx lp-models/*.png lp-models/*.json kit/models/
+          cp .models/face_*.onnx kit/vision/
+          cp takes/take-*.mp4 kit/takes/
+          cp spikes/liveportrait-probe/looks/*.jpg kit/looks/
+          ls -l kit kit/models kit/vision
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: liveportrait-probe-windows-kit
+          path: kit
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: liveportrait-results-${{ runner.os }}
+          path: |
+            *.json
+            *.mp4
+          retention-days: 30

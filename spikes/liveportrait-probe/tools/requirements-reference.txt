@@ -1,0 +1,18 @@
+# tools/fixtures.py, reference.py and compare_crop.py: upstream's own
+# dependencies on top of the converter's.
+-r requirements.txt
+# mediapipe needs libegl1 and libgles2 on Linux.
+albumentations==2.0.8
+ffmpeg-python==0.2.0
+imageio==2.38.1
+imageio-ffmpeg==0.6.0
+lmdb==3.0.0
+mediapipe==1.1.1
+pillow==13.0.0
+pykalman==0.11.2
+requests==2.34.2
+rich==15.0.0
+scikit-image==0.26.0
+torchvision==0.29.1+cpu
+tqdm==4.70.1
+tyro==1.0.16
