@@ -1,6 +1,7 @@
 //! Where LivePortrait crops a face, from its landmarks (upstream
-//! `src/utils/crop.py`), with MediaPipe's mesh standing in for the 203
-//! points upstream finds with InsightFace and its own landmark model.
+//! `src/utils/crop.py`), with MediaPipe's mesh standing in for upstream's
+//! points: InsightFace's 106 for a still source, its own landmark model's
+//! 203 for a driving video.
 
 /// A 2 × 3 affine transform, `[x', y'] = m · [x, y, 1]`.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
@@ -64,9 +65,9 @@ impl FacePoints {
     }
 
     /// MediaPipe's 478-point mesh, in pixels. The points kept are the ones
-    /// that match what upstream's 203 cover: the face's outline from ear to
-    /// ear through the chin (not the forehead, which the 203 leave out), the
-    /// brows, the eyes and the mouth's corners.
+    /// that match what upstream's 106 and 203 cover: the face's outline from
+    /// ear to ear through the chin (not the forehead, which both leave out),
+    /// the brows, the eyes and the mouth's corners.
     pub fn from_mediapipe(mesh: &[[f32; 2]]) -> FacePoints {
         let left = mean(mesh, &MP_LEFT_EYE);
         let right = mean(mesh, &MP_RIGHT_EYE);

@@ -140,6 +140,31 @@ pub struct Inputs<'a> {
     pub side_by_side: Option<&'a Path>,
     pub frames: Option<usize>,
     pub max_dim: usize,
+    /// The frame of the take motion is measured from.
+    pub reference: Reference,
+}
+
+/// The frame of the take that the look stands for: its motion from there
+/// is what moves the look.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub enum Reference {
+    /// The first frame with a face, as upstream.
+    First,
+    /// The head's pose from the first frame with a face, the expression
+    /// from the frame whose mouth is most closed: a take that starts
+    /// mid-word otherwise opens the look's mouth only as far as the
+    /// performer's opens beyond that first frame.
+    ClosedMouth,
+}
+
+impl Reference {
+    pub fn parse(v: &str) -> Result<Self> {
+        match v {
+            "first" => Ok(Self::First),
+            "closed-mouth" => Ok(Self::ClosedMouth),
+            _ => anyhow::bail!("--reference first|closed-mouth, not {v}"),
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -158,6 +183,9 @@ pub struct Report {
     pub wall_s: f64,
     /// Frames of the take where the tracker saw no face.
     pub frames_without_face: usize,
+    /// With `--reference closed-mouth`, the take's frame the expression was
+    /// measured from.
+    pub expression_frame: Option<usize>,
     pub source_lip_ratio: f32,
     pub lip_closed: bool,
     pub source_crop: Affine,
@@ -301,12 +329,25 @@ pub fn animate(inputs: &Inputs, choice: &Choice) -> Result<Report> {
     let mut driving_tracker = vision
         .face_tracker()
         .map_err(|e| anyhow::anyhow!("face tracker: {e}"))?;
+    // The frames motion is measured from: the first with a face (upstream
+    // starts the take there) and the one whose mouth is most closed.
+    let mut first_face: Option<Image> = None;
+    let mut closed: Option<(f32, usize, Image)> = None;
     let mut reader = Reader::open(inputs.take, &p, inputs.frames)?;
     let mut n = 0usize;
     while let Some(frame) = reader.next_frame()? {
         let at = Duration::from_secs_f64(n as f64 / p.fps);
         match t.time("face_take", || mesh(driving_tracker.as_mut(), &frame, at))? {
-            Some(m) => boxes.push(crop::driving_box(&FacePoints::from_mediapipe(&m))),
+            Some(m) => {
+                boxes.push(crop::driving_box(&FacePoints::from_mediapipe(&m)));
+                let ratio = crop::lip_ratio_mediapipe(&m);
+                if inputs.reference == Reference::ClosedMouth
+                    && closed.as_ref().is_none_or(|(best, _, _)| ratio < *best)
+                {
+                    closed = Some((ratio, n, frame.clone()));
+                }
+                first_face.get_or_insert(frame);
+            }
             None => missing += 1,
         }
         n += 1;
@@ -314,29 +355,45 @@ pub fn animate(inputs: &Inputs, choice: &Choice) -> Result<Report> {
     drop(reader);
     let global = crop::mean_box(&boxes).context("no face anywhere in the take")?;
     let d_o2c = crop::box_transform(&global, OUT as f32);
+    let crop_motion = |nets: &mut Networks, frame: &Image| {
+        run_motion(
+            &mut nets.motion,
+            &image::half(&image::warp(frame, &d_o2c, OUT, OUT)),
+        )
+    };
+    let mut first = crop_motion(
+        &mut nets,
+        &first_face.context("no face anywhere in the take")?,
+    )?;
+    let expression_frame = match closed {
+        Some((_, n, frame)) => {
+            first.exp = crop_motion(&mut nets, &frame)?.exp;
+            Some(n)
+        }
+        None => None,
+    };
 
     // Pass 2: every frame's motion moves the look's keypoints.
     let audio = p.has_audio.then_some(inputs.take);
-    let mut writer = Writer::create(inputs.out, look.width, look.height, p.fps, audio)?;
+    let mut writer = Writer::create(inputs.out, look.width, look.height, &p.rate, audio)?;
     let mut sbs = match inputs.side_by_side {
         Some(path) => {
             let w = p.width * look.height / p.height / 2 * 2 + look.width;
-            Some(Writer::create(path, w, look.height, p.fps, audio)?)
+            Some(Writer::create(path, w, look.height, &p.rate, audio)?)
         }
         None => None,
     };
     let mut truth = match inputs.look {
         None => Some(Reader::open_scaled(
             inputs.take,
-            look.width,
-            look.height,
+            &p,
+            inputs.max_dim,
             inputs.frames,
         )?),
         Some(_) => None,
     };
     let mut errors = ErrorSums::default();
     let mut reader = Reader::open(inputs.take, &p, inputs.frames)?;
-    let mut first: Option<Motion> = None;
     let mut frames = 0usize;
     let shape_f = [1usize, 32, 16, 64, 64];
     let shape_kp = [1usize, motion::KP, 3];
@@ -345,8 +402,7 @@ pub fn animate(inputs: &Inputs, choice: &Choice) -> Result<Report> {
             image::half(&image::warp(&frame, &d_o2c, OUT, OUT))
         });
         let m = t.time("motion", || run_motion(&mut nets.motion, &driving))?;
-        let first = first.get_or_insert_with(|| m.clone());
-        let mut x_d = src.driven(first, &m);
+        let mut x_d = src.driven(&first, &m);
         let input = motion::stitching_input(&x_s, &x_d);
         let delta = t.time("stitching", || {
             nets.stitching.run(&[(&[1, input.len()], &input)])
@@ -412,6 +468,7 @@ pub fn animate(inputs: &Inputs, choice: &Choice) -> Result<Report> {
         projected_30s_take_s: (setup_ms + take_frames * (per_frame + face_ms)) / 1000.0,
         wall_s: wall.elapsed().as_secs_f64(),
         frames_without_face: missing,
+        expression_frame,
         source_lip_ratio: lip_ratio,
         lip_closed: lip_delta.is_some(),
         source_crop: o2c,

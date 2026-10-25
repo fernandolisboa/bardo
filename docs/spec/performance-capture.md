@@ -95,6 +95,7 @@ It stages the inputs, submits, polls, downloads and quotes. The job saves the pr
     - a drawn look: one of ModelArk's preset digital characters, or a private virtual portrait the user made there, which ModelArk requires not to resemble any real person;
     - the user's own photo: the user's likeness added through ModelArk's real-person verification, and nothing else.
   - The asset library needs ModelArk's Advanced Creation Rights and a verified account.
+- **Later: LivePortrait on the computer** (#242, ADR-0026), for Recording only, as a local job rather than a take generator: no key, no cost, no draft, the face pasted into the look. It becomes the default take model only if the reference machine's graphics card makes a 30 s take within 5 minutes.
 - **Not used:**
   - temporary public file hosts, since they would publish the user's recording;
   - preprocessing in the cloud, since local analysis is free, works offline and keeps the face on the computer;

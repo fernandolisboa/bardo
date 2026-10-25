@@ -5,7 +5,9 @@
 LIVEPORTRAIT_CODE is upstream's repository at the pinned commit (convert.py
 clones it into OUT_DIR/.work/LivePortrait). Every value is computed by
 calling upstream's functions, so the Rust port's tests check it against
-upstream, not against a second reading of the same code.
+upstream, not against a second reading of the same code. The one
+exception is the relative motion, which upstream computes inline in its
+pipeline: its lines are copied here as they stand.
 """
 
 import json

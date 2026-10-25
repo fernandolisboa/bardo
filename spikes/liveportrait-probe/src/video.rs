@@ -43,16 +43,47 @@ fn ffprobe() -> PathBuf {
 }
 
 pub struct Probe {
+    /// The size frames decode at: turned upright, as ffmpeg turns a phone's
+    /// rotated recording.
     pub width: usize,
     pub height: usize,
     pub fps: f64,
+    /// The frame rate as ffmpeg takes it (`30000/1001`); frames are read
+    /// and written at this constant rate.
+    pub rate: String,
     pub has_audio: bool,
+}
+
+/// The frame rate from ffprobe's average rate, else its base rate: a
+/// rational such as `30000/1001`, and its value. `0/0` and the like are
+/// skipped.
+fn frame_rate(avg: Option<&str>, base: Option<&str>) -> Option<(String, f64)> {
+    [avg, base].into_iter().flatten().find_map(|rate| {
+        let (num, den) = rate.split_once('/').unwrap_or((rate, "1"));
+        let fps = num.parse::<f64>().ok()? / den.parse::<f64>().ok()?;
+        (fps.is_finite() && fps > 0.0).then(|| (rate.to_string(), fps))
+    })
+}
+
+/// The displayed size of a stored `width` × `height` frame turned by
+/// `rotation` degrees.
+fn upright(width: usize, height: usize, rotation: f64) -> (usize, usize) {
+    if (rotation.round() as i64).rem_euclid(180) == 90 {
+        (height, width)
+    } else {
+        (width, height)
+    }
 }
 
 pub fn probe(path: &Path) -> Result<Probe> {
     let out = Command::new(ffprobe())
         .args(["-v", "error", "-show_entries"])
-        .args(["stream=codec_type,width,height,r_frame_rate", "-of", "json"])
+        .args([
+            "stream=codec_type,width,height,r_frame_rate,avg_frame_rate:\
+             stream_side_data=rotation:stream_tags=rotate",
+            "-of",
+            "json",
+        ])
         .arg(path)
         .output()
         .context("running ffprobe")?;
@@ -65,12 +96,23 @@ pub fn probe(path: &Path) -> Result<Probe> {
         .iter()
         .find(|s| s["codec_type"] == "video")
         .context("no video stream")?;
-    let rate = v["r_frame_rate"].as_str().unwrap_or("30/1");
-    let (num, den) = rate.split_once('/').unwrap_or((rate, "1"));
+    let (rate, fps) = frame_rate(v["avg_frame_rate"].as_str(), v["r_frame_rate"].as_str())
+        .unwrap_or(("30/1".into(), 30.0));
+    let rotation = v["side_data_list"]
+        .as_array()
+        .and_then(|list| list.iter().find_map(|d| d["rotation"].as_f64()))
+        .or_else(|| v["tags"]["rotate"].as_str().and_then(|r| r.parse().ok()))
+        .unwrap_or(0.0);
+    let (width, height) = upright(
+        v["width"].as_u64().context("width")? as usize,
+        v["height"].as_u64().context("height")? as usize,
+        rotation,
+    );
     Ok(Probe {
-        width: v["width"].as_u64().context("width")? as usize,
-        height: v["height"].as_u64().context("height")? as usize,
-        fps: num.parse::<f64>()? / den.parse::<f64>()?,
+        width,
+        height,
+        fps,
+        rate,
         has_audio: streams.iter().any(|s| s["codec_type"] == "audio"),
     })
 }
@@ -140,6 +182,9 @@ impl Reader {
     pub fn open(path: &Path, p: &Probe, max_frames: Option<usize>) -> Result<Self> {
         let mut cmd = Command::new(ffmpeg());
         cmd.args(["-v", "error", "-nostdin", "-i"]).arg(path);
+        // A phone records at a variable rate; the frames are read at the
+        // constant rate the result is written at, so they keep to the sound.
+        cmd.args(["-fps_mode", "cfr", "-r", &p.rate]);
         if let Some(n) = max_frames {
             cmd.args(["-frames:v", &n.to_string()]);
         }
@@ -158,20 +203,25 @@ impl Reader {
         })
     }
 
-    /// The frames scaled to `width` × `height` (bilinear).
+    /// The frames scaled as `read_image` scales a still to `max_dim`.
     pub fn open_scaled(
         path: &Path,
-        width: usize,
-        height: usize,
+        p: &Probe,
+        max_dim: usize,
         max_frames: Option<usize>,
     ) -> Result<Self> {
+        let ((sw, sh), (width, height)) = limited_size(p.width, p.height, max_dim);
         let mut cmd = Command::new(ffmpeg());
         cmd.args(["-v", "error", "-nostdin", "-i"]).arg(path);
+        cmd.args(["-fps_mode", "cfr", "-r", &p.rate]);
         if let Some(n) = max_frames {
             cmd.args(["-frames:v", &n.to_string()]);
         }
-        cmd.args(["-vf", &format!("scale={width}:{height}:flags=bilinear")])
-            .args(["-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+        cmd.args([
+            "-vf",
+            &format!("scale={sw}:{sh}:flags=bilinear,crop={width}:{height}:0:0"),
+        ])
+        .args(["-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
         let mut child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -243,19 +293,12 @@ impl Writer {
         path: &Path,
         width: usize,
         height: usize,
-        fps: f64,
+        rate: &str,
         audio: Option<&Path>,
     ) -> Result<Self> {
         let mut cmd = Command::new(ffmpeg());
         cmd.args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24"])
-            .args([
-                "-s",
-                &format!("{width}x{height}"),
-                "-r",
-                &format!("{fps}"),
-                "-i",
-                "-",
-            ]);
+            .args(["-s", &format!("{width}x{height}"), "-r", rate, "-i", "-"]);
         if let Some(a) = audio {
             cmd.arg("-i")
                 .arg(a)
@@ -298,5 +341,29 @@ mod tests {
         assert_eq!(limited_size(1920, 1080, 1280), ((1280, 720), (1280, 720)));
         assert_eq!(limited_size(1083, 1921, 1280), ((721, 1280), (720, 1280)));
         assert_eq!(limited_size(1001, 777, 0), ((1001, 777), (1000, 776)));
+    }
+
+    #[test]
+    fn frame_rate_prefers_the_average_and_skips_unknown_rates() {
+        let rate = |avg, base| frame_rate(avg, base).map(|(r, f)| (r, (f * 1000.0).round()));
+        assert_eq!(
+            rate(Some("30000/1001"), Some("60/1")),
+            Some(("30000/1001".into(), 29970.0))
+        );
+        assert_eq!(
+            rate(Some("0/0"), Some("25/1")),
+            Some(("25/1".into(), 25000.0))
+        );
+        assert_eq!(rate(None, Some("24")), Some(("24".into(), 24000.0)));
+        assert_eq!(rate(Some("0/0"), None), None);
+    }
+
+    #[test]
+    fn a_phone_recording_turned_a_quarter_is_read_upright() {
+        assert_eq!(upright(1920, 1080, -90.0), (1080, 1920));
+        assert_eq!(upright(1920, 1080, 90.0), (1080, 1920));
+        assert_eq!(upright(1920, 1080, 270.0), (1080, 1920));
+        assert_eq!(upright(1920, 1080, 180.0), (1920, 1080));
+        assert_eq!(upright(1920, 1080, 0.0), (1920, 1080));
     }
 }

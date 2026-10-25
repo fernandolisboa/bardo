@@ -22,9 +22,9 @@ input. Writes, in OUT_DIR:
 Then every file's weights are kept as float16 and turned back into float32
 when the model loads (as crates/vision does), and the result is compared
 with the float32 file again. `--fp16` also writes `*_fp16.onnx` copies of
-the warping module and the generator that compute in float16 (inputs and
-outputs stay float32), for DirectML; ONNX Runtime's CPU has no float16
-kernels for most of their operators.
+the warping modules and the generator that compute in float16 (inputs and
+outputs stay float32), for DirectML, and checks each against its float32
+file on the CPU.
 """
 
 import argparse
@@ -105,8 +105,11 @@ def grid_sample_3d(inp, grid):
     x0, y0, z0 = torch.floor(x), torch.floor(y), torch.floor(z)
     fx, fy, fz = x - x0, y - y0, z - z0
     table = inp.permute(0, 2, 3, 4, 1).reshape(n * d * h * w, c)
-    base = (torch.arange(n, dtype=inp.dtype) * (d * h * w)).reshape(n, 1)
+    base = (torch.arange(n, dtype=torch.long) * (d * h * w)).reshape(n, 1)
     indices, weights = [], []
+    # Each corner's coordinates are clamped while still small whole numbers,
+    # then the voxel index is built in int64: as a float it would pass
+    # float16's largest value in the float16 copies.
     for dz, wz in ((0, 1 - fz), (1, fz)):
         zi = z0 + dz
         inside_z = (zi >= 0) & (zi <= d - 1)
@@ -116,10 +119,10 @@ def grid_sample_3d(inp, grid):
             for dx, wx in ((0, 1 - fx), (1, fx)):
                 xi = x0 + dx
                 inside = inside_y & (xi >= 0) & (xi <= w - 1)
-                index = (zi.clamp(0, d - 1) * h + yi.clamp(0, h - 1)) * w + xi.clamp(0, w - 1) + base
-                indices.append(index)
+                zc, yc, xc = (v.clamp(0, m - 1).long() for v, m in ((zi, d), (yi, h), (xi, w)))
+                indices.append((zc * h + yc) * w + xc + base)
                 weights.append(wz * wy * wx * inside.to(inp.dtype))
-    index = torch.stack(indices).reshape(-1).long()
+    index = torch.stack(indices).reshape(-1)
     weight = torch.stack(weights).reshape(8, n * p, 1)
     corners = table[index].reshape(8, n * p, c)
     out = (corners * weight).sum(0)
@@ -265,7 +268,10 @@ def export_all(nets, out):
     finally:
         F.grid_sample = original
 
+    # export() checked the rewrite against PyTorch running the rewrite
+    # itself; check it against F.grid_sample too.
     warped = Warp(nets["warping_module"])(feature, kp_driving, kp_source)
+    check(out / "warping_module.onnx", warp_feeds, (warped,))
     export(nets["spade_generator"], {"feature": warped}, ["image"], out / "spade_generator.onnx", 17)
 
     feeds = {
@@ -327,15 +333,37 @@ def half_weights(path, feeds):
     return worst, angle
 
 
-def float16_copy(path):
+FLOAT16_TOLERANCE = 2e-2
+
+
+def float16_copy(path, feeds):
     """A copy of the model at `path` that computes in float16, its inputs
-    and outputs still float32."""
+    and outputs still float32 (and the voxel indices of the Gather warping
+    module int64), checked against the float32 file."""
     import onnx
+    import onnxruntime as ort
     from onnxconverter_common import float16
 
-    model = float16.convert_float_to_float16(onnx.load(str(path)), keep_io_types=True)
+    model = onnx.load(str(path))
+    own_casts = {n.name for n in model.graph.node if n.op_type == "Cast"}
+    model = float16.convert_float_to_float16(model, keep_io_types=True)
+    # The converter leaves the graph's own casts to float32 as they were,
+    # though it types their outputs float16 (the casts it adds itself are
+    # right as they are).
+    for node in model.graph.node:
+        if node.op_type == "Cast" and node.name in own_casts:
+            for attr in node.attribute:
+                if attr.name == "to" and attr.i == onnx.TensorProto.FLOAT:
+                    attr.i = onnx.TensorProto.FLOAT16
     dest = path.with_name(path.stem + "_fp16.onnx")
     onnx.save(model, str(dest))
+    feeds = {k: v.numpy() for k, v in feeds.items()}
+    ref = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"]).run(None, feeds)
+    got = ort.InferenceSession(str(dest), providers=["CPUExecutionProvider"]).run(None, feeds)
+    worst = max(float(np.abs(g - r).max()) / (float(np.abs(r).max()) or 1.0) for g, r in zip(got, ref))
+    print(f"{dest.name}: computing in float16, max difference from float32 {worst:.2e} of the range", flush=True)
+    if worst > FLOAT16_TOLERANCE:
+        sys.exit(f"{dest.name}: float16 compute changes the output too much")
     return dest
 
 
@@ -355,7 +383,7 @@ def main():
 
     if a.fp16:
         for name in ["warping_module.onnx", "warping_module_gridsample.onnx", "spade_generator.onnx"]:
-            print(f"wrote {float16_copy(out / name).name}", flush=True)
+            float16_copy(out / name, feeds[name])
     for path in sorted(out.glob("*.onnx")):
         if path.stem.endswith("_fp16"):
             continue

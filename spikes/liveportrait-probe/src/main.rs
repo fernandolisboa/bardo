@@ -6,11 +6,15 @@
 //!       (--look IMAGE | --self) --out OUT.mp4 [--side-by-side OUT.mp4]
 //!       [--report OUT.json] [--frames N] [--max-dim 1280]
 //!       [--warp warping_module] [--generator spade_generator]
+//!       [--reference first|closed-mouth]
 //!
 //! `--models` holds tools/convert.py's output; `--vision` Bardo's own
 //! vision models (`cargo xtask fetch-models`), for MediaPipe's face mesh.
 //! `--self` animates the take's first frame by the take, and compares each
-//! result with the take's own frame. Common options: --ep cpu|directml
+//! result with the take's own frame. `--reference` picks the take's frames
+//! the look stands for: the first with a face (upstream), or that one for
+//! the head's pose and the one whose mouth is most closed for the
+//! expression (`closed-mouth`). Common options: --ep cpu|directml
 //! (default cpu), --threads N (default: ONNX Runtime's choice).
 
 mod animate;
@@ -111,6 +115,7 @@ fn main() -> Result<()> {
                 side_by_side: args.get("side-by-side").map(Path::new),
                 frames: args.number("frames")?,
                 max_dim: args.number("max-dim")?.unwrap_or(1280),
+                reference: animate::Reference::parse(args.get("reference").unwrap_or("first"))?,
             };
             let choice = animate::Choice {
                 ep,

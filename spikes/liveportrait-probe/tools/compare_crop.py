@@ -1,13 +1,14 @@
 """Compare the crops liveportrait-probe takes from MediaPipe's mesh with
-upstream's, which come from InsightFace and LivePortrait's 203-point
-landmark model.
+upstream's: the source crop from InsightFace's 106 points, the driving box
+and the lip ratio from LivePortrait's 203-point landmark model.
 
     python tools/compare_crop.py LIVEPORTRAIT_CODE WEIGHTS FACE_LANDMARKER_TASK OUT.json VIDEO_OR_IMAGE...
 
 LIVEPORTRAIT_CODE and WEIGHTS as for reference.py (InsightFace's models are
 for non-commercial research: run here, never shipped). The MediaPipe points
-and the crop arithmetic are read from src/crop.rs, so this measures what
-the probe does. For each frame: the crop's center offset and size as a
+are read from src/crop.rs and the crop arithmetic mirrors it; the mesh comes
+from MediaPipe's own Python package (the same Face Landmarker model the
+probe runs through bardo-vision, without its one-euro smoothing). For each frame: the crop's center offset and size as a
 share of upstream's crop size, and the tilt difference in degrees, for the
 source crop (turned with the face) and the driving box (upright); and the
 lip-open ratio from both sets of points.
@@ -93,7 +94,7 @@ def main(code, weights, task, out, *inputs):
     import mediapipe as mp
     from src.config.crop_config import CropConfig
     from src.utils.cropper import Cropper
-    from src.utils.crop import parse_pt2_from_pt203
+    from src.utils.crop import parse_pt2_from_pt106, parse_pt2_from_pt203
     from src.utils.retargeting_utils import calc_lip_close_ratio
 
     cfg = CropConfig(flag_force_cpu=True)
@@ -117,20 +118,19 @@ def main(code, weights, task, out, *inputs):
             if not found.face_landmarks:
                 continue
             mesh = np.array([[p.x * w, p.y * h] for p in found.face_landmarks[0]])
-            # Upstream: InsightFace finds the face once, then its landmark
-            # model tracks the 203 points from the last frame's.
-            if last is None:
-                faces = cropper.face_analysis_wrapper.get(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), flag_do_landmark_2d_106=True, direction=cfg.direction)
-                if not faces:
-                    continue
-                last = cropper.human_landmark_runner.run(rgb, faces[0].landmark_2d_106)
-            else:
-                last = cropper.human_landmark_runner.run(rgb, last)
+            # Upstream crops a source image from InsightFace's 106 points
+            # (found in that image); a driving video from the 203 points its
+            # landmark model tracks from the last frame's.
+            faces = cropper.face_analysis_wrapper.get(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), flag_do_landmark_2d_106=True, direction=cfg.direction)
+            if not faces:
+                continue
+            pt106 = np.asarray(faces[0].landmark_2d_106, dtype=np.float64)
+            last = cropper.human_landmark_runner.run(rgb, pt106 if last is None else last)
             pts = np.asarray(last, dtype=np.float64)
-            pt2 = parse_pt2_from_pt203(pts)
+            src2, drv2 = parse_pt2_from_pt106(pt106), parse_pt2_from_pt203(pts)
             ref = {
-                "source": rect(pts, pt2[0], pt2[1], cfg.scale, cfg.vy_ratio),
-                "driving": rect(pts, pt2[0], pt2[1], cfg.scale_crop_driving_video, cfg.vy_ratio_crop_driving_video),
+                "source": rect(pt106, src2[0], src2[1], cfg.scale, cfg.vy_ratio),
+                "driving": rect(pts, drv2[0], drv2[1], cfg.scale_crop_driving_video, cfg.vy_ratio_crop_driving_video),
             }
             points, eyes, mouth = mp_face(mesh)
             got = {
