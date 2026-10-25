@@ -4,10 +4,10 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     AnalysisPart, Capture, CaptureConfirmation, CaptureId, CaptureRepository, CaptureVideo,
-    CaptureVoice, ClipModelRef, ControlVideo, DepthRange, Device, JobId, Money, NarrationId,
-    ProfileId, Provider, RepositoryError, SetSource, Take, TakeAnalysis, TakeChecks, TakeMode,
-    TakePrompt, TakeResult, TakeSet, TakeStep, Takes, TemplateUsed, TemplateVersionId,
-    VideoProjectId, VoiceRef,
+    CaptureVoice, ClipModelRef, ControlVideo, DepthRange, Device, FaceMeasures, JobId, Money,
+    NarrationId, PreflightOverride, ProfileId, Provider, RepositoryError, SetSource, Take,
+    TakeAnalysis, TakeChecks, TakeMode, TakePrompt, TakeResult, TakeSet, TakeStep, Takes,
+    TemplateUsed, TemplateVersionId, VideoProjectId, VoiceRef,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -380,7 +380,7 @@ impl CaptureRepository for Database {
             .prepare(
                 "SELECT capture_id, position, part, revision, device, fallback, model, frames,
                      no_face, several_faces, small_face, turned, mask_jumps, depth_far,
-                     depth_near, finished_at, job_id
+                     depth_near, finished_at, job_id, face_height_sum, cut_off, fast
                  FROM take_analysis WHERE project_id = ?1
                  ORDER BY position, part = 'depth'",
             )
@@ -406,6 +406,7 @@ impl CaptureRepository for Database {
                     depth: [row.get(13)?, row.get(14)?],
                     finished_at: row.get(15)?,
                     job: row.get(16)?,
+                    measures: [row.get(17)?, row.get(18)?, row.get(19)?],
                 })
             })
             .map_err(boxed)?;
@@ -425,9 +426,10 @@ impl CaptureRepository for Database {
             .execute(
                 "INSERT OR REPLACE INTO take_analysis (project_id, capture_id, position, part,
                      revision, device, fallback, model, frames, no_face, several_faces,
-                     small_face, turned, mask_jumps, depth_far, depth_near, finished_at, job_id)
+                     small_face, turned, mask_jumps, depth_far, depth_near, finished_at, job_id,
+                     face_height_sum, cut_off, fast)
                  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18
+                     ?17, ?18, ?19, ?20, ?21
                  WHERE EXISTS (
                      SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
                      WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3
@@ -451,6 +453,11 @@ impl CaptureRepository for Database {
                     analysis.depth_range.map(|range| range.near),
                     to_unix_millis(analysis.finished_at),
                     analysis.job.map(|job| job.to_string()),
+                    checks
+                        .measures
+                        .map(|m| i64::try_from(m.height_sum).unwrap_or(i64::MAX)),
+                    checks.measures.map(|m| m.cut_off),
+                    checks.measures.map(|m| m.fast),
                 ],
             )
             .map_err(boxed)?;
@@ -660,7 +667,8 @@ impl CaptureRepository for Database {
                      priced_model, prompt, template_id, template_number, look, realistic,
                      request, cost_micros, file, duration_ms, made_at, job_id, accepted_at,
                      seed, deadline
-                 FROM take_result WHERE project_id = ?1 ORDER BY position, step = 'final'",
+                 FROM take_result WHERE project_id = ?1
+                 ORDER BY position, CASE step WHEN 'draft' THEN 0 WHEN 'final' THEN 1 ELSE 2 END",
             )
             .map_err(boxed)?;
         let rows = statement
@@ -764,6 +772,112 @@ impl CaptureRepository for Database {
             .map_err(boxed)?;
         Ok(changed == 1)
     }
+
+    fn remove_take_result(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        step: TakeStep,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM take_result WHERE project_id = ?1 AND position = ?2 AND step = ?3",
+                params![project.to_string(), position, step.code()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn preflight_overrides(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<PreflightOverride>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT capture_id, position, control, overridden_at
+                 FROM take_preflight_override WHERE project_id = ?1 ORDER BY position",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(boxed)?;
+        rows.map(|row| {
+            let (capture, position, control, at) = row.map_err(boxed)?;
+            Ok(PreflightOverride {
+                project,
+                capture: CaptureId::from(uuid(&capture)?),
+                position: u32::try_from(position).map_err(boxed)?,
+                control,
+                at: from_unix_millis(at),
+            })
+        })
+        .collect()
+    }
+
+    fn save_preflight_override(&self, chosen: &PreflightOverride) -> Result<bool, RepositoryError> {
+        // Kept only while the take is still there on the project's capture.
+        let saved = self
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO take_preflight_override (project_id, capture_id,
+                     position, control, overridden_at)
+                 SELECT ?1, ?2, ?3, ?4, ?5
+                 WHERE EXISTS (
+                     SELECT 1 FROM capture c JOIN capture_take t ON t.project_id = c.project_id
+                     WHERE c.project_id = ?1 AND c.id = ?2 AND t.position = ?3)",
+                params![
+                    chosen.project.to_string(),
+                    chosen.capture.to_string(),
+                    chosen.position,
+                    chosen.control,
+                    to_unix_millis(chosen.at),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(saved == 1)
+    }
+
+    fn take_cap(&self, project: VideoProjectId) -> Result<Option<Money>, RepositoryError> {
+        let micros: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT take_cap_micros FROM video_project WHERE id = ?1",
+                [project.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?
+            .flatten();
+        micros
+            .map(|micros| u64::try_from(micros).map(Money::from_micros).map_err(boxed))
+            .transpose()
+    }
+
+    fn save_take_cap(
+        &self,
+        project: VideoProjectId,
+        cap: Option<Money>,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE video_project SET take_cap_micros = ?2 WHERE id = ?1",
+                params![
+                    project.to_string(),
+                    cap.map(|cap| i64::try_from(cap.micros()).unwrap_or(i64::MAX))
+                        .filter(|micros| *micros > 0)
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
 }
 
 /// The template version of a prompt or result, as stored.
@@ -854,6 +968,9 @@ struct AnalysisRow {
     depth: [Option<i64>; 2],
     finished_at: i64,
     job: Option<String>,
+    /// The preflight measures: face heights summed, frames cut off, fast
+    /// frames.
+    measures: [Option<i64>; 3],
 }
 
 impl AnalysisRow {
@@ -889,6 +1006,14 @@ impl AnalysisRow {
                 small_face: frames(small_face)?,
                 turned: frames(turned)?,
                 mask_jumps: frames(mask_jumps)?,
+                measures: match self.measures {
+                    [Some(height_sum), Some(cut_off), Some(fast)] => Some(FaceMeasures {
+                        height_sum: u64::try_from(height_sum).map_err(boxed)?,
+                        cut_off: frames(cut_off)?,
+                        fast: frames(fast)?,
+                    }),
+                    _ => None,
+                },
             },
             depth_range,
             finished_at: from_unix_millis(self.finished_at),
@@ -1122,6 +1247,12 @@ mod tests {
                 small_face: 3,
                 turned: 4,
                 mask_jumps: 5,
+                // Measured by the face analysis only.
+                measures: (part == AnalysisPart::Face).then_some(FaceMeasures {
+                    height_sum: 22_000,
+                    cut_off: 6,
+                    fast: 7,
+                }),
             },
             depth_range: (part == AnalysisPart::Depth).then_some(DepthRange {
                 far: 1_200,
@@ -1460,6 +1591,91 @@ mod tests {
     }
 
     #[test]
+    fn a_test_take_round_trips_and_goes_when_discarded() {
+        let (db, project) = setup();
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let saved = capture(&project, &narration, CaptureVoice::Own);
+        db.save_capture(&saved).unwrap();
+        let test = result(&saved, 0, TakeStep::Test, "aaaa");
+        let draft = result(&saved, 0, TakeStep::Draft, "aaaa");
+        assert!(db.save_take_result(&test).unwrap());
+        assert!(db.save_take_result(&draft).unwrap());
+        assert_eq!(
+            db.take_results(project.id).unwrap(),
+            [draft.clone(), test.clone()]
+        );
+        assert!(
+            db.accept_take_result(
+                project.id,
+                0,
+                TakeStep::Test,
+                "aaaa",
+                Some(time(1_800_000_090))
+            )
+            .unwrap()
+        );
+        db.remove_take_result(project.id, 0, TakeStep::Test)
+            .unwrap();
+        db.remove_take_result(project.id, 0, TakeStep::Test)
+            .unwrap();
+        assert_eq!(db.take_results(project.id).unwrap(), [draft]);
+        assert!(
+            db.conn()
+                .execute("UPDATE take_result SET step = 'preview'", [])
+                .is_err(),
+            "the schema knows the steps"
+        );
+    }
+
+    #[test]
+    fn preflight_overrides_and_the_take_cap_round_trip() {
+        let (db, project) = setup();
+        assert_eq!(db.take_cap(project.id).unwrap(), None);
+        db.save_take_cap(project.id, Some(Money::from_cents(2_500)))
+            .unwrap();
+        assert_eq!(
+            db.take_cap(project.id).unwrap(),
+            Some(Money::from_cents(2_500))
+        );
+        db.save_take_cap(project.id, None).unwrap();
+        assert_eq!(db.take_cap(project.id).unwrap(), None);
+        assert_eq!(db.take_cap(VideoProjectId::new()).unwrap(), None);
+
+        let narration = narration(&project);
+        db.save_narration(&narration).unwrap();
+        let saved = capture(&project, &narration, CaptureVoice::Own);
+        let chosen = PreflightOverride {
+            project: project.id,
+            capture: saved.id,
+            position: 0,
+            control: "aaaa".into(),
+            at: time(1_800_000_100),
+        };
+        assert!(
+            !db.save_preflight_override(&chosen).unwrap(),
+            "no capture yet"
+        );
+        db.save_capture(&saved).unwrap();
+        assert!(db.save_preflight_override(&chosen).unwrap());
+        let again = PreflightOverride {
+            control: "bbbb".into(),
+            ..chosen.clone()
+        };
+        assert!(db.save_preflight_override(&again).unwrap());
+        assert_eq!(db.preflight_overrides(project.id).unwrap(), [again]);
+        assert!(
+            !db.save_preflight_override(&PreflightOverride {
+                position: 99,
+                ..chosen
+            })
+            .unwrap()
+        );
+        db.delete_capture(project.id).unwrap();
+        assert!(db.preflight_overrides(project.id).unwrap().is_empty());
+    }
+
+    #[test]
     fn clips_used_before_their_stretch_was_kept_take_it_from_their_capture() {
         use bardo_domain::{
             AssetSource, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, PerformedClip,
@@ -1509,6 +1725,11 @@ mod tests {
             let mut conn = db.conn();
             conn.execute_batch(&format!(
                 "{before}
+                 DROP TABLE take_preflight_override; DROP TABLE persona_look_face;
+                 ALTER TABLE video_project DROP COLUMN take_cap_micros;
+                 ALTER TABLE take_analysis DROP COLUMN fast;
+                 ALTER TABLE take_analysis DROP COLUMN cut_off;
+                 ALTER TABLE take_analysis DROP COLUMN face_height_sum;
                  DROP TABLE take_staging; DROP TABLE persona_look_asset;
                  ALTER TABLE take_result DROP COLUMN deadline;
                  ALTER TABLE take_result DROP COLUMN seed;

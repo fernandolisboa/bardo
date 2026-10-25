@@ -13,9 +13,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::narration::key;
 use crate::{
-    ClipModelRef, ControlVideo, GenerationPresets, JobId, NarrationId, ProfileId, RepositoryError,
-    TakeAnalysis, TakeMode, TakePrompt, TakeResult, TakeSet, TakeStep, VideoProjectId, VoiceRef,
-    WordTiming, spoken_words,
+    ClipModelRef, ControlVideo, GenerationPresets, JobId, Money, NarrationId, PreflightOverride,
+    ProfileId, RepositoryError, TakeAnalysis, TakeMode, TakePrompt, TakeResult, TakeSet, TakeStep,
+    VideoProjectId, VoiceRef, WordTiming, spoken_words,
 };
 
 uuid_id!(
@@ -745,6 +745,38 @@ pub trait CaptureRepository: Send + Sync {
         control: &str,
         at: Option<SystemTime>,
     ) -> Result<bool, RepositoryError>;
+
+    /// Removes take `position`'s `step` (a test the user discarded); one
+    /// already gone is not an error.
+    fn remove_take_result(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        step: TakeStep,
+    ) -> Result<(), RepositoryError>;
+
+    /// The overrides of the project's capture's takes, current or stale
+    /// (their control videos tell).
+    fn preflight_overrides(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<PreflightOverride>, RepositoryError>;
+
+    /// Keeps `chosen` as its take's override, replacing the one before,
+    /// while the project's capture is still its capture and has that take.
+    /// Returns whether it was kept.
+    fn save_preflight_override(&self, chosen: &PreflightOverride) -> Result<bool, RepositoryError>;
+
+    /// The cap the user set on what the project's performed takes may
+    /// cost before Bardo asks (#243); `None` for the default.
+    fn take_cap(&self, project: VideoProjectId) -> Result<Option<Money>, RepositoryError>;
+
+    /// Sets the project's cap, or goes back to the default with `None`.
+    fn save_take_cap(
+        &self,
+        project: VideoProjectId,
+        cap: Option<Money>,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
@@ -823,6 +855,38 @@ impl<T: CaptureRepository + ?Sized> CaptureRepository for Arc<T> {
         at: Option<SystemTime>,
     ) -> Result<bool, RepositoryError> {
         (**self).accept_take_result(project, position, step, control, at)
+    }
+
+    fn remove_take_result(
+        &self,
+        project: VideoProjectId,
+        position: u32,
+        step: TakeStep,
+    ) -> Result<(), RepositoryError> {
+        (**self).remove_take_result(project, position, step)
+    }
+
+    fn preflight_overrides(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<PreflightOverride>, RepositoryError> {
+        (**self).preflight_overrides(project)
+    }
+
+    fn save_preflight_override(&self, chosen: &PreflightOverride) -> Result<bool, RepositoryError> {
+        (**self).save_preflight_override(chosen)
+    }
+
+    fn take_cap(&self, project: VideoProjectId) -> Result<Option<Money>, RepositoryError> {
+        (**self).take_cap(project)
+    }
+
+    fn save_take_cap(
+        &self,
+        project: VideoProjectId,
+        cap: Option<Money>,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_take_cap(project, cap)
     }
 }
 

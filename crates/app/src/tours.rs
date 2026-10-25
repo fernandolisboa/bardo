@@ -116,10 +116,11 @@ pub enum Control {
     NarrationCapture,
     /// Capture: the recording, its voice and the user's confirmation.
     CaptureSummary,
+    /// Capture: what the video's performed takes cost, its cap and the
+    /// test take.
+    CaptureTest,
     /// Capture: the takes.
     CaptureTakes,
-    /// Capture: the first take's mode.
-    CaptureMode,
     /// Capture: the first take's analysis and checks.
     CaptureAnalysis,
     /// Capture: the first take's control video, its review and approval.
@@ -671,27 +672,27 @@ pub const NARRATION: Tour = {
     }
 };
 
-/// Capture: the recording and its voice, the takes and their cuts, a
-/// take's mode, analysis, control video and performed clip, and removing
-/// the capture.
+/// Capture: the recording and its voice, the video's cap and the test
+/// take, the takes and their cuts, a take's mode and analysis, its control
+/// video, a take's performed clip, and removing the capture.
 pub const CAPTURE: Tour = {
     const AT: Stage = Stage::Capture;
     const PAGE: &str = "capture";
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Capture,
-        version: 4,
+        version: 5,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "recording", control(Control::CaptureSummary))
                 .missing(PAGE_PART)
                 .learn(PAGE, "voice"),
+            at_stage(AT, "test", control(Control::CaptureTest))
+                .missing(PAGE_PART)
+                .learn(PAGE, "test"),
             at_stage(AT, "takes", control(Control::CaptureTakes))
                 .missing(PAGE_PART)
                 .learn(PAGE, "takes"),
-            at_stage(AT, "mode", control(Control::CaptureMode))
-                .missing(PAGE_PART)
-                .learn(PAGE, "mode"),
             at_stage(AT, "analysis", control(Control::CaptureAnalysis))
                 .missing(PAGE_PART)
                 .learn(PAGE, "analysis"),

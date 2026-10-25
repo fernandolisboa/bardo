@@ -106,7 +106,7 @@ You need this key only for video clips from Higgsfield's models.
 <a id="kling"></a>
 ## Kling
 
-You need this key only for video clips straight from Kling. Kling's models are also offered through Higgsfield; going direct costs the same at 1080p and less at 720p, paid from Kling's own resource packages.
+You need this key only for video clips or performed clips straight from Kling. Kling's models are also offered through Higgsfield; going direct costs the same at 1080p and less at 720p, paid from Kling's own resource packages.
 
 1. Open the [Kling API platform](https://kling.ai/dev) and sign in. Your developer account is the same as your Kling AI web account.
 2. Buy a video resource package on [Pricing](https://kling.ai/dev/pricing?scrollTo=video). Each clip spends units from it by the second (1 unit is US$ 0.14; Kling 3.0 at 720p spends 0.6 units a second). There is a trial package for a first try. Packages expire, and without units Kling refuses the call.

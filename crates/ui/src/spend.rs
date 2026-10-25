@@ -78,7 +78,7 @@ pub(crate) fn near_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedStr
     ))
 }
 
-fn over_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedString {
+pub(crate) fn over_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedString {
     SharedString::from(bardo.text_with(
         Text::BudgetReachedLine,
         &[

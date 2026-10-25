@@ -191,10 +191,12 @@ pub fn take_models() -> Vec<TakeModel> {
             draft: spec.draft.map(|(resolution, height)| TakeTier {
                 resolution: Some(resolution.to_owned()),
                 height,
+                model: None,
             }),
             final_tier: TakeTier {
                 resolution: spec.last.0.map(str::to_owned),
                 height: spec.last.1,
+                model: None,
             },
             // Higgsfield has no draft task or seed for these.
             finishes_draft: false,

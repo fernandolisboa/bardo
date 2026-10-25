@@ -551,6 +551,30 @@ pub trait VisionModels: Send + Sync {
     fn depth_estimator(&self, vertical: bool) -> Result<Box<dyn DepthEstimator>, VisionError>;
 }
 
+/// What the preflight checks read from a take's face mesh (#243), counted
+/// beside the other checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FaceMeasures {
+    /// The face heights of the frames with a face, in thousandths of the
+    /// frame's height, summed.
+    pub height_sum: u64,
+    /// Frames whose head or upper body the frame cuts off: the face within
+    /// [`EDGE_MARGIN`] of an edge, or less than its own height of room
+    /// below the chin.
+    pub cut_off: u32,
+    /// Frames whose face moved faster than [`MAX_FACE_SPEED`] since the
+    /// frame before.
+    pub fast: u32,
+}
+
+/// A face this close to an edge of the frame, as a share of it, may be cut
+/// off.
+pub const EDGE_MARGIN: f32 = 0.02;
+
+/// A face moving faster than this many face heights a second moves too fast
+/// for a motion-control model to follow.
+pub const MAX_FACE_SPEED: f32 = 2.0;
+
 /// What the free review shows about a take, counted in frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TakeChecks {
@@ -566,6 +590,36 @@ pub struct TakeChecks {
     /// Depth mode: frames whose person mask changed by more than
     /// [`MAX_MASK_CHANGE`] from the frame before.
     pub mask_jumps: u32,
+    /// The face analysis' measures for the preflight checks; `None` for a
+    /// take analyzed before they were counted.
+    pub measures: Option<FaceMeasures>,
+}
+
+/// The face's box in shares of the frame: left, top, right, bottom.
+fn face_box(mesh: &FaceMesh) -> Option<[f32; 4]> {
+    let mut found = None::<[f32; 4]>;
+    for point in mesh
+        .landmarks
+        .iter()
+        .filter(|point| point[0].is_finite() && point[1].is_finite())
+    {
+        let bounds = found.get_or_insert([point[0], point[1], point[0], point[1]]);
+        bounds[0] = bounds[0].min(point[0]);
+        bounds[1] = bounds[1].min(point[1]);
+        bounds[2] = bounds[2].max(point[0]);
+        bounds[3] = bounds[3].max(point[1]);
+    }
+    found
+}
+
+/// Whether the frame cuts off the head or the upper body of `mesh`'s
+/// person.
+fn cut_off(mesh: &FaceMesh) -> bool {
+    let Some([left, top, right, bottom]) = face_box(mesh) else {
+        return true;
+    };
+    let height = bottom - top;
+    left < EDGE_MARGIN || top < EDGE_MARGIN || right > 1.0 - EDGE_MARGIN || 1.0 - bottom < height
 }
 
 impl TakeChecks {
@@ -573,6 +627,17 @@ impl TakeChecks {
     /// most faces any count found in it (the whole frame's detector, or
     /// the person regions').
     pub fn add_face_frame(&mut self, mesh: Option<&FaceMesh>, faces: usize) {
+        // Measures count from a take's first frame, or not at all (a take
+        // whose analysis began before they were counted).
+        if self.frames == 0 {
+            self.measures.get_or_insert_with(FaceMeasures::default);
+        }
+        if let (Some(measures), Some(mesh)) = (self.measures.as_mut(), mesh) {
+            measures.height_sum += (mesh.height().clamp(0.0, 1.0) * 1_000.0).round() as u64;
+            if cut_off(mesh) {
+                measures.cut_off += 1;
+            }
+        }
         self.frames += 1;
         match mesh {
             None => self.no_face += 1,
@@ -588,6 +653,49 @@ impl TakeChecks {
         if faces > 1 {
             self.several_faces += 1;
         }
+    }
+
+    /// Counts how fast the face moved from `previous` to `mesh`, the frames
+    /// `interval` apart, in a picture `aspect` (width over height) wide:
+    /// landmarks are shares of each side, so a move across is scaled to the
+    /// height before it is measured in face heights.
+    pub fn add_face_motion(
+        &mut self,
+        previous: &FaceMesh,
+        mesh: &FaceMesh,
+        interval: Duration,
+        aspect: f32,
+    ) {
+        let Some(measures) = self.measures.as_mut() else {
+            return;
+        };
+        let (Some(before), Some(now)) = (face_box(previous), face_box(mesh)) else {
+            return;
+        };
+        let center = |b: [f32; 4]| ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+        let ((x0, y0), (x1, y1)) = (center(before), center(now));
+        let height = (now[3] - now[1]).max(before[3] - before[1]);
+        let seconds = interval.as_secs_f32();
+        if height <= 0.0 || seconds <= 0.0 || !aspect.is_finite() || aspect <= 0.0 {
+            return;
+        }
+        let speed = (((x1 - x0) * aspect).hypot(y1 - y0) / height) / seconds;
+        if speed > MAX_FACE_SPEED {
+            measures.fast += 1;
+        }
+    }
+
+    /// The frames with a face.
+    pub fn face_frames(&self) -> u32 {
+        self.frames.saturating_sub(self.no_face)
+    }
+
+    /// The face's average height over the frames with one, as a share of
+    /// the frame's; `None` without measures or a face.
+    pub fn mean_face_height(&self) -> Option<f32> {
+        let measures = self.measures?;
+        let faces = self.face_frames();
+        (faces > 0).then(|| measures.height_sum as f32 / 1_000.0 / faces as f32)
     }
 
     /// Counts one frame of the depth analysis by its mask's area and the
@@ -615,6 +723,7 @@ impl TakeChecks {
         self.small_face += other.small_face;
         self.turned += other.turned;
         self.mask_jumps += other.mask_jumps;
+        self.measures = self.measures.or(other.measures);
         self
     }
 }
@@ -1192,6 +1301,11 @@ mod tests {
                 small_face: 1,
                 turned: 1,
                 mask_jumps: 0,
+                measures: Some(FaceMeasures {
+                    height_sum: 700,
+                    cut_off: 0,
+                    fast: 0,
+                }),
             }
         );
         assert!(checks.blocked());
@@ -1199,6 +1313,97 @@ mod tests {
         fine.add_face_frame(Some(&mesh(MIN_FACE_HEIGHT + 0.01, 44.0)), 1);
         assert!(!fine.blocked());
         assert_eq!((fine.small_face, fine.turned), (0, 0));
+    }
+
+    /// A face `height` tall, centred on `x`, `y`.
+    fn mesh_at(x: f32, y: f32, height: f32) -> FaceMesh {
+        let mut face = mesh(height, 0.0);
+        for point in &mut face.landmarks {
+            point[0] += x - 0.5;
+            point[1] += y - 0.5;
+        }
+        face
+    }
+
+    #[test]
+    fn a_frame_cuts_off_a_face_at_its_edge_or_without_room_for_the_body() {
+        let mut checks = TakeChecks::default();
+        // Head and shoulders, room below.
+        checks.add_face_frame(Some(&mesh_at(0.5, 0.3, 0.2)), 1);
+        // At the left edge.
+        checks.add_face_frame(Some(&mesh_at(0.105, 0.3, 0.2)), 1);
+        // Too low: less than a face's height below the chin.
+        checks.add_face_frame(Some(&mesh_at(0.5, 0.7, 0.3)), 1);
+        // Touching the top.
+        checks.add_face_frame(Some(&mesh_at(0.5, 0.11, 0.2)), 1);
+        let measures = checks.measures.unwrap();
+        assert_eq!(measures.cut_off, 3);
+        assert_eq!(measures.height_sum, 900);
+        assert_eq!(checks.mean_face_height(), Some(0.225));
+    }
+
+    #[test]
+    fn a_face_moving_over_two_heights_a_second_is_fast() {
+        let mut checks = TakeChecks::default();
+        let a = mesh_at(0.5, 0.3, 0.2);
+        checks.add_face_frame(Some(&a), 1);
+        // 0.012 in 1/30 s is 0.36 a second: 1.8 face heights.
+        let b = mesh_at(0.512, 0.3, 0.2);
+        checks.add_face_motion(&a, &b, Duration::from_millis(33), 1.0);
+        assert_eq!(checks.measures.unwrap().fast, 0);
+        // 0.02 in 1/30 s: 3 face heights a second.
+        let c = mesh_at(0.532, 0.3, 0.2);
+        checks.add_face_motion(&b, &c, Duration::from_millis(33), 1.0);
+        assert_eq!(checks.measures.unwrap().fast, 1);
+        checks.add_face_motion(&b, &c, Duration::ZERO, 1.0);
+        assert_eq!(checks.measures.unwrap().fast, 1, "no interval, no speed");
+    }
+
+    #[test]
+    fn a_move_across_is_measured_against_the_height() {
+        // 0.012 of the width in 1/30 s: in a 9:16 picture that is 0.2 a
+        // second of its height, one face height; in 16:9, 3.2.
+        let a = mesh_at(0.5, 0.3, 0.2);
+        let b = mesh_at(0.512, 0.3, 0.2);
+        let fast = |aspect: f32| {
+            let mut checks = TakeChecks::default();
+            checks.add_face_frame(Some(&a), 1);
+            checks.add_face_motion(&a, &b, Duration::from_millis(33), aspect);
+            checks.measures.unwrap().fast
+        };
+        assert_eq!(fast(9.0 / 16.0), 0);
+        assert_eq!(fast(16.0 / 9.0), 1);
+    }
+
+    #[test]
+    fn measures_count_only_from_a_takes_first_frame() {
+        // An analysis resumed from a state saved before measures existed.
+        let mut resumed = TakeChecks {
+            frames: 96,
+            ..TakeChecks::default()
+        };
+        resumed.add_face_frame(Some(&mesh(0.3, 0.0)), 1);
+        resumed.add_face_motion(
+            &mesh(0.3, 0.0),
+            &mesh(0.3, 0.0),
+            Duration::from_millis(33),
+            1.0,
+        );
+        assert_eq!(resumed.measures, None);
+        assert_eq!(resumed.mean_face_height(), None);
+        let mut none = TakeChecks::default();
+        none.add_face_frame(None, 0);
+        assert_eq!(none.mean_face_height(), None, "no face to measure");
+        assert_eq!(none.face_frames(), 0);
+        // A depth analysis merged in keeps the face's measures.
+        let mut face = TakeChecks::default();
+        face.add_face_frame(Some(&mesh(0.3, 0.0)), 1);
+        let depth = TakeChecks {
+            frames: 1,
+            ..TakeChecks::default()
+        };
+        assert_eq!(depth.merged(&face).measures, face.measures);
+        assert_eq!(face.merged(&depth).measures, face.measures);
     }
 
     #[test]

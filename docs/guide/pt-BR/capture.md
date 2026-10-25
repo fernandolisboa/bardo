@@ -99,8 +99,39 @@ Depois que o vídeo de controle de uma tomada é aprovado, o modelo de tomada fa
 - **Kling 3.0 Motion Control · Higgsfield**, o padrão, aceita tomadas em Gravação de 3 a 30 segundos e faz a versão final direto, em 1080p.
 - **Seedance 2.5 Video Edit · Higgsfield** aceita tomadas em Malha e Profundidade de 4 a 30 segundos: primeiro um rascunho em 480p, depois a versão final em 1080p, feita do zero.
 - **Seedance 2.5 Video Edit · BytePlus ModelArk** aceita as mesmas tomadas, direto do ModelArk: um rascunho em 480p, depois uma versão final que completa esse mesmo rascunho em 1080p, então a versão final mantém o que você aprovou no rascunho. Veja [No BytePlus ModelArk](#byteplus).
+- **Kling 3.0 Motion Control 720p · Kling** e **Kling 3.0 Motion Control 1080p · Kling** aceitam tomadas em Gravação de 3 a 30 segundos direto do Kling, com a chave do Kling que o Bardo já guarda para clipes, por menos do que pela Higgsfield. Um rascunho opcional no Kling 2.6 em 720p custa cerca de metade de uma versão final em 720p. Veja [Direto do Kling](#kling).
 
 Escolher um modelo que não aceita o modo da tomada passa a tomada para o primeiro modo do modelo, o que monta o vídeo de controle de novo para você aprovar. Nada pode ser feito enquanto a tomada for curta ou longa demais para o modelo, a persona não tiver aparência ou o vídeo de controle não estiver aprovado; a tomada diz qual.
+
+<a id="spend"></a>
+## Quanto as tomadas do vídeo custam
+
+**Tomadas interpretadas deste vídeo**, acima das tomadas, soma quanto as tomadas interpretadas do vídeo já custaram (prompts, o teste, rascunhos e versões finais, como [Custos](costs.md) registra) e quanto ainda falta, aproximadamente: o prompt de cada tomada que não tem um, um rascunho quando o modelo exige e a versão final de cada tomada que não tem uma. Isso aparece comparado ao teto do vídeo, US$ 10, a não ser que você mude em **Mudar teto** (no mínimo US$ 1; **Usar o padrão** volta para US$ 10). Quando uma etapa não tem preço na tabela, a linha avisa que o total está incompleto.
+
+Antes de qualquer tomada paga (teste, rascunho ou versão final), o Bardo confere se a projeção mais essa tomada fica dentro do teto; uma tomada que já está na projeção não conta duas vezes. Acima do teto, a tomada espera e pergunta **Fazer mesmo assim?**: nada é enviado até você confirmar. O teto é por vídeo e não substitui os orçamentos mensais dos provedores ([Custos](costs.md)): quando uma tomada passa dos dois, uma única pergunta lista o teto e cada orçamento que ela ultrapassa, e confirmar envia a tomada.
+
+<a id="test"></a>
+## A tomada de teste
+
+Antes do primeiro rascunho ou versão final de uma captura, o Bardo pede um teste: **Fazer tomada de teste** envia até os primeiros 5 segundos de uma tomada pronta (vídeo de controle aprovado e prompt), a primeira que passou nas [checagens antes do envio](#preflight) quando houver uma, na opção mais barata do modelo (a de rascunho, quando ele tem uma). Ela mostra quanto custa antes de começar, é registrada em [Custos](costs.md) como qualquer tomada paga e toca com a voz da tomada. Depois:
+
+- **Aprovar teste** libera os rascunhos e versões finais da captura.
+- **Descartar teste** o apaga; **Fazer tomada de teste** de novo faz outro, que o substitui.
+
+Um teste vale para a aparência da persona com que foi feito: outra aparência pede um novo. Uma captura que já tinha rascunho ou versão final quando os testes chegaram não precisa de um.
+
+<a id="preflight"></a>
+## Checagens antes do envio
+
+Abaixo de cada tomada, **Checagens antes do envio** leem a análise da tomada e a aparência, de graça, antes de pagar qualquer coisa:
+
+- **Uma pessoa**: nenhum quadro com outro rosto (um já bloqueia o vídeo de controle).
+- **Dentro do quadro**: em no máximo 10% dos quadros o rosto falta, está numa borda ou sem espaço para o corpo abaixo dele.
+- **Rosto grande o suficiente**: o rosto tem pelo menos 8% da altura do quadro, em média.
+- **Movimento estável**: em no máximo 5% dos quadros o rosto se move mais rápido que duas alturas de rosto por segundo.
+- **Mesmo enquadramento da aparência**: uma tomada da cintura para cima pede uma aparência enquadrada igual, e uma tomada de corpo inteiro, uma aparência de corpo inteiro. Modelos de controle de movimento seguem o enquadramento da aparência; modelos de edição de vídeo mantêm o da tomada, então pulam esta checagem.
+
+O Bardo mede o rosto da aparência uma vez por imagem, em segundo plano. Uma checagem que falha diz por quê e segura o teste, o rascunho e a versão final da tomada até você gravar ou cortar de novo, ou selecionar **Enviar mesmo assim**, que vale para o vídeo de controle aprovado dessa tomada. Uma checagem que ainda não pode ser lida (uma tomada analisada antes de a checagem existir, ou uma aparência ainda sendo medida) avisa isso e não segura nada; analisar a tomada de novo a roda.
 
 <a id="take-prompt"></a>
 ## O prompt da tomada
@@ -112,7 +143,8 @@ Escolher um modelo que não aceita o modo da tomada passa a tomada para o primei
 
 **Fazer rascunho** e **Fazer versão final** enviam o vídeo de controle, a aparência e o prompt ao provedor do modelo de tomada; a estimativa abaixo deles é por segundo da tomada (em tokens na BytePlus). A aparência vai como um JPEG que o Bardo faz a partir dela, o que deixa de fora o que uma foto registra sobre onde e com o que foi tirada, a não ser que vá pelo id do asset na BytePlus. O som do provedor fica desligado: rascunhos e versões finais tocam com a voz da tomada, do vídeo de controle.
 
-- Um rascunho (Seedance) espera revisão: **Reproduzir rascunho**, depois **Aprovar rascunho**, ou **Refazer rascunho** para outro, que o substitui. Só um rascunho aprovado libera **Fazer versão final**; **Voltar aos rascunhos** desfaz a aprovação.
+- Um rascunho espera revisão: **Reproduzir rascunho**, depois **Aprovar rascunho**, ou **Refazer rascunho** para outro, que o substitui. **Voltar aos rascunhos** desfaz a aprovação.
+- Quando a versão final é uma tomada nova (Seedance na Higgsfield, Kling direto do Kling), o rascunho é opcional: **Fazer versão final sem rascunho** faz a versão final direto, com a estimativa ao lado. No BytePlus ModelArk, cuja versão final completa o rascunho, só um rascunho aprovado libera **Fazer versão final**.
 - A versão final espera revisão do mesmo jeito: **Reproduzir versão final**, depois **Usar**. **Fazer de novo** faz outra, que a substitui. Uma versão final é cobrada mesmo que você não a use.
 
 Uma linha diz quanto o resultado saiu mais longo ou mais curto que a tomada. **Parar de esperar** faz o Bardo parar de esperar, não o provedor, que ainda pode terminar e cobrar: **Verificar de novo** retoma o mesmo pedido, como o Bardo faz depois de reiniciar, e nada novo pode ser feito para a tomada até lá. Quando o provedor recusa o conteúdo, ou o pedido falha do lado dele, a tomada diz isso (com o motivo do provedor, quando ele dá um) e nada é mudado nem enviado de novo sozinho: fazer de novo é um novo pedido pago, e só você o inicia.
@@ -128,6 +160,15 @@ O Seedance 2.5 direto do ModelArk precisa dos cinco campos do cartão **BytePlus
 - **Uma foto sua precisa da sua semelhança verificada.** O Seedance recusa rostos reais, então uma tomada cuja persona tem uma foto como aparência só é enviada quando a aparência tem a sua semelhança verificada da biblioteca de assets do ModelArk ([A aparência](personas.md#look-asset)).
 - **Custos em tokens.** O ModelArk cobra os tokens do vídeo: cerca de US$ 3,70 por um rascunho de 30 segundos e US$ 20 pela versão final dele. [Custos](costs.md) registra os tokens que o ModelArk informa.
 - **Uma resposta perdida é achada de novo.** O ModelArk não tem como distinguir um pedido repetido de um novo, então o Bardo salva a hora logo antes de cada envio. Se o Bardo parar antes de a resposta do ModelArk chegar, a próxima tentativa procura esse pedido na lista de tarefas do ModelArk e espera por ele em vez de pagar de novo. Se achar vários, não envia nada e pede que você olhe a lista de tarefas no ModelArk.
+
+<a id="kling"></a>
+## Direto do Kling
+
+Os modelos Kling 3.0 Motion Control direto do Kling usam a chave **Kling** ([Como obter cada chave de API](get-api-keys.md#kling)) e os pacotes de recursos do Kling. O que muda:
+
+- **Preços.** O Kling cobra os segundos de vídeo que devolve: cerca de US$ 0,126 por segundo numa versão final em 720p, US$ 0,168 em 1080p, e US$ 0,07 num rascunho ou teste no Kling 2.6 em 720p. Uma tomada pode voltar um pouco mais curta do que foi enviada, e [Custos](costs.md) registra o que o Kling devolveu.
+- **O seu armazenamento guarda o vídeo de controle.** O Kling recebe a aparência dentro do pedido, mas só lê o vídeo de controle por um link, e não guarda arquivos. O Bardo o envia para um armazenamento que você já configurou: o seu bucket da BytePlus quando a chave **BytePlus ModelArk** está salva (com um link assinado que dura no máximo sete dias, apagado assim que a tomada é feita), senão o upload da Higgsfield, que é grátis. Sem nenhuma das duas chaves, a tomada diz o que adicionar.
+- **Uma resposta perdida é encontrada de novo.** Cada pedido leva um id próprio; se o Bardo parar antes de a resposta do Kling chegar, a próxima tentativa encontra esse pedido em vez de pagar de novo.
 
 <a id="use"></a>
 ## Usar um clipe interpretado

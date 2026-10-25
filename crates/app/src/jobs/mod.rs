@@ -49,6 +49,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) take_prompts: crate::performed_takes::TakePromptHandler,
     pub(crate) performed: crate::performed_takes::PerformedTakeHandler,
     pub(crate) staging: crate::performed_takes::StagingCleanupHandler,
+    pub(crate) framing: crate::look_framing::LookFramingHandler,
     pub(crate) scenes: SceneHandler,
     pub(crate) clips: ClipHandler,
     pub(crate) proxies: ProxyHandler,
@@ -85,6 +86,7 @@ pub(crate) fn built_in_handlers(
         take_prompts,
         performed,
         staging,
+        framing,
         scenes,
         clips,
         proxies,
@@ -119,6 +121,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::TakePrompt, Arc::new(take_prompts));
     handlers.insert(JobKind::PerformedTake, Arc::new(performed));
     handlers.insert(JobKind::StagingCleanup, Arc::new(staging));
+    handlers.insert(JobKind::LookFraming, Arc::new(framing));
     let scenes = Arc::new(scenes);
     handlers.insert(JobKind::ScenePlan, Arc::clone(&scenes) as _);
     handlers.insert(JobKind::SceneImages, scenes);
@@ -150,6 +153,7 @@ impl JobActionError {
             JobActionError::Elsewhere => Text::JobRunsElsewhere,
             JobActionError::Busy => Text::RestoreWaitsForJobs,
             JobActionError::Superseded => Text::JobSuperseded,
+            JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
             _ => Text::JobNotUpdated,
         }
     }
@@ -249,6 +253,9 @@ impl Bardo {
         }
         if self.superseded_capture(id) {
             return Err(JobActionError::Superseded);
+        }
+        if self.unsent_take_needs_asking(id) {
+            return Err(JobActionError::TakeFromItsPage);
         }
         self.jobs.retry(id)
     }

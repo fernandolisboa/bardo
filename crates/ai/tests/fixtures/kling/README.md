@@ -29,3 +29,11 @@ Synthetic, for edge cases: `status-succeeded-no-video.http`,
 `status-unknown-task.http`, `download-expired.http`, and
 `download-clip.http` (not a real video: just the `ftyp` box marker an MP4
 starts with).
+
+Motion Control takes (#243) reuse the submission, lookup, status and
+download fixtures above: `POST /motion-control/{model}` answers in the same
+shape as image to video (kling.ai/document-api: Motion Control 3.0 and 2.6,
+checked on 2026-10-25). `take-status-succeeded.http` is written from the
+documented task query, with the video's `duration` as a number and the
+`billing` block of a balance-paid task; `status-succeeded.http` keeps the
+duration as text, which the adapter reads too.

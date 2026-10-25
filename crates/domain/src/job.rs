@@ -140,6 +140,9 @@ pub enum JobKind {
     /// refused or past its deadline, or a capture removed. A file whose
     /// delete fails stays listed for the next run.
     StagingCleanup,
+    /// Measures the face in a persona's look on the computer (#243), for
+    /// the preflight check that compares its framing with the takes'.
+    LookFraming,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -168,7 +171,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 33] = [
+    pub const ALL: [JobKind; 34] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -202,6 +205,7 @@ impl JobKind {
         JobKind::TakePrompt,
         JobKind::PerformedTake,
         JobKind::StagingCleanup,
+        JobKind::LookFraming,
     ];
 
     /// Stable name stored in the database.
@@ -240,6 +244,7 @@ impl JobKind {
             JobKind::TakePrompt => "take_prompt",
             JobKind::PerformedTake => "performed_take",
             JobKind::StagingCleanup => "staging_cleanup",
+            JobKind::LookFraming => "look_framing",
         }
     }
 }

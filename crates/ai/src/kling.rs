@@ -138,11 +138,11 @@ fn spec(id: &str) -> Option<(&'static Spec, &'static str, &'static str)> {
     Some((spec, model, resolution))
 }
 
-fn auth(request: HttpRequest, key: &ApiKey) -> HttpRequest {
+pub(crate) fn auth(request: HttpRequest, key: &ApiKey) -> HttpRequest {
     request.header("authorization", format!("Bearer {}", key.expose()))
 }
 
-fn unexpected(detail: impl Into<String>) -> ProviderFailure {
+pub(crate) fn unexpected(detail: impl Into<String>) -> ProviderFailure {
     ProviderFailure::new(ProviderFailureKind::Unexpected, detail)
 }
 
@@ -171,7 +171,7 @@ pub fn external_task_id(request: &ClipRequest, submission: &str) -> Option<Strin
     Some(task_id_for(&task_body(request)?, submission))
 }
 
-fn task_id_for(body: &Value, submission: &str) -> String {
+pub(crate) fn task_id_for(body: &Value, submission: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(submission.as_bytes());
     hash.update([0]);
@@ -243,7 +243,7 @@ pub fn lookup_request(key: &ApiKey, external_id: &str) -> Option<HttpRequest> {
     })
 }
 
-fn json_body(response: &HttpResponse) -> Result<Value, ProviderFailure> {
+pub(crate) fn json_body(response: &HttpResponse) -> Result<Value, ProviderFailure> {
     serde_json::from_str(&response.body)
         .map_err(|error| unexpected(format!("unreadable response: {error}")))
 }
@@ -298,7 +298,7 @@ pub fn kling_failure(response: &HttpResponse) -> ProviderFailure {
 }
 
 /// Whether an answer is a success: HTTP 2xx and service code 0.
-fn succeeded(response: &HttpResponse) -> bool {
+pub(crate) fn succeeded(response: &HttpResponse) -> bool {
     (200..=299).contains(&response.status)
         && serde_json::from_str::<Value>(&response.body)
             .ok()
@@ -436,14 +436,14 @@ impl<T: Transport> KlingClips<T> {
         &self.transport
     }
 
-    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, ProviderFailure> {
+    pub(crate) fn send(&self, request: &HttpRequest) -> Result<HttpResponse, ProviderFailure> {
         self.backoff
             .send(&self.transport, request, &self.sleep)
             .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))
     }
 
     /// The task Kling already has under this custom id, if any.
-    fn find(&self, key: &ApiKey, external_id: &str) -> Option<ClipHandle> {
+    pub(crate) fn find(&self, key: &ApiKey, external_id: &str) -> Option<ClipHandle> {
         let response = self.send(&lookup_request(key, external_id)?).ok()?;
         if !succeeded(&response) {
             return None;

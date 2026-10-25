@@ -64,6 +64,8 @@ fn draft() -> TakeRequest {
         video: StagedFile(link(OBJECT)),
         look: StagedFile(link("bardo/takes/5d2e.jpg")),
         draft_task: None,
+        video_link: None,
+        look_bytes: None,
     }
 }
 
@@ -485,6 +487,40 @@ fn unstaging_deletes_the_file_and_a_file_already_gone_is_fine() {
         );
     }
     assert_eq!(takes.transport().sent().len(), 3);
+}
+
+#[test]
+fn another_provider_reads_a_staged_file_through_a_seven_day_signed_link() {
+    let takes = takes(&[]);
+    let file = StagedFile(link(OBJECT));
+    let signed = takes.link(&key(), &file).unwrap();
+    assert!(
+        signed.starts_with(&format!("https://{HOST}/{OBJECT}?")),
+        "{signed}"
+    );
+    assert!(signed.contains("X-Tos-Expires=604800"), "{signed}");
+    assert_eq!(
+        signed,
+        presign(
+            &BytePlusCredentials::of(&key()).unwrap(),
+            Method::Get,
+            OBJECT,
+            604_800,
+            noon()
+        )
+    );
+    // Only Bardo's own files in the named bucket.
+    assert_eq!(
+        takes
+            .link(
+                &key(),
+                &StagedFile(format!("https://{HOST}/someone/else.mp4"))
+            )
+            .unwrap_err()
+            .kind,
+        ProviderFailureKind::NotAllowed
+    );
+    assert!(takes.transport().sent().is_empty(), "signing calls nothing");
 }
 
 #[test]

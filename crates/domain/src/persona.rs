@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use crate::{LookAsset, PersonaLook, ProfileId, Provider, RepositoryError, VoiceRef};
+use crate::{
+    LookAsset, LookFaceMeasure, PersonaLook, ProfileId, Provider, RepositoryError, VoiceRef,
+};
 
 uuid_id!(
     /// Identifies a persona.
@@ -452,6 +454,17 @@ pub trait PersonaRepository: Send + Sync {
         provider: Provider,
         asset: Option<&LookAsset>,
     ) -> Result<(), RepositoryError>;
+
+    /// How tall the face in the look's image is (#243), as measured for
+    /// the image whose fingerprint it names; `None` until measured.
+    fn look_face(&self, persona: PersonaId) -> Result<Option<LookFaceMeasure>, RepositoryError>;
+
+    /// Saves the look's face measure, in place of any.
+    fn save_look_face(
+        &self,
+        persona: PersonaId,
+        measure: &LookFaceMeasure,
+    ) -> Result<(), RepositoryError>;
 }
 
 impl<T: PersonaRepository + ?Sized> PersonaRepository for Arc<T> {
@@ -514,6 +527,18 @@ impl<T: PersonaRepository + ?Sized> PersonaRepository for Arc<T> {
         asset: Option<&LookAsset>,
     ) -> Result<(), RepositoryError> {
         (**self).save_look_asset(persona, provider, asset)
+    }
+
+    fn look_face(&self, persona: PersonaId) -> Result<Option<LookFaceMeasure>, RepositoryError> {
+        (**self).look_face(persona)
+    }
+
+    fn save_look_face(
+        &self,
+        persona: PersonaId,
+        measure: &LookFaceMeasure,
+    ) -> Result<(), RepositoryError> {
+        (**self).save_look_face(persona, measure)
     }
 }
 

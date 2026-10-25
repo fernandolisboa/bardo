@@ -888,6 +888,7 @@ pub(crate) mod tests {
         pub(crate) vision: Arc<crate::take_analysis::testing::FakeVision>,
         pub(crate) takes: Arc<crate::testing::FakeTakes>,
         pub(crate) modelark: Arc<crate::testing::FakeModelArk>,
+        pub(crate) kling: Arc<crate::testing::FakeKling>,
     }
 
     impl Harness {
@@ -911,6 +912,7 @@ pub(crate) mod tests {
                 vision: Arc::default(),
                 takes: Arc::default(),
                 modelark: Arc::default(),
+                kling: Arc::default(),
             }
         }
 
@@ -936,6 +938,7 @@ pub(crate) mod tests {
                 takes: vec![
                     Arc::clone(&self.takes) as _,
                     Arc::clone(&self.modelark) as _,
+                    Arc::clone(&self.kling) as _,
                 ],
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,

@@ -83,10 +83,12 @@ pub fn take_models() -> Vec<TakeModel> {
         draft: Some(TakeTier {
             resolution: Some("480p".to_owned()),
             height: 480,
+            model: None,
         }),
         final_tier: TakeTier {
             resolution: Some("1080p".to_owned()),
             height: 1080,
+            model: None,
         },
         finishes_draft: true,
         draft_lifetime: Some(DRAFT_LIFETIME),
@@ -110,7 +112,8 @@ pub fn take_models() -> Vec<TakeModel> {
 pub fn take_body(request: &TakeRequest) -> Value {
     let resolution = request.resolution.clone().unwrap_or_else(|| {
         match request.step {
-            TakeStep::Draft => "480p",
+            // A test is sent as a draft.
+            TakeStep::Draft | TakeStep::Test => "480p",
             TakeStep::Final => "1080p",
         }
         .to_owned()
@@ -146,7 +149,7 @@ pub fn take_body(request: &TakeRequest) -> Value {
         "generate_audio": false,
         "watermark": false,
     });
-    if request.step == TakeStep::Draft {
+    if matches!(request.step, TakeStep::Draft | TakeStep::Test) {
         body["draft"] = json!(true);
     }
     body
@@ -385,7 +388,8 @@ pub fn parse_list(
         .filter(|item| match &request.draft_task {
             Some(draft) => item["draft_task_id"].as_str() == Some(draft.0.as_str()),
             None => {
-                item["draft"].as_bool() == Some(request.step == TakeStep::Draft)
+                item["draft"].as_bool()
+                    == Some(matches!(request.step, TakeStep::Draft | TakeStep::Test))
                     && item["draft_task_id"].as_str().is_none_or(str::is_empty)
             }
         })
@@ -813,6 +817,25 @@ impl<T: Transport> TakeGenerator for BytePlusTakes<T> {
 
     fn keeps_staged(&self) -> bool {
         true
+    }
+
+    /// A seven-day link to a file staged in the user's bucket, signed now
+    /// for another provider to read (Kling's takes, #243).
+    fn link(&self, key: &ApiKey, file: &StagedFile) -> Result<String, ProviderFailure> {
+        let credentials = credentials(key)?;
+        let object = object_of(&credentials, &file.0).ok_or_else(|| {
+            ProviderFailure::new(
+                ProviderFailureKind::NotAllowed,
+                "the file is not in the bucket the saved key names",
+            )
+        })?;
+        Ok(presign(
+            &credentials,
+            Method::Get,
+            &object,
+            LINK_SECONDS,
+            (self.clock)(),
+        ))
     }
 
     fn unstage(&self, key: &ApiKey, file: &StagedFile) -> Result<(), ProviderFailure> {

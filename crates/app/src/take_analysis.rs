@@ -27,10 +27,11 @@ use std::time::{Duration, Instant, SystemTime};
 
 use bardo_domain::{
     ANALYSIS_CHUNK_FRAMES, AnalysisPart, Capture, CaptureId, CaptureRepository, DepthHistogram,
-    DepthMap, DepthScale, Device, FaceFrame, FaceLandmarks, FaceSource, Job, JobFailure,
-    JobFailureKind, JobKind, JobRepository, JobState, PersonMask, ProfileId, Progress,
-    ProjectFiles, REGION_COUNT_EVERY, RgbFrame, TakeAnalysis, TakeChecks, TakeMode, VideoProjectId,
-    VisionError, VisionModels, analysis_fps, distinct_faces, take_frame_time, take_frames,
+    DepthMap, DepthScale, Device, FaceFrame, FaceLandmarks, FaceMeasures, FaceMesh, FaceSource,
+    Job, JobFailure, JobFailureKind, JobKind, JobRepository, JobState, PersonMask, ProfileId,
+    Progress, ProjectFiles, REGION_COUNT_EVERY, RgbFrame, TakeAnalysis, TakeChecks, TakeMode,
+    VideoProjectId, VisionError, VisionModels, analysis_fps, distinct_faces, take_frame_time,
+    take_frames,
 };
 use bardo_media::MediaEngine;
 use bardo_media::ffmpeg::{GrayDepth, GraySink, MediaError, analysis_size};
@@ -354,6 +355,7 @@ impl From<ChecksRecord> for TakeChecks {
             small_face: c[3],
             turned: c[4],
             mask_jumps: c[5],
+            measures: None,
         }
     }
 }
@@ -363,6 +365,24 @@ struct FaceState {
     /// Chunks finished.
     chunks: u32,
     checks: ChecksRecord,
+    /// The preflight measures (#243): face heights summed, frames cut off,
+    /// frames too fast. Missing in a state saved before they were counted.
+    #[serde(default)]
+    measures: Option<[u64; 3]>,
+}
+
+fn measures_record(checks: &TakeChecks) -> Option<[u64; 3]> {
+    checks
+        .measures
+        .map(|m| [m.height_sum, u64::from(m.cut_off), u64::from(m.fast)])
+}
+
+fn measures_of(record: Option<[u64; 3]>) -> Option<FaceMeasures> {
+    record.map(|[height_sum, cut_off, fast]| FaceMeasures {
+        height_sum,
+        cut_off: u32::try_from(cut_off).unwrap_or(u32::MAX),
+        fast: u32::try_from(fast).unwrap_or(u32::MAX),
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -577,6 +597,7 @@ impl TakeAnalysisHandler {
             if tracker.restore(&snapshot[0]).is_ok() && state.chunks <= work.chunks() {
                 chunks_done = state.chunks;
                 checks = state.checks.into();
+                checks.measures = measures_of(state.measures);
             } else {
                 tracing::info!("a take's saved face state does not fit: starting it over");
                 tracker = self.vision.face_tracker().map_err(vision_failure)?;
@@ -598,6 +619,9 @@ impl TakeAnalysisHandler {
             let mut frames = self.frames(take, chunks_done * ANALYSIS_CHUNK_FRAMES)?;
             // Faces are counted in each person region about once a second.
             let every = (take.fps.div_ceil(1_000) * REGION_COUNT_EVERY.as_secs() as u32).max(1);
+            // The face of the frame before, for how fast it moves; a run
+            // resumed after a chunk starts without it.
+            let mut previous: Option<(FaceMesh, Duration)> = None;
             for chunk in chunks_done..work.chunks() {
                 let first = chunk * ANALYSIS_CHUNK_FRAMES;
                 let end = (first + ANALYSIS_CHUNK_FRAMES).min(total);
@@ -637,6 +661,11 @@ impl TakeAnalysisHandler {
                         faces = faces.max(distinct_faces(&found));
                     }
                     checks.add_face_frame(seen.mesh.as_ref(), faces);
+                    if let (Some((before, then)), Some(mesh)) = (&previous, seen.mesh.as_ref()) {
+                        let aspect = frame.width as f32 / frame.height.max(1) as f32;
+                        checks.add_face_motion(before, mesh, at.saturating_sub(*then), aspect);
+                    }
+                    previous = seen.mesh.clone().map(|mesh| (mesh, at));
                     lines.push(
                         FaceFrame {
                             at,
@@ -656,6 +685,7 @@ impl TakeAnalysisHandler {
                 let state = FaceState {
                     chunks: chunk + 1,
                     checks: checks.into(),
+                    measures: measures_record(&checks),
                 };
                 self.files
                     .write(

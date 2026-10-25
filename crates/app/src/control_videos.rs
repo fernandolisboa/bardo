@@ -111,6 +111,33 @@ fn keyframe_interval(fps_milli: u32) -> u32 {
     ((u64::from(fps_milli) * millis + 500_000) / 1_000_000).max(1) as u32
 }
 
+/// Writes the first `length` of the control video at `source`, its voice
+/// with it, to `destination`, as the control video is encoded (its width,
+/// height and frame rate): what a test take sends (#243). A few seconds,
+/// so the software encoder makes it.
+pub(crate) fn cut_piece(
+    media: &dyn MediaEngine,
+    source: &Path,
+    (width, height, fps): (u32, u32, u32),
+    length: Duration,
+    destination: &Path,
+) -> Result<(), MediaError> {
+    let encoder = media.encoders()?.software(VideoCodec::H264)?;
+    let output = ControlOutput {
+        size: (width, height),
+        fps_milli: fps,
+        encoder,
+        bitrate: control_bitrate(length),
+        keyframe_interval: keyframe_interval(fps),
+    };
+    let voice = VoiceCut {
+        path: source.to_path_buf(),
+        from: Duration::ZERO,
+        length,
+    };
+    media.cut_recording(source, &output, &voice, destination, &())
+}
+
 /// The control video job of take `position`, unless one already waits to
 /// run (a running one may be building the take as it was).
 pub(crate) fn control_job(

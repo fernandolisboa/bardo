@@ -291,6 +291,7 @@ control_video = "Control video"
 take_prompt = "Take prompt"
 performed_take = "Performed take"
 staging_cleanup = "Staged files cleanup"
+look_framing = "Look framing"
 
 [job.state]
 queued = "Queued"
@@ -323,6 +324,7 @@ not_updated = "Could not update the job. Try again."
 not_started = "Could not start the job. Try again."
 runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
 superseded = "A newer narration of this project replaced this import, so it cannot run again."
+take_from_page = "Nothing of this take reached its provider yet. Make it again on the Capture step, which checks the video's cap, the test take and the preflight checks first."
 
 [setup]
 step_by_step = "Step by step"
@@ -802,6 +804,12 @@ make_hint = "Each draft and final is a paid job of the take model's provider, es
 used = "In the editor's Media tab: {n}."
 used_now = "Added to the editor's Media tab. Place it on the cut from there."
 realistic_note = "The look reads as a real person: a cut that uses its performed clips turns the synthetic-content disclosure on."
+missing_kling_key = "Save a Kling key under Settings to make performed clips with Kling."
+test_first = "Make and approve a test take first: drafts and finals wait for it."
+make_final_skip_draft = "Make final without a draft"
+draft_optional_note = "A cheaper draft is optional: make one to check the take, or make the final straight away."
+making_test = "{provider} is making the test…"
+skip_draft_cost = "A final without a draft: about {amount}"
 
 [capture.performed.blocked]
 no_model = "No take model is offered."
@@ -810,6 +818,67 @@ length = "This take is shorter or longer than its model makes. Move a cut first.
 no_look = "The persona has no look yet. Draw or import one on the Personas screen."
 no_verified_likeness = "This model takes a photo of you only as your verified likeness from the BytePlus asset library. Add its asset id under the persona's look on the Personas screen, or use a drawn look."
 control_not_approved = "Approve the take's control video first."
+no_video_host = "Kling reads the control video from a link, so Bardo stages it in storage you already set up. Save a BytePlus ModelArk or Higgsfield key under Settings."
+
+[capture.spend]
+cap_reached = "This would take the video's performed takes over their cap."
+cap_invalid = "Type an amount of at least US$ 1.00, like 10 or 12.50."
+title = "Performed takes of this video"
+hint = "What this video's performed takes cost so far (prompts, test, drafts and finals, from Costs) and about what is still to pay: each take's prompt, a draft where its model requires one, and its final. Before any paid take, Bardo asks if it would go over the cap."
+partial = "Some steps have no rate, so the total is short."
+over = "The projection is over the cap: Bardo asks before each paid take."
+cap_label = "Cap per video (US$)"
+save_cap = "Save cap"
+reset_cap = "Use the default"
+edit_cap = "Change cap"
+cap_saved = "Cap saved."
+question = "Make it anyway?"
+confirm = "Make it anyway"
+line = "{spent} spent, about {to_come} still to pay: {total} of the {cap} cap."
+
+[capture.test]
+title = "Test take"
+hint = "A few seconds (up to 5) of one take at its model's cheapest tier, to see that the look and your recording work together before any full take is paid for. Drafts and finals wait until a test is approved for the persona's current look."
+none = "Write a take's prompt and approve its control video to make a test."
+needed = "Drafts and finals wait for an approved test take."
+approved = "Test approved: drafts and finals can be made."
+approve = "Approve test"
+discard = "Discard test"
+play = "Play test"
+make_again = "Make another test"
+make = "Make test take (take {n})"
+ready = "Test: {seconds}. Watch it with the take's voice, then approve or discard it."
+cost = "Estimated cost: about {amount}"
+
+[capture.preflight]
+title = "Preflight checks"
+hint = "Free checks from the take's analysis and the look, before anything is paid: one person, in frame, face large enough, steady motion, and (for motion-control models) the same framing as the look. A failed check holds the take's paid steps until you fix the take or click Send anyway."
+failed = "A preflight check failed. Fix the take, or click Send anyway."
+passed = "Preflight checks passed."
+reanalyze = "This take was analyzed before some checks existed: analyze it again to run them."
+look_measuring = "The look's framing is still being measured."
+look_no_face = "No face was found in the look: use a look that shows the face clearly."
+send_anyway = "Send anyway"
+overridden = "Sent anyway, despite the failed checks."
+framing_failed = "The take is {capture} and the look is {look}: the model follows the look's framing. Use a look framed like the take, or record again."
+
+[capture.preflight.check]
+one_person = "One person"
+in_frame = "In frame"
+face_size = "Face large enough"
+motion = "Steady motion"
+framing = "Same framing as the look"
+
+[capture.preflight.fail]
+one_person = "Another face shows up in some frames. Record this take again alone."
+in_frame = "The face is missing, at an edge, or without room for the body below it in over 10% of frames. Step back into the frame."
+face_size = "The face is under 8% of the frame's height on average. Move closer to the camera."
+motion = "The face moves faster than two face heights a second in over 5% of frames. Move more steadily."
+framing = "The take and the look are framed differently."
+
+[capture.preflight.framing]
+half_body = "half body"
+full_body = "full body"
 
 [capture.check]
 no_face = "No face in {n} of {frames} frames."
@@ -2733,17 +2802,17 @@ name = "Capture tour"
 title = "Your recording"
 body = "The recording you imported, the voice its speech was given and the sentence you confirmed. Its speech is the project's narration."
 
+[tour.capture.test]
+title = "The cap and a test take"
+body = "What this video's performed takes cost so far and still need, against its cap (US$ 10 unless you change it): past the cap, Bardo asks before a paid take. Then a few seconds of a take that passed its checks, at its model's cheapest tier: drafts and finals wait until you approve a test for the persona's current look."
+
 [tour.capture.takes]
 title = "The takes"
 body = "The recording is split into takes of 4 to 30 seconds at sentence ends and pauses. Each becomes one performed clip; a take that cannot be one says why. Cut earlier or Cut later between two takes moves their cut."
 
-[tour.capture.mode]
-title = "Its mode"
-body = "Recording, Mesh or Depth: what the take model receives for this take. The face mesh runs on every take; Depth also needs the depth and the person mask."
-
 [tour.capture.analysis]
-title = "Its analysis"
-body = "Bardo analyzes each take on this computer, free, on the graphics card when it can. Each part shows its progress and the time left; the checks below say what to record again."
+title = "Its mode and analysis"
+body = "Recording, Mesh or Depth: what the take model receives for this take. Bardo analyzes each take on this computer, free, on the graphics card when it can. Each part shows its progress and the time left; the checks below say what to record again."
 
 [tour.capture.control]
 title = "Its control video"
@@ -2751,7 +2820,7 @@ body = "What the take model receives for this take, built here for free once the
 
 [tour.capture.performed]
 title = "Its performed clip"
-body = "The take model makes the persona perform the approved take: Claude writes the prompt, a draft comes first where the model makes one, then the final. A draft that the final finishes shows its deadline. Watch each with the take's voice; Use adds the final to the editor's Media tab."
+body = "The take model makes the persona perform the approved take: Claude writes the prompt, free preflight checks say what to fix first, a draft comes where the model makes one (optional when the final is a new take), then the final. Watch each with the take's voice; Use adds the final to the editor's Media tab."
 
 [tour.capture.remove]
 title = "Remove it"
