@@ -24,7 +24,7 @@ impl Image {
     pub fn to_chw(&self) -> Vec<f32> {
         let n = self.width * self.height;
         let mut out = vec![0.0; 3 * n];
-        for (i, px) in self.rgb.chunks_exact(3).enumerate() {
+        for (i, px) in self.rgb.as_chunks::<3>().0.iter().enumerate() {
             for c in 0..3 {
                 out[c * n + i] = f32::from(px[c]) / 255.0;
             }

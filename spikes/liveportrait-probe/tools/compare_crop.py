@@ -147,6 +147,7 @@ def main(code, weights, task, out, *inputs):
                 boxes[key].append([c[0] - s / 2, c[1] - s / 2, c[0] + s / 2, c[1] + s / 2])
             rows["lip_203"].append(float(calc_lip_close_ratio(pts[None])[0, 0]))
             rows["lip_mp"].append(mp_lip_ratio(mesh))
+        landmarker.close()
         entry = {"frames": len(rows["lip_mp"])}
         for k in ["source_center", "source_size", "source_angle", "driving_center", "driving_size"]:
             entry[k] = summary(rows[k])
