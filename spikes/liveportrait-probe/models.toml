@@ -1,0 +1,34 @@
+# Sources of the LivePortrait spike (issue #242), each pinned: upstream code
+# by commit, weights by Hugging Face revision and SHA-256. tools/convert.py
+# downloads them, checks every hash and writes the [[onnx]] files.
+#
+# Licenses: LivePortrait's code and weights are MIT. InsightFace's models
+# (`insightface/` in the same Hugging Face repository) are for
+# non-commercial research only: Bardo never ships or runs them. Only
+# tools/compare_crop.py loads them, on the developer's computer, to measure
+# the MediaPipe crop against the original one.
+
+[code]
+repo = "https://github.com/KwaiVGI/LivePortrait.git"
+commit = "9b294b3d0536135442ea73cb01e6cb3ca7029dd3"
+license = "MIT"
+
+[weights]
+# The repository moved from KwaiVGI/LivePortrait; the old name redirects.
+base = "https://huggingface.co/KlingTeam/LivePortrait/resolve/82a4fa6735ca58432b6ce39301b4b9ee066dea47"
+license = "MIT"
+license_url = "https://huggingface.co/KlingTeam/LivePortrait"
+
+[weights.files]
+"liveportrait/base_models/appearance_feature_extractor.pth" = "5279bb8654293dbdf327030b397f107237dd9212fb11dd75b83dfb635211ceb5"
+"liveportrait/base_models/motion_extractor.pth" = "251e6a94ad667a1d0c69526d292677165110ef7f0cf0f6d199f0e414e8aa0ca5"
+"liveportrait/base_models/warping_module.pth" = "2f61a6f265fe344f14132364859a78bdbbc2068577170693da57fb96d636e282"
+"liveportrait/base_models/spade_generator.pth" = "4780afc7909a9f84e24c01d73b31a555ef651521a1fe3b2429bd04534d992aee"
+"liveportrait/retargeting_models/stitching_retargeting_module.pth" = "3652d5a3f95099141a56986aaddec92fadf0a73c87a20fac9a2c07c32b28b611"
+
+# Only for tools/compare_crop.py (the original crop path); never converted
+# or shipped.
+[reference.files]
+"liveportrait/landmark.onnx" = "31d22a5041326c31f19b78886939a634a5aedcaa5ab8b9b951a1167595d147db"
+"insightface/models/buffalo_l/det_10g.onnx" = "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91"
+"insightface/models/buffalo_l/2d106det.onnx" = "f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf"
