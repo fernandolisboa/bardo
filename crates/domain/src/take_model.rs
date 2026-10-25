@@ -20,23 +20,28 @@ use crate::{
     TakeMode,
 };
 
-/// Which of a take model's two results.
+/// Which of a take model's results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TakeStep {
     /// The cheap tier, to check the take before paying for the final.
     Draft,
     /// The 1080p result that becomes the performed clip.
     Final,
+    /// A few seconds of one take at the model's cheapest tier, to see that
+    /// the look and the capture work together before any full take is
+    /// paid for (#243). One per capture.
+    Test,
 }
 
 impl TakeStep {
-    pub const ALL: [TakeStep; 2] = [TakeStep::Draft, TakeStep::Final];
+    pub const ALL: [TakeStep; 3] = [TakeStep::Draft, TakeStep::Final, TakeStep::Test];
 
     /// Stable name stored in the database.
     pub fn code(self) -> &'static str {
         match self {
             TakeStep::Draft => "draft",
             TakeStep::Final => "final",
+            TakeStep::Test => "test",
         }
     }
 
@@ -53,6 +58,10 @@ pub struct TakeTier {
     pub resolution: Option<String>,
     /// The picture's short side, in pixels.
     pub height: u32,
+    /// The model the tier is made and priced with, when it is another
+    /// than the take model (Kling's 2.6 draft of a 3.0 take model:
+    /// `motion-control/kling-2.6/720p`).
+    pub model: Option<String>,
 }
 
 /// A video model a provider offers for takes.
@@ -104,12 +113,42 @@ impl TakeModel {
     }
 
     /// The tier `step` is made at; `None` for a draft of a model without
-    /// one.
+    /// one. A test is made at the cheapest tier.
     pub fn tier(&self, step: TakeStep) -> Option<&TakeTier> {
         match step {
             TakeStep::Draft => self.draft.as_ref(),
             TakeStep::Final => Some(&self.final_tier),
+            TakeStep::Test => self.draft.as_ref().or(Some(&self.final_tier)),
         }
+    }
+
+    /// The step the provider is asked for when Bardo makes `step`: a test
+    /// is a draft where the model has one, else a final.
+    pub fn sent_step(&self, step: TakeStep) -> TakeStep {
+        match step {
+            TakeStep::Test if self.draft.is_some() => TakeStep::Draft,
+            TakeStep::Test => TakeStep::Final,
+            step => step,
+        }
+    }
+
+    /// Whether a final can be made without an approved draft: the model
+    /// has drafts, and its final is a new take rather than one that
+    /// finishes the draft. The draft is then a check the user may skip.
+    pub fn draft_optional(&self) -> bool {
+        self.draft.is_some() && !self.finishes_draft
+    }
+
+    /// Whether the user must approve a draft before the final.
+    pub fn draft_required(&self) -> bool {
+        self.draft.is_some() && self.finishes_draft
+    }
+
+    /// The length of a test of a take of `length`: [`TEST_TAKE_LENGTH`]
+    /// at most, or the model's shortest take where that is longer.
+    pub fn test_length(&self, length: Duration) -> Option<Duration> {
+        let piece = length.min(TEST_TAKE_LENGTH.max(self.min_length));
+        self.fits(piece).then_some(piece)
     }
 
     /// The first paid step of a take: its draft where the model has one.
@@ -153,16 +192,64 @@ impl TakeModel {
         (self.min_length..=self.max_length).contains(&length)
     }
 
-    /// The model `step` is priced and recorded as: the model, with the
-    /// tier's resolution where the request names one
-    /// (`bytedance/seedance-2.5/video-edit/480p`).
+    /// The model `step` is priced and recorded as: the tier's own model
+    /// where it has one, else the model with the tier's resolution where
+    /// the request names one (`bytedance/seedance-2.5/video-edit/480p`).
     pub fn priced_model(&self, step: TakeStep) -> String {
-        match self.tier(step).and_then(|tier| tier.resolution.as_deref()) {
+        let tier = self.tier(step);
+        if let Some(model) = tier.and_then(|tier| tier.model.as_deref()) {
+            return model.to_owned();
+        }
+        match tier.and_then(|tier| tier.resolution.as_deref()) {
             Some(resolution) => format!("{}/{resolution}", self.id.model()),
             None => self.id.model().to_owned(),
         }
     }
 }
+
+/// What a video's performed takes may cost before Bardo asks, until the
+/// user sets another cap for it (#243).
+pub const DEFAULT_TAKE_CAP: Money = Money::from_cents(1_000);
+
+/// The lowest cap a video can have.
+pub const MIN_TAKE_CAP: Money = Money::from_cents(100);
+
+/// What a video's performed takes cost so far and will cost, against its
+/// cap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TakeSpend {
+    /// Recorded for its takes: prompts, tests, drafts and finals.
+    pub spent: Money,
+    /// Each take's steps still to come: its prompt when it has none, a
+    /// draft where the model requires one, and its final when it has none.
+    pub to_come: Money,
+    /// Whether some step has no price, so `to_come` is short.
+    pub partial: bool,
+    pub cap: Money,
+}
+
+impl TakeSpend {
+    /// What the whole video is expected to cost.
+    pub fn projected(&self) -> Money {
+        self.spent.saturating_add(self.to_come)
+    }
+
+    /// Whether a call of `call` goes over the cap: on top of the
+    /// projection, unless `counted` (it is one of the steps still to come,
+    /// already in it).
+    pub fn goes_over(&self, call: Money, counted: bool) -> bool {
+        let with = if counted {
+            self.projected().max(self.spent.saturating_add(call))
+        } else {
+            self.projected().saturating_add(call)
+        };
+        with > self.cap
+    }
+}
+
+/// How long a test take is at most: Kling reads at least 3 seconds of
+/// motion and ModelArk takes 4, so 5 seconds leave room for both.
+pub const TEST_TAKE_LENGTH: Duration = Duration::from_secs(5);
 
 /// The take model a take uses: its own when still offered, else the
 /// channel's when still offered, else the first offered (the default).
@@ -208,6 +295,14 @@ pub struct TakeRequest {
     /// For a final that finishes a draft: the draft's request. The model
     /// reuses the draft's prompt and inputs, so they are not sent again.
     pub draft_task: Option<ClipHandle>,
+    /// For a provider that reads the control video from another
+    /// provider's storage (Kling): the link it reads it from, made when
+    /// the request is sent. `video` names the file as staged, so a
+    /// request sent again is the same request.
+    pub video_link: Option<String>,
+    /// For a provider that takes the look inside the request (Kling, as
+    /// Base64): its bytes. `look` then names it only.
+    pub look_bytes: Option<Vec<u8>>,
 }
 
 /// Where a take is on the provider's side.
@@ -251,6 +346,25 @@ pub trait TakeGenerator: Send + Sync {
 
     /// Hands a file to the provider.
     fn stage(&self, key: &ApiKey, input: TakeInput<'_>) -> Result<StagedFile, ProviderFailure>;
+
+    /// Whether `stage` takes the control video. A provider that reads it
+    /// only from a link and has no storage of its own (Kling) gets it
+    /// staged with another provider that has, through `link`.
+    fn stages_video(&self) -> bool {
+        true
+    }
+
+    /// Whether the look goes inside the request (`TakeRequest::look_bytes`)
+    /// instead of being staged.
+    fn inline_look(&self) -> bool {
+        false
+    }
+
+    /// A link another provider can read `file`, staged here, from for a
+    /// week: the file's own address, unless reading it needs a signature.
+    fn link(&self, _key: &ApiKey, file: &StagedFile) -> Result<String, ProviderFailure> {
+        Ok(file.0.clone())
+    }
 
     /// What the provider says `request` costs, when it says.
     fn quote(&self, key: &ApiKey, request: &TakeRequest) -> Option<Money>;
@@ -321,6 +435,18 @@ impl<T: TakeGenerator + ?Sized> TakeGenerator for Arc<T> {
         (**self).stage(key, input)
     }
 
+    fn stages_video(&self) -> bool {
+        (**self).stages_video()
+    }
+
+    fn inline_look(&self) -> bool {
+        (**self).inline_look()
+    }
+
+    fn link(&self, key: &ApiKey, file: &StagedFile) -> Result<String, ProviderFailure> {
+        (**self).link(key, file)
+    }
+
     fn quote(&self, key: &ApiKey, request: &TakeRequest) -> Option<Money> {
         (**self).quote(key, request)
     }
@@ -384,10 +510,12 @@ mod tests {
             draft: draft.then(|| TakeTier {
                 resolution: Some("480p".into()),
                 height: 480,
+                model: None,
             }),
             final_tier: TakeTier {
                 resolution: draft.then(|| "1080p".into()),
                 height: 1080,
+                model: None,
             },
             finishes_draft: false,
             draft_lifetime: None,
@@ -407,6 +535,7 @@ mod tests {
             assert_eq!(TakeStep::from_code(step.code()), Some(step));
         }
         assert_eq!(TakeStep::from_code("preview"), None);
+        assert_eq!(TakeStep::Test.code(), "test");
     }
 
     #[test]
@@ -435,6 +564,85 @@ mod tests {
             seedance.priced_model(TakeStep::Final),
             "seedance/edit/1080p"
         );
+    }
+
+    #[test]
+    fn a_tier_of_another_model_is_priced_as_that_model() {
+        let mut kling = model(
+            "motion-control/kling-3.0/1080p",
+            &[TakeMode::Recording],
+            false,
+        );
+        kling.draft = Some(TakeTier {
+            resolution: None,
+            height: 720,
+            model: Some("motion-control/kling-2.6/720p".into()),
+        });
+        assert_eq!(
+            kling.priced_model(TakeStep::Draft),
+            "motion-control/kling-2.6/720p"
+        );
+        assert_eq!(
+            kling.priced_model(TakeStep::Final),
+            "motion-control/kling-3.0/1080p"
+        );
+        assert_eq!(
+            kling.priced_model(TakeStep::Test),
+            "motion-control/kling-2.6/720p",
+            "a test is made at the cheapest tier"
+        );
+    }
+
+    #[test]
+    fn a_test_is_sent_at_the_cheapest_tier() {
+        let kling = model("kling/mc/pro", &[TakeMode::Recording], false);
+        assert_eq!(kling.sent_step(TakeStep::Test), TakeStep::Final);
+        assert_eq!(kling.tier(TakeStep::Test), kling.tier(TakeStep::Final));
+        assert_eq!(kling.priced_model(TakeStep::Test), "kling/mc/pro");
+        let seedance = model("seedance/edit", &[TakeMode::Mesh], true);
+        assert_eq!(seedance.sent_step(TakeStep::Test), TakeStep::Draft);
+        assert_eq!(seedance.priced_model(TakeStep::Test), "seedance/edit/480p");
+        for step in [TakeStep::Draft, TakeStep::Final] {
+            assert_eq!(seedance.sent_step(step), step);
+        }
+    }
+
+    #[test]
+    fn a_draft_is_optional_only_where_the_final_is_a_new_take() {
+        let kling = model("kling/mc/pro", &[TakeMode::Recording], false);
+        assert!(!kling.draft_optional() && !kling.draft_required());
+        let mut seedance = model("seedance/edit", &[TakeMode::Mesh], true);
+        assert!(seedance.draft_optional() && !seedance.draft_required());
+        seedance.finishes_draft = true;
+        assert!(!seedance.draft_optional() && seedance.draft_required());
+    }
+
+    #[test]
+    fn a_test_lasts_five_seconds_at_most_and_what_the_model_makes_at_least() {
+        let kling = model("kling/mc/pro", &[TakeMode::Recording], false);
+        assert_eq!(kling.test_length(secs(30)), Some(secs(5)));
+        assert_eq!(kling.test_length(secs(4)), Some(secs(4)));
+        assert_eq!(kling.test_length(secs(3)), None, "under the model's 4 s");
+    }
+
+    #[test]
+    fn the_cap_counts_a_step_still_to_come_once() {
+        let spend = TakeSpend {
+            spent: Money::from_cents(300),
+            to_come: Money::from_cents(600),
+            partial: false,
+            cap: Money::from_cents(1_000),
+        };
+        assert_eq!(spend.projected(), Money::from_cents(900));
+        // A final still to come is in the projection already.
+        assert!(!spend.goes_over(Money::from_cents(500), true));
+        // A test or an optional draft comes on top of it.
+        assert!(!spend.goes_over(Money::from_cents(100), false));
+        assert!(spend.goes_over(Money::from_cents(101), false));
+        // A redo dearer than the whole projection still counts in full.
+        assert!(spend.goes_over(Money::from_cents(800), true));
+        assert_eq!(DEFAULT_TAKE_CAP, Money::from_cents(1_000));
+        assert!(MIN_TAKE_CAP < DEFAULT_TAKE_CAP);
     }
 
     #[test]

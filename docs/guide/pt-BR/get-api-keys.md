@@ -106,7 +106,7 @@ Você só precisa desta chave para clipes de vídeo dos modelos da Higgsfield.
 <a id="kling"></a>
 ## Kling
 
-Você só precisa desta chave para clipes de vídeo direto do Kling. Os modelos do Kling também são oferecidos pela Higgsfield; ir direto custa o mesmo em 1080p e menos em 720p, pago com os pacotes de recursos do próprio Kling.
+Você só precisa desta chave para clipes de vídeo ou clipes interpretados direto do Kling. Os modelos do Kling também são oferecidos pela Higgsfield; ir direto custa o mesmo em 1080p e menos em 720p, pago com os pacotes de recursos do próprio Kling.
 
 1. Abra a [plataforma de API do Kling](https://kling.ai/dev) e entre. A sua conta de desenvolvedor é a mesma da sua conta web do Kling AI.
 2. Compre um pacote de recursos de vídeo em [Pricing](https://kling.ai/dev/pricing?scrollTo=video). Cada clipe gasta unidades dele por segundo (1 unidade custa US$ 0,14; o Kling 3.0 em 720p gasta 0,6 unidade por segundo). Há um pacote de teste para a primeira vez. Os pacotes vencem e, sem unidades, o Kling recusa a chamada.

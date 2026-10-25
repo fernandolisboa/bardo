@@ -104,6 +104,10 @@ pub enum JobActionError {
     /// A newer narration of the project replaced what the job would make.
     #[error("a newer job replaced it")]
     Superseded,
+    /// A performed take that never reached its provider: it is made again
+    /// from the capture, where its cap, test and checks are asked again.
+    #[error("make the take again from its capture")]
+    TakeFromItsPage,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]

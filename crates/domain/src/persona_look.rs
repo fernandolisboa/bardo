@@ -317,6 +317,19 @@ impl LookAssetError {
     ];
 }
 
+/// How tall the face in a look's image is (#243), measured on the computer
+/// by the face tracker for the preflight checks: a full-body look should
+/// not be driven by half-body motion. It holds for the image it was
+/// measured on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LookFaceMeasure {
+    /// The fingerprint of the look's image it was measured on.
+    pub image: String,
+    /// The face's height as a share of the image's; `None` when the face
+    /// tracker found no face.
+    pub face_height: Option<f32>,
+}
+
 /// A look's entry in the provider's asset library, used in place of the
 /// image. It belongs to the user's account, so it is never exported, and
 /// it holds only for the image it was given for.

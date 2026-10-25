@@ -130,6 +130,21 @@ pub enum CaptureError {
     /// Nothing made for the take to review or use.
     #[error("nothing was made for the take")]
     NoTakeResult,
+    /// Drafts and finals wait for the capture's test take, approved.
+    #[error("the test take is not approved")]
+    TestNotApproved,
+    /// A preflight check of the take failed, and the user did not send it
+    /// anyway.
+    #[error("a preflight check failed")]
+    PreflightFailed,
+    /// The step would take the video's performed takes over their cap,
+    /// with what it costs (and any budget it reaches); the card asks before
+    /// starting it with `BudgetConsent::Confirmed`.
+    #[error("over the video's cap")]
+    OverCap(bardo_domain::TakeSpend, crate::SpendEstimate),
+    /// A cap that is not an amount, or under the lowest one.
+    #[error("the cap is not a usable amount")]
+    CapInvalid,
     #[error(transparent)]
     Template(#[from] crate::TemplateError),
     #[error(transparent)]
@@ -151,6 +166,7 @@ impl CaptureError {
             CaptureError::MissingKey(Provider::Claude) => Text::PerformedMissingClaudeKey,
             CaptureError::MissingKey(Provider::Higgsfield) => Text::PerformedMissingHiggsfieldKey,
             CaptureError::MissingKey(Provider::BytePlus) => Text::PerformedMissingBytePlusKey,
+            CaptureError::MissingKey(Provider::Kling) => Text::PerformedMissingKlingKey,
             CaptureError::MissingKey(_) => Text::NarrationMissingKey,
             CaptureError::Busy => Text::NarrationBusy,
             CaptureError::OverBudget(_) => Text::BudgetReachedTitle,
@@ -175,6 +191,10 @@ impl CaptureError {
             CaptureError::DraftNotApproved => Text::PerformedDraftFirst,
             CaptureError::DraftExpired => Text::PerformedDraftExpired,
             CaptureError::DraftFinished => Text::PerformedDraftFinished,
+            CaptureError::TestNotApproved => Text::PerformedTestFirst,
+            CaptureError::PreflightFailed => Text::PreflightFailedNote,
+            CaptureError::OverCap(..) => Text::TakeCapReachedTitle,
+            CaptureError::CapInvalid => Text::TakeCapInvalid,
             CaptureError::Template(error) => error.message(),
             CaptureError::Boundary(_) => Text::CaptureNoCutPoint,
             CaptureError::Repository(_) => Text::CaptureNotSaved,

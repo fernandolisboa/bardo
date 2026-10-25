@@ -37,16 +37,16 @@ use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, AssetSource, Capture, CaptureId, CaptureRepository, ChannelId, ChannelRepository,
-    ClipHandle, ClipModelRef, CostPurpose, FaceLandmarks, ImageFormat, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, JobRepository, JobState, LookAssetKind, LookSource,
-    MAX_TAKE_PROMPT, MediaAsset, MediaAssetId, MediaAssetRepository, MediaKind, Metered, Money,
-    Outbound, PerformedClip, PersonaId, PersonaLook, PersonaRepository, PictureSize, ProfileId,
-    ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, SecretStore,
-    StagedFile, StagedUpload, StagingRepository, TakeGenerator, TakeInput, TakeMode, TakeModel,
-    TakePrompt, TakePromptError, TakeRequest, TakeResult, TakeStatus, TakeStep, TakeStretch,
-    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersionId, TextFormat,
-    TextGenerator, TextImage, TextRequest, ThemeRepository, VideoProjectId, take_model_of,
-    take_prompt_text,
+    ClipHandle, ClipModelRef, CostPurpose, DEFAULT_TAKE_CAP, FaceLandmarks, ImageFormat, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, JobRepository, JobState, LookAssetKind, LookFace,
+    LookSource, MAX_TAKE_PROMPT, MIN_TAKE_CAP, MediaAsset, MediaAssetId, MediaAssetRepository,
+    MediaKind, Metered, Money, Outbound, PerformedClip, PersonaId, PersonaLook, PersonaRepository,
+    PictureSize, Preflight, PreflightOverride, ProfileId, ProjectFiles, Provider, ProviderFailure,
+    ProviderFailureKind, RepositoryError, SecretStore, StagedFile, StagedUpload, StagingRepository,
+    TakeGenerator, TakeInput, TakeMode, TakeModel, TakePrompt, TakePromptError, TakeRequest,
+    TakeResult, TakeSpend, TakeStatus, TakeStep, TakeStretch, TemplateKind, TemplateUsed,
+    TemplateValues, TemplateVariable, TemplateVersionId, TextFormat, TextGenerator, TextImage,
+    TextRequest, ThemeRepository, VideoProjectId, preflight, take_model_of, take_prompt_text,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -129,16 +129,20 @@ pub enum PerformedBlock {
     NoVerifiedLikeness,
     /// The take's control video is not approved as it is now.
     ControlNotApproved,
+    /// The model reads the control video from a link, and no storage it
+    /// can be staged in has a key saved (BytePlus or Higgsfield).
+    NoVideoHost,
 }
 
 impl PerformedBlock {
-    pub const ALL: [PerformedBlock; 6] = [
+    pub const ALL: [PerformedBlock; 7] = [
         PerformedBlock::NoModel,
         PerformedBlock::ModeNotTaken,
         PerformedBlock::Length,
         PerformedBlock::NoLook,
         PerformedBlock::NoVerifiedLikeness,
         PerformedBlock::ControlNotApproved,
+        PerformedBlock::NoVideoHost,
     ];
 
     /// A stable name, for the interface's texts.
@@ -150,6 +154,7 @@ impl PerformedBlock {
             PerformedBlock::NoLook => "no_look",
             PerformedBlock::NoVerifiedLikeness => "no_verified_likeness",
             PerformedBlock::ControlNotApproved => "control_not_approved",
+            PerformedBlock::NoVideoHost => "no_video_host",
         }
     }
 }
@@ -199,6 +204,14 @@ pub struct PerformedTakeView {
     /// The next paid step, and what it would cost.
     pub next: PerformedStep,
     pub estimate: Option<SpendEstimate>,
+    /// Where the next step is a draft the model does not require: what a
+    /// final made without it would cost.
+    pub skip_draft: Option<SpendEstimate>,
+    /// The free checks of the take against its model and the look, once
+    /// it has a model; and whether the user chose to send it anyway, for
+    /// its approved control video.
+    pub preflight: Option<Preflight>,
+    pub overridden: bool,
     /// The take's length.
     pub length: Duration,
     /// How many performed clips the take's finals became.
@@ -224,6 +237,11 @@ impl PerformedTakeView {
             .as_ref()
             .is_some_and(|model| model.draft.is_some())
     }
+
+    /// Whether a failed preflight check holds its paid steps back.
+    pub fn preflight_holds(&self) -> bool {
+        !self.overridden && self.preflight.as_ref().is_some_and(Preflight::holds)
+    }
 }
 
 /// The performed clips part of the Capture stage.
@@ -239,6 +257,39 @@ pub struct PerformedView {
     pub realistic: bool,
     /// One per take, in order.
     pub takes: Vec<PerformedTakeView>,
+    /// The capture's test take, made for the performer's current look and
+    /// on disk; its latest job; the take a new test would be made from,
+    /// with what it would cost.
+    pub test: Option<TakeResult>,
+    pub test_job: Option<Job>,
+    pub test_pending: bool,
+    pub test_take: Option<usize>,
+    pub test_estimate: Option<SpendEstimate>,
+    /// Whether drafts and finals wait for an approved test: none was made
+    /// of this capture yet.
+    pub needs_test: bool,
+    /// What the video's takes cost so far and will cost, against its cap.
+    pub spend: TakeSpend,
+    /// Whether the cap is the user's own (else the default).
+    pub own_cap: bool,
+    /// How the face in the look was measured, for the framing check.
+    pub look_face: LookFace,
+}
+
+impl PerformedView {
+    /// Whether the test take waits for review.
+    pub fn test_to_review(&self) -> bool {
+        self.test
+            .as_ref()
+            .is_some_and(|test| test.accepted_at.is_none())
+    }
+
+    /// Whether a test of this capture's takes is being made.
+    pub fn test_busy(&self) -> bool {
+        self.test_job
+            .as_ref()
+            .is_some_and(|job| job.state().is_active())
+    }
 }
 
 /// A prompt job's payload: the take, the control video and model it is
@@ -294,6 +345,20 @@ struct TakePayload {
     draft_realistic: bool,
     #[serde(default)]
     draft_deadline: Option<u64>,
+    /// For a test: how much of the control video's start it sends.
+    #[serde(default)]
+    piece: Option<TestPiece>,
+}
+
+/// The start of a control video a test sends (#243), with how the control
+/// video is encoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct TestPiece {
+    /// Milliseconds.
+    length: u64,
+    width: u32,
+    height: u32,
+    fps_milli: u32,
 }
 
 /// Picks the take out of a prompt or take job's payload.
@@ -352,6 +417,10 @@ struct TakeState {
     staged_at: Option<u64>,
     #[serde(default)]
     sent_at: Option<u64>,
+    /// For a model that reads the control video from a link: the provider
+    /// it is staged with.
+    #[serde(default)]
+    host: Option<String>,
 }
 
 /// Whether a take job's saved state holds a request the provider took,
@@ -793,6 +862,46 @@ struct TakeRun<'a> {
     generator: Arc<dyn TakeGenerator>,
     key: ApiKey,
     state: TakeState,
+    /// Where the control video is staged, for a model that reads it from
+    /// a link, with its key.
+    host: Option<(Arc<dyn TakeGenerator>, ApiKey)>,
+    /// The look as it goes inside the request, for a model that takes it
+    /// so.
+    look_bytes: Option<Vec<u8>>,
+}
+
+/// The storage a control video is staged in for a model that reads it from
+/// a link (#243): the user's own BytePlus bucket when its key is saved,
+/// else Higgsfield's upload; `None` with neither key.
+fn video_host(
+    generators: &[Arc<dyn TakeGenerator>],
+    has_key: impl Fn(Provider) -> bool,
+) -> Option<&Arc<dyn TakeGenerator>> {
+    [Provider::BytePlus, Provider::Higgsfield]
+        .into_iter()
+        .filter(|provider| has_key(*provider))
+        .find_map(|provider| {
+            generators
+                .iter()
+                .find(|generator| generator.provider() == provider && generator.stages_video())
+        })
+}
+
+impl PerformedTakeHandler {
+    /// Removes `old`, a test another test replaced, with its file and
+    /// what its job staged.
+    fn drop_test(&self, project: VideoProjectId, old: &TakeResult) -> Result<(), JobFailure> {
+        self.captures
+            .remove_take_result(project, old.position, TakeStep::Test)
+            .map_err(unexpected)?;
+        let _ = self.files.remove(project, &old.file);
+        if let Some(job) = old.job {
+            self.staging
+                .release_staged_by(job, SystemTime::now())
+                .map_err(unexpected)?;
+        }
+        Ok(())
+    }
 }
 
 impl JobHandler for PerformedTakeHandler {
@@ -802,15 +911,19 @@ impl JobHandler for PerformedTakeHandler {
         let capture: CaptureId = id(&payload.capture)?;
         let step = TakeStep::from_code(&payload.step)
             .ok_or_else(|| unexpected(format!("unknown take step {}", payload.step)))?;
-        if self
-            .captures
-            .take_results(project)
-            .map_err(unexpected)?
-            .iter()
-            .any(|made| {
-                made.position == payload.position && made.step == step && made.job == Some(cx.id())
-            })
-        {
+        let results = self.captures.take_results(project).map_err(unexpected)?;
+        if results.iter().any(|made| {
+            made.position == payload.position && made.step == step && made.job == Some(cx.id())
+        }) {
+            // A test saved before the others went finishes replacing them.
+            if step == TakeStep::Test {
+                for old in results
+                    .iter()
+                    .filter(|old| old.step == TakeStep::Test && old.position != payload.position)
+                {
+                    self.drop_test(project, old)?;
+                }
+            }
             return Ok(());
         }
         let provider: Provider = payload.provider.parse().map_err(unexpected)?;
@@ -831,9 +944,45 @@ impl JobHandler for PerformedTakeHandler {
                 )
             })?;
         let key = key_of(self.secrets.as_ref(), self.owner, provider)?;
-        let state = match cx.external_handle() {
+        let state: TakeState = match cx.external_handle() {
             Some(saved) => parse(saved)?,
             None => TakeState::default(),
+        };
+        let host = if generator.stages_video() {
+            None
+        } else {
+            let host = match &state.host {
+                // The files are where the first attempt staged them.
+                Some(code) => {
+                    let staged_with: Provider = code.parse().map_err(unexpected)?;
+                    self.generators
+                        .iter()
+                        .find(|generator| generator.provider() == staged_with)
+                        .cloned()
+                        .ok_or_else(|| unexpected(format!("{staged_with} stages nothing")))?
+                }
+                None => video_host(&self.generators, |provider| {
+                    matches!(self.secrets.get(self.owner, provider), Ok(Some(_)))
+                })
+                .cloned()
+                .ok_or_else(|| {
+                    JobFailure::new(
+                        JobFailureKind::MissingKey,
+                        format!(
+                            "{} reads the control video from a link: save a BytePlus or \
+                             Higgsfield key to stage it",
+                            provider_name(provider)
+                        ),
+                    )
+                })?,
+            };
+            match key_of(self.secrets.as_ref(), self.owner, host.provider()) {
+                Ok(host_key) => Some((host, host_key)),
+                // A take already sent is checked on and downloaded from its
+                // own provider; its files expire on their own.
+                Err(_) if state.request.is_some() => None,
+                Err(failure) => return Err(failure),
+            }
         };
         let mut run = TakeRun {
             handler: self,
@@ -845,6 +994,8 @@ impl JobHandler for PerformedTakeHandler {
             generator,
             key,
             state,
+            host,
+            look_bytes: None,
         };
         // Files given up earlier go first, and what this run gave up after.
         run.sweep();
@@ -914,19 +1065,32 @@ impl TakeRun<'_> {
     /// Deletes the staged files that are due, where the provider keeps
     /// them. Best effort: what is not deleted now is deleted later.
     fn sweep(&self) {
-        if !self.generator.keeps_staged() {
+        let generators: Vec<Arc<dyn TakeGenerator>> = std::iter::once(&self.generator)
+            .chain(self.host.as_ref().map(|(host, _)| host))
+            .filter(|generator| generator.keeps_staged())
+            .cloned()
+            .collect();
+        if generators.is_empty() {
             return;
         }
         let handler = self.handler;
         if let Err(failure) = sweep_staged(
             handler.owner,
             handler.staging.as_ref(),
-            std::slice::from_ref(&self.generator),
+            &generators,
             handler.secrets.as_ref(),
             SystemTime::now(),
         ) {
             tracing::warn!(detail = %failure.detail, "staged files were not deleted yet");
         }
+    }
+
+    /// Whether files this run stages stay until Bardo deletes them.
+    fn keeps_staged(&self) -> bool {
+        self.host
+            .as_ref()
+            .map_or(&self.generator, |(host, _)| host)
+            .keeps_staged()
     }
 
     /// Gives up the files `job` staged: they are deleted at the next sweep.
@@ -1038,7 +1202,7 @@ impl TakeRun<'_> {
             }
             return Err(failure);
         }
-        let request = self.request();
+        let request = self.request()?;
         if !self.state.quoted {
             self.state.quote_micros = self.generator.quote(&self.key, &request).map(Money::micros);
             self.state.quoted = true;
@@ -1083,6 +1247,12 @@ impl TakeRun<'_> {
             }
             self.state.sent_at = Some(unix_millis(SystemTime::now()));
             self.save_state(cx)?;
+        } else if self.state.sent_at.is_none() {
+            // Sent from here on: a lost answer leaves the job pending, so
+            // checking again resends the same submission (which the
+            // provider recognizes) instead of a new one, and its files stay.
+            self.state.sent_at = Some(unix_millis(SystemTime::now()));
+            self.save_state(cx)?;
         }
         let submission = format!(
             "{}-{}-{}-{}",
@@ -1109,7 +1279,7 @@ impl TakeRun<'_> {
     /// Stages the control video and the look, unless staged already. Files
     /// staged long ago and never sent are staged again first.
     fn stage_inputs(&mut self, cx: &mut JobContext) -> Result<(), JobFailure> {
-        if self.generator.keeps_staged()
+        if self.keeps_staged()
             && self.state.request.is_none()
             && self.state.sent_at.is_none()
             && self.state.staged_at.is_some_and(|staged| {
@@ -1126,11 +1296,7 @@ impl TakeRun<'_> {
             self.save_state(cx)?;
         }
         if self.state.video.is_none() {
-            let bytes = self
-                .handler
-                .files
-                .read(self.project, &self.payload.control_file)
-                .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))?;
+            let bytes = self.control_bytes()?;
             if bytes.len() as u64 > self.model.max_video_bytes {
                 return Err(JobFailure::new(
                     JobFailureKind::Media,
@@ -1140,11 +1306,13 @@ impl TakeRun<'_> {
                     ),
                 ));
             }
-            let staged = self.stage(&bytes, "video/mp4", cx)?;
+            let staged = self.stage(&bytes, "video/mp4", true, cx)?;
             self.state.video = Some(staged);
             self.save_state(cx)?;
         }
-        if self.state.look.is_none() {
+        if self.generator.inline_look() {
+            self.inline_look(cx)?;
+        } else if self.state.look.is_none() {
             let persona: PersonaId = id(&self.payload.persona)?;
             let personas = &self.handler.personas;
             let look = personas
@@ -1175,7 +1343,7 @@ impl TakeRun<'_> {
                 }
                 None => {
                     let jpeg = self.fit_look(&look)?;
-                    self.stage(&jpeg, "image/jpeg", cx)?
+                    self.stage(&jpeg, "image/jpeg", false, cx)?
                 }
             };
             self.state.look = Some(sent);
@@ -1188,22 +1356,31 @@ impl TakeRun<'_> {
 
     /// Hands a file to the provider. One staged in the user's own storage
     /// is listed first, so it is deleted however the job ends.
+    /// The control video goes to the run's video host where it has one.
     fn stage(
         &mut self,
         bytes: &[u8],
         mime: &str,
+        video: bool,
         cx: &mut JobContext,
     ) -> Result<String, JobFailure> {
-        let staged = self
-            .generator
-            .stage(&self.key, TakeInput { bytes, mime })
-            .map_err(|failure| self.failure(failure))?;
-        if self.generator.keeps_staged() {
+        let (generator, key) = match &self.host {
+            Some((host, key)) if video => (Arc::clone(host), key.clone()),
+            _ => (Arc::clone(&self.generator), self.key.clone()),
+        };
+        if video && self.host.is_some() && self.state.host.is_none() {
+            self.state.host = Some(generator.provider().code().to_owned());
+            self.save_state(cx)?;
+        }
+        let staged = generator
+            .stage(&key, TakeInput { bytes, mime })
+            .map_err(|failure| provider_failure(generator.provider(), failure))?;
+        if generator.keeps_staged() {
             let now = whole_millis(SystemTime::now());
             let listed = self.handler.staging.add_staged(&StagedUpload {
                 file: staged.0.clone(),
                 owner: self.handler.owner,
-                provider: self.provider(),
+                provider: generator.provider(),
                 project: self.project,
                 capture: self.capture,
                 position: self.payload.position,
@@ -1214,7 +1391,7 @@ impl TakeRun<'_> {
             });
             if let Err(error) = listed {
                 // Not listed, so nothing would ever delete it.
-                let _ = self.generator.unstage(&self.key, &staged);
+                let _ = generator.unstage(&key, &staged);
                 return Err(unexpected(error));
             }
             if self.state.staged_at.is_none() {
@@ -1248,16 +1425,74 @@ impl TakeRun<'_> {
             .any(|state| state.request.as_deref() == Some(handle.0.as_str())))
     }
 
-    fn request(&self) -> TakeRequest {
-        TakeRequest {
+    /// What goes to the provider: a test is sent as the step the model
+    /// makes it at, and a control video staged elsewhere goes by a link
+    /// signed now.
+    fn request(&self) -> Result<TakeRequest, JobFailure> {
+        let video = StagedFile(self.state.video.clone().unwrap_or_default());
+        let video_link = match &self.host {
+            Some((host, key)) if self.payload.draft_task.is_none() => Some(
+                host.link(key, &video)
+                    .map_err(|failure| provider_failure(host.provider(), failure))?,
+            ),
+            _ => None,
+        };
+        Ok(TakeRequest {
             model: self.payload.model.clone(),
-            step: self.step,
+            step: self.model.sent_step(self.step),
             resolution: self.payload.resolution.clone(),
             prompt: self.payload.prompt.clone(),
-            video: StagedFile(self.state.video.clone().unwrap_or_default()),
+            video,
             look: StagedFile(self.state.look.clone().unwrap_or_default()),
             draft_task: self.payload.draft_task.clone().map(ClipHandle),
+            video_link,
+            look_bytes: self.look_bytes.clone(),
+        })
+    }
+
+    /// The control video, or its first seconds for a test.
+    fn control_bytes(&self) -> Result<Vec<u8>, JobFailure> {
+        let files = &self.handler.files;
+        let Some(piece) = self.payload.piece else {
+            return files
+                .read(self.project, &self.payload.control_file)
+                .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()));
+        };
+        let folder = private_folder()?;
+        let destination = folder.path().join("test.mp4");
+        crate::control_videos::cut_piece(
+            self.handler.media.as_ref(),
+            &files.path(self.project, &self.payload.control_file),
+            (piece.width, piece.height, piece.fps_milli),
+            Duration::from_millis(piece.length),
+            &destination,
+        )
+        .map_err(|e| JobFailure::new(JobFailureKind::Media, e.to_string()))?;
+        std::fs::read(&destination)
+            .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
+    }
+
+    /// The look, for a model that takes it inside the request: re-encoded
+    /// as for staging, named by the look's print so a request sent again
+    /// is the same request.
+    fn inline_look(&mut self, cx: &mut JobContext) -> Result<(), JobFailure> {
+        let persona: PersonaId = id(&self.payload.persona)?;
+        let look = self
+            .handler
+            .personas
+            .look(persona)
+            .map_err(unexpected)?
+            .ok_or_else(|| JobFailure::unexpected("the persona has no look"))?;
+        let print = look_print(look.image.bytes());
+        self.look_bytes = Some(self.fit_look(&look)?);
+        let named = format!("inline:{print}");
+        if self.state.look.as_deref() != Some(named.as_str()) {
+            self.state.look = Some(named);
+            self.state.look_print = Some(print);
+            self.state.realistic = look.realistic;
+            self.save_state(cx)?;
         }
+        Ok(())
     }
 
     /// The look re-encoded by ffmpeg as a JPEG within the model's limit,
@@ -1319,10 +1554,7 @@ impl TakeRun<'_> {
                 PaidCall {
                     provider: self.provider(),
                     model: &self.payload.priced_model,
-                    purpose: match self.step {
-                        TakeStep::Draft => CostPurpose::TakeDraft,
-                        TakeStep::Final => CostPurpose::TakeFinal,
-                    },
+                    purpose: take_purpose(self.step),
                     usage: usage
                         .unwrap_or_else(|| Metered::video_seconds(u64::from(self.payload.seconds))),
                     job: Some(cx.id()),
@@ -1338,11 +1570,20 @@ impl TakeRun<'_> {
             return Err(take_changed());
         }
         let captures = &self.handler.captures;
-        let replaced = captures
-            .take_results(self.project)
-            .map_err(unexpected)?
+        let results = captures.take_results(self.project).map_err(unexpected)?;
+        let replaced = results
+            .iter()
+            .find(|old| old.position == self.payload.position && old.step == self.step)
+            .cloned();
+        // A capture has one test: one of another take goes.
+        let other_tests: Vec<TakeResult> = results
             .into_iter()
-            .find(|old| old.position == self.payload.position && old.step == self.step);
+            .filter(|old| {
+                self.step == TakeStep::Test
+                    && old.step == TakeStep::Test
+                    && old.position != self.payload.position
+            })
+            .collect();
         let template = match (&self.payload.template, self.payload.template_number) {
             (Some(template), Some(number)) => Some(TemplateUsed {
                 id: id::<TemplateVersionId>(template)?,
@@ -1359,7 +1600,7 @@ impl TakeRun<'_> {
                 .or(self.state.sent_at)
                 .and_then(|from| self.model.draft_deadline(from_unix_millis(from)))
                 .map(whole_millis),
-            TakeStep::Final => None,
+            TakeStep::Final | TakeStep::Test => None,
         };
         let result = TakeResult {
             project: self.project,
@@ -1394,11 +1635,27 @@ impl TakeRun<'_> {
                 self.release(job)?;
             }
         }
+        for old in &other_tests {
+            self.handler.drop_test(self.project, old)?;
+        }
         // The draft's files served their final.
         if let Some(draft) = &self.payload.draft_job {
             self.release(id(draft)?)?;
         }
+        // Only a draft a final finishes needs its files again.
+        if self.step != TakeStep::Draft || !self.model.finishes_draft {
+            self.release(cx.id())?;
+        }
         Ok(())
+    }
+}
+
+/// What a take step's cost is recorded as.
+fn take_purpose(step: TakeStep) -> CostPurpose {
+    match step {
+        TakeStep::Draft => CostPurpose::TakeDraft,
+        TakeStep::Final => CostPurpose::TakeFinal,
+        TakeStep::Test => CostPurpose::TakeTest,
     }
 }
 
@@ -1439,15 +1696,8 @@ fn step_calls(
             )]
         }
         PerformedStep::Make(step) => {
-            let call = PlannedCall::new(
-                model.id.provider(),
-                match step {
-                    TakeStep::Draft => CostPurpose::TakeDraft,
-                    TakeStep::Final => CostPurpose::TakeFinal,
-                },
-                1,
-            )
-            .with_model(&model.priced_model(step));
+            let call = PlannedCall::new(model.id.provider(), take_purpose(step), 1)
+                .with_model(&model.priced_model(step));
             // A model billed in tokens is priced by those alone: a rate
             // table has no seconds rate for it.
             vec![match model.estimated_tokens(step, length, frame) {
@@ -1460,18 +1710,24 @@ fn step_calls(
 
 /// What a take's next paid step is: its prompt, then its draft until one
 /// is approved (where the model makes drafts) and can still be finished,
-/// then its final.
+/// then its final. Where the draft is optional and a final was made
+/// without one, the final.
 fn next_step(
     model: Option<&TakeModel>,
     prompt: Option<&TakePrompt>,
     draft: Option<&TakeResult>,
+    final_made: bool,
     now: SystemTime,
 ) -> PerformedStep {
     if prompt.is_none() {
         return PerformedStep::Prompt;
     }
     let drafts = model.is_some_and(|model| model.draft.is_some());
-    if drafts && draft.is_none_or(|draft| draft.accepted_at.is_none() || draft.expired(now)) {
+    let skipped = final_made && draft.is_none() && model.is_some_and(TakeModel::draft_optional);
+    if drafts
+        && !skipped
+        && draft.is_none_or(|draft| draft.accepted_at.is_none() || draft.expired(now))
+    {
         PerformedStep::Make(TakeStep::Draft)
     } else {
         PerformedStep::Make(TakeStep::Final)
@@ -1596,6 +1852,74 @@ impl Bardo {
             .map(|look| (persona.id, look)))
     }
 
+    /// Whether a key is saved for `provider`.
+    fn has_take_key(&self, provider: Provider) -> bool {
+        self.provider_key(provider).state != KeyState::NotSet
+    }
+
+    /// The generator of `model`'s provider.
+    fn generator_of(&self, model: &TakeModel) -> Option<&Arc<dyn TakeGenerator>> {
+        self.takes
+            .iter()
+            .find(|generator| generator.provider() == model.id.provider())
+    }
+
+    /// Whether `model` can have its control video staged: its provider
+    /// stages it, or storage with a saved key does (#243).
+    fn video_hosted(&self, model: &TakeModel) -> bool {
+        self.generator_of(model)
+            .is_none_or(|generator| generator.stages_video())
+            || video_host(&self.takes, |provider| self.has_take_key(provider)).is_some()
+    }
+
+    /// The face in the performer's look, as measured; a look not measured
+    /// yet gets its measuring job queued.
+    fn look_face(&self, persona: PersonaId, look: &PersonaLook) -> Result<LookFace, CaptureError> {
+        let print = look_print(look.image.bytes());
+        if let Some(measure) = self
+            .personas
+            .look_face(persona)?
+            .filter(|measure| measure.image == print)
+        {
+            return Ok(match measure.face_height {
+                Some(height) => LookFace::Height(height),
+                None => LookFace::NoFace,
+            });
+        }
+        crate::look_framing::queue_look_framing(self, persona, &print);
+        Ok(LookFace::Unmeasured)
+    }
+
+    /// The video's cap: the user's, else the default.
+    fn take_cap(&self, project: VideoProjectId) -> Result<(Money, bool), CaptureError> {
+        Ok(match self.captures.take_cap(project)? {
+            Some(cap) => (cap, true),
+            None => (DEFAULT_TAKE_CAP, false),
+        })
+    }
+
+    /// What `project`'s performed takes cost so far: prompts, tests,
+    /// drafts and finals, as Costs records them.
+    fn takes_spent(&self, project: VideoProjectId) -> Result<Money, CaptureError> {
+        let rates = self.cost_book.rates()?;
+        Ok(self
+            .cost_book
+            .costs
+            .project_costs(project)?
+            .into_iter()
+            .filter(|record| {
+                matches!(
+                    record.purpose,
+                    CostPurpose::TakePrompt
+                        | CostPurpose::TakeDraft
+                        | CostPurpose::TakeFinal
+                        | CostPurpose::TakeTest
+                )
+            })
+            .map(|record| record.priced_with(&rates).cost.amount())
+            .sum())
+    }
+
     /// The performed clips part of the Capture stage for `capture`, whose
     /// takes' control videos are `controls`.
     pub(crate) fn performed_view(
@@ -1613,6 +1937,13 @@ impl Bardo {
         let channel_ref = self.channel_take_ref(channel)?;
         let channel_model = take_model_of(&models, channel_ref.as_ref(), None).cloned();
         let look = self.performer_look(project)?;
+        let look_print_now = look
+            .as_ref()
+            .map(|(_, look)| look_print(look.image.bytes()));
+        let look_face = match &look {
+            Some((persona, look)) => self.look_face(*persona, look)?,
+            None => LookFace::Unmeasured,
+        };
         // The looks the providers' asset libraries hold for it.
         let likeness = |model: &TakeModel| -> Result<bool, CaptureError> {
             let Some((persona, look)) = &look else {
@@ -1633,9 +1964,13 @@ impl Bardo {
         let now = SystemTime::now();
         let prompts = self.captures.take_prompts(project)?;
         let results = self.captures.take_results(project)?;
+        let overrides = self.captures.preflight_overrides(project)?;
+        let analyses = self.analysis_views(capture)?;
         let used = self.media_assets.performed_clips(project)?;
         let jobs = self.performed_jobs(capture);
+        let is_test = |of: &TakeOf| of.step.as_deref() == Some(TakeStep::Test.code());
         let mut takes = Vec::with_capacity(capture.takes.as_slice().len());
+        let (mut to_come, mut partial) = (Money::ZERO, false);
         for (index, take) in capture.takes.as_slice().iter().enumerate() {
             let position = index as u32;
             let model = take_model_of(&models, channel_ref.as_ref(), take.model.as_ref()).cloned();
@@ -1650,6 +1985,7 @@ impl Bardo {
                 (Some(model), _) if !model.fits(take.length()) => Some(PerformedBlock::Length),
                 _ if look.is_none() => Some(PerformedBlock::NoLook),
                 (Some(model), _) if !likeness(model)? => Some(PerformedBlock::NoVerifiedLikeness),
+                (Some(model), _) if !self.video_hosted(model) => Some(PerformedBlock::NoVideoHost),
                 (_, None) => Some(PerformedBlock::ControlNotApproved),
                 _ => None,
             };
@@ -1686,10 +2022,12 @@ impl Bardo {
             let of_take = || jobs.iter().filter(|(_, of)| of.position == position);
             let busy = of_take().any(|(job, _)| job.state().is_active());
             // One under way, else the latest made for the take as it is now:
-            // one for another control video or model is history.
+            // one for another control video or model is history. Tests are
+            // the capture's, apart.
             let latest = |kind: JobKind| {
                 of_take().rev().find(|(job, of)| {
                     job.kind() == kind
+                        && !is_test(of)
                         && (job.state().is_active()
                             || of.made_for(approved.as_deref(), model.as_ref()))
                 })
@@ -1706,14 +2044,65 @@ impl Bardo {
                 model.as_ref(),
                 prompt.as_ref(),
                 draft.as_ref().filter(|_| !finished),
+                final_take.is_some(),
                 now,
             );
+            let estimate_of = |model: &TakeModel, step: PerformedStep| {
+                self.estimate(&step_calls(model, step, take.length(), frame))
+            };
             let estimate = match (&model, block) {
-                (Some(model), None) => {
-                    Some(self.estimate(&step_calls(model, next, take.length(), frame))?)
+                (Some(model), None) => Some(estimate_of(model, next)?),
+                _ => None,
+            };
+            let skip_draft = match (&model, block, next) {
+                (Some(model), None, PerformedStep::Make(TakeStep::Draft))
+                    if model.draft_optional() =>
+                {
+                    Some(estimate_of(model, PerformedStep::Make(TakeStep::Final))?)
                 }
                 _ => None,
             };
+            // What is still to pay for this take: its prompt, a draft its
+            // model requires, and its final, until each is made.
+            if let Some(model) = &model {
+                let mut steps = Vec::new();
+                if prompt.is_none() {
+                    steps.push(PerformedStep::Prompt);
+                }
+                if model.draft_required()
+                    && !finished
+                    && draft
+                        .as_ref()
+                        .is_none_or(|draft| draft.accepted_at.is_none() || draft.expired(now))
+                {
+                    steps.push(PerformedStep::Make(TakeStep::Draft));
+                }
+                if final_take.is_none() {
+                    steps.push(PerformedStep::Make(TakeStep::Final));
+                }
+                for step in steps {
+                    let estimate = estimate_of(model, step)?;
+                    to_come = to_come.saturating_add(estimate.total());
+                    partial |= estimate.is_partial();
+                }
+            }
+            let preflight = model.as_ref().map(|model| {
+                preflight(
+                    model,
+                    // The checks read the face mesh: a depth part alone
+                    // says nothing about faces.
+                    analyses
+                        .get(index)
+                        .filter(|view| matches!(view.face, crate::AnalysisStatus::Done { .. }))
+                        .and_then(|view| view.checks.as_ref()),
+                    look_face,
+                )
+            });
+            let overridden = approved.as_deref().is_some_and(|control| {
+                overrides.iter().any(|o| {
+                    o.capture == capture.id && o.position == position && o.control == control
+                })
+            });
             let expired = draft.as_ref().is_some_and(|draft| draft.expired(now));
             takes.push(PerformedTakeView {
                 finished,
@@ -1731,6 +2120,9 @@ impl Bardo {
                 pending,
                 next,
                 estimate,
+                skip_draft,
+                preflight,
+                overridden,
                 length: take.length(),
                 used: used
                     .iter()
@@ -1738,12 +2130,90 @@ impl Bardo {
                     .count(),
             });
         }
+
+        // The capture's test: made for the look as it is now, on disk.
+        // The latest, should an older one of another take outlive the job
+        // that replaced it.
+        let test = results
+            .iter()
+            .filter(|r| {
+                r.step == TakeStep::Test
+                    && r.capture == capture.id
+                    && look_print_now.as_deref() == Some(r.look.as_str())
+                    && self.files.exists(project, &r.file)
+            })
+            .max_by_key(|r| r.made_at)
+            .cloned();
+        let test_job = jobs
+            .iter()
+            .rev()
+            .find(|(job, of)| job.kind() == JobKind::PerformedTake && is_test(of))
+            .map(|(job, _)| job.clone());
+        let test_pending = test_job.as_ref().is_some_and(|job| {
+            matches!(job.state(), JobState::Failed | JobState::Cancelled) && has_request(job)
+        });
+        // A test comes from the first take that could go to its model now,
+        // one its preflight checks let through first. While the test runs,
+        // its own take stays the one shown.
+        let test_running = test_job.as_ref().is_some_and(|job| job.state().is_active());
+        let ready = |view: &PerformedTakeView| {
+            view.block.is_none()
+                && (test_running || !view.is_busy())
+                && !view.pending
+                && view.prompt.is_some()
+                && view
+                    .model
+                    .as_ref()
+                    .is_some_and(|model| model.test_length(view.length).is_some())
+        };
+        let test_take = takes
+            .iter()
+            .position(|view| ready(view) && !view.preflight_holds())
+            .or_else(|| takes.iter().position(ready));
+        let test_estimate = match test_take {
+            Some(index) => {
+                let view = &takes[index];
+                let model = view.model.as_ref().expect("a test take has a model");
+                let piece = model.test_length(view.length).expect("it fits");
+                Some(self.estimate(&step_calls(
+                    model,
+                    PerformedStep::Make(TakeStep::Test),
+                    piece,
+                    frame,
+                ))?)
+            }
+            None => None,
+        };
+        // A capture that already made a draft or final with the look as it
+        // is now (before tests existed, or after an approved test) goes on.
+        let made_before = results.iter().any(|r| {
+            r.capture == capture.id
+                && matches!(r.step, TakeStep::Draft | TakeStep::Final)
+                && look_print_now.as_deref() == Some(r.look.as_str())
+        });
+        let needs_test =
+            !made_before && test.as_ref().is_none_or(|test| test.accepted_at.is_none());
+        let (cap, own_cap) = self.take_cap(project)?;
         Ok(PerformedView {
             models,
             channel_model,
             has_look: look.is_some(),
             realistic: look.is_some_and(|(_, look)| look.realistic),
             takes,
+            test,
+            test_job,
+            test_pending,
+            test_take,
+            test_estimate,
+            needs_test,
+            spend: TakeSpend {
+                spent: self.takes_spent(project)?,
+                to_come,
+                partial,
+                cap,
+            },
+            own_cap,
+            look_face,
         })
     }
 
@@ -1959,11 +2429,14 @@ impl Bardo {
         Ok(())
     }
 
-    /// Starts a job in which take `index`'s model makes its draft or
-    /// final from its prompt, its approved control video and the persona's
-    /// look. A final needs an approved draft where the model makes drafts,
-    /// and finishes it within its deadline where the model's final
-    /// finishes its draft. Past the provider's budget it needs `consent`.
+    /// Starts a job in which take `index`'s model makes its draft, final
+    /// or the capture's test from its prompt, its approved control video
+    /// and the persona's look. A final needs an approved draft where the
+    /// model requires one, and finishes it within its deadline where the
+    /// model's final finishes its draft. Drafts and finals wait for an
+    /// approved test, and every step for the take's preflight checks to
+    /// pass or be overridden. Past the provider's budget or the video's
+    /// cap it needs `consent`.
     pub fn make_performed_take(
         &self,
         project: VideoProjectId,
@@ -1971,7 +2444,37 @@ impl Bardo {
         step: TakeStep,
         consent: BudgetConsent,
     ) -> Result<JobId, CaptureError> {
-        let (capture, view) = self.performed_take(project, index)?;
+        let (capture, payload) = self.take_payload(project, index, step, consent)?;
+        // Files an earlier attempt staged and never sent are not needed.
+        let now = SystemTime::now();
+        for (old, of) in self.performed_jobs(&capture) {
+            if of.position == payload.position && !old.state().is_active() && !has_request(&old) {
+                self.staging.release_staged_by(old.id(), now)?;
+            }
+        }
+        let job = Job::new(self.profile.id, JobKind::PerformedTake, to_json(&payload));
+        Ok(self.jobs.enqueue(job)?)
+    }
+
+    /// What a job making take `index`'s `step` sends, once everything
+    /// [`Self::make_performed_take`] asks holds.
+    fn take_payload(
+        &self,
+        project: VideoProjectId,
+        index: usize,
+        step: TakeStep,
+        consent: BudgetConsent,
+    ) -> Result<(Capture, TakePayload), CaptureError> {
+        let (capture, _) = self.current_capture(project)?;
+        let controls = self.control_views(&capture)?;
+        let performed = self.performed_view(&capture, &controls)?;
+        let view = performed
+            .takes
+            .get(index)
+            .ok_or(CaptureError::Boundary(
+                bardo_domain::BoundaryError::NoSuchTake,
+            ))?
+            .clone();
         let model = Self::check_take(&view)?;
         let prompt = view
             .prompt
@@ -1979,8 +2482,28 @@ impl Bardo {
             .ok_or(CaptureError::Prompt(TakePromptError::Empty))?;
         let text = take_prompt_text(&prompt.text).map_err(CaptureError::Prompt)?;
         let tier = model.tier(step).ok_or(CaptureError::NoDrafts)?;
+        if step == TakeStep::Test && performed.test_busy() {
+            return Err(CaptureError::TakeBusy);
+        }
+        if step == TakeStep::Test && performed.test_pending {
+            return Err(CaptureError::TakePending);
+        }
+        if step != TakeStep::Test && performed.needs_test {
+            return Err(CaptureError::TestNotApproved);
+        }
+        if view.preflight_holds() {
+            return Err(CaptureError::PreflightFailed);
+        }
+        let piece = match step {
+            TakeStep::Test => Some(
+                model
+                    .test_length(view.length)
+                    .ok_or(CaptureError::Performed(PerformedBlock::Length))?,
+            ),
+            _ => None,
+        };
         if step == TakeStep::Final
-            && model.draft.is_some()
+            && model.draft_required()
             && view
                 .draft
                 .as_ref()
@@ -2008,7 +2531,36 @@ impl Bardo {
             .performer_look(project)?
             .ok_or(CaptureError::Performed(PerformedBlock::NoLook))?;
         let frame = bardo_domain::control_size(capture.video.width, capture.video.height);
-        let calls = step_calls(model, PerformedStep::Make(step), take.length(), frame);
+        let length = piece.unwrap_or(take.length());
+        let calls = step_calls(model, PerformedStep::Make(step), length, frame);
+        // A step still to come is in the projection already; a test, an
+        // optional draft or a step made again is not.
+        let counted = match step {
+            TakeStep::Final => view.final_take.is_none(),
+            TakeStep::Draft => {
+                model.draft_required()
+                    && !view.finished
+                    && view.draft.as_ref().is_none_or(|draft| {
+                        draft.accepted_at.is_none() || draft.expired(SystemTime::now())
+                    })
+            }
+            TakeStep::Test => false,
+        };
+        // Past the cap, one question asks about the cap and any budget the
+        // step reaches together; the user's word covers both.
+        let estimate = self.estimate(&calls)?;
+        let call = estimate.total();
+        if consent == BudgetConsent::Ask && performed.spend.goes_over(call, counted) {
+            let spend = TakeSpend {
+                to_come: if counted {
+                    performed.spend.to_come
+                } else {
+                    performed.spend.to_come.saturating_add(call)
+                },
+                ..performed.spend
+            };
+            return Err(CaptureError::OverCap(spend, estimate));
+        }
         if let Err(estimate) = self.check_budget(&calls, consent)? {
             return Err(CaptureError::OverBudget(estimate));
         }
@@ -2027,7 +2579,7 @@ impl Bardo {
             template: prompt.template.map(|t| t.id.to_string()),
             template_number: prompt.template.map(|t| t.number),
             persona: persona.to_string(),
-            seconds: billed_seconds(take.length()),
+            seconds: billed_seconds(length),
             draft_task: finishes.map(|draft| draft.request.clone()),
             draft_job: finishes
                 .and_then(|draft| draft.job)
@@ -2035,16 +2587,18 @@ impl Bardo {
             draft_look: finishes.map(|draft| draft.look.clone()),
             draft_realistic: finishes.is_some_and(|draft| draft.realistic),
             draft_deadline: finishes.and_then(|draft| draft.deadline).map(unix_millis),
+            piece: piece.map(|piece| {
+                let (width, height) =
+                    bardo_domain::control_size(capture.video.width, capture.video.height);
+                TestPiece {
+                    length: piece.as_millis() as u64,
+                    width,
+                    height,
+                    fps_milli: bardo_domain::control_fps(take.mode, capture.video.fps_milli),
+                }
+            }),
         };
-        // Files an earlier attempt staged and never sent are not needed.
-        let now = SystemTime::now();
-        for (old, of) in self.performed_jobs(&capture) {
-            if of.position == payload.position && !old.state().is_active() && !has_request(&old) {
-                self.staging.release_staged_by(old.id(), now)?;
-            }
-        }
-        let job = Job::new(self.profile.id, JobKind::PerformedTake, to_json(&payload));
-        Ok(self.jobs.enqueue(job)?)
+        Ok((capture, payload))
     }
 
     /// Checks again on take `index`'s draft or final job that stopped (or
@@ -2065,6 +2619,48 @@ impl Bardo {
             .ok_or(CaptureError::NoTakeResult)?;
         self.retry_job(job.id())
             .map_err(|_| CaptureError::NoTakeResult)
+    }
+
+    /// Whether `job` is a performed take that never reached its provider
+    /// and that making it from the capture now would not send without a
+    /// question: past the video's cap or a budget, waiting for a test, or
+    /// held by a preflight check. Running it again from the jobs panel
+    /// would pay without that question.
+    pub(crate) fn unsent_take_needs_asking(&self, job: JobId) -> bool {
+        let Some(payload) = self
+            .jobs()
+            .into_iter()
+            .find(|candidate| {
+                candidate.id() == job
+                    && candidate.kind() == JobKind::PerformedTake
+                    && !has_request(candidate)
+            })
+            .and_then(|job| serde_json::from_str::<TakePayload>(job.payload()).ok())
+        else {
+            return false;
+        };
+        let (Ok(project), Some(step)) = (
+            payload.project.parse::<uuid::Uuid>(),
+            TakeStep::from_code(&payload.step),
+        ) else {
+            return false;
+        };
+        // A take that changed fails on its own when it runs, paying nothing.
+        match self.take_payload(
+            VideoProjectId::from(project),
+            payload.position as usize,
+            step,
+            BudgetConsent::Ask,
+        ) {
+            Ok(_) => false,
+            Err(error) => matches!(
+                error,
+                CaptureError::OverCap(..)
+                    | CaptureError::OverBudget(_)
+                    | CaptureError::TestNotApproved
+                    | CaptureError::PreflightFailed
+            ),
+        }
     }
 
     /// Whether a prompt or a performed take of take `index` of `capture`
@@ -2119,6 +2715,7 @@ impl Bardo {
         let made = match step {
             TakeStep::Draft => view.draft.as_ref(),
             TakeStep::Final => view.final_take.as_ref(),
+            TakeStep::Test => return Err(CaptureError::NoTakeResult),
         }
         .ok_or(CaptureError::NoTakeResult)?;
         if !self.captures.accept_take_result(
@@ -2130,6 +2727,112 @@ impl Bardo {
         )? {
             return Err(CaptureError::NoTakeResult);
         }
+        Ok(())
+    }
+
+    /// The capture's test take as the Capture stage shows it.
+    fn current_test(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<(Capture, PerformedView), CaptureError> {
+        let (capture, _) = self.current_capture(project)?;
+        let controls = self.control_views(&capture)?;
+        let view = self.performed_view(&capture, &controls)?;
+        Ok((capture, view))
+    }
+
+    /// Approves the capture's test take: its takes' drafts and finals can
+    /// be made.
+    pub fn approve_take_test(&self, project: VideoProjectId) -> Result<(), CaptureError> {
+        let (_, view) = self.current_test(project)?;
+        let test = view.test.ok_or(CaptureError::NoTakeResult)?;
+        if !self.captures.accept_take_result(
+            test.project,
+            test.position,
+            TakeStep::Test,
+            &test.control,
+            Some(whole_millis(SystemTime::now())),
+        )? {
+            return Err(CaptureError::NoTakeResult);
+        }
+        Ok(())
+    }
+
+    /// Discards the capture's test take: its row and file go, and the
+    /// takes wait for another.
+    pub fn discard_take_test(&self, project: VideoProjectId) -> Result<(), CaptureError> {
+        let (_, view) = self.current_test(project)?;
+        if view.test_busy() {
+            return Err(CaptureError::TakeBusy);
+        }
+        let test = view.test.ok_or(CaptureError::NoTakeResult)?;
+        self.captures
+            .remove_take_result(project, test.position, TakeStep::Test)?;
+        let _ = self.files.remove(project, &test.file);
+        Ok(())
+    }
+
+    /// Checks again on the test's job that stopped (or failed) after the
+    /// provider took its request.
+    pub fn check_test_again(&self, project: VideoProjectId) -> Result<(), CaptureError> {
+        let (_, view) = self.current_test(project)?;
+        if view.test_busy() {
+            return Err(CaptureError::TakeBusy);
+        }
+        let job = view
+            .test_job
+            .filter(|_| view.test_pending)
+            .ok_or(CaptureError::NoTakeResult)?;
+        self.retry_job(job.id())
+            .map_err(|_| CaptureError::NoTakeResult)
+    }
+
+    /// Sends take `index` on although a preflight check failed: it holds
+    /// for its approved control video.
+    pub fn send_take_anyway(
+        &self,
+        project: VideoProjectId,
+        index: usize,
+    ) -> Result<(), CaptureError> {
+        let (capture, view) = self.performed_take(project, index)?;
+        if view.preflight.is_none() {
+            return Err(CaptureError::Performed(PerformedBlock::NoModel));
+        }
+        let controls = self.control_views(&capture)?;
+        let control = controls
+            .get(index)
+            .filter(|view| view.is_approved())
+            .and_then(|view| view.built.clone())
+            .ok_or(CaptureError::Performed(PerformedBlock::ControlNotApproved))?;
+        let chosen = PreflightOverride {
+            project,
+            capture: capture.id,
+            position: index as u32,
+            control: control.fingerprint,
+            at: whole_millis(SystemTime::now()),
+        };
+        if !self.captures.save_preflight_override(&chosen)? {
+            return Err(CaptureError::NoCapture);
+        }
+        Ok(())
+    }
+
+    /// Sets what the video's performed takes may cost before Bardo asks,
+    /// from the amount the user typed; nothing typed goes back to the
+    /// default. At least [`MIN_TAKE_CAP`].
+    pub fn set_take_cap(&self, project: VideoProjectId, typed: &str) -> Result<(), CaptureError> {
+        let cap = match typed.trim() {
+            "" => None,
+            typed => Some(Money::parse(typed).map_err(|_| CaptureError::CapInvalid)?),
+        };
+        if cap.is_some_and(|cap| cap < MIN_TAKE_CAP) {
+            return Err(CaptureError::CapInvalid);
+        }
+        self.themes
+            .project(project)?
+            .ok_or(CaptureError::ProjectNotFound)?;
+        let cap = cap.filter(|cap| *cap != DEFAULT_TAKE_CAP);
+        self.captures.save_take_cap(project, cap)?;
         Ok(())
     }
 
@@ -2256,6 +2959,11 @@ impl Bardo {
         let made = match step {
             TakeStep::Draft => view.draft,
             TakeStep::Final => view.final_take,
+            TakeStep::Test => self
+                .current_test(project)?
+                .1
+                .test
+                .filter(|test| test.position as usize == index),
         }
         .ok_or(CaptureError::NoTakeResult)?;
         let controls = self.control_views(&capture)?;
@@ -2264,12 +2972,17 @@ impl Bardo {
             .and_then(|view| view.built.clone())
             .ok_or(CaptureError::ControlNotReady)?;
         let size = bardo_domain::control_size(capture.video.width, capture.video.height);
+        // A test is the take's first seconds: its voice stops with it.
+        let sound = match step {
+            TakeStep::Test => made.duration.min(view.length),
+            _ => view.length,
+        };
         Ok(ControlPlayer::with_sound(
             Arc::clone(&self.media),
             Arc::clone(&self.audio),
             self.take_result_path(&made),
             self.control_video_path(&control),
-            (made.duration, view.length),
+            (made.duration, sound),
             size,
         ))
     }
@@ -2280,7 +2993,10 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::Instant;
 
-    use bardo_domain::{ChannelDraft, CostRepository, JobState, StagingRepository};
+    use bardo_domain::{
+        BodyFraming, ChannelDraft, CostRepository, JobState, PreflightCheck, PreflightOutcome,
+        StagingRepository, TEST_TAKE_LENGTH,
+    };
     use bardo_media::ffmpeg::{MediaInfo, VideoStream};
 
     use super::*;
@@ -2392,7 +3108,72 @@ mod tests {
         assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
     }
 
+    fn performed(s: &Setup, project: VideoProjectId) -> PerformedView {
+        s.app.narration(project).unwrap().performed.unwrap()
+    }
+
+    /// Makes and approves the capture's test take from take `index`.
+    fn tested(s: &Setup, project: VideoProjectId, index: usize) -> Job {
+        let id = s
+            .app
+            .make_performed_take(project, index, TakeStep::Test, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&s.app, id);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        s.app.approve_take_test(project).unwrap();
+        job
+    }
+
+    /// Gives the capture an approved test of take `index` without asking
+    /// the provider, for tests about drafts and finals.
+    fn test_passed(s: &Setup, project: VideoProjectId, index: usize) {
+        let view = view(s, project, index);
+        let capture = s.app.narration(project).unwrap().capture.unwrap();
+        let control = s.app.narration(project).unwrap().controls[index]
+            .built
+            .clone()
+            .unwrap()
+            .fingerprint;
+        let persona = documentary_narrator(&s.app).id;
+        let look = s.h.db.look(persona).unwrap().unwrap();
+        let file = format!("take-test-{index}.mp4");
+        s.h.files.write(project, &file, TAKE).unwrap();
+        let model = view.model.unwrap();
+        let saved =
+            s.h.db
+                .save_take_result(&TakeResult {
+                    project,
+                    capture: capture.id,
+                    position: index as u32,
+                    step: TakeStep::Test,
+                    control,
+                    model: model.id.clone(),
+                    priced_model: model.priced_model(TakeStep::Test),
+                    prompt: "test".into(),
+                    template: None,
+                    look: look_print(look.image.bytes()),
+                    realistic: look.realistic,
+                    request: "test-request".into(),
+                    cost: None,
+                    file,
+                    duration: Duration::from_secs(5),
+                    made_at: whole_millis(SystemTime::now()),
+                    job: None,
+                    accepted_at: Some(whole_millis(SystemTime::now())),
+                    seed: None,
+                    deadline: None,
+                })
+                .unwrap();
+        assert!(saved);
+        assert!(!performed(s, project).needs_test);
+    }
+
+    /// Makes take `index`'s `step`; drafts and finals get the capture's
+    /// test passed first when they wait for one.
     fn made(s: &Setup, project: VideoProjectId, index: usize, step: TakeStep) -> Job {
+        if step != TakeStep::Test && performed(s, project).needs_test {
+            test_passed(s, project, index);
+        }
         let id = s
             .app
             .make_performed_take(project, index, step, BudgetConsent::Ask)
@@ -2400,12 +3181,14 @@ mod tests {
         wait_done(&s.app, id)
     }
 
+    /// The Higgsfield costs of drafts, finals and prompts (tests apart).
     fn costs(s: &Setup, project: VideoProjectId) -> Vec<(CostPurpose, String, u64)> {
         s.h.db
             .project_costs(project)
             .unwrap()
             .into_iter()
             .filter(|record| record.provider == Provider::Higgsfield)
+            .filter(|record| record.purpose != CostPurpose::TakeTest)
             .map(|record| (record.purpose, record.model, record.usage.video_seconds))
             .collect()
     }
@@ -2538,7 +3321,7 @@ mod tests {
     }
 
     #[test]
-    fn a_video_edit_take_needs_an_approved_draft_before_its_final() {
+    fn a_video_edit_take_offers_a_draft_before_its_final() {
         let (s, project, _) = ready();
         with_look(&s);
         let edit = ClipModelRef::new(Provider::Higgsfield, FakeTakes::EDIT).unwrap();
@@ -2568,10 +3351,13 @@ mod tests {
             view(&s, project, 0).next,
             PerformedStep::Make(TakeStep::Draft)
         );
+        // Its final is a new take: the draft is a check the user may skip,
+        // once the capture's test is approved.
+        assert!(view(&s, project, 0).skip_draft.is_some());
         assert!(matches!(
             s.app
                 .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask),
-            Err(CaptureError::DraftNotApproved)
+            Err(CaptureError::TestNotApproved)
         ));
 
         let job = made(&s, project, 0, TakeStep::Draft);
@@ -2683,6 +3469,7 @@ mod tests {
         with_look(&s);
         s.app.approve_control_video(project, 0).unwrap();
         prompt_written(&s, project, 0, "The host speaks.");
+        test_passed(&s, project, 0);
         s.h.takes.hold(true);
         let id = s
             .app
@@ -2740,6 +3527,7 @@ mod tests {
         with_look(&s);
         s.app.approve_control_video(project, 0).unwrap();
         prompt_written(&s, project, 0, "The host speaks.");
+        test_passed(&s, project, 0);
         s.h.takes.hold(true);
         let id = s
             .app
@@ -2797,6 +3585,7 @@ mod tests {
         with_look(&s);
         s.app.approve_control_video(project, 0).unwrap();
         prompt_written(&s, project, 0, "The host speaks.");
+        test_passed(&s, project, 0);
         s.h.takes.hold(true);
         let id = s
             .app
@@ -2823,7 +3612,15 @@ mod tests {
         assert_eq!(job.state(), JobState::Failed);
         assert_eq!(job.failure().unwrap().kind, JobFailureKind::NotAllowed);
         assert_eq!(costs(&s, project).len(), 1);
-        assert!(s.app.captures.take_results(project).unwrap().is_empty());
+        assert!(
+            s.app
+                .captures
+                .take_results(project)
+                .unwrap()
+                .iter()
+                .all(|made| made.step == TakeStep::Test),
+            "only the capture's test"
+        );
     }
 
     #[test]
@@ -2912,6 +3709,8 @@ mod tests {
             .unwrap();
         assert_eq!(view(&s, project, 0).block, None);
         prompt_written(&s, project, 0, "The host speaks.");
+        // A 30-second ModelArk projection is over the default cap.
+        s.app.set_take_cap(project, "100").unwrap();
         (s, project, capture)
     }
 
@@ -2921,6 +3720,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .filter(|record| record.provider == Provider::BytePlus)
+            .filter(|record| record.purpose != CostPurpose::TakeTest)
             .map(|record| (record.purpose, record.model, record.usage.output_tokens))
             .collect()
     }
@@ -3238,5 +4038,407 @@ mod tests {
         // The clip the user chose outlives the capture.
         assert!(s.h.files.exists(project, &used.file));
         assert_eq!(s.h.db.performed_clips(project).unwrap().len(), 1);
+    }
+
+    const KLING_KEY: &str = "kling-test-key-0001";
+
+    /// The take's analysis has finished and the look's framing is measured.
+    fn measured(s: &Setup, project: VideoProjectId) {
+        let _ = performed(s, project);
+        if let Some(job) = s
+            .app
+            .jobs()
+            .into_iter()
+            .find(|job| job.kind() == JobKind::LookFraming)
+        {
+            let job = wait_done(&s.app, job.id());
+            assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        }
+    }
+
+    /// Take 0 of a two-take capture on Kling's 3.0 720p model, its control
+    /// video approved and its prompt written; with the Higgsfield key saved
+    /// when `higgsfield`.
+    fn on_kling(higgsfield: bool) -> (Setup, VideoProjectId) {
+        let (mut s, project, _) = ready();
+        if !higgsfield {
+            s.app.remove_provider_key(Provider::Higgsfield).unwrap();
+        }
+        s.app.save_provider_key(Provider::Kling, KLING_KEY).unwrap();
+        with_look(&s);
+        s.app
+            .set_take_model(project, 0, Some(crate::testing::FakeKling::motion()))
+            .unwrap();
+        settled(&s.app, project);
+        s.app.approve_control_video(project, 0).unwrap();
+        (s, project)
+    }
+
+    fn kling_costs(s: &Setup, project: VideoProjectId) -> Vec<(CostPurpose, String, u64)> {
+        s.h.db
+            .project_costs(project)
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.provider == Provider::Kling)
+            .map(|record| (record.purpose, record.model, record.usage.video_seconds))
+            .collect()
+    }
+
+    #[test]
+    fn a_capture_waits_for_a_short_test_take_before_its_drafts_and_finals() {
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        let waiting = performed(&s, project);
+        assert!(waiting.needs_test);
+        assert_eq!(waiting.test_take, None, "no take has a prompt yet");
+        prompt_written(&s, project, 0, "The host speaks.");
+        let ready = performed(&s, project);
+        assert_eq!(ready.test_take, Some(0));
+        assert!(ready.test_estimate.is_some());
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Final, BudgetConsent::Ask),
+            Err(CaptureError::TestNotApproved)
+        ));
+
+        let job = tested_unapproved(&s, project);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        // Five seconds of the take, cut from its control video.
+        let piece = s.h.media.controls.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(piece.voice.length, TEST_TAKE_LENGTH);
+        let sent = s.h.takes.submissions();
+        assert_eq!(sent.len(), 1);
+        // A model without drafts makes its test as a final would.
+        assert_eq!(sent[0].step, TakeStep::Final);
+        let test = performed(&s, project).test.unwrap();
+        assert_eq!(test.step, TakeStep::Test);
+        assert_eq!(test.deadline, None);
+        assert!(s.h.files.exists(project, &test.file));
+        let tests: Vec<_> =
+            s.h.db
+                .project_costs(project)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == CostPurpose::TakeTest)
+                .map(|record| record.usage.video_seconds)
+                .collect();
+        assert_eq!(tests, [5]);
+        // Still waiting for the user's look at it.
+        assert!(performed(&s, project).needs_test);
+        assert!(s.app.take_result_player(project, 0, TakeStep::Test).is_ok());
+
+        // Discarded, it goes with its file; another replaces it.
+        s.app.discard_take_test(project).unwrap();
+        assert!(!s.h.files.exists(project, &test.file));
+        assert_eq!(performed(&s, project).test, None);
+        tested_unapproved(&s, project);
+        tested_unapproved(&s, project);
+        let tests: Vec<_> = s
+            .app
+            .captures
+            .take_results(project)
+            .unwrap()
+            .into_iter()
+            .filter(|made| made.step == TakeStep::Test)
+            .collect();
+        assert_eq!(tests.len(), 1, "one test per capture");
+        s.app.approve_take_test(project).unwrap();
+        assert!(!performed(&s, project).needs_test);
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+
+        // Another look is another test, though a final was made.
+        let persona = documentary_narrator(&s.app).id;
+        let path = s._folders.path().join("me-again.png");
+        let mut other = LOOK_IMAGE.to_vec();
+        other.extend_from_slice(b"another");
+        std::fs::write(&path, &other).unwrap();
+        s.app.import_look(persona, &path, true).unwrap();
+        let again = performed(&s, project);
+        assert_eq!(again.test, None);
+        assert!(again.needs_test);
+    }
+
+    /// Makes the capture's test take from take 0, leaving it unapproved.
+    fn tested_unapproved(s: &Setup, project: VideoProjectId) -> Job {
+        let id = s
+            .app
+            .make_performed_take(project, 0, TakeStep::Test, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&s.app, id)
+    }
+
+    #[test]
+    fn kling_reads_the_video_staged_with_another_provider_and_the_look_inline() {
+        let (mut s, project) = on_kling(false);
+        assert_eq!(
+            view(&s, project, 0).block,
+            Some(PerformedBlock::NoVideoHost),
+            "Kling keeps no files and no storage key is saved"
+        );
+        s.app
+            .save_provider_key(Provider::Higgsfield, HIGGSFIELD_KEY)
+            .unwrap();
+        assert_eq!(view(&s, project, 0).block, None);
+        prompt_written(&s, project, 0, "The host speaks.");
+        let job = tested(&s, project, 0);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        assert_eq!(*s.h.kling.staged.lock().unwrap(), 0);
+        let staged = s.h.takes.staged.lock().unwrap().clone();
+        assert_eq!(staged.len(), 1, "the video alone: {staged:?}");
+        assert_eq!(staged[0].0, "video/mp4");
+        let sent = s.h.kling.submissions();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].video_link.as_deref(), Some("https://fake/input-1"));
+        assert!(sent[0].look.0.starts_with("inline:"), "{}", sent[0].look.0);
+        assert!(
+            sent[0]
+                .look_bytes
+                .as_ref()
+                .is_some_and(|bytes| !bytes.is_empty())
+        );
+        // A Kling test is a 2.6 draft, the cheapest tier.
+        assert_eq!(sent[0].step, TakeStep::Draft);
+        assert_eq!(
+            kling_costs(&s, project),
+            [(
+                CostPurpose::TakeTest,
+                bardo_ai::kling_takes::DRAFT_MODEL.to_owned(),
+                5
+            )]
+        );
+
+        // Storage on BytePlus goes first, signed for Kling to read.
+        let [api, ak, sk, bucket, region] = BYTEPLUS_FIELDS;
+        s.app
+            .save_byteplus_key(api, ak, sk, bucket, region)
+            .unwrap();
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        let staged = s.h.modelark.staged.lock().unwrap().clone();
+        assert_eq!(staged.len(), 1);
+        let sent = s.h.kling.submissions().pop().unwrap();
+        assert_eq!(sent.video_link, Some(format!("{}&linked", staged[0])));
+        // A final is a new take: its staged video goes once it is made.
+        assert_eq!(*s.h.modelark.unstaged.lock().unwrap(), staged);
+    }
+
+    #[test]
+    fn a_kling_draft_is_optional_and_made_on_2_6() {
+        let (s, project) = on_kling(true);
+        prompt_written(&s, project, 0, "The host speaks.");
+        tested(&s, project, 0);
+        let next = view(&s, project, 0);
+        assert_eq!(next.next, PerformedStep::Make(TakeStep::Draft));
+        let skip = next.skip_draft.clone().unwrap();
+        assert!(skip.total() > next.estimate.clone().unwrap().total());
+        let job = made(&s, project, 0, TakeStep::Draft);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        // Not approved, the draft does not hold the final back.
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        let steps: Vec<_> =
+            s.h.kling
+                .submissions()
+                .iter()
+                .map(|sent| sent.step)
+                .collect();
+        assert_eq!(steps, [TakeStep::Draft, TakeStep::Draft, TakeStep::Final]);
+        let costs: Vec<_> = kling_costs(&s, project)
+            .into_iter()
+            .map(|(purpose, model, _)| (purpose, model))
+            .collect();
+        assert_eq!(
+            costs,
+            [
+                (
+                    CostPurpose::TakeTest,
+                    bardo_ai::kling_takes::DRAFT_MODEL.to_owned()
+                ),
+                (
+                    CostPurpose::TakeDraft,
+                    bardo_ai::kling_takes::DRAFT_MODEL.to_owned()
+                ),
+                (
+                    CostPurpose::TakeFinal,
+                    bardo_ai::kling_takes::TAKE_MODEL_720P.to_owned()
+                ),
+            ]
+        );
+        assert!(view(&s, project, 0).final_take.is_some());
+    }
+
+    #[test]
+    fn a_take_over_the_videos_cap_waits_for_the_user() {
+        let (s, project) = on_kling(true);
+        prompt_written(&s, project, 0, "The host speaks.");
+        assert!(matches!(
+            s.app.set_take_cap(project, "0.50"),
+            Err(CaptureError::CapInvalid)
+        ));
+        assert!(matches!(
+            s.app.set_take_cap(project, "lots"),
+            Err(CaptureError::CapInvalid)
+        ));
+        let spend = performed(&s, project).spend;
+        assert_eq!(spend.cap, DEFAULT_TAKE_CAP);
+        assert!(spend.to_come > Money::ZERO);
+        s.app.set_take_cap(project, "1").unwrap();
+        let low = performed(&s, project);
+        assert!(low.own_cap);
+        assert_eq!(low.spend.cap, Money::from_micros(1_000_000));
+        let Err(CaptureError::OverCap(over, _)) =
+            s.app
+                .make_performed_take(project, 0, TakeStep::Test, BudgetConsent::Ask)
+        else {
+            panic!("not over the cap");
+        };
+        // The test is on top of what the takes still need.
+        let test = low.test_estimate.unwrap().total();
+        assert_eq!(over.to_come, low.spend.to_come.saturating_add(test));
+        assert!(s.h.kling.submissions().is_empty());
+        let id = s
+            .app
+            .make_performed_take(project, 0, TakeStep::Test, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&s.app, id);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        let spent = performed(&s, project).spend;
+        assert_eq!(spent.spent, test.saturating_add(prompt_cost(&s, project)));
+        // Back to the default, stored as none.
+        s.app.set_take_cap(project, " ").unwrap();
+        assert!(!performed(&s, project).own_cap);
+        s.app.set_take_cap(project, "10").unwrap();
+        assert!(!performed(&s, project).own_cap);
+        assert_eq!(s.h.db.take_cap(project).unwrap(), None);
+    }
+
+    #[test]
+    fn a_take_never_sent_is_retried_from_the_jobs_panel_only_once_tested() {
+        let (s, project, _) = ready();
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        prompt_written(&s, project, 0, "The host speaks.");
+        s.h.takes.refuse.store(true, Ordering::SeqCst);
+        let job = made(&s, project, 0, TakeStep::Final);
+        assert_eq!(job.state(), JobState::Failed);
+        s.h.takes.refuse.store(false, Ordering::SeqCst);
+
+        // Another look asks for another test: the capture asks for it, so
+        // the jobs panel does not send the final.
+        let persona = documentary_narrator(&s.app).id;
+        let path = s._folders.path().join("me-again.png");
+        let mut other = LOOK_IMAGE.to_vec();
+        other.extend_from_slice(b"another");
+        std::fs::write(&path, &other).unwrap();
+        s.app.import_look(persona, &path, true).unwrap();
+        settled(&s.app, project);
+        assert!(performed(&s, project).needs_test);
+        let sent = s.h.takes.submissions().len();
+        assert!(matches!(
+            s.app.retry_job(job.id()),
+            Err(crate::jobs::JobActionError::TakeFromItsPage)
+        ));
+        settled(&s.app, project);
+        assert_eq!(s.h.takes.submissions().len(), sent, "nothing sent again");
+
+        test_passed(&s, project, 0);
+        s.app.retry_job(job.id()).unwrap();
+        let job = wait_done(&s.app, job.id());
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+    }
+
+    /// What the take prompts written for `project` cost.
+    fn prompt_cost(s: &Setup, project: VideoProjectId) -> Money {
+        let rates = s.app.cost_book.rates().unwrap();
+        s.h.db
+            .project_costs(project)
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.purpose == CostPurpose::TakePrompt)
+            .map(|record| record.priced_with(&rates).cost.amount())
+            .sum()
+    }
+
+    #[test]
+    fn a_take_that_fails_a_preflight_check_waits_until_sent_anyway() {
+        let mut s = setup(13);
+        // The performer walked out of the shot.
+        *s.h.vision.seen.faces.lock().unwrap() = Some(0);
+        s.app
+            .save_provider_key(Provider::Higgsfield, HIGGSFIELD_KEY)
+            .unwrap();
+        s.h.media.probes.lock().unwrap().insert(
+            String::from_utf8_lossy(TAKE).into_owned(),
+            MediaInfo {
+                duration: Duration::from_millis(6_500),
+                video: Some(VideoStream {
+                    codec: "h264".into(),
+                    width: 1280,
+                    height: 720,
+                    frame_rate: (30, 1),
+                }),
+                audio: None,
+            },
+        );
+        let (project, _) = imported(&s);
+        settled(&s.app, project);
+        *s.h.vision.seen.faces.lock().unwrap() = None;
+        with_look(&s);
+        s.app.approve_control_video(project, 0).unwrap();
+        prompt_written(&s, project, 0, "The host speaks.");
+        measured(&s, project);
+        let held = view(&s, project, 0);
+        let preflight = held.preflight.clone().unwrap();
+        assert_eq!(
+            preflight.failed().collect::<Vec<_>>(),
+            [PreflightCheck::InFrame, PreflightCheck::FaceSize]
+        );
+        assert_eq!(
+            preflight.outcome(PreflightCheck::OnePerson),
+            Some(PreflightOutcome::Passed)
+        );
+        assert_eq!(
+            preflight.outcome(PreflightCheck::Framing),
+            Some(PreflightOutcome::Unknown),
+            "no face to tell the recording's framing by"
+        );
+        assert_eq!(preflight.look, Some(BodyFraming::HalfBody));
+        assert!(held.preflight_holds());
+        assert!(matches!(
+            s.app
+                .make_performed_take(project, 0, TakeStep::Test, BudgetConsent::Ask),
+            Err(CaptureError::PreflightFailed)
+        ));
+        assert!(s.h.takes.submissions().is_empty());
+        s.app.send_take_anyway(project, 0).unwrap();
+        let sent = view(&s, project, 0);
+        assert!(sent.overridden);
+        assert!(!sent.preflight_holds());
+        let job = tested(&s, project, 0);
+        assert_eq!(job.state(), JobState::Done, "{:?}", job.failure());
+        // It holds for that take alone.
+        assert!(!view(&s, project, 1).overridden);
+    }
+
+    #[test]
+    fn the_looks_face_is_measured_once_per_look() {
+        let (s, project, _) = ready();
+        with_look(&s);
+        assert_eq!(performed(&s, project).look_face, LookFace::Unmeasured);
+        measured(&s, project);
+        let LookFace::Height(height) = performed(&s, project).look_face else {
+            panic!("not measured");
+        };
+        assert!((height - 0.33).abs() < 0.01, "{height}");
+        let _ = performed(&s, project);
+        let framings = s
+            .app
+            .jobs()
+            .into_iter()
+            .filter(|job| job.kind() == JobKind::LookFraming)
+            .count();
+        assert_eq!(framings, 1);
     }
 }

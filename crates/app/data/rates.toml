@@ -144,6 +144,18 @@ video_seconds = "0.042"
 [kling."kling-2.5-turbo/1080p"]
 video_seconds = "0.07"
 
+# Kling's Motion Control takes (#243), per second of the take it returns,
+# with sound off (checked on 2026-10-25). Drafts and test takes are made
+# with 2.6 at 720p.
+[kling."motion-control/kling-3.0/720p"]
+video_seconds = "0.126"
+
+[kling."motion-control/kling-3.0/1080p"]
+video_seconds = "0.168"
+
+[kling."motion-control/kling-2.6/720p"]
+video_seconds = "0.07"
+
 # TypeSafe charges JEV's input tokens only.
 [typesafe."jev"]
 input_tokens = "0.042"

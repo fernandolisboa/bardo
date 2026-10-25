@@ -291,6 +291,7 @@ control_video = "Vídeo de controle"
 take_prompt = "Prompt da tomada"
 performed_take = "Tomada interpretada"
 staging_cleanup = "Limpeza de arquivos enviados"
+look_framing = "Enquadramento da aparência"
 
 [job.state]
 queued = "Na fila"
@@ -323,6 +324,7 @@ not_updated = "Não foi possível atualizar a tarefa. Tente de novo."
 not_started = "Não foi possível iniciar a tarefa. Tente de novo."
 runs_elsewhere = "O agente em segundo plano está rodando esta tarefa agora. Tente de novo quando ela terminar."
 superseded = "Uma narração mais nova deste projeto substituiu esta importação, então ela não roda de novo."
+take_from_page = "Nada desta tomada chegou ao provedor ainda. Faça de novo na etapa Captura, que confere antes o teto do vídeo, a tomada de teste e as checagens antes do envio."
 
 [setup]
 step_by_step = "Passo a passo"
@@ -802,6 +804,12 @@ make_hint = "Cada rascunho e versão final é um job pago do provedor do modelo 
 used = "Na aba Mídia do editor: {n}."
 used_now = "Adicionado à aba Mídia do editor. Coloque-o no corte a partir dela."
 realistic_note = "A aparência parece uma pessoa real: um corte que usa os clipes interpretados dela liga o aviso de conteúdo sintético."
+missing_kling_key = "Salve uma chave do Kling em Configurações para fazer clipes interpretados com o Kling."
+test_first = "Faça e aprove uma tomada de teste antes: rascunhos e versões finais esperam por ela."
+make_final_skip_draft = "Fazer versão final sem rascunho"
+draft_optional_note = "Um rascunho mais barato é opcional: faça um para conferir a tomada, ou faça a versão final direto."
+making_test = "{provider} está fazendo o teste…"
+skip_draft_cost = "Versão final sem rascunho: cerca de {amount}"
 
 [capture.performed.blocked]
 no_model = "Nenhum modelo de tomada é oferecido."
@@ -810,6 +818,67 @@ length = "Esta tomada é mais curta ou mais longa do que o modelo dela faz. Mova
 no_look = "A persona ainda não tem aparência. Desenhe ou importe uma na tela Personas."
 no_verified_likeness = "Este modelo só aceita uma foto sua como a sua semelhança verificada na biblioteca de assets da BytePlus. Adicione o id do asset na aparência da persona, na tela Personas, ou use uma aparência desenhada."
 control_not_approved = "Aprove o vídeo de controle da tomada antes."
+no_video_host = "O Kling lê o vídeo de controle por um link, então o Bardo o envia para um armazenamento que você já configurou. Salve uma chave da BytePlus ModelArk ou da Higgsfield em Configurações."
+
+[capture.spend]
+cap_reached = "Isto levaria as tomadas interpretadas do vídeo acima do teto."
+cap_invalid = "Digite um valor de pelo menos US$ 1,00, como 10 ou 12,50."
+title = "Tomadas interpretadas deste vídeo"
+hint = "Quanto as tomadas interpretadas deste vídeo já custaram (prompts, teste, rascunhos e versões finais, de Custos) e quanto falta pagar, aproximadamente: o prompt de cada tomada, um rascunho quando o modelo exige, e a versão final. Antes de qualquer tomada paga, o Bardo pergunta se ela passaria do teto."
+partial = "Algumas etapas não têm preço na tabela, então o total está incompleto."
+over = "A projeção passa do teto: o Bardo pergunta antes de cada tomada paga."
+cap_label = "Teto por vídeo (US$)"
+save_cap = "Salvar teto"
+reset_cap = "Usar o padrão"
+edit_cap = "Mudar teto"
+cap_saved = "Teto salvo."
+question = "Fazer mesmo assim?"
+confirm = "Fazer mesmo assim"
+line = "{spent} gastos, cerca de {to_come} ainda a pagar: {total} de um teto de {cap}."
+
+[capture.test]
+title = "Tomada de teste"
+hint = "Alguns segundos (até 5) de uma tomada na opção mais barata do modelo, para ver se a aparência e a sua gravação funcionam juntas antes de pagar qualquer tomada inteira. Rascunhos e versões finais esperam até um teste ser aprovado para a aparência atual da persona."
+none = "Escreva o prompt de uma tomada e aprove o vídeo de controle dela para fazer um teste."
+needed = "Rascunhos e versões finais esperam por uma tomada de teste aprovada."
+approved = "Teste aprovado: rascunhos e versões finais podem ser feitos."
+approve = "Aprovar teste"
+discard = "Descartar teste"
+play = "Reproduzir teste"
+make_again = "Fazer outro teste"
+make = "Fazer tomada de teste (tomada {n})"
+ready = "Teste: {seconds}. Assista com a voz da tomada e depois aprove ou descarte."
+cost = "Custo estimado: cerca de {amount}"
+
+[capture.preflight]
+title = "Checagens antes do envio"
+hint = "Checagens grátis a partir da análise da tomada e da aparência, antes de pagar qualquer coisa: uma pessoa, dentro do quadro, rosto grande o suficiente, movimento estável e (para modelos de controle de movimento) o mesmo enquadramento da aparência. Uma checagem que falha segura as etapas pagas da tomada até você corrigir a tomada ou clicar em Enviar mesmo assim."
+failed = "Uma checagem falhou. Corrija a tomada ou clique em Enviar mesmo assim."
+passed = "Checagens aprovadas."
+reanalyze = "Esta tomada foi analisada antes de algumas checagens existirem: analise de novo para rodá-las."
+look_measuring = "O enquadramento da aparência ainda está sendo medido."
+look_no_face = "Nenhum rosto foi encontrado na aparência: use uma aparência que mostre o rosto com clareza."
+send_anyway = "Enviar mesmo assim"
+overridden = "Enviada mesmo assim, apesar das checagens que falharam."
+framing_failed = "A tomada é {capture} e a aparência é {look}: o modelo segue o enquadramento da aparência. Use uma aparência enquadrada como a tomada, ou grave de novo."
+
+[capture.preflight.check]
+one_person = "Uma pessoa"
+in_frame = "Dentro do quadro"
+face_size = "Rosto grande o suficiente"
+motion = "Movimento estável"
+framing = "Mesmo enquadramento da aparência"
+
+[capture.preflight.fail]
+one_person = "Outro rosto aparece em alguns quadros. Grave esta tomada de novo, sozinho."
+in_frame = "O rosto some, encosta numa borda ou fica sem espaço para o corpo abaixo em mais de 10% dos quadros. Volte para dentro do quadro."
+face_size = "O rosto tem menos de 8% da altura do quadro, em média. Chegue mais perto da câmera."
+motion = "O rosto se move mais rápido que duas alturas de rosto por segundo em mais de 5% dos quadros. Mova-se com mais calma."
+framing = "A tomada e a aparência têm enquadramentos diferentes."
+
+[capture.preflight.framing]
+half_body = "de meio corpo"
+full_body = "de corpo inteiro"
 
 [capture.check]
 no_face = "Nenhum rosto em {n} de {frames} quadros."
@@ -2733,17 +2802,17 @@ name = "Tour da captura"
 title = "Sua gravação"
 body = "A gravação que você importou, a voz que a fala recebeu e a frase que você confirmou. A fala dela é a narração do projeto."
 
+[tour.capture.test]
+title = "O teto e uma tomada de teste"
+body = "Quanto as tomadas interpretadas deste vídeo já custaram e ainda precisam, comparado ao teto (US$ 10, a não ser que você mude): acima dele, o Bardo pergunta antes de uma tomada paga. Depois, alguns segundos de uma tomada que passou nas checagens, na opção mais barata do modelo: rascunhos e versões finais esperam até você aprovar um teste para a aparência atual da persona."
+
 [tour.capture.takes]
 title = "As tomadas"
 body = "A gravação é dividida em tomadas de 4 a 30 segundos em fins de frase e pausas. Cada uma vira um clipe interpretado; uma tomada que não pode virar diz por quê. Cortar antes ou Cortar depois, entre duas tomadas, move o corte delas."
 
-[tour.capture.mode]
-title = "O modo"
-body = "Gravação, Malha ou Profundidade: o que o modelo de tomada recebe desta tomada. A malha do rosto roda em toda tomada; Profundidade também precisa da profundidade e da máscara da pessoa."
-
 [tour.capture.analysis]
-title = "A análise"
-body = "O Bardo analisa cada tomada neste computador, de graça, na placa de vídeo quando pode. Cada parte mostra o progresso e o tempo que falta; as checagens abaixo dizem o que gravar de novo."
+title = "O modo e a análise"
+body = "Gravação, Malha ou Profundidade: o que o modelo de tomada recebe desta tomada. O Bardo analisa cada tomada neste computador, de graça, na placa de vídeo quando pode. Cada parte mostra o progresso e o tempo que falta; as checagens abaixo dizem o que gravar de novo."
 
 [tour.capture.control]
 title = "O vídeo de controle"
@@ -2751,7 +2820,7 @@ body = "O que o modelo de tomada recebe desta tomada, montado aqui de graça dep
 
 [tour.capture.performed]
 title = "O clipe interpretado"
-body = "O modelo de tomada faz a persona interpretar a tomada aprovada: o Claude escreve o prompt, um rascunho vem antes quando o modelo faz um, depois a versão final. Um rascunho que a versão final completa mostra o prazo dele. Assista a cada um com a voz da tomada; Usar adiciona a versão final à aba Mídia do editor."
+body = "O modelo de tomada faz a persona interpretar a tomada aprovada: o Claude escreve o prompt, checagens grátis dizem o que corrigir antes, um rascunho vem quando o modelo faz um (opcional quando a versão final é uma tomada nova), depois a versão final. Assista a cada um com a voz da tomada; Usar adiciona a versão final à aba Mídia do editor."
 
 [tour.capture.remove]
 title = "Remova"

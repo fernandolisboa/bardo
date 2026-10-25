@@ -81,6 +81,7 @@ mod performed_cut;
 mod persona;
 mod persona_look;
 mod post_insights;
+mod preflight;
 mod profile;
 mod provider_key;
 mod publication;
@@ -251,8 +252,8 @@ pub use performance::{
     PastPerformance, PerformanceEvidence, PerformanceReason, PublishedVideo, Standing, first_week,
 };
 pub use performed::{
-    LENGTH_TOLERANCE, MAX_TAKE_PROMPT, PerformedClip, TakePrompt, TakePromptError, TakeResult,
-    TakeStretch, take_prompt_text,
+    LENGTH_TOLERANCE, MAX_TAKE_PROMPT, PerformedClip, PreflightOverride, TakePrompt,
+    TakePromptError, TakeResult, TakeStretch, take_prompt_text,
 };
 pub use performed_cut::{PerformedPlace, PerformedSync, scene_at_narration};
 pub use persona::{
@@ -261,13 +262,17 @@ pub use persona::{
 };
 pub use persona_look::{
     LOOK_MAX_BYTES, LOOK_MAX_RATIO_TENTHS, LOOK_MAX_SIDE, LOOK_MIN_RATIO_TENTHS, LOOK_MIN_SIDE,
-    LookAsset, LookAssetError, LookAssetKind, LookDescriptionError, LookDrawing, LookImage,
-    LookImageError, LookSource, MAX_LOOK_DESCRIPTION, MAX_LOOK_PROMPT, PersonaLook,
+    LookAsset, LookAssetError, LookAssetKind, LookDescriptionError, LookDrawing, LookFaceMeasure,
+    LookImage, LookImageError, LookSource, MAX_LOOK_DESCRIPTION, MAX_LOOK_PROMPT, PersonaLook,
     UnknownLookSource, look_description,
 };
 pub use post_insights::{
     Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,
     PostReading, find_media, read_insights,
+};
+pub use preflight::{
+    BodyFraming, HALF_BODY_FACE, LookFace, MAX_FAST_FRAMES, MAX_OUT_OF_FRAME, MIN_PREFLIGHT_FACE,
+    Preflight, PreflightCheck, PreflightOutcome, PreflightResult, preflight,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{
@@ -320,16 +325,17 @@ pub use speech::{
 pub use staging::{StagedUpload, StagingRepository};
 pub use take_analysis::{
     ANALYSIS_CHUNK_FRAMES, AnalysisPart, BLENDSHAPE_NAMES, DEPTH_FAR_PERMILLE, DEPTH_NEAR_PERMILLE,
-    DepthEstimator, DepthHistogram, DepthMap, DepthRange, DepthScale, Device, FACE_FILE_VERSION,
-    FACE_LANDMARKS, FaceFileError, FaceFrame, FaceLandmarks, FaceMesh, FaceObservation, FaceSource,
-    FaceTracker, MASK_BACKGROUND, MASK_FACE_SKIN, MAX_HEAD_TURN_DEGREES, MAX_MASK_CHANGE,
-    MIN_FACE_HEIGHT, ModelFile, ModelInfo, PersonMask, PersonSegmenter, REGION_COUNT_EVERY, Region,
-    RgbFrame, TakeAnalysis, TakeChecks, TakeMode, VisionError, VisionModels, analysis_fps,
-    distinct_faces, take_frame_time, take_frames,
+    DepthEstimator, DepthHistogram, DepthMap, DepthRange, DepthScale, Device, EDGE_MARGIN,
+    FACE_FILE_VERSION, FACE_LANDMARKS, FaceFileError, FaceFrame, FaceLandmarks, FaceMeasures,
+    FaceMesh, FaceObservation, FaceSource, FaceTracker, MASK_BACKGROUND, MASK_FACE_SKIN,
+    MAX_FACE_SPEED, MAX_HEAD_TURN_DEGREES, MAX_MASK_CHANGE, MIN_FACE_HEIGHT, ModelFile, ModelInfo,
+    PersonMask, PersonSegmenter, REGION_COUNT_EVERY, Region, RgbFrame, TakeAnalysis, TakeChecks,
+    TakeMode, VisionError, VisionModels, analysis_fps, distinct_faces, take_frame_time,
+    take_frames,
 };
 pub use take_model::{
-    StagedFile, TakeDone, TakeGenerator, TakeInput, TakeModel, TakeRequest, TakeStatus, TakeStep,
-    TakeTier, take_model_of,
+    DEFAULT_TAKE_CAP, MIN_TAKE_CAP, StagedFile, TEST_TAKE_LENGTH, TakeDone, TakeGenerator,
+    TakeInput, TakeModel, TakeRequest, TakeSpend, TakeStatus, TakeStep, TakeTier, take_model_of,
 };
 pub use template::{
     MissingValue, RenderedPrompt, TemplateBody, TemplateField, TemplateFieldError, TemplateKind,

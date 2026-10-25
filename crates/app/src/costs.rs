@@ -276,11 +276,15 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         CostPurpose::TakePrompt => tokens(2_500, 500),
         // ModelArk bills the video's tokens, which each estimate counts
         // from the take itself.
-        CostPurpose::TakeDraft | CostPurpose::TakeFinal if provider == Provider::BytePlus => {
+        CostPurpose::TakeDraft | CostPurpose::TakeFinal | CostPurpose::TakeTest
+            if provider == Provider::BytePlus =>
+        {
             Metered::default()
         }
         // A 30-second take, the longest one.
         CostPurpose::TakeDraft | CostPurpose::TakeFinal => Metered::video_seconds(30),
+        // Five seconds at most.
+        CostPurpose::TakeTest => Metered::video_seconds(5),
         CostPurpose::PersonaLook => match provider {
             Provider::Claude => tokens(700, 400),
             _ => Metered {

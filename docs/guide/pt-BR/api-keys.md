@@ -17,7 +17,7 @@ O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas cont
 - **ElevenLabs** narra, lista as suas vozes (clones incluídos) e compõe a música do vídeo. Você precisa dela para a narração e as vozes das personas, e para a música só se gerar no Bardo (plano pago da ElevenLabs).
 - **Gemini** gera as imagens das cenas (Nano Banana) e clipes de vídeo (Veo, Gemini Omni Flash). Você precisa dele para as imagens das cenas e para desenhar a [aparência](personas.md#look) de uma persona e, para os clipes, só se usar os modelos do Google.
 - **Higgsfield** gera clipes de vídeo pelos modelos que oferece. Você só precisa dela para clipes, se escolher os modelos dela.
-- **Kling** gera clipes de vídeo direto dos modelos do próprio Kling (Kling 3.0, 2.6 e 2.5 Turbo). Você só precisa dela para clipes, se escolher os modelos dele.
+- **Kling** gera clipes de vídeo direto dos modelos do próprio Kling (Kling 3.0, 2.6 e 2.5 Turbo), e clipes interpretados com o Kling 3.0 Motion Control ([Captura de atuação](capture.md#kling)). Você só precisa dela se escolher os modelos dele.
 - **BytePlus ModelArk** gera clipes interpretados com o Seedance 2.5 direto do ModelArk, cuja versão final completa o rascunho aprovado. Você só precisa dela para clipes interpretados, se escolher esse modelo de tomada. O cartão dela recebe a chave do ModelArk e um bucket seu de armazenamento de objetos para os arquivos da tomada.
 - **TypeSafe (JEV)** é o motor de decisão: ranqueia ideias de vídeo e pontua sugestões de corte. Você precisa dele para ranquear ideias e sugerir cortes.
 - **YouTube Data API** traz a pesquisa de nicho e as estatísticas públicas dos vídeos. Você precisa dela para a pesquisa e para os números públicos dos seus posts.

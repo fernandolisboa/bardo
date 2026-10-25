@@ -182,6 +182,8 @@ pub struct ProjectsScreen {
     capture: capture::CaptureImport,
     /// The take prompt open in the Capture stage, as the user types it.
     take_prompt_editor: Entity<TextareaState>,
+    /// The video's cap on performed takes, as the user types it.
+    take_cap_input: Entity<InputState>,
     /// The music prompt card, and the prompt as the user types it.
     music: Option<MusicPromptView>,
     music_editor: Entity<TextareaState>,
@@ -331,6 +333,7 @@ impl ProjectsScreen {
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let take_prompt_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+        let take_cap_input = cx.new(|cx| InputState::new(window, cx));
         let thumbnail_text = cx.new(|cx| InputState::new(window, cx));
         let thumbnail_prompt = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6));
         let chapter_title = cx.new(|cx| InputState::new(window, cx));
@@ -471,6 +474,7 @@ impl ProjectsScreen {
             music: None,
             music_editor,
             take_prompt_editor,
+            take_cap_input,
             music_loaded: None,
             music_error: None,
             music_notice: None,

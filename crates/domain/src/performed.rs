@@ -9,6 +9,9 @@
 //!   the one before when it arrives.
 //! - A used final becomes a **performed clip**: a media file of the
 //!   project, linked to its take ([`PerformedClip`]).
+//! - A **test** (#243) is a few seconds of one take at the model's
+//!   cheapest tier, kept as the capture's one result of step
+//!   [`TakeStep::Test`]; an approved test lets the full takes be paid for.
 
 use std::time::{Duration, SystemTime};
 
@@ -67,6 +70,18 @@ impl TakePrompt {
     pub fn fits(&self, capture: CaptureId, control: &str, model: &ClipModelRef) -> bool {
         self.capture == capture && self.control == control && self.model == *model
     }
+}
+
+/// The user's choice to send a take whose preflight checks failed (#243).
+/// It holds for the control video it was given for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreflightOverride {
+    pub project: VideoProjectId,
+    pub capture: CaptureId,
+    pub position: u32,
+    /// The fingerprint of the approved control video it holds for.
+    pub control: String,
+    pub at: SystemTime,
 }
 
 /// What a take model made for a take: a draft or a final, kept in the

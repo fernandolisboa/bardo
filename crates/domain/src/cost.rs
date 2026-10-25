@@ -530,6 +530,9 @@ pub enum CostPurpose {
     TakeDraft,
     /// A take model making a take's final at 1080p (#192).
     TakeFinal,
+    /// A take model making a capture's few-second test take at its
+    /// cheapest tier (#243).
+    TakeTest,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -580,7 +583,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 24] = [
+    pub const ALL: [CostPurpose; 25] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -605,6 +608,7 @@ impl CostPurpose {
         CostPurpose::TakePrompt,
         CostPurpose::TakeDraft,
         CostPurpose::TakeFinal,
+        CostPurpose::TakeTest,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -634,6 +638,7 @@ impl CostPurpose {
             CostPurpose::TakePrompt => "take_prompt",
             CostPurpose::TakeDraft => "take_draft",
             CostPurpose::TakeFinal => "take_final",
+            CostPurpose::TakeTest => "take_test",
         }
     }
 }

@@ -95,6 +95,8 @@ It stages the inputs, submits, polls, downloads and quotes. The job saves the pr
     - a drawn look: one of ModelArk's preset digital characters, or a private virtual portrait the user made there, which ModelArk requires not to resemble any real person;
     - the user's own photo: the user's likeness added through ModelArk's real-person verification, and nothing else.
   - The asset library needs ModelArk's Advanced Creation Rights and a verified account.
+- **Then: Kling 3.0 Motion Control straight from Kling** (#243, ADR-0027), at 720p or 1080p for Recording takes, with an optional draft on Kling 2.6 at 720p. The look goes inline as Base64; Kling reads the control video only from a link and keeps no files, so Bardo stages it in the user's BytePlus bucket when that key is saved, else with Higgsfield's upload. Kling bills the seconds it returns.
+- **Spending guards** (#243, ADR-0027): a whole-video estimate against a cap per video (US$ 10 unless changed) checked before every paid take; a short test take per capture, approved before any draft or final; and free preflight checks per take from the local analysis and the look, which hold a take's paid steps until fixed or sent anyway. Drafts are optional where the final is a new take.
 - **Later: LivePortrait on the computer** (#242, ADR-0026), for Recording only, as a local job rather than a take generator: no key, no cost, no draft, the face pasted into the look. It becomes the default take model only if the reference machine's graphics card makes a 30 s take within 5 minutes.
 - **Not used:**
   - temporary public file hosts, since they would publish the user's recording;
@@ -103,7 +105,7 @@ It stages the inputs, submits, polls, downloads and quotes. The job saves the pr
 
 Prices change. Each model is priced from the provider's quote when it gives one, else from the rate table. Two 30-second takes for scale, on the providers' own published prices (checked 2026-10-22):
 
-- **Kling 3.0 Motion Control at 1080p:** US$ 0.168 a second, about US$ 5 for the final.
+- **Kling 3.0 Motion Control at 1080p:** US$ 0.168 a second, about US$ 5 for the final; straight from Kling at 720p, US$ 0.126 a second, about US$ 3.80, with a 2.6 draft at US$ 0.07 a second.
 - **Seedance 2.5 Video Edit on ModelArk:** billed in tokens, (input + output seconds) × width × height × frame rate / 1024, at US$ 6.40 per million tokens up to 720p and US$ 7.00 at 1080p when the input has video. At 24 fps that is about US$ 3.70 for a 480p draft and US$ 20 for the 1080p final.
 
 ## Local analysis
@@ -164,3 +166,4 @@ In order (each is a sub-issue of #186):
 6. #192 Performed clips through Higgsfield (after 2 and 5)
 7. #193 Performed clips on the cut (after 6)
 8. #194 Seedance 2.5 on BytePlus ModelArk with draft mode (after 6)
+9. #243 Cheaper takes: Kling direct, a cap per video, a test take and preflight checks (after 8)

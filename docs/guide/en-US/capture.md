@@ -99,8 +99,39 @@ Once a take's control video is approved, its take model makes the persona perfor
 - **Kling 3.0 Motion Control · Higgsfield**, the default, takes Recording takes of 3 to 30 seconds and makes the final straight away, at 1080p.
 - **Seedance 2.5 Video Edit · Higgsfield** takes Mesh and Depth takes of 4 to 30 seconds: a draft at 480p first, then the final at 1080p, made anew.
 - **Seedance 2.5 Video Edit · BytePlus ModelArk** takes the same takes, straight from ModelArk: a draft at 480p, then a final that finishes that same draft at 1080p, so the final keeps what you approved in the draft. See [On BytePlus ModelArk](#byteplus).
+- **Kling 3.0 Motion Control 720p · Kling** and **Kling 3.0 Motion Control 1080p · Kling** take Recording takes of 3 to 30 seconds straight from Kling, with the Kling key Bardo already keeps for clips, for less than through Higgsfield. An optional draft on Kling 2.6 at 720p costs about half of a 720p final. See [Straight from Kling](#kling).
 
 Picking a model that does not take the take's mode switches the take to the model's first mode, which builds its control video again for you to approve. Nothing can be made while the take is too short or too long for its model, the persona has no look, or the control video is not approved; the take says which.
+
+<a id="spend"></a>
+## What the video's takes cost
+
+**Performed takes of this video**, above the takes, adds up what the video's performed takes cost so far (prompts, the test, drafts and finals, as [Costs](costs.md) records them) and about what they still need: each take's prompt when it has none, a draft where its model requires one, and its final when it has none. It shows against the video's cap, US$ 10 unless you change it with **Change cap** (US$ 1 at least; **Use the default** goes back to US$ 10). When a step has no rate in the table, the line says the total is short.
+
+Before any paid take (test, draft or final), Bardo checks that the projection plus that take stays within the cap; a take already counted in the projection is not added twice. Past the cap, the take waits and asks **Make it anyway?**: nothing is sent until you confirm. The cap is per video and does not replace the providers' monthly budgets ([Costs](costs.md)): when a take goes past both, one question lists the cap and each budget it goes past, and confirming it sends the take.
+
+<a id="test"></a>
+## The test take
+
+Before the first draft or final of a capture, Bardo asks for a test: **Make test take** sends up to the first 5 seconds of a take that is ready (an approved control video and a prompt), the first one that passed its [preflight checks](#preflight) when there is one, at its model's cheapest tier (its draft tier where it has one). It shows what it costs before you start, is recorded in [Costs](costs.md) like any paid take, and plays with the take's voice. Then:
+
+- **Approve test** lets the capture's drafts and finals be made.
+- **Discard test** deletes it; **Make test take** again makes another, which replaces it.
+
+A test holds for the persona's look it was made with: another look asks for a new one. A capture that already had a draft or final when tests came along needs none.
+
+<a id="preflight"></a>
+## Preflight checks
+
+Under each take, **Preflight checks** read the take's analysis and the look, free, before anything is paid:
+
+- **One person**: no frame with another face (one already blocks the control video).
+- **In frame**: in no more than 10% of frames is the face missing, at an edge, or without room for the body below it.
+- **Face large enough**: the face is at least 8% of the frame's height on average.
+- **Steady motion**: in no more than 5% of frames does the face move faster than two face heights a second.
+- **Same framing as the look**: a take framed from the waist up needs a look framed the same, and a full-body take a full-body look. Motion-control models follow the look's framing; video-edit models keep the take's, so they skip this check.
+
+Bardo measures the look's face once per look image, in the background. A failed check says why and holds the take's test, draft and final until you record or cut it again, or select **Send anyway**, which holds for that take's approved control video. A check that cannot be read yet (a take analyzed before the check existed, or a look still being measured) says so and holds nothing; analyzing the take again runs it.
 
 <a id="take-prompt"></a>
 ## The take's prompt
@@ -112,7 +143,8 @@ Picking a model that does not take the take's mode switches the take to the mode
 
 **Make draft** and **Make final** send the control video, the look and the prompt to the take model's provider; the estimate under them is per second of the take (in tokens on BytePlus). The look goes as a JPEG Bardo makes from it, which leaves out what a photo records about where and with what it was taken, unless it goes by its asset id on BytePlus. The provider's sound is off: drafts and finals play with the take's voice, from the control video.
 
-- A draft (Seedance) waits for review: **Play draft**, then **Approve draft**, or **Regenerate draft** for another one, which replaces it. Only an approved draft lets you **Make final**; **Back to drafts** takes the approval back.
+- A draft waits for review: **Play draft**, then **Approve draft**, or **Regenerate draft** for another one, which replaces it. **Back to drafts** takes the approval back.
+- Where the final is a new take (Seedance on Higgsfield, Kling straight from Kling), the draft is optional: **Make final without a draft** makes the final straight away, with its estimate beside it. On BytePlus ModelArk, whose final finishes the draft, only an approved draft lets you **Make final**.
 - A final waits for review the same way: **Play final**, then **Use**. **Make it again** makes another, which replaces it. A final is billed whether you use it or not.
 
 A line says how much longer or shorter than the take a result came out. **Stop waiting** stops Bardo waiting, not the provider, which may still finish and bill it: **Check again** picks up the same request, as Bardo does after a restart, and nothing new can be made for the take until then. When the provider refuses the content, or the request fails on its side, the take says so (with the provider's reason when it gives one) and nothing is changed or sent again on its own: making it again is a new paid request, and only you start it.
@@ -128,6 +160,15 @@ Seedance 2.5 straight from ModelArk needs the **BytePlus ModelArk** card's five 
 - **A photo of you needs your verified likeness.** Seedance refuses real faces, so a take whose persona has a photo look is sent only once the look holds your verified likeness from ModelArk's asset library ([The look](personas.md#look-asset)).
 - **Costs in tokens.** ModelArk bills the video's tokens: about US$ 3.70 for a 30-second draft and US$ 20 for its final. [Costs](costs.md) records the tokens ModelArk reports.
 - **A lost answer is found again.** ModelArk has no way to tell a repeated request from a new one, so Bardo saves the time right before each send. If Bardo stops before ModelArk's answer arrives, the next attempt looks in ModelArk's task list for that request and waits for it instead of paying again. If it finds several, it sends nothing and asks you to look at the task list in ModelArk.
+
+<a id="kling"></a>
+## Straight from Kling
+
+The Kling 3.0 Motion Control models straight from Kling use the **Kling** key ([Getting each API key](get-api-keys.md#kling)) and Kling's resource packages. What changes there:
+
+- **Prices.** Kling bills the seconds of video it returns: about US$ 0.126 a second for a 720p final, US$ 0.168 at 1080p, and US$ 0.07 for a draft or test on Kling 2.6 at 720p. A take can come back a little shorter than it was sent, and [Costs](costs.md) records what Kling returned.
+- **Your storage holds the control video.** Kling takes the look inside the request but reads the control video only from a link, and keeps no files. Bardo stages it in storage you already set up: your BytePlus bucket when the **BytePlus ModelArk** key is saved (with a signed link that lasts seven days at most, deleted once the take is made), otherwise Higgsfield's upload, which is free. With neither key, the take says what to add.
+- **A lost answer is found again.** Each request carries an id of its own; if Bardo stops before Kling's answer arrives, the next attempt finds that request instead of paying again.
 
 <a id="use"></a>
 ## Using a performed clip

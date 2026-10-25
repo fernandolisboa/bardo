@@ -145,16 +145,20 @@ pub mod refs {
     pub const NARRATION_STALE: GuideRef = at("narration", "stale");
     pub const NARRATION_IMPORT: GuideRef = at("narration", "import");
     pub const CAPTURE_IMPORT: GuideRef = at("capture", "import");
+    pub const CAPTURE_SPEND: GuideRef = at("capture", "spend");
+    pub const CAPTURE_TEST: GuideRef = at("capture", "test");
     pub const CAPTURE_TAKES: GuideRef = at("capture", "takes");
     pub const CAPTURE_MODE: GuideRef = at("capture", "mode");
     pub const CAPTURE_ANALYSIS: GuideRef = at("capture", "analysis");
     pub const CAPTURE_CONTROL: GuideRef = at("capture", "control");
     pub const CAPTURE_REVIEW: GuideRef = at("capture", "review");
     pub const CAPTURE_SET: GuideRef = at("capture", "set");
+    pub const CAPTURE_PREFLIGHT: GuideRef = at("capture", "preflight");
     pub const CAPTURE_PERFORMED: GuideRef = at("capture", "performed");
     pub const CAPTURE_TAKE_PROMPT: GuideRef = at("capture", "take-prompt");
     pub const CAPTURE_DRAFT_FINAL: GuideRef = at("capture", "draft-final");
     pub const CAPTURE_BYTEPLUS: GuideRef = at("capture", "byteplus");
+    pub const CAPTURE_KLING: GuideRef = at("capture", "kling");
     pub const CAPTURE_REMOVE: GuideRef = at("capture", "remove");
     pub const SCENES_PLAN: GuideRef = at("scenes", "plan");
     pub const SCENES_REDRAW: GuideRef = at("scenes", "redraw");
@@ -211,7 +215,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 83] = [
+    pub const ALL: [GuideRef; 87] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -232,16 +236,20 @@ pub mod refs {
         NARRATION_STALE,
         NARRATION_IMPORT,
         CAPTURE_IMPORT,
+        CAPTURE_SPEND,
+        CAPTURE_TEST,
         CAPTURE_TAKES,
         CAPTURE_MODE,
         CAPTURE_ANALYSIS,
         CAPTURE_CONTROL,
         CAPTURE_REVIEW,
         CAPTURE_SET,
+        CAPTURE_PREFLIGHT,
         CAPTURE_PERFORMED,
         CAPTURE_TAKE_PROMPT,
         CAPTURE_DRAFT_FINAL,
         CAPTURE_BYTEPLUS,
+        CAPTURE_KLING,
         CAPTURE_REMOVE,
         SCENES_PLAN,
         SCENES_REDRAW,

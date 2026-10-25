@@ -24,6 +24,7 @@ pub mod i18n;
 mod jobs;
 mod localization;
 pub mod logging;
+mod look_framing;
 mod media_import;
 mod music_prompts;
 mod music_tracks;
@@ -500,6 +501,7 @@ impl Providers {
             takes: vec![
                 Arc::new(bardo_ai::HiggsfieldTakes::new()),
                 Arc::new(bardo_ai::BytePlusTakes::new()),
+                Arc::new(bardo_ai::KlingTakes::new()),
             ],
             audio: Arc::new(bardo_media::DeviceAudio),
             media: Arc::new(bardo_media::BundledFfmpeg::new()),
@@ -845,6 +847,11 @@ impl Bardo {
             generators: providers.takes.clone(),
             secrets: Arc::clone(&secrets),
         };
+        let framing_handler = crate::look_framing::LookFramingHandler {
+            personas: Arc::clone(&personas),
+            media: Arc::clone(&providers.media),
+            vision: Arc::clone(&providers.vision),
+        };
         let scene_handler = SceneHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
@@ -1008,6 +1015,7 @@ impl Bardo {
                 take_prompts: take_prompt_handler,
                 performed: performed_handler,
                 staging: staging_handler,
+                framing: framing_handler,
                 scenes: scene_handler,
                 clips: clip_handler,
                 proxies: proxy_handler,
@@ -2400,6 +2408,7 @@ pub(crate) mod testing {
             let tier = |resolution: Option<&str>, height| TakeTier {
                 resolution: resolution.map(str::to_owned),
                 height,
+                model: None,
             };
             let model = |name: &str, label: &str, modes: Vec<TakeMode>, draft| TakeModel {
                 id: ClipModelRef::new(Provider::Higgsfield, name).unwrap(),
@@ -2551,10 +2560,12 @@ pub(crate) mod testing {
                 draft: Some(TakeTier {
                     resolution: Some("480p".into()),
                     height: 480,
+                    model: None,
                 }),
                 final_tier: TakeTier {
                     resolution: Some("1080p".into()),
                     height: 1080,
+                    model: None,
                 },
                 finishes_draft: true,
                 draft_lifetime: Some(Duration::from_secs(7 * 24 * 3600)),
@@ -2585,6 +2596,11 @@ pub(crate) mod testing {
             );
             staged.push(link.clone());
             Ok(StagedFile(link))
+        }
+
+        /// Signed again for whoever reads it.
+        fn link(&self, _key: &ApiKey, file: &StagedFile) -> Result<String, ProviderFailure> {
+            Ok(format!("{}&linked", file.0))
         }
 
         fn quote(&self, _key: &ApiKey, _request: &TakeRequest) -> Option<Money> {
@@ -2683,6 +2699,104 @@ pub(crate) mod testing {
             }
             self.unstaged.lock().unwrap().push(file.0.clone());
             Ok(())
+        }
+    }
+
+    /// A Kling-like take generator without the network: Kling's own Motion
+    /// Control models (optional 2.6 drafts), which stage nothing, read the
+    /// control video from a link to a file staged elsewhere and take the
+    /// look inside the request.
+    #[derive(Default)]
+    pub(crate) struct FakeKling {
+        pub(crate) requests: Mutex<Vec<(TakeRequest, String)>>,
+        /// Files it was asked to stage: never, as Kling keeps none.
+        pub(crate) staged: Mutex<u32>,
+    }
+
+    impl FakeKling {
+        pub(crate) fn motion() -> ClipModelRef {
+            ClipModelRef::new(Provider::Kling, bardo_ai::kling_takes::TAKE_MODEL_720P).unwrap()
+        }
+
+        pub(crate) fn submissions(&self) -> Vec<TakeRequest> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(request, _)| request.clone())
+                .collect()
+        }
+    }
+
+    impl TakeGenerator for FakeKling {
+        fn provider(&self) -> Provider {
+            Provider::Kling
+        }
+
+        fn models(&self) -> Vec<TakeModel> {
+            bardo_ai::kling_takes::take_models()
+        }
+
+        fn stage(
+            &self,
+            _key: &ApiKey,
+            _input: TakeInput<'_>,
+        ) -> Result<StagedFile, ProviderFailure> {
+            *self.staged.lock().unwrap() += 1;
+            Err(ProviderFailure::new(
+                bardo_domain::ProviderFailureKind::NotAllowed,
+                "Kling takes no files ahead of a take",
+            ))
+        }
+
+        fn stages_video(&self) -> bool {
+            false
+        }
+
+        fn inline_look(&self) -> bool {
+            true
+        }
+
+        fn quote(&self, _key: &ApiKey, _request: &TakeRequest) -> Option<Money> {
+            None
+        }
+
+        fn submit(
+            &self,
+            _key: &ApiKey,
+            request: &TakeRequest,
+            submission: &str,
+        ) -> Result<ClipHandle, ProviderFailure> {
+            let mut requests = self.requests.lock().unwrap();
+            let index = match requests.iter().position(|(_, sent)| sent == submission) {
+                Some(index) => index,
+                None => {
+                    requests.push((request.clone(), submission.to_owned()));
+                    requests.len() - 1
+                }
+            };
+            Ok(ClipHandle(format!("kling-{index}")))
+        }
+
+        fn status(
+            &self,
+            _key: &ApiKey,
+            handle: &ClipHandle,
+        ) -> Result<TakeStatus, ProviderFailure> {
+            Ok(TakeStatus::Done(TakeDone::at(format!(
+                "https://fake/{}.mp4",
+                handle.0
+            ))))
+        }
+
+        fn download(&self, _key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+            Ok(GeneratedClip {
+                bytes: TAKE.to_vec(),
+            })
+        }
+
+        fn poll_delay(&self, _polls: u32) -> Duration {
+            Duration::from_millis(5)
         }
     }
 
@@ -2829,6 +2943,21 @@ mod tests {
             _: bardo_domain::PersonaId,
             _: bardo_domain::Provider,
             _: Option<&bardo_domain::LookAsset>,
+        ) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+
+        fn look_face(
+            &self,
+            _: bardo_domain::PersonaId,
+        ) -> Result<Option<bardo_domain::LookFaceMeasure>, RepositoryError> {
+            Ok(None)
+        }
+
+        fn save_look_face(
+            &self,
+            _: bardo_domain::PersonaId,
+            _: &bardo_domain::LookFaceMeasure,
         ) -> Result<(), RepositoryError> {
             Ok(())
         }

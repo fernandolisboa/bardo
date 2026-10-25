@@ -43,6 +43,8 @@ fn request(model: &str, step: TakeStep, resolution: Option<&str>) -> TakeRequest
         video: StagedFile(CONTROL_URL.into()),
         look: StagedFile(LOOK_URL.into()),
         draft_task: None,
+        video_link: None,
+        look_bytes: None,
     }
 }
 

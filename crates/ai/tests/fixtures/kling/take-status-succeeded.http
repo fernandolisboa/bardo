@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json;charset=UTF-8
+
+{"code":0,"message":"SUCCEED","request_id":"b7","data":[{"id":"893605946402811985","status":"succeeded","message":"","create_time":1792540800000,"update_time":1792541100000,"external_id":"bardo-00000000000000000000000000000000","outputs":[{"type":"video","id":"v1","url":"https://cdn.kling.example/output/893605946402811985.mp4","watermark_url":"https://cdn.kling.example/output/893605946402811985-wm.mp4","duration":7.6}],"billing":[{"charge_type":"cash","cash_type":"balance","amount":"0.96","currency":"USD","list_price":"0.96"}]}]}

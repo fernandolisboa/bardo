@@ -1,7 +1,7 @@
 use bardo_domain::{
-    GenerationPresets, JobId, LookAsset, LookAssetKind, LookDrawing, LookImage, LookSource,
-    Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaLook, PersonaRepository, ProfileId,
-    Provider, RepositoryError, TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
+    GenerationPresets, JobId, LookAsset, LookAssetKind, LookDrawing, LookFaceMeasure, LookImage,
+    LookSource, Persona, PersonaDetails, PersonaDraft, PersonaId, PersonaLook, PersonaRepository,
+    ProfileId, Provider, RepositoryError, TemplateUsed, TemplateVersionId, VoiceFlag, VoiceRef,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -454,6 +454,45 @@ impl PersonaRepository for Database {
         .map_err(boxed)?;
         Ok(())
     }
+
+    fn look_face(&self, persona: PersonaId) -> Result<Option<LookFaceMeasure>, RepositoryError> {
+        let row: Option<(String, Option<i64>)> = self
+            .conn()
+            .query_row(
+                "SELECT image, face_height FROM persona_look_face WHERE persona_id = ?1",
+                [persona.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(boxed)?;
+        Ok(row.map(|(image, height)| LookFaceMeasure {
+            image,
+            face_height: height.map(|thousandths| thousandths as f32 / 1_000.0),
+        }))
+    }
+
+    fn save_look_face(
+        &self,
+        persona: PersonaId,
+        measure: &LookFaceMeasure,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "INSERT INTO persona_look_face (persona_id, image, face_height)
+                 SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM persona WHERE id = ?1)
+                 ON CONFLICT (persona_id) DO UPDATE SET
+                     image = excluded.image, face_height = excluded.face_height",
+                params![
+                    persona.to_string(),
+                    measure.image,
+                    measure
+                        .face_height
+                        .map(|height| (height.clamp(0.0, 1.0) * 1_000.0).round() as i64)
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -537,6 +576,39 @@ mod tests {
             .unwrap();
         let left: i64 = conn
             .query_row("SELECT count(*) FROM persona_look_asset", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn a_looks_face_measure_is_kept_per_persona_and_goes_with_it() {
+        let (db, owner) = database_with_profile();
+        let saved = persona(owner, "Narrator");
+        PersonaRepository::save(&db, &saved).unwrap();
+        assert_eq!(db.look_face(saved.id).unwrap(), None);
+        let measured = LookFaceMeasure {
+            image: "fp-look".into(),
+            face_height: Some(0.231),
+        };
+        db.save_look_face(saved.id, &measured).unwrap();
+        assert_eq!(db.look_face(saved.id).unwrap(), Some(measured));
+        let none = LookFaceMeasure {
+            image: "fp-other".into(),
+            face_height: None,
+        };
+        db.save_look_face(saved.id, &none).unwrap();
+        assert_eq!(db.look_face(saved.id).unwrap(), Some(none.clone()));
+        // Nothing kept for a persona that is not there.
+        let gone = PersonaId::new();
+        db.save_look_face(gone, &none).unwrap();
+        assert_eq!(db.look_face(gone).unwrap(), None);
+        let conn = db.conn();
+        conn.execute("DELETE FROM persona WHERE id = ?1", [saved.id.to_string()])
+            .unwrap();
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM persona_look_face", [], |row| {
                 row.get(0)
             })
             .unwrap();

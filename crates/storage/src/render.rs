@@ -470,7 +470,9 @@ mod tests {
             // As the database was before migration 49 (and the ones after).
             let mut conn = db.conn();
             conn.execute_batch(
-                "DROP TABLE take_staging; DROP TABLE persona_look_asset;
+                "DROP TABLE take_preflight_override; DROP TABLE persona_look_face;
+                 ALTER TABLE video_project DROP COLUMN take_cap_micros;
+                 DROP TABLE take_staging; DROP TABLE persona_look_asset;
                  DROP TABLE rendered_cut; DROP TABLE adapted_sentence;
                  DROP TABLE localized_audio; DROP TABLE localized_lane;
                  DROP TABLE localized_scene; DROP TABLE localized_sentence;
