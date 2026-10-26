@@ -20,7 +20,7 @@ Clips are made through Higgsfield, Kling or Google, with your own key for each (
 <a id="motion"></a>
 ## Motion
 
-The **motion prompt** says how the image moves: the subject, the action, the camera. Until you write one, the scene uses its image prompt, marked **Same as the image prompt**. **Edit motion** changes it for the scene's next clip.
+The **motion prompt** says how the image moves: one camera move and at most one simple action of the subject. Claude writes one for each scene when it [plans the scenes](scenes.md#plan); scenes planned before that use their image prompt, marked **Same as the image prompt**. **Edit motion** changes it for the scene's next clip, and saving it empty goes back to Claude's.
 
 <a id="model"></a>
 ## Video model

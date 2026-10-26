@@ -72,6 +72,24 @@ impl From<AspectRatio> for ImageShape {
     }
 }
 
+/// An image sent with a request for the model to keep what it shows: a
+/// cast member's portrait, so the person looks the same in every scene
+/// (#246).
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReferenceImage {
+    pub bytes: Vec<u8>,
+    pub format: ImageFormat,
+}
+
+impl std::fmt::Debug for ReferenceImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReferenceImage")
+            .field("bytes", &self.bytes.len())
+            .field("format", &self.format)
+            .finish()
+    }
+}
+
 /// What to draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRequest {
@@ -80,6 +98,9 @@ pub struct ImageRequest {
     pub prompt: String,
     /// The image's shape: a frame of the video's format, or a portrait.
     pub shape: ImageShape,
+    /// Images whose people the drawing keeps, in the order the prompt
+    /// names them.
+    pub references: Vec<ReferenceImage>,
 }
 
 /// The width and height of a PNG, JPEG or WebP file, read from its header;

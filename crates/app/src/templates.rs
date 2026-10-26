@@ -41,18 +41,33 @@ sentences, keep the tension through the middle, and end with a payoff that deliv
 promise.";
 
 const IMAGE_PROMPT_INSTRUCTIONS: &str = "\
-You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of still \
-images, one per scene. You split the narration into scenes and write one image prompt per scene \
-for an image model.
+You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of images, \
+one per scene, and some of them become short video clips. You split the narration into scenes \
+and write, for each scene, the prompt an image model draws it from and the motion prompt a video \
+model animates that image with.
 
 Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
 and runs until the next scene starts. Change scene when the subject, place or moment changes, \
 about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own.
 
-Each prompt stands alone, because the image model sees one prompt at a time and remembers none \
-of the others. Describe the subject, setting, period, composition, lighting and mood, and repeat \
-the channel's visual style in every prompt so the images look like one video. Frames are \
+The cast: when the same person appears in more than one scene (a recurring character such as \
+\"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
+name and one fixed appearance: sex, adult age, skin tone, hair, build and clothes, precise \
+enough to draw the very same person again, in the channel's visual style. Each scene lists in \
+`cast` the members it shows, by their position in `cast` (from 0); its prompt calls them by \
+that name and never describes them differently. A person seen once, crowds and scenes without \
+people need no cast member; leave `cast` empty when nobody recurs.
+
+Each image prompt stands alone, because the image model sees one prompt at a time and remembers \
+none of the others. Describe the subject, setting, period, composition, lighting and mood, and \
+repeat the channel's visual style in every prompt so the images look like one video. Bardo adds \
+each cast member's appearance and reference portrait to the scenes that show them. Frames are \
 {{frame_shape}}. Write the prompts in English, whatever the narration's language ({{language}}).
+
+The motion prompt says how the image moves in a clip of a few seconds: one camera move (slow push \
+in, pan, tilt, orbit or static) and at most one simple, natural action of the subject that fits \
+the narration. Describe motion only: no new people or objects, no cuts, text or sound. One or two \
+sentences, in English.
 
 The images are original: no recognizable real people, logos, brands or copyrighted characters, \
 and no text, captions or watermarks in the image. Keep them safe for advertisers.";
@@ -69,8 +84,9 @@ Angle: {{theme_angle}}
 The narration, one sentence per line: its number, when it is spoken, and its text.
 {{narration_sentences}}
 
-Split the narration into scenes. For each scene give the number of the sentence it starts at \
-and the image prompt that draws it.";
+List the recurring characters, then split the narration into scenes. For each scene give the \
+number of the sentence it starts at, the image prompt that draws it, the cast members it shows \
+and its motion prompt.";
 
 const MUSIC_PROMPT_INSTRUCTIONS: &str = "\
 You write prompts for AI music tools (text-to-music generators). The music is the background bed \
@@ -244,6 +260,39 @@ the channel's visual style in every prompt so the images look like one video. Fr
 The images are original: no recognizable real people, logos, brands or copyrighted characters, \
 and no text, captions or watermarks in the image. Keep them safe for advertisers.";
 
+/// The scene plan before the cast and motion prompts (#246).
+const RETIRED_IMAGE_PROMPT_INSTRUCTIONS_2: &str = "\
+You plan the visuals of a faceless YouTube video: a narrator speaks over a sequence of still \
+images, one per scene. You split the narration into scenes and write one image prompt per scene \
+for an image model.
+
+Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
+and runs until the next scene starts. Change scene when the subject, place or moment changes, \
+about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own.
+
+Each prompt stands alone, because the image model sees one prompt at a time and remembers none \
+of the others. Describe the subject, setting, period, composition, lighting and mood, and repeat \
+the channel's visual style in every prompt so the images look like one video. Frames are \
+{{frame_shape}}. Write the prompts in English, whatever the narration's language ({{language}}).
+
+The images are original: no recognizable real people, logos, brands or copyrighted characters, \
+and no text, captions or watermarks in the image. Keep them safe for advertisers.";
+
+const RETIRED_IMAGE_PROMPT_PROMPT: &str = "\
+Channel: {{channel_name}}
+Channel niche: {{channel_niche}}
+Visual style (aesthetic notes): {{aesthetic_notes}}
+
+Video niche: {{niche}}
+Video title: {{theme_title}}
+Angle: {{theme_angle}}
+
+The narration, one sentence per line: its number, when it is spoken, and its text.
+{{narration_sentences}}
+
+Split the narration into scenes. For each scene give the number of the sentence it starts at \
+and the image prompt that draws it.";
+
 const LOOK_PROMPT_INSTRUCTIONS: &str = "\
 You write the prompt an image model draws a persona's look from: the character a faceless \
 channel's narrator appears as on screen, whose face and body a video model later moves with the \
@@ -318,7 +367,24 @@ Write the prompt for this take.";
 fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
     let (instructions, prompt) = match kind {
         TemplateKind::Script => (SCRIPT_INSTRUCTIONS, RETIRED_SCRIPT_PROMPT),
-        TemplateKind::ImagePrompt => (RETIRED_IMAGE_PROMPT_INSTRUCTIONS, IMAGE_PROMPT_PROMPT),
+        TemplateKind::ImagePrompt => {
+            return [
+                (
+                    RETIRED_IMAGE_PROMPT_INSTRUCTIONS,
+                    RETIRED_IMAGE_PROMPT_PROMPT,
+                ),
+                (
+                    RETIRED_IMAGE_PROMPT_INSTRUCTIONS_2,
+                    RETIRED_IMAGE_PROMPT_PROMPT,
+                ),
+            ]
+            .into_iter()
+            .map(|(instructions, prompt)| {
+                TemplateBody::new(kind, instructions, prompt)
+                    .expect("the retired templates are valid")
+            })
+            .collect();
+        }
         TemplateKind::MusicPrompt
         | TemplateKind::Metadata
         | TemplateKind::Thumbnail

@@ -14,17 +14,18 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, CarriedCut, Channel, ChannelId, ChannelRepository, ContentLanguage, CostPurpose,
-    Country, Gap, GeneratedScript, Generation, GenerationId, Job, JobFailure, JobFailureKind,
-    JobId, JobKind, Localization, LocalizationRepository, MediaAsset, MediaAssetId,
-    MediaAssetRepository, MusicTrack, MusicTrackRepository, Narration, NarrationRepository,
-    NewVersion, PlacedScene, ProfileId, ProjectFiles, Provider, RenderedPrompt, RepositoryError,
-    Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository,
-    SceneRecord, Script, ScriptRepository, SecretStore, SourceSentence, TemplateKind, TemplateUsed,
-    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat,
-    TextGenerator, TextRequest, Theme, ThemeIdea, ThemeRepository, TimelineRepository, UiLanguage,
-    VideoProject, VideoProjectId, adaptation_gaps, join_adapted, localized_cut, place_scenes,
-    placed_scene_notes, scene_sentences, sentence_times, sentence_words, sentences, source_gaps,
+    ApiKey, CarriedCut, CastMember, CastRecord, Channel, ChannelId, ChannelRepository,
+    ContentLanguage, CostPurpose, Country, Gap, GeneratedScript, Generation, GenerationId, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, Localization, LocalizationRepository, MediaAsset,
+    MediaAssetId, MediaAssetRepository, MusicTrack, MusicTrackRepository, Narration,
+    NarrationRepository, NewVersion, PlacedScene, ProfileId, ProjectFiles, Provider,
+    RenderedPrompt, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
+    ScenePlanRecord, ScenePlanRepository, SceneRecord, Script, ScriptRepository, SecretStore,
+    SourceSentence, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea, ThemeRepository,
+    TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps, join_adapted,
+    localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
+    sentence_words, sentences, source_gaps,
 };
 use serde::{Deserialize, Serialize};
 
@@ -330,8 +331,9 @@ fn other_audience(channel: &Channel, language: ContentLanguage, country: Country
 }
 
 /// A copy of `plan` for `project`: the current images and clips with new
-/// generation records, prompts and model picks; nothing waiting for
-/// review, no failures and no clip of an image the scene no longer shows.
+/// generation records, prompts and model picks, and the cast with its
+/// portraits; nothing waiting for review, no failures and no clip of an
+/// image the scene no longer shows.
 fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> ScenePlan {
     let copied = |generation: &Generation| Generation {
         id: GenerationId::new(),
@@ -371,6 +373,24 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
                 pending_clip: None,
                 clip_failure: None,
             })
+            .with_cast(scene.cast().to_vec())
+            .with_planned_motion(scene.planned_motion().cloned())
+        })
+        .collect();
+    let cast = plan
+        .cast()
+        .iter()
+        .map(|member| {
+            CastMember::restore(CastRecord {
+                name: member.name.clone(),
+                generated_description: member.generated_description().clone(),
+                description: member.description().clone(),
+                portrait: member.portrait().map(|portrait| SceneImage {
+                    file: portrait.file.clone(),
+                    generation: copied(&portrait.generation),
+                }),
+                failure: None,
+            })
         })
         .collect();
     ScenePlan::restore(ScenePlanRecord {
@@ -382,6 +402,7 @@ fn copy_plan(plan: &ScenePlan, project: VideoProjectId, now: SystemTime) -> Scen
         scenes,
         updated_at: now,
     })
+    .with_cast(cast)
 }
 
 /// Runs version jobs.
@@ -696,9 +717,8 @@ impl LocalizationHandler {
             };
 
             let mut names: Vec<String> = new_plan
-                .scenes()
-                .iter()
-                .flat_map(|scene| scene.files().map(str::to_owned).collect::<Vec<_>>())
+                .files()
+                .map(str::to_owned)
                 .chain(media.iter().map(|asset| asset.file.clone()))
                 .collect();
             names.sort();

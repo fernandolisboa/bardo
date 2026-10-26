@@ -126,6 +126,203 @@ pub struct SceneImage {
 #[error("no new image of this scene is waiting for review")]
 pub struct NoPendingImage;
 
+/// The most recurring characters a plan keeps, and so the most reference
+/// portraits sent with one scene's image.
+pub const MAX_CAST: usize = 3;
+
+/// The longest name of a cast member, in characters.
+pub const MAX_CAST_NAME_CHARS: usize = 60;
+
+/// One of the video's recurring characters (#246) as the planner proposed
+/// them: what the scene prompts call them and their fixed appearance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CastDraft {
+    pub name: String,
+    pub description: String,
+}
+
+/// A recurring character of the video: the planner names them once with a
+/// fixed appearance, the image provider draws their reference portrait,
+/// and every scene that shows them is drawn with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CastMember {
+    /// What the scene prompts call them, e.g. "the chef".
+    pub name: String,
+    /// The appearance as planned. The user's edits change `description`.
+    generated_description: ScenePrompt,
+    description: ScenePrompt,
+    /// The reference portrait, once drawn.
+    portrait: Option<SceneImage>,
+    /// Why the last attempt to draw the portrait failed, until one
+    /// succeeds.
+    failure: Option<JobFailureKind>,
+}
+
+/// Every stored field of a cast member, for adapters that rebuild one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CastRecord {
+    pub name: String,
+    pub generated_description: ScenePrompt,
+    pub description: ScenePrompt,
+    pub portrait: Option<SceneImage>,
+    pub failure: Option<JobFailureKind>,
+}
+
+impl CastMember {
+    pub fn restore(record: CastRecord) -> Self {
+        Self {
+            name: record.name,
+            generated_description: record.generated_description,
+            description: record.description,
+            portrait: record.portrait,
+            failure: record.failure,
+        }
+    }
+
+    /// A planned member, or `None` when the name or the description is not
+    /// usable.
+    fn planned(draft: &CastDraft) -> Option<Self> {
+        let name: String = draft
+            .name
+            .trim()
+            .chars()
+            .take(MAX_CAST_NAME_CHARS)
+            .collect();
+        let description = ScenePrompt::new(&draft.description).ok()?;
+        (!name.trim().is_empty()).then(|| Self {
+            name: name.trim().to_owned(),
+            generated_description: description.clone(),
+            description,
+            portrait: None,
+            failure: None,
+        })
+    }
+
+    pub fn description(&self) -> &ScenePrompt {
+        &self.description
+    }
+
+    /// The name without a leading article ("the chef" is "chef"), as an
+    /// edited prompt may still call them.
+    fn called(&self) -> &str {
+        let lower = self.name.to_lowercase();
+        ["the ", "a ", "an "]
+            .iter()
+            .find(|article| lower.starts_with(**article))
+            .map_or(self.name.as_str(), |article| &self.name[article.len()..])
+    }
+
+    pub fn generated_description(&self) -> &ScenePrompt {
+        &self.generated_description
+    }
+
+    /// Whether the user changed the description since it was planned.
+    pub fn is_edited(&self) -> bool {
+        self.description != self.generated_description
+    }
+
+    pub fn portrait(&self) -> Option<&SceneImage> {
+        self.portrait.as_ref()
+    }
+
+    pub fn failure(&self) -> Option<JobFailureKind> {
+        self.failure
+    }
+
+    /// Replaces the description with the user's. The portrait no longer
+    /// shows it, so it goes: the next image drawn with this member draws
+    /// a new one first. Returns whether the description changed and the
+    /// portrait it dropped, whose file can go.
+    pub fn edit_description(&mut self, description: ScenePrompt) -> (bool, Option<SceneImage>) {
+        if description == self.description {
+            return (false, None);
+        }
+        self.description = description;
+        // A failure was about the old description.
+        self.failure = None;
+        (true, self.portrait.take())
+    }
+
+    /// Takes a newly drawn portrait in place of the current one. Returns
+    /// the replaced one, whose file can go.
+    pub fn set_portrait(&mut self, portrait: SceneImage) -> Option<SceneImage> {
+        self.failure = None;
+        self.portrait.replace(portrait)
+    }
+
+    /// Records that drawing the portrait failed. The portrait it has stays.
+    pub fn fail(&mut self, kind: JobFailureKind) {
+        self.failure = Some(kind);
+    }
+
+    /// What the image model draws the reference portrait from.
+    pub fn portrait_prompt(&self) -> String {
+        format!(
+            "A reference portrait of one character of a video, {name}: {description}\n\n\
+             Exactly one person, from the waist up, the whole head in frame, facing the \
+             camera with a neutral expression, against a plain, evenly lit background. \
+             Nothing covers the face. No other people, no text, logos or watermarks.",
+            name = self.name,
+            description = self.description.as_str(),
+        )
+    }
+}
+
+/// The prompt an image of a scene is drawn from: the scene's prompt, then
+/// who each cast member it shows is. `referenced` are the members whose
+/// portrait goes with the request, in that order; the others are only
+/// described.
+pub fn scene_image_prompt(prompt: &str, shown: &[&CastMember], referenced: &[bool]) -> String {
+    if shown.is_empty() {
+        return prompt.to_owned();
+    }
+    let mut text = prompt.to_owned();
+    let with: Vec<&CastMember> = shown
+        .iter()
+        .zip(referenced.iter().chain(std::iter::repeat(&false)))
+        .filter(|(_, referenced)| **referenced)
+        .map(|(member, _)| *member)
+        .collect();
+    if !with.is_empty() {
+        text.push_str(
+            "\n\nThe reference images show the people in this scene, in this order. Each \
+             person must look exactly as in their reference: the same face, skin tone, age, \
+             hair, build and clothes. Do not copy the reference's pose, framing or \
+             background.",
+        );
+        for (number, member) in with.iter().enumerate() {
+            text.push_str(&format!(
+                "\nReference {}: {}, {}",
+                number + 1,
+                member.name,
+                member.description.as_str()
+            ));
+        }
+    }
+    let described: Vec<&&CastMember> = shown
+        .iter()
+        .zip(referenced.iter().chain(std::iter::repeat(&false)))
+        .filter(|(_, referenced)| !**referenced)
+        .map(|(member, _)| member)
+        .collect();
+    if !described.is_empty() {
+        text.push_str("\n\nThe people in this scene look like this:");
+        for member in described {
+            text.push_str(&format!(
+                "\n{}: {}",
+                member.name,
+                member.description.as_str()
+            ));
+        }
+    }
+    text
+}
+
+/// A user action on a cast member that does not apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the plan has no cast member {0}")]
+pub struct NoSuchCastMember(pub usize);
+
 /// A clip made from a scene's image: the file in the project folder, its
 /// length, the image it animated and the generation that made it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +368,10 @@ pub struct Scene {
     pending_clip: Option<SceneClip>,
     /// Why the last attempt to make a clip failed, until one succeeds.
     clip_failure: Option<JobFailureKind>,
+    /// The cast members it shows, as indexes into the plan's cast.
+    cast: Vec<usize>,
+    /// How the clip moves, as planned; plans made before #246 have none.
+    planned_motion: Option<ScenePrompt>,
 }
 
 /// Every stored field of a scene, for adapters that rebuild one.
@@ -207,7 +408,22 @@ impl Scene {
             clip: record.clip,
             pending_clip: record.pending_clip,
             clip_failure: record.clip_failure,
+            cast: Vec::new(),
+            planned_motion: None,
         }
+    }
+
+    /// The scene showing `cast` (indexes into its plan's cast), as an
+    /// adapter rebuilds it.
+    pub fn with_cast(mut self, cast: Vec<usize>) -> Self {
+        self.cast = cast;
+        self
+    }
+
+    /// The scene with its planned motion prompt, as an adapter rebuilds it.
+    pub fn with_planned_motion(mut self, motion: Option<ScenePrompt>) -> Self {
+        self.planned_motion = motion;
+        self
     }
 
     /// A scene of a new plan: no image or clip yet.
@@ -226,7 +442,14 @@ impl Scene {
             clip: None,
             pending_clip: None,
             clip_failure: None,
+            cast: Vec::new(),
+            planned_motion: None,
         }
+    }
+
+    /// The cast members it shows, as indexes into the plan's cast.
+    pub fn cast(&self) -> &[usize] {
+        &self.cast
     }
 
     pub fn duration(&self) -> Duration {
@@ -298,10 +521,22 @@ impl Scene {
         self.pending.take().ok_or(NoPendingImage)
     }
 
-    /// What moves the clip: the user's motion prompt, else the image
-    /// prompt.
+    /// What moves the clip: the user's motion prompt, else the planned
+    /// one, else (plans made before #246) the image prompt.
     pub fn motion_prompt(&self) -> &ScenePrompt {
-        self.motion_prompt.as_ref().unwrap_or(&self.prompt)
+        self.motion_prompt
+            .as_ref()
+            .unwrap_or_else(|| self.default_motion())
+    }
+
+    /// The motion prompt the scene follows without one of the user's.
+    fn default_motion(&self) -> &ScenePrompt {
+        self.planned_motion.as_ref().unwrap_or(&self.prompt)
+    }
+
+    /// The motion prompt Claude planned, if the plan has one.
+    pub fn planned_motion(&self) -> Option<&ScenePrompt> {
+        self.planned_motion.as_ref()
     }
 
     /// The motion prompt the user wrote, if any.
@@ -309,10 +544,10 @@ impl Scene {
         self.motion_prompt.as_ref()
     }
 
-    /// Sets the user's motion prompt; `None` goes back to the image prompt.
-    /// Returns whether it changed.
+    /// Sets the user's motion prompt; `None` goes back to the planned one
+    /// (or the image prompt). Returns whether it changed.
     pub fn set_motion_prompt(&mut self, prompt: Option<ScenePrompt>) -> bool {
-        let prompt = prompt.filter(|prompt| *prompt != self.prompt);
+        let prompt = prompt.filter(|prompt| prompt != self.default_motion());
         if prompt == self.motion_prompt {
             return false;
         }
@@ -410,11 +645,14 @@ impl Scene {
 }
 
 /// One scene as the planner proposed it: the sentence it starts at (an
-/// index into `sentences`) and its image prompt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// index into `sentences`), its image prompt, the cast members it shows
+/// (indexes into the drafted cast) and how its clip moves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SceneDraft {
     pub first_sentence: usize,
     pub prompt: String,
+    pub cast: Vec<usize>,
+    pub motion: String,
 }
 
 /// The planner's answer has no usable scene.
@@ -438,6 +676,8 @@ pub struct ScenePlan {
     /// The planner's generation; never changes.
     pub generation: Generation,
     scenes: Vec<Scene>,
+    /// The recurring characters the scenes show (#246).
+    cast: Vec<CastMember>,
     pub updated_at: SystemTime,
 }
 
@@ -459,30 +699,57 @@ impl ScenePlan {
     /// first starting at the narration's start and each running until the
     /// next starts, so together they cover all of it. Drafts with a
     /// sentence the narration does not have or an unusable prompt are
-    /// dropped.
+    /// dropped. Cast members without a name or a usable description, past
+    /// `MAX_CAST`, or shown in no scene are dropped too, and each scene
+    /// keeps the members it names that are left, each once.
     pub fn from_drafts(
         generation: Generation,
         narration: &Narration,
+        cast: Vec<CastDraft>,
         mut drafts: Vec<SceneDraft>,
         now: SystemTime,
     ) -> Result<Self, NoScenes> {
         let sentences = sentences(narration);
         drafts.sort_by_key(|draft| draft.first_sentence);
-        let mut starts: Vec<(usize, ScenePrompt)> = Vec::new();
+        let mut starts: Vec<(usize, ScenePrompt, Vec<usize>, Option<ScenePrompt>)> = Vec::new();
         for draft in drafts {
             let Ok(prompt) = ScenePrompt::new(&draft.prompt) else {
                 continue;
             };
             let taken = starts
                 .last()
-                .is_some_and(|(first, _)| *first == draft.first_sentence);
+                .is_some_and(|(first, ..)| *first == draft.first_sentence);
             if draft.first_sentence < sentences.len() && !taken {
-                starts.push((draft.first_sentence, prompt));
+                let motion = ScenePrompt::new(&draft.motion).ok();
+                starts.push((draft.first_sentence, prompt, draft.cast, motion));
             }
         }
+        // The usable members, by their drafted index.
+        let mut usable: Vec<(usize, CastMember)> = cast
+            .iter()
+            .enumerate()
+            .filter_map(|(index, draft)| Some((index, CastMember::planned(draft)?)))
+            .collect();
+        usable.retain(|(index, _)| starts.iter().any(|(_, _, shown, _)| shown.contains(index)));
+        usable.truncate(MAX_CAST);
+        let renumber = |shown: &[usize]| -> Vec<usize> {
+            let mut kept: Vec<usize> = Vec::new();
+            for drafted in shown {
+                if let Some(at) = usable.iter().position(|(index, _)| index == drafted)
+                    && !kept.contains(&at)
+                {
+                    kept.push(at);
+                }
+            }
+            kept
+        };
+        let mut starts: Vec<(usize, ScenePrompt, Vec<usize>, Option<ScenePrompt>)> = starts
+            .into_iter()
+            .map(|(first, prompt, shown, motion)| (first, prompt, renumber(&shown), motion))
+            .collect();
         // The opening sentences belong to the first scene.
         match starts.first_mut() {
-            Some((first, _)) => *first = 0,
+            Some((first, ..)) => *first = 0,
             None => return Err(NoScenes),
         }
         let text = narration.text.as_str();
@@ -492,8 +759,8 @@ impl ScenePlan {
         let scenes = starts
             .iter()
             .enumerate()
-            .map(|(index, (first, prompt))| {
-                let next = starts.get(index + 1).map(|(next, _)| *next);
+            .map(|(index, (first, prompt, shown, motion))| {
+                let next = starts.get(index + 1).map(|(next, ..)| *next);
                 let last = &sentences[next.unwrap_or(sentences.len()) - 1];
                 Scene::planned(
                     if index == 0 {
@@ -505,6 +772,8 @@ impl ScenePlan {
                     text[sentences[*first].text.start..last.text.end].to_owned(),
                     prompt.clone(),
                 )
+                .with_cast(shown.clone())
+                .with_planned_motion(motion.clone())
             })
             .collect();
         Ok(Self {
@@ -514,6 +783,7 @@ impl ScenePlan {
             narration: narration.id,
             generation,
             scenes,
+            cast: usable.into_iter().map(|(_, member)| member).collect(),
             updated_at: now,
         })
     }
@@ -526,8 +796,77 @@ impl ScenePlan {
             narration: record.narration,
             generation: record.generation,
             scenes: record.scenes,
+            cast: Vec::new(),
             updated_at: record.updated_at,
         }
+    }
+
+    /// The plan with its cast, as an adapter rebuilds it.
+    pub fn with_cast(mut self, cast: Vec<CastMember>) -> Self {
+        self.cast = cast;
+        self
+    }
+
+    /// The recurring characters the scenes show.
+    pub fn cast(&self) -> &[CastMember] {
+        &self.cast
+    }
+
+    pub fn cast_member(&self, index: usize) -> Result<&CastMember, NoSuchCastMember> {
+        self.cast.get(index).ok_or(NoSuchCastMember(index))
+    }
+
+    /// The cast member at `index`, to change; the plan's time moves to
+    /// `now`.
+    pub fn cast_mut(
+        &mut self,
+        index: usize,
+        now: SystemTime,
+    ) -> Result<&mut CastMember, NoSuchCastMember> {
+        let member = self.cast.get_mut(index).ok_or(NoSuchCastMember(index))?;
+        self.updated_at = now;
+        Ok(member)
+    }
+
+    /// The cast members scene `index` is drawn with, by their index in
+    /// the cast: the ones it shows, and once the user edited its prompt,
+    /// only those the prompt still names, so writing a person out of a
+    /// scene takes them out of its image.
+    pub fn scene_cast(&self, index: usize) -> Vec<usize> {
+        self.scenes.get(index).map_or_else(Vec::new, |scene| {
+            let prompt = scene.prompt.as_str().to_lowercase();
+            scene
+                .cast
+                .iter()
+                .copied()
+                .filter(|&member| {
+                    self.cast.get(member).is_some_and(|cast| {
+                        !scene.is_edited() || prompt.contains(&cast.called().to_lowercase())
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// Cast members without a portrait that drawing `scenes` would draw
+    /// first, each once.
+    pub fn missing_portraits(&self, scenes: &[usize]) -> Vec<usize> {
+        let mut missing: Vec<usize> = Vec::new();
+        for &scene in scenes {
+            for member in self.scene_cast(scene) {
+                if self.cast[member].portrait.is_none() && !missing.contains(&member) {
+                    missing.push(member);
+                }
+            }
+        }
+        missing
+    }
+
+    /// The scenes drawn with cast member `member`.
+    pub fn scenes_with(&self, member: usize) -> Vec<usize> {
+        (0..self.scenes.len())
+            .filter(|&index| self.scene_cast(index).contains(&member))
+            .collect()
     }
 
     pub fn scenes(&self) -> &[Scene] {
@@ -569,9 +908,14 @@ impl ScenePlan {
             .collect()
     }
 
-    /// Every image and clip file of every scene.
+    /// Every image and clip file of every scene, and every portrait.
     pub fn files(&self) -> impl Iterator<Item = &str> {
-        self.scenes.iter().flat_map(Scene::files)
+        self.scenes.iter().flat_map(Scene::files).chain(
+            self.cast
+                .iter()
+                .filter_map(|member| member.portrait.as_ref())
+                .map(|portrait| portrait.file.as_str()),
+        )
     }
 }
 
@@ -589,6 +933,11 @@ pub trait ScenePlanRepository: Send + Sync {
     /// clips, leaving the other scenes as they are. Fails when the plan is
     /// no longer saved.
     fn save_scene(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError>;
+
+    /// Saves cast member `index` of the saved plan `plan` (description,
+    /// portrait, failure) and its portrait's generation, leaving the rest
+    /// as it is. Fails when the plan is no longer saved.
+    fn save_cast_member(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError>;
 }
 
 impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
@@ -602,6 +951,10 @@ impl<T: ScenePlanRepository + ?Sized> ScenePlanRepository for Arc<T> {
 
     fn save_scene(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
         (**self).save_scene(plan, index)
+    }
+
+    fn save_cast_member(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
+        (**self).save_cast_member(plan, index)
     }
 }
 
@@ -674,6 +1027,7 @@ mod tests {
         SceneDraft {
             first_sentence,
             prompt: prompt.into(),
+            ..SceneDraft::default()
         }
     }
 
@@ -681,6 +1035,7 @@ mod tests {
         ScenePlan::from_drafts(
             generation(narration, Provider::Claude, "{}"),
             narration,
+            Vec::new(),
             drafts,
             SystemTime::UNIX_EPOCH,
         )
@@ -781,6 +1136,7 @@ mod tests {
         let none = ScenePlan::from_drafts(
             generation(&n, Provider::Claude, "{}"),
             &n,
+            Vec::new(),
             vec![draft(7, "Out of range."), draft(1, "")],
             SystemTime::UNIX_EPOCH,
         );
@@ -960,6 +1316,194 @@ mod tests {
         assert!(!scene.set_clip_model(Some(model.clone())));
         assert_eq!(scene.clip_model(), Some(&model));
         assert!(scene.set_clip_model(None));
+    }
+
+    fn member(name: &str, description: &str) -> CastDraft {
+        CastDraft {
+            name: name.into(),
+            description: description.into(),
+        }
+    }
+
+    fn cast_draft(first_sentence: usize, prompt: &str, cast: Vec<usize>) -> SceneDraft {
+        SceneDraft {
+            first_sentence,
+            prompt: prompt.into(),
+            cast,
+            motion: "Slow push in.".into(),
+        }
+    }
+
+    #[test]
+    fn the_cast_is_planned_once_and_scenes_point_at_it() {
+        let n = narration(STORY, 0);
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![
+                member("the chef", "A man in his fifties, brown skin, white apron."),
+                member("  ", "No name."),
+                member("the critic", "  "),
+                member("the waiter", "Never shown."),
+                member("the sous-chef", "A woman in her twenties, red hair."),
+            ],
+            vec![
+                cast_draft(0, "The chef tastes a sauce.", vec![0, 0, 1, 9]),
+                cast_draft(2, "The chef and the sous-chef plate.", vec![4, 0, 2]),
+                cast_draft(3, "An empty kitchen.", Vec::new()),
+            ],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let names: Vec<_> = plan.cast().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["the chef", "the sous-chef"],
+            "unusable and unshown members are dropped"
+        );
+        assert_eq!(plan.scenes()[0].cast(), [0], "each once, dropped ones gone");
+        assert_eq!(plan.scenes()[1].cast(), [1, 0], "in the scene's order");
+        assert!(plan.scenes()[2].cast().is_empty());
+        assert_eq!(plan.scenes_with(0), [0, 1]);
+        assert_eq!(plan.missing_portraits(&[2, 1, 0]), [1, 0]);
+        assert_eq!(
+            plan.scenes()[0].planned_motion().map(ScenePrompt::as_str),
+            Some("Slow push in.")
+        );
+    }
+
+    #[test]
+    fn a_long_cast_is_cut_and_names_are_limited() {
+        let n = narration(STORY, 0);
+        let cast: Vec<_> = (0..MAX_CAST + 2)
+            .map(|i| member(&format!("person {i}"), "A person."))
+            .collect();
+        let all: Vec<usize> = (0..MAX_CAST + 2).collect();
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            cast,
+            vec![cast_draft(0, "A crowd.", all)],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.cast().len(), MAX_CAST);
+        assert_eq!(plan.scenes()[0].cast().len(), MAX_CAST);
+        assert_eq!(plan.scene_cast(0).len(), MAX_CAST);
+        let long = "n".repeat(MAX_CAST_NAME_CHARS + 10);
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![member(&long, "A person.")],
+            vec![cast_draft(0, "A person.", vec![0])],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.cast()[0].name.chars().count(), MAX_CAST_NAME_CHARS);
+    }
+
+    #[test]
+    fn a_portrait_is_kept_until_the_description_changes() {
+        let n = narration(STORY, 0);
+        let mut plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![member("the chef", "A man, brown skin.")],
+            vec![cast_draft(0, "The chef cooks.", vec![0])],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let chef = plan.cast_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        chef.fail(JobFailureKind::Declined);
+        assert_eq!(chef.set_portrait(image(&n, "chef-1.png")), None);
+        assert_eq!(chef.failure(), None, "a success clears the failure");
+        let replaced = chef.set_portrait(image(&n, "chef-2.png")).unwrap();
+        assert_eq!(replaced.file, "chef-1.png");
+        assert_eq!(plan.missing_portraits(&[0]), Vec::<usize>::new());
+        assert_eq!(plan.files().collect::<Vec<_>>(), ["chef-2.png"]);
+
+        let chef = plan.cast_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        let same = ScenePrompt::new("A man, brown skin.").unwrap();
+        assert_eq!(chef.edit_description(same), (false, None));
+        let (changed, dropped) =
+            chef.edit_description(ScenePrompt::new("A man, brown skin, mustache.").unwrap());
+        assert!(changed);
+        assert_eq!(dropped.unwrap().file, "chef-2.png");
+        assert!(chef.is_edited());
+        assert_eq!(chef.generated_description().as_str(), "A man, brown skin.");
+        assert_eq!(plan.missing_portraits(&[0]), [0], "drawn again next time");
+        assert_eq!(plan.cast_member(3), Err(NoSuchCastMember(3)));
+    }
+
+    #[test]
+    fn an_edited_prompt_is_drawn_only_with_the_people_it_still_names() {
+        let n = narration(STORY, 0);
+        let mut plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![member("the chef", "A man."), member("Ana", "A woman.")],
+            vec![cast_draft(0, "The chef and Ana cook.", vec![0, 1])],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.scene_cast(0), [0, 1]);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        scene.edit_prompt(ScenePrompt::new("Our Chef alone at the stove.").unwrap());
+        assert_eq!(plan.scene_cast(0), [0], "Ana was written out");
+        assert_eq!(plan.scenes_with(1), Vec::<usize>::new());
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        scene.edit_prompt(ScenePrompt::new("An empty kitchen.").unwrap());
+        assert!(plan.scene_cast(0).is_empty());
+        assert_eq!(plan.missing_portraits(&[0]), Vec::<usize>::new());
+
+        let ana = plan.cast_mut(1, SystemTime::UNIX_EPOCH).unwrap();
+        ana.fail(JobFailureKind::Declined);
+        ana.edit_description(ScenePrompt::new("A woman, red hair.").unwrap());
+        assert_eq!(ana.failure(), None, "the failure was about the old look");
+    }
+
+    #[test]
+    fn a_scene_prompt_names_its_people_and_their_references() {
+        let n = narration(STORY, 0);
+        let plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![
+                member("the chef", "A man in his fifties, brown skin."),
+                member("the critic", "A woman in her forties, grey bob."),
+            ],
+            vec![cast_draft(0, "The chef serves the critic.", vec![0, 1])],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let shown: Vec<&CastMember> = plan.cast().iter().collect();
+        let prompt = scene_image_prompt("The chef serves the critic.", &shown, &[true, false]);
+        assert!(prompt.starts_with("The chef serves the critic.\n\n"));
+        assert!(prompt.contains("Reference 1: the chef, A man in his fifties, brown skin."));
+        assert!(!prompt.contains("Reference 2"));
+        assert!(prompt.contains("the critic: A woman in her forties, grey bob."));
+        assert_eq!(scene_image_prompt("Stars.", &[], &[]), "Stars.");
+        assert!(
+            plan.cast()[0]
+                .portrait_prompt()
+                .contains("the chef: A man in his fifties")
+        );
+    }
+
+    #[test]
+    fn the_planned_motion_prompt_comes_before_the_image_prompt() {
+        let n = narration(STORY, 0);
+        let mut plan = plan(&n, vec![cast_draft(0, "A ship at dawn.", Vec::new())]);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(scene.motion_prompt().as_str(), "Slow push in.");
+        assert_eq!(scene.own_motion_prompt(), None);
+        let same = ScenePrompt::new("Slow push in.").unwrap();
+        assert!(!scene.set_motion_prompt(Some(same)), "same as planned");
+        let mine = ScenePrompt::new("Pan left.").unwrap();
+        assert!(scene.set_motion_prompt(Some(mine)));
+        assert_eq!(scene.motion_prompt().as_str(), "Pan left.");
+        assert!(scene.set_motion_prompt(None));
+        assert_eq!(scene.motion_prompt().as_str(), "Slow push in.");
     }
 
     #[test]

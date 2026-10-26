@@ -20,7 +20,7 @@ Os clipes são feitos pela Higgsfield, pelo Kling ou pelo Google, com a sua pró
 <a id="motion"></a>
 ## Movimento
 
-O **prompt de movimento** diz como a imagem se move: o assunto, a ação, a câmera. Até você escrever um, a cena usa o prompt de imagem, marcada como **Igual ao prompt de imagem**. **Editar movimento** o muda para o próximo clipe da cena.
+O **prompt de movimento** diz como a imagem se move: um movimento de câmera e no máximo uma ação simples do assunto. O Claude escreve um para cada cena quando [planeja as cenas](scenes.md#plan); cenas planejadas antes disso usam o prompt de imagem, marcadas como **Igual ao prompt de imagem**. **Editar movimento** o muda para o próximo clipe da cena, e salvá-lo vazio volta ao do Claude.
 
 <a id="model"></a>
 ## Modelo de vídeo

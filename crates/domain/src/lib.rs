@@ -189,8 +189,8 @@ pub use format::{UnknownVideoFormat, VideoFormat};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{
-    GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, ImageShape, image_dimensions,
-    shape_of,
+    GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, ImageShape, ReferenceImage,
+    image_dimensions, shape_of,
 };
 pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
@@ -305,9 +305,10 @@ pub use runner::{
     UnknownRunnerRole, running_since,
 };
 pub use scene::{
-    MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchScene, Scene, SceneClip,
+    CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_SENTENCE_WORDS,
+    NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchScene, Scene, SceneClip,
     SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
-    ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, sentences,
+    ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, scene_image_prompt, sentences,
 };
 pub use schedule::{
     DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,
