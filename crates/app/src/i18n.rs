@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
+use bardo_domain::ProductionMode;
 use bardo_domain::{
     AnalysisPart, ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionHighlight,
     CaptionStyle, CaptureProblem, ChannelFieldError, ContentLanguage, Country, DateOrder, Decibels,
@@ -268,6 +269,37 @@ pub enum Text {
     /// Placeholder: `{format}`.
     ProjectFormatChannel,
     ProjectFormatHint,
+    ProductionModeName(ProductionMode),
+    /// One sentence on what the mode makes.
+    ProductionModeAbout(ProductionMode),
+    ChannelProduction,
+    ChannelProductionHint,
+    ProjectMode,
+    /// Placeholder: `{mode}`.
+    ProjectModeChannel,
+    ProjectModeHint,
+    /// Placeholders: `{mode}`, `{amount}`.
+    ProjectModeOption,
+    /// Placeholder: `{provider}`.
+    ProjectModeMissingKey,
+    /// Placeholders: `{total}`, `{spent}`.
+    ProjectEstimate,
+    /// Placeholders: `{total}`, `{spent}`.
+    ProjectEstimatePartial,
+    SpendCap,
+    SpendCapHint,
+    SpendCapPlaceholder,
+    SaveSpendCap,
+    SpendCapSaved,
+    SpendCapInvalid,
+    /// Placeholder: `{cap}`.
+    SpendCapOver,
+    CapReachedTitle,
+    /// Placeholders: `{spent}`, `{cap}`, `{amount}`, `{rest}`.
+    CapReachedLine,
+    ClipsEconomy,
+    /// Placeholder: `{n}`.
+    AnimateHookClips,
     JobsTitle,
     JobsEmpty,
     JobsRunning,
@@ -1432,6 +1464,7 @@ pub enum Text {
     StageToReview,
     StageImages,
     StageClips,
+    StageClipsNone,
     StageEditorReady,
     StageWorking,
     FilterAll,
@@ -2640,6 +2673,40 @@ impl Text {
             Text::ProjectFormat => "projects.format",
             Text::ProjectFormatChannel => "projects.format_channel",
             Text::ProjectFormatHint => "projects.format_hint",
+            Text::ProductionModeName(mode) => match mode {
+                ProductionMode::Economy => "production_mode.economy",
+                ProductionMode::AnimatedHook => "production_mode.hook",
+                ProductionMode::AllAnimated => "production_mode.animated",
+                ProductionMode::Premium => "production_mode.premium",
+                ProductionMode::ChannelModel => "production_mode.channel_model",
+            },
+            Text::ProductionModeAbout(mode) => match mode {
+                ProductionMode::Economy => "production_mode.about.economy",
+                ProductionMode::AnimatedHook => "production_mode.about.hook",
+                ProductionMode::AllAnimated => "production_mode.about.animated",
+                ProductionMode::Premium => "production_mode.about.premium",
+                ProductionMode::ChannelModel => "production_mode.about.channel_model",
+            },
+            Text::ChannelProduction => "channel.production",
+            Text::ChannelProductionHint => "channel.production_hint",
+            Text::ProjectMode => "projects.mode",
+            Text::ProjectModeChannel => "projects.mode_channel",
+            Text::ProjectModeHint => "projects.mode_hint",
+            Text::ProjectModeOption => "projects.mode_option",
+            Text::ProjectModeMissingKey => "projects.mode_missing_key",
+            Text::ProjectEstimate => "projects.estimate",
+            Text::ProjectEstimatePartial => "projects.estimate_partial",
+            Text::SpendCap => "projects.cap.label",
+            Text::SpendCapHint => "projects.cap.hint",
+            Text::SpendCapPlaceholder => "projects.cap.placeholder",
+            Text::SaveSpendCap => "projects.cap.save",
+            Text::SpendCapSaved => "projects.cap.saved",
+            Text::SpendCapInvalid => "projects.cap.invalid",
+            Text::SpendCapOver => "projects.cap.over",
+            Text::CapReachedTitle => "budget.cap_title",
+            Text::CapReachedLine => "budget.cap_line",
+            Text::ClipsEconomy => "scenes.clip.economy",
+            Text::AnimateHookClips => "scenes.clip.animate_hook",
             Text::PersonaFieldError(error) => match error {
                 PersonaFieldError::NameRequired => "persona.error.name_required",
                 PersonaFieldError::NameTooLong => "persona.error.name_too_long",
@@ -3896,6 +3963,7 @@ impl Text {
             Text::StageToReview => "stage.note.to_review",
             Text::StageImages => "stage.note.images",
             Text::StageClips => "stage.note.clips",
+            Text::StageClipsNone => "stage.note.clips_none",
             Text::StageEditorReady => "stage.note.editor_ready",
             Text::StageWorking => "stage.note.working",
             Text::FilterAll => "scenes.filter.all",
@@ -5242,6 +5310,26 @@ mod tests {
             Text::ProjectFormat,
             Text::ProjectFormatChannel,
             Text::ProjectFormatHint,
+            Text::ChannelProduction,
+            Text::ChannelProductionHint,
+            Text::ProjectMode,
+            Text::ProjectModeChannel,
+            Text::ProjectModeHint,
+            Text::ProjectModeOption,
+            Text::ProjectModeMissingKey,
+            Text::ProjectEstimate,
+            Text::ProjectEstimatePartial,
+            Text::SpendCap,
+            Text::SpendCapHint,
+            Text::SpendCapPlaceholder,
+            Text::SaveSpendCap,
+            Text::SpendCapSaved,
+            Text::SpendCapInvalid,
+            Text::SpendCapOver,
+            Text::CapReachedTitle,
+            Text::CapReachedLine,
+            Text::ClipsEconomy,
+            Text::AnimateHookClips,
             Text::JobsTitle,
             Text::JobsEmpty,
             Text::JobsRunning,
@@ -6076,6 +6164,8 @@ mod tests {
         texts.extend(TransitionKind::ALL.map(Text::TransitionName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatBrief));
+        texts.extend(ProductionMode::ALL.map(Text::ProductionModeName));
+        texts.extend(ProductionMode::ALL.map(Text::ProductionModeAbout));
         texts.extend(TakeMode::ALL.map(Text::TakeModeName));
         texts.extend(AnalysisPart::ALL.map(Text::AnalysisPartName));
         texts.extend(Outbound::ALL.map(Text::ControlOutbound));
@@ -6361,6 +6451,7 @@ mod tests {
         texts.push(Text::StageToReview);
         texts.push(Text::StageImages);
         texts.push(Text::StageClips);
+        texts.push(Text::StageClipsNone);
         texts.push(Text::StageEditorReady);
         texts.push(Text::StageWorking);
         texts.push(Text::FilterAll);
@@ -7464,6 +7555,23 @@ mod tests {
                         ("budget", "$9"),
                         ("amount", "$2"),
                     ][..],
+                ),
+                (
+                    Text::CapReachedLine,
+                    &[
+                        ("spent", "$4"),
+                        ("cap", "$5"),
+                        ("amount", "$2"),
+                        ("rest", "$3"),
+                    ][..],
+                ),
+                (
+                    Text::ProjectEstimate,
+                    &[("total", "$1.80"), ("spent", "$0.40")][..],
+                ),
+                (
+                    Text::ProjectModeOption,
+                    &[("mode", "Economy"), ("amount", "$1.30")][..],
                 ),
             ] {
                 let filled = catalog.format(text, args);

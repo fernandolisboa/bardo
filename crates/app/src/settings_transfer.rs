@@ -25,8 +25,8 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipModelRef,
     ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
     Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
-    Provider, Rate, Resolution, Score, ThumbnailLook, TokenSet, Transition, UiLanguage,
-    UiThemePreference, VideoFormat, VoiceFlag,
+    ProductionMode, Provider, Rate, Resolution, Score, ThumbnailLook, TokenSet, Transition,
+    UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -421,6 +421,10 @@ struct ChannelEntry {
     /// channels had.
     #[serde(default)]
     motion: Option<MotionEntry>,
+    /// Missing from files made before production modes: every scene
+    /// animated with the channel's clip model, as those channels made.
+    #[serde(default)]
+    production: Option<String>,
     /// Missing from files made before the word highlight: off, as those
     /// channels' captions were.
     #[serde(default)]
@@ -557,6 +561,10 @@ impl ChannelEntry {
                     MotionDefault::new(entry.pattern.parse().ok()?, entry.strength.parse().ok()?)
                 }
                 None => MotionDefault::still(),
+            },
+            production: match &self.production {
+                Some(mode) => mode.parse().ok()?,
+                None => ProductionMode::ChannelModel,
             },
         })
     }
@@ -917,6 +925,7 @@ impl Bardo {
                     pattern: details.motion().pattern.code().to_owned(),
                     strength: details.motion().strength.code().to_owned(),
                 }),
+                production: Some(details.production().code().to_owned()),
                 accounts,
             });
         }

@@ -135,6 +135,7 @@ pub mod refs {
     pub const PERFORMANCE_DROPS: GuideRef = at("performance-metrics", "drops");
     pub const PROJECTS_NARRATOR: GuideRef = at("projects", "narrator");
     pub const PROJECTS_FORMAT: GuideRef = at("projects", "format");
+    pub const PROJECTS_MODE: GuideRef = at("projects", "mode");
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
     pub const SCRIPT_MUSIC: GuideRef = at("script", "music");
@@ -182,6 +183,7 @@ pub mod refs {
     pub const RENDER_LAST: GuideRef = at("render", "last");
     pub const CHANNELS_PERSONA: GuideRef = at("channels", "persona");
     pub const CHANNELS_FORMAT: GuideRef = at("channels", "format");
+    pub const CHANNELS_PRODUCTION: GuideRef = at("channels", "production");
     pub const CHANNELS_DEFAULTS: GuideRef = at("channels", "defaults");
     pub const ACCOUNTS_ONE: GuideRef = at("network-accounts", "accounts");
     pub const ACCOUNTS_METADATA: GuideRef = at("network-accounts", "metadata");
@@ -216,7 +218,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 88] = [
+    pub const ALL: [GuideRef; 90] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -227,6 +229,7 @@ pub mod refs {
         PERFORMANCE_NUMBERS,
         PERFORMANCE_SYNC,
         PROJECTS_NARRATOR,
+        PROJECTS_MODE,
         SCRIPT_WRITE,
         SCRIPT_REVIEW,
         SCRIPT_MUSIC,
@@ -273,6 +276,7 @@ pub mod refs {
         RENDER_TARGETS,
         RENDER_LAST,
         CHANNELS_PERSONA,
+        CHANNELS_PRODUCTION,
         CHANNELS_DEFAULTS,
         ACCOUNTS_ONE,
         ACCOUNTS_METADATA,

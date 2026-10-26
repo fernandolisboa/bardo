@@ -9,8 +9,8 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    CastMember, ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip, SceneImage, TemplateKind,
-    VideoProjectId,
+    AnimatedScenes, CastMember, ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip,
+    SceneImage, TemplateKind, VideoProjectId,
 };
 use std::rc::Rc;
 
@@ -476,25 +476,39 @@ impl ProjectsScreen {
     ) -> (Vec<AnyElement>, Option<AnyElement>) {
         let bardo = self.bardo.read(cx);
         let missing = view.clips.missing.len();
+        // The mode says which scenes the button animates (#248).
+        let label = match view.clips.mode.animated() {
+            AnimatedScenes::Hook => Text::AnimateHookClips,
+            AnimatedScenes::None | AnimatedScenes::All => Text::AnimateMissingClips,
+        };
         let button = (missing > 0 && !view.is_busy()).then(|| {
             Button::new("animate-missing-clips")
                 .primary()
                 .small()
-                .label(SharedString::from(bardo.text_with(
-                    Text::AnimateMissingClips,
-                    &[("n", &missing.to_string())],
-                )))
+                .label(SharedString::from(
+                    bardo.text_with(label, &[("n", &missing.to_string())]),
+                ))
                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                     this.run_scene(SceneAction::AnimateMissing, BudgetConsent::Ask, window, cx);
                 }))
                 .into_any_element()
         });
-        let estimate = button.as_ref().and_then(|_| {
-            view.clips
+        let economy = view.plan.is_some() && view.clips.mode.animated() == AnimatedScenes::None;
+        let estimate = match &button {
+            Some(_) => view
+                .clips
                 .missing_estimate
                 .as_ref()
-                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx))
-        });
+                .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx)),
+            None if economy => Some(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(bardo, Text::ClipsEconomy))
+                    .into_any_element(),
+            ),
+            None => None,
+        };
         let actions = button
             .into_iter()
             .chain(Some(
@@ -1474,7 +1488,7 @@ impl ProjectsScreen {
         let channel_model = self
             .scenes
             .as_ref()
-            .and_then(|scenes| scenes.clips.channel_model.clone());
+            .and_then(|scenes| scenes.clips.default_model.clone());
         let screen = cx.entity().downgrade();
         let accent_edge = look(cx).tokens.accent_edge;
         let bardo = self.bardo.read(cx);

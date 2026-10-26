@@ -6,7 +6,8 @@
 use bardo_app::bardo_domain::{
     CaptionHighlight, CaptionStyle, Channel, ChannelDraft, ChannelFieldError, ChannelId, ClipModel,
     ClipModelRef, ContentLanguage, Country, MotionDefault, MotionPattern, MotionStrength,
-    PersonaId, TakeModel, ThumbnailLook, Transition, TransitionKind, VideoFormat, frame_time,
+    PersonaId, ProductionMode, TakeModel, ThumbnailLook, Transition, TransitionKind, VideoFormat,
+    frame_time,
 };
 use std::rc::Rc;
 
@@ -14,7 +15,7 @@ use bardo_app::{Bardo, ChannelError, Control, Destination, GuideRef, Text, TourA
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
-use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::{ActiveTheme as _, IndexPath, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -168,6 +169,13 @@ fn format_choices(bardo: &Bardo) -> SearchableVec<Choice<VideoFormat>> {
     }))
 }
 
+fn production_choices(bardo: &Bardo) -> SearchableVec<Choice<ProductionMode>> {
+    SearchableVec::new(ProductionMode::ALL.map(|value| Choice {
+        value,
+        title: tr(bardo, Text::ProductionModeName(value)),
+    }))
+}
+
 fn transition_choices(bardo: &Bardo) -> SearchableVec<Choice<TransitionKind>> {
     SearchableVec::new(TransitionKind::ALL.map(|value| Choice {
         value,
@@ -261,6 +269,7 @@ pub struct ChannelsScreen {
     caption_highlight: ChoiceSelect<CaptionHighlight>,
     thumbnail_look: ChoiceSelect<ThumbnailLook>,
     format: ChoiceSelect<VideoFormat>,
+    production: ChoiceSelect<ProductionMode>,
     transition: ChoiceSelect<TransitionKind>,
     transition_length: ChoiceSelect<u32>,
     motion: ChoiceSelect<MotionPattern>,
@@ -339,6 +348,11 @@ impl ChannelsScreen {
             let selected = index_of(&VideoFormat::ALL, &defaults.format);
             SelectState::new(formats, selected, window, cx)
         });
+        let productions = production_choices(bardo.read(cx));
+        let production = cx.new(|cx| {
+            let selected = index_of(&ProductionMode::ALL, &defaults.production);
+            SelectState::new(productions, selected, window, cx)
+        });
         let transition = cx.new(|cx| {
             let selected = index_of(&TransitionKind::ALL, &defaults.transition.kind);
             SelectState::new(transitions, selected, window, cx)
@@ -372,6 +386,11 @@ impl ChannelsScreen {
             cx.observe_in(&bardo, window, |this, _, window, cx| {
                 this.relabel(window, cx)
             }),
+            // The line under the mode says what the picked one makes.
+            cx.subscribe(
+                &production,
+                |_, _, _: &SelectEvent<SearchableVec<Choice<ProductionMode>>>, cx| cx.notify(),
+            ),
         ];
 
         let mut screen = Self {
@@ -392,6 +411,7 @@ impl ChannelsScreen {
             caption_highlight,
             thumbnail_look,
             format,
+            production,
             transition,
             transition_length,
             motion,
@@ -437,6 +457,7 @@ impl ChannelsScreen {
         let transitions = transition_choices(bardo);
         let lengths = transition_length_choices(bardo);
         let formats = format_choices(bardo);
+        let productions = production_choices(bardo);
         let motions = motion_choices(bardo);
         let strengths = motion_strength_choices(bardo);
 
@@ -497,6 +518,13 @@ impl ChannelsScreen {
         self.format.update(cx, |select, cx| {
             let selected = select.selected_value().copied();
             select.set_items(formats, window, cx);
+            if let Some(value) = selected {
+                select.set_selected_value(&value, window, cx);
+            }
+        });
+        self.production.update(cx, |select, cx| {
+            let selected = select.selected_value().copied();
+            select.set_items(productions, window, cx);
             if let Some(value) = selected {
                 select.set_selected_value(&value, window, cx);
             }
@@ -606,6 +634,9 @@ impl ChannelsScreen {
         self.format.update(cx, |select, cx| {
             select.set_selected_value(&draft.format, window, cx)
         });
+        self.production.update(cx, |select, cx| {
+            select.set_selected_value(&draft.production, window, cx)
+        });
         self.transition.update(cx, |select, cx| {
             select.set_selected_value(&draft.transition.kind, window, cx)
         });
@@ -695,6 +726,12 @@ impl ChannelsScreen {
                     .copied()
                     .unwrap_or_default(),
             ),
+            production: self
+                .production
+                .read(cx)
+                .selected_value()
+                .copied()
+                .unwrap_or_default(),
         }
     }
 
@@ -910,14 +947,32 @@ impl ChannelsScreen {
                 ))
                 .child(tagged(
                     TourAnchor::Control(Control::ChannelFormat),
-                    explained(
-                        "channel-format-info",
-                        Text::ChannelFormat,
-                        Text::ChannelFormatHint,
-                        guide::refs::CHANNELS_FORMAT,
-                        Select::new(&self.format).into_any_element(),
-                    )
-                    .into_any_element(),
+                    v_flex()
+                        .gap_4()
+                        .child(explained(
+                            "channel-format-info",
+                            Text::ChannelFormat,
+                            Text::ChannelFormatHint,
+                            guide::refs::CHANNELS_FORMAT,
+                            Select::new(&self.format).into_any_element(),
+                        ))
+                        .child(explained(
+                            "channel-production-info",
+                            Text::ChannelProduction,
+                            Text::ChannelProductionHint,
+                            guide::refs::CHANNELS_PRODUCTION,
+                            v_flex()
+                                .gap_1()
+                                .child(Select::new(&self.production))
+                                .children(self.production.read(cx).selected_value().map(|mode| {
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(tr(bardo, Text::ProductionModeAbout(*mode)))
+                                }))
+                                .into_any_element(),
+                        ))
+                        .into_any_element(),
                 ))
                 .child(tagged(
                     TourAnchor::Control(Control::ChannelDefaults),

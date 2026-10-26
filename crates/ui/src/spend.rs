@@ -93,8 +93,27 @@ pub(crate) fn over_line(bardo: &Bardo, provider: &ProviderEstimate) -> SharedStr
     ))
 }
 
-/// Asks before starting a job that would reach a budget: the budgets it
-/// reaches, then "generate anyway" and "cancel".
+/// The video's cap, when the job would pass it, as one line.
+pub(crate) fn cap_line(bardo: &Bardo, estimate: &SpendEstimate) -> Option<AnyElement> {
+    estimate.cap.map(|cap| {
+        div()
+            .text_sm()
+            .child(SharedString::from(bardo.text_with(
+                Text::CapReachedLine,
+                &[
+                    ("spent", &bardo.money(cap.spent)),
+                    ("cap", &bardo.money(cap.cap)),
+                    ("amount", &bardo.money(estimate.total())),
+                    ("rest", &bardo.money(cap.rest)),
+                ],
+            )))
+            .into_any_element()
+    })
+}
+
+/// Asks before starting a job that would reach a budget or pass its
+/// video's cap: the budgets it reaches and the cap, then "generate anyway"
+/// and "cancel".
 pub(crate) fn budget_question(
     id: impl Into<SharedString>,
     bardo: &Bardo,
@@ -110,12 +129,18 @@ pub(crate) fn budget_question(
         .iter()
         .filter(|provider| provider.level == Some(BudgetLevel::Reached))
         .map(|provider| div().text_sm().child(over_line(bardo, provider)));
+    let cap = cap_line(bardo, estimate);
+    let title = match (estimate.over_budget().next(), estimate.cap) {
+        (None, Some(_)) => Text::CapReachedTitle,
+        _ => Text::BudgetReachedTitle,
+    };
     kit::card(cx)
         .p_3()
         .gap_2()
         .border_color(theme.danger)
-        .child(kit::notice(Tone::Danger, tr(bardo, Text::BudgetReachedTitle), cx).font_semibold())
+        .child(kit::notice(Tone::Danger, tr(bardo, title), cx).font_semibold())
         .children(lines)
+        .children(cap)
         .child(div().text_sm().child(tr(bardo, Text::BudgetQuestion)))
         .child(
             h_flex()

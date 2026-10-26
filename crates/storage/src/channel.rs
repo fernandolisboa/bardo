@@ -10,7 +10,7 @@ use crate::{Database, boxed};
 const SELECT_CHANNEL: &str = "SELECT id, profile_id, name, niche, aesthetic_notes, language, \
      country, default_persona_id, clip_provider, clip_model, caption_style, transition, \
      transition_frames, video_format, motion, motion_strength, caption_highlight, thumbnail_look, \
-     take_provider, take_model \
+     take_provider, take_model, production_mode \
      FROM channel";
 
 /// A channel row before its themes are attached.
@@ -26,6 +26,7 @@ struct ChannelRow {
     transition: (String, i64),
     format: String,
     motion: (String, String),
+    production: String,
     draft: ChannelDraft,
 }
 
@@ -44,6 +45,7 @@ impl ChannelRow {
                 transition: (row.get(11)?, row.get(12)?),
                 format: row.get(13)?,
                 motion: (row.get(14)?, row.get(15)?),
+                production: row.get(20)?,
                 draft: ChannelDraft {
                     name: row.get(2)?,
                     niche: row.get(3)?,
@@ -84,6 +86,7 @@ impl ChannelRow {
             pattern.parse().map_err(boxed)?,
             strength.parse().map_err(boxed)?,
         );
+        draft.production = self.production.parse().map_err(boxed)?;
         let (kind, frames) = self.transition;
         draft.transition = Transition::new(
             kind.parse::<TransitionKind>().map_err(boxed)?,
@@ -167,9 +170,9 @@ impl ChannelRepository for Database {
                                   default_persona_id, clip_provider, clip_model, caption_style,
                                   transition, transition_frames, video_format, motion,
                                   motion_strength, caption_highlight, thumbnail_look,
-                                  take_provider, take_model)
+                                  take_provider, take_model, production_mode)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20)
+                     ?17, ?18, ?19, ?20, ?21)
              ON CONFLICT (id) DO UPDATE SET
                  name = excluded.name,
                  niche = excluded.niche,
@@ -189,6 +192,7 @@ impl ChannelRepository for Database {
                  thumbnail_look = excluded.thumbnail_look,
                  take_provider = excluded.take_provider,
                  take_model = excluded.take_model,
+                 production_mode = excluded.production_mode,
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             params![
                 id,
@@ -211,6 +215,7 @@ impl ChannelRepository for Database {
                 details.thumbnail_look().code(),
                 details.take_model().map(|model| model.provider().code()),
                 details.take_model().map(ClipModelRef::model),
+                details.production().code(),
             ],
         )
         .map_err(boxed)?;
@@ -268,6 +273,7 @@ mod tests {
                 bardo_domain::MotionPattern::Same(bardo_domain::MotionKind::ZoomOut),
                 bardo_domain::MotionStrength::Subtle,
             ),
+            production: bardo_domain::ProductionMode::Premium,
         })
         .unwrap();
         Channel::new(owner, details)
@@ -322,6 +328,15 @@ mod tests {
         assert_eq!(
             db.get(old).unwrap().unwrap().details.motion(),
             MotionDefault::still()
+        );
+        // And every scene animated with its clip model, as before modes.
+        assert_eq!(
+            db.get(old).unwrap().unwrap().details.production(),
+            bardo_domain::ProductionMode::ChannelModel
+        );
+        assert_eq!(
+            db.get(short.id).unwrap().unwrap().details.production(),
+            bardo_domain::ProductionMode::AnimatedHook
         );
         // And captions that light no word, as its cuts had.
         assert_eq!(

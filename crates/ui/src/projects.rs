@@ -17,18 +17,19 @@ use std::time::Duration;
 
 use bardo_app::bardo_domain::{
     CaptureVoice, Channel, ChannelId, Generation, Job, JobKind, JobState, Narration,
-    NarrationSource, Network, NetworkAccountId, PersonaId, SceneFieldError, ScenePlanId,
-    ScriptFieldError, TemplateKind, VideoFormat, VideoMetadataDraft, VideoProject, VideoProjectId,
+    NarrationSource, Network, NetworkAccountId, PersonaId, ProductionMode, SceneFieldError,
+    ScenePlanId, ScriptFieldError, TemplateKind, VideoFormat, VideoMetadataDraft, VideoProject,
+    VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
     MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer,
-    NarrationView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError, ScriptView,
-    SpendEstimate, Stage, StageState, StageStatus, Text, ThumbnailView, TourAnchor, UploadChoices,
-    UploadReview, opening_stage, project_stages,
+    NarrationView, ProductionView, Recording, RenderReview, RenderSummary, ScenesView, ScriptError,
+    ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text, ThumbnailView, TourAnchor,
+    UploadChoices, UploadReview, opening_stage, project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::searchable_list::{SearchableListItem, SearchableVec};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -119,6 +120,15 @@ pub struct ProjectsScreen {
     narrator_select: ChoiceSelect<Option<PersonaId>>,
     /// The project's format: the channel's (`None`), Short or Long.
     format_select: ChoiceSelect<Option<VideoFormat>>,
+    /// The project's production mode: the channel's (`None`) or its own,
+    /// each with what the whole video would cost in it.
+    mode_select: ChoiceSelect<Option<ProductionMode>>,
+    /// The project's mode, its estimates and its cap.
+    production: Option<ProductionView>,
+    /// The video's spend cap, as the user types it.
+    spend_cap_input: Entity<InputState>,
+    /// What saving the cap said.
+    spend_cap_note: Option<(Tone, Text)>,
     channel: Option<ChannelId>,
     projects: Vec<VideoProject>,
     project: Option<VideoProjectId>,
@@ -329,6 +339,9 @@ impl ProjectsScreen {
         });
         let format_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let mode_select =
+            cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let spend_cap_input = cx.new(|cx| InputState::new(window, cx));
         let editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(12, 24));
         let scene_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
         let music_editor = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
@@ -430,6 +443,19 @@ impl ProjectsScreen {
                     }
                 },
             ),
+            cx.subscribe_in(
+                &mode_select,
+                window,
+                |this,
+                 _,
+                 event: &SelectEvent<SearchableVec<Choice<Option<ProductionMode>>>>,
+                 window,
+                 cx| {
+                    if let SelectEvent::Confirm(Some(mode)) = event {
+                        this.set_mode(*mode, window, cx);
+                    }
+                },
+            ),
         ];
         let revision = bardo.read(cx).jobs_revision();
         let mut screen = Self {
@@ -438,6 +464,10 @@ impl ProjectsScreen {
             channel_select,
             narrator_select,
             format_select,
+            mode_select,
+            production: None,
+            spend_cap_input,
+            spend_cap_note: None,
             channel: None,
             projects: Vec::new(),
             project: None,
@@ -666,6 +696,9 @@ impl ProjectsScreen {
     ) {
         self.project = id;
         self.loaded = None;
+        // The cap box is filled again from the next project's own cap.
+        self.production = None;
+        self.spend_cap_note = None;
         self.field_error = None;
         self.error = None;
         self.notice = None;
@@ -925,6 +958,114 @@ impl ProjectsScreen {
         cx.notify();
     }
 
+    /// Reads the project's mode and estimates, and refills the mode menu
+    /// with them.
+    fn load_production(&mut self, id: VideoProjectId, window: &mut Window, cx: &mut Context<Self>) {
+        let production = self.bardo.read(cx).production(id).ok();
+        let bardo = self.bardo.read(cx);
+        let amount = |view: &ProductionView, mode: ProductionMode| {
+            bardo.money(view.total(mode).unwrap_or_default())
+        };
+        let title = |view: &ProductionView, mode: ProductionMode, name: String| {
+            let mut title = bardo.text_with(
+                Text::ProjectModeOption,
+                &[("mode", &name), ("amount", &amount(view, mode))],
+            );
+            if let Some(provider) = view.estimate(mode).and_then(|e| e.missing_key) {
+                title.push_str(" · ");
+                title.push_str(&bardo.text_with(
+                    Text::ProjectModeMissingKey,
+                    &[("provider", &bardo.text(Text::ProviderName(provider)))],
+                ));
+            }
+            SharedString::from(title)
+        };
+        let choices = production.as_ref().map(|view| {
+            let channel = bardo.text_with(
+                Text::ProjectModeChannel,
+                &[(
+                    "mode",
+                    &bardo.text(Text::ProductionModeName(view.channel_mode)),
+                )],
+            );
+            SearchableVec::new(
+                std::iter::once(Choice {
+                    value: None,
+                    title: title(view, view.channel_mode, channel),
+                })
+                .chain(ProductionMode::ALL.map(|mode| Choice {
+                    value: Some(mode),
+                    title: title(
+                        view,
+                        mode,
+                        bardo.text(Text::ProductionModeName(mode)).into_owned(),
+                    ),
+                }))
+                .collect::<Vec<_>>(),
+            )
+        });
+        let placeholder = tr(bardo, Text::SpendCapPlaceholder);
+        if let (Some(choices), Some(view)) = (choices, production.as_ref()) {
+            let own = view.own;
+            self.mode_select.update(cx, |select, cx| {
+                select.set_items(choices, window, cx);
+                select.set_selected_value(&own, window, cx);
+            });
+        }
+        let typed_cap = production
+            .as_ref()
+            .and_then(|view| view.cap)
+            .map(|cap| cap.to_string())
+            .unwrap_or_default();
+        self.spend_cap_input.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
+        if self.production.as_ref().map(|view| view.cap) != production.as_ref().map(|view| view.cap)
+        {
+            self.spend_cap_input
+                .update(cx, |input, cx| input.set_value(typed_cap, window, cx));
+        }
+        self.production = production;
+    }
+
+    /// Saves the project's mode and re-reads what depends on it.
+    fn set_mode(
+        &mut self,
+        mode: Option<ProductionMode>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(production) = self.production.as_ref() else {
+            return;
+        };
+        if production.own == mode {
+            return;
+        }
+        let Some(id) = self.project else {
+            return;
+        };
+        match self.bardo.read(cx).set_project_production(id, mode) {
+            Ok(_) => self.error = None,
+            Err(error) => self.error = Some(error.message()),
+        }
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// Saves the cap the user typed; nothing typed takes it away.
+    fn save_spend_cap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        let typed = self.spend_cap_input.read(cx).value().to_string();
+        self.spend_cap_note = Some(match self.bardo.read(cx).set_spend_cap(id, &typed) {
+            Ok(_) => (Tone::Success, Text::SpendCapSaved),
+            Err(error) => (Tone::Danger, error.message()),
+        });
+        self.load(window, cx);
+        cx.notify();
+    }
+
     /// Saves the project's narrator and re-reads what depends on it.
     fn set_narrator(
         &mut self,
@@ -954,6 +1095,7 @@ impl ProjectsScreen {
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.project else {
             self.view = None;
+            self.production = None;
             self.narration = None;
             self.player = None;
             self.scenes = None;
@@ -976,6 +1118,7 @@ impl ProjectsScreen {
         self.load_render(id, cx);
         self.load_export(id, window, cx);
         self.load_youtube(id, window, cx);
+        self.load_production(id, window, cx);
         match self.bardo.read(cx).script(id) {
             Ok(view) => {
                 let stored = view
@@ -1278,6 +1421,7 @@ impl ProjectsScreen {
     /// line, and who narrates it.
     fn header(&self, cx: &mut Context<Self>) -> Header {
         let screen = cx.entity().downgrade();
+        let mode = self.render_mode(cx);
         let bardo = self.bardo.read(cx);
         let Some(project) = self.view.as_ref().map(|view| &view.project) else {
             let mut header = Header::new(tr(bardo, Text::DestinationName(Destination::Projects)));
@@ -1414,7 +1558,106 @@ impl ProjectsScreen {
             )
             .into_any_element(),
         ];
+        header.actions.extend(mode);
         header
+    }
+
+    /// The production mode, what the whole video costs in it, and the
+    /// video's spend cap (#248).
+    fn render_mode(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let production = self.production.as_ref()?;
+        let save = cx.listener(|this, _: &ClickEvent, window, cx| this.save_spend_cap(window, cx));
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let total = production.total(production.mode).unwrap_or_default();
+        let partial = production
+            .estimate(production.mode)
+            .is_some_and(|estimate| estimate.partial);
+        let estimate = bardo.text_with(
+            if partial {
+                Text::ProjectEstimatePartial
+            } else {
+                Text::ProjectEstimate
+            },
+            &[
+                ("total", &bardo.money(total)),
+                ("spent", &bardo.money(production.spent)),
+            ],
+        );
+        let over = production.over_cap().then(|| {
+            kit::notice(
+                Tone::Warning,
+                SharedString::from(bardo.text_with(
+                    Text::SpendCapOver,
+                    &[("cap", &bardo.money(production.cap.unwrap_or_default()))],
+                )),
+                cx,
+            )
+            .text_xs()
+        });
+        let note = self
+            .spend_cap_note
+            .map(|(tone, text)| kit::notice(tone, tr(bardo, text), cx).text_xs());
+        kit::anchor(
+            TourAnchor::Control(Control::ProjectMode),
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .flex_wrap()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(tr(bardo, Text::ProjectMode)),
+                        )
+                        .child(
+                            div()
+                                .w(px(280.))
+                                .child(Select::new(&self.mode_select).small().menu_width(px(560.))),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(tr(bardo, Text::SpendCap)),
+                        )
+                        .child(
+                            div()
+                                .w(px(90.))
+                                .child(Input::new(&self.spend_cap_input).small()),
+                        )
+                        .child(
+                            Button::new("save-spend-cap")
+                                .ghost()
+                                .small()
+                                .label(tr(bardo, Text::SaveSpendCap))
+                                .on_click(save),
+                        )
+                        .child(guide::info(
+                            bardo,
+                            "project-mode-info",
+                            SharedString::from(format!(
+                                "{} {}",
+                                bardo.text(Text::ProductionModeAbout(production.mode)),
+                                bardo.text(Text::ProjectModeHint)
+                            )),
+                            guide::refs::PROJECTS_MODE,
+                        )),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(estimate),
+                )
+                .children(over)
+                .children(note),
+        )
+        .into_any_element()
+        .into()
     }
 
     /// The Script stage: the script, a new version to review, where it

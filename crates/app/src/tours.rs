@@ -86,6 +86,9 @@ pub enum Control {
     ProjectNarrator,
     /// Projects: whether the open project is a Short or a long video.
     ProjectFormat,
+    /// Projects: how the open project is produced, what the whole video
+    /// costs in each mode, and its spend cap.
+    ProjectMode,
     /// Script: the script's editor, or the button that generates it.
     ScriptBody,
     /// Script: a new version waiting beside the current one.
@@ -575,15 +578,15 @@ pub const PERFORMANCE: Tour = {
     }
 };
 
-/// Projects: the project and its narrator, the stages and how they open,
-/// and what the project has cost.
+/// Projects: the project and its narrator, its format and production mode,
+/// the stages and how they open, and what the project has cost.
 pub const PROJECTS: Tour = {
     const AT: Destination = Destination::Projects;
     const PAGE: &str = "projects";
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
@@ -595,6 +598,9 @@ pub const PROJECTS: Tour = {
             on(AT, "format", control(Control::ProjectFormat))
                 .missing(HEADER)
                 .learn(PAGE, "format"),
+            on(AT, "mode", control(Control::ProjectMode))
+                .missing(HEADER)
+                .learn(PAGE, "mode"),
             on(AT, "stages", TourAnchor::Stages).learn(PAGE, "stages"),
             on(AT, "unlock", TourAnchor::Stages).learn(PAGE, "unlock"),
             on(AT, "cost", TourAnchor::Header).learn(PAGE, "cost"),
@@ -923,14 +929,15 @@ pub const RENDER: Tour = {
 };
 
 /// Channels: the list, a channel's niche and themes, its look, its market,
-/// its narrator, its video model and captions, and its network accounts.
+/// its narrator, its format and production mode, its video model and
+/// captions, and its network accounts.
 pub const CHANNELS: Tour = {
     const AT: Destination = Destination::Channels;
     const PAGE: &str = "channels";
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Channels,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),

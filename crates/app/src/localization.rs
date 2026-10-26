@@ -1182,7 +1182,9 @@ impl Bardo {
     ) -> Result<JobId, ScriptError> {
         let template = self.current_template(TemplateKind::Localization)?;
         let rendered = self.render_adaptation(project, localization, &template)?;
-        if let Err(estimate) = self.check_budget(&[adaptation_call(&rendered)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[adaptation_call(&rendered)], consent)?
+        {
             return Err(ScriptError::OverBudget(estimate));
         }
         let payload = LocalizationPayload {

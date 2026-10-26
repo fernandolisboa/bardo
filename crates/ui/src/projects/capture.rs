@@ -40,7 +40,7 @@ use crate::appearance::look;
 use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
-use crate::spend::{budget_question, estimate_note, over_line};
+use crate::spend::{budget_question, cap_line, estimate_note, over_line};
 
 /// Importing a capture: the file being chosen or read, the one read with
 /// what it would cost, and the user's answers on its card.
@@ -2430,6 +2430,8 @@ impl ProjectsScreen {
                         .filter(|provider| provider.level == Some(BudgetLevel::Reached))
                         .map(|provider| div().text_sm().child(over_line(bardo, provider))),
                 )
+                // And so is the video's cap.
+                .children(cap_line(bardo, estimate))
                 .child(div().text_sm().child(tr(bardo, Text::TakeCapQuestion)))
                 .child(
                     h_flex()

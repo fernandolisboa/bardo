@@ -638,7 +638,9 @@ impl Bardo {
         }
         let template = self.current_template(TemplateKind::Thumbnail)?;
         let rendered = self.render_thumbnail_prompt(&project, &template)?;
-        if let Err(estimate) = self.check_budget(&[write_call(&rendered)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[write_call(&rendered)], consent)?
+        {
             return Err(ThumbnailError::OverBudget(estimate));
         }
         let payload = WritePayload {
@@ -672,7 +674,7 @@ impl Bardo {
         if self.provider_key(Provider::Gemini).state == KeyState::NotSet {
             return Err(ThumbnailError::MissingKey(Provider::Gemini));
         }
-        if let Err(estimate) = self.check_budget(&[draw_call()], consent)? {
+        if let Err(estimate) = self.check_video_budget(project.id, &[draw_call()], consent)? {
             return Err(ThumbnailError::OverBudget(estimate));
         }
         let payload = DrawPayload {

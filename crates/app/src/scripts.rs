@@ -55,6 +55,9 @@ pub enum ScriptError {
     /// before starting it with `BudgetConsent::Confirmed`.
     #[error("over budget")]
     OverBudget(SpendEstimate),
+    /// The typed spend cap is not an amount above zero.
+    #[error("invalid spend cap")]
+    CapInvalid,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -73,6 +76,7 @@ impl ScriptError {
             ScriptError::MissingKey(_) => Text::ScriptMissingKey,
             ScriptError::Busy => Text::ScriptBusy,
             ScriptError::OverBudget(_) => Text::BudgetReachedTitle,
+            ScriptError::CapInvalid => Text::SpendCapInvalid,
             ScriptError::Template(error) => error.message(),
             ScriptError::Repository(_) => Text::ScriptNotSaved,
         }
@@ -407,7 +411,9 @@ impl Bardo {
         }
         let template = self.current_template(TemplateKind::Script)?;
         let rendered = self.render_script(&project, &template)?;
-        if let Err(estimate) = self.check_budget(&[script_call(&rendered)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[script_call(&rendered)], consent)?
+        {
             return Err(ScriptError::OverBudget(estimate));
         }
         let payload = ScriptPayload {

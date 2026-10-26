@@ -601,6 +601,10 @@ fn header_row(header: Header, summary: Vec<Figure>, cx: &App) -> AnyElement {
             h_flex()
                 .ml_auto()
                 .flex_none()
+                .max_w_full()
+                // Actions too wide for one line wrap instead of running off
+                // the window.
+                .flex_wrap()
                 .gap_2()
                 .items_center()
                 .children(header.actions),

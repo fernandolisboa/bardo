@@ -47,10 +47,15 @@ The [persona](personas.md) that narrates the channel's videos: its voice, tone a
 
 The format decides how long Claude writes the script, the shape the scene images and clips are made in, the shape of a new cut in the editor and which [render preset](render.md#targets) YouTube uses. Each project follows its channel's format unless it picks the other ([Projects](projects.md#format)). Changing it applies to what is made next; scripts, images and cuts already made keep their shape.
 
+<a id="production"></a>
+## Production mode
+
+How the channel's videos are made: which scenes become AI clips and with which model, from stills with motion only (**Economy**) to every scene animated at 1080p (**All animated, premium**). New channels start with **Animated hook**, the first 10 seconds animated; channels made before modes keep **All animated, channel's model**, so nothing changes for them until you pick another. Each project follows its channel's mode unless it picks its own, and shows what the whole video costs in each mode before anything is generated ([Projects](projects.md#mode)).
+
 <a id="defaults"></a>
 ## Video model, captions, transitions and motion
 
-- **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield, Kling or Google. Keeping the provider's default follows it when it changes. Any scene can pick another model at the [Clips](clips.md#model) stage.
+- **Video model**: the model that animates the channel's scene images into short clips, through Higgsfield, Kling or Google, in the [production mode](#production) **All animated, channel's model**; the other modes pick their own model. Keeping the provider's default follows it when it changes. Any scene can pick another model at the [Clips](clips.md#model) stage.
 - **Take model**: the model that makes the persona perform each take of a capture, through Higgsfield: Kling 3.0 Motion Control unless you pick another. Any take can pick another ([Performed clip](capture.md#performed)).
 - **Caption style**: how captions look in the channel's new projects. Each project can pick another style in the [editor](editor.md#captions).
 - **Spoken word**: the color the word being said lights up in, in the channel's new projects. **Yellow** is the default for a new channel; **Off** is where channels made before this existed start, so their cuts and renders stay as they were. Each project can pick another color in the [editor](editor.md#captions).

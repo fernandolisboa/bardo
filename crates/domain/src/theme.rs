@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::{
-    ChannelId, Confidence, JobId, Niche, PerformanceReason, PersonaId, ProfileId, RepositoryError,
-    Score, VideoFormat,
+    ChannelId, Confidence, JobId, Money, Niche, PerformanceReason, PersonaId, ProductionMode,
+    ProfileId, RepositoryError, Score, VideoFormat,
 };
 
 uuid_id!(
@@ -358,6 +358,8 @@ impl Theme {
             created_at: now,
             persona: None,
             format: None,
+            production: None,
+            spend_cap: None,
         })
     }
 }
@@ -393,6 +395,11 @@ pub struct VideoProject {
     /// Short or long, instead of the channel's default; `None` follows the
     /// channel.
     pub format: Option<VideoFormat>,
+    /// How it is produced, instead of the channel's default mode; `None`
+    /// follows the channel.
+    pub production: Option<ProductionMode>,
+    /// What it may cost before Bardo asks (#248); `None` has no cap.
+    pub spend_cap: Option<Money>,
 }
 
 impl VideoProject {
@@ -404,6 +411,11 @@ impl VideoProject {
     /// What kind of video it is: its own format, else the channel's.
     pub fn format(&self, channel_default: VideoFormat) -> VideoFormat {
         self.format.unwrap_or(channel_default)
+    }
+
+    /// How it is produced: its own mode, else the channel's.
+    pub fn production(&self, channel_default: ProductionMode) -> ProductionMode {
+        self.production.unwrap_or(channel_default)
     }
 }
 
@@ -438,6 +450,22 @@ pub trait ThemeRepository: Send + Sync {
         &self,
         id: VideoProjectId,
         format: Option<VideoFormat>,
+    ) -> Result<(), RepositoryError>;
+
+    /// Sets or clears (`None`, the channel's) the project's production
+    /// mode.
+    fn set_project_production(
+        &self,
+        id: VideoProjectId,
+        mode: Option<ProductionMode>,
+    ) -> Result<(), RepositoryError>;
+
+    /// Sets or clears (`None`, no cap) what the project may cost before
+    /// Bardo asks.
+    fn set_project_spend_cap(
+        &self,
+        id: VideoProjectId,
+        cap: Option<Money>,
     ) -> Result<(), RepositoryError>;
 }
 
@@ -480,6 +508,22 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
         format: Option<VideoFormat>,
     ) -> Result<(), RepositoryError> {
         (**self).set_project_format(id, format)
+    }
+
+    fn set_project_production(
+        &self,
+        id: VideoProjectId,
+        mode: Option<ProductionMode>,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_project_production(id, mode)
+    }
+
+    fn set_project_spend_cap(
+        &self,
+        id: VideoProjectId,
+        cap: Option<Money>,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_project_spend_cap(id, cap)
     }
 }
 

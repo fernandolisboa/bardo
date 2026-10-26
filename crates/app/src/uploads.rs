@@ -2167,7 +2167,7 @@ impl Bardo {
         };
         if now.network.bills_posts() {
             let text = post.text.as_deref().unwrap_or_default();
-            self.check_budget(&[post_call(text)], choices.budget)?
+            self.check_video_budget(review.project, &[post_call(text)], choices.budget)?
                 .map_err(UploadReviewError::OverBudget)?;
         }
         if let Some(at) = choices.publish_at {

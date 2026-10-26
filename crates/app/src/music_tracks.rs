@@ -470,7 +470,9 @@ impl Bardo {
         if self.provider_key(provider).state == KeyState::NotSet {
             return Err(MusicTrackError::MissingKey(provider));
         }
-        if let Err(estimate) = self.check_budget(&[music_call(provider, length)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[music_call(provider, length)], consent)?
+        {
             return Err(MusicTrackError::OverBudget(estimate));
         }
         let tracks = self.music_tracks.music_tracks(project.id)?;
