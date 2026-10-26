@@ -305,11 +305,10 @@ pub use runner::{
     UnknownRunnerRole, running_since,
 };
 pub use scene::{
-    CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_SCENE_REFERENCES,
-    MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchScene,
-    Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, scene_image_prompt,
-    sentences,
+    CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_SENTENCE_WORDS,
+    NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchScene, Scene, SceneClip,
+    SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
+    ScenePlanRepository, ScenePrompt, SceneRecord, Sentence, scene_image_prompt, sentences,
 };
 pub use schedule::{
     DateOrder, LocalTime, Rfc3339, SCHEDULE_GRACE, ScheduleProblem, Zone, check_publish_time,

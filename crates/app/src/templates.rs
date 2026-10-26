@@ -51,12 +51,12 @@ and runs until the next scene starts. Change scene when the subject, place or mo
 about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own.
 
 The cast: when the same person appears in more than one scene (a recurring character such as \
-\"the chef\" or \"the detective\"), list them once in `cast` with a short name and one fixed \
-appearance: sex, adult age, skin tone, hair, build and clothes, precise enough to draw the very \
-same person again, in the channel's visual style. Each scene lists in `cast` the members it \
-shows, by their position in `cast` (from 0); its prompt calls them by that name and never \
-describes them differently. A person seen once, crowds and scenes without people need no cast \
-member; leave `cast` empty when nobody recurs.
+\"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
+name and one fixed appearance: sex, adult age, skin tone, hair, build and clothes, precise \
+enough to draw the very same person again, in the channel's visual style. Each scene lists in \
+`cast` the members it shows, by their position in `cast` (from 0); its prompt calls them by \
+that name and never describes them differently. A person seen once, crowds and scenes without \
+people need no cast member; leave `cast` empty when nobody recurs.
 
 Each image prompt stands alone, because the image model sees one prompt at a time and remembers \
 none of the others. Describe the subject, setting, period, composition, lighting and mood, and \

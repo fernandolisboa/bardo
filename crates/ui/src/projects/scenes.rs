@@ -1002,7 +1002,7 @@ impl ProjectsScreen {
         let redraw_estimate = self
             .scenes
             .as_ref()
-            .and_then(|view| view.image_estimate.as_ref());
+            .and_then(|view| view.image_estimates.get(index));
 
         let failure = scene.failure().map(|kind| {
             kit::notice(

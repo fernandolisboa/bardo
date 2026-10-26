@@ -148,8 +148,9 @@ pub struct ScenesView {
     /// What drawing the missing images would cost; `None` when none is
     /// missing.
     pub images_estimate: Option<SpendEstimate>,
-    /// What drawing one scene again would cost; `None` without a plan.
-    pub image_estimate: Option<SpendEstimate>,
+    /// What drawing each scene again would cost, its people's missing
+    /// portraits included; empty without a plan.
+    pub image_estimates: Vec<SpendEstimate>,
     /// The scenes' clips: models, lengths, prices and jobs.
     pub clips: ClipsView,
     /// For a version: the scenes it carried and where they stand.
@@ -529,14 +530,15 @@ impl SceneHandler {
             .aspect
             .parse()
             .map_err(|_| unexpected(format!("unknown frame shape {}", payload.aspect)))?;
-        let total = payload.portraits.len() + payload.scenes.len();
+        // Portraits drawn on the way to a scene are counted as they come.
+        let mut total = payload.portraits.len() + payload.scenes.len();
         let mut failed: Vec<JobFailure> = Vec::new();
         let mut key = None;
         // Portraits this run drew or tried: one that fails is not tried
         // again for every scene its member is in.
         let mut tried: Vec<usize> = Vec::new();
         let mut done = 0;
-        let step = |cx: &mut Option<&mut JobContext>, done: &mut usize| {
+        let step = |cx: &mut Option<&mut JobContext>, done: &mut usize, total: usize| {
             *done += 1;
             match cx.as_mut() {
                 Some(cx) => cx
@@ -569,7 +571,7 @@ impl SceneHandler {
                 };
                 self.draw_portrait(key, project, plan_id, member, job, &mut failed)?;
             }
-            step(&mut cx, &mut done)?;
+            step(&mut cx, &mut done, total)?;
         }
         for &index in &payload.scenes {
             // A new plan replaced this one: its scenes are gone.
@@ -598,6 +600,7 @@ impl SceneHandler {
             for member in plan.missing_portraits(&[index]) {
                 if !tried.contains(&member) {
                     tried.push(member);
+                    total += 1;
                     self.draw_portrait(key, project, plan_id, member, job, &mut failed)?;
                 }
             }
@@ -706,7 +709,7 @@ impl SceneHandler {
                     failed.push(failure);
                 }
             }
-            step(&mut cx, &mut done)?;
+            step(&mut cx, &mut done, total)?;
         }
         match failed.first() {
             None => Ok(()),
@@ -715,7 +718,7 @@ impl SceneHandler {
                 format!(
                     "{} of {} images were not drawn. {}",
                     failed.len(),
-                    total.max(failed.len()),
+                    total,
                     failed
                         .iter()
                         .map(|failure| failure.detail.as_str())
@@ -819,8 +822,10 @@ impl SceneHandler {
                     kind,
                     format!("Gemini, portrait of {name}: {}", failure.detail),
                 );
+                // A failure is about the description it was drawn from.
                 if let Some(mut plan) = self.saved_plan(project, plan_id)?
                     && let Ok(cast) = plan.cast_mut(member, SystemTime::now())
+                    && *cast.description() == description
                 {
                     cast.fail(kind);
                     self.plans
@@ -914,9 +919,14 @@ impl Bardo {
                 0 => None,
                 n => Some(self.estimate(&[images_call(n)])?),
             },
-            image_estimate: match &plan {
-                Some(_) => Some(self.estimate(&[images_call(1)])?),
-                None => None,
+            image_estimates: match &plan {
+                Some(plan) => (0..plan.scenes().len())
+                    .map(|index| {
+                        let portraits = plan.missing_portraits(&[index]).len();
+                        self.estimate(&[images_call(1 + portraits)])
+                    })
+                    .collect::<Result<_, _>>()?,
+                None => Vec::new(),
             },
             plan,
             job: self.latest_scene_job(project.id),
@@ -1098,6 +1108,8 @@ impl Bardo {
         description: &str,
     ) -> Result<ScenePlan, SceneError> {
         let mut plan = self.own_plan(project)?;
+        // A job drawing the scenes would draw some with the old look.
+        self.scenes_idle(plan.project)?;
         let description = ScenePrompt::new(description).map_err(SceneError::Invalid)?;
         let (changed, dropped) = plan
             .cast_mut(member, SystemTime::now())?
@@ -1751,6 +1763,28 @@ pub(crate) mod tests {
         let scene = requests.last().unwrap();
         assert_eq!(scene.references.len(), 1);
         assert!(scene.prompt.contains("A woman in her thirties, red hair"));
+    }
+
+    #[test]
+    fn a_look_cannot_change_while_the_scenes_are_drawn() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        *h.images.delay.lock().unwrap() = Duration::from_millis(300);
+        let id = app
+            .generate_scene_images(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert!(matches!(
+            app.edit_cast_description(project.id, 0, "A woman, red hair"),
+            Err(SceneError::Busy)
+        ));
+        *h.images.delay.lock().unwrap() = Duration::ZERO;
+        done(&app, id);
+        let view = app.scenes(project.id).unwrap();
+        let plan = view.plan.unwrap();
+        assert!(!plan.cast()[0].is_edited());
+        assert!(plan.cast()[0].portrait().is_some());
+        assert_eq!(view.image_estimates.len(), 3);
     }
 
     #[test]

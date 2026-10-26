@@ -126,11 +126,9 @@ pub struct SceneImage {
 #[error("no new image of this scene is waiting for review")]
 pub struct NoPendingImage;
 
-/// The most recurring characters a plan keeps.
-pub const MAX_CAST: usize = 6;
-
-/// The most reference portraits sent with one scene's image.
-pub const MAX_SCENE_REFERENCES: usize = 3;
+/// The most recurring characters a plan keeps, and so the most reference
+/// portraits sent with one scene's image.
+pub const MAX_CAST: usize = 3;
 
 /// The longest name of a cast member, in characters.
 pub const MAX_CAST_NAME_CHARS: usize = 60;
@@ -204,6 +202,16 @@ impl CastMember {
         &self.description
     }
 
+    /// The name without a leading article ("the chef" is "chef"), as an
+    /// edited prompt may still call them.
+    fn called(&self) -> &str {
+        let lower = self.name.to_lowercase();
+        ["the ", "a ", "an "]
+            .iter()
+            .find(|article| lower.starts_with(**article))
+            .map_or(self.name.as_str(), |article| &self.name[article.len()..])
+    }
+
     pub fn generated_description(&self) -> &ScenePrompt {
         &self.generated_description
     }
@@ -230,6 +238,8 @@ impl CastMember {
             return (false, None);
         }
         self.description = description;
+        // A failure was about the old description.
+        self.failure = None;
         (true, self.portrait.take())
     }
 
@@ -818,16 +828,22 @@ impl ScenePlan {
         Ok(member)
     }
 
-    /// The cast members scene `index` is drawn with: the ones it shows,
-    /// at most `MAX_SCENE_REFERENCES`, by their index in the cast.
+    /// The cast members scene `index` is drawn with, by their index in
+    /// the cast: the ones it shows, and once the user edited its prompt,
+    /// only those the prompt still names, so writing a person out of a
+    /// scene takes them out of its image.
     pub fn scene_cast(&self, index: usize) -> Vec<usize> {
         self.scenes.get(index).map_or_else(Vec::new, |scene| {
+            let prompt = scene.prompt.as_str().to_lowercase();
             scene
                 .cast
                 .iter()
                 .copied()
-                .filter(|member| *member < self.cast.len())
-                .take(MAX_SCENE_REFERENCES)
+                .filter(|&member| {
+                    self.cast.get(member).is_some_and(|cast| {
+                        !scene.is_edited() || prompt.contains(&cast.called().to_lowercase())
+                    })
+                })
                 .collect()
         })
     }
@@ -846,10 +862,10 @@ impl ScenePlan {
         missing
     }
 
-    /// The scenes that show cast member `member`.
+    /// The scenes drawn with cast member `member`.
     pub fn scenes_with(&self, member: usize) -> Vec<usize> {
         (0..self.scenes.len())
-            .filter(|&index| self.scenes[index].cast.contains(&member))
+            .filter(|&index| self.scene_cast(index).contains(&member))
             .collect()
     }
 
@@ -1357,7 +1373,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_cast_is_cut_and_a_scene_sends_few_references() {
+    fn a_long_cast_is_cut_and_names_are_limited() {
         let n = narration(STORY, 0);
         let cast: Vec<_> = (0..MAX_CAST + 2)
             .map(|i| member(&format!("person {i}"), "A person."))
@@ -1373,7 +1389,7 @@ mod tests {
         .unwrap();
         assert_eq!(plan.cast().len(), MAX_CAST);
         assert_eq!(plan.scenes()[0].cast().len(), MAX_CAST);
-        assert_eq!(plan.scene_cast(0).len(), MAX_SCENE_REFERENCES);
+        assert_eq!(plan.scene_cast(0).len(), MAX_CAST);
         let long = "n".repeat(MAX_CAST_NAME_CHARS + 10);
         let plan = ScenePlan::from_drafts(
             generation(&n, Provider::Claude, "{}"),
@@ -1417,6 +1433,33 @@ mod tests {
         assert_eq!(chef.generated_description().as_str(), "A man, brown skin.");
         assert_eq!(plan.missing_portraits(&[0]), [0], "drawn again next time");
         assert_eq!(plan.cast_member(3), Err(NoSuchCastMember(3)));
+    }
+
+    #[test]
+    fn an_edited_prompt_is_drawn_only_with_the_people_it_still_names() {
+        let n = narration(STORY, 0);
+        let mut plan = ScenePlan::from_drafts(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            vec![member("the chef", "A man."), member("Ana", "A woman.")],
+            vec![cast_draft(0, "The chef and Ana cook.", vec![0, 1])],
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(plan.scene_cast(0), [0, 1]);
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        scene.edit_prompt(ScenePrompt::new("Our Chef alone at the stove.").unwrap());
+        assert_eq!(plan.scene_cast(0), [0], "Ana was written out");
+        assert_eq!(plan.scenes_with(1), Vec::<usize>::new());
+        let scene = plan.scene_mut(0, SystemTime::UNIX_EPOCH).unwrap();
+        scene.edit_prompt(ScenePrompt::new("An empty kitchen.").unwrap());
+        assert!(plan.scene_cast(0).is_empty());
+        assert_eq!(plan.missing_portraits(&[0]), Vec::<usize>::new());
+
+        let ana = plan.cast_mut(1, SystemTime::UNIX_EPOCH).unwrap();
+        ana.fail(JobFailureKind::Declined);
+        ana.edit_description(ScenePrompt::new("A woman, red hair.").unwrap());
+        assert_eq!(ana.failure(), None, "the failure was about the old look");
     }
 
     #[test]
