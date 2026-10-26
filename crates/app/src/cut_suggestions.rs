@@ -671,7 +671,9 @@ impl Bardo {
             return Err(CutSuggestionError::NoCandidates);
         }
         let chunks = cut_chunks(&narration, &points, &CHUNK_LIMITS).len();
-        if let Err(estimate) = self.check_budget(&[scoring_call(engine, chunks)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project, &[scoring_call(engine, chunks)], consent)?
+        {
             return Err(CutSuggestionError::OverBudget(estimate));
         }
         let payload = CutPayload {

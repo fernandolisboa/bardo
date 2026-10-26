@@ -27,6 +27,23 @@ The narrator is the persona that reads the video's narration, and its tone and s
 
 The format applies to what is made next: the next script's length, the shape of the next scene images and clips, a new cut in the editor and YouTube's [render preset](render.md#targets). What was already made keeps its shape, so after switching, write the script again and draw the scenes again for a video that matches.
 
+<a id="mode"></a>
+## How it is produced, and what it will cost
+
+**Mode** beside the format says how this video is made: which scenes become AI clips and with which model. The other scenes stay still pictures, moved by the channel's [motion on stills](channels.md#defaults).
+
+- **Economy**: stills with motion, no AI clips. The cheapest.
+- **Animated hook**: stills with motion, and the scenes that start in the first 10 seconds animated by Kling 2.6 at 720p, to hold the viewer. New channels start here.
+- **All animated**: every scene animated by Kling 2.6 at 720p.
+- **All animated, premium**: every scene animated by Kling 3.0 at 1080p.
+- **All animated, channel's model**: every scene animated by the channel's [video model](channels.md#defaults), as channels made before modes do.
+
+**Channel's** follows the channel's [production mode](channels.md#production). Each choice in the menu shows what the whole video would cost in that mode, and the line beside it shows the total for the mode picked and what was spent so far. The estimate counts what is left to make (script, narration, scene plan, images and portraits, and the clips the mode makes) from the [rate table](bardo:go/costs), so it drops as the video gets made. Before the narration exists it assumes a minute for a Short and eight for a long video. With the rate table as Bardo ships it, a whole Short costs about US$ 1.40 in Economy, US$ 2.20 with the hook animated, US$ 5.60 all animated and US$ 8.10 premium; a long video about US$ 9, US$ 10, US$ 43 and US$ 63. Kling 2.6 makes clips of 5 or 10 seconds, so a 6-second scene pays for 10.
+
+A mode whose clips need a key you have not saved says so in the menu: Kling's modes need a Kling key under [Settings › API keys](bardo:go/settings/keys). Changing the mode applies to what is animated next: on the Clips stage, **Animate scenes without a clip** (or **Animate the hook**) animates only the scenes the mode animates, clips made already stay, and any scene can still be animated by hand with any model.
+
+**Cap** is what this video may cost before Bardo asks. A paid step of the video (a script, a narration, images, clips, takes) that would take its spend past the cap asks first, with what the step costs and what the rest of the video would cost in its mode; **Generate anyway** goes on. A step whose price is not known asks too. A job still running counts toward the cap once it has finished, so starting several at once can pass it. Leave it empty for no cap.
+
 <a id="stages"></a>
 ## The stages
 
@@ -54,4 +71,4 @@ Nothing is thrown away when an earlier stage changes. What was made from it show
 <a id="cost"></a>
 ## What it has cost
 
-The line under the project's name shows its niche, when it was started and, once something was paid for, what the project has cost so far: every call to a provider for this video, from the script to the clips. Each generation shows its estimate before you start it, and a call that would go past a budget asks first. [Costs](bardo:go/costs) breaks the spending down by provider, channel and video; see [Your API keys](api-keys.md#budgets) for budgets.
+The line under the project's name shows its niche, when it was started and, once something was paid for, what the project has cost so far: every call to a provider for this video, from the script to the clips. Each generation shows its estimate before you start it, and a call that would go past a budget or the video's [cap](#mode) asks first. [Costs](bardo:go/costs) breaks the spending down by provider, channel and video; see [Your API keys](api-keys.md#budgets) for budgets.

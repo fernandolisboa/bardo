@@ -85,6 +85,19 @@ pub struct ProviderEstimate {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SpendEstimate {
     pub providers: Vec<ProviderEstimate>,
+    /// Set when the job would take its video past the video's cap.
+    pub cap: Option<CapReached>,
+}
+
+/// A job that would take its video's spend past the video's cap (#248).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapReached {
+    pub cap: Money,
+    /// What the video cost so far.
+    pub spent: Money,
+    /// What the rest of the video would cost in its production mode, this
+    /// job included.
+    pub rest: Money,
 }
 
 impl SpendEstimate {
@@ -422,6 +435,21 @@ impl CostBook {
         Ok(Spend::of(&records))
     }
 
+    /// What `calls` would spend together, and whether some call has no
+    /// rate (so the amount is short).
+    pub(crate) fn price(&self, calls: &[PlannedCall]) -> Result<(Money, bool), RepositoryError> {
+        let rates = self.rates()?;
+        let mut total = Money::ZERO;
+        let mut partial = false;
+        for call in calls.iter().filter(|call| call.calls > 0) {
+            match rates.price(call.provider, &call.model, &self.typical(call)?) {
+                Some(amount) => total = total.saturating_add(amount),
+                None => partial = true,
+            }
+        }
+        Ok((total, partial))
+    }
+
     /// What `calls` would spend, per provider, against this month's
     /// budgets.
     pub(crate) fn estimate(&self, calls: &[PlannedCall]) -> Result<SpendEstimate, RepositoryError> {
@@ -454,7 +482,10 @@ impl CostBook {
                     Some(budget.level(estimate.spent, estimate.amount.unwrap_or_default()));
             }
         }
-        Ok(SpendEstimate { providers })
+        Ok(SpendEstimate {
+            providers,
+            cap: None,
+        })
     }
 }
 
@@ -940,6 +971,7 @@ mod tests {
                     level: None,
                 },
             ],
+            cap: None,
         };
         assert_eq!(estimate.total(), Money::from_cents(5));
         assert!(estimate.is_partial());

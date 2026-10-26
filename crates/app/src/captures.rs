@@ -1115,7 +1115,9 @@ impl Bardo {
         if self.provider_key(PROVIDER).state == KeyState::NotSet {
             return Err(CaptureError::MissingKey(PROVIDER));
         }
-        if let Err(estimate) = self.check_budget(&capture_calls(chosen, voice), consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &capture_calls(chosen, voice), consent)?
+        {
             return Err(CaptureError::OverBudget(estimate));
         }
         let language = self

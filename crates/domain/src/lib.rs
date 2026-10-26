@@ -82,6 +82,7 @@ mod persona;
 mod persona_look;
 mod post_insights;
 mod preflight;
+mod production;
 mod profile;
 mod provider_key;
 mod publication;
@@ -273,6 +274,10 @@ pub use post_insights::{
 pub use preflight::{
     BodyFraming, HALF_BODY_FACE, LookFace, MAX_FAST_FRAMES, MAX_OUT_OF_FRAME, MIN_PREFLIGHT_FACE,
     Preflight, PreflightCheck, PreflightOutcome, PreflightResult, preflight,
+};
+pub use production::{
+    AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_SCENE,
+    UnknownProductionMode, typical_length, typical_scenes,
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{

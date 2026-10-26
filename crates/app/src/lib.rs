@@ -36,6 +36,7 @@ mod performed_takes;
 mod persona_looks;
 mod persona_package;
 mod personas;
+mod production;
 mod provider_keys;
 mod proxies;
 mod publications;
@@ -115,8 +116,8 @@ pub use control_videos::{
     ControlPlayer, ControlStatus, ControlVideoView, SetChoice, SetPicture, SetScene,
 };
 pub use costs::{
-    BudgetConsent, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow, SpendEstimate,
-    SpendRow, SpendSummary,
+    BudgetConsent, CapReached, CostError, CostsView, ProviderEstimate, ProviderSpend, RateRow,
+    SpendEstimate, SpendRow, SpendSummary,
 };
 pub use cut_suggestions::{
     CHUNK_LIMITS, CutSuggestionError, SuggestionState, SuggestionView, SuggestionsView,
@@ -159,6 +160,7 @@ pub use persona_package::PackageError;
 pub use personas::{
     PersonaError, PersonaExport, VoiceList, VoiceListing, VoiceStatus, persona_package_folder,
 };
+pub use production::{ModeEstimate, ProductionView};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
 pub use publications::{
     ChannelMetricsView, ChannelPost, MetricsError, MetricsStatus, OwnerAccess, PublicationError,

@@ -25,9 +25,10 @@ use std::time::SystemTime;
 use bardo_domain::{
     ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef, ClipRequest,
     ClipStatus, CostPurpose, Generation, GenerationId, ImageFormat, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, Metered, Money, ProfileId, Progress, ProjectFiles, Provider,
-    ProviderFailure, ProviderFailureKind, Scene, SceneClip, ScenePlan, ScenePlanId,
-    ScenePlanRepository, ScenePrompt, SecretStore, StagedImage, TokenUsage, VideoProjectId,
+    JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId, Progress,
+    ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
+    SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage,
+    TokenUsage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,13 +47,17 @@ const MAX_HICCUPS: u32 = 10;
 pub struct ClipsView {
     /// Every model the user can pick, each provider's default first.
     pub models: Vec<ClipModel>,
-    /// The model of scenes without their own: the channel's, else the
-    /// provider's default. `None` when no provider is set up.
-    pub channel_model: Option<ClipModel>,
+    /// The model of scenes without their own: the production mode's, else
+    /// the channel's, else the provider's default. `None` when no provider
+    /// is set up.
+    pub default_model: Option<ClipModel>,
+    /// The video's production mode (#248), which says which scenes
+    /// "animate missing" animates.
+    pub mode: ProductionMode,
     /// One per scene of the plan, in order.
     pub scenes: Vec<SceneClipView>,
-    /// The scenes "animate all" would animate: with an image, no clip and
-    /// no clip being made.
+    /// The scenes "animate missing" would animate: the ones the mode
+    /// animates with an image, no clip and no clip being made.
     pub missing: Vec<usize>,
     /// What animating them would cost; `None` when none is missing.
     pub missing_estimate: Option<SpendEstimate>,
@@ -667,11 +672,11 @@ impl Bardo {
 
     /// The model of a channel's scenes without their own: the channel's
     /// when still offered, else the first provider's default.
-    fn channel_clip_model(
+    pub(crate) fn channel_clip_model(
         &self,
         models: &[ClipModel],
         channel: ChannelId,
-    ) -> Result<Option<ClipModel>, SceneError> {
+    ) -> Result<Option<ClipModel>, RepositoryError> {
         let chosen = self
             .channels
             .get(channel)?
@@ -685,12 +690,12 @@ impl Bardo {
     /// The model a scene's next clip uses.
     fn scene_clip_model(
         models: &[ClipModel],
-        channel_model: Option<&ClipModel>,
+        default_model: Option<&ClipModel>,
         scene: &Scene,
     ) -> Option<ClipModel> {
         match scene.clip_model() {
             Some(own) => models.iter().find(|model| model.id == *own).cloned(),
-            None => channel_model.cloned(),
+            None => default_model.cloned(),
         }
     }
 
@@ -714,15 +719,18 @@ impl Bardo {
     /// The clips part of the scenes panel for `plan`.
     pub(crate) fn clips_view(
         &self,
-        channel: ChannelId,
+        project: &VideoProject,
         plan: Option<&ScenePlan>,
     ) -> Result<ClipsView, SceneError> {
         let models = self.clip_models();
-        let channel_model = self.channel_clip_model(&models, channel)?;
+        let channel_model = self.channel_clip_model(&models, project.channel)?;
+        let mode = self.production_mode(project)?;
+        let default_model = Self::mode_clip_model(mode, &models, channel_model.as_ref()).cloned();
         let Some(plan) = plan else {
             return Ok(ClipsView {
                 models,
-                channel_model,
+                default_model,
+                mode,
                 ..ClipsView::default()
             });
         };
@@ -733,7 +741,7 @@ impl Bardo {
             .iter()
             .enumerate()
             .map(|(index, scene)| {
-                let model = Self::scene_clip_model(&models, channel_model.as_ref(), scene);
+                let model = Self::scene_clip_model(&models, default_model.as_ref(), scene);
                 let seconds = model
                     .as_ref()
                     .map(|model| model.durations.fit(scene.duration()));
@@ -763,7 +771,11 @@ impl Bardo {
         let missing: Vec<usize> = plan
             .missing_clips()
             .into_iter()
-            .filter(|&index| !scenes[index].is_busy() && scenes[index].model.is_some())
+            .filter(|&index| {
+                mode.animates(plan.scenes()[index].start)
+                    && !scenes[index].is_busy()
+                    && scenes[index].model.is_some()
+            })
             .collect();
         let missing_estimate = match missing.is_empty() {
             true => None,
@@ -771,7 +783,8 @@ impl Bardo {
         };
         Ok(ClipsView {
             models,
-            channel_model,
+            default_model,
+            mode,
             scenes,
             missing,
             missing_estimate,
@@ -818,7 +831,7 @@ impl Bardo {
             .scene_plans
             .scene_plan(project.id)?
             .ok_or(SceneError::NoPlan)?;
-        let view = self.clips_view(project.channel, Some(&plan))?;
+        let view = self.clips_view(&project, Some(&plan))?;
         Ok((plan, view))
     }
 
@@ -842,7 +855,7 @@ impl Bardo {
                 model: model.id.model().to_owned(),
             });
         }
-        self.check_budget(&clip_calls(views, &scenes), consent)?
+        self.check_video_budget(plan.project, &clip_calls(views, &scenes), consent)?
             .map_err(SceneError::OverBudget)?;
         let payload = ClipsPayload {
             project: plan.project.to_string(),
@@ -998,7 +1011,8 @@ mod tests {
         }
     }
 
-    /// Gives the project's channel `model` for its clips.
+    /// Gives the project's channel `model` for its clips, in the mode that
+    /// animates every scene with it.
     fn channel_uses(app: &Bardo, project: &VideoProject, model: Option<ClipModelRef>) {
         let channel = app
             .channels()
@@ -1010,6 +1024,7 @@ mod tests {
             channel.id,
             ChannelDraft {
                 clip_model: model,
+                production: ProductionMode::ChannelModel,
                 ..ChannelDraft::from(&channel.details)
             },
         )
@@ -1024,7 +1039,7 @@ mod tests {
         *h.clips.quote.lock().unwrap() = Some(Money::from_cents(56));
         let scene = &drawn.scenes()[0];
         let view = app.scenes(project.id).unwrap().clips;
-        assert_eq!(view.channel_model.as_ref().unwrap().id, model("fake/range"));
+        assert_eq!(view.default_model.as_ref().unwrap().id, model("fake/range"));
         let seconds = view.scenes[0].seconds.unwrap();
         assert_eq!(
             seconds,

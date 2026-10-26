@@ -13,7 +13,7 @@ A clip animates a scene's image into a short video. Clips are optional: a scene 
 <a id="animate"></a>
 ## Animating scenes
 
-**Animate scenes without a clip** sends every scene that has an image and no clip to the video provider in one job; **Animate** on a scene does just that one. Each clip runs as long as its scene is narrated, within the lengths the model allows. A scene that fails does not stop the others, and retrying the job sends only the scenes still without a clip.
+**Animate scenes without a clip** sends every scene that has an image and no clip to the video provider in one job; **Animate** on a scene does just that one. The video's [production mode](projects.md#mode) says which scenes the first button sends: with **Animated hook** it reads **Animate the hook** and sends only the scenes that start in the first 10 seconds, and with **Economy** there is none, since every scene stays a still with motion. **Animate** on a scene works in every mode. Each clip runs as long as its scene is narrated, within the lengths the model allows. A scene that fails does not stop the others, and retrying the job sends only the scenes still without a clip.
 
 Clips are made through Higgsfield, Kling or Google, with your own key for each ([Your API keys](api-keys.md#providers)). Cancelling a run stops the waiting, not the provider: a clip already sent may still finish and be billed.
 
@@ -25,7 +25,7 @@ The **motion prompt** says how the image moves: one camera move and at most one 
 <a id="model"></a>
 ## Video model
 
-Each scene uses its channel's video model, set on [Channels](bardo:go/channels), unless you pick another one for it under **Video model**. Models differ in look, in the lengths they accept and in price. If a scene's model is no longer offered, the scene says so; pick another one.
+Each scene uses the video's default model unless you pick another one for it under **Video model**: the [production mode](projects.md#mode)'s model (Kling 2.6 or 3.0), or, in **All animated, channel's model**, the channel's, set on [Channels](bardo:go/channels). Models differ in look, in the lengths they accept and in price. If a scene's model is no longer offered, the scene says so; pick another one.
 
 <a id="review"></a>
 ## Reviewing a clip

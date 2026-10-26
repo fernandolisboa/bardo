@@ -1053,7 +1053,9 @@ impl Bardo {
         }
         let template = self.current_template(TemplateKind::Metadata)?;
         let rendered = self.render_metadata_prompt(&project, &accounts, &template)?;
-        if let Err(estimate) = self.check_budget(&[metadata_call(&rendered)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[metadata_call(&rendered)], consent)?
+        {
             return Err(ExportError::OverBudget(estimate));
         }
         let payload = MetadataPayload {

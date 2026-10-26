@@ -447,6 +447,8 @@ mod tests {
                 created_at: at(0),
                 persona: None,
                 format: None,
+                production: None,
+                spend_cap: None,
             };
             let id = project.id;
             self.projects.push(project);

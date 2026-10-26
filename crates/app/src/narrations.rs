@@ -667,7 +667,9 @@ impl Bardo {
         if self.provider_key(provider).state == KeyState::NotSet {
             return Err(NarrationError::MissingKey(provider));
         }
-        if let Err(estimate) = self.check_budget(&[narration_call(script.text())], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[narration_call(script.text())], consent)?
+        {
             return Err(NarrationError::OverBudget(estimate));
         }
         let voice = persona.details.voice();

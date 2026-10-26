@@ -338,9 +338,11 @@ impl Bardo {
         if self.provider_key(ALIGNER).state == KeyState::NotSet {
             return Err(NarrationError::MissingKey(ALIGNER));
         }
-        if let Err(estimate) =
-            self.check_budget(&[alignment_call(recording.billed_seconds())], consent)?
-        {
+        if let Err(estimate) = self.check_video_budget(
+            project.id,
+            &[alignment_call(recording.billed_seconds())],
+            consent,
+        )? {
             return Err(NarrationError::OverBudget(estimate));
         }
         let payload = ImportPayload {

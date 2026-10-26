@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     CaptionHighlight, CaptionStyle, ClipModelRef, ContentLanguage, Country, Market, MotionDefault,
-    PersonaId, ProfileId, RepositoryError, ThumbnailLook, Transition, VideoFormat,
+    PersonaId, ProductionMode, ProfileId, RepositoryError, ThumbnailLook, Transition, VideoFormat,
 };
 
 /// Identifies a channel.
@@ -72,6 +72,9 @@ pub struct ChannelDraft {
     pub transition: Transition,
     /// The motions a new rough cut gives its scenes.
     pub motion: MotionDefault,
+    /// How the channel's videos are produced unless a video picks another
+    /// mode (#248).
+    pub production: ProductionMode,
 }
 
 /// Why a draft is not a valid channel. One entry per offending field, so a
@@ -116,6 +119,7 @@ pub struct ChannelDetails {
     thumbnail_look: ThumbnailLook,
     transition: Transition,
     motion: MotionDefault,
+    production: ProductionMode,
 }
 
 impl ChannelDetails {
@@ -179,6 +183,7 @@ impl ChannelDetails {
             thumbnail_look: draft.thumbnail_look,
             transition: draft.transition,
             motion: draft.motion,
+            production: draft.production,
         })
     }
 
@@ -253,6 +258,12 @@ impl ChannelDetails {
         self.motion
     }
 
+    /// How the channel's videos are produced unless a video picks another
+    /// mode.
+    pub fn production(&self) -> ProductionMode {
+        self.production
+    }
+
     /// The audience the channel aims at, for market research.
     pub fn market(&self) -> Market {
         Market::new(self.country, self.language)
@@ -282,6 +293,7 @@ impl From<&ChannelDetails> for ChannelDraft {
             thumbnail_look: details.thumbnail_look,
             transition: details.transition,
             motion: details.motion,
+            production: details.production,
         }
     }
 }
@@ -485,6 +497,7 @@ mod tests {
                 crate::MotionPattern::Same(crate::MotionKind::PanUp),
                 crate::MotionStrength::Strong,
             ),
+            production: ProductionMode::Economy,
         })
         .unwrap();
         assert_eq!(

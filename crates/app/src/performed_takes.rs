@@ -2379,7 +2379,7 @@ impl Bardo {
             .render(&values)
             .map_err(|missing| CaptureError::Repository(RepositoryError(Box::new(missing))))?;
         let calls = step_calls(model, PerformedStep::Prompt, take.length(), (0, 0));
-        if let Err(estimate) = self.check_budget(&calls, consent)? {
+        if let Err(estimate) = self.check_video_budget(project, &calls, consent)? {
             return Err(CaptureError::OverBudget(estimate));
         }
         let payload = PromptPayload {
@@ -2551,6 +2551,11 @@ impl Bardo {
         let estimate = self.estimate(&calls)?;
         let call = estimate.total();
         if consent == BudgetConsent::Ask && performed.spend.goes_over(call, counted) {
+            // The video's cap, when the step passes it too, joins the card.
+            let estimate = match self.check_video_budget(project, &calls, consent)? {
+                Err(video) => video,
+                Ok(()) => estimate,
+            };
             let spend = TakeSpend {
                 to_come: if counted {
                     performed.spend.to_come
@@ -2561,7 +2566,7 @@ impl Bardo {
             };
             return Err(CaptureError::OverCap(spend, estimate));
         }
-        if let Err(estimate) = self.check_budget(&calls, consent)? {
+        if let Err(estimate) = self.check_video_budget(project, &calls, consent)? {
             return Err(CaptureError::OverBudget(estimate));
         }
         let payload = TakePayload {

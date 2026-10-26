@@ -315,7 +315,9 @@ impl Bardo {
         }
         let template = self.current_template(TemplateKind::MusicPrompt)?;
         let rendered = self.render_music_prompt(&project, &template)?;
-        if let Err(estimate) = self.check_budget(&[music_prompt_call(&rendered)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[music_prompt_call(&rendered)], consent)?
+        {
             return Err(MusicPromptError::OverBudget(estimate));
         }
         let payload = MusicPromptPayload {

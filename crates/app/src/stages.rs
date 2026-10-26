@@ -306,6 +306,12 @@ pub fn project_stages(
     } else {
         let to_review = count(|scene| scene.pending_clip().is_some());
         let animated = count(|scene| scene.clip().is_some());
+        // Scenes the production mode leaves still are not owed a clip.
+        let mode = scenes.clips.mode;
+        let total = scene_list
+            .iter()
+            .filter(|scene| mode.animates(scene.start) || scene.clip().is_some())
+            .count();
         if to_review > 0 {
             StageStatus::new(
                 Stage::Clips,
@@ -314,8 +320,8 @@ pub fn project_stages(
             )
         } else {
             let state = match animated {
-                0 => StageState::Open,
                 done if done == total => StageState::Done,
+                0 => StageState::Open,
                 _ => StageState::Partial,
             };
             StageStatus::new(
@@ -434,6 +440,7 @@ impl Bardo {
                 n(Text::StageToReview, count)
             }
             StageNote::Images { done, total } => of(Text::StageImages, done, total),
+            StageNote::Clips { total: 0, .. } => self.text(Text::StageClipsNone).into_owned(),
             StageNote::Clips { done, total } => of(Text::StageClips, done, total),
             StageNote::EditorReady => self.text(Text::StageEditorReady).into_owned(),
             StageNote::RenderReady => self.text(Text::StageRenderReady).into_owned(),
@@ -512,6 +519,9 @@ pub fn scene_states(scenes: &ScenesView, stage: Stage) -> Vec<SceneState> {
                     SceneState::Review
                 } else if scene.clip_failure().is_some() {
                     SceneState::Failed
+                } else if scene.clip().is_none() && !scenes.clips.mode.animates(scene.start) {
+                    // The production mode keeps it a still image.
+                    SceneState::Done
                 } else if !scene.can_animate() {
                     SceneState::ToDraw
                 } else if scene.clip().is_none() {
@@ -711,6 +721,21 @@ mod tests {
     }
 
     #[test]
+    fn scenes_the_mode_keeps_still_are_not_owed_a_clip() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        app.set_project_production(project.id, Some(bardo_domain::ProductionMode::Economy))
+            .unwrap();
+        assert_eq!(
+            of(&stages(&app, &project), Stage::Clips),
+            (StageState::Done, StageNote::Clips { done: 0, total: 0 })
+        );
+        let view = app.scenes(project.id).unwrap();
+        assert_eq!(scene_states(&view, Stage::Clips), vec![SceneState::Done; 3]);
+    }
+
+    #[test]
     fn an_edited_script_puts_its_narration_out_of_date() {
         let h = Harness::new();
         let app = h.start();
@@ -740,6 +765,10 @@ mod tests {
         assert_eq!(
             app.stage_note(StageNote::After(Stage::Scenes)),
             "After the scenes"
+        );
+        assert_eq!(
+            app.stage_note(StageNote::Clips { done: 0, total: 0 }),
+            "Still images only"
         );
     }
 

@@ -906,7 +906,7 @@ impl Bardo {
             let missing = plan.missing_images();
             missing.len() + plan.missing_portraits(&missing).len()
         });
-        let clips = self.clips_view(project.channel, plan.as_ref())?;
+        let clips = self.clips_view(&project, plan.as_ref())?;
         let version = self.version_scenes(project.id, plan.as_ref(), narration.as_ref())?;
         Ok(ScenesView {
             clips,
@@ -959,8 +959,13 @@ impl Bardo {
     }
 
     /// Past a budget without `consent`, the estimate to ask about.
-    fn scenes_budget(&self, call: PlannedCall, consent: BudgetConsent) -> Result<(), SceneError> {
-        self.check_budget(&[call], consent)?
+    fn scenes_budget(
+        &self,
+        project: VideoProjectId,
+        call: PlannedCall,
+        consent: BudgetConsent,
+    ) -> Result<(), SceneError> {
+        self.check_video_budget(project, &[call], consent)?
             .map_err(SceneError::OverBudget)
     }
 
@@ -994,7 +999,7 @@ impl Bardo {
         self.require_key(Provider::Claude)?;
         let template = self.current_template(TemplateKind::ImagePrompt)?;
         let rendered = self.render_plan(&project, &narration, &template)?;
-        self.scenes_budget(plan_call(&rendered), consent)?;
+        self.scenes_budget(project.id, plan_call(&rendered), consent)?;
         let payload = PlanPayload {
             project: project.id.to_string(),
             narration: narration.id.to_string(),
@@ -1040,7 +1045,11 @@ impl Bardo {
             .into_iter()
             .filter(|member| !portraits.contains(member))
             .count();
-        self.scenes_budget(images_call(portraits.len() + first + scenes.len()), consent)?;
+        self.scenes_budget(
+            plan.project,
+            images_call(portraits.len() + first + scenes.len()),
+            consent,
+        )?;
         let project = self
             .themes
             .project(plan.project)?

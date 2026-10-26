@@ -583,7 +583,9 @@ impl Bardo {
         }
         let template = self.current_template(TemplateKind::Chapters)?;
         let rendered = self.render_chapters_prompt(&project, &narration, &template)?;
-        if let Err(estimate) = self.check_budget(&[chapters_call(&rendered)], consent)? {
+        if let Err(estimate) =
+            self.check_video_budget(project.id, &[chapters_call(&rendered)], consent)?
+        {
             return Err(ChaptersError::OverBudget(estimate));
         }
         let payload = ChaptersPayload {

@@ -47,10 +47,15 @@ A [persona](personas.md) que narra os vídeos do canal: a voz, o tom e o estilo 
 
 O formato define o tamanho do roteiro que o Claude escreve, o formato em que as imagens e os clipes das cenas são feitos, o formato de um corte novo no editor e qual [preset de render](render.md#targets) o YouTube usa. Cada projeto segue o formato do canal, a não ser que escolha o outro ([Projetos](projects.md#format)). A mudança vale para o que for feito depois; roteiros, imagens e cortes já feitos mantêm o formato.
 
+<a id="production"></a>
+## Modo de produção
+
+Como os vídeos do canal são feitos: quais cenas viram clipes de IA e com qual modelo, de só imagens com movimento (**Econômico**) a todas as cenas animadas em 1080p (**Tudo animado, premium**). Canais novos começam no **Gancho animado**, com os primeiros 10 segundos animados; canais criados antes dos modos ficam em **Tudo animado, modelo do canal**, então nada muda para eles até você escolher outro. Cada projeto segue o modo do canal, a não ser que escolha o seu, e mostra quanto o vídeo inteiro custa em cada modo antes de gerar qualquer coisa ([Projetos](projects.md#mode)).
+
 <a id="defaults"></a>
 ## Modelo de vídeo, legendas, transições e movimento
 
-- **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google. Manter o padrão do provedor acompanha esse padrão quando ele muda. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
+- **Modelo de vídeo**: o modelo que anima as imagens das cenas do canal em clipes curtos, pelo Higgsfield, pelo Kling ou pelo Google, no [modo de produção](#production) **Tudo animado, modelo do canal**; os outros modos escolhem o seu modelo. Manter o padrão do provedor acompanha esse padrão quando ele muda. Qualquer cena pode escolher outro modelo na etapa [Clipes](clips.md#model).
 - **Modelo de tomada**: o modelo que faz a persona interpretar cada tomada de uma captura, pelo Higgsfield: o Kling 3.0 Motion Control, a não ser que você escolha outro. Qualquer tomada pode escolher outro ([Clipe interpretado](capture.md#performed)).
 - **Estilo de legenda**: o visual das legendas nos projetos novos do canal. Cada projeto pode escolher outro estilo no [editor](editor.md#captions).
 - **Palavra falada**: a cor em que acende a palavra sendo dita, nos projetos novos do canal. **Amarelo** é o padrão de um canal novo; **Desligado** é onde começam os canais criados antes disso existir, para que seus cortes e renders fiquem como estavam. Cada projeto pode escolher outra cor no [editor](editor.md#captions).
