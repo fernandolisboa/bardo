@@ -676,11 +676,13 @@ fn render_ready(
         .map(|n| SceneDraft {
             first_sentence: n,
             prompt: prompts[n].into(),
+            ..SceneDraft::default()
         })
         .collect();
     let mut plan = ScenePlan::from_drafts(
         generation(Provider::Claude, "claude-fixture", template),
         &narration,
+        Vec::new(),
         drafts,
         now,
     )?;

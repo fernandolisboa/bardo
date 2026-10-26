@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    GenerationId, JobFailureKind, NarrationId, ProfileId, RepositoryError, Scene, SceneClip,
-    SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt,
-    SceneRecord, VideoProjectId,
+    CastMember, CastRecord, GenerationId, JobFailureKind, NarrationId, ProfileId, RepositoryError,
+    Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository,
+    ScenePrompt, SceneRecord, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -51,6 +51,28 @@ struct SceneRow {
     motion_prompt: Option<String>,
     clip_model: (Option<String>, Option<String>),
     clip_failure: Option<String>,
+    cast_members: String,
+    planned_motion: Option<String>,
+}
+
+/// A scene's cast members as stored: positions separated by commas.
+fn cast_members(scene: &Scene) -> String {
+    scene
+        .cast()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn parse_cast_members(text: &str) -> Result<Vec<usize>, RepositoryError> {
+    text.split(',')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.parse::<usize>()
+                .map_err(|_| invalid(format!("cast member {part}")))
+        })
+        .collect()
 }
 
 fn failure_kind(code: Option<String>) -> Result<Option<JobFailureKind>, RepositoryError> {
@@ -132,7 +154,9 @@ impl SceneRow {
             clip: clip(conn, plan, position, CURRENT)?,
             pending_clip: clip(conn, plan, position, PENDING)?,
             clip_failure: failure_kind(self.clip_failure)?,
-        }))
+        })
+        .with_cast(parse_cast_members(&self.cast_members)?)
+        .with_planned_motion(self.planned_motion.as_deref().map(prompt).transpose()?))
     }
 }
 
@@ -141,7 +165,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
         .prepare(
             "SELECT start_ms, end_ms, text, generated_prompt, prompt, image_file,
                  image_generation_id, pending_file, pending_generation_id, failure,
-                 motion_prompt, clip_provider, clip_model, clip_failure, position
+                 motion_prompt, clip_provider, clip_model, clip_failure, position,
+                 cast_members, planned_motion_prompt
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -160,6 +185,8 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     motion_prompt: row.get(10)?,
                     clip_model: (row.get(11)?, row.get(12)?),
                     clip_failure: row.get(13)?,
+                    cast_members: row.get(15)?,
+                    planned_motion: row.get(16)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -170,6 +197,89 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
     rows.into_iter()
         .map(|(row, position)| row.into_scene(conn, plan, position))
         .collect()
+}
+
+/// The plan's cast, in order.
+fn cast(conn: &Connection, plan: &str) -> Result<Vec<CastMember>, RepositoryError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT name, generated_description, description, portrait_file,
+                 portrait_generation_id, failure
+             FROM scene_cast WHERE plan_id = ?1 ORDER BY position",
+        )
+        .map_err(boxed)?;
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = statement
+        .query_map([plan], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        })
+        .map_err(boxed)?
+        .collect::<Result<_, _>>()
+        .map_err(boxed)?;
+    rows.into_iter()
+        .map(
+            |(name, generated, description, file, generation_id, failure)| {
+                Ok(CastMember::restore(CastRecord {
+                    name,
+                    generated_description: prompt(&generated)?,
+                    description: prompt(&description)?,
+                    portrait: image(conn, (file, generation_id))?,
+                    failure: failure_kind(failure)?,
+                }))
+            },
+        )
+        .collect()
+}
+
+/// Writes cast member `index` in place of the saved one, with its
+/// portrait's generation.
+fn write_cast_member(
+    tx: &Transaction<'_>,
+    plan: &str,
+    index: usize,
+    member: &CastMember,
+) -> Result<(), RepositoryError> {
+    if let Some(portrait) = member.portrait() {
+        insert_generation(tx, &portrait.generation)?;
+    }
+    tx.execute(
+        "INSERT INTO scene_cast (plan_id, position, name, generated_description, description,
+             portrait_file, portrait_generation_id, failure)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (plan_id, position) DO UPDATE SET
+             description = excluded.description,
+             portrait_file = excluded.portrait_file,
+             portrait_generation_id = excluded.portrait_generation_id,
+             failure = excluded.failure",
+        params![
+            plan,
+            position(index)?,
+            member.name,
+            member.generated_description().as_str(),
+            member.description().as_str(),
+            member.portrait().map(|portrait| portrait.file.as_str()),
+            member
+                .portrait()
+                .map(|portrait| portrait.generation.id.to_string()),
+            member.failure().map(|kind| kind.code()),
+        ],
+    )
+    .map_err(boxed)?;
+    Ok(())
 }
 
 fn position(index: usize) -> Result<i64, RepositoryError> {
@@ -233,8 +343,10 @@ fn insert_scene(
     tx.execute(
         "INSERT INTO scene (plan_id, position, start_ms, end_ms, text, generated_prompt,
              prompt, image_file, image_generation_id, pending_file, pending_generation_id,
-             failure, motion_prompt, clip_provider, clip_model, clip_failure)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
+             planned_motion_prompt)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+             ?18)",
         params![
             plan,
             position(index)?,
@@ -252,6 +364,8 @@ fn insert_scene(
             scene.clip_model().map(|model| model.provider().code()),
             scene.clip_model().map(|model| model.model()),
             scene.clip_failure().map(|kind| kind.code()),
+            cast_members(scene),
+            scene.planned_motion().map(ScenePrompt::as_str),
         ],
     )
     .map_err(boxed)?;
@@ -291,6 +405,11 @@ pub(crate) fn write_scene_plan(
     .map_err(boxed)?;
     tx.execute("DELETE FROM scene WHERE plan_id = ?1", [&id])
         .map_err(boxed)?;
+    tx.execute("DELETE FROM scene_cast WHERE plan_id = ?1", [&id])
+        .map_err(boxed)?;
+    for (index, member) in plan.cast().iter().enumerate() {
+        write_cast_member(tx, &id, index, member)?;
+    }
     for (index, scene) in plan.scenes().iter().enumerate() {
         insert_scene(tx, &id, index, scene)?;
     }
@@ -320,15 +439,18 @@ impl ScenePlanRepository for Database {
         let Some((id, owner, narration, generation_id, updated_at)) = row else {
             return Ok(None);
         };
-        Ok(Some(ScenePlan::restore(ScenePlanRecord {
-            id: ScenePlanId::from(uuid(&id)?),
-            project,
-            owner: ProfileId::from(uuid(&owner)?),
-            narration: NarrationId::from(uuid(&narration)?),
-            generation: generation(&conn, &generation_id)?,
-            scenes: scenes(&conn, &id)?,
-            updated_at: from_unix_millis(updated_at),
-        })))
+        Ok(Some(
+            ScenePlan::restore(ScenePlanRecord {
+                id: ScenePlanId::from(uuid(&id)?),
+                project,
+                owner: ProfileId::from(uuid(&owner)?),
+                narration: NarrationId::from(uuid(&narration)?),
+                generation: generation(&conn, &generation_id)?,
+                scenes: scenes(&conn, &id)?,
+                updated_at: from_unix_millis(updated_at),
+            })
+            .with_cast(cast(&conn, &id)?),
+        ))
     }
 
     fn save_scene_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
@@ -382,6 +504,26 @@ impl ScenePlanRepository for Database {
         write_clips(&tx, &id, position(index)?, scene)?;
         tx.commit().map_err(boxed)
     }
+
+    fn save_cast_member(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
+        let member = plan
+            .cast_member(index)
+            .map_err(|error| invalid(error.to_string()))?;
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let id = plan.id.to_string();
+        let saved = tx
+            .execute(
+                "UPDATE scene_plan SET updated_at = ?2 WHERE id = ?1",
+                params![id, to_unix_millis(plan.updated_at)],
+            )
+            .map_err(boxed)?;
+        if saved == 0 {
+            return Err(invalid(format!("plan {id} is not saved")));
+        }
+        write_cast_member(&tx, &id, index, member)?;
+        tx.commit().map_err(boxed)
+    }
 }
 
 #[cfg(test)]
@@ -389,7 +531,7 @@ mod tests {
     use std::time::SystemTime;
 
     use bardo_domain::{
-        Alignment, Channel, ChannelDetails, ChannelDraft, ChannelRepository, CharTiming,
+        Alignment, CastDraft, Channel, ChannelDetails, ChannelDraft, ChannelRepository, CharTiming,
         Generation, GenerationId, GenerationPresets, JobId, Narration, Niche, ProfileRepository,
         Provider, SceneDraft, ScriptText, TemplateBody, TemplateKind, TemplateRepository,
         TemplateUsed, TemplateVersion, Theme, ThemeIdea, ThemeRepository, TokenUsage, UiLanguage,
@@ -509,14 +651,21 @@ mod tests {
         ScenePlan::from_drafts(
             generation(s, Provider::Claude, "{\"scenes\": []}"),
             &s.narration,
+            vec![CastDraft {
+                name: "the engineer".into(),
+                description: "A woman in her thirties, short black hair.".into(),
+            }],
             vec![
                 SceneDraft {
                     first_sentence: 0,
-                    prompt: "A probe leaves Earth.".into(),
+                    prompt: "The engineer watches a probe leave Earth.".into(),
+                    cast: vec![0],
+                    motion: "Slow push in on the engineer.".into(),
                 },
                 SceneDraft {
                     first_sentence: 1,
                     prompt: "Empty space.".into(),
+                    ..SceneDraft::default()
                 },
             ],
             time(1_800_000_011),
@@ -594,6 +743,40 @@ mod tests {
         scene.add_clip(clip(&s, "three.mp4", &other));
         s.db.save_scene_plan(&plan).unwrap();
         assert_eq!(s.db.scene_plan(s.project.id).unwrap(), Some(plan));
+    }
+
+    #[test]
+    fn the_cast_round_trips_and_a_member_saves_alone() {
+        let s = setup();
+        let mut plan = plan(&s);
+        assert_eq!(plan.cast().len(), 1);
+        assert_eq!(plan.scenes()[0].cast(), [0]);
+        s.db.save_scene_plan(&plan).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+
+        let engineer = plan.cast_mut(0, time(1_800_000_040)).unwrap();
+        engineer.set_portrait(image(&s, "cast-1.png"));
+        s.db.save_cast_member(&plan, 0).unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored, plan);
+        assert_eq!(
+            stored.scenes()[0].planned_motion().map(ScenePrompt::as_str),
+            Some("Slow push in on the engineer.")
+        );
+
+        let engineer = plan.cast_mut(0, time(1_800_000_041)).unwrap();
+        engineer.edit_description(ScenePrompt::new("A woman, grey hair.").unwrap());
+        engineer.fail(JobFailureKind::Declined);
+        s.db.save_cast_member(&plan, 0).unwrap();
+        assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
+        assert!(s.db.save_cast_member(&plan, 4).is_err());
+
+        let other = self::plan(&s);
+        s.db.save_scene_plan(&other).unwrap();
+        assert!(
+            s.db.save_cast_member(&plan, 0).is_err(),
+            "the replaced plan is gone"
+        );
     }
 
     #[test]

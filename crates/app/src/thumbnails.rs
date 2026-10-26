@@ -397,6 +397,7 @@ impl ThumbnailHandler {
         let request = ImageRequest {
             prompt: payload.prompt.clone(),
             shape: AspectRatio::Landscape.into(),
+            references: Vec::new(),
         };
         let image = self.images.generate(&key, &request).map_err(|failure| {
             JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))

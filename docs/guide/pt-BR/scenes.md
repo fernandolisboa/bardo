@@ -13,7 +13,7 @@ As cenas dividem a narração nos planos que o vídeo mostra, cada um com uma im
 <a id="plan"></a>
 ## Planejar e desenhar
 
-**Planejar cenas** faz o Claude dividir a narração em cenas pelas frases e escrever um prompt de imagem para cada uma, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)) e das notas de estética do canal.
+**Planejar cenas** faz o Claude dividir a narração em cenas pelas frases e escrever um prompt de imagem e um [prompt de movimento](clips.md#motion) para cada uma, a partir do **modelo de prompts de imagem** ([Modelos](templates.md)) e das notas de estética do canal. Ele também lista as [pessoas que voltam](#cast) em mais de uma cena.
 
 **Gerar N imagens** então desenha, numa só tarefa, cada cena que ainda não tem imagem. O Nano Banana desenha cada uma a 2K no formato do [vídeo](projects.md#format), 9:16 para um Short e 16:9 para um vídeo longo, e o Gemini cobra cada imagem; uma cena que o provedor recusa não para as outras. A estimativa sob o botão principal diz quanto a rodada custa. Planejar exige uma chave do Claude, e desenhar uma chave do Gemini ([Suas chaves de API](api-keys.md#providers)).
 
@@ -31,6 +31,13 @@ A cena escolhida mostra o trecho da narração que ela cobre, a imagem e o **pro
 ## Desenhar de novo
 
 **Desenhar de novo** faz uma nova imagem a partir do prompt da cena. A nova imagem espera ao lado da atual: **Usar a nova imagem** a substitui, **Manter a atual** descarta a nova. Até você decidir, a cena mostra **Revisar** e a etapa diz quantas esperam.
+
+<a id="cast"></a>
+## Pessoas que voltam
+
+Quando a mesma pessoa aparece em mais de uma cena (o chef, a detetive), o plano a lista uma vez com uma aparência fixa: sexo, idade, tom de pele, cabelo, porte e roupas. Antes de desenhar a primeira cena em que ela aparece, o Nano Banana desenha o **retrato de referência** dela, e toda cena com ela é desenhada com esse retrato e essa aparência, para que mantenha o mesmo rosto de cena para cena. O retrato é cobrado como uma imagem de cena, e a estimativa o conta.
+
+Uma cena que mostra alguém que volta lista essa pessoa em **Pessoas nesta cena**, com o retrato. **Editar aparência** muda a descrição; o retrato deixa de corresponder a ela e sai, e a próxima cena desenhada com essa pessoa desenha um novo antes. **Desenhar retrato de novo** faz um novo retrato com a mesma aparência. Nos dois casos, as cenas já desenhadas mantêm a imagem: desenhe-as de novo para usar o novo retrato. Um retrato que o provedor recusa fica marcado na pessoa, e as cenas dela são desenhadas só pela descrição.
 
 <a id="filter"></a>
 ## Todas ou pendentes

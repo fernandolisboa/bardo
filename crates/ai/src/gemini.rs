@@ -4,7 +4,8 @@
 //! One request per image, answered with the image inline (base64), so a
 //! large answer is allowed. Images come back in the shape asked for at 2K:
 //! enough for a 1080p frame with room for a slow zoom, or a persona's look
-//! that take models read in detail. Every image the
+//! that take models read in detail. Reference images (a cast member's
+//! portrait, #246) go inline after the prompt. Every image the
 //! model draws carries Google's SynthID watermark.
 
 use std::time::Duration;
@@ -25,10 +26,21 @@ pub const MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/m
 pub const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
 pub const IMAGE_SIZE: &str = "2K";
 
-/// The request that draws `request.prompt` in `request.shape`.
+/// The request that draws `request.prompt` in `request.shape`, with its
+/// reference images after the prompt, in order.
 pub fn image_request(key: &ApiKey, request: &ImageRequest) -> HttpRequest {
+    let parts: Vec<Value> = std::iter::once(json!({ "text": request.prompt }))
+        .chain(request.references.iter().map(|reference| {
+            json!({
+                "inlineData": {
+                    "mimeType": reference.format.mime(),
+                    "data": base64::engine::general_purpose::STANDARD.encode(&reference.bytes),
+                }
+            })
+        }))
+        .collect();
     let body = json!({
-        "contents": [{ "role": "user", "parts": [{ "text": request.prompt }] }],
+        "contents": [{ "role": "user", "parts": parts }],
         "generationConfig": {
             "responseModalities": ["IMAGE"],
             "imageConfig": { "aspectRatio": request.shape.code(), "imageSize": IMAGE_SIZE },

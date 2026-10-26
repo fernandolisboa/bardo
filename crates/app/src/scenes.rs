@@ -12,19 +12,27 @@
 //! stop the others, and retrying the job draws only the scenes it has not
 //! drawn yet. Every image records its generation (provider, model, prompt,
 //! template version and tokens).
+//!
+//! The plan names the video's recurring characters (#246). Before the
+//! first scene that shows one is drawn, Nano Banana draws their reference
+//! portrait, and every scene showing them is drawn with it, so a person
+//! keeps one face from scene to scene. The user can edit a member's
+//! description or draw the portrait again; scenes already drawn keep
+//! theirs until drawn again.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AspectRatio, CostPurpose, Generation, GenerationId, ImageGenerator, ImageRequest, Job,
-    JobFailure, JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository,
-    NoPendingClip, NoPendingImage, NoSuchScene, ProfileId, Progress, ProjectFiles, Provider,
-    RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan,
-    ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, TemplateKind, TemplateUsed,
-    TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest,
-    VideoProject, VideoProjectId, sentences,
+    ApiKey, AspectRatio, CastDraft, CastMember, CostPurpose, Generation, GenerationId, ImageFormat,
+    ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind, JobId, JobKind,
+    Narration, NarrationId, NarrationRepository, NoPendingClip, NoPendingImage, NoSuchCastMember,
+    NoSuchScene, ProfileId, Progress, ProjectFiles, Provider, ReferenceImage, RenderedPrompt,
+    RepositoryError, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
+    ScenePlanRepository, ScenePrompt, SecretStore, TemplateKind, TemplateUsed, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoProject,
+    VideoProjectId, scene_image_prompt, sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +56,8 @@ pub enum SceneError {
     NoPlan,
     #[error(transparent)]
     SceneNotFound(#[from] NoSuchScene),
+    #[error(transparent)]
+    CastMemberNotFound(#[from] NoSuchCastMember),
     /// Generation calls this provider, and no key is saved for it.
     #[error("no {0} key saved")]
     MissingKey(Provider),
@@ -91,7 +101,7 @@ impl SceneError {
             SceneError::ProjectNotFound => Text::ProjectNotFound,
             SceneError::NoNarration => Text::ScenesNoNarration,
             SceneError::NoPlan => Text::ScenesNoPlan,
-            SceneError::SceneNotFound(_) => Text::SceneNotFound,
+            SceneError::SceneNotFound(_) | SceneError::CastMemberNotFound(_) => Text::SceneNotFound,
             SceneError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
             SceneError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
             SceneError::MissingKey(Provider::Kling) => Text::ScenesMissingKlingKey,
@@ -152,17 +162,19 @@ fn plan_call(rendered: &RenderedPrompt) -> PlannedCall {
         .with_prompt(&rendered.instructions, &rendered.prompt)
 }
 
-/// Nano Banana's calls that draw `images` images.
+/// Nano Banana's calls that draw `images` images, portraits included.
 fn images_call(images: usize) -> PlannedCall {
     PlannedCall::new(Provider::Gemini, CostPurpose::SceneImage, images as u64)
 }
 
 impl ScenesView {
-    /// How many images "generate images" draws: the scenes without one.
+    /// How many images "generate images" draws: the scenes without one,
+    /// and the portraits of the people they show that have none yet.
     pub fn missing_images(&self) -> usize {
-        self.plan
-            .as_ref()
-            .map_or(0, |plan| plan.missing_images().len())
+        self.plan.as_ref().map_or(0, |plan| {
+            let missing = plan.missing_images();
+            missing.len() + plan.missing_portraits(&missing).len()
+        })
     }
 
     /// Whether a scene plan or image job of the project is running.
@@ -176,36 +188,64 @@ impl ScenesView {
     }
 }
 
-/// The shape Claude answers in.
+/// The shape Claude answers in: the cast, then the scenes, each with the
+/// cast members it shows (by their index in `cast`) and how its clip
+/// moves.
 const PLAN_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
+    "cast": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"}
+        },
+        "required": ["name", "description"],
+        "additionalProperties": false
+      }
+    },
     "scenes": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "first_sentence": {"type": "integer"},
-          "prompt": {"type": "string"}
+          "prompt": {"type": "string"},
+          "cast": {"type": "array", "items": {"type": "integer"}},
+          "motion": {"type": "string"}
         },
-        "required": ["first_sentence", "prompt"],
+        "required": ["first_sentence", "prompt", "cast", "motion"],
         "additionalProperties": false
       }
     }
   },
-  "required": ["scenes"],
+  "required": ["cast", "scenes"],
   "additionalProperties": false
 }"#;
 
 #[derive(Debug, Deserialize)]
 struct PlannedScenes {
+    #[serde(default)]
+    cast: Vec<PlannedMember>,
     scenes: Vec<PlannedScene>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlannedMember {
+    name: String,
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct PlannedScene {
     first_sentence: i64,
     prompt: String,
+    #[serde(default)]
+    cast: Vec<i64>,
+    #[serde(default)]
+    motion: String,
 }
 
 /// The scene plan job's payload: the rendered prompt, where it came from,
@@ -232,6 +272,10 @@ struct ImagesPayload {
     /// started; jobs from before formats drew wide images.
     #[serde(default = "landscape")]
     aspect: String,
+    /// Cast members whose portrait the user asked to draw again, drawn
+    /// before any scene (#246).
+    #[serde(default)]
+    portraits: Vec<usize>,
 }
 
 fn landscape() -> String {
@@ -290,6 +334,19 @@ pub(crate) fn sentence_lines(narration: &Narration) -> String {
 /// The scene image's file name in the project folder.
 fn image_file(generation: GenerationId, extension: &str) -> String {
     format!("scene-{generation}.{extension}")
+}
+
+/// A cast member's portrait's file name in the project folder.
+fn portrait_file(generation: GenerationId, extension: &str) -> String {
+    format!("cast-{generation}.{extension}")
+}
+
+/// The format of an image file Bardo saved, from its extension.
+fn saved_format(file: &str) -> Option<ImageFormat> {
+    let extension = file.rsplit_once('.')?.1.to_ascii_lowercase();
+    [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Webp]
+        .into_iter()
+        .find(|format| format.extension() == extension)
 }
 
 /// Drawing failures that are about one scene (its prompt, the answer to
@@ -389,6 +446,14 @@ impl SceneHandler {
         };
         let planned: PlannedScenes =
             serde_json::from_str(&generated.text).map_err(|e| not_usable(e.to_string()))?;
+        let cast = planned
+            .cast
+            .into_iter()
+            .map(|member| CastDraft {
+                name: member.name,
+                description: member.description,
+            })
+            .collect();
         let drafts = planned
             .scenes
             .into_iter()
@@ -396,6 +461,12 @@ impl SceneHandler {
                 Some(SceneDraft {
                     first_sentence: usize::try_from(scene.first_sentence).ok()?,
                     prompt: scene.prompt,
+                    cast: scene
+                        .cast
+                        .into_iter()
+                        .filter_map(|member| usize::try_from(member).ok())
+                        .collect(),
+                    motion: scene.motion,
                 })
             })
             .collect();
@@ -417,7 +488,7 @@ impl SceneHandler {
             generated_at: now,
             job: Some(job),
         };
-        let plan = ScenePlan::from_drafts(generation, &narration, drafts, now)
+        let plan = ScenePlan::from_drafts(generation, &narration, cast, drafts, now)
             .map_err(|error| not_usable(error.to_string()))?;
         self.plans.save_scene_plan(&plan).map_err(unexpected)?;
         // The replaced plan's images go with it. A file that will not go
@@ -441,9 +512,10 @@ impl SceneHandler {
             .filter(|saved| saved.id == plan))
     }
 
-    /// Draws the scenes `job` asked for, saving each image as it arrives.
-    /// Without a context (tests replaying a job) nothing reports progress
-    /// or stops it.
+    /// Draws the scenes `job` asked for, saving each image as it arrives,
+    /// and before them the portraits asked for and those of the people
+    /// the scenes show that have none yet. Without a context (tests
+    /// replaying a job) nothing reports progress or stops it.
     fn draw(
         &self,
         payload: &str,
@@ -457,10 +529,49 @@ impl SceneHandler {
             .aspect
             .parse()
             .map_err(|_| unexpected(format!("unknown frame shape {}", payload.aspect)))?;
-        let total = payload.scenes.len();
+        let total = payload.portraits.len() + payload.scenes.len();
         let mut failed: Vec<JobFailure> = Vec::new();
         let mut key = None;
-        for (done, &index) in payload.scenes.iter().enumerate() {
+        // Portraits this run drew or tried: one that fails is not tried
+        // again for every scene its member is in.
+        let mut tried: Vec<usize> = Vec::new();
+        let mut done = 0;
+        let step = |cx: &mut Option<&mut JobContext>, done: &mut usize| {
+            *done += 1;
+            match cx.as_mut() {
+                Some(cx) => cx
+                    .save_checkpoint(
+                        format!("{} of {} images", done, total),
+                        Progress::of(*done as u64, total as u64),
+                    )
+                    .map_err(unexpected),
+                None => Ok(()),
+            }
+        };
+        for &member in &payload.portraits {
+            let Some(plan) = self.saved_plan(project, plan_id)? else {
+                return Ok(());
+            };
+            let Ok(cast) = plan.cast_member(member) else {
+                continue;
+            };
+            tried.push(member);
+            let drawn = cast
+                .portrait()
+                .is_some_and(|portrait| portrait.generation.job == Some(job));
+            if !drawn {
+                if cx.as_ref().is_some_and(|cx| cx.should_stop()) {
+                    return Ok(());
+                }
+                let key = match &key {
+                    Some(key) => key,
+                    None => key.insert(self.key(Provider::Gemini)?),
+                };
+                self.draw_portrait(key, project, plan_id, member, job, &mut failed)?;
+            }
+            step(&mut cx, &mut done)?;
+        }
+        for &index in &payload.scenes {
             // A new plan replaced this one: its scenes are gone.
             let Some(plan) = self.saved_plan(project, plan_id)? else {
                 return Ok(());
@@ -483,10 +594,49 @@ impl SceneHandler {
                 Some(key) => key,
                 None => key.insert(self.key(Provider::Gemini)?),
             };
-            let prompt = scene.prompt().as_str().to_owned();
+            // The people it shows get their portrait first.
+            for member in plan.missing_portraits(&[index]) {
+                if !tried.contains(&member) {
+                    tried.push(member);
+                    self.draw_portrait(key, project, plan_id, member, job, &mut failed)?;
+                }
+            }
+            let Some(plan) = self.saved_plan(project, plan_id)? else {
+                return Ok(());
+            };
+            let Ok(scene) = plan.scene(index) else {
+                continue;
+            };
+            let shown: Vec<&CastMember> = plan
+                .scene_cast(index)
+                .into_iter()
+                .filter_map(|member| plan.cast_member(member).ok())
+                .collect();
+            let mut references = Vec::new();
+            let referenced: Vec<bool> = shown
+                .iter()
+                .map(|member| {
+                    let Some(portrait) = member.portrait() else {
+                        return false;
+                    };
+                    let Some(format) = saved_format(&portrait.file) else {
+                        return false;
+                    };
+                    // A portrait that will not read is described instead.
+                    match self.files.read(project, &portrait.file) {
+                        Ok(bytes) => {
+                            references.push(ReferenceImage { bytes, format });
+                            true
+                        }
+                        Err(_) => false,
+                    }
+                })
+                .collect();
+            let prompt = scene_image_prompt(scene.prompt().as_str(), &shown, &referenced);
             let request = ImageRequest {
                 prompt: prompt.clone(),
                 shape: aspect.into(),
+                references,
             };
             match self.images.generate(key, &request) {
                 Ok(image) => {
@@ -556,22 +706,16 @@ impl SceneHandler {
                     failed.push(failure);
                 }
             }
-            if let Some(cx) = cx.as_mut() {
-                cx.save_checkpoint(
-                    format!("{} of {} scenes", done + 1, total),
-                    Progress::of(done as u64 + 1, total as u64),
-                )
-                .map_err(unexpected)?;
-            }
+            step(&mut cx, &mut done)?;
         }
         match failed.first() {
             None => Ok(()),
             Some(first) => Err(JobFailure::new(
                 first.kind,
                 format!(
-                    "{} of {} scenes were not drawn. {}",
+                    "{} of {} images were not drawn. {}",
                     failed.len(),
-                    total,
+                    total.max(failed.len()),
                     failed
                         .iter()
                         .map(|failure| failure.detail.as_str())
@@ -579,6 +723,116 @@ impl SceneHandler {
                         .join(" | ")
                 ),
             )),
+        }
+    }
+
+    /// Draws cast member `member`'s portrait and puts it in place of the
+    /// current one. A failure about the portrait is recorded on the member
+    /// and in `failed`, and the scenes are drawn without it; any other
+    /// failure stops the job.
+    fn draw_portrait(
+        &self,
+        key: &ApiKey,
+        project: VideoProjectId,
+        plan_id: ScenePlanId,
+        member: usize,
+        job: JobId,
+        failed: &mut Vec<JobFailure>,
+    ) -> Result<(), JobFailure> {
+        let Some(plan) = self.saved_plan(project, plan_id)? else {
+            return Ok(());
+        };
+        let Ok(cast) = plan.cast_member(member) else {
+            return Ok(());
+        };
+        let name = cast.name.clone();
+        let description = cast.description().clone();
+        let prompt = cast.portrait_prompt();
+        let request = ImageRequest {
+            prompt: prompt.clone(),
+            shape: ImageShape::Portrait,
+            references: Vec::new(),
+        };
+        match self.images.generate(key, &request) {
+            Ok(image) => {
+                self.costs.record_for_project(
+                    PaidCall {
+                        provider: Provider::Gemini,
+                        model: &image.model,
+                        purpose: CostPurpose::SceneImage,
+                        usage: image.usage,
+                        job: Some(job),
+                        reported: None,
+                    },
+                    project,
+                );
+                let generation = GenerationId::new();
+                let file = portrait_file(generation, image.format.extension());
+                self.files
+                    .write(project, &file, &image.bytes)
+                    .map_err(unexpected)?;
+                let portrait = SceneImage {
+                    file: file.clone(),
+                    generation: Generation {
+                        id: generation,
+                        owner: self.owner,
+                        project,
+                        provider: Provider::Gemini,
+                        model: image.model,
+                        template: plan.generation.template,
+                        instructions: String::new(),
+                        prompt,
+                        output: file.clone(),
+                        usage: image.usage.tokens(),
+                        generated_at: SystemTime::now(),
+                        job: Some(job),
+                    },
+                };
+                // Read again: a description the user changed meanwhile is
+                // not what this portrait shows.
+                let Some(mut plan) = self.saved_plan(project, plan_id)? else {
+                    crate::proxies::remove_media(self.files.as_ref(), project, &file);
+                    return Ok(());
+                };
+                let still = plan
+                    .cast_member(member)
+                    .is_ok_and(|cast| *cast.description() == description);
+                if !still {
+                    crate::proxies::remove_media(self.files.as_ref(), project, &file);
+                    return Ok(());
+                }
+                let replaced = plan
+                    .cast_mut(member, SystemTime::now())
+                    .map_err(unexpected)?
+                    .set_portrait(portrait);
+                self.plans
+                    .save_cast_member(&plan, member)
+                    .map_err(unexpected)?;
+                if let Some(replaced) = replaced {
+                    crate::proxies::remove_media(self.files.as_ref(), project, &replaced.file);
+                }
+                Ok(())
+            }
+            Err(failure) => {
+                let kind = JobFailureKind::from(failure.kind);
+                let failure = JobFailure::new(
+                    kind,
+                    format!("Gemini, portrait of {name}: {}", failure.detail),
+                );
+                if let Some(mut plan) = self.saved_plan(project, plan_id)?
+                    && let Ok(cast) = plan.cast_mut(member, SystemTime::now())
+                {
+                    cast.fail(kind);
+                    self.plans
+                        .save_cast_member(&plan, member)
+                        .map_err(unexpected)?;
+                }
+                if !is_about_the_scene(kind) {
+                    return Err(failure);
+                }
+                failed.push(failure);
+                Ok(())
+            }
         }
     }
 }
@@ -643,7 +897,10 @@ impl Bardo {
             }
             None => None,
         };
-        let missing = plan.as_ref().map_or(0, |plan| plan.missing_images().len());
+        let missing = plan.as_ref().map_or(0, |plan| {
+            let missing = plan.missing_images();
+            missing.len() + plan.missing_portraits(&missing).len()
+        });
         let clips = self.clips_view(project.channel, plan.as_ref())?;
         let version = self.version_scenes(project.id, plan.as_ref(), narration.as_ref())?;
         Ok(ScenesView {
@@ -763,11 +1020,17 @@ impl Bardo {
         &self,
         plan: &ScenePlan,
         scenes: Vec<usize>,
+        portraits: Vec<usize>,
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
         self.scenes_idle(plan.project)?;
         self.require_key(Provider::Gemini)?;
-        self.scenes_budget(images_call(scenes.len()), consent)?;
+        let first = plan
+            .missing_portraits(&scenes)
+            .into_iter()
+            .filter(|member| !portraits.contains(member))
+            .count();
+        self.scenes_budget(images_call(portraits.len() + first + scenes.len()), consent)?;
         let project = self
             .themes
             .project(plan.project)?
@@ -777,6 +1040,7 @@ impl Bardo {
             plan: plan.id.to_string(),
             scenes,
             aspect: self.video_format(&project)?.aspect().code().to_owned(),
+            portraits,
         };
         let job = Job::new(self.profile.id, JobKind::SceneImages, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -794,7 +1058,7 @@ impl Bardo {
         if missing.is_empty() {
             return Err(SceneError::NothingToGenerate);
         }
-        self.draw_scenes(&plan, missing, consent)
+        self.draw_scenes(&plan, missing, Vec::new(), consent)
     }
 
     /// Starts a job that draws scene `index` again. Its current image stays
@@ -807,7 +1071,44 @@ impl Bardo {
     ) -> Result<JobId, SceneError> {
         let plan = self.own_plan(project)?;
         plan.scene(index)?;
-        self.draw_scenes(&plan, vec![index], consent)
+        self.draw_scenes(&plan, vec![index], Vec::new(), consent)
+    }
+
+    /// Starts a job that draws cast member `member`'s portrait again. It
+    /// replaces the current one once drawn; scenes already drawn keep
+    /// their images until drawn again.
+    pub fn redraw_cast_portrait(
+        &self,
+        project: VideoProjectId,
+        member: usize,
+        consent: BudgetConsent,
+    ) -> Result<JobId, SceneError> {
+        let plan = self.own_plan(project)?;
+        plan.cast_member(member)?;
+        self.draw_scenes(&plan, Vec::new(), vec![member], consent)
+    }
+
+    /// Replaces cast member `member`'s description with the user's. Its
+    /// portrait no longer shows it, so it goes; the next scene drawn with
+    /// the member draws a new one first.
+    pub fn edit_cast_description(
+        &self,
+        project: VideoProjectId,
+        member: usize,
+        description: &str,
+    ) -> Result<ScenePlan, SceneError> {
+        let mut plan = self.own_plan(project)?;
+        let description = ScenePrompt::new(description).map_err(SceneError::Invalid)?;
+        let (changed, dropped) = plan
+            .cast_mut(member, SystemTime::now())?
+            .edit_description(description);
+        if changed {
+            self.scene_plans.save_cast_member(&plan, member)?;
+        }
+        if let Some(dropped) = dropped {
+            crate::proxies::remove_media(self.files.as_ref(), plan.project, &dropped.file);
+        }
+        Ok(plan)
     }
 
     /// Makes scene `index`'s new image its image; the replaced file goes.
@@ -1271,6 +1572,187 @@ pub(crate) mod tests {
         assert_eq!(generation.job, Some(job.id()));
     }
 
+    /// The plan of `plan_answer` with a chef in the first and last scenes.
+    fn cast_answer() -> String {
+        serde_json::json!({
+            "cast": [
+                {"name": "the chef", "description": "A man in his fifties, brown skin, grey beard, white apron"},
+            ],
+            "scenes": [
+                {"first_sentence": 0, "prompt": "The chef at the launch pad, archival photo",
+                 "cast": [0], "motion": "Slow push in on the chef"},
+                {"first_sentence": 1, "prompt": "The probe drifting away from Earth",
+                 "cast": [], "motion": "The probe drifts left"},
+                {"first_sentence": 2, "prompt": "The chef alone in a control room",
+                 "cast": [0], "motion": "Static shot, the chef lowers his head"},
+            ],
+        })
+        .to_string()
+    }
+
+    fn cast_project(h: &Harness, app: &Bardo) -> VideoProject {
+        let project = h.narrated_project(app);
+        h.answer(cast_answer());
+        done(
+            app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        project
+    }
+
+    #[test]
+    fn a_recurring_person_gets_one_portrait_sent_with_every_scene_they_are_in() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        let request = h.text.requests().pop().unwrap();
+        let TextFormat::Json { schema } = &request.format else {
+            panic!("the plan is asked as JSON");
+        };
+        assert!(schema.contains("\"cast\"") && schema.contains("\"motion\""));
+        assert!(request.instructions.contains("fixed"));
+
+        let view = app.scenes(project.id).unwrap();
+        assert_eq!(view.missing_images(), 4, "three scenes and the chef");
+        let plan = view.plan.unwrap();
+        assert_eq!(plan.cast().len(), 1);
+        assert_eq!(plan.scenes_with(0), [0, 2]);
+        assert_eq!(
+            plan.scenes()[2].motion_prompt().as_str(),
+            "Static shot, the chef lowers his head",
+            "clips move as planned"
+        );
+
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 4, "the chef is drawn once");
+        assert_eq!(requests[0].shape, ImageShape::Portrait);
+        assert!(
+            requests[0]
+                .prompt
+                .contains("the chef: A man in his fifties")
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let portrait = plan.cast()[0].portrait().unwrap().clone();
+        assert!(portrait.file.starts_with("cast-"));
+        let bytes = h.files.read(project.id, &portrait.file).unwrap();
+        for scene in [1, 3] {
+            let request = &requests[scene];
+            assert_eq!(request.references.len(), 1, "scene {scene}");
+            assert_eq!(request.references[0].bytes, bytes);
+            assert!(
+                request
+                    .prompt
+                    .contains("Reference 1: the chef, A man in his fifties")
+            );
+        }
+        assert!(requests[2].references.is_empty(), "nobody recurs there");
+        assert_eq!(requests[2].prompt, "The probe drifting away from Earth");
+        assert_eq!(
+            plan.scenes()[0].image().unwrap().generation.prompt,
+            requests[1].prompt,
+            "the generation records what was sent"
+        );
+        assert!(plan.files().any(|file| file == portrait.file));
+    }
+
+    #[test]
+    fn a_declined_portrait_is_tried_once_and_its_scenes_describe_the_person() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        h.images.decline("reference portrait");
+
+        let job = wait_done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::Declined);
+        assert!(
+            failure.detail.contains("portrait of the chef"),
+            "{}",
+            failure.detail
+        );
+
+        let requests = h.images.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 4, "one portrait try, three scenes");
+        assert!(requests[1].references.is_empty());
+        assert!(
+            requests[1]
+                .prompt
+                .contains("the chef: A man in his fifties, brown skin")
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert_eq!(plan.cast()[0].failure(), Some(JobFailureKind::Declined));
+        assert_eq!(plan.missing_images().len(), 0, "the scenes were drawn");
+
+        // Drawing the portrait again works once the provider accepts it.
+        h.images.accept_all();
+        done(
+            &app,
+            app.redraw_cast_portrait(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        assert!(plan.cast()[0].portrait().is_some());
+        assert_eq!(plan.cast()[0].failure(), None);
+        assert_eq!(h.images.requests.lock().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn a_new_description_drops_the_portrait_and_the_next_scene_draws_one() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = cast_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let plan = app.scenes(project.id).unwrap().plan.unwrap();
+        let first = plan.cast()[0].portrait().unwrap().file.clone();
+
+        let plan = app
+            .edit_cast_description(project.id, 0, "A woman in her thirties, red hair")
+            .unwrap();
+        assert!(plan.cast()[0].portrait().is_none());
+        assert!(plan.cast()[0].is_edited());
+        assert!(!h.files.exists(project.id, &first), "the old portrait goes");
+        assert!(matches!(
+            app.edit_cast_description(project.id, 0, " "),
+            Err(SceneError::Invalid(SceneFieldError::PromptRequired))
+        ));
+        assert!(matches!(
+            app.edit_cast_description(project.id, 4, "Anyone"),
+            Err(SceneError::CastMemberNotFound(_))
+        ));
+
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 2, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let requests = h.images.requests.lock().unwrap().clone();
+        let portrait = &requests[requests.len() - 2];
+        assert_eq!(portrait.shape, ImageShape::Portrait);
+        assert!(
+            portrait
+                .prompt
+                .contains("A woman in her thirties, red hair")
+        );
+        let scene = requests.last().unwrap();
+        assert_eq!(scene.references.len(), 1);
+        assert!(scene.prompt.contains("A woman in her thirties, red hair"));
+    }
+
     #[test]
     fn every_scene_gets_one_image_with_its_provenance() {
         let h = Harness::new();
@@ -1357,7 +1839,7 @@ pub(crate) mod tests {
         let failure = job.failure().unwrap();
         assert_eq!(failure.kind, JobFailureKind::Declined);
         assert!(
-            failure.detail.contains("1 of 3 scenes"),
+            failure.detail.contains("1 of 3 images"),
             "{}",
             failure.detail
         );

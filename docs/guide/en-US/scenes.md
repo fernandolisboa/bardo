@@ -13,7 +13,7 @@ Scenes cut the narration into the shots the video shows, each with an image. The
 <a id="plan"></a>
 ## Planning and drawing
 
-**Plan scenes** has Claude split the narration into scenes on its sentences and write an image prompt for each one, from the **image prompt template** ([Templates](templates.md)) and the channel's aesthetic notes.
+**Plan scenes** has Claude split the narration into scenes on its sentences and write an image prompt and a [motion prompt](clips.md#motion) for each one, from the **image prompt template** ([Templates](templates.md)) and the channel's aesthetic notes. It also lists the [people who come back](#cast) in more than one scene.
 
 **Generate N images** then draws every scene still without an image, in one job. Nano Banana draws each at 2K in the shape of the video's [format](projects.md#format), 9:16 for a Short and 16:9 for a long video, and Gemini bills each one; a scene the provider declines does not stop the others. The estimate under the leading button says what the run costs. Planning needs a Claude key, and drawing a Gemini key ([Your API keys](api-keys.md#providers)).
 
@@ -31,6 +31,13 @@ The picked scene shows the narration it covers, its image and its **image prompt
 ## Drawing again
 
 **Draw again** makes a new image from the scene's prompt. The new image waits beside the current one: **Use new image** replaces it, **Keep current** throws the new one away. Until you choose, the scene reads **Review** and the stage says how many wait.
+
+<a id="cast"></a>
+## People who come back
+
+When the same person appears in more than one scene (the chef, the detective), the plan lists them once with a fixed look: sex, age, skin tone, hair, build and clothes. Before the first scene that shows them is drawn, Nano Banana draws their **reference portrait**, and every scene with them is drawn with that portrait and their look, so they keep the same face from scene to scene. The portrait is billed like a scene image, and the estimate counts it.
+
+A scene that shows someone who comes back lists them under **People in this scene**, with the portrait. **Edit look** changes the description; the portrait no longer matches it, so it goes, and the next scene drawn with that person draws a new one first. **Draw portrait again** makes a new portrait from the same look. Scenes already drawn keep their image either way: draw them again to use the new portrait. A portrait the provider declines is marked on the person, and their scenes are drawn from the description alone.
 
 <a id="filter"></a>
 ## All or pending

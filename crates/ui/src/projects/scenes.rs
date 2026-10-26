@@ -1,13 +1,15 @@
 //! The Scenes and Clips stages of the projects screen: plan the
 //! narration's scenes, read and edit each scene's image prompt, draw the
 //! images, draw one again and choose between the current image and the new
-//! one. Then animate the images into clips: pick each scene's video model,
+//! one; see the recurring people a scene shows with their reference
+//! portraits, edit how one looks or draw their portrait again. Then
+//! animate the images into clips: pick each scene's video model,
 //! edit how it moves, and play, keep or discard each new clip. The scenes
 //! are a grid of cards; the picked one opens in the inspector. Clips play in the system's
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip, SceneImage, TemplateKind,
+    CastMember, ClipModel, ClipModelRef, Job, JobState, Scene, SceneClip, SceneImage, TemplateKind,
     VideoProjectId,
 };
 use std::rc::Rc;
@@ -42,9 +44,13 @@ use crate::spend::{budget_question, estimate_note};
 /// A scene action that starts a paid job.
 #[derive(Clone, Copy)]
 pub(super) enum SceneAction {
-    Plan { discard_images: bool },
+    Plan {
+        discard_images: bool,
+    },
     DrawMissing,
     Redraw(usize),
+    /// Draw a cast member's portrait again.
+    RedrawPortrait(usize),
     AnimateMissing,
     Animate(usize),
 }
@@ -54,6 +60,8 @@ pub(super) enum SceneAction {
 pub(super) enum ScenePromptField {
     Image,
     Motion,
+    /// A cast member's description.
+    Cast(usize),
 }
 
 impl ProjectsScreen {
@@ -112,6 +120,7 @@ impl ProjectsScreen {
             SceneAction::Plan { discard_images } => bardo.plan_scenes(id, discard_images, consent),
             SceneAction::DrawMissing => bardo.generate_scene_images(id, consent),
             SceneAction::Redraw(index) => bardo.regenerate_scene_image(id, index, consent),
+            SceneAction::RedrawPortrait(member) => bardo.redraw_cast_portrait(id, member, consent),
             SceneAction::AnimateMissing => bardo.generate_missing_clips(id, consent),
             SceneAction::Animate(index) => bardo.generate_scene_clip(id, index, consent),
         };
@@ -144,14 +153,20 @@ impl ProjectsScreen {
         let Ok(scene) = plan.scene(index) else {
             return;
         };
-        // A motion prompt the scene does not have opens empty: saving it
-        // empty keeps following the image prompt.
+        // A motion prompt the scene does not have opens with the planned
+        // one, or empty in plans without one: saving it unchanged or empty
+        // keeps following it.
         let text = match field {
             ScenePromptField::Image => scene.prompt().as_str().to_owned(),
             ScenePromptField::Motion => scene
                 .own_motion_prompt()
+                .or(scene.planned_motion())
                 .map(|prompt| prompt.as_str().to_owned())
                 .unwrap_or_default(),
+            ScenePromptField::Cast(member) => match plan.cast_member(member) {
+                Ok(member) => member.description().as_str().to_owned(),
+                Err(_) => return,
+            },
         };
         self.editing_scene = Some((plan.id, index, field));
         self.scene_field_error = None;
@@ -168,6 +183,7 @@ impl ProjectsScreen {
         let saved = self.scene_action(window, cx, |bardo, id| match field {
             ScenePromptField::Image => bardo.edit_scene_prompt(id, index, &text),
             ScenePromptField::Motion => bardo.edit_scene_motion_prompt(id, index, &text),
+            ScenePromptField::Cast(member) => bardo.edit_cast_description(id, member, &text),
         });
         match saved {
             Some(_) => {
@@ -1141,6 +1157,7 @@ impl ProjectsScreen {
         });
 
         let media = usize::from(failure.is_some());
+        let cast = self.render_scene_cast(index, scene, open, busy, cx);
         let body = failure
             .into_iter()
             .chain(Some(picture))
@@ -1152,8 +1169,173 @@ impl ProjectsScreen {
                     .into_any_element(),
             ))
             .chain(redraw)
+            .chain(cast)
             .collect();
         (body, media)
+    }
+
+    /// The recurring people scene `index` shows (#246): each one's
+    /// portrait, name and look, with editing the look and drawing the
+    /// portrait again. `None` for a scene that shows nobody who recurs.
+    fn render_scene_cast(
+        &self,
+        index: usize,
+        scene: &Scene,
+        open: Option<ScenePromptField>,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let plan = self.scenes.as_ref()?.plan.as_ref()?;
+        if scene.cast().is_empty() {
+            return None;
+        }
+        let members: Vec<(usize, CastMember)> = scene
+            .cast()
+            .iter()
+            .filter_map(|&member| Some((member, plan.cast_member(member).ok()?.clone())))
+            .collect();
+        let editors: Vec<Option<AnyElement>> = members
+            .iter()
+            .map(|(member, _)| {
+                (open == Some(ScenePromptField::Cast(*member)))
+                    .then(|| self.render_prompt_editor(index, None, cx))
+            })
+            .collect();
+        let bardo = self.bardo.read(cx);
+        let t = look(cx).tokens;
+        let theme = cx.theme();
+        let rows = members
+            .into_iter()
+            .zip(editors)
+            .map(|((member, cast), editor)| {
+                let portrait = div()
+                    .w(px(56.))
+                    .h(px(84.))
+                    .flex_none()
+                    .rounded(t.radius)
+                    .overflow_hidden()
+                    .bg(t.sunken);
+                let portrait = match cast.portrait() {
+                    Some(image) => portrait
+                        .child(
+                            img(bardo.scene_image_path(image))
+                                .size_full()
+                                .object_fit(ObjectFit::Cover),
+                        )
+                        .into_any_element(),
+                    None => portrait.into_any_element(),
+                };
+                let name = h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(SharedString::from(cast.name.clone())),
+                    )
+                    .when(cast.is_edited(), |row| {
+                        row.child(kit::status(Tone::Info, tr(bardo, Text::CastEdited), cx))
+                    });
+                let description: AnyElement = match editor {
+                    Some(editor) => editor,
+                    None => kit::well(cx)
+                        .text_xs()
+                        .child(SharedString::from(cast.description().as_str().to_owned()))
+                        .into_any_element(),
+                };
+                let failure = cast.failure().map(|kind| {
+                    kit::notice(
+                        Tone::Danger,
+                        format!(
+                            "{} {}",
+                            bardo.text(Text::CastPortraitFailed),
+                            bardo.text(Text::JobFailureKindName(kind))
+                        ),
+                        cx,
+                    )
+                    .text_xs()
+                });
+                let later = cast.portrait().is_none().then(|| {
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, Text::CastPortraitLater))
+                });
+                let actions = (open.is_none() && !busy).then(|| {
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .child(
+                            Button::new(("edit-cast", member))
+                                .ghost()
+                                .xsmall()
+                                .label(tr(bardo, Text::EditCastDescription))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.edit_scene(
+                                        index,
+                                        ScenePromptField::Cast(member),
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .when(
+                            cast.portrait().is_some() || cast.failure().is_some(),
+                            |row| {
+                                row.child(
+                                    Button::new(("redraw-portrait", member))
+                                        .outline()
+                                        .xsmall()
+                                        .label(tr(bardo, Text::RedrawCastPortrait))
+                                        .on_click(cx.listener(
+                                            move |this, _: &ClickEvent, window, cx| {
+                                                this.run_scene(
+                                                    SceneAction::RedrawPortrait(member),
+                                                    BudgetConsent::Ask,
+                                                    window,
+                                                    cx,
+                                                );
+                                            },
+                                        )),
+                                )
+                            },
+                        )
+                });
+                h_flex()
+                    .gap_2()
+                    .items_start()
+                    .child(portrait)
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
+                            .child(name)
+                            .child(description)
+                            .children(failure)
+                            .children(later)
+                            .children(actions),
+                    )
+                    .into_any_element()
+            });
+        let title = h_flex()
+            .gap_1()
+            .items_center()
+            .child(field_label(tr(bardo, Text::SceneCast)))
+            .child(guide::info(
+                bardo,
+                ("scene-cast-info", index),
+                tr(bardo, Text::SceneCastHint),
+                guide::refs::SCENES_CAST,
+            ));
+        Some(
+            v_flex()
+                .gap_2()
+                .child(title)
+                .children(rows)
+                .into_any_element(),
+        )
     }
 
     /// A plan or image job running, or why the last one stopped.
@@ -1307,13 +1489,16 @@ impl ProjectsScreen {
                     .font_semibold()
                     .child(tr(bardo, Text::SceneMotionPrompt)),
             )
-            .when(scene.own_motion_prompt().is_none(), |row| {
-                row.child(
-                    Tag::secondary()
-                        .small()
-                        .child(tr(bardo, Text::SceneMotionFromImage)),
-                )
-            });
+            .when(
+                scene.own_motion_prompt().is_none() && scene.planned_motion().is_none(),
+                |row| {
+                    row.child(
+                        Tag::secondary()
+                            .small()
+                            .child(tr(bardo, Text::SceneMotionFromImage)),
+                    )
+                },
+            );
 
         // The model menu: the channel's model, then every model by name.
         let model_label = match (scene.clip_model(), &view.model) {

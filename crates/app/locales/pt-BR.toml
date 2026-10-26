@@ -1769,6 +1769,15 @@ current = "Atual"
 new = "Nova"
 generation_details = "Detalhes da geração"
 
+[scenes.cast]
+title = "Pessoas nesta cena"
+hint = "O Bardo desenha um retrato de referência de cada pessoa que volta no vídeo e o envia com toda cena em que ela aparece, para que mantenha o mesmo rosto, tom de pele e roupas."
+later = "Ainda sem retrato: ele é desenhado antes da primeira cena que mostra esta pessoa."
+edit = "Editar aparência"
+redraw = "Desenhar retrato de novo"
+failed = "O retrato não foi desenhado:"
+edited = "Editado"
+
 [costs.column]
 provider = "Provedor"
 usage = "Uso"
@@ -2839,7 +2848,7 @@ body = "Cada cena em ordem, com o tempo, a imagem e como está: para desenhar, p
 
 [tour.scenes.scene]
 title = "Uma cena"
-body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem. Edite o prompt para mudar o que o próximo desenho mostra."
+body = "A cena escolhida: o trecho da narração que ela cobre, a imagem e o prompt de imagem, e as pessoas que voltam no vídeo com os retratos de referência, para que fiquem iguais em toda cena. Edite o prompt para mudar o que o próximo desenho mostra."
 
 [tour.scenes.redraw]
 title = "Desenhe de novo"
@@ -2866,7 +2875,7 @@ body = "Um clipe anima a imagem de uma cena num vídeo curto, com a duração da
 
 [tour.clips.motion]
 title = "Movimento"
-body = "Como a imagem se move: o assunto, a ação, a câmera. Vazio, ele segue o prompt de imagem."
+body = "Como a imagem se move: um movimento de câmera e no máximo uma ação simples. O Claude o escreve com as cenas; edite-o para mudar o próximo clipe."
 
 [tour.clips.model]
 title = "Modelo de vídeo"

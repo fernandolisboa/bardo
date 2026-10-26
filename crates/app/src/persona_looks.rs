@@ -355,6 +355,7 @@ impl PersonaLookHandler {
         let request = ImageRequest {
             prompt: prompt.to_owned(),
             shape: ImageShape::Portrait,
+            references: Vec::new(),
         };
         let image = self.images.generate(&key, &request).map_err(|failure| {
             JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))

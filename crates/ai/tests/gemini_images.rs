@@ -8,8 +8,9 @@ use bardo_ai::gemini::{IMAGE_MODEL, IMAGE_SIZE, MODELS_URL};
 use bardo_ai::http::Method;
 use bardo_domain::{
     ApiKey, AspectRatio, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Metered, Provider,
-    ProviderFailureKind,
+    ProviderFailureKind, ReferenceImage,
 };
+use base64::Engine as _;
 use common::{Scripted, fixture, recording_sleeper};
 
 const KEY: &str = "AIzaSyTestKeyForBardo0000000000000000";
@@ -24,6 +25,7 @@ fn request() -> ImageRequest {
     ImageRequest {
         prompt: PROMPT.into(),
         shape: AspectRatio::Landscape.into(),
+        references: Vec::new(),
     }
 }
 
@@ -68,6 +70,34 @@ fn a_short_asks_for_a_tall_image() {
         sent.body["generationConfig"]["imageConfig"]["aspectRatio"],
         "9:16"
     );
+}
+
+#[test]
+fn reference_portraits_go_inline_after_the_prompt_in_order() {
+    let adapter = images(&["generate-image"]);
+    let jpeg = vec![0xFF, 0xD8, 0xFF, 0xD9];
+    let with = ImageRequest {
+        references: vec![
+            ReferenceImage {
+                bytes: FINAL_IMAGE.to_vec(),
+                format: ImageFormat::Png,
+            },
+            ReferenceImage {
+                bytes: jpeg.clone(),
+                format: ImageFormat::Jpeg,
+            },
+        ],
+        ..request()
+    };
+    adapter.generate(&key(), &with).unwrap();
+    let parts = &adapter.transport().sent()[0].body["contents"][0]["parts"];
+    assert_eq!(parts.as_array().unwrap().len(), 3);
+    assert_eq!(parts[0]["text"], PROMPT);
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+    assert_eq!(parts[1]["inlineData"]["data"], encode(FINAL_IMAGE));
+    assert_eq!(parts[2]["inlineData"]["mimeType"], "image/jpeg");
+    assert_eq!(parts[2]["inlineData"]["data"], encode(&jpeg));
 }
 
 #[test]

@@ -1443,6 +1443,13 @@ pub enum Text {
     SceneCardToAnimate,
     SceneCardAnimating,
     SceneImagePrompt,
+    SceneCast,
+    SceneCastHint,
+    CastPortraitLater,
+    EditCastDescription,
+    RedrawCastPortrait,
+    CastPortraitFailed,
+    CastEdited,
     SceneCurrentImage,
     SceneNewImage,
     ProjectSwitch,
@@ -3900,6 +3907,13 @@ impl Text {
             Text::SceneCardToAnimate => "scenes.card.to_animate",
             Text::SceneCardAnimating => "scenes.card.animating",
             Text::SceneImagePrompt => "scenes.inspector.image_prompt",
+            Text::SceneCast => "scenes.cast.title",
+            Text::SceneCastHint => "scenes.cast.hint",
+            Text::CastPortraitLater => "scenes.cast.later",
+            Text::EditCastDescription => "scenes.cast.edit",
+            Text::RedrawCastPortrait => "scenes.cast.redraw",
+            Text::CastPortraitFailed => "scenes.cast.failed",
+            Text::CastEdited => "scenes.cast.edited",
             Text::SceneCurrentImage => "scenes.inspector.current",
             Text::SceneNewImage => "scenes.inspector.new",
             Text::ProjectSwitch => "projects.switch",
@@ -6358,6 +6372,13 @@ mod tests {
         texts.push(Text::SceneCardToAnimate);
         texts.push(Text::SceneCardAnimating);
         texts.push(Text::SceneImagePrompt);
+        texts.push(Text::SceneCast);
+        texts.push(Text::SceneCastHint);
+        texts.push(Text::CastPortraitLater);
+        texts.push(Text::EditCastDescription);
+        texts.push(Text::RedrawCastPortrait);
+        texts.push(Text::CastPortraitFailed);
+        texts.push(Text::CastEdited);
         texts.push(Text::SceneCurrentImage);
         texts.push(Text::SceneNewImage);
         texts.push(Text::ProjectSwitch);

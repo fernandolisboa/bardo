@@ -1769,6 +1769,15 @@ current = "Current"
 new = "New"
 generation_details = "Generation details"
 
+[scenes.cast]
+title = "People in this scene"
+hint = "Bardo draws one reference portrait of each person who comes back in the video and sends it with every scene they are in, so they keep the same face, skin tone and clothes."
+later = "No portrait yet: it is drawn before the first scene that shows this person."
+edit = "Edit look"
+redraw = "Draw portrait again"
+failed = "The portrait was not drawn:"
+edited = "Edited"
+
 [costs.column]
 provider = "Provider"
 usage = "Usage"
@@ -2839,7 +2848,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt. Edit the prompt to change what the next drawing shows."
+body = "The scene you picked: the narration it covers, its image and its image prompt, and the people who come back in the video with their reference portraits, so they look the same in every scene. Edit the prompt to change what the next drawing shows."
 
 [tour.scenes.redraw]
 title = "Draw again"
@@ -2866,7 +2875,7 @@ body = "A clip animates a scene's image into a short video, as long as the scene
 
 [tour.clips.motion]
 title = "Motion"
-body = "How the image moves: the subject, the action, the camera. Left empty, it follows the image prompt."
+body = "How the image moves: one camera move and at most one simple action. Claude writes it with the scenes; edit it to change the next clip."
 
 [tour.clips.model]
 title = "Video model"
