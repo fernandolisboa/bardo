@@ -4,6 +4,54 @@ What changed in each version of Bardo, newest first. Each version is a
 [release on GitHub](https://github.com/fernandolisboa/bardo/releases) with the
 installer, and its notes there are the section below.
 
+## 0.3.0
+
+### Cost of a video
+
+- **Production modes** (#248): each channel picks how much of its videos
+  moves, and a project can pick its own in its header. **Economy** keeps still
+  images with motion and no clips; **Animated hook** animates only the scenes
+  in the first 10 seconds, with Kling 2.6 at 720p; **All animated** animates
+  every scene with Kling 2.6 at 720p; **Premium** every scene with Kling 3.0
+  at 1080p; **Channel model** every scene with the channel's clip model.
+- **Whole-video estimate** (#248): the mode menu shows an approximate price
+  for every mode, counting only what is left to make: script and plan,
+  narration, pictures, portraits and clips. A mode whose clips need a key you
+  have not saved says so.
+- **Spend cap per video** (#248): set a cap in the project header, and a paid
+  step that would take the video past it asks first, with what the rest of the
+  video would cost.
+- **Cheaper performed takes** (#243):
+  - Kling 3.0 Motion Control straight from Kling, on the Kling key, with an
+    optional draft on Kling 2.6. The control video is hosted in your BytePlus
+    bucket when that key is saved, or else with Higgsfield's free upload on
+    the Higgsfield key.
+  - **Make final without a draft** where the final is a new take.
+  - A test take: the first 5 seconds of a take at the model's cheapest tier,
+    approved before any draft or final for the persona's look.
+  - Preflight checks: one person, in frame, face large enough, steady motion
+    and framed like the look. A take that fails one waits for **Send anyway**.
+  - A cap on what a video's takes cost (US$ 10 unless you change it), with
+    what they cost so far and what they still need on the Capture stage.
+
+### Scenes and clips
+
+- **Recurring people** (#246): the scene plan names the people who come back
+  across scenes, each with one fixed look. Bardo draws a reference portrait of
+  each before their first scene and draws every scene that shows them from it,
+  so they look the same throughout. In the Scenes inspector you can edit a
+  person's look or draw the portrait again.
+- **Planned motion** (#246): the plan gives each scene a motion prompt, and
+  its clip uses it unless you wrote your own.
+
+### Upgrading from 0.2.0
+
+Projects, keys and connections carry over. Existing channels use the Channel
+model mode, so their videos are animated as before; new channels start on
+Animated hook. Scene plans made before this version have no recurring people,
+and their clips keep using the image prompt until the scenes are planned
+again.
+
 ## 0.2.0
 
 ### Performance capture
