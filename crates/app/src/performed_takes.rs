@@ -1763,17 +1763,10 @@ impl Bardo {
         self.backup_time_text(at)
     }
 
-    /// Every take model offered, the default first: the providers with a
-    /// key saved before the others, so the default is one that can run
-    /// (#251).
+    /// Every take model offered, the default first.
     pub fn take_models(&self) -> Vec<TakeModel> {
-        let (keyed, rest): (Vec<_>, Vec<_>) = self
-            .takes
+        self.takes
             .iter()
-            .partition(|generator| self.has_take_key(generator.provider()));
-        keyed
-            .into_iter()
-            .chain(rest)
             .flat_map(|generator| generator.models())
             .collect()
     }
@@ -2244,7 +2237,7 @@ impl Bardo {
     }
 
     /// Makes take `index` go to `model`, or to the channel's with `None`
-    /// (or when `model` is the one the channel picked). A mode the model does not take
+    /// (or when `model` is the channel's). A mode the model does not take
     /// becomes its first, which builds the control video again.
     pub fn set_take_model(
         &self,
@@ -2264,16 +2257,7 @@ impl Bardo {
             return Err(CaptureError::TakeModelNotOffered);
         }
         let (_, channel) = self.take_model_at(&capture, index)?;
-        // Back to the channel's only when the channel picked that model
-        // itself: the default a channel follows moves with the keys saved
-        // (#251), and a take pointed at a model stays on it.
-        let channel_id = self
-            .themes
-            .project(project)?
-            .ok_or(CaptureError::ProjectNotFound)?
-            .channel;
-        let picked = self.channel_take_ref(channel_id)?;
-        let own = model.filter(|wanted| picked.as_ref() != Some(wanted));
+        let own = model.filter(|wanted| channel.as_ref().is_none_or(|c| c.id != *wanted));
         let take = &capture.takes.as_slice()[index];
         let effective = take_model_of(&models, channel.as_ref().map(|c| &c.id), own.as_ref());
         let mode = match effective {
@@ -4188,49 +4172,6 @@ mod tests {
             .make_performed_take(project, 0, TakeStep::Test, BudgetConsent::Ask)
             .unwrap();
         wait_done(&s.app, id)
-    }
-
-    #[test]
-    fn the_default_take_model_follows_a_provider_whose_key_is_saved() {
-        let (mut s, project, _) = ready();
-        let default = |s: &Setup| {
-            performed(s, project)
-                .channel_model
-                .map(|model| model.id.provider())
-        };
-        assert_eq!(default(&s), Some(Provider::Higgsfield));
-
-        // Without Higgsfield's key, BytePlus ModelArk's, then Kling's.
-        s.app.remove_provider_key(Provider::Higgsfield).unwrap();
-        s.app.save_provider_key(Provider::Kling, KLING_KEY).unwrap();
-        assert_eq!(default(&s), Some(Provider::Kling));
-        let [api, ak, sk, bucket, region] = BYTEPLUS_FIELDS;
-        s.app
-            .save_byteplus_key(api, ak, sk, bucket, region)
-            .unwrap();
-        assert_eq!(default(&s), Some(Provider::BytePlus));
-
-        // With no take key at all, the first provider, as before.
-        s.app.remove_provider_key(Provider::BytePlus).unwrap();
-        s.app.remove_provider_key(Provider::Kling).unwrap();
-        assert_eq!(default(&s), Some(Provider::Higgsfield));
-
-        // A take pointed at the default model stays on it when a key moves
-        // the default: Kling's take keeps Kling once Higgsfield's key is
-        // saved to stage its video.
-        s.app.save_provider_key(Provider::Kling, KLING_KEY).unwrap();
-        let motion = crate::testing::FakeKling::motion();
-        s.app
-            .set_take_model(project, 0, Some(motion.clone()))
-            .unwrap();
-        s.app
-            .save_provider_key(Provider::Higgsfield, HIGGSFIELD_KEY)
-            .unwrap();
-        assert_eq!(default(&s), Some(Provider::Higgsfield));
-        assert_eq!(
-            view(&s, project, 0).model.map(|model| model.id),
-            Some(motion)
-        );
     }
 
     #[test]

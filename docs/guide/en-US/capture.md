@@ -96,7 +96,7 @@ In Depth mode, **Set** picks where you appear: **Your room**, as recorded; a **S
 
 Once a take's control video is approved, its take model makes the persona perform it: the persona's [look](personas.md#look) moves, speaks and turns as you do in the take. Takes go to the channel's take model ([Channels](channels.md#defaults)); **Take model** under the take picks another for that take alone. Each model is named with the provider it runs on, with your key there ([Your API keys](api-keys.md#providers)):
 
-- **Kling 3.0 Motion Control · Higgsfield**, the default while the Higgsfield key is saved, takes Recording takes of 3 to 30 seconds and makes the final straight away, at 1080p.
+- **Kling 3.0 Motion Control · Higgsfield**, the default, takes Recording takes of 3 to 30 seconds and makes the final straight away, at 1080p.
 - **Seedance 2.5 Video Edit · Higgsfield** takes Mesh and Depth takes of 4 to 30 seconds: a draft at 480p first, then the final at 1080p, made anew.
 - **Seedance 2.5 Video Edit · BytePlus ModelArk** takes the same takes, straight from ModelArk: a draft at 480p, then a final that finishes that same draft at 1080p, so the final keeps what you approved in the draft. See [On BytePlus ModelArk](#byteplus).
 - **Kling 3.0 Motion Control 720p · Kling** and **Kling 3.0 Motion Control 1080p · Kling** take Recording takes of 3 to 30 seconds straight from Kling, with the Kling key Bardo already keeps for clips, for less than through Higgsfield. An optional draft on Kling 2.6 at 720p costs about half of a 720p final. See [Straight from Kling](#kling).

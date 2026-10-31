@@ -96,7 +96,7 @@ No modo Profundidade, **Cenário** escolhe onde você aparece: **Seu ambiente**,
 
 Depois que o vídeo de controle de uma tomada é aprovado, o modelo de tomada faz a persona interpretá-la: a [aparência](personas.md#look) da persona se mexe, fala e vira como você na tomada. As tomadas vão para o modelo de tomada do canal ([Canais](channels.md#defaults)); **Modelo de tomada**, abaixo da tomada, escolhe outro só para ela. Cada modelo aparece com o provedor em que roda, com a sua chave de lá ([Suas chaves de API](api-keys.md#providers)):
 
-- **Kling 3.0 Motion Control · Higgsfield**, o padrão enquanto a chave da Higgsfield estiver salva, aceita tomadas em Gravação de 3 a 30 segundos e faz a versão final direto, em 1080p.
+- **Kling 3.0 Motion Control · Higgsfield**, o padrão, aceita tomadas em Gravação de 3 a 30 segundos e faz a versão final direto, em 1080p.
 - **Seedance 2.5 Video Edit · Higgsfield** aceita tomadas em Malha e Profundidade de 4 a 30 segundos: primeiro um rascunho em 480p, depois a versão final em 1080p, feita do zero.
 - **Seedance 2.5 Video Edit · BytePlus ModelArk** aceita as mesmas tomadas, direto do ModelArk: um rascunho em 480p, depois uma versão final que completa esse mesmo rascunho em 1080p, então a versão final mantém o que você aprovou no rascunho. Veja [No BytePlus ModelArk](#byteplus).
 - **Kling 3.0 Motion Control 720p · Kling** e **Kling 3.0 Motion Control 1080p · Kling** aceitam tomadas em Gravação de 3 a 30 segundos direto do Kling, com a chave do Kling que o Bardo já guarda para clipes, por menos do que pela Higgsfield. Um rascunho opcional no Kling 2.6 em 720p custa cerca de metade de uma versão final em 720p. Veja [Direto do Kling](#kling).
