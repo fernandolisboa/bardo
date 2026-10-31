@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler};
 use crate::scenes::{id, parse, to_json, unexpected};
-use crate::{Bardo, SceneError};
+use crate::{Bardo, KeyState, SceneError};
 
 /// How many rounds of status checks in a row may all fail on the
 /// provider's side before the job gives up for now (the queue retries it
@@ -655,10 +655,16 @@ fn clip_payload(job: &Job) -> Option<ClipsPayload> {
 
 impl Bardo {
     /// Every model the video providers offer, each provider's default
-    /// first.
+    /// first, and the providers with a key saved before the others: the
+    /// first model is the default of channels that keep it, so it is one
+    /// that can run (#251).
     pub fn clip_models(&self) -> Vec<ClipModel> {
-        self.clips
-            .iter()
+        let (keyed, rest): (Vec<_>, Vec<_>) = self.clips.iter().partition(|generator| {
+            self.provider_key(generator.provider()).state != KeyState::NotSet
+        });
+        keyed
+            .into_iter()
+            .chain(rest)
             .flat_map(|generator| generator.models())
             .collect()
     }
@@ -1269,6 +1275,75 @@ mod tests {
             };
             Ok(bardo_ai::http::HttpResponse::new(200, body))
         }
+    }
+
+    #[test]
+    fn a_channel_on_the_default_model_follows_a_provider_whose_key_is_saved() {
+        let mut h = Harness::new();
+        h.more_clips.push(Arc::new(bardo_ai::KlingClips::new()));
+        h.more_clips.push(Arc::new(bardo_ai::GoogleClips::new()));
+        let mut app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, None);
+        let default = |app: &Bardo| {
+            let model = app
+                .channel_clip_model(&app.clip_models(), project.channel)
+                .unwrap()
+                .unwrap();
+            (model.id.provider(), model.id.model().to_owned())
+        };
+        let missing_key = |app: &Bardo| {
+            app.production(project.id)
+                .unwrap()
+                .estimate(ProductionMode::ChannelModel)
+                .unwrap()
+                .missing_key
+        };
+
+        // The harness saves Higgsfield's key and Gemini's: Higgsfield, the
+        // first provider, stays the default, as before.
+        assert_eq!(default(&app).0, Provider::Higgsfield);
+        assert_eq!(missing_key(&app), None);
+
+        // Without Higgsfield's key, Veo through the Gemini key already
+        // saved for images.
+        app.remove_provider_key(Provider::Higgsfield).unwrap();
+        assert_eq!(
+            default(&app),
+            (
+                Provider::Gemini,
+                bardo_ai::google_clips::DEFAULT_MODEL.to_owned()
+            )
+        );
+        assert_eq!(missing_key(&app), None);
+
+        // Kling comes before Google, as on the list.
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        assert_eq!(
+            default(&app),
+            (Provider::Kling, bardo_ai::kling::DEFAULT_MODEL.to_owned())
+        );
+        assert_eq!(
+            app.clip_models().first().map(|model| model.id.provider()),
+            Some(Provider::Kling),
+            "the menus list a provider with a key first"
+        );
+
+        // With no video key at all, the first provider again: it asks for
+        // its key.
+        app.remove_provider_key(Provider::Kling).unwrap();
+        app.remove_provider_key(Provider::Gemini).unwrap();
+        assert_eq!(default(&app).0, Provider::Higgsfield);
+        assert_eq!(missing_key(&app), Some(Provider::Higgsfield));
+
+        // A channel's own pick stays, whatever keys are saved.
+        let veo =
+            ClipModelRef::new(Provider::Gemini, bardo_ai::google_clips::DEFAULT_MODEL).unwrap();
+        channel_uses(&app, &project, Some(veo.clone()));
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        assert_eq!(default(&app).0, Provider::Gemini);
     }
 
     #[test]
