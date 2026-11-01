@@ -43,7 +43,7 @@ Um modelo tem duas partes, cada uma com até 8.000 caracteres:
 <a id="variables"></a>
 ## Variáveis
 
-Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do projeto. A lista sob o editor mostra as variáveis que este tipo de modelo pode usar e o que cada uma traz, como `{{channel_name}}`, `{{persona}}` ou `{{narration_sentences}}`. `{{video_title}}` é o título do YouTube quando já foi escrito, senão o do projeto. `{{target_length}}` e `{{frame_shape}}` seguem o [formato](projects.md#format) do vídeo: o tamanho do roteiro e o formato das imagens. Uma variável escrita errado ou desconhecida, ou sem o `}}` de fechamento, impede que o modelo seja salvo.
+Escreva uma variável como `{{nome}}`; cada geração a troca pelo valor do projeto. A lista sob o editor mostra as variáveis que este tipo de modelo pode usar e o que cada uma traz, como `{{channel_name}}`, `{{persona}}` ou `{{narration_sentences}}`. `{{video_title}}` é o título do YouTube quando já foi escrito, senão o do projeto. `{{target_length}}` e `{{frame_shape}}` seguem o [formato](projects.md#format) do vídeo: o tamanho do roteiro (ou a [duração](projects.md#length) do projeto, quando ele escolhe uma) e o formato das imagens. Um modelo de roteiro sem `{{target_length}}` ignora os dois. Uma variável escrita errado ou desconhecida, ou sem o `}}` de fechamento, impede que o modelo seja salvo.
 
 <a id="save"></a>
 ## Salvar e recomeçar

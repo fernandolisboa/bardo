@@ -13,8 +13,8 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, VideoProject,
-    VideoProjectId, typical_length, typical_scenes,
+    ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, VideoLength,
+    VideoProject, VideoProjectId, typical_length, typical_scenes,
 };
 
 use crate::costs::{BudgetConsent, CapReached, PlannedCall, SpendEstimate};
@@ -200,7 +200,9 @@ impl Bardo {
             (None, Some(script)) => Duration::from_secs(
                 (script.text().as_str().chars().count() as u64).div_ceil(CHARS_PER_SECOND),
             ),
-            (None, None) => typical_length(format),
+            (None, None) => project
+                .length
+                .map_or_else(|| typical_length(format), VideoLength::duration),
         };
         if narration.is_none() {
             let characters = match &script {

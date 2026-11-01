@@ -449,6 +449,7 @@ mod tests {
                 format: None,
                 production: None,
                 spend_cap: None,
+                length: None,
             };
             let id = project.id;
             self.projects.push(project);

@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use crate::{
     ChannelId, Confidence, JobId, Money, Niche, PerformanceReason, PersonaId, ProductionMode,
-    ProfileId, RepositoryError, Score, VideoFormat,
+    ProfileId, RepositoryError, Score, VideoFormat, VideoLength,
 };
 
 uuid_id!(
@@ -360,6 +360,7 @@ impl Theme {
             format: None,
             production: None,
             spend_cap: None,
+            length: None,
         })
     }
 }
@@ -400,6 +401,9 @@ pub struct VideoProject {
     pub production: Option<ProductionMode>,
     /// What it may cost before Bardo asks (#248); `None` has no cap.
     pub spend_cap: Option<Money>,
+    /// How long its script runs instead of its format's length (#253);
+    /// `None` follows the format.
+    pub length: Option<VideoLength>,
 }
 
 impl VideoProject {
@@ -416,6 +420,13 @@ impl VideoProject {
     /// How it is produced: its own mode, else the channel's.
     pub fn production(&self, channel_default: ProductionMode) -> ProductionMode {
         self.production.unwrap_or(channel_default)
+    }
+
+    /// What the script template asks for: its own length, else its
+    /// format's.
+    pub fn target_length(&self, format: VideoFormat) -> &'static str {
+        self.length
+            .map_or_else(|| format.target_length(), VideoLength::target_length)
     }
 }
 
@@ -466,6 +477,13 @@ pub trait ThemeRepository: Send + Sync {
         &self,
         id: VideoProjectId,
         cap: Option<Money>,
+    ) -> Result<(), RepositoryError>;
+
+    /// Sets or clears (`None`, the format's) the project's length.
+    fn set_project_length(
+        &self,
+        id: VideoProjectId,
+        length: Option<VideoLength>,
     ) -> Result<(), RepositoryError>;
 }
 
@@ -524,6 +542,14 @@ impl<T: ThemeRepository + ?Sized> ThemeRepository for Arc<T> {
         cap: Option<Money>,
     ) -> Result<(), RepositoryError> {
         (**self).set_project_spend_cap(id, cap)
+    }
+
+    fn set_project_length(
+        &self,
+        id: VideoProjectId,
+        length: Option<VideoLength>,
+    ) -> Result<(), RepositoryError> {
+        (**self).set_project_length(id, length)
     }
 }
 

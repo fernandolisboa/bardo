@@ -331,7 +331,7 @@ impl Bardo {
             (TemplateVariable::ThemeAngle, or_not_set(&angle)),
             (
                 TemplateVariable::TargetLength,
-                format.target_length().to_owned(),
+                project.target_length(format).to_owned(),
             ),
             (
                 TemplateVariable::FrameShape,

@@ -135,6 +135,7 @@ pub mod refs {
     pub const PERFORMANCE_DROPS: GuideRef = at("performance-metrics", "drops");
     pub const PROJECTS_NARRATOR: GuideRef = at("projects", "narrator");
     pub const PROJECTS_FORMAT: GuideRef = at("projects", "format");
+    pub const PROJECTS_LENGTH: GuideRef = at("projects", "length");
     pub const PROJECTS_MODE: GuideRef = at("projects", "mode");
     pub const SCRIPT_WRITE: GuideRef = at("script", "write");
     pub const SCRIPT_REVIEW: GuideRef = at("script", "review");
@@ -218,7 +219,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 90] = [
+    pub const ALL: [GuideRef; 91] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -229,6 +230,7 @@ pub mod refs {
         PERFORMANCE_NUMBERS,
         PERFORMANCE_SYNC,
         PROJECTS_NARRATOR,
+        PROJECTS_LENGTH,
         PROJECTS_MODE,
         SCRIPT_WRITE,
         SCRIPT_REVIEW,

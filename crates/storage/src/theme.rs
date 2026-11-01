@@ -1,8 +1,8 @@
 use bardo_domain::{
     ChannelId, Confidence, EvidenceScope, JobId, Money, Niche, PerformanceEvidence,
     PerformanceReason, PersonaId, ProductionMode, ProfileId, Reason, RepositoryError, Score, Theme,
-    ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository, VideoFormat, VideoProject,
-    VideoProjectId,
+    ThemeId, ThemeIdea, ThemeRanking, ThemeRecord, ThemeRepository, VideoFormat, VideoLength,
+    VideoProject, VideoProjectId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -18,7 +18,7 @@ const SELECT_THEME: &str = "SELECT id, profile_id, channel_id, niche, title, ang
     FROM theme";
 
 pub(crate) const SELECT_PROJECT: &str = "SELECT id, profile_id, channel_id, niche, theme_id, title, created_at, persona_id, \
-     video_format, production_mode, spend_cap_micros FROM video_project";
+     video_format, production_mode, spend_cap_micros, video_length FROM video_project";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored theme is invalid: {0}")]
@@ -254,6 +254,7 @@ pub(crate) struct ProjectRow {
     format: Option<String>,
     production: Option<String>,
     spend_cap: Option<i64>,
+    length: Option<String>,
 }
 
 impl ProjectRow {
@@ -270,6 +271,7 @@ impl ProjectRow {
             format: row.get(8)?,
             production: row.get(9)?,
             spend_cap: row.get(10)?,
+            length: row.get(11)?,
         })
     }
 
@@ -298,6 +300,10 @@ impl ProjectRow {
                 .spend_cap
                 .map(|micros| u64::try_from(micros).map(Money::from_micros).map_err(boxed))
                 .transpose()?,
+            length: self
+                .length
+                .map(|code| code.parse::<VideoLength>().map_err(boxed))
+                .transpose()?,
         })
     }
 }
@@ -312,8 +318,8 @@ pub(crate) fn insert_project(
     tx.execute(
         "INSERT INTO video_project (id, profile_id, channel_id, niche, theme_id, title,
                                     created_at, persona_id, video_format, production_mode,
-                                    spend_cap_micros)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                                    spend_cap_micros, video_length)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             project.id.to_string(),
             project.owner.to_string(),
@@ -326,6 +332,7 @@ pub(crate) fn insert_project(
             project.format.map(VideoFormat::code),
             project.production.map(ProductionMode::code),
             project.spend_cap.map(micros).transpose()?,
+            project.length.map(VideoLength::code),
         ],
     )
     .map_err(boxed)?;
@@ -456,6 +463,20 @@ impl ThemeRepository for Database {
             .execute(
                 "UPDATE video_project SET spend_cap_micros = ?2 WHERE id = ?1",
                 params![id.to_string(), cap.map(micros).transpose()?],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn set_project_length(
+        &self,
+        id: VideoProjectId,
+        length: Option<VideoLength>,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE video_project SET video_length = ?2 WHERE id = ?1",
+                params![id.to_string(), length.map(VideoLength::code)],
             )
             .map_err(boxed)?;
         Ok(())
@@ -691,6 +712,25 @@ mod tests {
         db.set_project_production(project.id, None).unwrap();
         db.set_project_spend_cap(project.id, None).unwrap();
         assert_eq!((stored().production, stored().spend_cap), (None, None));
+    }
+
+    #[test]
+    fn a_project_keeps_its_own_length_or_follows_its_format() {
+        let (db, channel) = setup();
+        let mut approved = theme(&channel, "The lost cosmonauts", 0);
+        db.save_themes(std::slice::from_ref(&approved)).unwrap();
+        let project = approved.approve(time(1_800_000_200)).unwrap();
+        db.start_project(&approved, &project).unwrap();
+        let stored = || db.project(project.id).unwrap().unwrap();
+        assert_eq!(stored().length, None);
+
+        db.set_project_length(project.id, Some(VideoLength::Minutes3))
+            .unwrap();
+        assert_eq!(stored().length, Some(VideoLength::Minutes3));
+        assert_eq!(db.projects(channel.id).unwrap(), [stored()]);
+
+        db.set_project_length(project.id, None).unwrap();
+        assert_eq!(stored().length, None);
     }
 
     #[test]

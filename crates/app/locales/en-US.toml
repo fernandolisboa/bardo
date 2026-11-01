@@ -205,6 +205,13 @@ short = "Short (9:16, under a minute)"
 long = "Long (16:9, 8 to 10 min)"
 short_brief = "Short"
 long_brief = "Long"
+short_length = "45 to 60 s"
+long_length = "8 to 10 min"
+
+[video_length]
+seconds_30 = "30 seconds"
+minute_1 = "1 minute"
+minutes_3 = "3 minutes"
 
 [production_mode]
 economy = "Economy"
@@ -570,7 +577,10 @@ narrator_channel_none = "Channel default (none set)"
 narrator_hint = "Reads this video's narration and shapes its script. Pick a persona to use it for this video only."
 format = "Format"
 format_channel = "Channel's: {format}"
-format_hint = "Short or long video. It sets the length of the next script, the shape of the next pictures and new cuts, and YouTube's preset. What was already made stays as it is."
+format_hint = "Short or long video. It sets the length of the next script (unless the project picks a length), the shape of the next pictures and new cuts, and YouTube's preset. What was already made stays as it is."
+length = "Length"
+length_format = "Format's: {length}"
+length_hint = "How long the next script runs: the format's length, or 30 seconds, 1 minute or 3 minutes, under the 3:00 Shorts and Reels take (X takes 2:20). The format keeps the shape and the preset. The whole-video estimate follows it until a script exists."
 mode = "Mode"
 mode_channel = "Channel's: {mode}"
 mode_option = "{mode} · about {amount}"
@@ -1073,7 +1083,7 @@ narration_sentences = "The narration, one numbered sentence per line with when i
 video_length = "The video's length, from its narration (\"not known yet\" before there is one)."
 script = "The approved script."
 networks = "The channel's network accounts, one per line, with each network's fields and limits, the account's language, default tags and footer."
-target_length = "How long the script runs, from the video's format: under a minute for a Short, 8 to 10 minutes for a long video."
+target_length = "How long the script runs: the project's length when it picks one, else from the video's format: under a minute for a Short, 8 to 10 minutes for a long video."
 frame_shape = "The shape of the pictures, from the video's format: tall (9:16) for a Short, wide (16:9) for a long video."
 video_title = "The video's title on YouTube once the metadata is written, else its working title."
 source_language = "The language the version is adapted from: the source channel's."
@@ -2772,8 +2782,8 @@ title = "Who narrates it"
 body = "The narrator reads this video's narration and shapes its script. It is the channel's default persona unless you pick another one for this video only."
 
 [tour.projects.format]
-title = "Short or long"
-body = "A Short is a vertical video of under a minute; a long video is 16:9 and runs 8 to 10 minutes. The project follows its channel unless you pick the other here. It sets the next script's length, the shape of the next pictures and new cuts, and YouTube's preset."
+title = "Short or long, and how long"
+body = "A Short is a vertical video of 45 to 60 seconds; a long video is 16:9 and runs 8 to 10 minutes. The project follows its channel unless you pick the other here. It sets the shape of the next pictures and new cuts, and YouTube's preset. Length beside it makes this video's script 30 seconds, 1 minute or 3 minutes instead of the format's length."
 
 [tour.projects.mode]
 title = "How it is produced, and what it costs"

@@ -43,7 +43,7 @@ A template has two parts, each up to 8,000 characters:
 <a id="variables"></a>
 ## Variables
 
-Write a variable as `{{name}}`; each generation replaces it with the project's value. The list under the editor shows the variables this kind of template can use and what each holds, such as `{{channel_name}}`, `{{persona}}` or `{{narration_sentences}}`. `{{video_title}}` is the YouTube title when written, else the project's. `{{target_length}}` and `{{frame_shape}}` follow the video's [format](projects.md#format): how long the script runs and the shape of the pictures. A misspelled or unknown variable, or one missing its closing `}}`, keeps the template from being saved.
+Write a variable as `{{name}}`; each generation replaces it with the project's value. The list under the editor shows the variables this kind of template can use and what each holds, such as `{{channel_name}}`, `{{persona}}` or `{{narration_sentences}}`. `{{video_title}}` is the YouTube title when written, else the project's. `{{target_length}}` and `{{frame_shape}}` follow the video's [format](projects.md#format): how long the script runs (or the project's [length](projects.md#length) when it picks one) and the shape of the pictures. A script template without `{{target_length}}` ignores both. A misspelled or unknown variable, or one missing its closing `}}`, keeps the template from being saved.
 
 <a id="save"></a>
 ## Saving and starting over
