@@ -138,7 +138,7 @@ mod tests {
         );
         let script = h.text.requests().pop().unwrap();
         assert!(
-            script.prompt.contains("just under 3 minutes"),
+            script.prompt.contains("2 minutes 40 seconds"),
             "{}",
             script.prompt
         );

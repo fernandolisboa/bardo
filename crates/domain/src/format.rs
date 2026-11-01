@@ -125,13 +125,14 @@ impl VideoLength {
 
     /// How long its script runs, as the script template's
     /// `{{target_length}}` says it to the model: about 150 spoken words a
-    /// minute, a little under the length so the narration fits.
+    /// minute, under the length so a slower voice still fits; three
+    /// minutes keeps a margin under the 3:00 Shorts and Reels take.
     pub fn target_length(self) -> &'static str {
         match self {
             VideoLength::Seconds30 => "about 60 to 75 words (25 to 30 seconds spoken)",
             VideoLength::Minute1 => "about 130 to 150 words (50 to 60 seconds spoken)",
             VideoLength::Minutes3 => {
-                "about 400 to 440 words (2 minutes 40 seconds to just under 3 minutes spoken)"
+                "about 360 to 400 words (2 minutes 25 seconds to 2 minutes 40 seconds spoken)"
             }
         }
     }
@@ -196,10 +197,15 @@ mod tests {
                 .target_length()
                 .contains("30 seconds")
         );
-        assert!(
-            VideoLength::Minutes3
-                .target_length()
-                .contains("under 3 minutes")
-        );
+        // At 150 words a minute, the most words three minutes asks for
+        // leave a margin under 3:00 for a slower voice.
+        let most_words: u64 = VideoLength::Minutes3
+            .target_length()
+            .split(" to ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|words| words.parse().ok())
+            .unwrap();
+        assert!(most_words * 60 / 150 <= 165, "{most_words} words");
     }
 }
