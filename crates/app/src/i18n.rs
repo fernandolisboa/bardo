@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::{Destination, GuideGroup, Pillar, Stage, UploadBlock};
 
 use bardo_domain::ProductionMode;
+use bardo_domain::VideoLength;
 use bardo_domain::{
     AnalysisPart, ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionHighlight,
     CaptionStyle, CaptureProblem, ChannelFieldError, ContentLanguage, Country, DateOrder, Decibels,
@@ -152,6 +153,9 @@ pub enum Text {
     VideoFormatName(VideoFormat),
     /// The format in one word, where the full name does not fit.
     VideoFormatBrief(VideoFormat),
+    /// How long a video of the format runs, as a range.
+    VideoFormatLength(VideoFormat),
+    VideoLengthName(VideoLength),
     /// No transition: a hard cut.
     TransitionCut,
     MotionName(MotionKind),
@@ -269,6 +273,10 @@ pub enum Text {
     /// Placeholder: `{format}`.
     ProjectFormatChannel,
     ProjectFormatHint,
+    ProjectLength,
+    /// Placeholder: `{length}`.
+    ProjectLengthFormat,
+    ProjectLengthHint,
     ProductionModeName(ProductionMode),
     /// One sentence on what the mode makes.
     ProductionModeAbout(ProductionMode),
@@ -2546,6 +2554,15 @@ impl Text {
                 VideoFormat::Short => "video_format.short_brief",
                 VideoFormat::Long => "video_format.long_brief",
             },
+            Text::VideoFormatLength(format) => match format {
+                VideoFormat::Short => "video_format.short_length",
+                VideoFormat::Long => "video_format.long_length",
+            },
+            Text::VideoLengthName(length) => match length {
+                VideoLength::Seconds30 => "video_length.seconds_30",
+                VideoLength::Minute1 => "video_length.minute_1",
+                VideoLength::Minutes3 => "video_length.minutes_3",
+            },
             Text::NetworkAccountFieldError(error) => match error {
                 NetworkAccountFieldError::HandleRequired => "network_account.error.handle_required",
                 NetworkAccountFieldError::HandleTooLong => "network_account.error.handle_too_long",
@@ -2673,6 +2690,9 @@ impl Text {
             Text::ProjectFormat => "projects.format",
             Text::ProjectFormatChannel => "projects.format_channel",
             Text::ProjectFormatHint => "projects.format_hint",
+            Text::ProjectLength => "projects.length",
+            Text::ProjectLengthFormat => "projects.length_format",
+            Text::ProjectLengthHint => "projects.length_hint",
             Text::ProductionModeName(mode) => match mode {
                 ProductionMode::Economy => "production_mode.economy",
                 ProductionMode::AnimatedHook => "production_mode.hook",
@@ -5310,6 +5330,9 @@ mod tests {
             Text::ProjectFormat,
             Text::ProjectFormatChannel,
             Text::ProjectFormatHint,
+            Text::ProjectLength,
+            Text::ProjectLengthFormat,
+            Text::ProjectLengthHint,
             Text::ChannelProduction,
             Text::ChannelProductionHint,
             Text::ProjectMode,
@@ -6164,6 +6187,8 @@ mod tests {
         texts.extend(TransitionKind::ALL.map(Text::TransitionName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatName));
         texts.extend(VideoFormat::ALL.map(Text::VideoFormatBrief));
+        texts.extend(VideoFormat::ALL.map(Text::VideoFormatLength));
+        texts.extend(VideoLength::ALL.map(Text::VideoLengthName));
         texts.extend(ProductionMode::ALL.map(Text::ProductionModeName));
         texts.extend(ProductionMode::ALL.map(Text::ProductionModeAbout));
         texts.extend(TakeMode::ALL.map(Text::TakeModeName));

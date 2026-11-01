@@ -18,8 +18,8 @@ use std::time::Duration;
 use bardo_app::bardo_domain::{
     CaptureVoice, Channel, ChannelId, Generation, Job, JobKind, JobState, Narration,
     NarrationSource, Network, NetworkAccountId, PersonaId, ProductionMode, SceneFieldError,
-    ScenePlanId, ScriptFieldError, TemplateKind, VideoFormat, VideoMetadataDraft, VideoProject,
-    VideoProjectId,
+    ScenePlanId, ScriptFieldError, TemplateKind, VideoFormat, VideoLength, VideoMetadataDraft,
+    VideoProject, VideoProjectId,
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
@@ -120,6 +120,8 @@ pub struct ProjectsScreen {
     narrator_select: ChoiceSelect<Option<PersonaId>>,
     /// The project's format: the channel's (`None`), Short or Long.
     format_select: ChoiceSelect<Option<VideoFormat>>,
+    /// The project's length: its format's (`None`) or its own (#253).
+    length_select: ChoiceSelect<Option<VideoLength>>,
     /// The project's production mode: the channel's (`None`) or its own,
     /// each with what the whole video would cost in it.
     mode_select: ChoiceSelect<Option<ProductionMode>>,
@@ -339,6 +341,8 @@ impl ProjectsScreen {
         });
         let format_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let length_select =
+            cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let mode_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let spend_cap_input = cx.new(|cx| InputState::new(window, cx));
@@ -444,6 +448,19 @@ impl ProjectsScreen {
                 },
             ),
             cx.subscribe_in(
+                &length_select,
+                window,
+                |this,
+                 _,
+                 event: &SelectEvent<SearchableVec<Choice<Option<VideoLength>>>>,
+                 window,
+                 cx| {
+                    if let SelectEvent::Confirm(Some(length)) = event {
+                        this.set_length(*length, window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
                 &mode_select,
                 window,
                 |this,
@@ -464,6 +481,7 @@ impl ProjectsScreen {
             channel_select,
             narrator_select,
             format_select,
+            length_select,
             mode_select,
             production: None,
             spend_cap_input,
@@ -899,7 +917,8 @@ impl ProjectsScreen {
     }
 
     /// The format choices: the channel's (named), then Short and Long;
-    /// selects the project's own format or the channel's.
+    /// selects the project's own format or the channel's. Refills the
+    /// length choices too, which name the format's length.
     fn fill_format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(project) = self.view.as_ref().map(|view| view.project.clone()) else {
             return;
@@ -933,6 +952,61 @@ impl ProjectsScreen {
             select.set_items(choices, window, cx);
             select.set_selected_value(&project.format, window, cx);
         });
+        self.fill_length(project.format(channel_format), project.length, window, cx);
+    }
+
+    /// The length choices: the format's (named with its length), then 30
+    /// seconds, 1 minute and 3 minutes; selects the project's own.
+    fn fill_length(
+        &mut self,
+        format: VideoFormat,
+        length: Option<VideoLength>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bardo = self.bardo.read(cx);
+        let format_title = SharedString::from(bardo.text_with(
+            Text::ProjectLengthFormat,
+            &[("length", &bardo.text(Text::VideoFormatLength(format)))],
+        ));
+        let choices = SearchableVec::new(
+            std::iter::once(Choice {
+                value: None,
+                title: format_title,
+            })
+            .chain(VideoLength::ALL.map(|length| Choice {
+                value: Some(length),
+                title: tr(bardo, Text::VideoLengthName(length)),
+            }))
+            .collect::<Vec<_>>(),
+        );
+        self.length_select.update(cx, |select, cx| {
+            select.set_items(choices, window, cx);
+            select.set_selected_value(&length, window, cx);
+        });
+    }
+
+    /// Saves the project's length and re-reads the estimate it changes.
+    fn set_length(
+        &mut self,
+        length: Option<VideoLength>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self.view.as_ref().map(|view| &view.project) else {
+            return;
+        };
+        if project.length == length {
+            return;
+        }
+        let id = project.id;
+        match self.bardo.read(cx).set_project_length(id, length) {
+            Ok(_) => self.error = None,
+            Err(error) => self.error = Some(error.message()),
+        }
+        self.load(window, cx);
+        self.fill_format(window, cx);
+        cx.notify();
     }
 
     /// Saves the project's format and re-reads what depends on it.
@@ -1557,6 +1631,28 @@ impl ProjectsScreen {
                     )),
             )
             .into_any_element(),
+            // The format's tour step covers it.
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(bardo, Text::ProjectLength)),
+                )
+                .child(
+                    div()
+                        .w(px(220.))
+                        .child(Select::new(&self.length_select).small()),
+                )
+                .child(guide::info(
+                    bardo,
+                    "project-length-info",
+                    tr(bardo, Text::ProjectLengthHint),
+                    guide::refs::PROJECTS_LENGTH,
+                ))
+                .into_any_element(),
         ];
         header.actions.extend(mode);
         header

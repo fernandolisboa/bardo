@@ -205,6 +205,13 @@ short = "Short (9:16, menos de um minuto)"
 long = "Longo (16:9, 8 a 10 min)"
 short_brief = "Short"
 long_brief = "Longo"
+short_length = "45 a 60 s"
+long_length = "8 a 10 min"
+
+[video_length]
+seconds_30 = "30 segundos"
+minute_1 = "1 minuto"
+minutes_3 = "3 minutos"
 
 [production_mode]
 economy = "Econômico"
@@ -571,6 +578,9 @@ narrator_hint = "Lê a narração deste vídeo e molda o roteiro dele. Escolha u
 format = "Formato"
 format_channel = "Do canal: {format}"
 format_hint = "Short ou vídeo longo. Define o tamanho do próximo roteiro, o formato das próximas imagens e dos novos cortes, e o preset do YouTube. O que já foi feito fica como está."
+length = "Duração"
+length_format = "Do formato: {length}"
+length_hint = "Quanto dura o próximo roteiro: a duração do formato, ou 30 segundos, 1 minuto ou 3 minutos, abaixo dos 3:00 que Shorts e Reels aceitam. O formato continua definindo a forma da imagem (vertical ou 16:9) e o preset. A estimativa do vídeo inteiro segue a duração até existir um roteiro."
 mode = "Modo"
 mode_channel = "Do canal: {mode}"
 mode_option = "{mode} · cerca de {amount}"
@@ -2772,8 +2782,8 @@ title = "Quem narra"
 body = "O narrador lê a narração deste vídeo e dá forma ao roteiro. É a persona padrão do canal, a menos que você escolha outra só para este vídeo."
 
 [tour.projects.format]
-title = "Short ou longo"
-body = "Um Short é um vídeo vertical de menos de um minuto; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o tamanho do próximo roteiro, o formato das próximas imagens e dos novos cortes, e o preset do YouTube."
+title = "Short ou longo, e quanto dura"
+body = "Um Short é um vídeo vertical de 45 a 60 segundos; um vídeo longo é 16:9 e tem de 8 a 10 minutos. O projeto segue o canal, a não ser que você escolha o outro aqui. Isso define o formato das próximas imagens e dos novos cortes, e o preset do YouTube. Duração, ao lado, faz o roteiro deste vídeo ter 30 segundos, 1 minuto ou 3 minutos em vez da duração do formato."
 
 [tour.projects.mode]
 title = "Como é produzido, e quanto custa"

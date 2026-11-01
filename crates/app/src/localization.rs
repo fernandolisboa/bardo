@@ -619,6 +619,8 @@ impl LocalizationHandler {
             project.id = version;
             // Its pictures have the source's shape.
             project.format = Some(source.format(source_channel.details.format()));
+            // And its length: a version tells the same video.
+            project.length = source.length;
             let generation = Generation {
                 id: GenerationId::new(),
                 owner: self.owner,

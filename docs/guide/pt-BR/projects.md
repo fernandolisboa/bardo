@@ -27,10 +27,17 @@ O narrador é a persona que lê a narração do vídeo, e o tom e o estilo de ro
 
 O formato vale para o que for feito depois: o tamanho do próximo roteiro, o formato das próximas imagens e clipes das cenas, um corte novo no editor e o [preset de render](render.md#targets) do YouTube. O que já foi feito mantém o formato, então, depois de trocar, escreva o roteiro de novo e desenhe as cenas de novo para ter um vídeo coerente.
 
+<a id="length"></a>
+## Quanto tempo dura
+
+**Duração**, ao lado do formato, diz quanto dura o roteiro deste vídeo. **Do formato** mantém a duração do formato: 45 a 60 segundos num Short, 8 a 10 minutos num vídeo longo. Escolha **30 segundos**, **1 minuto** ou **3 minutos** só para este vídeo. Toda duração fica abaixo de 3:00, o máximo que Shorts do YouTube e Reels do Instagram aceitam, então um Short de 3 minutos continua sendo publicado como Short; um vídeo longo de 3 minutos é um vídeo 16:9 curto para o YouTube.
+
+A duração define só quanto dura o próximo roteiro e a [estimativa do vídeo inteiro](#mode) enquanto não existe roteiro; o formato continua definindo a forma das imagens, o corte e o [preset de render](render.md#targets). Um roteiro já escrito mantém a duração dele: escreva de novo depois de trocar. A narração dura o que o roteiro leva para ser lido, então confira a duração dela na etapa Narração antes de seguir.
+
 <a id="mode"></a>
 ## Como é produzido, e quanto vai custar
 
-**Modo**, ao lado do formato, diz como este vídeo é feito: quais cenas viram clipes de IA e com qual modelo. As outras cenas ficam em imagens paradas, com o [movimento nas imagens](channels.md#defaults) do canal.
+**Modo**, ao lado da duração, diz como este vídeo é feito: quais cenas viram clipes de IA e com qual modelo. As outras cenas ficam em imagens paradas, com o [movimento nas imagens](channels.md#defaults) do canal.
 
 - **Econômico**: imagens com movimento, sem clipes de IA. O mais barato.
 - **Gancho animado**: imagens com movimento, e as cenas que começam nos primeiros 10 segundos animadas pelo Kling 2.6 em 720p, para prender quem assiste. Canais novos começam assim.
@@ -38,7 +45,7 @@ O formato vale para o que for feito depois: o tamanho do próximo roteiro, o for
 - **Tudo animado, premium**: todas as cenas animadas pelo Kling 3.0 em 1080p.
 - **Tudo animado, modelo do canal**: todas as cenas animadas pelo [modelo de vídeo](channels.md#defaults) do canal, como fazem os canais criados antes dos modos.
 
-**Do canal** segue o [modo de produção](channels.md#production) do canal. Cada opção do menu mostra quanto o vídeo inteiro custaria naquele modo, e a linha ao lado mostra o total do modo escolhido e quanto já foi gasto. A estimativa soma o que falta fazer (roteiro, narração, plano de cenas, imagens e retratos, e os clipes que o modo faz) pela [tabela de preços](bardo:go/costs), então ela cai conforme o vídeo é feito. Antes de existir narração, ela supõe um minuto para um Short e oito para um vídeo longo. Com a tabela de preços que vem com o Bardo, um Short inteiro custa cerca de US$ 1,40 no Econômico, US$ 2,20 com o gancho animado, US$ 5,60 tudo animado e US$ 8,10 no premium; um vídeo longo, cerca de US$ 9, US$ 10, US$ 43 e US$ 63. O Kling 2.6 faz clipes de 5 ou 10 segundos, então uma cena de 6 segundos paga por 10.
+**Do canal** segue o [modo de produção](channels.md#production) do canal. Cada opção do menu mostra quanto o vídeo inteiro custaria naquele modo, e a linha ao lado mostra o total do modo escolhido e quanto já foi gasto. A estimativa soma o que falta fazer (roteiro, narração, plano de cenas, imagens e retratos, e os clipes que o modo faz) pela [tabela de preços](bardo:go/costs), então ela cai conforme o vídeo é feito. Antes de existir narração, ela supõe a [duração](#length) do vídeo, ou um minuto para um Short e oito para um vídeo longo. Com a tabela de preços que vem com o Bardo, um Short inteiro custa cerca de US$ 1,40 no Econômico, US$ 2,20 com o gancho animado, US$ 5,60 tudo animado e US$ 8,10 no premium; um vídeo longo, cerca de US$ 9, US$ 10, US$ 43 e US$ 63. Um vídeo de 30 segundos custa cerca de US$ 0,85 no Econômico e US$ 1,70 com o gancho animado; um de 3 minutos, cerca de US$ 3,60 e US$ 4,40. O Kling 2.6 faz clipes de 5 ou 10 segundos, então uma cena de 6 segundos paga por 10.
 
 Um modo cujos clipes precisam de uma chave que você não salvou avisa no menu: os modos do Kling precisam de uma chave Kling em [Configurações › Chaves de API](bardo:go/settings/keys). Trocar o modo vale para o que for animado depois: na etapa Clipes, **Animar cenas sem clipe** (ou **Animar o gancho**) anima só as cenas que o modo anima, clipes já feitos ficam, e qualquer cena ainda pode ser animada à mão com qualquer modelo.
 

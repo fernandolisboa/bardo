@@ -27,10 +27,17 @@ The narrator is the persona that reads the video's narration, and its tone and s
 
 The format applies to what is made next: the next script's length, the shape of the next scene images and clips, a new cut in the editor and YouTube's [render preset](render.md#targets). What was already made keeps its shape, so after switching, write the script again and draw the scenes again for a video that matches.
 
+<a id="length"></a>
+## How long it runs
+
+**Length**, beside the format, says how long this video's script runs. **Format's** keeps the format's length: 45 to 60 seconds for a Short, 8 to 10 minutes for a long video. Pick **30 seconds**, **1 minute** or **3 minutes** for this video alone. Every length stays under 3:00, the longest YouTube Shorts and Instagram Reels take, so a 3-minute Short still posts as a Short; a long video of 3 minutes is a short 16:9 upload for YouTube.
+
+The length sets only how long the next script runs and the [whole-video estimate](#mode) before a script exists; the format still sets the shape of the pictures, the cut and the [render preset](render.md#targets). A script already written keeps its length: write it again after switching. The narration runs as long as the script reads, so check its length on the Narration stage before moving on.
+
 <a id="mode"></a>
 ## How it is produced, and what it will cost
 
-**Mode** beside the format says how this video is made: which scenes become AI clips and with which model. The other scenes stay still pictures, moved by the channel's [motion on stills](channels.md#defaults).
+**Mode** beside the length says how this video is made: which scenes become AI clips and with which model. The other scenes stay still pictures, moved by the channel's [motion on stills](channels.md#defaults).
 
 - **Economy**: stills with motion, no AI clips. The cheapest.
 - **Animated hook**: stills with motion, and the scenes that start in the first 10 seconds animated by Kling 2.6 at 720p, to hold the viewer. New channels start here.
@@ -38,7 +45,7 @@ The format applies to what is made next: the next script's length, the shape of 
 - **All animated, premium**: every scene animated by Kling 3.0 at 1080p.
 - **All animated, channel's model**: every scene animated by the channel's [video model](channels.md#defaults), as channels made before modes do.
 
-**Channel's** follows the channel's [production mode](channels.md#production). Each choice in the menu shows what the whole video would cost in that mode, and the line beside it shows the total for the mode picked and what was spent so far. The estimate counts what is left to make (script, narration, scene plan, images and portraits, and the clips the mode makes) from the [rate table](bardo:go/costs), so it drops as the video gets made. Before the narration exists it assumes a minute for a Short and eight for a long video. With the rate table as Bardo ships it, a whole Short costs about US$ 1.40 in Economy, US$ 2.20 with the hook animated, US$ 5.60 all animated and US$ 8.10 premium; a long video about US$ 9, US$ 10, US$ 43 and US$ 63. Kling 2.6 makes clips of 5 or 10 seconds, so a 6-second scene pays for 10.
+**Channel's** follows the channel's [production mode](channels.md#production). Each choice in the menu shows what the whole video would cost in that mode, and the line beside it shows the total for the mode picked and what was spent so far. The estimate counts what is left to make (script, narration, scene plan, images and portraits, and the clips the mode makes) from the [rate table](bardo:go/costs), so it drops as the video gets made. Before the narration exists it assumes the video's [length](#length), or a minute for a Short and eight for a long video. With the rate table as Bardo ships it, a whole Short costs about US$ 1.40 in Economy, US$ 2.20 with the hook animated, US$ 5.60 all animated and US$ 8.10 premium; a long video about US$ 9, US$ 10, US$ 43 and US$ 63. A 30-second video costs about US$ 0.85 in Economy and US$ 1.70 with the hook animated; a 3-minute one about US$ 3.60 and US$ 4.40. Kling 2.6 makes clips of 5 or 10 seconds, so a 6-second scene pays for 10.
 
 A mode whose clips need a key you have not saved says so in the menu: Kling's modes need a Kling key under [Settings › API keys](bardo:go/settings/keys). Changing the mode applies to what is animated next: on the Clips stage, **Animate scenes without a clip** (or **Animate the hook**) animates only the scenes the mode animates, clips made already stay, and any scene can still be animated by hand with any model.
 

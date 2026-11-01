@@ -3,8 +3,13 @@
 //! its own. The format reaches the script and scene templates, the shape
 //! images and clips are drawn in, the shape a new cut starts in and the
 //! YouTube preset a render uses (ADR-0018).
+//!
+//! A project may also pick a length (issue #253) instead of its format's:
+//! it reaches only the script template and the whole-video estimate.
 
-use bardo_domain::{RepositoryError, ThemeRepository, VideoFormat, VideoProject, VideoProjectId};
+use bardo_domain::{
+    RepositoryError, ThemeRepository, VideoFormat, VideoLength, VideoProject, VideoProjectId,
+};
 
 use crate::{Bardo, ScriptError};
 
@@ -34,11 +39,29 @@ impl Bardo {
         project.format = format;
         Ok(project)
     }
+
+    /// Sets the project's own length, or goes back to its format's
+    /// (`None`). The script already written stays: the next one follows
+    /// the new length.
+    pub fn set_project_length(
+        &self,
+        project: VideoProjectId,
+        length: Option<VideoLength>,
+    ) -> Result<VideoProject, ScriptError> {
+        let mut project = self
+            .themes
+            .project(project)?
+            .filter(|project| project.owner == self.profile.id)
+            .ok_or(ScriptError::ProjectNotFound)?;
+        self.themes.set_project_length(project.id, length)?;
+        project.length = length;
+        Ok(project)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use bardo_domain::{AspectRatio, Network, NetworkAccountDraft};
+    use bardo_domain::{AspectRatio, Money, Network, NetworkAccountDraft};
 
     use super::*;
     use crate::BudgetConsent;
@@ -63,6 +86,72 @@ mod tests {
         assert_eq!(app.video_format(&back).unwrap(), VideoFormat::Long);
         assert!(matches!(
             app.set_project_format(VideoProjectId::new(), None),
+            Err(ScriptError::ProjectNotFound)
+        ));
+    }
+
+    #[test]
+    fn a_length_sets_the_script_and_the_estimate_and_leaves_the_shape_to_the_format() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = project(&app);
+        app.set_project_format(project.id, Some(VideoFormat::Short))
+            .unwrap();
+        let economy = |app: &Bardo| {
+            app.production(project.id)
+                .unwrap()
+                .estimate(bardo_domain::ProductionMode::Economy)
+                .unwrap()
+                .remaining
+        };
+        // A minute, as a Short assumes: ten scenes and a portrait.
+        let minute = economy(&app);
+
+        let three = app
+            .set_project_length(project.id, Some(VideoLength::Minutes3))
+            .unwrap();
+        assert_eq!(three.length, Some(VideoLength::Minutes3));
+        let stored = app.themes.project(project.id).unwrap().unwrap();
+        assert_eq!(stored.length, Some(VideoLength::Minutes3));
+        assert_eq!(app.video_format(&stored).unwrap(), VideoFormat::Short);
+        // Three minutes: 2,700 characters, 30 scenes and a portrait; the
+        // narration and the 20 more images make the difference.
+        assert_eq!(
+            economy(&app),
+            minute.saturating_add(Money::from_micros(180_000 + 20 * 101_570))
+        );
+
+        app.set_project_length(project.id, Some(VideoLength::Seconds30))
+            .unwrap();
+        // Thirty seconds: 450 characters and five scenes.
+        assert_eq!(
+            economy(&app).saturating_add(Money::from_micros(45_000 + 5 * 101_570)),
+            minute
+        );
+        app.set_project_length(project.id, Some(VideoLength::Minutes3))
+            .unwrap();
+
+        h.answer(SCRIPT.to_owned());
+        done(
+            &app,
+            app.generate_script(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        let script = h.text.requests().pop().unwrap();
+        assert!(
+            script.prompt.contains("just under 3 minutes"),
+            "{}",
+            script.prompt
+        );
+        assert!(!script.prompt.contains("45 to 60 seconds"));
+
+        // Back to the format's.
+        app.set_project_length(project.id, None).unwrap();
+        assert_eq!(
+            app.themes.project(project.id).unwrap().unwrap().length,
+            None
+        );
+        assert!(matches!(
+            app.set_project_length(VideoProjectId::new(), None),
             Err(ScriptError::ProjectNotFound)
         ));
     }

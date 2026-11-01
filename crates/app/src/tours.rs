@@ -578,15 +578,16 @@ pub const PERFORMANCE: Tour = {
     }
 };
 
-/// Projects: the project and its narrator, its format and production mode,
-/// the stages and how they open, and what the project has cost.
+/// Projects: the project and its narrator, its format, length and
+/// production mode, the stages and how they open, and what the project has
+/// cost.
 pub const PROJECTS: Tour = {
     const AT: Destination = Destination::Projects;
     const PAGE: &str = "projects";
     const HEADER: WhenMissing = WhenMissing::LightPart(TourAnchor::Header);
     Tour {
         id: TourId::Projects,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "switcher", control(Control::ProjectSwitcher))
