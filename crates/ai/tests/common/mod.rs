@@ -55,6 +55,14 @@ impl Scripted {
         }
     }
 
+    /// Answers with responses and transport failures in order.
+    pub fn with_answers(answers: Vec<Result<HttpResponse, TransportError>>) -> Self {
+        Self {
+            answers: Mutex::new(answers.into_iter().collect()),
+            ..Self::default()
+        }
+    }
+
     pub fn offline() -> Self {
         Self {
             answers: Mutex::new(VecDeque::from([Err(TransportError(

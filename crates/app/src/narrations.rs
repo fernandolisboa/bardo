@@ -945,6 +945,7 @@ pub(crate) mod tests {
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
+                plans: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
                 analytics: Vec::new(),

@@ -188,6 +188,23 @@ fn animated_by(scene: &Scene, job: JobId) -> bool {
         .any(|clip| clip.generation.job == Some(job))
 }
 
+/// Why a plan gave no access token, as a job failure: signed out or
+/// refused is a missing key, the provider unreachable or busy passes.
+fn plan_failure(provider: Provider, error: &crate::PlanError) -> JobFailure {
+    use crate::PlanError;
+    let kind = match error {
+        PlanError::NotConnected(_) | PlanError::ReconnectNeeded(_) => JobFailureKind::MissingKey,
+        error if error.is_transient() => JobFailureKind::ProviderUnavailable,
+        _ => JobFailureKind::Unexpected,
+    };
+    let detail = match error {
+        PlanError::NotConnected(_) => format!("not signed in to the {provider} plan"),
+        PlanError::ReconnectNeeded(_) => format!("sign in to the {provider} plan again"),
+        error => format!("could not renew the {provider} plan's sign-in: {error}"),
+    };
+    JobFailure::new(kind, detail)
+}
+
 /// Runs clip jobs.
 pub(crate) struct ClipHandler {
     pub(crate) owner: ProfileId,
@@ -195,6 +212,8 @@ pub(crate) struct ClipHandler {
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) generators: Vec<Arc<dyn ClipGenerator>>,
     pub(crate) secrets: Arc<dyn SecretStore>,
+    /// Plans signed in to instead of a key (ADR-0028).
+    pub(crate) plan_sessions: crate::plans::PlanSessions,
     pub(crate) costs: CostBook,
 }
 
@@ -343,7 +362,17 @@ impl ClipJob<'_> {
             .ok_or_else(|| JobFailure::unexpected(format!("{provider} does not make clips")))
     }
 
+    /// The provider's key. A plan's access token is asked for on every
+    /// step instead of kept: it expires within the hour and is renewed
+    /// while clips run.
     fn key(&mut self, provider: Provider) -> Result<ApiKey, JobFailure> {
+        if provider.signs_in() {
+            return self
+                .handler
+                .plan_sessions
+                .access_token(provider)
+                .map_err(|error| plan_failure(provider, &error));
+        }
         if let Some((_, key)) = self.keys.iter().find(|(p, _)| *p == provider) {
             return Ok(key.clone());
         }
@@ -1344,6 +1373,77 @@ mod tests {
         app.save_provider_key(Provider::Kling, "kling-test-key-0001")
             .unwrap();
         assert_eq!(default(&app).0, Provider::Gemini);
+    }
+
+    #[test]
+    fn a_scene_animated_on_the_higgsfield_plan_asks_for_a_fresh_sign_in_each_step() {
+        let mut h = Harness::new();
+        let plan = Arc::new(crate::plans::testing::FakePlan::default());
+        // Every token is close to expiring: each use renews it.
+        *plan.expires_in.lock().unwrap() = Duration::from_secs(60);
+        h.plans.push(Arc::clone(&plan) as _);
+        let on_plan = Arc::new(FakeClips {
+            provider: Some(Provider::HiggsfieldPlan),
+            ..FakeClips::default()
+        });
+        h.more_clips.push(Arc::clone(&on_plan) as _);
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let model = ClipModelRef::new(Provider::HiggsfieldPlan, "fake/range").unwrap();
+        channel_uses(&app, &project, Some(model));
+
+        let error = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            SceneError::MissingKey(Provider::HiggsfieldPlan)
+        ));
+        assert_eq!(error.message(), Text::ScenesMissingHiggsfieldPlan);
+
+        let tokens = bardo_domain::TokenSet::granted(
+            &bardo_domain::TokenGrant {
+                access_token: bardo_domain::SecretText::new("stored-access"),
+                refresh_token: Some(bardo_domain::SecretText::new("stored-refresh")),
+                expires_in: Duration::from_secs(60),
+                scopes: Vec::new(),
+            },
+            std::time::SystemTime::now(),
+        );
+        bardo_domain::ConnectionSecrets::set_plan_session(
+            &*h.connection_secrets,
+            app.profile().id,
+            Provider::HiggsfieldPlan,
+            &bardo_domain::PlanSession::new("client-0001", tokens).unwrap(),
+        )
+        .unwrap();
+        drop(app);
+        let app = h.start();
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+
+        assert!(h.clips.submissions().is_empty(), "not the API's provider");
+        assert_eq!(on_plan.submissions().len(), 1);
+        let keys = on_plan.keys.lock().unwrap().clone();
+        assert_eq!(
+            keys,
+            [
+                "plan-access-0001",
+                "plan-access-0001",
+                "plan-access-0002",
+                "plan-access-0002"
+            ],
+            "staging and submitting share a step; the status check and the \
+             download the next one, on a renewed token"
+        );
+        let pending = plan_of(&app, &project).scenes()[0].pending_clip().cloned();
+        assert_eq!(
+            pending.unwrap().generation.provider,
+            Provider::HiggsfieldPlan
+        );
     }
 
     #[test]

@@ -425,6 +425,10 @@ name = "Higgsfield"
 purpose = "Video clips through the models Higgsfield offers."
 placeholder = "Key ID:Key secret"
 
+[provider.higgsfield-plan]
+name = "Higgsfield plan"
+purpose = "Video clips paid from the credits of your higgsfield.ai plan, through Higgsfield's MCP server. No key needed: you sign in with your Higgsfield account."
+
 [provider.kling]
 name = "Kling"
 purpose = "Video clips straight from Kling (Kling 3.0, 2.6 and 2.5 Turbo), paid from your Kling resource packages."
@@ -1020,6 +1024,7 @@ not_loaded = "Could not load the scenes. Try again."
 prompt_required = "The prompt cannot be empty."
 prompt_too_long = "Keep the prompt to at most 4000 characters."
 missing_higgsfield_key = "Save a Higgsfield key under Settings to animate scenes."
+missing_higgsfield_plan = "Sign in to your Higgsfield plan under Settings to animate scenes with it."
 missing_kling_key = "Save a Kling key under Settings to animate scenes with Kling."
 no_image_to_animate = "Generate this scene's image first; the clip animates it."
 nothing_to_animate = "Every scene with an image already has a clip or one on the way."
@@ -2405,6 +2410,36 @@ no_channel = "X didn't return this account. Sign in with the account you post fr
 limit_reached = "X refused the request: the app is out of credits or over a rate limit. Check its credits in the X Developer Console, then try again."
 network_down = "X is failing on its side. Try again later."
 
+[plan]
+title = "Plans you sign in to"
+hint = "Instead of a key, Bardo signs in to these plans in the browser and spends the plan's credits. The sign-in is kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
+not_connected = "Not signed in"
+connected = "Signed in: {plan} plan, {credits} credits left"
+connected_plain = "Signed in"
+reconnect_needed = "Sign in again"
+unreadable = "Could not read this sign-in from Windows Credential Manager."
+sign_in = "Sign in"
+sign_in_again = "Sign in again"
+waiting = "Waiting for the browser…"
+cancel = "Cancel"
+check = "Check credits"
+checking = "Checking…"
+sign_out = "Sign out"
+checked = "{credits} credits left on the {plan} plan."
+
+[plan.error]
+not_signed_in = "Sign in to the plan first."
+sign_in_again = "The plan no longer accepts this sign-in. Sign in again."
+
+[plan.failure]
+refused = "The plan refused the sign-in. Sign in again."
+client_rejected = "The plan didn't accept Bardo's registration. Sign in again; if it keeps failing, the provider may have changed how apps sign in."
+not_allowed = "The plan didn't allow this. Sign in again and allow everything Bardo asks for."
+limit_reached = "The plan is limiting requests right now. Try again in a few minutes."
+provider_down = "The plan's servers are failing on their side. Try again later."
+unreachable = "Couldn't reach the plan. Check your internet connection."
+unexpected = "The plan answered in a way Bardo doesn't understand. Try again."
+
 [consent_page]
 done = "Bardo is connected. You can close this tab."
 failed = "Bardo didn't connect. Go back to Bardo to see why."
@@ -3297,11 +3332,11 @@ body = "Once a key is saved, Test key makes the cheapest call that needs it and 
 
 [tour.keys.kept]
 title = "Where keys are kept"
-body = "Keys go to Windows Credential Manager under your Windows account, never to Bardo's database or logs."
+body = "Keys go to Windows Credential Manager under your Windows account, never to Bardo's database or logs. A saved key never shows again: its card shows only the last four characters, and anywhere text leaves Bardo the key is masked."
 
-[tour.keys.masked]
-title = "Only the last characters"
-body = "A saved key never shows again: the card shows its last four characters, and anywhere text leaves Bardo the key is masked. Replace key swaps it for a new one."
+[tour.keys.plan]
+title = "Plans you sign in to"
+body = "The Higgsfield plan takes no key: Sign in opens Higgsfield in the browser, and clips are then paid from your plan's credits. The card shows the plan and the credits left."
 
 [tour.appearance]
 name = "Appearance tour"

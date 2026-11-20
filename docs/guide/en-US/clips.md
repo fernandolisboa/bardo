@@ -15,7 +15,7 @@ A clip animates a scene's image into a short video. Clips are optional: a scene 
 
 **Animate scenes without a clip** sends every scene that has an image and no clip to the video provider in one job; **Animate** on a scene does just that one. The video's [production mode](projects.md#mode) says which scenes the first button sends: with **Animated hook** it reads **Animate the hook** and sends only the scenes that start in the first 10 seconds, and with **Economy** there is none, since every scene stays a still with motion. **Animate** on a scene works in every mode. Each clip runs as long as its scene is narrated, within the lengths the model allows. A scene that fails does not stop the others, and retrying the job sends only the scenes still without a clip.
 
-Clips are made through Higgsfield, Kling or Google, with your own key for each ([Your API keys](api-keys.md#providers)). Cancelling a run stops the waiting, not the provider: a clip already sent may still finish and be billed.
+Clips are made through Higgsfield, Kling or Google, with your own key for each ([Your API keys](api-keys.md#providers)), or from the credits of your Higgsfield plan once you sign in to it ([The Higgsfield plan](api-keys.md#higgsfield-plan)). Cancelling a run stops the waiting, not the provider: a clip already sent may still finish and be billed.
 
 <a id="motion"></a>
 ## Motion

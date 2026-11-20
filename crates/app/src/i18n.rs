@@ -885,6 +885,7 @@ pub enum Text {
     ScenesMissingClaudeKey,
     ScenesMissingGeminiKey,
     ScenesMissingHiggsfieldKey,
+    ScenesMissingHiggsfieldPlan,
     ScenesMissingKlingKey,
     SceneNoImageToAnimate,
     ScenesNothingToAnimate,
@@ -1434,6 +1435,27 @@ pub enum Text {
     /// The status of an account waiting for the user's choice.
     ConnectionChooseLabel,
     SignInFailure(Network, SignInFailureKind),
+    /// Plans Bardo signs in to instead of a key (ADR-0028).
+    PlansTitle,
+    PlansHint,
+    PlanNotConnected,
+    /// Placeholders: `{plan}`, `{credits}`.
+    PlanConnected,
+    PlanConnectedPlain,
+    PlanReconnectNeeded,
+    PlanUnreadable,
+    PlanSignIn,
+    PlanSignInAgain,
+    PlanWaiting,
+    PlanCancel,
+    PlanCheck,
+    PlanChecking,
+    PlanSignOut,
+    /// Placeholders: `{plan}`, `{credits}`.
+    PlanChecked,
+    PlanNotSignedIn,
+    PlanSignInAgainHint,
+    PlanFailure(SignInFailureKind),
     NetworkAccountStillConnected,
     ConsentPageDone,
     ConsentPageFailed,
@@ -2949,6 +2971,34 @@ impl Text {
                 return format!("connection.failure.{}.{kind}", network.code()).into();
             }
             Text::NetworkAccountStillConnected => "network_account.error.still_connected",
+            Text::PlansTitle => "plan.title",
+            Text::PlansHint => "plan.hint",
+            Text::PlanNotConnected => "plan.not_connected",
+            Text::PlanConnected => "plan.connected",
+            Text::PlanConnectedPlain => "plan.connected_plain",
+            Text::PlanReconnectNeeded => "plan.reconnect_needed",
+            Text::PlanUnreadable => "plan.unreadable",
+            Text::PlanSignIn => "plan.sign_in",
+            Text::PlanSignInAgain => "plan.sign_in_again",
+            Text::PlanWaiting => "plan.waiting",
+            Text::PlanCancel => "plan.cancel",
+            Text::PlanCheck => "plan.check",
+            Text::PlanChecking => "plan.checking",
+            Text::PlanSignOut => "plan.sign_out",
+            Text::PlanChecked => "plan.checked",
+            Text::PlanNotSignedIn => "plan.error.not_signed_in",
+            Text::PlanSignInAgainHint => "plan.error.sign_in_again",
+            Text::PlanFailure(kind) => match kind {
+                SignInFailureKind::Refused => "plan.failure.refused",
+                SignInFailureKind::ClientRejected => "plan.failure.client_rejected",
+                SignInFailureKind::NotAllowed => "plan.failure.not_allowed",
+                SignInFailureKind::LimitReached => "plan.failure.limit_reached",
+                SignInFailureKind::NetworkDown => "plan.failure.provider_down",
+                SignInFailureKind::Unreachable => "plan.failure.unreachable",
+                SignInFailureKind::NoChannel | SignInFailureKind::Unexpected => {
+                    "plan.failure.unexpected"
+                }
+            },
             Text::ConsentPageDone => "consent_page.done",
             Text::ConsentPageFailed => "consent_page.failed",
             Text::ProviderKeyStoreFailed => "provider_keys.error.store_failed",
@@ -3416,6 +3466,7 @@ impl Text {
             Text::ScenesMissingClaudeKey => "scenes.error.missing_claude_key",
             Text::ScenesMissingGeminiKey => "scenes.error.missing_gemini_key",
             Text::ScenesMissingHiggsfieldKey => "scenes.error.missing_higgsfield_key",
+            Text::ScenesMissingHiggsfieldPlan => "scenes.error.missing_higgsfield_plan",
             Text::ScenesMissingKlingKey => "scenes.error.missing_kling_key",
             Text::SceneNoImageToAnimate => "scenes.error.no_image_to_animate",
             Text::ScenesNothingToAnimate => "scenes.error.nothing_to_animate",
@@ -6407,6 +6458,38 @@ mod tests {
             }
         }
         texts.push(Text::Details);
+        texts.extend([
+            Text::PlansTitle,
+            Text::PlansHint,
+            Text::PlanNotConnected,
+            Text::PlanConnected,
+            Text::PlanConnectedPlain,
+            Text::PlanReconnectNeeded,
+            Text::PlanUnreadable,
+            Text::PlanSignIn,
+            Text::PlanSignInAgain,
+            Text::PlanWaiting,
+            Text::PlanCancel,
+            Text::PlanCheck,
+            Text::PlanChecking,
+            Text::PlanSignOut,
+            Text::PlanChecked,
+            Text::PlanNotSignedIn,
+            Text::PlanSignInAgainHint,
+            Text::ScenesMissingHiggsfieldPlan,
+        ]);
+        texts.extend(
+            [
+                SignInFailureKind::Refused,
+                SignInFailureKind::ClientRejected,
+                SignInFailureKind::NotAllowed,
+                SignInFailureKind::LimitReached,
+                SignInFailureKind::NetworkDown,
+                SignInFailureKind::Unreachable,
+                SignInFailureKind::Unexpected,
+            ]
+            .map(Text::PlanFailure),
+        );
         texts.push(Text::NavBudgetsUsed);
         texts.extend([
             Text::AppearanceLayout,

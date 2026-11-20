@@ -67,8 +67,8 @@ pub use migrations::{BrokenReferences, MigrationError, SCHEMA_VERSION};
 #[cfg(windows)]
 pub use secrets::CredentialManager;
 pub use secrets::{
-    MemorySecretStore, app_credentials_target, credential_target, platform_connection_secrets,
-    platform_secret_store, tokens_target,
+    MemorySecretStore, app_credentials_target, credential_target, plan_target,
+    platform_connection_secrets, platform_secret_store, tokens_target,
 };
 pub use setup_choices::{
     SETUP_CHOICES_FILE, SetupChoices, SetupChoicesError, default_setup_choices_path,

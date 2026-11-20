@@ -1,0 +1,5 @@
+HTTP/2 200
+content-type: application/json
+cache-control: no-store
+
+{"access_token": "hf-access-test-0001", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "hf-refresh-test-0001", "scope": "openid email offline_access"}

@@ -210,6 +210,7 @@ pub mod refs {
     pub const JOBS_TEST: GuideRef = at("jobs", "test");
     pub const KEYS_KEPT: GuideRef = at("api-keys", "where-kept");
     pub const DECISION_ENGINE: GuideRef = at("api-keys", "decision-engine");
+    pub const HIGGSFIELD_PLAN: GuideRef = at("api-keys", "higgsfield-plan");
     pub const SETTINGS_LAYOUT: GuideRef = at("settings", "layout");
     pub const SETTINGS_TOURS: GuideRef = at("settings", "tours");
     pub const METRICS_ON_START: GuideRef = at("metrics-sync", "on-start");
@@ -219,7 +220,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 91] = [
+    pub const ALL: [GuideRef; 92] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -304,6 +305,7 @@ pub mod refs {
         JOBS_TEST,
         KEYS_KEPT,
         DECISION_ENGINE,
+        HIGGSFIELD_PLAN,
         SETTINGS_LAYOUT,
         SETTINGS_TOURS,
         METRICS_ON_START,

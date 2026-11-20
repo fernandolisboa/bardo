@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+content-type: text/event-stream
+
+event: message
+data: {"jsonrpc": "2.0", "id": 3, "result": {"content": [{"type": "text", "text": "{\"items\": [{\"id\": \"7c1e9a52-0f4d-4f7b-9d3e-5a6b2c8d1e40\", \"type\": \"video\", \"status\": \"in_progress\", \"model\": \"kling3_0\", \"params\": {\"model\": \"kling3_0\", \"prompt\": \"Slow push in on the launch pad, steam rising.\", \"duration\": 8, \"medias\": [{\"role\": \"start_image\", \"value\": \"2428803a-33a6-42e4-9627-6133b90b02ef\"}]}, \"results\": []}], \"next_cursor\": null}"}]}}
+

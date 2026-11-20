@@ -602,6 +602,7 @@ dependencies = [
  "bardo-domain",
  "base64 0.22.1",
  "form_urlencoded",
+ "getrandom 0.3.4",
  "humantime",
  "serde_json",
  "sha2 0.10.9",

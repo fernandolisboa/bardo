@@ -36,6 +36,7 @@ mod performed_takes;
 mod persona_looks;
 mod persona_package;
 mod personas;
+mod plans;
 mod production;
 mod provider_keys;
 mod proxies;
@@ -82,7 +83,7 @@ use bardo_domain::{
     VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceSampleStore, YouTubeDataStore,
     Zone, running_since,
 };
-use bardo_domain::{InstallerRunner, InstallerStore, ReleaseFeed, VisionModels};
+use bardo_domain::{InstallerRunner, InstallerStore, PlanSignIn, ReleaseFeed, VisionModels};
 use bardo_media::{AudioOutput, MediaEngine};
 use bardo_storage::{
     DataPaths, Database, LocalBackups, MemoryBackups, MemoryExportFiles, MemoryProjectFiles,
@@ -159,6 +160,10 @@ pub use persona_looks::{LookError, LookView};
 pub use persona_package::PackageError;
 pub use personas::{
     PersonaError, PersonaExport, VoiceList, VoiceListing, VoiceStatus, persona_package_folder,
+};
+pub use plans::{
+    PlanCheck, PlanCheckResult, PlanConnect, PlanConnectResult, PlanConsent, PlanError, PlanState,
+    PlanStatus,
 };
 pub use production::{ModeEstimate, ProductionView};
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
@@ -459,6 +464,9 @@ pub struct Providers {
     pub media: Arc<dyn MediaEngine>,
     /// Sign-in per network that has one (ADR-0008): YouTube for now.
     pub sign_ins: Vec<Arc<dyn NetworkSignIn>>,
+    /// Sign-in per plan Bardo spends instead of a key (ADR-0028): the
+    /// Higgsfield plan. The same adapter makes its clips.
+    pub plans: Vec<Arc<dyn PlanSignIn>>,
     /// Where the browser comes back after consent: a loopback listener.
     pub consent: Arc<dyn ConsentReceiver>,
     /// Upload per network that has one (ADR-0008): YouTube and Instagram
@@ -480,6 +488,7 @@ pub struct Providers {
 impl Providers {
     /// The real providers, over HTTPS.
     pub fn live() -> Self {
+        let higgsfield_plan = Arc::new(bardo_ai::HiggsfieldPlan::new());
         Self {
             key_checker: Arc::new(bardo_ai::HttpKeyChecker::new()),
             market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
@@ -499,6 +508,7 @@ impl Providers {
                 Arc::new(bardo_ai::HiggsfieldClips::new()),
                 Arc::new(bardo_ai::KlingClips::new()),
                 Arc::new(bardo_ai::GoogleClips::new()),
+                Arc::clone(&higgsfield_plan) as _,
             ],
             takes: vec![
                 Arc::new(bardo_ai::HiggsfieldTakes::new()),
@@ -513,6 +523,7 @@ impl Providers {
                 Arc::new(bardo_publish::InstagramSignIn::new()),
                 Arc::new(bardo_publish::XSignIn::new()),
             ],
+            plans: vec![higgsfield_plan],
             consent: Arc::new(bardo_publish::LoopbackReceiver),
             uploaders: vec![
                 Arc::new(bardo_publish::YouTubeUploader::new()),
@@ -602,6 +613,7 @@ pub struct Bardo {
     jobs: JobQueue,
     provider_keys: ProviderKeys,
     connection_book: ConnectionBook,
+    plan_book: plans::PlanBook,
     tours: TourBook,
     profile: UserProfile,
     catalog: Catalog,
@@ -864,12 +876,20 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let plan_book = plans::PlanBook::load(
+            profile.id,
+            Arc::clone(&connection_secrets),
+            providers.plans,
+            Arc::clone(&providers.consent),
+            redactor.clone(),
+        );
         let clip_handler = ClipHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
             files: Arc::clone(&files),
             generators: providers.clips.clone(),
             secrets: Arc::clone(&secrets),
+            plan_sessions: plan_book.sessions().clone(),
             costs: cost_book.clone(),
         };
         let proxy_handler = ProxyHandler {
@@ -1087,6 +1107,7 @@ impl Bardo {
             jobs,
             provider_keys,
             connection_book,
+            plan_book,
             tours,
             profile,
             catalog,
@@ -1835,6 +1856,10 @@ pub(crate) mod testing {
         pub(crate) quote: Mutex<Option<Money>>,
         /// How many status checks fail on the provider's side first.
         pub(crate) status_outages: Mutex<u32>,
+        /// The provider it stands for; Higgsfield when `None`.
+        pub(crate) provider: Option<Provider>,
+        /// The key each call was made with, in order.
+        pub(crate) keys: Mutex<Vec<String>>,
     }
 
     impl FakeClips {
@@ -1863,18 +1888,18 @@ pub(crate) mod testing {
 
     impl ClipGenerator for FakeClips {
         fn provider(&self) -> Provider {
-            Provider::Higgsfield
+            self.provider.unwrap_or(Provider::Higgsfield)
         }
 
         fn models(&self) -> Vec<ClipModel> {
             vec![
                 ClipModel {
-                    id: ClipModelRef::new(Provider::Higgsfield, "fake/range").unwrap(),
+                    id: ClipModelRef::new(self.provider(), "fake/range").unwrap(),
                     name: "Fake Range".into(),
                     durations: ClipDurations::Range { min: 3, max: 15 },
                 },
                 ClipModel {
-                    id: ClipModelRef::new(Provider::Higgsfield, "fake/choices").unwrap(),
+                    id: ClipModelRef::new(self.provider(), "fake/choices").unwrap(),
                     name: "Fake Choices".into(),
                     durations: ClipDurations::Choices(vec![5, 10]),
                 },
@@ -1883,9 +1908,10 @@ pub(crate) mod testing {
 
         fn stage_image(
             &self,
-            _key: &ApiKey,
+            key: &ApiKey,
             image: &ClipImage,
         ) -> Result<StagedImage, ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
             let mut staged = self.staged.lock().unwrap();
             staged.push(image.clone());
             Ok(StagedImage(format!("https://fake/image-{}", staged.len())))
@@ -1893,10 +1919,11 @@ pub(crate) mod testing {
 
         fn submit(
             &self,
-            _key: &ApiKey,
+            key: &ApiKey,
             request: &ClipRequest,
             submission: &str,
         ) -> Result<ClipSubmission, ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
             if let Some(failure) = self.submit_failure.lock().unwrap().clone() {
                 return Err(failure);
             }
@@ -1920,11 +1947,8 @@ pub(crate) mod testing {
             })
         }
 
-        fn status(
-            &self,
-            _key: &ApiKey,
-            handle: &ClipHandle,
-        ) -> Result<ClipStatus, ProviderFailure> {
+        fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
             self.polls.lock().unwrap().push(handle.0.clone());
             let mut outages = self.status_outages.lock().unwrap();
             if *outages > 0 {
@@ -1957,7 +1981,8 @@ pub(crate) mod testing {
             })
         }
 
-        fn download(&self, _key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+        fn download(&self, key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
             Ok(GeneratedClip {
                 bytes: CLIP.to_vec(),
             })
@@ -2829,6 +2854,7 @@ pub(crate) mod testing {
             audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
             media: Arc::new(crate::editor::testing::FakeMedia::default()),
             sign_ins: Vec::new(),
+            plans: Vec::new(),
             consent: Arc::new(crate::connections::testing::NoConsent),
             uploaders: Vec::new(),
             analytics: Vec::new(),

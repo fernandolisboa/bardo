@@ -14,7 +14,9 @@ use std::time::{Duration, SystemTime};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{Network, NetworkAccountId, ProfileId, RepositoryError, SecretStoreError};
+use crate::{
+    Network, NetworkAccountId, PlanSession, ProfileId, Provider, RepositoryError, SecretStoreError,
+};
 
 /// Text that must never be shown or logged: an OAuth token, a client
 /// secret, a PKCE verifier. `Debug` hides it, there is no `Display`, and its
@@ -572,6 +574,30 @@ pub trait ConnectionSecrets: Send + Sync {
         owner: ProfileId,
         account: NetworkAccountId,
     ) -> Result<(), SecretStoreError>;
+
+    /// The client id and tokens of a provider Bardo signs in to
+    /// (`Provider::signs_in`, ADR-0028).
+    fn plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<Option<PlanSession>, SecretStoreError>;
+
+    /// Saves the session, replacing an earlier one. One over
+    /// `TokenSet::MAX_STORED_BYTES` is refused.
+    fn set_plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+        session: &PlanSession,
+    ) -> Result<(), SecretStoreError>;
+
+    /// Removing a session that is not there succeeds.
+    fn delete_plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<(), SecretStoreError>;
 }
 
 impl<T: ConnectionSecrets + ?Sized> ConnectionSecrets for Arc<T> {
@@ -623,6 +649,31 @@ impl<T: ConnectionSecrets + ?Sized> ConnectionSecrets for Arc<T> {
         account: NetworkAccountId,
     ) -> Result<(), SecretStoreError> {
         (**self).delete_tokens(owner, account)
+    }
+
+    fn plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<Option<PlanSession>, SecretStoreError> {
+        (**self).plan_session(owner, provider)
+    }
+
+    fn set_plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+        session: &PlanSession,
+    ) -> Result<(), SecretStoreError> {
+        (**self).set_plan_session(owner, provider, session)
+    }
+
+    fn delete_plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<(), SecretStoreError> {
+        (**self).delete_plan_session(owner, provider)
     }
 }
 

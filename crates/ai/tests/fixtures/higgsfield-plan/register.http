@@ -1,0 +1,4 @@
+HTTP/2 201
+content-type: application/json
+
+{"client_id": "qUWc3yOYYb9VDWGT", "client_id_issued_at": 1795121247223, "client_secret_expires_at": 0, "client_name": "Bardo", "redirect_uris": ["http://127.0.0.1:53682/callback"], "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"], "scope": "openid email offline_access", "token_endpoint_auth_method": "none", "application_type": "web"}

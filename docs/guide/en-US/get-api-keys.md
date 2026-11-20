@@ -103,6 +103,15 @@ You need this key only for video clips from Higgsfield's models.
 4. Copy both. Bardo takes them in one field, joined by a colon: `KEY_ID:KEY_SECRET` (the ID, a `:`, then the secret, with no spaces).
 5. Paste that into the **Higgsfield** card in [Settings › API keys](bardo:go/settings/keys), select **Save key**, then **Test key**.
 
+<a id="higgsfield-plan"></a>
+## Higgsfield plan
+
+The Higgsfield plan takes no key: you sign in to your higgsfield.ai account instead.
+
+1. Have a plan with credits on [higgsfield.ai](https://higgsfield.ai). The API's console and balance above are a separate product and are not needed for this.
+2. In [Settings › API keys](bardo:go/settings/keys), under **Plans you sign in to**, select **Sign in** on the **Higgsfield plan** card.
+3. Sign in in the browser page that opens and allow Bardo. Back in Bardo, the card shows your plan and its credits.
+
 <a id="kling"></a>
 ## Kling
 

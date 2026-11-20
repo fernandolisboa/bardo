@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+content-type: text/event-stream
+
+event: message
+data: {"jsonrpc": "2.0", "id": 3, "result": {"content": [{"type": "text", "text": "Submitted 0/1 video generations.\n- index 0: submission_failed \u2014 insufficient credits for this generation."}], "isError": true}}
+

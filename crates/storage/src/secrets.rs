@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use bardo_domain::{
-    ApiKey, AppCredentials, ConnectionSecrets, Network, NetworkAccountId, ProfileId, Provider,
-    SecretStore, SecretStoreError, TokenSet,
+    ApiKey, AppCredentials, ConnectionSecrets, Network, NetworkAccountId, PlanSession, ProfileId,
+    Provider, SecretStore, SecretStoreError, TokenSet,
 };
 use zeroize::Zeroizing;
 
@@ -134,6 +134,38 @@ impl ConnectionSecrets for MemorySecretStore {
         self.blobs().remove(&tokens_target(owner, account));
         Ok(())
     }
+
+    fn plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<Option<PlanSession>, SecretStoreError> {
+        self.blobs()
+            .get(&plan_target(owner, provider))
+            .map(|stored| PlanSession::decode(stored).ok_or_else(|| malformed("plan session")))
+            .transpose()
+    }
+
+    fn set_plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+        session: &PlanSession,
+    ) -> Result<(), SecretStoreError> {
+        let encoded = session
+            .encode()
+            .map_err(|error| SecretStoreError(Box::new(error)))?;
+        self.put(plan_target(owner, provider), encoded)
+    }
+
+    fn delete_plan_session(
+        &self,
+        owner: ProfileId,
+        provider: Provider,
+    ) -> Result<(), SecretStoreError> {
+        self.blobs().remove(&plan_target(owner, provider));
+        Ok(())
+    }
 }
 
 impl SecretStore for MemorySecretStore {
@@ -176,6 +208,12 @@ pub fn app_credentials_target(owner: ProfileId, network: Network) -> String {
 /// Name of the credential holding a network account's OAuth tokens.
 pub fn tokens_target(owner: ProfileId, account: NetworkAccountId) -> String {
     format!("Bardo/{owner}/tokens/{account}")
+}
+
+/// Name of the credential holding the sign-in of a provider Bardo signs
+/// in to (ADR-0028): its client id and tokens.
+pub fn plan_target(owner: ProfileId, provider: Provider) -> String {
+    format!("Bardo/{owner}/plan/{}", provider.code())
 }
 
 /// What one generic Windows credential holds
@@ -259,8 +297,8 @@ mod credential_manager {
     use std::sync::Arc;
 
     use bardo_domain::{
-        ApiKey, AppCredentials, ConnectionSecrets, Network, NetworkAccountId, ProfileId, Provider,
-        SecretStore, SecretStoreError, TokenSet,
+        ApiKey, AppCredentials, ConnectionSecrets, Network, NetworkAccountId, PlanSession,
+        ProfileId, Provider, SecretStore, SecretStoreError, TokenSet,
     };
     use keyring_core::Entry;
     use keyring_core::api::CredentialStoreApi as _;
@@ -269,7 +307,7 @@ mod credential_manager {
 
     use super::{
         MAX_BLOB_BYTES, SETTLE_PAUSE, StoreFailure, app_credentials_target, credential_target,
-        kept, malformed, not_kept, tokens_target, too_long,
+        kept, malformed, not_kept, plan_target, tokens_target, too_long,
     };
 
     /// Generic credentials in Windows Credential Manager, readable only by
@@ -340,6 +378,7 @@ mod credential_manager {
 
     const APP_CREDENTIALS: &str = "app credentials";
     const TOKENS: &str = "tokens";
+    const PLAN: &str = "plan session";
 
     impl ConnectionSecrets for CredentialManager {
         fn app_credentials(
@@ -404,6 +443,36 @@ mod credential_manager {
             account: NetworkAccountId,
         ) -> Result<(), SecretStoreError> {
             self.remove(&tokens_target(owner, account), TOKENS)
+        }
+
+        fn plan_session(
+            &self,
+            owner: ProfileId,
+            provider: Provider,
+        ) -> Result<Option<PlanSession>, SecretStoreError> {
+            self.read(&plan_target(owner, provider), PLAN)?
+                .map(|stored| PlanSession::decode(&stored).ok_or_else(|| malformed(PLAN)))
+                .transpose()
+        }
+
+        fn set_plan_session(
+            &self,
+            owner: ProfileId,
+            provider: Provider,
+            session: &PlanSession,
+        ) -> Result<(), SecretStoreError> {
+            let encoded = session
+                .encode()
+                .map_err(|error| SecretStoreError(Box::new(error)))?;
+            self.write(&plan_target(owner, provider), PLAN, &encoded)
+        }
+
+        fn delete_plan_session(
+            &self,
+            owner: ProfileId,
+            provider: Provider,
+        ) -> Result<(), SecretStoreError> {
+            self.remove(&plan_target(owner, provider), PLAN)
         }
     }
 
@@ -659,6 +728,26 @@ mod tests {
             store.app_credentials(owner, Network::YouTube).unwrap(),
             None
         );
+
+        let plan = Provider::HiggsfieldPlan;
+        assert_eq!(store.plan_session(owner, plan).unwrap(), None);
+        let session = PlanSession::new(
+            "client-0001",
+            tokens("plan-access-0001", Some("plan-refresh-0001")),
+        )
+        .unwrap();
+        store.set_plan_session(owner, plan, &session).unwrap();
+        assert_eq!(
+            store.plan_session(owner, plan).unwrap(),
+            Some(session.clone())
+        );
+        assert_eq!(store.plan_session(other, plan).unwrap(), None);
+        let too_large = PlanSession::new("client-0001", tokens(&"a".repeat(2_540), None)).unwrap();
+        assert!(store.set_plan_session(owner, plan, &too_large).is_err());
+        assert_eq!(store.plan_session(owner, plan).unwrap(), Some(session));
+        store.delete_plan_session(owner, plan).unwrap();
+        store.delete_plan_session(owner, plan).unwrap();
+        assert_eq!(store.plan_session(owner, plan).unwrap(), None);
     }
 
     #[test]
@@ -677,6 +766,10 @@ mod tests {
         assert_eq!(
             tokens_target(owner, account),
             format!("Bardo/{owner}/tokens/{account}")
+        );
+        assert_eq!(
+            plan_target(owner, Provider::HiggsfieldPlan),
+            format!("Bardo/{owner}/plan/higgsfield-plan")
         );
     }
 

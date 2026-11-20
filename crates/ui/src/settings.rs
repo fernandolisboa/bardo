@@ -22,8 +22,8 @@ use bardo_app::bardo_domain::{
 };
 use bardo_app::{
     AgentStatus, AppCredentialsStatus, Bardo, Control, Destination, DisplayInfo, GpuInfo,
-    GuideLink, GuidePlace, GuideRef, KeyState, ProviderKeyStatus, SettingsTab, SetupTarget, Text,
-    TourAnchor, TourPlace,
+    GuideLink, GuidePlace, GuideRef, KeyState, PlanError, PlanState, PlanStatus, ProviderKeyStatus,
+    SettingsTab, SetupTarget, Text, TourAnchor, TourPlace,
 };
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -156,6 +156,17 @@ struct KeyRow {
     testing: Option<Task<()>>,
 }
 
+/// What the screen holds for one plan's card (ADR-0028).
+#[derive(Default)]
+struct PlanRow {
+    /// The sign-in or credit check under way; dropping it stops waiting.
+    work: Option<Task<()>>,
+    /// The work under way is a credit check, not a sign-in.
+    checking: bool,
+    /// What the last sign-in or check said.
+    notice: Option<(Tone, SharedString)>,
+}
+
 /// Field errors each credentials input shows, and clears once edited.
 const CLIENT_ID_ERRORS: &[AppCredentialsFieldError] = &[
     AppCredentialsFieldError::ClientIdRequired,
@@ -232,6 +243,7 @@ pub struct SettingsScreen {
     /// The setup screen's block was copied.
     copied: bool,
     rows: HashMap<Provider, KeyRow>,
+    plan_rows: HashMap<Provider, PlanRow>,
     byteplus: BytePlusFields,
     credentials: HashMap<Network, CredentialsRow>,
     /// The light and dark slots of "follow Windows".
@@ -440,6 +452,7 @@ impl SettingsScreen {
             setup: None,
             copied: false,
             rows,
+            plan_rows: HashMap::new(),
             byteplus,
             credentials,
             light_theme,
@@ -831,6 +844,139 @@ impl SettingsScreen {
         let row = self.row_mut(provider);
         row.error = None;
         row.testing = Some(task);
+        cx.notify();
+    }
+
+    fn plan_row(&mut self, provider: Provider) -> &mut PlanRow {
+        self.plan_rows.entry(provider).or_default()
+    }
+
+    fn plan_failed(&mut self, provider: Provider, error: &PlanError, cx: &mut Context<Self>) {
+        let text = tr(self.bardo.read(cx), error.message());
+        self.plan_row(provider).notice = Some((Tone::Danger, text));
+        cx.notify();
+    }
+
+    /// Signs in to the plan: registers Bardo off the UI thread, opens the
+    /// consent page in the system browser and waits off the UI thread for
+    /// the browser to come back.
+    fn sign_in_plan(&mut self, provider: Provider, cx: &mut Context<Self>) {
+        let connect = self.bardo.update(cx, |bardo, cx| {
+            let connect = bardo.connect_plan(provider);
+            cx.notify();
+            connect
+        });
+        let connect = match connect {
+            Ok(connect) => connect,
+            Err(error) => return self.plan_failed(provider, &error, cx),
+        };
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let registered = cx
+                .background_executor()
+                .spawn(async move { connect.register() })
+                .await;
+            let result = match registered {
+                Ok(consent) => {
+                    cx.update(|cx| cx.open_url(consent.consent_url()));
+                    cx.background_executor()
+                        .spawn(async move { consent.run() })
+                        .await
+                }
+                Err(ended) => ended,
+            };
+            let outcome = bardo.update(cx, |bardo, cx| {
+                let outcome = bardo.record_plan_connect(result);
+                cx.notify();
+                outcome
+            });
+            let _ = this.update(cx, |this, cx| {
+                this.plan_row(provider).work = None;
+                match outcome {
+                    // Cancelled or replaced while it ran.
+                    None => {}
+                    Some(Ok(_)) => this.plan_row(provider).notice = None,
+                    Some(Err(error)) => this.plan_failed(provider, &error, cx),
+                }
+                cx.notify();
+            });
+        });
+        let row = self.plan_row(provider);
+        row.notice = None;
+        row.checking = false;
+        row.work = Some(task);
+        cx.notify();
+    }
+
+    fn cancel_plan_sign_in(&mut self, provider: Provider, cx: &mut Context<Self>) {
+        self.bardo.update(cx, |bardo, cx| {
+            bardo.cancel_plan_connect(provider);
+            cx.notify();
+        });
+        let row = self.plan_row(provider);
+        row.work = None;
+        row.notice = None;
+        cx.notify();
+    }
+
+    /// Reads the plan and its credits again, off the UI thread.
+    fn check_plan(&mut self, provider: Provider, cx: &mut Context<Self>) {
+        let check = match self.bardo.read(cx).plan_check(provider) {
+            Ok(check) => check,
+            Err(error) => return self.plan_failed(provider, &error, cx),
+        };
+        let bardo = self.bardo.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { check.run() })
+                .await;
+            let outcome = bardo.update(cx, |bardo, cx| {
+                let outcome = bardo.record_plan_check(result);
+                cx.notify();
+                outcome
+            });
+            let _ = this.update(cx, |this, cx| {
+                let row = this.plan_row(provider);
+                row.work = None;
+                row.checking = false;
+                match outcome {
+                    Ok(account) => {
+                        let text = this.bardo.read(cx).text_with(
+                            Text::PlanChecked,
+                            &[
+                                ("plan", &account.plan),
+                                ("credits", &account.credits.to_string()),
+                            ],
+                        );
+                        this.plan_row(provider).notice =
+                            Some((Tone::Success, SharedString::from(text)));
+                    }
+                    Err(error) => this.plan_failed(provider, &error, cx),
+                }
+                cx.notify();
+            });
+        });
+        let row = self.plan_row(provider);
+        row.notice = None;
+        row.checking = true;
+        row.work = Some(task);
+        cx.notify();
+    }
+
+    fn sign_out_plan(&mut self, provider: Provider, cx: &mut Context<Self>) {
+        let result = self.bardo.update(cx, |bardo, cx| {
+            let result = bardo.disconnect_plan(provider);
+            cx.notify();
+            result
+        });
+        let row = self.plan_row(provider);
+        row.work = None;
+        row.checking = false;
+        row.notice = None;
+        if let Err(error) = result {
+            self.plan_failed(provider, &error, cx);
+        }
         cx.notify();
     }
 
@@ -1341,7 +1487,203 @@ impl SettingsScreen {
             .into_any_element()
     }
 
+    /// A plan's card (ADR-0028): signed in or not, the plan and its
+    /// credits, and signing in, checking and signing out. The tour lights
+    /// the first one (`first`).
+    fn render_plan_card(
+        &self,
+        status: PlanStatus,
+        first: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let provider = status.provider;
+        let bardo = self.bardo.read(cx);
+        let tokens = look(cx).tokens;
+        let row = self.plan_rows.get(&provider);
+        let busy = row.is_some_and(|row| row.work.is_some());
+        let checking = busy && row.is_some_and(|row| row.checking);
+        let signing_in = status.connecting;
+        let state = match (&status.state, &status.account) {
+            (PlanState::NotConnected, _) => kit::status_with(
+                Tone::Neutral,
+                IconName::Minus,
+                tr(bardo, Text::PlanNotConnected),
+                cx,
+            ),
+            (PlanState::Connected, Some(account)) => kit::status(
+                Tone::Success,
+                bardo.text_with(
+                    Text::PlanConnected,
+                    &[
+                        ("plan", &account.plan),
+                        ("credits", &account.credits.to_string()),
+                    ],
+                ),
+                cx,
+            ),
+            (PlanState::Connected, None) => {
+                kit::status(Tone::Success, tr(bardo, Text::PlanConnectedPlain), cx)
+            }
+            (PlanState::ReconnectNeeded, _) => {
+                kit::status(Tone::Warning, tr(bardo, Text::PlanReconnectNeeded), cx)
+            }
+            (PlanState::Unreadable, _) => {
+                kit::status(Tone::Danger, tr(bardo, Text::PlanUnreadable), cx)
+            }
+        };
+        let signed_in = matches!(status.state, PlanState::Connected);
+        let actions = if signing_in {
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .child(
+                    Button::new(("plan-waiting", provider as usize))
+                        .outline()
+                        .label(tr(bardo, Text::PlanWaiting))
+                        .loading(true)
+                        .disabled(true),
+                )
+                .child(
+                    Button::new(("plan-cancel", provider as usize))
+                        .ghost()
+                        .label(tr(bardo, Text::PlanCancel))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.cancel_plan_sign_in(provider, cx)
+                        })),
+                )
+        } else {
+            let sign_in = Button::new(("plan-sign-in", provider as usize))
+                .label(tr(
+                    bardo,
+                    if status.state == PlanState::NotConnected {
+                        Text::PlanSignIn
+                    } else {
+                        Text::PlanSignInAgain
+                    },
+                ))
+                .disabled(busy)
+                .on_click(
+                    cx.listener(move |this, _: &ClickEvent, _, cx| this.sign_in_plan(provider, cx)),
+                );
+            let sign_in = if signed_in {
+                sign_in.outline()
+            } else {
+                sign_in.primary()
+            };
+            h_flex()
+                .gap_2()
+                .flex_wrap()
+                .child(sign_in)
+                // Hidden, not disabled, until there is a sign-in to act on.
+                .when(signed_in, |actions| {
+                    actions.child(
+                        Button::new(("plan-check", provider as usize))
+                            .outline()
+                            .label(tr(
+                                bardo,
+                                if checking {
+                                    Text::PlanChecking
+                                } else {
+                                    Text::PlanCheck
+                                },
+                            ))
+                            .loading(checking)
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                if this
+                                    .plan_rows
+                                    .get(&provider)
+                                    .is_none_or(|row| row.work.is_none())
+                                {
+                                    this.check_plan(provider, cx)
+                                }
+                            })),
+                    )
+                })
+                .when(status.state != PlanState::NotConnected, |actions| {
+                    actions.child(
+                        Button::new(("plan-sign-out", provider as usize))
+                            .ghost()
+                            .label(tr(bardo, Text::PlanSignOut))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.sign_out_plan(provider, cx)
+                            })),
+                    )
+                })
+        };
+        let notice = row
+            .and_then(|row| row.notice.clone())
+            .map(|(tone, text)| kit::notice(tone, text, cx));
+        let card = kit::card(cx)
+            .p_4()
+            .gap_2()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_start()
+                    .gap_3()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .font_semibold()
+                                    .child(tr(bardo, Text::ProviderName(provider))),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(tokens.text2)
+                                    .child(tr(bardo, Text::ProviderPurpose(provider))),
+                            ),
+                    )
+                    .child(div().flex_none().child(state)),
+            )
+            .child(actions)
+            .children(notice);
+        if first {
+            kit::anchor_in(
+                TourAnchor::Control(Control::PlanCard),
+                card,
+                Some(&self.scroll),
+            )
+            .into_any_element()
+        } else {
+            card.into_any_element()
+        }
+    }
+
+    /// The plans Bardo signs in to instead of a key, under the keys.
+    fn render_plans(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let plans = self.bardo.read(cx).plans();
+        if plans.is_empty() {
+            return None;
+        }
+        let cards: Vec<_> = plans
+            .into_iter()
+            .enumerate()
+            .map(|(index, status)| self.render_plan_card(status, index == 0, cx))
+            .collect();
+        let bardo = self.bardo.read(cx);
+        Some(
+            v_flex()
+                .gap_3()
+                .child(
+                    kit::section_heading(tr(bardo, Text::PlansTitle)).child(guide::info(
+                        bardo,
+                        "plans-info",
+                        tr(bardo, Text::PlansHint),
+                        guide::refs::HIGGSFIELD_PLAN,
+                    )),
+                )
+                .children(cards)
+                .into_any_element(),
+        )
+    }
+
     fn render_keys(&self, cx: &mut Context<Self>) -> AnyElement {
+        let plans = self.render_plans(cx);
         let statuses = self.bardo.read(cx).provider_keys();
         let first_saved = statuses
             .iter()
@@ -1398,6 +1740,7 @@ impl SettingsScreen {
                 Some(&self.scroll),
             ))
             .children(cards)
+            .children(plans)
             .into_any_element()
     }
 

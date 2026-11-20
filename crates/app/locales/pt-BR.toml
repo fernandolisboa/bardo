@@ -425,6 +425,10 @@ name = "Higgsfield"
 purpose = "Clipes de vídeo pelos modelos que a Higgsfield oferece."
 placeholder = "ID da chave:chave secreta"
 
+[provider.higgsfield-plan]
+name = "Plano Higgsfield"
+purpose = "Clipes de vídeo pagos com os créditos do seu plano no higgsfield.ai, pelo servidor MCP da Higgsfield. Não precisa de chave: você entra com a sua conta da Higgsfield."
+
 [provider.kling]
 name = "Kling"
 purpose = "Clipes de vídeo direto do Kling (Kling 3.0, 2.6 e 2.5 Turbo), pagos com os seus pacotes de recursos do Kling."
@@ -1020,6 +1024,7 @@ not_loaded = "Não foi possível carregar as cenas. Tente de novo."
 prompt_required = "O prompt não pode ficar vazio."
 prompt_too_long = "Use no máximo 4000 caracteres no prompt."
 missing_higgsfield_key = "Salve uma chave do Higgsfield em Configurações para animar cenas."
+missing_higgsfield_plan = "Faça login no seu plano Higgsfield em Configurações para animar cenas com ele."
 missing_kling_key = "Salve uma chave do Kling em Configurações para animar cenas com o Kling."
 no_image_to_animate = "Gere a imagem desta cena primeiro; o clipe a anima."
 nothing_to_animate = "Todas as cenas com imagem já têm clipe ou um a caminho."
@@ -2405,6 +2410,36 @@ no_channel = "O X não devolveu esta conta. Entre com a conta de onde você post
 limit_reached = "O X recusou a chamada: o app ficou sem créditos ou passou de um limite de requisições. Confira os créditos no X Developer Console e tente de novo."
 network_down = "O X está com falha do lado dele. Tente mais tarde."
 
+[plan]
+title = "Planos com login"
+hint = "Em vez de uma chave, o Bardo faz login nestes planos pelo navegador e usa os créditos do plano. O login fica guardado no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
+not_connected = "Sem login"
+connected = "Conectado: plano {plan}, {credits} créditos restantes"
+connected_plain = "Conectado"
+reconnect_needed = "Faça login de novo"
+unreadable = "Não foi possível ler este login no Gerenciador de Credenciais do Windows."
+sign_in = "Fazer login"
+sign_in_again = "Fazer login de novo"
+waiting = "Aguardando o navegador…"
+cancel = "Cancelar"
+check = "Ver créditos"
+checking = "Verificando…"
+sign_out = "Sair"
+checked = "{credits} créditos restantes no plano {plan}."
+
+[plan.error]
+not_signed_in = "Faça login no plano primeiro."
+sign_in_again = "O plano não aceita mais este login. Faça login de novo."
+
+[plan.failure]
+refused = "O plano recusou o login. Faça login de novo."
+client_rejected = "O plano não aceitou o registro do Bardo. Faça login de novo; se continuar falhando, o provedor pode ter mudado a forma de login dos apps."
+not_allowed = "O plano não permitiu isso. Faça login de novo e permita tudo o que o Bardo pede."
+limit_reached = "O plano está limitando os pedidos agora. Tente de novo em alguns minutos."
+provider_down = "Os servidores do plano estão falhando do lado deles. Tente mais tarde."
+unreachable = "Não foi possível falar com o plano. Verifique sua conexão com a internet."
+unexpected = "O plano respondeu de um jeito que o Bardo não entende. Tente de novo."
+
 [consent_page]
 done = "O Bardo está conectado. Pode fechar esta aba."
 failed = "O Bardo não conectou. Volte ao Bardo para ver o motivo."
@@ -3297,11 +3332,11 @@ body = "Com a chave salva, Testar chave faz a chamada mais barata que precisa de
 
 [tour.keys.kept]
 title = "Onde as chaves ficam"
-body = "As chaves vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados nem para os logs do Bardo."
+body = "As chaves vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados nem para os logs do Bardo. Uma chave salva nunca mais aparece: o cartão mostra só os quatro últimos caracteres, e em todo texto que sai do Bardo a chave aparece mascarada."
 
-[tour.keys.masked]
-title = "Só os últimos caracteres"
-body = "Uma chave salva nunca mais aparece: o cartão mostra os quatro últimos caracteres, e em todo texto que sai do Bardo a chave aparece mascarada. Trocar chave põe uma nova no lugar."
+[tour.keys.plan]
+title = "Planos com login"
+body = "O plano Higgsfield não usa chave: Fazer login abre a Higgsfield no navegador, e os clipes passam a ser pagos com os créditos do plano. O cartão mostra o plano e os créditos restantes."
 
 [tour.appearance]
 name = "Tour de Aparência"

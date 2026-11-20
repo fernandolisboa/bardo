@@ -105,6 +105,7 @@ impl SceneError {
             SceneError::MissingKey(Provider::Claude) => Text::ScenesMissingClaudeKey,
             SceneError::MissingKey(Provider::Higgsfield) => Text::ScenesMissingHiggsfieldKey,
             SceneError::MissingKey(Provider::Kling) => Text::ScenesMissingKlingKey,
+            SceneError::MissingKey(Provider::HiggsfieldPlan) => Text::ScenesMissingHiggsfieldPlan,
             SceneError::MissingKey(_) => Text::ScenesMissingGeminiKey,
             SceneError::Busy => Text::ScenesBusy,
             SceneError::WouldDiscardImages(_) => Text::ScenesWouldDiscardImages,
@@ -1213,6 +1214,8 @@ pub(crate) mod tests {
         pub(crate) clips: Arc<FakeClips>,
         /// Video providers after the fake one.
         pub(crate) more_clips: Vec<Arc<dyn bardo_domain::ClipGenerator>>,
+        /// Plans signed in to instead of a key (ADR-0028).
+        pub(crate) plans: Vec<Arc<dyn bardo_domain::PlanSignIn>>,
         pub(crate) secrets: Arc<MemorySecretStore>,
         /// Writes its proxies into `files`.
         pub(crate) media: Arc<crate::editor::testing::FakeMedia>,
@@ -1262,6 +1265,7 @@ pub(crate) mod tests {
                 music: Arc::default(),
                 clips: Arc::default(),
                 more_clips: Vec::new(),
+                plans: Vec::new(),
                 secrets: Arc::default(),
                 stats: Arc::default(),
                 decisions: Arc::default(),
@@ -1412,6 +1416,7 @@ pub(crate) mod tests {
                 audio: Arc::clone(&self.audio) as _,
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
+                plans: self.plans.clone(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: vec![
                     Arc::clone(&self.uploader) as _,
