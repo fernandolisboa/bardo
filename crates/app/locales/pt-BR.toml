@@ -326,8 +326,8 @@ done = "Concluída"
 [job.failure]
 simulated = "A tarefa de teste falhou de propósito."
 unexpected = "Algo deu errado dentro do Bardo."
-missing_key = "Não há chave salva para este provedor. Adicione em Configurações e tente de novo."
-key_rejected = "O provedor recusou a chave salva. Confira em Configurações e tente de novo."
+missing_key = "Não há chave salva para este provedor, ou não há login no plano dele. Resolva em Configurações e tente de novo."
+key_rejected = "O provedor recusou a chave salva ou o login do plano. Confira em Configurações e tente de novo."
 not_allowed = "A chave não tem o acesso necessário, como uma API não ativada no projeto."
 limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube renovam todo dia à meia-noite do horário do Pacífico."
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
@@ -424,6 +424,10 @@ placeholder = "Sua chave de API do Gemini"
 name = "Higgsfield"
 purpose = "Clipes de vídeo pelos modelos que a Higgsfield oferece."
 placeholder = "ID da chave:chave secreta"
+
+[provider.higgsfield-plan]
+name = "Plano Higgsfield"
+purpose = "Clipes de vídeo pagos com os créditos do seu plano no higgsfield.ai. Não precisa de chave: você faz login com a sua conta da Higgsfield."
 
 [provider.kling]
 name = "Kling"
@@ -585,6 +589,7 @@ mode = "Modo"
 mode_channel = "Do canal: {mode}"
 mode_option = "{mode} · cerca de {amount}"
 mode_missing_key = "falta a chave {provider}"
+mode_missing_sign_in = "{provider}: sem login"
 mode_hint = "Quais cenas viram clipes de IA e com qual modelo; o resto fica em imagens com movimento. Cada opção mostra quanto o vídeo inteiro custaria, pela tabela de preços. Clipes já feitos ficam, e qualquer cena ainda pode ser animada à mão."
 estimate = "Vídeo inteiro: cerca de {total} ({spent} gastos)"
 estimate_partial = "Vídeo inteiro: cerca de {total}, mais chamadas sem preço ({spent} gastos)"
@@ -1020,6 +1025,7 @@ not_loaded = "Não foi possível carregar as cenas. Tente de novo."
 prompt_required = "O prompt não pode ficar vazio."
 prompt_too_long = "Use no máximo 4000 caracteres no prompt."
 missing_higgsfield_key = "Salve uma chave do Higgsfield em Configurações para animar cenas."
+missing_higgsfield_plan = "Faça login no seu plano Higgsfield em Configurações para animar cenas com ele."
 missing_kling_key = "Salve uma chave do Kling em Configurações para animar cenas com o Kling."
 no_image_to_animate = "Gere a imagem desta cena primeiro; o clipe a anima."
 nothing_to_animate = "Todas as cenas com imagem já têm clipe ou um a caminho."
@@ -2405,6 +2411,44 @@ no_channel = "O X não devolveu esta conta. Entre com a conta de onde você post
 limit_reached = "O X recusou a chamada: o app ficou sem créditos ou passou de um limite de requisições. Confira os créditos no X Developer Console e tente de novo."
 network_down = "O X está com falha do lado dele. Tente mais tarde."
 
+[plan]
+title = "Planos com login"
+hint = "Em vez de uma chave, o Bardo faz login nestes planos pelo navegador e usa os créditos do plano. O login fica guardado no Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca no banco de dados nem nos logs do Bardo."
+not_connected = "Sem login"
+connected = "Plano {plan}: {credits} créditos restantes"
+connected_plain = "Com login"
+reconnect_needed = "Login expirado"
+unreadable = "Não foi possível ler este login no Gerenciador de Credenciais do Windows."
+sign_in = "Fazer login"
+sign_in_again = "Fazer login de novo"
+waiting = "Aguardando o navegador…"
+cancel = "Cancelar"
+check = "Ver créditos"
+checking = "Verificando…"
+sign_out = "Encerrar login"
+checked = "{credits} créditos restantes no plano {plan}."
+
+[plan.error]
+not_signed_in = "Faça login no plano primeiro."
+sign_in_again = "O plano não aceita mais este login. Faça login de novo."
+not_offered = "O Bardo não faz login neste plano."
+denied = "O acesso não foi permitido no navegador. Faça login de novo e escolha Permitir."
+timed_out = "O navegador não respondeu em cinco minutos. Faça login de novo."
+cancelled = "Login cancelado."
+listen_failed = "O Bardo não conseguiu esperar a resposta do navegador neste computador. Tente de novo; se continuar falhando, verifique se um firewall permite o Bardo em 127.0.0.1."
+port_in_use = "Outro programa deste computador está usando a porta em que o Bardo espera a resposta do navegador. Feche-o, ou espere um minuto se acabou de tentar, e faça login de novo."
+tokens_too_large = "O login do plano é grande demais para o Gerenciador de Credenciais do Windows, então não foi guardado."
+store_failed = "Não foi possível acessar o Gerenciador de Credenciais do Windows. Tente de novo."
+
+[plan.failure]
+refused = "O plano recusou o login. Faça login de novo."
+client_rejected = "O plano não aceitou o registro do Bardo. Faça login de novo; se continuar falhando, o provedor pode ter mudado a forma de login dos apps."
+not_allowed = "O plano não permitiu isso. Faça login de novo e permita tudo o que o Bardo pede."
+limit_reached = "O plano está limitando os pedidos agora. Tente de novo em alguns minutos."
+provider_down = "Os servidores do plano estão falhando do lado deles. Tente mais tarde."
+unreachable = "Não foi possível falar com o plano. Verifique sua conexão com a internet."
+unexpected = "O plano respondeu de um jeito que o Bardo não entende. Tente de novo."
+
 [consent_page]
 done = "O Bardo está conectado. Pode fechar esta aba."
 failed = "O Bardo não conectou. Volte ao Bardo para ver o motivo."
@@ -3297,11 +3341,11 @@ body = "Com a chave salva, Testar chave faz a chamada mais barata que precisa de
 
 [tour.keys.kept]
 title = "Onde as chaves ficam"
-body = "As chaves vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados nem para os logs do Bardo."
+body = "As chaves vão para o Gerenciador de Credenciais do Windows, na sua conta do Windows, nunca para o banco de dados nem para os logs do Bardo. Uma chave salva nunca mais aparece: o cartão mostra só os quatro últimos caracteres, e em todo texto que sai do Bardo a chave aparece mascarada."
 
-[tour.keys.masked]
-title = "Só os últimos caracteres"
-body = "Uma chave salva nunca mais aparece: o cartão mostra os quatro últimos caracteres, e em todo texto que sai do Bardo a chave aparece mascarada. Trocar chave põe uma nova no lugar."
+[tour.keys.plan]
+title = "Planos com login"
+body = "O plano Higgsfield não usa chave: Fazer login abre a Higgsfield no navegador, e os clipes passam a ser pagos com os créditos do plano. Ver créditos mostra o plano e os créditos restantes."
 
 [tour.appearance]
 name = "Tour de Aparência"
@@ -3648,6 +3692,7 @@ restored = "O Bardo agora tem o backup feito em {when}."
 rolled_back = "A restauração não conseguiu substituir os arquivos, então o Bardo abriu seus dados como estavam. Feche outros programas que possam usar as pastas do Bardo e tente de novo."
 set_up_again = "Este computador ainda precisa de:"
 set_up_key = "A chave do {provider}"
+set_up_plan = "O login do {provider}"
 set_up_credentials = "As credenciais de app do {network}"
 set_up_reconnect = "Reconectar {handle} no {network}"
 set_up_open = "Abrir"

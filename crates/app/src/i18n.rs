@@ -290,6 +290,7 @@ pub enum Text {
     ProjectModeOption,
     /// Placeholder: `{provider}`.
     ProjectModeMissingKey,
+    ProjectModeMissingSignIn,
     /// Placeholders: `{total}`, `{spent}`.
     ProjectEstimate,
     /// Placeholders: `{total}`, `{spent}`.
@@ -885,6 +886,7 @@ pub enum Text {
     ScenesMissingClaudeKey,
     ScenesMissingGeminiKey,
     ScenesMissingHiggsfieldKey,
+    ScenesMissingHiggsfieldPlan,
     ScenesMissingKlingKey,
     SceneNoImageToAnimate,
     ScenesNothingToAnimate,
@@ -1434,6 +1436,35 @@ pub enum Text {
     /// The status of an account waiting for the user's choice.
     ConnectionChooseLabel,
     SignInFailure(Network, SignInFailureKind),
+    /// Plans Bardo signs in to instead of a key (ADR-0028).
+    PlansTitle,
+    PlansHint,
+    PlanNotConnected,
+    /// Placeholders: `{plan}`, `{credits}`.
+    PlanConnected,
+    PlanConnectedPlain,
+    PlanReconnectNeeded,
+    PlanUnreadable,
+    PlanSignIn,
+    PlanSignInAgain,
+    PlanWaiting,
+    PlanCancel,
+    PlanCheck,
+    PlanChecking,
+    PlanSignOut,
+    /// Placeholders: `{plan}`, `{credits}`.
+    PlanChecked,
+    PlanNotSignedIn,
+    PlanSignInAgainHint,
+    PlanNotOffered,
+    PlanDenied,
+    PlanTimedOut,
+    PlanCancelled,
+    PlanListenFailed,
+    PlanPortInUse,
+    PlanTokensTooLarge,
+    PlanStoreFailed,
+    PlanFailure(SignInFailureKind),
     NetworkAccountStillConnected,
     ConsentPageDone,
     ConsentPageFailed,
@@ -2224,6 +2255,7 @@ pub enum Text {
     BackupSetUpAgain,
     /// Placeholders: `{provider}`.
     BackupSetUpKey,
+    BackupSetUpPlan,
     /// Placeholders: `{network}`.
     BackupSetUpCredentials,
     /// Placeholders: `{handle}`, `{network}`.
@@ -2714,6 +2746,7 @@ impl Text {
             Text::ProjectModeHint => "projects.mode_hint",
             Text::ProjectModeOption => "projects.mode_option",
             Text::ProjectModeMissingKey => "projects.mode_missing_key",
+            Text::ProjectModeMissingSignIn => "projects.mode_missing_sign_in",
             Text::ProjectEstimate => "projects.estimate",
             Text::ProjectEstimatePartial => "projects.estimate_partial",
             Text::SpendCap => "projects.cap.label",
@@ -2949,6 +2982,42 @@ impl Text {
                 return format!("connection.failure.{}.{kind}", network.code()).into();
             }
             Text::NetworkAccountStillConnected => "network_account.error.still_connected",
+            Text::PlansTitle => "plan.title",
+            Text::PlansHint => "plan.hint",
+            Text::PlanNotConnected => "plan.not_connected",
+            Text::PlanConnected => "plan.connected",
+            Text::PlanConnectedPlain => "plan.connected_plain",
+            Text::PlanReconnectNeeded => "plan.reconnect_needed",
+            Text::PlanUnreadable => "plan.unreadable",
+            Text::PlanSignIn => "plan.sign_in",
+            Text::PlanSignInAgain => "plan.sign_in_again",
+            Text::PlanWaiting => "plan.waiting",
+            Text::PlanCancel => "plan.cancel",
+            Text::PlanCheck => "plan.check",
+            Text::PlanChecking => "plan.checking",
+            Text::PlanSignOut => "plan.sign_out",
+            Text::PlanChecked => "plan.checked",
+            Text::PlanNotSignedIn => "plan.error.not_signed_in",
+            Text::PlanSignInAgainHint => "plan.error.sign_in_again",
+            Text::PlanNotOffered => "plan.error.not_offered",
+            Text::PlanDenied => "plan.error.denied",
+            Text::PlanTimedOut => "plan.error.timed_out",
+            Text::PlanCancelled => "plan.error.cancelled",
+            Text::PlanListenFailed => "plan.error.listen_failed",
+            Text::PlanPortInUse => "plan.error.port_in_use",
+            Text::PlanTokensTooLarge => "plan.error.tokens_too_large",
+            Text::PlanStoreFailed => "plan.error.store_failed",
+            Text::PlanFailure(kind) => match kind {
+                SignInFailureKind::Refused => "plan.failure.refused",
+                SignInFailureKind::ClientRejected => "plan.failure.client_rejected",
+                SignInFailureKind::NotAllowed => "plan.failure.not_allowed",
+                SignInFailureKind::LimitReached => "plan.failure.limit_reached",
+                SignInFailureKind::NetworkDown => "plan.failure.provider_down",
+                SignInFailureKind::Unreachable => "plan.failure.unreachable",
+                SignInFailureKind::NoChannel | SignInFailureKind::Unexpected => {
+                    "plan.failure.unexpected"
+                }
+            },
             Text::ConsentPageDone => "consent_page.done",
             Text::ConsentPageFailed => "consent_page.failed",
             Text::ProviderKeyStoreFailed => "provider_keys.error.store_failed",
@@ -3416,6 +3485,7 @@ impl Text {
             Text::ScenesMissingClaudeKey => "scenes.error.missing_claude_key",
             Text::ScenesMissingGeminiKey => "scenes.error.missing_gemini_key",
             Text::ScenesMissingHiggsfieldKey => "scenes.error.missing_higgsfield_key",
+            Text::ScenesMissingHiggsfieldPlan => "scenes.error.missing_higgsfield_plan",
             Text::ScenesMissingKlingKey => "scenes.error.missing_kling_key",
             Text::SceneNoImageToAnimate => "scenes.error.no_image_to_animate",
             Text::ScenesNothingToAnimate => "scenes.error.nothing_to_animate",
@@ -4732,6 +4802,7 @@ impl Text {
             Text::BackupRolledBack => "backup.rolled_back",
             Text::BackupSetUpAgain => "backup.set_up_again",
             Text::BackupSetUpKey => "backup.set_up_key",
+            Text::BackupSetUpPlan => "backup.set_up_plan",
             Text::BackupSetUpCredentials => "backup.set_up_credentials",
             Text::BackupSetUpReconnect => "backup.set_up_reconnect",
             Text::BackupSetUpOpen => "backup.set_up_open",
@@ -5020,6 +5091,19 @@ impl Catalog {
     /// A price, to the millionth when it needs it: `$4.00`, `$0.042`.
     pub fn price(&self, amount: Money) -> String {
         self.dollars(amount, 6)
+    }
+
+    /// A plan's credits, grouped, with only the decimals they need:
+    /// `1,250`, `982.5`, `982,5`.
+    pub fn credits(&self, credits: bardo_domain::Credits) -> String {
+        let hundredths = credits.hundredths();
+        let (whole, cents) = (self.grouped(hundredths / 100), hundredths % 100);
+        let separator = self.get(Text::DecimalSeparator);
+        match cents {
+            0 => whole,
+            cents if cents % 10 == 0 => format!("{whole}{separator}{}", cents / 10),
+            cents => format!("{whole}{separator}{cents:02}"),
+        }
     }
 
     /// A month and its year: `October 2026`, `outubro de 2026`.
@@ -5340,6 +5424,7 @@ mod tests {
             Text::ProjectModeHint,
             Text::ProjectModeOption,
             Text::ProjectModeMissingKey,
+            Text::ProjectModeMissingSignIn,
             Text::ProjectEstimate,
             Text::ProjectEstimatePartial,
             Text::SpendCap,
@@ -6407,6 +6492,46 @@ mod tests {
             }
         }
         texts.push(Text::Details);
+        texts.extend([
+            Text::PlansTitle,
+            Text::PlansHint,
+            Text::PlanNotConnected,
+            Text::PlanConnected,
+            Text::PlanConnectedPlain,
+            Text::PlanReconnectNeeded,
+            Text::PlanUnreadable,
+            Text::PlanSignIn,
+            Text::PlanSignInAgain,
+            Text::PlanWaiting,
+            Text::PlanCancel,
+            Text::PlanCheck,
+            Text::PlanChecking,
+            Text::PlanSignOut,
+            Text::PlanChecked,
+            Text::PlanNotSignedIn,
+            Text::PlanSignInAgainHint,
+            Text::PlanNotOffered,
+            Text::PlanDenied,
+            Text::PlanTimedOut,
+            Text::PlanCancelled,
+            Text::PlanListenFailed,
+            Text::PlanPortInUse,
+            Text::PlanTokensTooLarge,
+            Text::PlanStoreFailed,
+            Text::ScenesMissingHiggsfieldPlan,
+        ]);
+        texts.extend(
+            [
+                SignInFailureKind::Refused,
+                SignInFailureKind::ClientRejected,
+                SignInFailureKind::NotAllowed,
+                SignInFailureKind::LimitReached,
+                SignInFailureKind::NetworkDown,
+                SignInFailureKind::Unreachable,
+                SignInFailureKind::Unexpected,
+            ]
+            .map(Text::PlanFailure),
+        );
         texts.push(Text::NavBudgetsUsed);
         texts.extend([
             Text::AppearanceLayout,
@@ -7233,6 +7358,7 @@ mod tests {
             Text::BackupRolledBack,
             Text::BackupSetUpAgain,
             Text::BackupSetUpKey,
+            Text::BackupSetUpPlan,
             Text::BackupSetUpCredentials,
             Text::BackupSetUpReconnect,
             Text::BackupSetUpOpen,
@@ -7476,6 +7602,18 @@ mod tests {
         assert_eq!(en.money(Money::from_micros(5_000)), "$0.01");
         assert_eq!(en.money(Money::from_micros(4_999)), "under $0.01");
         assert_eq!(pt.money(Money::from_micros(1)), "menos de US$ 0,01");
+    }
+
+    #[test]
+    fn plan_credits_read_in_each_language() {
+        let en = Catalog::load(UiLanguage::EnUs);
+        let pt = Catalog::load(UiLanguage::PtBr);
+        let credits = bardo_domain::Credits::from_hundredths;
+        assert_eq!(en.credits(credits(125_000)), "1,250");
+        assert_eq!(pt.credits(credits(125_000)), "1.250");
+        assert_eq!(en.credits(credits(98_250)), "982.5");
+        assert_eq!(pt.credits(credits(98_250)), "982,5");
+        assert_eq!(en.credits(credits(25)), "0.25");
     }
 
     #[test]

@@ -62,7 +62,7 @@ Scheduled posts come back as they were in the backup. A post whose time came whi
 <a id="after-restore"></a>
 ## After a restore
 
-The tab lists what this computer still needs: the keys and app credentials the backup's computer had and this one lacks, and the accounts whose sign-in is not here. Each line opens the place to fix it: [API keys](api-keys.md), [Network app credentials](app-credentials.md) or [Accounts](network-accounts.md#connect). On the same computer there is usually nothing to do. **Done** closes the list.
+The tab lists what this computer still needs: the keys, plan sign-ins and app credentials the backup's computer had and this one lacks, and the accounts whose sign-in is not here. Each line opens the place to fix it: [API keys](api-keys.md), [Network app credentials](app-credentials.md) or [Accounts](network-accounts.md#connect). On the same computer there is usually nothing to do. **Done** closes the list.
 
 <a id="moving"></a>
 ## Moving to another computer

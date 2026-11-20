@@ -326,8 +326,8 @@ done = "Done"
 [job.failure]
 simulated = "The test job failed on purpose."
 unexpected = "Something went wrong inside Bardo."
-missing_key = "No key is saved for this provider. Add it under Settings, then retry."
-key_rejected = "The provider rejected the saved key. Check it under Settings, then retry."
+missing_key = "No key is saved for this provider, or its plan is not signed in. Fix it under Settings, then retry."
+key_rejected = "The provider rejected the saved key or the plan's sign-in. Check it under Settings, then retry."
 not_allowed = "The key lacks access this needs, such as an API not enabled for the project."
 limit_reached = "A quota or rate limit stopped the provider. YouTube quotas reset daily at midnight Pacific time."
 provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
@@ -424,6 +424,10 @@ placeholder = "Your Gemini API key"
 name = "Higgsfield"
 purpose = "Video clips through the models Higgsfield offers."
 placeholder = "Key ID:Key secret"
+
+[provider.higgsfield-plan]
+name = "Higgsfield plan"
+purpose = "Video clips paid from the credits of your higgsfield.ai plan. No key needed: you sign in with your Higgsfield account."
 
 [provider.kling]
 name = "Kling"
@@ -585,6 +589,7 @@ mode = "Mode"
 mode_channel = "Channel's: {mode}"
 mode_option = "{mode} · about {amount}"
 mode_missing_key = "{provider} key missing"
+mode_missing_sign_in = "{provider}: not signed in"
 mode_hint = "Which scenes become AI clips and with which model; the rest stay stills with motion. Each choice shows what the whole video would cost, from the rate table. Clips made already stay, and any scene can still be animated by hand."
 estimate = "Whole video: about {total} ({spent} spent)"
 estimate_partial = "Whole video: about {total}, plus calls without a rate ({spent} spent)"
@@ -1020,6 +1025,7 @@ not_loaded = "Could not load the scenes. Try again."
 prompt_required = "The prompt cannot be empty."
 prompt_too_long = "Keep the prompt to at most 4000 characters."
 missing_higgsfield_key = "Save a Higgsfield key under Settings to animate scenes."
+missing_higgsfield_plan = "Sign in to your Higgsfield plan under Settings to animate scenes with it."
 missing_kling_key = "Save a Kling key under Settings to animate scenes with Kling."
 no_image_to_animate = "Generate this scene's image first; the clip animates it."
 nothing_to_animate = "Every scene with an image already has a clip or one on the way."
@@ -2405,6 +2411,44 @@ no_channel = "X didn't return this account. Sign in with the account you post fr
 limit_reached = "X refused the request: the app is out of credits or over a rate limit. Check its credits in the X Developer Console, then try again."
 network_down = "X is failing on its side. Try again later."
 
+[plan]
+title = "Plans you sign in to"
+hint = "Instead of a key, Bardo signs in to these plans in the browser and spends the plan's credits. The sign-in is kept in Windows Credential Manager under your Windows account, never in Bardo's database or logs."
+not_connected = "Not signed in"
+connected = "{plan} plan: {credits} credits left"
+connected_plain = "Signed in"
+reconnect_needed = "Sign-in expired"
+unreadable = "Could not read this sign-in from Windows Credential Manager."
+sign_in = "Sign in"
+sign_in_again = "Sign in again"
+waiting = "Waiting for the browser…"
+cancel = "Cancel"
+check = "Check credits"
+checking = "Checking…"
+sign_out = "Sign out"
+checked = "{credits} credits left on the {plan} plan."
+
+[plan.error]
+not_signed_in = "Sign in to the plan first."
+sign_in_again = "The plan no longer accepts this sign-in. Sign in again."
+not_offered = "Bardo doesn't sign in to this plan."
+denied = "Access wasn't allowed in the browser. Sign in again and choose Allow."
+timed_out = "No answer came back from the browser within five minutes. Sign in again."
+cancelled = "Sign-in cancelled."
+listen_failed = "Bardo couldn't wait for the browser's answer on this computer. Try again; if it keeps failing, check that a firewall allows Bardo on 127.0.0.1."
+port_in_use = "Another program on this computer is using the port Bardo waits on for the browser's answer. Close it, or wait a minute if you just tried, and sign in again."
+tokens_too_large = "The plan's sign-in is too large for Windows Credential Manager, so it wasn't kept."
+store_failed = "Could not reach Windows Credential Manager. Try again."
+
+[plan.failure]
+refused = "The plan refused the sign-in. Sign in again."
+client_rejected = "The plan didn't accept Bardo's registration. Sign in again; if it keeps failing, the provider may have changed how apps sign in."
+not_allowed = "The plan didn't allow this. Sign in again and allow everything Bardo asks for."
+limit_reached = "The plan is limiting requests right now. Try again in a few minutes."
+provider_down = "The plan's servers are failing on their side. Try again later."
+unreachable = "Couldn't reach the plan. Check your internet connection."
+unexpected = "The plan answered in a way Bardo doesn't understand. Try again."
+
 [consent_page]
 done = "Bardo is connected. You can close this tab."
 failed = "Bardo didn't connect. Go back to Bardo to see why."
@@ -3297,11 +3341,11 @@ body = "Once a key is saved, Test key makes the cheapest call that needs it and 
 
 [tour.keys.kept]
 title = "Where keys are kept"
-body = "Keys go to Windows Credential Manager under your Windows account, never to Bardo's database or logs."
+body = "Keys go to Windows Credential Manager under your Windows account, never to Bardo's database or logs. A saved key never shows again: its card shows only the last four characters, and anywhere text leaves Bardo the key is masked."
 
-[tour.keys.masked]
-title = "Only the last characters"
-body = "A saved key never shows again: the card shows its last four characters, and anywhere text leaves Bardo the key is masked. Replace key swaps it for a new one."
+[tour.keys.plan]
+title = "Plans you sign in to"
+body = "The Higgsfield plan takes no key: Sign in opens Higgsfield in the browser, and clips are then paid from your plan's credits. Check credits shows the plan and the credits left."
 
 [tour.appearance]
 name = "Appearance tour"
@@ -3648,6 +3692,7 @@ restored = "Bardo now has the backup made {when}."
 rolled_back = "The restore couldn't replace the files, so Bardo opened your data as it was. Close other programs that may use Bardo's folders and try again."
 set_up_again = "This computer still needs:"
 set_up_key = "The {provider} key"
+set_up_plan = "The sign-in to the {provider}"
 set_up_credentials = "The {network} app credentials"
 set_up_reconnect = "Reconnect {handle} on {network}"
 set_up_open = "Open"

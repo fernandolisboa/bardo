@@ -17,8 +17,13 @@ pub enum Provider {
     ElevenLabs,
     /// Google's Gemini API: images (Nano Banana) and video (Veo).
     Gemini,
-    /// Video clips through the models Higgsfield aggregates.
+    /// Video clips through the models Higgsfield aggregates, paid from
+    /// the API's dollar balance.
     Higgsfield,
+    /// Video clips through Higgsfield's MCP server, paid from the credits
+    /// of the user's higgsfield.ai plan (ADR-0028). Bardo signs in to it
+    /// (Settings › API keys); it has no API key.
+    HiggsfieldPlan,
     /// Video clips straight from Kling's own API.
     Kling,
     /// Performed takes straight from BytePlus ModelArk (Seedance 2.5 with
@@ -36,11 +41,12 @@ pub enum Provider {
 
 impl Provider {
     /// In the order the settings screen lists them.
-    pub const ALL: [Provider; 9] = [
+    pub const ALL: [Provider; 10] = [
         Provider::Claude,
         Provider::ElevenLabs,
         Provider::Gemini,
         Provider::Higgsfield,
+        Provider::HiggsfieldPlan,
         Provider::Kling,
         Provider::BytePlus,
         Provider::TypeSafe,
@@ -55,6 +61,7 @@ impl Provider {
             Provider::ElevenLabs => "elevenlabs",
             Provider::Gemini => "gemini",
             Provider::Higgsfield => "higgsfield",
+            Provider::HiggsfieldPlan => "higgsfield-plan",
             Provider::Kling => "kling",
             Provider::BytePlus => "byteplus",
             Provider::TypeSafe => "typesafe",
@@ -64,9 +71,16 @@ impl Provider {
     }
 
     /// Whether Bardo calls it with an API key the user saves in Settings ›
-    /// API keys. X goes through the connected network account instead.
+    /// API keys. X goes through the connected network account instead,
+    /// and the Higgsfield plan through its own sign-in.
     pub fn has_key(self) -> bool {
-        self != Provider::X
+        !matches!(self, Provider::X | Provider::HiggsfieldPlan)
+    }
+
+    /// Whether Bardo signs in to it as a provider (a plan's account),
+    /// rather than saving a key or connecting a network.
+    pub fn signs_in(self) -> bool {
+        self == Provider::HiggsfieldPlan
     }
 
     /// The providers with an API key, in settings order.
@@ -185,6 +199,20 @@ impl ApiKey {
             crate::byteplus::check_key(key)?;
         }
         Ok(Self(key.to_owned()))
+    }
+
+    /// The access token of a provider Bardo signs in to (`Provider::signs_in`),
+    /// passed to its adapter where other providers get their key. OAuth
+    /// access tokens can be longer than any key, so only emptiness and
+    /// header-safe characters are checked.
+    pub fn access_token(token: &str) -> Result<Self, ApiKeyError> {
+        if token.is_empty() {
+            return Err(ApiKeyError::Required);
+        }
+        if !token.chars().all(|c| c.is_ascii_graphic()) {
+            return Err(ApiKeyError::InvalidCharacters);
+        }
+        Ok(Self(token.to_owned()))
     }
 
     /// The key itself. Only for the request header or the secret store.
@@ -426,6 +454,26 @@ mod tests {
                 Provider::TypeSafe,
                 Provider::YouTubeData
             ]
+        );
+    }
+
+    #[test]
+    fn the_higgsfield_plan_signs_in_and_is_paid_without_an_api_key() {
+        assert!(Provider::HiggsfieldPlan.signs_in());
+        assert!(!Provider::HiggsfieldPlan.has_key());
+        assert!(Provider::HiggsfieldPlan.is_paid());
+        assert!(!Provider::Higgsfield.signs_in());
+        assert_eq!(Provider::HiggsfieldPlan.code(), "higgsfield-plan");
+    }
+
+    #[test]
+    fn an_access_token_may_be_longer_than_any_key_but_stays_header_safe() {
+        let long = "e".repeat(1_500);
+        assert_eq!(ApiKey::access_token(&long).unwrap().expose(), long);
+        assert_eq!(ApiKey::access_token(""), Err(ApiKeyError::Required));
+        assert_eq!(
+            ApiKey::access_token("a b"),
+            Err(ApiKeyError::InvalidCharacters)
         );
     }
 

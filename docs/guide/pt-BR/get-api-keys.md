@@ -103,6 +103,15 @@ Você só precisa desta chave para clipes de vídeo dos modelos da Higgsfield.
 4. Copie as duas. O Bardo recebe as duas num campo só, unidas por dois-pontos: `KEY_ID:KEY_SECRET` (o ID, um `:` e a chave secreta, sem espaços).
 5. Cole no cartão **Higgsfield** em [Configurações › Chaves de API](bardo:go/settings/keys), escolha **Salvar chave** e depois **Testar chave**.
 
+<a id="higgsfield-plan"></a>
+## Plano Higgsfield
+
+O plano Higgsfield não usa chave: você faz login na sua conta do higgsfield.ai.
+
+1. Tenha um plano com créditos no [higgsfield.ai](https://higgsfield.ai). O console e o saldo da API, acima, são outro produto e não são necessários para isto.
+2. Em [Configurações › Chaves de API](bardo:go/settings/keys), em **Planos com login**, escolha **Fazer login** no cartão **Plano Higgsfield**.
+3. Faça login na página que abre no navegador e permita o Bardo. De volta ao Bardo, o cartão mostra o seu plano e os créditos.
+
 <a id="kling"></a>
 ## Kling
 

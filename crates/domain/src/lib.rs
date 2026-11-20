@@ -80,6 +80,7 @@ mod performed;
 mod performed_cut;
 mod persona;
 mod persona_look;
+mod plan;
 mod post_insights;
 mod preflight;
 mod production;
@@ -267,6 +268,7 @@ pub use persona_look::{
     LookImage, LookImageError, LookSource, MAX_LOOK_DESCRIPTION, MAX_LOOK_PROMPT, PersonaLook,
     UnknownLookSource, look_description,
 };
+pub use plan::{Credits, PlanAccount, PlanSession, PlanSignIn};
 pub use post_insights::{
     Insights, InsightsReader, MEDIA_PAGES, MediaItem, MediaLookup, MediaPage, PostNumbers,
     PostReading, find_media, read_insights,

@@ -96,6 +96,29 @@ video_seconds = "0.042"
 [higgsfield."minimax/h3/"]
 video_seconds = "0.13"
 
+# The Higgsfield plan (ADR-0028) spends the plan's credits, not dollars:
+# each price is the model's credits per second of a 9:16 clip (from
+# Higgsfield's own estimate, checked on 2026-11-20) at US$ 0.049 a credit,
+# the Plus plan's US$ 49 for 1,000 credits. Change them on the costs screen
+# to match your plan.
+[higgsfield-plan."kling3_0/std"]
+video_seconds = "0.0735"
+
+[higgsfield-plan."kling3_0/pro"]
+video_seconds = "0.08575"
+
+[higgsfield-plan."kling2_6"]
+video_seconds = "0.049"
+
+[higgsfield-plan."seedance_2_0/1080p"]
+video_seconds = "0.588"
+
+[higgsfield-plan."wan2_7/1080p"]
+video_seconds = "0.1225"
+
+[higgsfield-plan."minimax_hailuo/2.3"]
+video_seconds = "0.0539"
+
 # Take models (performed takes), per second of take. Kling 3.0 Motion
 # Control at 1080p is Kling's list price (2026-10-22). Seedance 2.5 Video
 # Edit has no published per-second price on Higgsfield: these come from

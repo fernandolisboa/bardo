@@ -234,6 +234,7 @@ mod tests {
                 audio: Arc::new(crate::narrations::testing::FakeAudioOutput::default()),
                 media: Arc::clone(&self.media) as _,
                 sign_ins: Vec::new(),
+                plans: Vec::new(),
                 consent: Arc::new(crate::connections::testing::NoConsent),
                 uploaders: Vec::new(),
                 analytics: Vec::new(),

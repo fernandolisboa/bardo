@@ -37,7 +37,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned: Rust 1.100 moved build scripts' output folders, and ort's
+      # build script then copies onnxruntime's DLLs into folders that do
+      # not exist and fails. Back to stable once ort follows the layout.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
       - uses: Swatinem/rust-cache@v2
         with:
           key: release

@@ -814,6 +814,7 @@ impl SetupTarget {
                     Provider::ElevenLabs => &["elevenlabs"],
                     Provider::Gemini => &["gemini"],
                     Provider::Higgsfield => &["higgsfield"],
+                    Provider::HiggsfieldPlan => &["higgsfield-plan"],
                     Provider::Kling => &["kling"],
                     Provider::BytePlus => &["byteplus"],
                     Provider::TypeSafe => &["typesafe"],

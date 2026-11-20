@@ -26,7 +26,7 @@ Exports go to `Videos\Bardo`, one folder per project with a folder per network i
 <a id="credentials"></a>
 ## Windows Credential Manager
 
-Your API keys, your networks' app credentials and the sign-ins of your connected accounts are kept in Windows Credential Manager, readable only by your Windows account, under **Generic Credentials** with names that start with `Bardo/`. They stay on this computer: on another one, save your keys and credentials again and reconnect the accounts. Removing a key or a credential, or disconnecting an account, deletes it from Credential Manager too.
+Your API keys, your networks' app credentials, the sign-ins of your connected accounts and of the [Higgsfield plan](api-keys.md#higgsfield-plan) are kept in Windows Credential Manager, readable only by your Windows account, under **Generic Credentials** with names that start with `Bardo/`. They stay on this computer: on another one, save your keys and credentials again, reconnect the accounts and sign in to the plan again. Removing a key or a credential, or disconnecting an account, deletes it from Credential Manager too.
 
 <a id="logs"></a>
 ## Logs

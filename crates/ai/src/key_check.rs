@@ -23,7 +23,8 @@ const NO_SUCH_KLING_TASK: &str = "bardo-key-check";
 const MAX_DETAIL_CHARS: usize = 300;
 
 /// The request that tests `key` with `provider`; `None` for a provider
-/// without API keys (X signs in as a network).
+/// without API keys (X signs in as a network, the Higgsfield plan as a
+/// provider).
 pub fn check_request(provider: Provider, key: &ApiKey) -> Option<HttpRequest> {
     let key = key.expose();
     Some(match provider {
@@ -61,7 +62,7 @@ pub fn check_request(provider: Provider, key: &ApiKey) -> Option<HttpRequest> {
             HttpRequest::get("https://www.googleapis.com/youtube/v3/i18nLanguages?part=snippet")
                 .header("x-goog-api-key", key)
         }
-        Provider::X => return None,
+        Provider::X | Provider::HiggsfieldPlan => return None,
     })
 }
 

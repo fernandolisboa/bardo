@@ -62,7 +62,7 @@ Os posts agendados voltam como estavam no backup. Um post cujo horário chegou e
 <a id="after-restore"></a>
 ## Depois de restaurar
 
-A aba lista o que este computador ainda precisa: as chaves e credenciais de app que o computador do backup tinha e este não tem, e as contas cujo login não está aqui. Cada linha abre o lugar para resolver: [Chaves de API](api-keys.md), [Credenciais de app das redes](app-credentials.md) ou [Contas](network-accounts.md#connect). No mesmo computador costuma não haver nada a fazer. **Concluir** fecha a lista.
+A aba lista o que este computador ainda precisa: as chaves, logins de plano e credenciais de app que o computador do backup tinha e este não tem, e as contas cujo login não está aqui. Cada linha abre o lugar para resolver: [Chaves de API](api-keys.md), [Credenciais de app das redes](app-credentials.md) ou [Contas](network-accounts.md#connect). No mesmo computador costuma não haver nada a fazer. **Concluir** fecha a lista.
 
 <a id="moving"></a>
 ## Trocar de computador

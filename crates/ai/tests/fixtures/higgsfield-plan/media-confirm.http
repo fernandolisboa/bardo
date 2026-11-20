@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+content-type: text/event-stream
+
+event: message
+data: {"jsonrpc": "2.0", "id": 3, "result": {"content": [{"type": "text", "text": "{\"confirmed\": [{\"media_id\": \"2428803a-33a6-42e4-9627-6133b90b02ef\", \"type\": \"image\", \"status\": \"ready\"}]}"}]}}
+

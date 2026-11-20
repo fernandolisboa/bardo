@@ -215,7 +215,16 @@ impl Bardo {
             .collect()
     }
 
+    /// A plan signed in to instead of a key (ADR-0028) counts as a saved
+    /// key once signed in.
     pub fn provider_key(&self, provider: Provider) -> ProviderKeyStatus {
+        if provider.signs_in() {
+            return ProviderKeyStatus {
+                provider,
+                state: self.plan_book.key_state(provider),
+                last_check: None,
+            };
+        }
         let slot = &self.provider_keys.slots[&provider];
         ProviderKeyStatus {
             provider,

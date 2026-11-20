@@ -288,11 +288,10 @@ pub enum Control {
     KeyCard,
     /// Settings › API keys: the first card's Step by step.
     KeySetup,
-    /// Settings › API keys: whether the first provider's key is saved, by
-    /// its last characters.
-    KeyState,
     /// Settings › API keys: the first Test key.
     KeyTest,
+    /// Settings › API keys: the first plan Bardo signs in to (ADR-0028).
+    PlanCard,
     /// Settings › Appearance: the layouts.
     AppearanceLayout,
     /// Settings › Appearance: the interface themes.
@@ -1170,7 +1169,7 @@ pub const KEYS: Tour = {
     const CARD: WhenMissing = WhenMissing::LightPart(TourAnchor::Control(Control::KeyCard));
     Tour {
         id: TourId::Keys,
-        version: 3,
+        version: 4,
         place: Some(AT),
         steps: &[
             TourStep::at("tab", TourAnchor::Toolbar)
@@ -1196,10 +1195,10 @@ pub const KEYS: Tour = {
                 .on(AT)
                 .missing(CARD)
                 .learn(PAGE, "where-kept"),
-            TourStep::at("masked", control(Control::KeyState))
+            TourStep::at("plan", control(Control::PlanCard))
                 .on(AT)
-                .missing(CARD)
-                .learn(PAGE, "masked"),
+                .missing(WhenMissing::LightPart(TourAnchor::Content))
+                .learn(PAGE, "higgsfield-plan"),
         ],
     }
 };

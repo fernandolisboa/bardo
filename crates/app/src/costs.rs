@@ -180,6 +180,7 @@ impl PlannedCall {
             Provider::Gemini => bardo_ai::gemini::IMAGE_MODEL,
             Provider::TypeSafe => bardo_ai::jev::MODEL,
             Provider::Higgsfield => bardo_ai::higgsfield::DEFAULT_MODEL,
+            Provider::HiggsfieldPlan => bardo_ai::higgsfield_plan::DEFAULT_MODEL,
             Provider::Kling => bardo_ai::kling::DEFAULT_MODEL,
             Provider::BytePlus => bardo_ai::byteplus::MODEL,
             Provider::YouTubeData => "",

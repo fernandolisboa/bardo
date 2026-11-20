@@ -35,7 +35,7 @@ A API do X também é um provedor, sem chave: cada post que o Bardo faz no X é 
 <a id="rates"></a>
 ## Tarifas e modelos sem preço
 
-**Tarifas** é a tabela de preços que o Bardo usa quando o provedor não informa quanto a chamada custou: por milhão de tokens, por mil caracteres, por segundo de vídeo, por hora de áudio ou por post. O nome de um modelo vale para todos os modelos que começam com ele. **Editar** muda um preço, **Restaurar** traz de volta o preço do próprio Bardo, e **Adicionar tarifa** dá preço a um modelo que a tabela não tem. Um preço alterado vale para as próximas chamadas; os custos já registrados ficam como estão.
+**Tarifas** é a tabela de preços que o Bardo usa quando o provedor não informa quanto a chamada custou: por milhão de tokens, por mil caracteres, por segundo de vídeo, por hora de áudio ou por post. O nome de um modelo vale para todos os modelos que começam com ele. **Editar** muda um preço, **Restaurar** traz de volta o preço do próprio Bardo, e **Adicionar tarifa** dá preço a um modelo que a tabela não tem. Um preço alterado vale para as próximas chamadas; os custos já registrados ficam como estão. Os clipes do [plano Higgsfield](api-keys.md#higgsfield-plan) são pagos em créditos: as tarifas deles estão em dólar a US$ 0,049 por crédito, o preço do plano Plus, então em outro plano edite-as para bater com o seu.
 
 Quando um modelo rodou sem nenhum preço, as chamadas dele contam como zero, e o número **Chamadas sem preço** diz quais modelos. **Adicionar preço** abre o formulário de tarifa com esse modelo preenchido.
 

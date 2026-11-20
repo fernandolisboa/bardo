@@ -1,0 +1,5 @@
+HTTP/2 401
+content-type: application/json; charset=utf-8
+www-authenticate: Bearer resource_metadata="https://mcp.higgsfield.ai/.well-known/oauth-protected-resource/mcp", scope="openid email offline_access"
+
+{"error":"Unauthorized"}

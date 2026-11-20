@@ -1,0 +1,5 @@
+HTTP/1.1 200 OK
+content-type: application/json
+mcp-session-id: mcp-session-7f3a9c
+
+{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {"listChanged": false}}, "serverInfo": {"name": "higgsfield", "version": "1.0.0"}}}

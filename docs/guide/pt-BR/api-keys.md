@@ -17,12 +17,26 @@ O Bardo não tem IA própria nem conta para criar. Ele trabalha com as suas cont
 - **ElevenLabs** narra, lista as suas vozes (clones incluídos) e compõe a música do vídeo. Você precisa dela para a narração e as vozes das personas, e para a música só se gerar no Bardo (plano pago da ElevenLabs).
 - **Gemini** gera as imagens das cenas (Nano Banana) e clipes de vídeo (Veo, Gemini Omni Flash). Você precisa dele para as imagens das cenas e para desenhar a [aparência](personas.md#look) de uma persona e, para os clipes, só se usar os modelos do Google.
 - **Higgsfield** gera clipes de vídeo pelos modelos que oferece. Você só precisa dela para clipes, se escolher os modelos dela.
+- **Plano Higgsfield** gera clipes de vídeo pagos com os créditos do seu plano no higgsfield.ai, sem chave de API. Você faz login nele pelo navegador ([abaixo](#higgsfield-plan)).
 - **Kling** gera clipes de vídeo direto dos modelos do próprio Kling (Kling 3.0, 2.6 e 2.5 Turbo), e clipes interpretados com o Kling 3.0 Motion Control ([Captura de atuação](capture.md#kling)). Você só precisa dela se escolher os modelos dele.
 - **BytePlus ModelArk** gera clipes interpretados com o Seedance 2.5 direto do ModelArk, cuja versão final completa o rascunho aprovado. Você só precisa dela para clipes interpretados, se escolher esse modelo de tomada. O cartão dela recebe a chave do ModelArk e um bucket seu de armazenamento de objetos para os arquivos da tomada.
 - **TypeSafe (JEV)** é o motor de decisão: ranqueia ideias de vídeo e pontua sugestões de corte. Você precisa dele para ranquear ideias e sugerir cortes.
 - **YouTube Data API** traz a pesquisa de nicho e as estatísticas públicas dos vídeos. Você precisa dela para a pesquisa e para os números públicos dos seus posts.
 
 Você não precisa de todas as chaves no primeiro dia. Uma tela que depende de uma chave que falta avisa. Clipes são opcionais: uma cena sem clipe fica com a imagem parada.
+
+<a id="higgsfield-plan"></a>
+## O plano Higgsfield
+
+A Higgsfield vende duas coisas separadas: a API, com saldo em dólar e chave (o cartão **Higgsfield**), e os planos do higgsfield.ai, com créditos mensais. O Bardo pode gastar os créditos do plano em clipes pelo servidor MCP oficial da Higgsfield, que os termos da Higgsfield abrem para apps como o Bardo. O cartão dele fica em **Planos com login**, abaixo das chaves.
+
+1. No cartão **Plano Higgsfield**, clique em **Fazer login**. O Bardo abre a página da Higgsfield no navegador.
+2. Entre com a sua conta do higgsfield.ai e permita o Bardo. A página diz que o Bardo está conectado; feche a aba.
+3. O cartão diz **Com login** e mostra o seu plano e os créditos restantes. Depois que o Bardo reinicia, **Ver créditos** lê de novo.
+
+Depois, escolha um modelo marcado **Plano Higgsfield** para os seus clipes ([Modelo de vídeo](clips.md#model)). Antes de cada clipe, o Bardo pergunta à Higgsfield quanto ele custa em créditos e recusa quando o plano não consegue pagar. Cada clipe é enviado uma vez só: se a resposta se perde no caminho, o Bardo procura o clipe na sua biblioteca da Higgsfield em vez de enviar de novo, e quando a biblioteca não o mostra a cena pede que você confira a biblioteca antes de animá-la de novo. Cada clipe fica registrado em [Custos](bardo:go/costs) pelas tarifas por segundo dos modelos do plano, calculadas a US$ 0,049 por crédito (quanto custa um crédito no plano Plus). Em outro plano, edite essas tarifas em Custos.
+
+O login fica no Gerenciador de Credenciais do Windows, como uma chave, e é renovado sozinho. Se a Higgsfield deixar de aceitá-lo, o cartão diz **Login expirado**; clique em **Fazer login de novo** e tente de novo, em [Tarefas](jobs.md), os clipes que pararam por isso. **Encerrar login** esquece o login no Bardo; para encerrar o acesso do Bardo na Higgsfield também, remova-o na sua conta da Higgsfield.
 
 <a id="decision-engine"></a>
 ## Motor de decisão
