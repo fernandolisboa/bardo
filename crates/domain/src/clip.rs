@@ -210,6 +210,31 @@ pub trait ClipGenerator: Send + Sync {
         submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure>;
 
+    /// Whether `submit` keeps its promise above. A provider without an
+    /// idempotency key cannot: the job then writes down that it sent a
+    /// request before sending it, and after a lost answer asks
+    /// `find_submitted` instead of sending it again.
+    fn dedupes_submissions(&self) -> bool {
+        true
+    }
+
+    /// Free checks before a submission that cannot be repeated safely
+    /// (credits, for one). Only asked when `dedupes_submissions` is false.
+    fn check_submit(&self, _key: &ApiKey, _request: &ClipRequest) -> Result<(), ProviderFailure> {
+        Ok(())
+    }
+
+    /// The clip an earlier `submit` of this request started, when its
+    /// answer was lost. `Ok(None)` means the provider shows none. Only
+    /// asked when `dedupes_submissions` is false.
+    fn find_submitted(
+        &self,
+        _key: &ApiKey,
+        _request: &ClipRequest,
+    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+        Ok(None)
+    }
+
     fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure>;
 
     /// Downloads a finished clip from where `ClipStatus::Done` said. Some
@@ -245,6 +270,22 @@ impl<T: ClipGenerator + ?Sized> ClipGenerator for Arc<T> {
         submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure> {
         (**self).submit(key, request, submission)
+    }
+
+    fn dedupes_submissions(&self) -> bool {
+        (**self).dedupes_submissions()
+    }
+
+    fn check_submit(&self, key: &ApiKey, request: &ClipRequest) -> Result<(), ProviderFailure> {
+        (**self).check_submit(key, request)
+    }
+
+    fn find_submitted(
+        &self,
+        key: &ApiKey,
+        request: &ClipRequest,
+    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+        (**self).find_submitted(key, request)
     }
 
     fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {

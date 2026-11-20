@@ -24,9 +24,9 @@ use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef, ClipRequest,
-    ClipStatus, CostPurpose, Generation, GenerationId, ImageFormat, Job, JobFailure,
-    JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId, Progress,
-    ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
+    ClipStatus, ClipSubmission, CostPurpose, Generation, GenerationId, ImageFormat, Job,
+    JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId,
+    Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
     SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage,
     TokenUsage, VideoProject, VideoProjectId,
 };
@@ -41,6 +41,20 @@ use crate::{Bardo, KeyState, SceneError};
 /// provider's side before the job gives up for now (the queue retries it
 /// later, polling the same requests).
 const MAX_HICCUPS: u32 = 10;
+
+/// How long after sending a submission whose answer was lost the job
+/// keeps looking for it before saying it may have started unseen: the
+/// provider's library can take a moment to list a new clip.
+/// Tests look at once.
+fn lookup_grace_secs() -> u64 {
+    if cfg!(test) { 0 } else { 120 }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
 
 /// The clips part of a project's scenes panel.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -130,6 +144,12 @@ struct ClipRun {
     request: Option<String>,
     /// What the provider said the clip costs, in micro-dollars.
     quote_micros: Option<u64>,
+    /// For a provider that would start a second clip if sent the same
+    /// submission again: when it was sent without an answer yet (Unix
+    /// seconds). Written before sending, so after a lost answer or a
+    /// crash the job looks for the clip instead of paying twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sent_at: Option<u64>,
 }
 
 impl ClipRun {
@@ -139,6 +159,7 @@ impl ClipRun {
         self.staged = None;
         self.request = None;
         self.quote_micros = None;
+        self.sent_at = None;
     }
 }
 
@@ -225,6 +246,9 @@ struct ClipJob<'a> {
     plan: ScenePlanId,
     state: ClipsState,
     keys: Vec<(Provider, ApiKey)>,
+    /// A plan's token was renewed after the provider refused it, and no
+    /// call has worked since: a second refusal is final.
+    renewed: bool,
 }
 
 impl JobHandler for ClipHandler {
@@ -241,6 +265,7 @@ impl JobHandler for ClipHandler {
             plan: id(&payload.plan)?,
             state,
             keys: Vec::new(),
+            renewed: false,
         };
         run.run(&payload.scenes, cx)
     }
@@ -420,23 +445,26 @@ impl ClipJob<'_> {
         generator: &Arc<dyn ClipGenerator>,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
-        let key = self.key(generator.provider())?;
+        let mut key = self.key(generator.provider())?;
         let submitted = self.run_of(order.scene).and_then(|run| run.request.clone());
         let Some(request) = submitted else {
-            return self.submit(order, scene, generator, &key, cx);
+            return self.submit(order, scene, generator, &mut key, cx);
         };
-        match generator.status(&key, &ClipHandle(request)) {
+        let handle = ClipHandle(request);
+        match self.call(generator, &mut key, |key| generator.status(key, &handle)) {
             Ok(ClipStatus::Queued | ClipStatus::Running) => Ok(Step::Waiting),
-            Ok(ClipStatus::Done { video }) => match generator.download(&key, &video) {
-                Ok(clip) => {
-                    self.save_clip(order, &clip.bytes)?;
-                    Ok(Step::Saved)
+            Ok(ClipStatus::Done { video }) => {
+                match self.call(generator, &mut key, |key| generator.download(key, &video)) {
+                    Ok(clip) => {
+                        self.save_clip(order, &clip.bytes)?;
+                        Ok(Step::Saved)
+                    }
+                    Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
+                        Ok(Step::Hiccup(self.failure(order, failure)))
+                    }
+                    Err(failure) => self.scene_failed(order, failure, cx),
                 }
-                Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
-                    Ok(Step::Hiccup(self.failure(order, failure)))
-                }
-                Err(failure) => self.scene_failed(order, failure, cx),
-            },
+            }
             Ok(ClipStatus::Failed(failure)) => self.scene_failed(order, failure, cx),
             Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                 Ok(Step::Hiccup(self.failure(order, failure)))
@@ -445,13 +473,46 @@ impl ClipJob<'_> {
         }
     }
 
+    /// Calls the provider. A token a plan's provider refuses is renewed
+    /// and the call made once more: a refusal started nothing.
+    fn call<R>(
+        &mut self,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        call: impl Fn(&ApiKey) -> Result<R, ProviderFailure>,
+    ) -> Result<R, ProviderFailure> {
+        let provider = generator.provider();
+        let answer = match call(key) {
+            Err(failure)
+                if failure.kind == ProviderFailureKind::Rejected
+                    && provider.signs_in()
+                    && !self.renewed =>
+            {
+                self.renewed = true;
+                self.handler.plan_sessions.renew(provider);
+                match self.key(provider) {
+                    Ok(fresh) => {
+                        *key = fresh;
+                        call(key)
+                    }
+                    Err(_) => Err(failure),
+                }
+            }
+            answer => answer,
+        };
+        if answer.is_ok() {
+            self.renewed = false;
+        }
+        answer
+    }
+
     /// Hands the scene's image over (once per submission) and submits it.
     fn submit(
         &mut self,
         order: &ClipOrder,
         scene: &Scene,
         generator: &Arc<dyn ClipGenerator>,
-        key: &ApiKey,
+        key: &mut ApiKey,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
         let staged = self.run_of(order.scene).and_then(|run| run.staged.clone());
@@ -483,16 +544,113 @@ impl ClipJob<'_> {
             seconds: run.seconds,
         };
         let submission = format!("{}-{}-{}", self.job, order.scene, run.submission);
-        match generator.submit(key, &request, &submission) {
-            Ok(submitted) => {
-                let run = self.run_of(order.scene).expect("the scene's run exists");
-                run.request = Some(submitted.handle.0);
-                run.quote_micros = submitted.quote.map(Money::micros);
-                self.save_state(cx)?;
-                Ok(Step::Waiting)
-            }
+        if !generator.dedupes_submissions() {
+            return self.submit_once(order, generator, key, &request, &submission, cx);
+        }
+        match self.call(generator, key, |key| {
+            generator.submit(key, &request, &submission)
+        }) {
+            Ok(submitted) => self.submitted(order, submitted, cx),
             Err(failure) => self.submit_failed(order, failure, cx),
         }
+    }
+
+    /// Submits to a provider that would start (and charge for) a second
+    /// clip if sent the same submission again. The job writes down that it
+    /// sends before sending; with that note and no answer it looks for the
+    /// clip instead, and never sends again without knowing.
+    fn submit_once(
+        &mut self,
+        order: &ClipOrder,
+        generator: &Arc<dyn ClipGenerator>,
+        key: &mut ApiKey,
+        request: &ClipRequest,
+        submission: &str,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let provider = generator.provider();
+        if let Some(sent_at) = self.run_of(order.scene).and_then(|run| run.sent_at) {
+            return match self.call(generator, key, |key| generator.find_submitted(key, request)) {
+                Ok(Some(handle)) => {
+                    tracing::info!(scene = order.scene, "found the clip a lost answer started");
+                    self.submitted(
+                        order,
+                        ClipSubmission {
+                            handle,
+                            quote: None,
+                        },
+                        cx,
+                    )
+                }
+                Ok(None) if now_secs().saturating_sub(sent_at) < lookup_grace_secs() => {
+                    Ok(Step::NotSubmitted(self.failure(
+                        order,
+                        ProviderFailure::new(
+                            ProviderFailureKind::ProviderDown,
+                            format!(
+                                "waiting for {provider} to list the clip sent without an answer"
+                            ),
+                        ),
+                    )))
+                }
+                Ok(None) => self.scene_failed(
+                    order,
+                    ProviderFailure::new(
+                        ProviderFailureKind::Unexpected,
+                        format!(
+                            "{provider} did not answer the submission and does not list it; \
+                             it may still have started the clip, so check your {provider} \
+                             library before animating this scene again"
+                        ),
+                    ),
+                    cx,
+                ),
+                Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
+                    Ok(Step::NotSubmitted(self.failure(order, failure)))
+                }
+                // Stops with the note kept: the next attempt looks again.
+                Err(failure) => Err(self.failure(order, failure)),
+            };
+        }
+        if let Err(failure) = self.call(generator, key, |key| generator.check_submit(key, request))
+        {
+            return self.submit_failed(order, failure, cx);
+        }
+        self.run_of(order.scene)
+            .expect("staging adds the scene's run")
+            .sent_at = Some(now_secs());
+        self.save_state(cx)?;
+        match self.call(generator, key, |key| {
+            generator.submit(key, request, submission)
+        }) {
+            Ok(submitted) => self.submitted(order, submitted, cx),
+            // It may have started: the note stays for the lookup.
+            Err(failure) if failure.kind == ProviderFailureKind::Unreachable => {
+                Ok(Step::NotSubmitted(self.failure(order, failure)))
+            }
+            Err(failure) => {
+                self.run_of(order.scene)
+                    .expect("the scene's run exists")
+                    .sent_at = None;
+                self.save_state(cx)?;
+                self.submit_failed(order, failure, cx)
+            }
+        }
+    }
+
+    /// Keeps the provider's handle: from now on the job asks how it goes.
+    fn submitted(
+        &mut self,
+        order: &ClipOrder,
+        submitted: ClipSubmission,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let run = self.run_of(order.scene).expect("the scene's run exists");
+        run.request = Some(submitted.handle.0);
+        run.quote_micros = submitted.quote.map(Money::micros);
+        run.sent_at = None;
+        self.save_state(cx)?;
+        Ok(Step::Waiting)
     }
 
     /// Reads the scene as it is now (image, motion prompt, length) and
@@ -503,7 +661,7 @@ impl ClipJob<'_> {
         order: &ClipOrder,
         scene: &Scene,
         generator: &Arc<dyn ClipGenerator>,
-        key: &ApiKey,
+        key: &mut ApiKey,
         cx: &mut JobContext,
     ) -> Result<Result<String, Step>, JobFailure> {
         let Some(image) = scene.image() else {
@@ -531,7 +689,10 @@ impl ClipJob<'_> {
             .files
             .read(self.project, &image.file)
             .map_err(unexpected)?;
-        let staged = match generator.stage_image(key, &ClipImage { bytes, format }) {
+        let first_frame = ClipImage { bytes, format };
+        let staged = match self.call(generator, key, |key| {
+            generator.stage_image(key, &first_frame)
+        }) {
             Ok(staged) => staged.0,
             Err(failure) => return self.submit_failed(order, failure, cx).map(Err),
         };
@@ -556,6 +717,7 @@ impl ClipJob<'_> {
                 staged: Some(staged.clone()),
                 request: None,
                 quote_micros: None,
+                sent_at: None,
             }),
         }
         self.save_state(cx)?;
@@ -1015,6 +1177,7 @@ fn clip_calls(views: &[SceneClipView], scenes: &[usize]) -> Vec<PlannedCall> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     use bardo_domain::{
@@ -1444,6 +1607,152 @@ mod tests {
             pending.unwrap().generation.provider,
             Provider::HiggsfieldPlan
         );
+    }
+
+    /// The app over a plan signed in with a fresh token
+    /// (`stored-access`), animating with `clips` on the plan.
+    fn on_the_plan(
+        h: &mut Harness,
+        clips: FakeClips,
+    ) -> (
+        Arc<crate::plans::testing::FakePlan>,
+        Arc<FakeClips>,
+        Bardo,
+        VideoProject,
+    ) {
+        let plan = Arc::new(crate::plans::testing::FakePlan::default());
+        h.plans.push(Arc::clone(&plan) as _);
+        let clips = Arc::new(FakeClips {
+            provider: Some(Provider::HiggsfieldPlan),
+            ..clips
+        });
+        h.more_clips.push(Arc::clone(&clips) as _);
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let model = ClipModelRef::new(Provider::HiggsfieldPlan, "fake/range").unwrap();
+        channel_uses(&app, &project, Some(model));
+        let tokens = bardo_domain::TokenSet::granted(
+            &bardo_domain::TokenGrant {
+                access_token: bardo_domain::SecretText::new("stored-access"),
+                refresh_token: Some(bardo_domain::SecretText::new("stored-refresh")),
+                expires_in: Duration::from_secs(3_600),
+                scopes: Vec::new(),
+            },
+            std::time::SystemTime::now(),
+        );
+        bardo_domain::ConnectionSecrets::set_plan_session(
+            &*h.connection_secrets,
+            app.profile().id,
+            Provider::HiggsfieldPlan,
+            &bardo_domain::PlanSession::new("client-0001", tokens).unwrap(),
+        )
+        .unwrap();
+        drop(app);
+        let app = h.start();
+        (plan, clips, app, project)
+    }
+
+    #[test]
+    fn a_plan_clip_whose_answer_was_lost_is_found_instead_of_paid_for_twice() {
+        let mut h = Harness::new();
+        let (_, clips, app, project) = on_the_plan(
+            &mut h,
+            FakeClips {
+                no_idempotency: true,
+                lost: Mutex::new(1),
+                ..FakeClips::default()
+            },
+        );
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        assert_eq!(*clips.sends.lock().unwrap(), 1, "sent once");
+        assert_eq!(*clips.checks.lock().unwrap(), 1, "credits checked first");
+        assert_eq!(*clips.lookups.lock().unwrap(), 1);
+        assert_eq!(clips.submissions().len(), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_lost_plan_submission_that_is_not_listed_fails_the_scene_unsent_again() {
+        let mut h = Harness::new();
+        let (_, clips, app, project) = on_the_plan(
+            &mut h,
+            FakeClips {
+                no_idempotency: true,
+                unseen: Mutex::new(1),
+                ..FakeClips::default()
+            },
+        );
+        let job = wait_done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert!(failure.detail.contains("library"), "{failure:?}");
+        assert_eq!(*clips.sends.lock().unwrap(), 1, "never sent again");
+        assert_eq!(*clips.lookups.lock().unwrap(), 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+        assert!(plan.scenes()[0].pending_clip().is_none());
+    }
+
+    #[test]
+    fn a_refused_plan_token_is_renewed_once_and_the_call_made_again() {
+        let mut h = Harness::new();
+        let (plan, clips, app, project) = on_the_plan(
+            &mut h,
+            FakeClips {
+                no_idempotency: true,
+                refusals: Mutex::new(1),
+                ..FakeClips::default()
+            },
+        );
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        let refreshes = plan
+            .calls()
+            .into_iter()
+            .filter(|call| matches!(call, crate::plans::testing::PlanCall::Refresh { .. }))
+            .count();
+        assert_eq!(refreshes, 1);
+        let keys = clips.keys.lock().unwrap().clone();
+        // Staged, checked, refused on submit; submitted again renewed.
+        assert_eq!(keys[..3], ["stored-access"; 3]);
+        assert!(
+            keys[3..].iter().all(|key| key == "plan-access-0001"),
+            "{keys:?}"
+        );
+        assert_eq!(*clips.sends.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_plan_that_refuses_its_renewed_token_too_stops_the_run() {
+        let mut h = Harness::new();
+        let (plan, clips, app, project) = on_the_plan(
+            &mut h,
+            FakeClips {
+                no_idempotency: true,
+                refusals: Mutex::new(2),
+                ..FakeClips::default()
+            },
+        );
+        let job = wait_done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                .unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::KeyRejected);
+        assert_eq!(plan.calls().len(), 1, "one renewal");
+        assert_eq!(*clips.sends.lock().unwrap(), 0);
     }
 
     #[test]

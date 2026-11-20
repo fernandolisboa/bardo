@@ -1048,7 +1048,11 @@ impl ProjectsScreen {
             if let Some(provider) = view.estimate(mode).and_then(|e| e.missing_key) {
                 title.push_str(" · ");
                 title.push_str(&bardo.text_with(
-                    Text::ProjectModeMissingKey,
+                    if provider.signs_in() {
+                        Text::ProjectModeMissingSignIn
+                    } else {
+                        Text::ProjectModeMissingKey
+                    },
                     &[("provider", &bardo.text(Text::ProviderName(provider)))],
                 ));
             }

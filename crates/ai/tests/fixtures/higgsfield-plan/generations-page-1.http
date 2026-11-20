@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+content-type: text/event-stream
+
+event: message
+data: {"jsonrpc": "2.0", "id": 3, "result": {"content": [{"type": "text", "text": "{\"items\": [{\"id\": \"0b5d1f2e-8c3a-4e6f-9a7b-1c2d3e4f5a6b\", \"type\": \"video\", \"status\": \"completed\", \"model\": \"kling2_6\", \"params\": {\"model\": \"kling2_6\", \"prompt\": \"Another scene\", \"medias\": [{\"role\": \"start_image\", \"value\": \"5e0c7a11-2b3d-4c5e-8f90-a1b2c3d4e5f6\"}]}, \"results\": [{\"url\": \"https://cdn.higgsfield.example/other.mp4\"}]}], \"next_cursor\": \"page-2\"}"}]}}
+

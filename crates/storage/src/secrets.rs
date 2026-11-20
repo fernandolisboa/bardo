@@ -45,6 +45,8 @@ pub struct MemorySecretStore {
     keys: Mutex<HashMap<(ProfileId, Provider), ApiKey>>,
     /// App credentials and tokens, by credential name.
     blobs: Mutex<HashMap<String, Zeroizing<String>>>,
+    /// Refuses every write of a credential, as a locked or full store would.
+    fail_writes: std::sync::atomic::AtomicBool,
 }
 
 impl MemorySecretStore {
@@ -56,6 +58,12 @@ impl MemorySecretStore {
 }
 
 impl MemorySecretStore {
+    /// From now on, refuses (or takes again) every credential write.
+    pub fn fail_writes(&self, fail: bool) {
+        self.fail_writes
+            .store(fail, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn blobs(&self) -> std::sync::MutexGuard<'_, HashMap<String, Zeroizing<String>>> {
         self.blobs
             .lock()
@@ -63,6 +71,9 @@ impl MemorySecretStore {
     }
 
     fn put(&self, target: String, value: Zeroizing<String>) -> Result<(), SecretStoreError> {
+        if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SecretStoreError("the store refused the write".into()));
+        }
         if value.len() > MAX_BLOB_BYTES {
             return Err(too_long(value.len()));
         }

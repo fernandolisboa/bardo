@@ -26,7 +26,7 @@ As exportações vão para `Vídeos\Bardo`, uma pasta por projeto com uma pasta 
 <a id="credentials"></a>
 ## Gerenciador de Credenciais do Windows
 
-Suas chaves de API, as credenciais de app das redes e os logins das contas conectadas ficam no Gerenciador de Credenciais do Windows, que só a sua conta do Windows lê, em **Credenciais genéricas**, com nomes que começam com `Bardo/`. Elas ficam neste computador: em outro, salve as chaves e as credenciais de novo e reconecte as contas. Remover uma chave ou uma credencial, ou desconectar uma conta, também apaga do Gerenciador de Credenciais.
+Suas chaves de API, as credenciais de app das redes, os logins das contas conectadas e do [plano Higgsfield](api-keys.md#higgsfield-plan) ficam no Gerenciador de Credenciais do Windows, que só a sua conta do Windows lê, em **Credenciais genéricas**, com nomes que começam com `Bardo/`. Elas ficam neste computador: em outro, salve as chaves e as credenciais de novo, reconecte as contas e faça login no plano de novo. Remover uma chave ou uma credencial, ou desconectar uma conta, também apaga do Gerenciador de Credenciais.
 
 <a id="logs"></a>
 ## Logs

@@ -11,7 +11,7 @@ JSON.
 Recorded on 2026-11-19 and 2026-11-20 from the live server (tool payloads
 through an MCP client signed in to a free account, nothing generated):
 `unauthorized.http` (an unauthenticated `initialize`), `register.http`
-(dynamic client registration with a loopback redirect), and the payloads
+(dynamic client registration with a loopback redirect; the client id replaced), and the payloads
 of `balance.http`, `estimate.http` (Kling 3.0 Standard, 10 s, sound off),
 `media-upload.http`, `generations-empty.http`, `submit-unknown-model.http`
 and `wait-lookup-failed.http`.
@@ -34,7 +34,11 @@ real plan:
 - `media-confirm.http`, `token.http`, `token-refreshed.http`,
   `token-invalid-grant.http` (RFC 6749 shapes).
 
-Synthetic, for edge cases: `balance-plus.http`, `generations-other.http`,
-`submitted-no-id.http`, `submit-no-credits.http`, `put-ok.http`,
-`put-refused.http`, and `download-clip.http` (not a real video: just the
-`ftyp` box marker an MP4 starts with).
+Synthetic, for edge cases: `balance-plus.http`,
+`generations-page-1.http` (a page with a `next_cursor`),
+`generations-same-prompt.http` (an older clip of the same scene),
+`submitted-no-id.http`, `submit-no-credits.http`, `answer-cut-off.http`
+(an empty answer), `rate-limited.http`, `wait-unknown-over.http` and
+`wait-unknown-going.http` (statuses the adapter does not know),
+`put-ok.http`, `put-refused.http`, and `download-clip.http` (not a real
+video: just the `ftyp` box marker an MP4 starts with).

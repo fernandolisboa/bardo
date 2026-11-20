@@ -178,7 +178,7 @@ fn a_refused_token_is_a_refused_sign_in_and_drops_the_session() {
 fn registration_asks_for_a_public_client_that_returns_to_the_loopback() {
     let adapter = bare(&["register"]);
     let client = adapter.register("http://127.0.0.1:53682/callback").unwrap();
-    assert_eq!(client, "qUWc3yOYYb9VDWGT");
+    assert_eq!(client, "bardoTestClient1");
     let sent = adapter.transport().sent();
     assert_eq!(sent[0].url, format!("{AUTH_URL}/register"));
     let body = &sent[0].body;
@@ -191,7 +191,7 @@ fn registration_asks_for_a_public_client_that_returns_to_the_loopback() {
 #[test]
 fn the_consent_address_carries_pkce_state_and_the_resource() {
     let adapter = bare(&[]);
-    let consent = adapter.consent_request("qUWc3yOYYb9VDWGT", "http://127.0.0.1:53682/callback");
+    let consent = adapter.consent_request("bardoTestClient1", "http://127.0.0.1:53682/callback");
     let (address, query) = consent.url.split_once('?').unwrap();
     assert_eq!(address, format!("{AUTH_URL}/authorize"));
     let fields: Vec<(String, String)> = form_urlencoded::parse(query.as_bytes())
@@ -204,7 +204,7 @@ fn the_consent_address_carries_pkce_state_and_the_resource() {
             .map(|(_, value)| value.as_str())
     };
     assert_eq!(field("response_type"), Some("code"));
-    assert_eq!(field("client_id"), Some("qUWc3yOYYb9VDWGT"));
+    assert_eq!(field("client_id"), Some("bardoTestClient1"));
     assert_eq!(
         field("redirect_uri"),
         Some("http://127.0.0.1:53682/callback")
@@ -215,7 +215,7 @@ fn the_consent_address_carries_pkce_state_and_the_resource() {
     assert_eq!(field("state"), Some(consent.state.expose()));
     assert_eq!(field("code_challenge").unwrap().len(), 43);
     assert!(consent.verifier.expose().len() >= 43);
-    let again = adapter.consent_request("qUWc3yOYYb9VDWGT", "http://127.0.0.1:53682/callback");
+    let again = adapter.consent_request("bardoTestClient1", "http://127.0.0.1:53682/callback");
     assert_ne!(again.state, consent.state);
     assert_ne!(again.verifier, consent.verifier);
 }
@@ -225,7 +225,7 @@ fn the_code_and_the_refresh_token_are_traded_at_the_token_endpoint() {
     let adapter = bare(&["token", "token-refreshed"]);
     let grant = adapter
         .exchange(
-            "qUWc3yOYYb9VDWGT",
+            "bardoTestClient1",
             &SecretText::new("code-0001"),
             &SecretText::new("verifier-0001"),
             "http://127.0.0.1:53682/callback",
@@ -237,7 +237,7 @@ fn the_code_and_the_refresh_token_are_traded_at_the_token_endpoint() {
         Some("hf-refresh-test-0001")
     );
     let renewed = adapter
-        .refresh("qUWc3yOYYb9VDWGT", "hf-refresh-test-0001")
+        .refresh("bardoTestClient1", "hf-refresh-test-0001")
         .unwrap();
     assert_eq!(renewed.access_token.expose(), "hf-access-test-0002");
     assert_eq!(renewed.refresh_token, None, "the old one is kept");
@@ -254,7 +254,7 @@ fn the_code_and_the_refresh_token_are_traded_at_the_token_endpoint() {
         ("grant_type", "authorization_code"),
         ("code", "code-0001"),
         ("code_verifier", "verifier-0001"),
-        ("client_id", "qUWc3yOYYb9VDWGT"),
+        ("client_id", "bardoTestClient1"),
         ("redirect_uri", "http://127.0.0.1:53682/callback"),
         ("resource", MCP_URL),
     ] {
@@ -271,11 +271,11 @@ fn the_code_and_the_refresh_token_are_traded_at_the_token_endpoint() {
 #[test]
 fn a_refused_refresh_says_to_sign_in_again() {
     let failure = bare(&["token-invalid-grant"])
-        .refresh("qUWc3yOYYb9VDWGT", "hf-refresh-test-0001")
+        .refresh("bardoTestClient1", "hf-refresh-test-0001")
         .unwrap_err();
     assert_eq!(failure.kind, SignInFailureKind::Refused);
     let offline = HiggsfieldPlan::with_transport(Scripted::offline())
-        .refresh("qUWc3yOYYb9VDWGT", "x")
+        .refresh("bardoTestClient1", "x")
         .unwrap_err();
     assert_eq!(offline.kind, SignInFailureKind::Unreachable);
 }
@@ -327,8 +327,9 @@ fn a_refused_upload_fails_without_confirming() {
 }
 
 #[test]
-fn a_submission_checks_the_credits_then_starts_one_job_with_credits_only() {
-    let adapter = plan(&["generations-other", "estimate", "balance-plus", "submitted"]);
+fn a_submission_starts_one_job_with_credits_only() {
+    let adapter = plan(&["submitted"]);
+    assert!(!adapter.dedupes_submissions(), "no idempotency key");
     let submission = adapter
         .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
         .unwrap();
@@ -336,20 +337,11 @@ fn a_submission_checks_the_credits_then_starts_one_job_with_credits_only() {
     assert_eq!(submission.quote, None, "the rate table prices it");
 
     let calls = tool_calls(&adapter);
-    let names: Vec<_> = calls.iter().map(|(name, _)| name.as_str()).collect();
-    assert_eq!(
-        names,
-        [
-            "show_generations",
-            "estimate_video_cost",
-            "balance",
-            "generate_video_batch"
-        ]
-    );
-    assert_eq!(calls[0].1["only_completed"], false);
-    let params = &calls[3].1["requests"][0]["params"];
-    assert_eq!(calls[3].1["requests"][0]["index"], 0);
-    assert_eq!(calls[3].1["requests"].as_array().unwrap().len(), 1);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "generate_video_batch");
+    let params = &calls[0].1["requests"][0]["params"];
+    assert_eq!(calls[0].1["requests"][0]["index"], 0);
+    assert_eq!(calls[0].1["requests"].as_array().unwrap().len(), 1);
     assert_eq!(params["model"], "kling3_0");
     assert_eq!(params["mode"], "std");
     assert_eq!(params["sound"], "off", "the narration is the soundtrack");
@@ -359,107 +351,133 @@ fn a_submission_checks_the_credits_then_starts_one_job_with_credits_only() {
     assert_eq!(params["medias"][0]["role"], "start_image");
     assert_eq!(params["medias"][0]["value"], MEDIA);
     assert_eq!(params["use_unlim"], false, "credits only, never asked");
+}
+
+#[test]
+fn the_credit_check_prices_the_same_request_and_starts_nothing() {
+    let adapter = plan(&["estimate", "balance-plus", "submitted"]);
+    adapter
+        .check_submit(&key(), &request(DEFAULT_MODEL))
+        .unwrap();
+    adapter
+        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+        .unwrap();
+    let calls = tool_calls(&adapter);
+    let names: Vec<_> = calls.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(
-        &calls[1].1["params"], params,
+        names,
+        ["estimate_video_cost", "balance", "generate_video_batch"]
+    );
+    assert_eq!(
+        calls[0].1["params"], calls[2].1["requests"][0]["params"],
         "the estimate prices the same"
     );
 }
 
 #[test]
-fn a_job_already_started_from_the_same_image_is_returned_instead_of_paying_again() {
-    let adapter = plan(&["generations-with-job"]);
-    let submission = adapter
-        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
-        .unwrap();
-    assert_eq!(submission.handle, ClipHandle(JOB.into()));
-    assert_eq!(tool_calls(&adapter).len(), 1, "nothing started");
-}
-
-#[test]
-fn a_plan_without_enough_credits_refuses_before_starting() {
-    let adapter = plan(&["generations-empty", "estimate", "balance"]);
+fn a_plan_without_enough_credits_is_refused_before_starting() {
+    let adapter = plan(&["estimate", "balance"]);
     let mut costly = request(DEFAULT_MODEL);
     costly.seconds = 15;
     // The estimate says 15 credits and the free plan has 10.
-    let failure = adapter.submit(&key(), &costly, "41-2-1").unwrap_err();
+    let failure = adapter.check_submit(&key(), &costly).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::LimitReached);
     assert!(failure.detail.contains("needs 15"), "{}", failure.detail);
     assert!(failure.detail.contains("has 10"), "{}", failure.detail);
-    assert!(
-        tool_calls(&adapter)
-            .iter()
-            .all(|(name, _)| name != "generate_video_batch")
-    );
 }
 
 #[test]
-fn a_lost_answer_is_a_passing_failure_and_the_next_try_finds_the_job() {
-    let mut all = answers(&[
-        "initialize",
-        "initialized",
-        "generations-empty",
-        "estimate",
-        "balance-plus",
-    ]);
-    let lost: Vec<Result<HttpResponse, TransportError>> =
-        vec![Err(TransportError("timed out reading the answer".into()))];
-    let found = answers(&["generations-with-job"]);
-    let scripted = Scripted::with_answers(
-        all.drain(..)
-            .map(Ok)
-            .chain(lost)
-            .chain(found.into_iter().map(Ok))
-            .collect(),
-    );
-    let adapter = HiggsfieldPlan::with_transport(scripted);
-    let failure = adapter
-        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
-        .unwrap_err();
-    assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
-    let again = adapter
-        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+fn a_lost_submission_is_found_by_its_first_frame_on_a_later_page() {
+    let adapter = plan(&["generations-page-1", "generations-with-job"]);
+    let found = adapter
+        .find_submitted(&key(), &request(DEFAULT_MODEL))
         .unwrap();
-    assert_eq!(again.handle, ClipHandle(JOB.into()));
-    let starts = tool_calls(&adapter)
-        .iter()
-        .filter(|(name, _)| name == "generate_video_batch")
-        .count();
-    assert_eq!(starts, 1, "never sent twice");
+    assert_eq!(found, Some(ClipHandle(JOB.into())));
+    let calls = tool_calls(&adapter);
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|(name, _)| name == "show_generations"));
+    assert_eq!(calls[0].1["only_completed"], false);
+    assert_eq!(calls[0].1.get("cursor"), None);
+    assert_eq!(calls[1].1["cursor"], "page-2");
 }
 
 #[test]
-fn an_answer_without_a_job_id_is_a_passing_failure_too() {
-    let adapter = plan(&[
-        "generations-empty",
-        "estimate",
-        "balance-plus",
-        "submitted-no-id",
-    ]);
-    let failure = adapter
-        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+fn an_older_clip_of_the_same_scene_is_not_taken_for_a_lost_one() {
+    // Same model and prompt, another first frame: an earlier submission.
+    for page in ["generations-same-prompt", "generations-empty"] {
+        let found = plan(&[page])
+            .find_submitted(&key(), &request(DEFAULT_MODEL))
+            .unwrap();
+        assert_eq!(found, None, "{page}");
+    }
+}
+
+#[test]
+fn a_cursor_that_does_not_move_ends_the_lookup() {
+    let adapter = plan(&["generations-page-1", "generations-page-1"]);
+    let found = adapter
+        .find_submitted(&key(), &request(DEFAULT_MODEL))
+        .unwrap();
+    assert_eq!(found, None);
+    assert_eq!(tool_calls(&adapter).len(), 2);
+}
+
+#[test]
+fn a_failed_lookup_is_a_failure_not_a_missing_clip() {
+    let failure = plan(&["rate-limited"])
+        .find_submitted(&key(), &request(DEFAULT_MODEL))
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
 }
 
+/// The adapter with a session open, then a lost or cut answer.
+fn losing(last: Result<HttpResponse, TransportError>) -> HiggsfieldPlan<Scripted> {
+    let mut all: Vec<_> = answers(&["initialize", "initialized"])
+        .into_iter()
+        .map(Ok)
+        .collect();
+    all.push(last);
+    HiggsfieldPlan::with_transport(Scripted::with_answers(all))
+}
+
 #[test]
-fn tool_refusals_say_what_is_wrong() {
-    let no_credits = plan(&[
-        "generations-empty",
-        "estimate",
-        "balance-plus",
-        "submit-no-credits",
-    ])
-    .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
-    .unwrap_err();
+fn an_answer_lost_after_sending_may_have_started_a_clip() {
+    let timed_out = losing(Err(TransportError("timed out reading the answer".into())));
+    let cut_off = losing(Ok(fixture("higgsfield-plan", "answer-cut-off")));
+    let no_id = plan(&["submitted-no-id"]);
+    for adapter in [timed_out, cut_off, no_id] {
+        let failure = adapter
+            .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+            .unwrap_err();
+        assert_eq!(
+            failure.kind,
+            ProviderFailureKind::Unreachable,
+            "{}",
+            failure.detail
+        );
+    }
+}
+
+#[test]
+fn a_call_never_sent_or_refused_started_nothing() {
+    let offline = HiggsfieldPlan::with_transport(Scripted::offline());
+    let unsent = offline
+        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+        .unwrap_err();
+    assert_eq!(unsent.kind, ProviderFailureKind::ProviderDown);
+    assert!(tool_calls(&offline).is_empty());
+
+    let busy = plan(&["rate-limited"])
+        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+        .unwrap_err();
+    assert_eq!(busy.kind, ProviderFailureKind::ProviderDown);
+    let no_credits = plan(&["submit-no-credits"])
+        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+        .unwrap_err();
     assert_eq!(no_credits.kind, ProviderFailureKind::LimitReached);
-    let unknown = plan(&[
-        "generations-empty",
-        "estimate",
-        "balance-plus",
-        "submit-unknown-model",
-    ])
-    .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
-    .unwrap_err();
+    let unknown = plan(&["submit-unknown-model"])
+        .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
+        .unwrap_err();
     assert_eq!(unknown.kind, ProviderFailureKind::NotAllowed);
     let refused = plan(&["unauthorized"])
         .submit(&key(), &request(DEFAULT_MODEL), "41-2-1")
@@ -477,7 +495,26 @@ fn a_model_outside_the_catalog_or_an_image_not_uploaded_is_never_sent() {
     let mut inline = request(DEFAULT_MODEL);
     inline.image = StagedImage("inline".into());
     assert!(adapter.submit(&key(), &inline, "1").is_err());
+    assert!(adapter.check_submit(&key(), &inline).is_err());
+    assert_eq!(adapter.find_submitted(&key(), &inline).unwrap(), None);
     assert!(adapter.transport().sent().is_empty());
+}
+
+#[test]
+fn a_status_this_adapter_does_not_know_follows_whether_the_job_is_over() {
+    let adapter = plan(&["wait-unknown-over", "wait-unknown-going"]);
+    let handle = ClipHandle(JOB.into());
+    match adapter.status(&key(), &handle).unwrap() {
+        ClipStatus::Failed(failure) => {
+            assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+            assert!(failure.detail.contains("expired"), "{}", failure.detail);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        adapter.status(&key(), &handle).unwrap(),
+        ClipStatus::Running
+    );
 }
 
 #[test]

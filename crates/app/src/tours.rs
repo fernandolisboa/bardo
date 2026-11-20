@@ -288,9 +288,6 @@ pub enum Control {
     KeyCard,
     /// Settings › API keys: the first card's Step by step.
     KeySetup,
-    /// Settings › API keys: whether the first provider's key is saved, by
-    /// its last characters.
-    KeyState,
     /// Settings › API keys: the first Test key.
     KeyTest,
     /// Settings › API keys: the first plan Bardo signs in to (ADR-0028).

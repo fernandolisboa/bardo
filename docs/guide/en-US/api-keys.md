@@ -32,11 +32,11 @@ Higgsfield sells two separate things: its API, with a dollar balance and a key (
 
 1. On the **Higgsfield plan** card, click **Sign in**. Bardo opens Higgsfield's page in your browser.
 2. Sign in with your higgsfield.ai account and allow Bardo. The page says Bardo is connected; close the tab.
-3. The card shows your plan and the credits left. **Check credits** reads them again.
+3. The card says **Signed in** and shows your plan and the credits left. After Bardo restarts, **Check credits** reads them again.
 
-Then pick a model marked **Higgsfield plan** for your clips ([Video model](clips.md#model)). Before each clip, Bardo asks Higgsfield what it costs in credits and refuses it when the plan cannot pay. Each clip is recorded in [Costs](bardo:go/costs) at an estimated dollar price per credit (US$ 0.049, the Plus plan's), which you can change there.
+Then pick a model marked **Higgsfield plan** for your clips ([Video model](clips.md#model)). Before each clip, Bardo asks Higgsfield what it costs in credits and refuses it when the plan cannot pay. Each clip is sent once: if its answer is lost on the way, Bardo looks for it in your Higgsfield library instead of sending it again, and when the library doesn't list it the scene says to check your library before animating it again. Each clip is recorded in [Costs](bardo:go/costs) at the per-second rates of the plan's models, priced at US$ 0.049 a credit (what a credit costs on the Plus plan). On another plan, edit those rates in Costs.
 
-The sign-in is kept in Windows Credential Manager like a key, and renewed on its own. If Higgsfield stops accepting it, the card says **Sign in again**. **Sign out** forgets it in Bardo; to end Bardo's access at Higgsfield too, remove it in your Higgsfield account.
+The sign-in is kept in Windows Credential Manager like a key, and renewed on its own. If Higgsfield stops accepting it, the card says **Sign-in expired**; click **Sign in again**, then retry any clip that stopped for it in [Jobs](jobs.md). **Sign out** forgets it in Bardo; to end Bardo's access at Higgsfield too, remove it in your Higgsfield account.
 
 <a id="decision-engine"></a>
 ## Decision engine

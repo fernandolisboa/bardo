@@ -39,7 +39,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::http::{HttpRequest, HttpResponse, Transport, UreqTransport};
-use crate::mcp::{McpClient, McpError};
+use crate::mcp::{CallFailure, McpClient, McpError};
 
 /// Higgsfield's MCP server.
 pub const MCP_URL: &str = "https://mcp.higgsfield.ai/mcp";
@@ -59,9 +59,10 @@ pub const MAX_CLIP_BYTES: u64 = 512 * 1024 * 1024;
 /// Longest prompt passed on, as for the API's models.
 const MAX_PROMPT_CHARS: usize = 2_500;
 
-/// How many recent generations are searched for one already made from a
-/// submission's image.
-const RECENT: u32 = 30;
+/// How many generations a page of the lookup for a lost submission
+/// reads, and how many pages: the newest 150.
+const PAGE: u32 = 30;
+const PAGES: usize = 5;
 
 /// A model Bardo offers through the plan, as `{model}` or
 /// `{model}/{variant}`, and the settings its request needs besides the
@@ -188,16 +189,52 @@ fn clip_failure(error: McpError) -> ProviderFailure {
     ProviderFailure::new(kind, error.to_string())
 }
 
+/// What a failed `generate_video_batch` means. Refusals (sign-in,
+/// permission, rate limit, the tool's own error) started nothing; a call
+/// never sent neither. Anything else may have started a clip, so it is
+/// `Unreachable`: the job looks for the clip instead of paying again.
+fn submit_failure(failure: CallFailure) -> ProviderFailure {
+    match failure.error {
+        McpError::RateLimited => ProviderFailure::new(
+            ProviderFailureKind::ProviderDown,
+            "too many calls; nothing was started",
+        ),
+        error @ (McpError::Unauthorized | McpError::Forbidden(_) | McpError::Tool(_)) => {
+            clip_failure(error)
+        }
+        error if !failure.sent => ProviderFailure::new(
+            ProviderFailureKind::ProviderDown,
+            format!("{error}; nothing was sent"),
+        ),
+        error => ProviderFailure::new(ProviderFailureKind::Unreachable, error.to_string()),
+    }
+}
+
+/// The parameters of a request, or why it cannot be sent.
+fn submit_params(request: &ClipRequest) -> Result<Value, ProviderFailure> {
+    if !is_uuid(&request.image.0) {
+        return Err(unexpected("the scene's image was not uploaded"));
+    }
+    clip_params(request).ok_or_else(|| {
+        ProviderFailure::new(
+            ProviderFailureKind::NotAllowed,
+            format!("{} is not a model of the Higgsfield plan", request.model),
+        )
+    })
+}
+
 /// What a tool's own failure message is about.
 fn tool_failure_kind(text: &str) -> ProviderFailureKind {
     let text = text.to_ascii_lowercase();
-    if text.contains("credit") || text.contains("balance") || text.contains("upgrade") {
-        ProviderFailureKind::LimitReached
-    } else if ["nsfw", "moderation", "policy", "ip_detected", "safety"]
+    // Moderation first: "credits were not charged for flagged content" is
+    // about the content, not the balance.
+    if ["nsfw", "moderation", "policy", "ip_detected", "safety"]
         .iter()
         .any(|word| text.contains(word))
     {
         ProviderFailureKind::Declined
+    } else if text.contains("credit") || text.contains("balance") || text.contains("upgrade") {
+        ProviderFailureKind::LimitReached
     } else if text.contains("unknown model") || text.contains("not available") {
         ProviderFailureKind::NotAllowed
     } else {
@@ -257,33 +294,39 @@ pub fn parse_submitted_job(value: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// A recent generation made from `media` (the uploaded first frame), or
-/// else from the same model and prompt: the job a lost answer started.
-pub fn find_generation(value: &Value, media: &str, model: &str, prompt: &str) -> Option<String> {
-    let items = value["items"]
+/// The generation in one page of `show_generations` whose parameters
+/// name `media` (the first frame uploaded for this submission alone):
+/// the job a lost answer started. Nothing else identifies it; a model and
+/// prompt match could be an older clip of the same scene.
+pub fn find_generation(value: &Value, media: &str) -> Option<String> {
+    fn names(value: &Value, media: &str) -> bool {
+        match value {
+            Value::String(text) => text == media,
+            Value::Array(items) => items.iter().any(|item| names(item, media)),
+            Value::Object(fields) => fields.values().any(|field| names(field, media)),
+            _ => false,
+        }
+    }
+    value["items"]
         .as_array()
-        .or_else(|| value["generations"].as_array())?;
-    let id = |item: &Value| {
-        item["id"]
-            .as_str()
-            .or_else(|| item["job_id"].as_str())
-            .filter(|id| is_uuid(id))
-            .map(str::to_owned)
-    };
-    items
+        .or_else(|| value["generations"].as_array())?
         .iter()
-        .find(|item| item.to_string().contains(media))
-        .and_then(id)
-        .or_else(|| {
-            items
-                .iter()
-                .find(|item| {
-                    let params = &item["params"];
-                    item["model"].as_str().or_else(|| params["model"].as_str()) == Some(model)
-                        && params["prompt"].as_str() == Some(prompt)
-                })
-                .and_then(id)
+        .find(|item| names(&item["params"], media) || names(&item["medias"], media))
+        .and_then(|item| {
+            item["id"]
+                .as_str()
+                .or_else(|| item["job_id"].as_str())
+                .filter(|id| is_uuid(id))
+                .map(str::to_owned)
         })
+}
+
+/// The cursor of the next page of `show_generations`, if any.
+fn next_cursor(value: &Value) -> Option<String> {
+    value["next_cursor"]
+        .as_str()
+        .filter(|cursor| !cursor.is_empty() && cursor.len() <= 512)
+        .map(str::to_owned)
 }
 
 /// The first HTTPS address in a finished job: under a key naming a URL,
@@ -362,8 +405,26 @@ pub fn parse_status(value: &Value) -> Result<ClipStatus, ProviderFailure> {
             ProviderFailureKind::Unexpected,
             "Higgsfield does not know this clip",
         ),
-        "queued" | "pending" | "waiting" | "submitted" => ClipStatus::Queued,
-        _ => ClipStatus::Running,
+        "queued" | "pending" | "waiting" | "submitted" | "created" => ClipStatus::Queued,
+        "in_progress" | "running" | "processing" | "generating" | "started" => ClipStatus::Running,
+        // A status this adapter does not know: over when the server says
+        // every job is, else still going.
+        _ => match value["all_terminal"].as_bool() {
+            Some(true) => failed(
+                ProviderFailureKind::Unexpected,
+                &format!(
+                    "the clip ended as \"{}\"",
+                    status.chars().take(40).collect::<String>()
+                ),
+            ),
+            Some(false) => ClipStatus::Running,
+            None => {
+                return Err(unexpected(format!(
+                    "unknown clip status \"{}\"",
+                    status.chars().take(40).collect::<String>()
+                )));
+            }
+        },
     })
 }
 
@@ -487,29 +548,6 @@ impl<T: Transport> HiggsfieldPlan<T> {
         } else {
             Err(token_failure(&response))
         }
-    }
-
-    /// A generation already started from this request's image, if any.
-    /// A failed lookup stops the submission: starting a clip without
-    /// knowing whether it already runs could pay for it twice.
-    fn find(
-        &self,
-        key: &ApiKey,
-        request: &ClipRequest,
-        params: &Value,
-    ) -> Result<Option<ClipHandle>, ProviderFailure> {
-        let recent = self.tool(
-            key,
-            "show_generations",
-            json!({ "only_completed": false, "size": RECENT, "type": "video" }),
-        )?;
-        Ok(find_generation(
-            &recent,
-            &request.image.0,
-            params["model"].as_str().unwrap_or_default(),
-            params["prompt"].as_str().unwrap_or_default(),
-        )
-        .map(ClipHandle))
     }
 
     /// Refuses a clip the plan's credits cannot pay for.
@@ -674,50 +712,68 @@ impl<T: Transport> ClipGenerator for HiggsfieldPlan<T> {
         Ok(StagedImage(media))
     }
 
-    /// Starts the clip, once: a generation already made from the same
-    /// uploaded image is returned instead.
+    /// Higgsfield takes no idempotency key: the job writes down that it
+    /// sent a submission, and looks for it after a lost answer.
+    fn dedupes_submissions(&self) -> bool {
+        false
+    }
+
+    fn check_submit(&self, key: &ApiKey, request: &ClipRequest) -> Result<(), ProviderFailure> {
+        let params = submit_params(request)?;
+        self.check_credits(key, &params)
+    }
+
+    /// The generation made from this submission's first frame, in the
+    /// newest pages of the library. Each submission uploads its frame
+    /// again, so the frame's id names one submission.
+    fn find_submitted(
+        &self,
+        key: &ApiKey,
+        request: &ClipRequest,
+    ) -> Result<Option<ClipHandle>, ProviderFailure> {
+        if !is_uuid(&request.image.0) {
+            return Ok(None);
+        }
+        let mut cursor: Option<String> = None;
+        for _ in 0..PAGES {
+            let mut arguments = json!({ "only_completed": false, "size": PAGE, "type": "video" });
+            if let Some(cursor) = &cursor {
+                arguments["cursor"] = json!(cursor);
+            }
+            let page = self.tool(key, "show_generations", arguments)?;
+            if let Some(job) = find_generation(&page, &request.image.0) {
+                return Ok(Some(ClipHandle(job)));
+            }
+            match next_cursor(&page) {
+                Some(next) if Some(&next) != cursor.as_ref() => cursor = Some(next),
+                _ => break,
+            }
+        }
+        Ok(None)
+    }
+
+    /// Starts the clip. A failure of kind `Unreachable` means the request
+    /// may have reached Higgsfield (the job then looks for it); any other
+    /// means it did not start.
     fn submit(
         &self,
         key: &ApiKey,
         request: &ClipRequest,
         _submission: &str,
     ) -> Result<ClipSubmission, ProviderFailure> {
-        if !is_uuid(&request.image.0) {
-            return Err(unexpected("the scene's image was not uploaded"));
-        }
-        let params = clip_params(request).ok_or_else(|| {
-            ProviderFailure::new(
-                ProviderFailureKind::NotAllowed,
-                format!("{} is not a model of the Higgsfield plan", request.model),
-            )
-        })?;
-        if let Some(handle) = self.find(key, request, &params)? {
-            return Ok(ClipSubmission {
-                handle,
-                quote: None,
-            });
-        }
-        self.check_credits(key, &params)?;
+        let params = submit_params(request)?;
         let started = self
             .mcp
-            .call_tool(
+            .try_call_tool(
                 key.expose(),
                 "generate_video_batch",
                 json!({ "requests": [{ "index": 0, "params": params }] }),
             )
-            .map_err(|error| match error {
-                // The answer may be lost after Higgsfield took the request:
-                // a passing failure makes the job look for it next time
-                // instead of starting another.
-                McpError::Unreachable(_) | McpError::ServerDown(_) => {
-                    ProviderFailure::new(ProviderFailureKind::Unreachable, error.to_string())
-                }
-                error => clip_failure(error),
-            })?;
+            .map_err(submit_failure)?;
         let handle = parse_submitted_job(&started).ok_or_else(|| {
             ProviderFailure::new(
-                ProviderFailureKind::ProviderDown,
-                "the submission's answer has no job id; looking for the job again",
+                ProviderFailureKind::Unreachable,
+                "the submission's answer has no job id",
             )
         })?;
         Ok(ClipSubmission {
@@ -808,6 +864,11 @@ mod tests {
         assert_eq!(
             tool_failure_kind("Flagged as NSFW"),
             ProviderFailureKind::Declined
+        );
+        assert_eq!(
+            tool_failure_kind("Flagged by moderation; your credits were not charged"),
+            ProviderFailureKind::Declined,
+            "about the content, not the balance"
         );
         assert_eq!(
             tool_failure_kind("unknown model \"x\""),

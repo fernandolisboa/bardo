@@ -56,17 +56,17 @@ impl PlanError {
     /// What the settings screen says.
     pub fn message(&self) -> Text {
         match self {
-            PlanError::NotOffered(_) => Text::ConnectionNotOffered,
+            PlanError::NotOffered(_) => Text::PlanNotOffered,
             PlanError::NotConnected(_) => Text::PlanNotSignedIn,
             PlanError::ReconnectNeeded(_) => Text::PlanSignInAgainHint,
-            PlanError::Consent(ConsentError::Denied(_)) => Text::ConnectionDenied,
-            PlanError::Consent(ConsentError::TimedOut) => Text::ConnectionTimedOut,
-            PlanError::Consent(ConsentError::Cancelled) => Text::ConnectionCancelled,
-            PlanError::Consent(ConsentError::Listen(_)) => Text::ConnectionListenFailed,
-            PlanError::Consent(ConsentError::PortInUse(_)) => Text::ConnectionPortInUse,
+            PlanError::Consent(ConsentError::Denied(_)) => Text::PlanDenied,
+            PlanError::Consent(ConsentError::TimedOut) => Text::PlanTimedOut,
+            PlanError::Consent(ConsentError::Cancelled) => Text::PlanCancelled,
+            PlanError::Consent(ConsentError::Listen(_)) => Text::PlanListenFailed,
+            PlanError::Consent(ConsentError::PortInUse(_)) => Text::PlanPortInUse,
             PlanError::SignIn(_, failure) => Text::PlanFailure(failure.kind),
-            PlanError::TooLarge(_) => Text::ConnectionTokensTooLarge,
-            PlanError::Store(_) => Text::ConnectionStoreFailed,
+            PlanError::TooLarge(_) => Text::PlanTokensTooLarge,
+            PlanError::Store(_) => Text::PlanStoreFailed,
         }
     }
 
@@ -123,6 +123,21 @@ pub(crate) struct PlanSessions {
     refreshing: Arc<Mutex<()>>,
     /// Plans whose refresh the provider refused in this session.
     reconnect: Arc<Mutex<HashSet<Provider>>>,
+    /// Plans whose access token the provider refused although it had not
+    /// expired: the next use renews it first.
+    refused: Arc<Mutex<HashSet<Provider>>>,
+    /// Renewed sign-ins the secret store would not save: used for the rest
+    /// of the session (the refresh token they replace may no longer work)
+    /// and saved again on the next renewal.
+    unsaved: Arc<Mutex<HashMap<Provider, PlanSession>>>,
+}
+
+/// Locks a mutex even after a panic elsewhere: the sets it guards stay
+/// consistent.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl PlanSessions {
@@ -152,8 +167,12 @@ impl PlanSessions {
         PlanError::SignIn(provider, failure)
     }
 
-    /// The stored session, masked from then on.
+    /// The stored session (or a renewed one not saved yet), masked from
+    /// then on.
     fn session(&self, provider: Provider) -> Result<Option<PlanSession>, PlanError> {
+        if let Some(session) = lock(&self.unsaved).get(&provider) {
+            return Ok(Some(session.clone()));
+        }
         let session = self
             .secrets
             .plan_session(self.owner, provider)
@@ -165,17 +184,11 @@ impl PlanSessions {
     }
 
     fn needs_reconnect(&self, provider: Provider) -> bool {
-        self.reconnect
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains(&provider)
+        lock(&self.reconnect).contains(&provider)
     }
 
     fn set_reconnect(&self, provider: Provider, needed: bool) {
-        let mut reconnect = self
-            .reconnect
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut reconnect = lock(&self.reconnect);
         if needed {
             reconnect.insert(provider);
         } else {
@@ -183,15 +196,22 @@ impl PlanSessions {
         }
     }
 
+    /// The provider refused the access token (HTTP 401) before it expired:
+    /// the next `access_token` renews it whatever its expiry says.
+    pub(crate) fn renew(&self, provider: Provider) {
+        tracing::info!(
+            provider = provider.code(),
+            "plan refused its access token; renewing it"
+        );
+        lock(&self.refused).insert(provider);
+    }
+
     /// The access token as a key the clip adapter sends, fresh: refreshed
     /// first when it expires within `RENEW_AHEAD`. A refused
     /// refresh marks the plan "sign in again". Blocks on the provider when
     /// refreshing.
     pub(crate) fn access_token(&self, provider: Provider) -> Result<ApiKey, PlanError> {
-        let _one_at_a_time = self
-            .refreshing
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _one_at_a_time = lock(&self.refreshing);
         if self.needs_reconnect(provider) {
             return Err(PlanError::ReconnectNeeded(provider));
         }
@@ -200,19 +220,22 @@ impl PlanSessions {
             .ok_or(PlanError::NotConnected(provider))?;
         let tokens = session.tokens();
         let now = SystemTime::now();
-        if !tokens.needs_refresh_within(now, RENEW_AHEAD) {
+        // A token the provider refused is renewed once; a renewal that
+        // fails leaves it refused, and the caller's next call says so.
+        let refused = lock(&self.refused).remove(&provider);
+        if !refused && !tokens.needs_refresh_within(now, RENEW_AHEAD) {
             return self.key(provider, tokens);
         }
-        let refused = |failure: SignInFailure| {
+        let refused_refresh = |failure: SignInFailure| {
             let _ = self.sign_in_failure(provider, failure);
             self.set_reconnect(provider, true);
             Err(PlanError::ReconnectNeeded(provider))
         };
         let Some(refresh_token) = tokens.refresh_token() else {
-            if !tokens.needs_refresh(now) {
+            if !refused && !tokens.needs_refresh(now) {
                 return self.key(provider, tokens);
             }
-            return refused(SignInFailure::new(
+            return refused_refresh(SignInFailure::new(
                 SignInFailureKind::Refused,
                 "the sign-in expired and has no refresh token",
             ));
@@ -224,16 +247,34 @@ impl PlanSessions {
                 self.redactor.add_parts(&fresh.sensitive_parts());
                 let renewed = session.with_tokens(fresh);
                 renewed.encode()?;
-                self.secrets
+                match self
+                    .secrets
                     .set_plan_session(self.owner, provider, &renewed)
-                    .map_err(|error| self.store_failure("save the plan's sign-in", error))?;
+                {
+                    Ok(()) => {
+                        lock(&self.unsaved).remove(&provider);
+                    }
+                    // The provider may have retired the old refresh token:
+                    // the new one is kept in memory rather than lost.
+                    Err(error) => {
+                        let _ = self.store_failure("save the plan's renewed sign-in", error);
+                        lock(&self.unsaved).insert(provider, renewed.clone());
+                    }
+                }
                 tracing::info!(provider = provider.code(), "refreshed plan tokens");
                 self.key(provider, renewed.tokens())
             }
-            Err(failure) if failure.kind == SignInFailureKind::Refused => refused(failure),
+            Err(failure)
+                if matches!(
+                    failure.kind,
+                    SignInFailureKind::Refused | SignInFailureKind::ClientRejected
+                ) =>
+            {
+                refused_refresh(failure)
+            }
             // Still valid for a while: renewing early failed, so the next
             // use tries again.
-            Err(failure) if !tokens.needs_refresh(now) => {
+            Err(failure) if !refused && !tokens.needs_refresh(now) => {
                 let _ = self.sign_in_failure(provider, failure);
                 self.key(provider, tokens)
             }
@@ -253,24 +294,46 @@ impl PlanSessions {
         })
     }
 
-    /// Keeps a new sign-in, replacing any earlier one.
-    fn keep(&self, provider: Provider, session: &PlanSession) -> Result<(), PlanError> {
+    /// Keeps a new sign-in, replacing any earlier one, unless `cancelled`
+    /// is set by then. Waits for a refresh under way, so the refresh
+    /// cannot write the old sign-in over it.
+    fn keep(
+        &self,
+        provider: Provider,
+        session: &PlanSession,
+        cancelled: &AtomicBool,
+    ) -> Result<(), PlanError> {
         session.encode()?;
+        let _one_at_a_time = lock(&self.refreshing);
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(ConsentError::Cancelled.into());
+        }
         self.secrets
             .set_plan_session(self.owner, provider, session)
             .map_err(|error| self.store_failure("save the plan's sign-in", error))?;
-        self.set_reconnect(provider, false);
+        self.reset(provider);
         tracing::info!(provider = provider.code(), "signed in to the plan");
         Ok(())
     }
 
+    /// Forgets the sign-in. Waits for a refresh under way, so the refresh
+    /// cannot save it again.
     fn forget(&self, provider: Provider) -> Result<(), PlanError> {
+        let _one_at_a_time = lock(&self.refreshing);
+        lock(&self.unsaved).remove(&provider);
         self.secrets
             .delete_plan_session(self.owner, provider)
             .map_err(|error| self.store_failure("delete the plan's sign-in", error))?;
-        self.set_reconnect(provider, false);
+        self.reset(provider);
         tracing::info!(provider = provider.code(), "signed out of the plan");
         Ok(())
+    }
+
+    /// Clears what this session learned about the earlier sign-in.
+    fn reset(&self, provider: Provider) {
+        self.set_reconnect(provider, false);
+        lock(&self.refused).remove(&provider);
+        lock(&self.unsaved).remove(&provider);
     }
 }
 
@@ -307,6 +370,8 @@ impl PlanBook {
             redactor,
             refreshing: Arc::default(),
             reconnect: Arc::default(),
+            refused: Arc::default(),
+            unsaved: Arc::default(),
         };
         let states = sessions
             .sign_ins
@@ -404,7 +469,7 @@ impl PlanConnect {
             .register(&redirect_uri)
             .map_err(|failure| self.sessions.sign_in_failure(provider, failure));
         let client_id = match registered {
-            Ok(client_id) if !self.cancel.load(Ordering::Relaxed) => client_id,
+            Ok(client_id) if !self.cancel.load(Ordering::SeqCst) => client_id,
             Ok(_) => return Err(self.end(Err(ConsentError::Cancelled.into()))),
             Err(error) => return Err(self.end(Err(error))),
         };
@@ -493,9 +558,6 @@ impl PlanConsent {
             .sign_in
             .account(tokens.access_token())
             .map_err(|failure| sessions.sign_in_failure(provider, failure))?;
-        if connect.cancel.load(Ordering::Relaxed) {
-            return Err(ConsentError::Cancelled.into());
-        }
         let session = PlanSession::new(&self.client_id, tokens).ok_or_else(|| {
             sessions.sign_in_failure(
                 provider,
@@ -505,7 +567,7 @@ impl PlanConsent {
                 ),
             )
         })?;
-        sessions.keep(provider, &session)?;
+        sessions.keep(provider, &session, &connect.cancel)?;
         Ok(account)
     }
 }
@@ -565,13 +627,23 @@ impl PlanCheck {
         self.provider
     }
 
+    /// Reads the plan. A token the provider refuses is renewed and the
+    /// read made once more.
     pub fn run(self) -> PlanCheckResult {
         let provider = self.provider;
-        let outcome = self.sessions.access_token(provider).and_then(|token| {
-            self.sign_in
-                .account(token.expose())
-                .map_err(|failure| self.sessions.sign_in_failure(provider, failure))
-        });
+        let read = || {
+            self.sessions
+                .access_token(provider)
+                .map(|token| self.sign_in.account(token.expose()))
+        };
+        let outcome = match read() {
+            Ok(Err(failure)) if failure.kind == SignInFailureKind::Refused => {
+                self.sessions.renew(provider);
+                read()
+            }
+            first => first,
+        }
+        .and_then(|read| read.map_err(|failure| self.sessions.sign_in_failure(provider, failure)));
         PlanCheckResult { provider, outcome }
     }
 }
@@ -608,7 +680,7 @@ impl Bardo {
             .listen(sign_in.redirect_path(), None)?;
         let book = &mut self.plan_book;
         if let Some(earlier) = book.attempts.remove(&provider) {
-            earlier.cancel.store(true, Ordering::Relaxed);
+            earlier.cancel.store(true, Ordering::SeqCst);
         }
         book.generations += 1;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -638,7 +710,7 @@ impl Bardo {
     /// earlier state at once.
     pub fn cancel_plan_connect(&mut self, provider: Provider) {
         if let Some(attempt) = self.plan_book.attempts.remove(&provider) {
-            attempt.cancel.store(true, Ordering::Relaxed);
+            attempt.cancel.store(true, Ordering::SeqCst);
         }
     }
 
@@ -654,6 +726,16 @@ impl Bardo {
             .get(&result.provider)
             .is_some_and(|attempt| attempt.generation == result.generation);
         if !current {
+            // A cancelled attempt may have kept its sign-in just before
+            // the cancel: the card shows what the store holds.
+            if result.outcome.is_ok() {
+                let state = match book.sessions.session(result.provider) {
+                    Ok(Some(_)) => PlanState::Connected,
+                    Ok(None) => PlanState::NotConnected,
+                    Err(_) => PlanState::Unreadable,
+                };
+                book.states.insert(result.provider, state);
+            }
             return None;
         }
         book.attempts.remove(&result.provider);
@@ -737,6 +819,8 @@ pub(crate) mod testing {
         pub(crate) refreshes: Mutex<VecDeque<Result<(), SignInFailure>>>,
         pub(crate) account: Mutex<Result<PlanAccount, SignInFailure>>,
         pub(crate) expires_in: Mutex<Duration>,
+        /// How many plan reads refuse the token first.
+        pub(crate) account_refusals: Mutex<u32>,
         issued: Mutex<u32>,
     }
 
@@ -752,6 +836,7 @@ pub(crate) mod testing {
                     credits: Credits::from_hundredths(98_250),
                 })),
                 expires_in: Mutex::new(Duration::from_secs(3_600)),
+                account_refusals: Mutex::default(),
                 issued: Mutex::new(0),
             }
         }
@@ -834,6 +919,14 @@ pub(crate) mod testing {
                 .lock()
                 .unwrap()
                 .push(PlanCall::Account(access_token.into()));
+            let mut refusals = self.account_refusals.lock().unwrap();
+            if *refusals > 0 {
+                *refusals -= 1;
+                return Err(SignInFailure::new(
+                    SignInFailureKind::Refused,
+                    "the server refused the access token",
+                ));
+            }
             self.account.lock().unwrap().clone()
         }
     }
@@ -1080,6 +1173,88 @@ mod tests {
         let error = token(&app).unwrap_err();
         assert!(error.is_transient(), "{error:?}");
         assert_eq!(app.plan(PLAN).state, PlanState::Connected);
+    }
+
+    #[test]
+    fn a_token_the_plan_refused_is_renewed_before_it_expires_once() {
+        let harness = Harness::default();
+        let app = harness.stored(3_600);
+        app.plan_book.sessions().renew(PLAN);
+        assert_eq!(token(&app).unwrap(), "plan-access-0001");
+        assert_eq!(token(&app).unwrap(), "plan-access-0001", "renewed once");
+        assert_eq!(harness.plan.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_token_whose_renewal_fails_is_not_used_again() {
+        let harness = Harness::default();
+        let app = harness.stored(3_600);
+        harness
+            .plan
+            .refreshes
+            .lock()
+            .unwrap()
+            .push_back(Err(SignInFailure::new(
+                SignInFailureKind::Unreachable,
+                "dns error",
+            )));
+        app.plan_book.sessions().renew(PLAN);
+        let error = token(&app).unwrap_err();
+        assert!(error.is_transient(), "{error:?}");
+    }
+
+    #[test]
+    fn a_client_the_plan_no_longer_knows_asks_to_sign_in_again() {
+        let harness = Harness::default();
+        let app = harness.stored(60);
+        harness
+            .plan
+            .refreshes
+            .lock()
+            .unwrap()
+            .push_back(Err(SignInFailure::new(
+                SignInFailureKind::ClientRejected,
+                "invalid_client",
+            )));
+        assert!(matches!(token(&app), Err(PlanError::ReconnectNeeded(PLAN))));
+        assert_eq!(app.plan(PLAN).state, PlanState::ReconnectNeeded);
+    }
+
+    #[test]
+    fn a_check_the_plan_refuses_renews_the_token_and_reads_again() {
+        let harness = Harness::default();
+        let mut app = harness.stored(3_600);
+        *harness.plan.account_refusals.lock().unwrap() = 1;
+        let check = app.plan_check(PLAN).unwrap();
+        let account = app.record_plan_check(check.run()).unwrap();
+        assert_eq!(account.plan, "plus");
+        assert_eq!(
+            harness.plan.calls(),
+            [
+                PlanCall::Account("stored-access".into()),
+                PlanCall::Refresh {
+                    client_id: "client-stored".into(),
+                    refresh_token: "stored-refresh".into(),
+                },
+                PlanCall::Account("plan-access-0001".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_renewed_sign_in_the_store_cannot_save_is_kept_for_the_session() {
+        let harness = Harness::default();
+        let app = harness.stored(60);
+        harness.secrets.fail_writes(true);
+        assert_eq!(token(&app).unwrap(), "plan-access-0001");
+        // The store still has the old one; the session uses the new one
+        // without spending the old refresh token again.
+        assert_eq!(
+            harness.session(&app).unwrap().tokens().access_token(),
+            "stored-access"
+        );
+        assert_eq!(token(&app).unwrap(), "plan-access-0001");
+        assert_eq!(harness.plan.calls().len(), 1);
     }
 
     #[test]

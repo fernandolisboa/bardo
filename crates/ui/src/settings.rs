@@ -942,11 +942,12 @@ impl SettingsScreen {
                 row.checking = false;
                 match outcome {
                     Ok(account) => {
-                        let text = this.bardo.read(cx).text_with(
+                        let bardo = this.bardo.read(cx);
+                        let text = bardo.text_with(
                             Text::PlanChecked,
                             &[
-                                ("plan", &account.plan),
-                                ("credits", &account.credits.to_string()),
+                                ("plan", &bardo.plan_name(&account.plan)),
+                                ("credits", &bardo.credits(account.credits)),
                             ],
                         );
                         this.plan_row(provider).notice =
@@ -1245,8 +1246,7 @@ impl SettingsScreen {
     }
 
     /// A provider's card. The tour lights the first card (`first`), and the
-    /// state and Test key of the first card with a saved key
-    /// (`first_saved`). On the setup screen (`in_setup`) the card has no
+    /// Test key of the first card with a saved key (`first_saved`). On the setup screen (`in_setup`) the card has no
     /// Step by step, since its steps are right above it.
     fn render_card(
         &self,
@@ -1286,11 +1286,6 @@ impl SettingsScreen {
             KeyState::Unreadable => kit::status(Tone::Danger, tr(bardo, Text::KeyUnreadable), cx),
         };
         let scroll = Some(&self.scroll);
-        let state = if first_saved {
-            kit::anchor_in(TourAnchor::Control(Control::KeyState), state, scroll).into_any_element()
-        } else {
-            state.into_any_element()
-        };
 
         let check = status.last_check.filter(|_| !testing).map(|check| {
             h_flex()
@@ -1503,34 +1498,36 @@ impl SettingsScreen {
         let busy = row.is_some_and(|row| row.work.is_some());
         let checking = busy && row.is_some_and(|row| row.checking);
         let signing_in = status.connecting;
-        let state = match (&status.state, &status.account) {
-            (PlanState::NotConnected, _) => kit::status_with(
+        // The chip stays short so it fits a narrow window; the plan and
+        // its credits, once read, go on a line of their own.
+        let state = match status.state {
+            PlanState::NotConnected => kit::status_with(
                 Tone::Neutral,
                 IconName::Minus,
                 tr(bardo, Text::PlanNotConnected),
                 cx,
             ),
-            (PlanState::Connected, Some(account)) => kit::status(
-                Tone::Success,
+            PlanState::Connected => {
+                kit::status(Tone::Success, tr(bardo, Text::PlanConnectedPlain), cx)
+            }
+            PlanState::ReconnectNeeded => {
+                kit::status(Tone::Warning, tr(bardo, Text::PlanReconnectNeeded), cx)
+            }
+            PlanState::Unreadable => kit::status(Tone::Danger, tr(bardo, Text::PlanUnreadable), cx),
+        };
+        let account = status
+            .account
+            .as_ref()
+            .filter(|_| status.state == PlanState::Connected)
+            .map(|account| {
                 bardo.text_with(
                     Text::PlanConnected,
                     &[
-                        ("plan", &account.plan),
-                        ("credits", &account.credits.to_string()),
+                        ("plan", &bardo.plan_name(&account.plan)),
+                        ("credits", &bardo.credits(account.credits)),
                     ],
-                ),
-                cx,
-            ),
-            (PlanState::Connected, None) => {
-                kit::status(Tone::Success, tr(bardo, Text::PlanConnectedPlain), cx)
-            }
-            (PlanState::ReconnectNeeded, _) => {
-                kit::status(Tone::Warning, tr(bardo, Text::PlanReconnectNeeded), cx)
-            }
-            (PlanState::Unreadable, _) => {
-                kit::status(Tone::Danger, tr(bardo, Text::PlanUnreadable), cx)
-            }
-        };
+                )
+            });
         let signed_in = matches!(status.state, PlanState::Connected);
         let actions = if signing_in {
             h_flex()
@@ -1636,6 +1633,9 @@ impl SettingsScreen {
                                     .text_xs()
                                     .text_color(tokens.text2)
                                     .child(tr(bardo, Text::ProviderPurpose(provider))),
+                            )
+                            .children(
+                                account.map(|account| div().text_sm().font_medium().child(account)),
                             ),
                     )
                     .child(div().flex_none().child(state)),

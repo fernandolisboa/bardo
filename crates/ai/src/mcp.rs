@@ -51,6 +51,26 @@ pub enum McpError {
     Protocol(String),
 }
 
+/// A failed call, and whether it went out.
+#[derive(Debug)]
+pub struct CallFailure {
+    pub error: McpError,
+    /// `false` when it failed before the call was sent (opening the
+    /// session, or a session the server kept dropping): the server never
+    /// saw it. `true` means it may have run.
+    pub sent: bool,
+}
+
+impl CallFailure {
+    fn sent(error: McpError) -> Self {
+        Self { error, sent: true }
+    }
+
+    fn unsent(error: McpError) -> Self {
+        Self { error, sent: false }
+    }
+}
+
 struct Session {
     /// SHA-256 of the access token the session was opened with: a new
     /// token (after a refresh or another sign-in) opens a new session.
@@ -85,37 +105,50 @@ impl<T: Transport> McpClient<T> {
     /// when the server sends it, else the first text block read as JSON
     /// (or as a JSON string when it is not JSON).
     pub fn call_tool(&self, token: &str, name: &str, arguments: Value) -> Result<Value, McpError> {
+        self.try_call_tool(token, name, arguments)
+            .map_err(|failure| failure.error)
+    }
+
+    /// `call_tool`, saying on failure whether the call went out at all:
+    /// for a tool that must not run twice, a call never sent is safe to
+    /// make again.
+    pub fn try_call_tool(
+        &self,
+        token: &str,
+        name: &str,
+        arguments: Value,
+    ) -> Result<Value, CallFailure> {
         let params = json!({ "name": name, "arguments": arguments });
         let result = self.request(token, "tools/call", params)?;
-        tool_result(&result)
+        tool_result(&result).map_err(CallFailure::sent)
     }
 
     /// Sends one request in the current session, opening one first when
     /// there is none for this token.
-    fn request(&self, token: &str, method: &str, params: Value) -> Result<Value, McpError> {
+    fn request(&self, token: &str, method: &str, params: Value) -> Result<Value, CallFailure> {
         let fingerprint: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         for attempt in 0..2 {
-            let (id, version) = self.open(token, fingerprint)?;
+            let (id, version) = self.open(token, fingerprint).map_err(CallFailure::unsent)?;
             let rpc = self.next_id.fetch_add(1, Ordering::Relaxed);
             let body = json!({ "jsonrpc": "2.0", "id": rpc, "method": method, "params": params });
             let response = match self.post(token, id.as_deref(), Some(&version), &body) {
                 Err(McpError::Unauthorized) => {
                     // The next call with a renewed token opens a new session.
                     self.forget(fingerprint);
-                    return Err(McpError::Unauthorized);
+                    return Err(CallFailure::sent(McpError::Unauthorized));
                 }
-                other => other?,
+                other => other.map_err(CallFailure::sent)?,
             };
             if response.status == 404 && id.is_some() && attempt == 0 {
                 // The server forgot the session; it did not take the call.
                 self.forget(fingerprint);
                 continue;
             }
-            return answer(&response, rpc);
+            return answer(&response, rpc).map_err(CallFailure::sent);
         }
-        Err(McpError::Protocol(
+        Err(CallFailure::unsent(McpError::Protocol(
             "the server keeps dropping the session".into(),
-        ))
+        )))
     }
 
     /// The session for this token: kept, or opened now.
@@ -233,6 +266,11 @@ fn short(text: &str) -> String {
 fn answer(response: &HttpResponse, rpc: u64) -> Result<Value, McpError> {
     if !(200..=299).contains(&response.status) {
         return Err(status_error(response));
+    }
+    if response.body.trim().is_empty() {
+        // A request always gets an answer: an empty one was cut off on the
+        // way, after the server took the request.
+        return Err(McpError::Unreachable("the answer was cut off".into()));
     }
     let streamed = response
         .header("content-type")

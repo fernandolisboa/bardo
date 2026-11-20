@@ -331,7 +331,11 @@ impl BackupPanel {
                         let (label, open): (String, SetUpOpen) = match item {
                             SetUpAgain::Key(provider) => (
                                 bardo.text_with(
-                                    Text::BackupSetUpKey,
+                                    if provider.signs_in() {
+                                        Text::BackupSetUpPlan
+                                    } else {
+                                        Text::BackupSetUpKey
+                                    },
                                     &[("provider", &bardo.text(Text::ProviderName(*provider)))],
                                 ),
                                 SetUpOpen::Setup(SetupTarget::Key(*provider)),

@@ -474,6 +474,10 @@ impl Bardo {
             .saved_keys
             .iter()
             .filter(|provider| self.provider_key(**provider).state == KeyState::NotSet)
+            // A plan this Bardo no longer signs in to has nothing to set up.
+            .filter(|provider| {
+                !provider.signs_in() || self.plans().iter().any(|plan| plan.provider == **provider)
+            })
             .map(|provider| SetUpAgain::Key(*provider))
             .collect();
         let credentials = self.app_credentials();
@@ -550,9 +554,16 @@ impl Bardo {
         media: bool,
         automatic: bool,
     ) -> Result<JobId, BackupStartError> {
+        // Plans signed in to count as keys: they need signing in again on
+        // another computer too.
         let saved_keys = self
             .provider_keys()
             .into_iter()
+            .chain(
+                self.plans()
+                    .into_iter()
+                    .map(|plan| self.provider_key(plan.provider)),
+            )
             .filter(|status| matches!(status.state, KeyState::Saved { .. }))
             .map(|status| status.provider.code().to_owned())
             .collect();
@@ -1098,10 +1109,16 @@ mod tests {
             restored_at: SystemTime::now(),
             failure: None,
             kept_aside: None,
-            saved_keys: vec![Provider::Claude, Provider::YouTubeData],
+            saved_keys: vec![
+                Provider::Claude,
+                Provider::YouTubeData,
+                Provider::HiggsfieldPlan,
+            ],
             saved_credentials: vec![Network::InstagramReels],
         }));
         s.h.backups = Some(Arc::clone(&backups) as _);
+        s.h.plans
+            .push(Arc::new(crate::plans::testing::FakePlan::default()) as _);
         let s = s.restart();
 
         let view = s.app.backup_view();
@@ -1109,6 +1126,7 @@ mod tests {
             view.set_up_again,
             [
                 SetUpAgain::Key(Provider::YouTubeData),
+                SetUpAgain::Key(Provider::HiggsfieldPlan),
                 SetUpAgain::AppCredentials(Network::InstagramReels),
                 SetUpAgain::Reconnect {
                     account,

@@ -1267,6 +1267,21 @@ impl Bardo {
         self.catalog.price(amount)
     }
 
+    /// A plan's credits, e.g. `1,250`, `982,5`.
+    pub fn credits(&self, credits: bardo_domain::Credits) -> String {
+        self.catalog.credits(credits)
+    }
+
+    /// A plan's name as its provider gives it (`plus`), capitalized for
+    /// display: `Plus`.
+    pub fn plan_name(&self, plan: &str) -> String {
+        let mut chars = plan.chars();
+        chars
+            .next()
+            .map(|first| first.to_uppercase().chain(chars).collect())
+            .unwrap_or_default()
+    }
+
     /// A month and its year, e.g. `October 2026`.
     pub fn month_name(&self, month: bardo_domain::Month) -> String {
         self.catalog.month(month)
@@ -1860,6 +1875,20 @@ pub(crate) mod testing {
         pub(crate) provider: Option<Provider>,
         /// The key each call was made with, in order.
         pub(crate) keys: Mutex<Vec<String>>,
+        /// Starts a new clip on every submission, like a provider without
+        /// an idempotency key (the Higgsfield plan).
+        pub(crate) no_idempotency: bool,
+        /// Submissions sent, answered or not.
+        pub(crate) sends: Mutex<u32>,
+        /// How many submissions start a clip and lose the answer.
+        pub(crate) lost: Mutex<u32>,
+        /// How many submissions are lost before reaching the provider.
+        pub(crate) unseen: Mutex<u32>,
+        /// Credit checks and lookups for a lost submission.
+        pub(crate) checks: Mutex<u32>,
+        pub(crate) lookups: Mutex<u32>,
+        /// How many calls the provider refuses the token for first.
+        pub(crate) refusals: Mutex<u32>,
     }
 
     impl FakeClips {
@@ -1883,6 +1912,24 @@ pub(crate) mod testing {
 
         pub(crate) fn succeed_all(&self) {
             self.failing.lock().unwrap().clear();
+        }
+
+        /// Counts the call down from `count`: `true` while it was above 0.
+        fn take(count: &Mutex<u32>) -> bool {
+            let mut count = count.lock().unwrap();
+            let take = *count > 0;
+            *count = count.saturating_sub(1);
+            take
+        }
+
+        fn refused(&self) -> Result<(), ProviderFailure> {
+            if Self::take(&self.refusals) {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Rejected,
+                    "the server refused the access token",
+                ));
+            }
+            Ok(())
         }
     }
 
@@ -1924,14 +1971,26 @@ pub(crate) mod testing {
             submission: &str,
         ) -> Result<ClipSubmission, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
+            self.refused()?;
             if let Some(failure) = self.submit_failure.lock().unwrap().clone() {
                 return Err(failure);
             }
+            *self.sends.lock().unwrap() += 1;
+            let timed_out = || {
+                Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unreachable,
+                    "timed out reading the answer",
+                ))
+            };
+            if Self::take(&self.unseen) {
+                return timed_out();
+            }
             let mut requests = self.requests.lock().unwrap();
-            let index = match requests
+            let earlier = requests
                 .iter()
                 .position(|sent| sent.submission == submission)
-            {
+                .filter(|_| !self.no_idempotency);
+            let index = match earlier {
                 Some(index) => index,
                 None => {
                     requests.push(FakeClipRequest {
@@ -1941,14 +2000,48 @@ pub(crate) mod testing {
                     requests.len() - 1
                 }
             };
+            if Self::take(&self.lost) {
+                return timed_out();
+            }
             Ok(ClipSubmission {
                 handle: ClipHandle(format!("req-{index}")),
                 quote: *self.quote.lock().unwrap(),
             })
         }
 
+        fn dedupes_submissions(&self) -> bool {
+            !self.no_idempotency
+        }
+
+        fn check_submit(
+            &self,
+            key: &ApiKey,
+            _request: &ClipRequest,
+        ) -> Result<(), ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
+            *self.checks.lock().unwrap() += 1;
+            Ok(())
+        }
+
+        fn find_submitted(
+            &self,
+            key: &ApiKey,
+            request: &ClipRequest,
+        ) -> Result<Option<ClipHandle>, ProviderFailure> {
+            self.keys.lock().unwrap().push(key.expose().to_owned());
+            *self.lookups.lock().unwrap() += 1;
+            Ok(self
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .position(|sent| sent.request.image == request.image)
+                .map(|index| ClipHandle(format!("req-{index}"))))
+        }
+
         fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
+            self.refused()?;
             self.polls.lock().unwrap().push(handle.0.clone());
             let mut outages = self.status_outages.lock().unwrap();
             if *outages > 0 {

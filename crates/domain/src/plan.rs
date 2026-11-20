@@ -211,9 +211,9 @@ mod tests {
 
     #[test]
     fn a_session_round_trips_through_the_secret_store_form() {
-        let session = PlanSession::new("qUWc3yOYYb9VDWGT", tokens()).unwrap();
+        let session = PlanSession::new("bardoTestClient1", tokens()).unwrap();
         let stored = session.encode().unwrap();
-        assert!(stored.starts_with("bardo-plan-1\nqUWc3yOYYb9VDWGT\nbardo-tokens-1\n"));
+        assert!(stored.starts_with("bardo-plan-1\nbardoTestClient1\nbardo-tokens-1\n"));
         assert_eq!(PlanSession::decode(&stored), Some(session));
         assert_eq!(PlanSession::decode("bardo-tokens-1\n1\na\nb"), None);
         assert_eq!(PlanSession::decode(""), None);

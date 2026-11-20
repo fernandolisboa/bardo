@@ -32,11 +32,11 @@ A Higgsfield vende duas coisas separadas: a API, com saldo em dólar e chave (o 
 
 1. No cartão **Plano Higgsfield**, clique em **Fazer login**. O Bardo abre a página da Higgsfield no navegador.
 2. Entre com a sua conta do higgsfield.ai e permita o Bardo. A página diz que o Bardo está conectado; feche a aba.
-3. O cartão mostra o seu plano e os créditos restantes. **Ver créditos** lê de novo.
+3. O cartão diz **Com login** e mostra o seu plano e os créditos restantes. Depois que o Bardo reinicia, **Ver créditos** lê de novo.
 
-Depois, escolha um modelo marcado **Plano Higgsfield** para os seus clipes ([Modelo de vídeo](clips.md#model)). Antes de cada clipe, o Bardo pergunta à Higgsfield quanto ele custa em créditos e recusa quando o plano não consegue pagar. Cada clipe fica registrado em [Custos](bardo:go/costs) com um preço estimado em dólar por crédito (US$ 0,049, o do plano Plus), que você pode mudar lá.
+Depois, escolha um modelo marcado **Plano Higgsfield** para os seus clipes ([Modelo de vídeo](clips.md#model)). Antes de cada clipe, o Bardo pergunta à Higgsfield quanto ele custa em créditos e recusa quando o plano não consegue pagar. Cada clipe é enviado uma vez só: se a resposta se perde no caminho, o Bardo procura o clipe na sua biblioteca da Higgsfield em vez de enviar de novo, e quando a biblioteca não o mostra a cena pede que você confira a biblioteca antes de animá-la de novo. Cada clipe fica registrado em [Custos](bardo:go/costs) pelas tarifas por segundo dos modelos do plano, calculadas a US$ 0,049 por crédito (quanto custa um crédito no plano Plus). Em outro plano, edite essas tarifas em Custos.
 
-O login fica no Gerenciador de Credenciais do Windows, como uma chave, e é renovado sozinho. Se a Higgsfield deixar de aceitá-lo, o cartão diz **Faça login de novo**. **Sair** esquece o login no Bardo; para encerrar o acesso do Bardo na Higgsfield também, remova-o na sua conta da Higgsfield.
+O login fica no Gerenciador de Credenciais do Windows, como uma chave, e é renovado sozinho. Se a Higgsfield deixar de aceitá-lo, o cartão diz **Login expirado**; clique em **Fazer login de novo** e tente de novo, em [Tarefas](jobs.md), os clipes que pararam por isso. **Encerrar login** esquece o login no Bardo; para encerrar o acesso do Bardo na Higgsfield também, remova-o na sua conta da Higgsfield.
 
 <a id="decision-engine"></a>
 ## Motor de decisão
