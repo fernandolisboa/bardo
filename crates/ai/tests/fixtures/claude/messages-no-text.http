@@ -1,0 +1,22 @@
+HTTP/2 200 
+content-type: application/json
+
+{
+  "id": "msg_01NoTextFixture0000000000",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "c2lnbmF0dXJl"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 412,
+    "output_tokens": 950
+  }
+}

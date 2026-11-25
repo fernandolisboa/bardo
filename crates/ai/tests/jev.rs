@@ -144,6 +144,13 @@ fn a_missing_answer_is_unexpected() {
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
     assert!(failure.detail.contains("format"), "{}", failure.detail);
+    // The answers that came were given, and billed.
+    let billed = failure.billed.expect("what the answer used");
+    assert_eq!(billed.model, "jev-1.13.0");
+    assert_eq!(
+        (billed.usage.input_tokens, billed.usage.output_tokens),
+        (512, 14)
+    );
 }
 
 #[test]
@@ -218,6 +225,19 @@ fn no_answer_is_unreachable() {
     let jev = JevDecisionEngine::with_transport(Scripted::offline());
     let failure = jev.decide(&key(), STATE, &questions()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
+}
+
+#[test]
+fn a_decision_whose_answer_is_lost_is_asked_for_once() {
+    let jev = JevDecisionEngine::with_transport(Scripted::losing_the_answer());
+    let failure = jev.decide(&key(), STATE, &questions()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(jev.transport().sent().len(), 1);
+
+    let jev = engine(&["systemone-gateway-timeout"]);
+    let failure = jev.decide(&key(), STATE, &questions()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(jev.transport().sent().len(), 1);
 }
 
 #[test]

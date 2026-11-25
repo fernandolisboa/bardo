@@ -20,6 +20,8 @@ Custos abre no mês atual. As setas ao lado do nome voltam um mês por vez e ava
 
 Os números no topo somam tudo: quanto foi gasto e em quantos provedores; quantos orçamentos estão perto ou além do limite; e quantos modelos rodaram sem preço. No Workspace eles são cartões; no Studio, uma linha no cabeçalho.
 
+Uma chamada que não entregou nada ainda pode custar dinheiro, e ela é contada. Uma resposta que o provedor cortou ou deixou vazia é contada pelo que o provedor diz ter usado. Um pedido que foi enviado e nunca teve resposta é contado como uma estimativa do que uma chamada dessas costuma custar, porque o provedor pode ter cobrado por ele; veja [Um pedido pago ficou sem resposta](troubleshooting.md#answer-lost).
+
 <a id="budgets"></a>
 ## Orçamentos
 

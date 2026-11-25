@@ -74,12 +74,68 @@ fn declined(detail: impl Into<String>) -> ProviderFailure {
     ProviderFailure::new(ProviderFailureKind::Declined, detail)
 }
 
+/// Whether an error body is the Gemini API's own: `{"error": {"status":
+/// ...}}`.
+fn own_words(body: &Value) -> bool {
+    body["error"]["status"].is_string()
+}
+
 /// Reads a successful answer: the first image the model output (images it
 /// drew while thinking are drafts), the model and the tokens counted. A
 /// blocked prompt or an answer without an image is a failure.
 pub fn parse_image(response: &HttpResponse) -> Result<GeneratedImage, ProviderFailure> {
     let body: Value = serde_json::from_str(&response.body)
         .map_err(|error| unexpected(format!("unreadable response: {error}")))?;
+    let model = body["modelVersion"]
+        .as_str()
+        .unwrap_or(IMAGE_MODEL)
+        .to_owned();
+    let usage = usage(&body["usageMetadata"]);
+    // An answer without a usable image still says what it used, and Google
+    // bills that.
+    let failed = |failure: ProviderFailure| {
+        if usage == Metered::default() {
+            failure
+        } else {
+            failure.billed(model.clone(), usage)
+        }
+    };
+    read_image(&body)
+        .map(|(bytes, format)| GeneratedImage {
+            bytes,
+            format,
+            model: model.clone(),
+            usage,
+        })
+        .map_err(failed)
+}
+
+/// The tokens an answer counted, image tokens apart from text.
+fn usage(usage: &Value) -> Metered {
+    let count = |name: &str| usage[name].as_u64().unwrap_or(0);
+    let candidates = count("candidatesTokenCount");
+    // Image tokens are priced apart from text; without a breakdown, the
+    // whole answer is the image.
+    let image_tokens = usage["candidatesTokensDetails"]
+        .as_array()
+        .map_or(candidates, |details| {
+            details
+                .iter()
+                .filter(|detail| detail["modality"].as_str() == Some("IMAGE"))
+                .filter_map(|detail| detail["tokenCount"].as_u64())
+                .sum()
+        });
+    Metered {
+        input_tokens: count("promptTokenCount"),
+        // Reasoning and any text are billed as text output.
+        output_tokens: candidates.saturating_sub(image_tokens) + count("thoughtsTokenCount"),
+        image_tokens,
+        ..Metered::default()
+    }
+}
+
+/// The first image the model output, and its format.
+fn read_image(body: &Value) -> Result<(Vec<u8>, ImageFormat), ProviderFailure> {
     if let Some(reason) = body["promptFeedback"]["blockReason"].as_str() {
         return Err(declined(format!("Gemini blocked the prompt ({reason})")));
     }
@@ -126,35 +182,7 @@ pub fn parse_image(response: &HttpResponse) -> Result<GeneratedImage, ProviderFa
     if bytes.is_empty() {
         return Err(unexpected("the image is empty"));
     }
-    let usage = &body["usageMetadata"];
-    let count = |name: &str| usage[name].as_u64().unwrap_or(0);
-    let candidates = count("candidatesTokenCount");
-    // Image tokens are priced apart from text; without a breakdown, the
-    // whole answer is the image.
-    let image_tokens = usage["candidatesTokensDetails"]
-        .as_array()
-        .map_or(candidates, |details| {
-            details
-                .iter()
-                .filter(|detail| detail["modality"].as_str() == Some("IMAGE"))
-                .filter_map(|detail| detail["tokenCount"].as_u64())
-                .sum()
-        });
-    Ok(GeneratedImage {
-        bytes,
-        format,
-        model: body["modelVersion"]
-            .as_str()
-            .unwrap_or(IMAGE_MODEL)
-            .to_owned(),
-        usage: Metered {
-            input_tokens: count("promptTokenCount"),
-            // Reasoning and any text are billed as text output.
-            output_tokens: candidates.saturating_sub(image_tokens) + count("thoughtsTokenCount"),
-            image_tokens,
-            ..Metered::default()
-        },
-    })
+    Ok((bytes, format))
 }
 
 /// Draws images with Nano Banana over HTTPS.
@@ -171,7 +199,9 @@ impl GeminiImages {
     pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES),
+        )
     }
 }
 
@@ -208,10 +238,14 @@ impl<T: Transport> ImageGenerator for GeminiImages<T> {
         key: &ApiKey,
         request: &ImageRequest,
     ) -> Result<GeneratedImage, ProviderFailure> {
-        let response = self
-            .backoff
-            .send(&self.transport, &image_request(key, request), &self.sleep)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        // Billed once drawn, read or not: never sent again after an answer
+        // that may have been drawn (ADR-0030).
+        let response = self.backoff.send_paid(
+            &self.transport,
+            &image_request(key, request),
+            own_words,
+            &self.sleep,
+        )?;
         if !(200..=299).contains(&response.status) {
             return Err(failure(Provider::Gemini, &response));
         }

@@ -77,3 +77,10 @@ with a real key):
 
 Synthetic, for edge cases: `stt-no-words.http`, `stt-rate-limited.http`,
 `voice-changer-rate-limited.http`, `voice-changer-empty.http`.
+
+Lost answers (ADR-0030). Synthetic, a gateway's 504 page in place of the
+API's answer: `tts-gateway-timeout.http`, `alignment-gateway-timeout.http`,
+`music-gateway-timeout.http`, `stt-gateway-timeout.http`,
+`voice-changer-gateway-timeout.http`, `isolation-gateway-timeout.http`.
+Written from the documented error shape: `tts-system-busy.http` (the API's
+own 503, `system_busy`, which started nothing).

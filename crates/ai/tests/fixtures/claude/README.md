@@ -17,3 +17,12 @@ real key):
 - `messages-refusal.http`, `messages-max-tokens.http`,
   `messages-overloaded.http`, `messages-rate-limited.http`,
   `messages-credit-balance.http`, `messages-beta-not-enabled.http`.
+
+Lost and failed answers (ADR-0030):
+
+- `messages-api-error.http`: the API's own 500 (`api_error`), written from
+  the documented error shape.
+- `messages-gateway-timeout.http`: synthetic, a gateway's 504 page in
+  place of the API's answer.
+- `messages-no-text.http`: synthetic, a finished answer with an empty
+  thinking block and no text, with its usage.

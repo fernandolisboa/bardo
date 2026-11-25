@@ -18,9 +18,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 
 use bardo_domain::{
-    ApiKey, CostPurpose, GenerationPresets, InvalidSampleText, Metered, Provider, ProviderFailure,
-    Redactor, RepositoryError, SampleSource, SampleText, SpeechRequest, SpeechSynthesizer, Voice,
-    VoicePreviews, VoiceRef, VoiceSampleStore,
+    ApiKey, CostPurpose, GenerationPresets, InvalidSampleText, JobFailureKind, Metered, Provider,
+    ProviderFailure, ProviderFailureKind, Redactor, RepositoryError, SampleSource, SampleText,
+    SpeechRequest, SpeechSynthesizer, Voice, VoicePreviews, VoiceRef, VoiceSampleStore,
 };
 use bardo_media::{Playback, PlaybackError};
 
@@ -71,6 +71,13 @@ impl VoiceSampleError {
             VoiceSampleError::KeyUnreadable(_) => Text::ProviderKeyStoreFailed,
             VoiceSampleError::OverBudget(_) => Text::BudgetReachedTitle,
             VoiceSampleError::Repository(_) => Text::VoiceSampleFailed,
+            // The reading may have been made and billed: say so, as a job
+            // would.
+            VoiceSampleError::Provider(failure)
+                if failure.kind == ProviderFailureKind::AnswerLost =>
+            {
+                Text::JobFailureKindName(JobFailureKind::AnswerLost)
+            }
             VoiceSampleError::Provider(_) => Text::VoiceSampleFailed,
             VoiceSampleError::NotKept(_) => Text::VoiceSampleNotKept,
             VoiceSampleError::Playback(_) => Text::VoiceSampleCannotPlay,
@@ -228,7 +235,13 @@ impl VoiceSampling {
                     previous_text: None,
                     next_text: None,
                 };
-                let speech = speech.synthesize(api_key, &request).map_err(redacted)?;
+                let speech = speech.synthesize(api_key, &request).map_err(|failure| {
+                    // A reading that may have been made is money too.
+                    let call = PlannedCall::new(voice.provider(), CostPurpose::VoiceSample, 1)
+                        .with_characters(request.text.chars().count());
+                    self.costs.record_failed(&failure, &call, None, None, None);
+                    redacted(failure)
+                })?;
                 // The money is spent whether or not the audio can be kept.
                 self.costs.record(
                     PaidCall {
@@ -748,6 +761,28 @@ mod tests {
         assert!(detail.contains("quota exceeded"), "{detail}");
         assert!(h.samples.is_empty(), "nothing kept");
         assert!(h.sample_costs(&app).is_empty());
+    }
+
+    #[test]
+    fn a_reading_whose_answer_is_lost_is_in_costs_as_what_it_may_have_cost() {
+        let h = Harness::new();
+        *h.speech.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            "no answer came back (timeout: global)",
+        ));
+        let app = h.start_with_key();
+        let error = app
+            .voice_sample(Some(&wyatt()), presets(30), "Hello.", BudgetConsent::Ask)
+            .unwrap()
+            .run()
+            .result
+            .unwrap_err();
+        assert!(error.detail().unwrap().contains("no answer came back"));
+        assert_eq!(h.speech.requests().len(), 1, "asked once");
+        let costs = h.sample_costs(&app);
+        assert_eq!(costs.len(), 1, "the reading may have been made and billed");
+        assert_eq!(costs[0].usage, Metered::characters(6));
+        assert!(costs[0].cost.amount() > bardo_domain::Money::ZERO, "priced");
     }
 
     #[test]

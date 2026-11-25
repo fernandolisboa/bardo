@@ -28,7 +28,9 @@ Uma tarefa em execução mostra uma barra e o percentual. As telas também mostr
 <a id="retry"></a>
 ## Tentar de novo
 
-Quando um provedor falha por um motivo passageiro (tempo esgotado, servidor ocupado, limite de requisições), o Bardo tenta de novo sozinho, até quatro tentativas no total, esperando mais a cada vez, e o cartão diz qual tentativa falhou. Quando a falha é duradoura, como uma chave que falta ou um login recusado, a tarefa para como **Com falha**, com o que deu errado e **Detalhes**.
+Quando um provedor falha por um motivo passageiro (uma conexão que não pôde ser feita, servidor ocupado, limite de requisições), o Bardo tenta de novo sozinho, até quatro tentativas no total, esperando mais a cada vez, e o cartão diz qual tentativa falhou. Quando a falha é duradoura, como uma chave que falta ou um login recusado, a tarefa para como **Com falha**, com o que deu errado e **Detalhes**.
+
+Um pedido pago de texto, imagem, voz ou música que foi enviado e ficou sem resposta não é repetido sozinho: o provedor pode ter feito o trabalho e cobrado por ele. A tarefa para como **Com falha** e diz isso, e [Custos](costs.md#spent) conta uma estimativa do que ele pode ter custado. Veja [Um pedido pago ficou sem resposta](troubleshooting.md#answer-lost).
 
 **Tentar de novo**, numa tarefa com falha ou cancelada, coloca ela na fila de novo. Ela continua do último ponto que salvou, não do começo. Resolva antes o que a falha aponta: veja [Solução de problemas](troubleshooting.md).
 

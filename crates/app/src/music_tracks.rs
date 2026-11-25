@@ -251,6 +251,14 @@ impl MusicHandler {
                 }
                 let key = self.key()?;
                 let composed = self.music.compose(&key, &request).map_err(|failure| {
+                    // A track whose answer was lost may still have been
+                    // composed and billed, by its length.
+                    self.costs.record_failed_for_project(
+                        &failure,
+                        &music_call(self.music.provider(), request.length),
+                        Some(job),
+                        project,
+                    );
                     JobFailure::new(
                         failure.kind.into(),
                         format!("{}: {}", self.music.provider().code(), failure.detail),
@@ -843,6 +851,45 @@ mod tests {
         assert_eq!(view.job.map(|job| job.id()), Some(job.id()));
         assert_eq!(view.in_review, None);
         assert!(h.db.media_assets(project.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_track_whose_answer_is_lost_is_asked_for_once_and_is_in_costs() {
+        let h = Harness::new();
+        let app = h.start();
+        let project = ready(&h, &app, false);
+        *h.music.failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            "no answer came back (timeout: global)",
+        ));
+        let job = wait_done(
+            &app,
+            app.generate_music(project.id, BudgetConsent::Ask).unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue allows two");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(
+            h.music.requests().len(),
+            1,
+            "one click, one track asked for"
+        );
+        let costs =
+            h.db.recent_costs(app.profile().id, CostPurpose::Music, 10)
+                .unwrap();
+        assert_eq!(
+            costs.len(),
+            1,
+            "the track may have been composed and billed"
+        );
+        assert_eq!(costs[0].job, Some(job.id()));
+        assert_eq!(costs[0].project, Some(project.id));
+        assert_eq!(
+            costs[0].usage.audio_seconds,
+            billed_seconds(h.music.requests()[0].length),
+            "the length asked for"
+        );
+        assert!(costs[0].cost.amount() > bardo_domain::Money::ZERO, "priced");
     }
 
     #[test]

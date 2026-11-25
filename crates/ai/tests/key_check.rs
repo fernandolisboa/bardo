@@ -248,7 +248,7 @@ fn the_checker_sends_the_check_request_and_classifies_the_answer() {
 #[test]
 fn no_answer_is_unreachable_with_the_network_error() {
     let checker = HttpKeyChecker::with_transport(Replay {
-        response: Err(TransportError("dns error: no such host".into())),
+        response: Err(TransportError::not_sent("dns error: no such host")),
         asked: Mutex::default(),
     });
     assert_eq!(

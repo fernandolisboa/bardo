@@ -1,7 +1,9 @@
 //! Text generation with Anthropic's Claude API (Messages API).
 //!
 //! One request per generation, not streamed: the outputs Bardo asks for
-//! (ideas, titles, short scripts) fit well within the timeout. JSON output
+//! (ideas, titles, short scripts) fit well within the timeout. A request
+//! whose answer never arrives is a lost answer, not an outage (ADR-0030):
+//! Claude wrote and billed it, so it is not asked again by itself. JSON output
 //! uses structured outputs (`output_config.format`), so the answer always
 //! matches the schema, and its fields come in the schema's order: the
 //! schema is sent as written (`serde_json` keeps the order of keys, see
@@ -113,11 +115,25 @@ pub fn message_request(
     })
 }
 
+/// Whether an error body is the Messages API's own: `{"type": "error",
+/// "error": {"type": ...}}`.
+fn own_words(body: &Value) -> bool {
+    body["type"] == "error" && body["error"]["type"].is_string()
+}
+
 /// Reads a successful answer: the text blocks, the model and the usage. A
-/// refusal or an answer cut by the token limit is a failure.
+/// refusal, an answer cut by the token limit or one without text is a
+/// failure that says what the answer used: Claude bills an answer as it
+/// wrote it, usable or not.
 pub fn parse_message(response: &HttpResponse) -> Result<GeneratedText, ProviderFailure> {
     let body: Value = serde_json::from_str(&response.body)
         .map_err(|error| unexpected(format!("unreadable response: {error}")))?;
+    let model = body["model"].as_str().unwrap_or(MODEL).to_owned();
+    let usage = TokenUsage {
+        input_tokens: body["usage"]["input_tokens"].as_u64().unwrap_or(0),
+        output_tokens: body["usage"]["output_tokens"].as_u64().unwrap_or(0),
+    };
+    let failed = |failure: ProviderFailure| failure.billed(model.clone(), usage.into());
     match body["stop_reason"].as_str() {
         Some("refusal") => {
             let details = &body["stop_details"];
@@ -125,13 +141,13 @@ pub fn parse_message(response: &HttpResponse) -> Result<GeneratedText, ProviderF
                 .as_str()
                 .or(details["category"].as_str())
                 .unwrap_or("no reason given");
-            return Err(ProviderFailure::new(
+            return Err(failed(ProviderFailure::new(
                 ProviderFailureKind::Declined,
                 format!("Claude declined the request: {reason}"),
-            ));
+            )));
         }
         Some("max_tokens") => {
-            return Err(unexpected("the answer was cut at the token limit"));
+            return Err(failed(unexpected("the answer was cut at the token limit")));
         }
         _ => {}
     }
@@ -143,17 +159,9 @@ pub fn parse_message(response: &HttpResponse) -> Result<GeneratedText, ProviderF
         .filter_map(|block| block["text"].as_str())
         .collect();
     if text.trim().is_empty() {
-        return Err(unexpected("the answer has no text"));
+        return Err(failed(unexpected("the answer has no text")));
     }
-    let usage = &body["usage"];
-    Ok(GeneratedText {
-        text,
-        model: body["model"].as_str().unwrap_or(MODEL).to_owned(),
-        usage: TokenUsage {
-            input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
-            output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
-        },
-    })
+    Ok(GeneratedText { text, model, usage })
 }
 
 fn unexpected(detail: impl Into<String>) -> ProviderFailure {
@@ -180,7 +188,7 @@ impl ClaudeTextGenerator {
     pub const TIMEOUT: Duration = Duration::from_secs(180);
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT))
+        Self::with_transport(UreqTransport::for_paid_calls(Self::TIMEOUT))
     }
 }
 
@@ -217,9 +225,10 @@ impl<T: Transport> ClaudeTextGenerator<T> {
         with_fallback: bool,
     ) -> Result<HttpResponse, ProviderFailure> {
         let http = message_request(key, request, with_fallback)?;
+        // Billed for what it writes, read or not: never sent again after
+        // an answer that may have been written.
         self.backoff
-            .send(&self.transport, &http, &self.sleep)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))
+            .send_paid(&self.transport, &http, own_words, &self.sleep)
     }
 }
 

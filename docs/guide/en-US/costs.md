@@ -20,6 +20,8 @@ Costs opens on this month. The arrows beside its name go back a month at a time,
 
 The figures at the top add it up: what was spent, across how many providers; how many budgets are near or past their limit; and how many models ran without a price. In Workspace they are cards; in Studio, a line in the header.
 
+A call that gave you nothing can still cost money, and it is counted. An answer the provider cut short or left empty is counted from what the provider says it used. A request that was sent and never answered is counted as an estimate of what such a call usually costs, because the provider may have charged for it; see [A paid request got no answer](troubleshooting.md#answer-lost).
+
 <a id="budgets"></a>
 ## Budgets
 

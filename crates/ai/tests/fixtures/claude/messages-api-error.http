@@ -1,0 +1,4 @@
+HTTP/2 500 
+content-type: application/json
+
+{"type":"error","error":{"type":"api_error","message":"Internal server error"},"request_id":"req_011ApiError0000000000"}

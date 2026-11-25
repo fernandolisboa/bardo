@@ -389,6 +389,9 @@ pub enum JobFailureKind {
     LimitReached,
     /// The provider is down or unreachable. Transient.
     ProviderUnavailable,
+    /// A paid request was sent and its answer never came: the provider may
+    /// have done the work and billed it, so only the user asks again.
+    AnswerLost,
     /// The provider answered in a way Bardo does not understand.
     UnexpectedAnswer,
     /// The provider's safety rules declined the request.
@@ -421,7 +424,7 @@ pub enum JobFailureKind {
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 17] = [
+    pub const ALL: [JobFailureKind; 18] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -429,6 +432,7 @@ impl JobFailureKind {
         JobFailureKind::NotAllowed,
         JobFailureKind::LimitReached,
         JobFailureKind::ProviderUnavailable,
+        JobFailureKind::AnswerLost,
         JobFailureKind::UnexpectedAnswer,
         JobFailureKind::Declined,
         JobFailureKind::Media,
@@ -451,6 +455,7 @@ impl JobFailureKind {
             JobFailureKind::NotAllowed => "not_allowed",
             JobFailureKind::LimitReached => "limit_reached",
             JobFailureKind::ProviderUnavailable => "provider_unavailable",
+            JobFailureKind::AnswerLost => "answer_lost",
             JobFailureKind::UnexpectedAnswer => "unexpected_answer",
             JobFailureKind::Declined => "declined",
             JobFailureKind::Media => "media",
@@ -473,6 +478,7 @@ impl JobFailureKind {
             | JobFailureKind::KeyRejected
             | JobFailureKind::NotAllowed
             | JobFailureKind::LimitReached
+            | JobFailureKind::AnswerLost
             | JobFailureKind::UnexpectedAnswer
             | JobFailureKind::Declined
             | JobFailureKind::Media
@@ -496,6 +502,7 @@ impl From<ProviderFailureKind> for JobFailureKind {
             ProviderFailureKind::ProviderDown | ProviderFailureKind::Unreachable => {
                 JobFailureKind::ProviderUnavailable
             }
+            ProviderFailureKind::AnswerLost => JobFailureKind::AnswerLost,
             ProviderFailureKind::Unexpected => JobFailureKind::UnexpectedAnswer,
             ProviderFailureKind::Declined => JobFailureKind::Declined,
         }
@@ -1346,7 +1353,9 @@ mod tests {
             ProviderFailureKind::LimitReached,
             ProviderFailureKind::ProviderDown,
             ProviderFailureKind::Unreachable,
+            ProviderFailureKind::AnswerLost,
             ProviderFailureKind::Unexpected,
+            ProviderFailureKind::Declined,
         ]
         .into_iter()
         .filter(|&kind| JobFailureKind::from(kind).is_transient())
@@ -1359,6 +1368,25 @@ mod tests {
             ]
         );
         assert!(!JobFailureKind::MissingKey.is_transient());
+    }
+
+    #[test]
+    fn a_lost_answer_ends_the_job_at_once() {
+        // The provider may have done and billed the work: asking again is
+        // the user's call, not the queue's.
+        assert_eq!(
+            JobFailureKind::from(ProviderFailureKind::AnswerLost),
+            JobFailureKind::AnswerLost
+        );
+        let mut job = running();
+        job.fail_attempt(
+            JobFailure::new(JobFailureKind::AnswerLost, "timed out"),
+            now(),
+            &policy(),
+        )
+        .unwrap();
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1);
     }
 
     #[test]

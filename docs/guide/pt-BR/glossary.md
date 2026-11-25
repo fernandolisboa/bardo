@@ -187,6 +187,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Orçamento**: um limite mensal de gasto por provedor. Quando chega nele, as tarefas novas desse provedor perguntam antes de começar.
 
+**Resposta perdida**: um pedido pago que foi enviado e nunca teve resposta. O provedor pode ter cobrado por ele, então o Bardo não envia de novo sozinho e conta uma estimativa em Custos. Veja [Um pedido pago ficou sem resposta](troubleshooting.md#answer-lost).
+
 **Motor de decisão**: a IA que ranqueia e dá notas (ideias, cortes) com respostas tipadas e uma confiança. Nunca escreve conteúdo. Você o escolhe em [Configurações › Chaves de API](api-keys.md#decision-engine).
 
 <a id="interface"></a>

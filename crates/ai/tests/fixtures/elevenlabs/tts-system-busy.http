@@ -1,0 +1,4 @@
+HTTP/1.1 503 
+content-type: application/json
+
+{"detail":{"status":"system_busy","message":"Our services are experiencing high level of traffic and your request cannot be processed at the moment. Please retry your request."}}

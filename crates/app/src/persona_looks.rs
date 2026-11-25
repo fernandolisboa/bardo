@@ -306,6 +306,14 @@ impl PersonaLookHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed(
+                &failure,
+                &PlannedCall::text(CostPurpose::PersonaLook, &request),
+                Some(job),
+                None,
+                None,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record(
@@ -359,6 +367,14 @@ impl PersonaLookHandler {
             references: Vec::new(),
         };
         let image = self.images.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost may still have been billed.
+            self.costs.record_failed(
+                &failure,
+                &PlannedCall::new(Provider::Gemini, CostPurpose::PersonaLook, 1),
+                Some(job),
+                None,
+                None,
+            );
             JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))
         })?;
         self.costs.record(
@@ -914,6 +930,52 @@ mod tests {
         let pending = app.persona_look(persona).unwrap().pending.unwrap();
         assert_eq!(pending.image.format(), ImageFormat::Jpeg);
         assert_eq!((pending.image.width(), pending.image.height()), (400, 600));
+    }
+
+    #[test]
+    fn a_look_whose_prompt_or_drawing_is_lost_is_asked_for_once_and_is_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        // The prompt, from Claude.
+        let h = Harness::new();
+        *h.text.failure.lock().unwrap() = Some(lost_answer());
+        let app = h.start();
+        let persona = narrator(&app);
+        let job = app
+            .draw_look(persona, DESCRIPTION, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, job);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.text.requests().len(), 1);
+        assert!(h.images.requests.lock().unwrap().is_empty());
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::PersonaLook);
+        assert_eq!(
+            (cost.provider, cost.job),
+            (Provider::Claude, Some(job.id()))
+        );
+
+        // The drawing, from the image provider.
+        let h = Harness::new();
+        *h.images.failure.lock().unwrap() = Some(lost_answer());
+        let app = h.start();
+        let persona = narrator(&app);
+        h.answer(answer("", "A keeper", false));
+        let job = app
+            .draw_look(persona, DESCRIPTION, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, job);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.images.requests.lock().unwrap().len(), 1);
+        let costs =
+            h.db.recent_costs(app.profile().id, CostPurpose::PersonaLook, 10)
+                .unwrap();
+        let providers: Vec<_> = costs.iter().map(|cost| cost.provider).collect();
+        assert_eq!(costs.len(), 2, "the prompt that answered and the drawing");
+        assert!(providers.contains(&Provider::Claude) && providers.contains(&Provider::Gemini));
     }
 
     #[test]
