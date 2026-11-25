@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime};
@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime};
 use bardo_domain::{
     Holder, InvalidJobTransition, JOB_LEASE, Job, JobFailure, JobId, JobKind, JobRepository,
     JobState, ProfileId, Progress, RUNNER_ALIVE, RUNNER_TICK, Redactor, RepositoryError,
-    RetryPolicy, RunnerRole, RunnerSeen,
+    RetryPolicy, RunnerRole, RunnerSeen, Stop,
 };
 
 /// Runs one kind of job. Handlers run on a worker thread, read their payload
@@ -140,11 +140,16 @@ impl From<SaveNotKept> for RepositoryError {
     }
 }
 
-/// Tells a running handler to stop, because the user cancelled the job or
-/// the app is closing. Handlers cannot tell the two apart and need not.
+/// Tells a running handler to stop, because the user cancelled the job,
+/// the app is closing or another runner took the job. Most handlers need
+/// not tell these apart. One with a paid request on its way does
+/// (`JobContext::cancelled`): a cancelled job runs again only when the
+/// user asks, and the others run again by themselves.
 #[derive(Default)]
 struct StopSignal {
     stopped: Mutex<bool>,
+    /// The user cancelled the job, whatever else stopped it.
+    cancelled: AtomicBool,
     changed: Condvar,
 }
 
@@ -152,6 +157,11 @@ impl StopSignal {
     fn stop(&self) {
         *lock(&self.stopped) = true;
         self.changed.notify_all();
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.stop();
     }
 
     fn is_stopped(&self) -> bool {
@@ -212,6 +222,22 @@ impl JobContext {
     /// True once the job is cancelled or the app is closing.
     pub fn should_stop(&self) -> bool {
         self.stop.is_stopped()
+    }
+
+    /// True once the user cancelled the job. A run stopped for another
+    /// reason (the app is closing, another runner took the job) is
+    /// started again by itself, so what it leaves behind decides whether
+    /// a paid request is sent a second time; a cancelled one waits for
+    /// the user.
+    pub fn cancelled(&self) -> bool {
+        self.stop.cancelled.load(Ordering::Acquire)
+    }
+
+    /// The stop signal, for work that waits outside the handler (an
+    /// answer a provider is still writing) and gives it up when asked.
+    pub fn stop(&self) -> Stop {
+        let stop = Arc::clone(&self.stop);
+        Stop::when(move || stop.is_stopped())
     }
 
     /// Waits `duration`, waking early when told to stop. True when the full
@@ -505,7 +531,7 @@ impl Shared {
         if new_state == JobState::Cancelled
             && let Some(stop) = state.workers.get(&id)
         {
-            stop.stop();
+            stop.cancel();
         }
         self.changed();
         self.wake.notify_all();

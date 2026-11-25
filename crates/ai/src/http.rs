@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use std::fmt;
 use std::time::Duration;
 
+use bardo_domain::Stop;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Get,
@@ -16,6 +18,7 @@ pub enum Method {
 /// A request. Header values may hold keys, query strings tokens and
 /// secrets, and bodies user content, so `Debug` shows only the address
 /// without its query, the header names and the body size.
+#[derive(Clone)]
 pub struct HttpRequest {
     pub method: Method,
     pub url: String,
@@ -367,6 +370,17 @@ pub trait Transport: Send + Sync {
             headers: response.headers,
             body: Box::new(std::io::Cursor::new(response.body.into_bytes())),
         })
+    }
+
+    /// `send_streamed`, given up as soon as `stop` asks: while the answer
+    /// is awaited, and at every read of its body. A transport that cannot
+    /// give an answer up (this default) reads it to its end.
+    fn send_streamed_until(
+        &self,
+        request: &HttpRequest,
+        _stop: &Stop,
+    ) -> Result<StreamedResponse, TransportError> {
+        self.send_streamed(request)
     }
 }
 

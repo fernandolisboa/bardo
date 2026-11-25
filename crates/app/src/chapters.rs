@@ -19,10 +19,10 @@ use bardo_domain::{
     ApiKey, Chapter, ChapterFieldError, ChapterProblem, ChapterRepository, Chapters, CostPurpose,
     Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Narration,
     NarrationRepository, Network, ProfileId, Provider, RenderedPrompt, RepositoryError,
-    SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, VideoFormat,
-    VideoProject, VideoProjectId, chapter_lines, chapter_problems, chapter_title, fitting_chapters,
-    place_chapters, sentences,
+    SecretStore, Stop, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
+    VideoFormat, VideoProject, VideoProjectId, chapter_lines, chapter_problems, chapter_title,
+    fitting_chapters, place_chapters, sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -259,7 +259,7 @@ pub(crate) struct ChaptersHandler {
 
 impl JobHandler for ChaptersHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.write(payload, cx.id())
+        self.write(payload, cx.id(), &cx.stop())
     }
 }
 
@@ -272,7 +272,7 @@ impl ChaptersHandler {
     }
 
     /// Writes the chapters `job` asked for, in place of the project's.
-    pub(crate) fn write(&self, payload: &str, job: JobId) -> Result<(), JobFailure> {
+    pub(crate) fn write(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
         let payload: ChaptersPayload = serde_json::from_str(payload)
             .map_err(|e| JobFailure::unexpected(format!("invalid chapters payload: {e}")))?;
         let project: VideoProjectId = crate::scenes::id(&payload.project)?;
@@ -303,16 +303,19 @@ impl ChaptersHandler {
                 schema: CHAPTERS_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed_for_project(
-                &failure,
-                &PlannedCall::text(CostPurpose::Chapters, &request),
-                Some(job),
-                project,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        let generated = self
+            .text
+            .generate_until(&key, &request, stop)
+            .map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs.record_failed_for_project(
+                    &failure,
+                    &PlannedCall::text(CostPurpose::Chapters, &request),
+                    Some(job),
+                    project,
+                );
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            })?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,
@@ -1104,7 +1107,9 @@ mod tests {
             },
         };
         let asked = h.text.requests().len();
-        handler.write(job.payload(), job.id()).unwrap();
+        handler
+            .write(job.payload(), job.id(), &Stop::never())
+            .unwrap();
         assert_eq!(h.text.requests().len(), asked);
 
         h.answer(answer(&[(0, "Launch")]));

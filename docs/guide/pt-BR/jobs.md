@@ -25,6 +25,8 @@ Uma tarefa em execução mostra uma barra e o percentual. As telas também mostr
 
 **Cancelar** para uma tarefa em execução ou na fila. O que ela já fez fica guardado para uma nova tentativa, e uma chamada que o provedor já respondeu está paga e conta em [Custos](costs.md#spent). Um render ou uma exportação cancelada guarda as redes que já terminou, e uma nova tentativa faz as que faltam.
 
+Um texto que o Claude ainda está escrevendo (um roteiro, um plano de cenas, um título) é abandonado quando a tarefa é cancelada: o Bardo para de ler e fecha a conexão em vez de esperar o fim. O Claude pode cobrar pelo que escreveu até ali, então [Custos](costs.md#spent) conta uma estimativa do texto inteiro, que é mais do que custou um texto cancelado cedo. Um plano cuja resposta chega bem na hora em que você cancela não é aplicado ao projeto; ele está pago, e **Tentar de novo** nessa tarefa usa essa resposta sem pedir de novo ao Claude.
+
 <a id="retry"></a>
 ## Tentar de novo
 
@@ -38,6 +40,8 @@ Um pedido pago de texto, imagem, voz ou música que foi enviado e ficou sem resp
 ## Fechar o Bardo no meio de uma tarefa
 
 Fechar o Bardo, ou desligar o computador, nunca perde uma tarefa. Na próxima vez que o Bardo abrir, cada tarefa em execução continua do último ponto que salvou, e a tentativa em que estava não conta nas novas tentativas. Uma tarefa que já tinha entregado trabalho a um provedor (um clipe sendo feito, um envio sendo processado) pergunta ao provedor como ficou, em vez de pagar duas vezes. Uma tarefa esperando nova tentativa, ou esperando a hora dela, continua esperando.
+
+Um plano de cenas que o Claude ainda estava escrevendo quando o Bardo fechou é a exceção: o Claude pode ter cobrado pela parte que escreveu, então na próxima vez que o Bardo abrir o plano não é pedido de novo sozinho. A tarefa para como **Com falha** com [Um pedido pago ficou sem resposta](troubleshooting.md#answer-lost), [Custos](costs.md#spent) conta uma estimativa dele, e **Tentar de novo** envia um novo pedido.
 
 <a id="test"></a>
 ## Tarefas de teste

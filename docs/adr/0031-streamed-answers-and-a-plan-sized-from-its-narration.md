@@ -5,6 +5,7 @@
 - Issue: #267
 - Amends: ADR-0029 (decision 9: a careful request no longer has a wait of its own)
 - Builds on: ADR-0030 (a paid call is sent once, and a lost answer is recorded), which it applies to a streamed answer
+- Amended by: ADR-0034 (a stopped job gives up its request)
 
 ## Context
 
@@ -42,7 +43,7 @@ Two limits are the provider's and do not move: a model writes at most 128,000 to
 - The estimate before planning a long video is higher than before, because it was too low. The share assumed for thought is a guess until plans of every length have been paid for.
 - A narration longer than about 16 minutes cannot be planned in one project, though some such plans would fit. If long narrations become something people make, planning in parts (point 8) is the change.
 - After a silence, the abandoned connection and the thread that reads it stay until the two-hour bound: the HTTP client offers no way to close them sooner. On a path that holds a long answer back for more than ten minutes, whether it holds the status back too or only the body, the request fails once as a lost answer and Claude may still write, and bill, the whole answer.
-- Cancelling a plan job does not stop its request: the answer is still written and billed, as before, and the job now runs for minutes. Stopping the stream when its job stops is a separate change (#295).
+- Cancelling a plan job did not stop its request when this was decided: the answer was still written and billed, as before, and the job now runs for minutes. ADR-0034 stops the stream when its job stops.
 - A plan that is lost midway is recorded in Costs at the plan's estimate. That can be wrong in both directions, as every lost answer's record can (ADR-0030): a stream that stopped early wrote less, and one that thought for long wrote more.
 - When a fallback model took part in an answer, the usage recorded is the most the answer can cost, not always the bill: an attempt that declined before it wrote anything is billed only for some reasons, and each attempt is billed at its own model's rate. Recording each attempt under its own model would need more than one cost record per call.
 - The whole-video estimate still prices the plan of a narration too long to plan; the Scenes stage is where it is refused.

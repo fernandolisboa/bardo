@@ -14,9 +14,9 @@ use std::time::{Duration, SystemTime};
 use bardo_domain::{
     ApiKey, CostPurpose, Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind,
     MusicPrompt, MusicPromptFieldError, MusicPromptRepository, ProfileId, Provider, RenderedPrompt,
-    RepositoryError, SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
-    VideoProject, VideoProjectId,
+    RepositoryError, SecretStore, Stop, TemplateKind, TemplateUsed, TemplateValues,
+    TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
+    TextRequest, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -145,7 +145,7 @@ pub(crate) struct MusicPromptHandler {
 
 impl JobHandler for MusicPromptHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.generate(payload, cx.id())
+        self.generate(payload, cx.id(), &cx.stop())
     }
 }
 
@@ -159,7 +159,7 @@ impl MusicPromptHandler {
 
     /// Generates the prompt `job` asked for and saves it in place of the
     /// project's prompt.
-    fn generate(&self, payload: &str, job: JobId) -> Result<(), JobFailure> {
+    fn generate(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
         let payload = MusicPromptPayload::parse(payload)?;
         let project = payload.project()?;
         // An earlier attempt of this job may have saved its prompt and
@@ -178,16 +178,19 @@ impl MusicPromptHandler {
             images: Vec::new(),
             format: TextFormat::Prose,
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed_for_project(
-                &failure,
-                &PlannedCall::text(CostPurpose::MusicPrompt, &request),
-                Some(job),
-                project,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        let generated = self
+            .text
+            .generate_until(&key, &request, stop)
+            .map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs.record_failed_for_project(
+                    &failure,
+                    &PlannedCall::text(CostPurpose::MusicPrompt, &request),
+                    Some(job),
+                    project,
+                );
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            })?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,
@@ -764,7 +767,9 @@ mod tests {
                 themes: Arc::clone(&h.db) as _,
             },
         };
-        handler.generate(job.payload(), job.id()).unwrap();
+        handler
+            .generate(job.payload(), job.id(), &Stop::never())
+            .unwrap();
         assert_eq!(h.text.requests().len(), 1, "Claude is asked once");
         assert_eq!(app.music_prompt(project.id).unwrap().prompt, saved);
     }

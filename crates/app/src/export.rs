@@ -26,7 +26,7 @@ use bardo_domain::{
     GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, METADATA_FILE, MetadataProblem,
     NarrationSource, Network, NetworkAccount, NetworkAccountId, Post, ProfileId, Progress,
     ProjectFiles, Provider, Render, RenderId, RenderRepository, RenderedPrompt, RepositoryError,
-    SecretStore, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
+    SecretStore, Stop, TagPlacement, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
     TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
     UiLanguage, VideoMetadata, VideoMetadataDraft, VideoProject, VideoProjectId, Visibility,
     package_folder, problems_with, video_file_name,
@@ -496,7 +496,7 @@ pub(crate) struct MetadataHandler {
 
 impl JobHandler for MetadataHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.generate(payload, cx.id())
+        self.generate(payload, cx.id(), &cx.stop())
     }
 }
 
@@ -510,7 +510,7 @@ impl MetadataHandler {
 
     /// Generates the metadata `job` asked for and saves it in place of
     /// the networks' metadata.
-    fn generate(&self, payload: &str, job: JobId) -> Result<(), JobFailure> {
+    fn generate(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
         let payload: MetadataPayload = parse(payload)?;
         let project: VideoProjectId = id(&payload.project)?;
         // An earlier attempt may have saved and stopped before the queue
@@ -534,16 +534,19 @@ impl MetadataHandler {
                 schema: METADATA_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs.record_failed_for_project(
-                &failure,
-                &PlannedCall::text(CostPurpose::Metadata, &request),
-                Some(job),
-                project,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
+        let generated = self
+            .text
+            .generate_until(&key, &request, stop)
+            .map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs.record_failed_for_project(
+                    &failure,
+                    &PlannedCall::text(CostPurpose::Metadata, &request),
+                    Some(job),
+                    project,
+                );
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            })?;
         self.costs.record_for_project(
             PaidCall {
                 provider: Provider::Claude,

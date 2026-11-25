@@ -356,7 +356,7 @@ pub use template::{
     TemplateVersionId, UnknownTemplateKind,
 };
 pub use text::{
-    GeneratedText, TextEffort, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage,
+    GeneratedText, Stop, TextEffort, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage,
 };
 pub use theme::{
     Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,

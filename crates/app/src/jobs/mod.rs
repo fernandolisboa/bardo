@@ -585,6 +585,42 @@ mod tests {
     }
 
     #[test]
+    fn a_handler_can_tell_a_cancel_from_the_app_closing() {
+        // A cancelled job runs again only when the user asks; one stopped
+        // because the app closes runs again by itself. A handler with a
+        // paid request on its way leaves a different note for each.
+        let (db, owner) = memory_db();
+        let seen: Arc<Mutex<Vec<(bool, bool)>>> = Arc::default();
+        let note = Arc::clone(&seen);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                let stop = cx.stop();
+                assert!(!stop.asked() && !cx.cancelled());
+                until_stopped(cx);
+                note.lock().unwrap().push((stop.asked(), cx.cancelled()));
+                Ok(())
+            }),
+            settings(),
+        );
+        let cancelled = enqueue(&q, owner);
+        wait_for(|| q.jobs(), cancelled, |j| j.state() == JobState::Running);
+        q.cancel(cancelled).unwrap();
+        wait_for(|| q.jobs(), cancelled, |_| !q.runs_here(cancelled));
+        assert_eq!(*seen.lock().unwrap(), [(true, true)]);
+
+        let closing = enqueue(&q, owner);
+        wait_for(|| q.jobs(), closing, |j| j.state() == JobState::Running);
+        drop(q);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [(true, true), (true, false)],
+            "stopped, and not by the user"
+        );
+    }
+
+    #[test]
     fn a_cancelled_job_runs_here_until_its_handler_returns() {
         let (db, owner) = memory_db();
         let release = Arc::new(AtomicBool::new(false));

@@ -25,6 +25,8 @@ A running job shows a bar and its percent. Screens show their own jobs too: a st
 
 **Cancel** stops a running or queued job. What it already made is kept for a retry, and a call a provider already answered is paid and counted in [Costs](costs.md#spent). A cancelled render or export keeps the networks it finished, and a retry does the ones left.
 
+A text Claude is still writing (a script, a scene plan, a title) is given up when its job is cancelled: Bardo stops reading and closes the connection instead of waiting for the end. Claude may charge for what it wrote until then, so [Costs](costs.md#spent) counts an estimate of the whole text, which is more than a text cancelled early cost. A plan whose answer arrives just as you cancel is not applied to the project; it is paid, and **Retry** on that job uses it without asking Claude again.
+
 <a id="retry"></a>
 ## Retrying
 
@@ -38,6 +40,8 @@ A paid request for text, an image, a voice or music that was sent and got no ans
 ## Closing Bardo mid-job
 
 Closing Bardo, or the computer, never loses a job. The next time Bardo opens, each running job picks up from the last point it saved, and the attempt it was on does not count against its retries. A job that had already handed work to a provider (a clip being made, an upload being processed) asks the provider how it went rather than paying for it twice. A job waiting to retry, or waiting for its time, keeps waiting.
+
+A scene plan Claude was still writing when Bardo closed is the exception: Claude may have charged for the part it wrote, so the next time Bardo opens the plan is not asked for again by itself. The job stops as **Failed** with [A paid request got no answer](troubleshooting.md#answer-lost), [Costs](costs.md#spent) counts an estimate of it, and **Retry** sends a new request.
 
 <a id="test"></a>
 ## Test jobs

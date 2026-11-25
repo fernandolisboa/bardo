@@ -28,6 +28,8 @@ What Bardo's messages mean when something stops, and what to do. A job that stop
 
 "The request was sent, but no answer came back" means Bardo sent a paid request (a script, a scene plan, an image, a narration part, a music track) and the connection dropped, or the wait ran out, before the provider answered or while a long answer was still arriving. The provider may have done the work and charged for it, so Bardo did not send it again by itself: the job stopped after that one request, and [Costs](costs.md#spent) counts an estimate of what it may have cost, so budgets and a video's spend cap do not undercount. Check the connection, look at the provider's usage page if the amount matters, then **Retry** when you are ready; the retry is a new paid request. A request that never left the computer, as when the network is off, costs nothing and is still retried by itself.
 
+A scene plan shows the same failure, with "Bardo closed while Claude was writing the scene plan", when Bardo was closed before the plan arrived: see [Closing Bardo mid-job](jobs.md#restart).
+
 A post on X is such a request too, with one difference: before it fails, and again when you **Retry**, Bardo asks X whether the post is there, so a post X already shows is not posted again. See [A post X did not answer](connect-x.md#post-unanswered).
 
 <a id="reconnect"></a>

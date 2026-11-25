@@ -1320,9 +1320,9 @@ pub(crate) mod testing {
         ImageFormat, ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market,
         MarketData, MarketSample, Money, MusicGenerator, MusicRequest, Niche, Provider,
         ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
-        SpeechSynthesizer, StagedFile, StagedImage, TakeDone, TakeGenerator, TakeInput, TakeMode,
-        TakeModel, TakeRequest, TakeStatus, TakeTier, TextGenerator, TextRequest, TokenUsage,
-        UploadSample, Voice, VoiceLibrary, YesNoAnswer,
+        SpeechSynthesizer, StagedFile, StagedImage, Stop, TakeDone, TakeGenerator, TakeInput,
+        TakeMode, TakeModel, TakeRequest, TakeStatus, TakeTier, TextGenerator, TextRequest,
+        TokenUsage, UploadSample, Voice, VoiceLibrary, YesNoAnswer,
     };
 
     use crate::Providers;
@@ -1441,6 +1441,11 @@ pub(crate) mod testing {
         pub(crate) usage: Mutex<TokenUsage>,
         /// How long each call takes, to catch a job mid-run.
         pub(crate) delay: Mutex<Duration>,
+        /// Answers although it was told to stop: the answer that arrives
+        /// whole just as its job is stopped.
+        pub(crate) deaf: Mutex<bool>,
+        /// Answers given up midway because their stop asked.
+        pub(crate) given_up: std::sync::atomic::AtomicU32,
     }
 
     impl FakeTextGenerator {
@@ -1463,14 +1468,39 @@ pub(crate) mod testing {
     }
 
     impl TextGenerator for FakeTextGenerator {
-        fn generate(
+        fn generate_until(
             &self,
             _key: &ApiKey,
             request: &TextRequest,
+            stop: &Stop,
         ) -> Result<GeneratedText, ProviderFailure> {
+            // As the adapter: nothing is sent once the stop asked, and an
+            // answer on its way is given up where it is.
+            if stop.asked() {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unreachable,
+                    "given up before the request was sent",
+                ));
+            }
             self.requests.lock().unwrap().push(request.clone());
             let delay = *self.delay.lock().unwrap();
-            std::thread::sleep(delay);
+            let deaf = *self.deaf.lock().unwrap();
+            let until = std::time::Instant::now() + delay;
+            loop {
+                let left = until.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                if !deaf && stop.asked() {
+                    self.given_up
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    return Err(ProviderFailure::new(
+                        bardo_domain::ProviderFailureKind::AnswerLost,
+                        "the answer stopped midway, and Claude bills what it wrote of it (given up while Claude was writing it)",
+                    ));
+                }
+                std::thread::sleep(left.min(Duration::from_millis(5)));
+            }
             if let Some(failure) = self.failure.lock().unwrap().clone() {
                 return Err(failure);
             }

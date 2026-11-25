@@ -33,14 +33,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AspectRatio, CastDraft, CastMember, CostPurpose, Generation, GenerationId, ImageFormat,
-    ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind, JobId, JobKind,
-    Narration, NarrationId, NarrationRepository, NoPendingClip, NoPendingImage, NoSuchCastMember,
-    NoSuchPlace, NoSuchScene, OtherShot, PlaceDraft, PlanDraft, ProfileId, Progress, ProjectFiles,
-    Provider, ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError,
-    SceneImage, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize, ScenePrompt,
-    SceneSetting, SecretStore, StyleChoice, TemplateKind, TemplateUsed, TemplateVariable,
-    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
+    ApiKey, AspectRatio, CastDraft, CastMember, CostPurpose, GeneratedText, Generation,
+    GenerationId, ImageFormat, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure,
+    JobFailureKind, JobId, JobKind, Narration, NarrationId, NarrationRepository, NoPendingClip,
+    NoPendingImage, NoSuchCastMember, NoSuchPlace, NoSuchScene, OtherShot, PlaceDraft, PlanDraft,
+    ProfileId, Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind,
+    ReferenceImage, RenderedPrompt, RepositoryError, SceneDraft, SceneFieldError, SceneImage,
+    ScenePlan, ScenePlanId, ScenePlanRepository, ScenePlanSize, ScenePrompt, SceneSetting,
+    SecretStore, StyleChoice, TemplateKind, TemplateUsed, TemplateVariable, TemplateVersion,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, TokenUsage,
     VideoProject, VideoProjectId, scene_image_prompt, sentences,
 };
 use bardo_media::MediaEngine;
@@ -160,6 +161,10 @@ pub struct ScenesView {
     pub stale: bool,
     /// The project's latest scene plan or image job.
     pub job: Option<Job>,
+    /// A scene job that was cancelled has not let go of its work yet (a
+    /// request it gave up is being closed): nothing new starts until it
+    /// has, which takes a moment.
+    pub stopping: bool,
     /// The template version the next plan uses.
     pub template: TemplateVersion,
     /// What planning the scenes would cost; `None` without a narration or
@@ -225,9 +230,10 @@ impl ScenesView {
         })
     }
 
-    /// Whether a scene plan or image job of the project is running.
+    /// Whether a scene plan or image job of the project is running, or
+    /// one that was cancelled is still stopping.
     pub fn is_busy(&self) -> bool {
-        self.job.as_ref().is_some_and(|job| job.state().is_active())
+        self.stopping || self.job.as_ref().is_some_and(|job| job.state().is_active())
     }
 
     /// Whether a clip of some scene is being made.
@@ -539,6 +545,71 @@ fn is_about_the_scene(kind: JobFailureKind) -> bool {
     )
 }
 
+/// Where a scene plan job stands with its one request to Claude, kept as
+/// the job's checkpoint. Claude bills what it writes, read or not, so the
+/// request is sent once (ADR-0030): a run that finds it already asked does
+/// not ask again by itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PlanStep {
+    /// The request left, or was about to, and the run that sent it has not
+    /// come back from it. Found by a later run, that run never did: Bardo
+    /// closed or died while Claude was writing.
+    Asked,
+    /// The run that asked came back, with an answer or a failure: nothing
+    /// is on its way, and what was billed is recorded.
+    Settled,
+    /// Claude's answer, paid for and recorded, kept by a job that was
+    /// cancelled as it arrived: a retry plans from it.
+    Answered(KeptAnswer),
+}
+
+/// An answer kept in a job's checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct KeptAnswer {
+    text: String,
+    model: String,
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+impl From<GeneratedText> for KeptAnswer {
+    fn from(generated: GeneratedText) -> Self {
+        Self {
+            text: generated.text,
+            model: generated.model,
+            input_tokens: generated.usage.input_tokens,
+            output_tokens: generated.usage.output_tokens,
+        }
+    }
+}
+
+impl From<KeptAnswer> for GeneratedText {
+    fn from(kept: KeptAnswer) -> Self {
+        Self {
+            text: kept.text,
+            model: kept.model,
+            usage: TokenUsage {
+                input_tokens: kept.input_tokens,
+                output_tokens: kept.output_tokens,
+            },
+        }
+    }
+}
+
+impl PlanStep {
+    /// Where the job's earlier runs left it; `None` for a job that never
+    /// asked.
+    fn of(cx: &JobContext) -> Option<Self> {
+        serde_json::from_str(cx.checkpoint()?).ok()
+    }
+
+    /// Kept for a run that was told to stop, too (`save_checkpoint`).
+    fn save(&self, cx: &mut JobContext) -> Result<(), RepositoryError> {
+        cx.save_checkpoint(to_json(self), Progress::ZERO)
+    }
+}
+
 /// Runs scene plan and image jobs.
 pub(crate) struct SceneHandler {
     pub(crate) owner: ProfileId,
@@ -556,7 +627,7 @@ pub(crate) struct SceneHandler {
 impl JobHandler for SceneHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
         match cx.kind() {
-            JobKind::ScenePlan => self.plan(payload, cx.id()),
+            JobKind::ScenePlan => self.plan(payload, cx),
             _ => self.draw(payload, cx.id(), Some(cx)),
         }
     }
@@ -575,8 +646,10 @@ impl SceneHandler {
             })
     }
 
-    /// Plans the scenes `job` asked for and makes them the project's plan.
-    fn plan(&self, payload: &str, job: JobId) -> Result<(), JobFailure> {
+    /// Plans the scenes the job asked for and makes them the project's
+    /// plan. Its one request to Claude is sent once: see [`PlanStep`].
+    fn plan(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
+        let job = cx.id();
         let payload: PlanPayload = parse(payload)?;
         let project: VideoProjectId = id(&payload.project)?;
         let current = self.plans.scene_plan(project).map_err(unexpected)?;
@@ -605,7 +678,6 @@ impl SceneHandler {
                 "the narration is too long to plan its scenes in one answer",
             ));
         }
-        let key = self.key(Provider::Claude)?;
         let size = ScenePlanSize::of(&narration);
         let request = TextRequest {
             effort: TextEffort::Careful,
@@ -617,29 +689,65 @@ impl SceneHandler {
                 schema: PLAN_SCHEMA.to_owned(),
             },
         };
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            // One that was lost is recorded as a plan of this length, as
-            // it was estimated: what other plans took says little.
-            self.costs.record_failed_for_project(
-                &failure,
-                &sized_plan_call(size).with_prompt(&request.instructions, &request.prompt),
-                Some(job),
-                project,
-            );
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        })?;
-        self.costs.record_for_project(
-            PaidCall {
-                provider: Provider::Claude,
-                model: &generated.model,
-                purpose: CostPurpose::ScenePlan,
-                usage: generated.usage.into(),
-                job: Some(job),
-                reported: None,
-            },
-            project,
-        );
+        // A lost answer is recorded as a plan of this length, as it was
+        // estimated: what other plans took says little.
+        let call = sized_plan_call(size).with_prompt(&request.instructions, &request.prompt);
+        let step = PlanStep::of(cx);
+        let kept = matches!(step, Some(PlanStep::Answered(_)));
+        let generated = match step {
+            // Paid for and recorded when it arrived.
+            Some(PlanStep::Answered(answer)) => answer.into(),
+            Some(PlanStep::Asked) => {
+                // The run that sent the request never came back from it:
+                // Bardo closed, or stopped, while Claude was writing.
+                // Claude bills what it wrote, so the request is not sent
+                // again unless the user asks. Settled first: were that
+                // refused, the next run would find the request as this
+                // one did, and record it then.
+                PlanStep::Settled.save(cx).map_err(unexpected)?;
+                let lost = ProviderFailure::new(
+                    ProviderFailureKind::AnswerLost,
+                    "Bardo closed while Claude was writing the scene plan, and Claude bills what it wrote of it",
+                );
+                self.costs
+                    .record_failed_for_project(&lost, &call, Some(job), project);
+                return Err(JobFailure::new(
+                    JobFailureKind::AnswerLost,
+                    format!("Claude: {}", lost.detail),
+                ));
+            }
+            Some(PlanStep::Settled) | None => {
+                match self.ask_for_plan(&request, &call, project, cx)? {
+                    Some(generated) => generated,
+                    // Stopped: nothing to plan from now.
+                    None => return Ok(()),
+                }
+            }
+        };
+        let saved = self.save_plan(payload, job, &narration, current, generated);
+        // A kept answer that turns out not to be a plan is let go, so the
+        // next retry asks Claude again instead of failing on it for good.
+        if kept
+            && saved
+                .as_ref()
+                .is_err_and(|failure| failure.kind == JobFailureKind::UnexpectedAnswer)
+            && let Err(error) = PlanStep::Settled.save(cx)
+        {
+            tracing::warn!(job = %job, "could not let go of an unusable kept plan: {error}");
+        }
+        saved
+    }
+
+    /// Makes Claude's answer the project's plan, in place of `current`.
+    fn save_plan(
+        &self,
+        payload: PlanPayload,
+        job: JobId,
+        narration: &Narration,
+        current: Option<ScenePlan>,
+        generated: GeneratedText,
+    ) -> Result<(), JobFailure> {
+        let project: VideoProjectId = id(&payload.project)?;
         let not_usable = |detail: String| {
             JobFailure::new(
                 JobFailureKind::UnexpectedAnswer,
@@ -704,7 +812,7 @@ impl SceneHandler {
             places,
             scenes,
         };
-        let plan = ScenePlan::from_draft(generation, &narration, draft, now)
+        let plan = ScenePlan::from_draft(generation, narration, draft, now)
             .map_err(|error| not_usable(error.to_string()))?;
         self.plans.save_scene_plan(&plan).map_err(unexpected)?;
         // The replaced plan's images go with it. A file that will not go
@@ -713,6 +821,83 @@ impl SceneHandler {
             crate::proxies::remove_media(self.files.as_ref(), project, file);
         }
         Ok(())
+    }
+
+    /// Sends the plan's request to Claude and waits for the answer, which
+    /// is given up as soon as the job is told to stop. `None` when the job
+    /// was stopped and has no answer to plan from now: nothing was sent,
+    /// or the answer arrived as the job was cancelled and is kept for the
+    /// user's retry (`PlanStep::Answered`).
+    fn ask_for_plan(
+        &self,
+        request: &TextRequest,
+        call: &PlannedCall,
+        project: VideoProjectId,
+        cx: &mut JobContext,
+    ) -> Result<Option<GeneratedText>, JobFailure> {
+        let job = cx.id();
+        let key = self.key(Provider::Claude)?;
+        if cx.should_stop() {
+            return Ok(None);
+        }
+        // Before the request leaves: a run that never comes back from it
+        // (the app closes, or dies) leaves this for the next run to find.
+        // Refused, nothing is sent.
+        PlanStep::Asked.save(cx).map_err(unexpected)?;
+        let failure = match self.text.generate_until(&key, request, &cx.stop()) {
+            Ok(generated) => {
+                self.costs.record_for_project(
+                    PaidCall {
+                        provider: Provider::Claude,
+                        model: &generated.model,
+                        purpose: CostPurpose::ScenePlan,
+                        usage: generated.usage.into(),
+                        job: Some(job),
+                        reported: None,
+                    },
+                    project,
+                );
+                if !cx.cancelled() {
+                    // Not kept, the plan is still saved below; were it
+                    // not usable, a retry would take the request for lost.
+                    if let Err(error) = PlanStep::Settled.save(cx) {
+                        tracing::warn!(job = %job, "could not note that the plan's request was answered: {error}");
+                    }
+                    return Ok(Some(generated));
+                }
+                // The user cancelled as the answer arrived whole. It is
+                // paid for, so it is kept; and the job was cancelled, so it
+                // does not replace the project's plan. Retrying the job
+                // plans from it without asking Claude again.
+                if let Err(error) = PlanStep::Answered(generated.into()).save(cx) {
+                    tracing::warn!(job = %job, "could not keep the plan a cancelled job was answered: {error}");
+                }
+                return Ok(None);
+            }
+            Err(failure) => failure,
+        };
+        let failed = JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail));
+        // The app is closing, or another runner took the job: it runs again
+        // by itself. When Claude may bill the request that was cut, it
+        // stays marked as asked, and that run records it and fails once
+        // instead of sending it again.
+        let may_be_billed =
+            failure.kind == ProviderFailureKind::AnswerLost || failure.billed.is_some();
+        if cx.should_stop() && !cx.cancelled() && may_be_billed {
+            return Err(failed);
+        }
+        // An answer that was lost, cut or given up may still have been
+        // billed. Settled first: a request left marked as asked is
+        // recorded by the run that finds it.
+        match PlanStep::Settled.save(cx) {
+            Ok(()) => self
+                .costs
+                .record_failed_for_project(&failure, call, Some(job), project),
+            Err(error) => {
+                tracing::warn!(job = %job, "could not note that the plan's request ended: {error}");
+            }
+        }
+        Err(failed)
     }
 
     /// The saved plan, if it is still `plan`.
@@ -1090,6 +1275,12 @@ impl SceneHandler {
     }
 }
 
+/// Whether `job` plans or draws the scenes of `project` (its id as text).
+fn is_scene_job(job: &Job, project: &str) -> bool {
+    matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
+        && serde_json::from_str::<ProjectOf>(job.payload()).is_ok_and(|p| p.project == project)
+}
+
 impl Bardo {
     pub(crate) fn scenes_project(&self, id: VideoProjectId) -> Result<VideoProject, SceneError> {
         self.themes
@@ -1098,26 +1289,37 @@ impl Bardo {
             .ok_or(SceneError::ProjectNotFound)
     }
 
-    /// Whether a scene plan or image job of the project is running.
+    /// Whether a scene plan or image job of the project is running, or
+    /// one that was cancelled is still stopping (`scenes_stopping`).
     pub(crate) fn scenes_busy(&self, project: VideoProjectId) -> bool {
         self.latest_scene_job(project)
             .is_some_and(|job| job.state().is_active())
+            || self.scenes_stopping(project)
+    }
+
+    /// Whether a scene job of the project that no longer reads as running
+    /// (it was cancelled) still has its handler at work here. A cancelled
+    /// job reads cancelled at once, while its handler may be in a paid
+    /// request it has yet to give up, or saving what that request brought.
+    /// Until it returns, a new job would pay for the same work beside it
+    /// and the two would save over each other.
+    fn scenes_stopping(&self, project: VideoProjectId) -> bool {
+        let project = project.to_string();
+        self.jobs().iter().any(|job| {
+            is_scene_job(job, &project) && !job.state().is_active() && self.jobs.runs_here(job.id())
+        })
     }
 
     fn latest_scene_job(&self, project: VideoProjectId) -> Option<Job> {
         let project = project.to_string();
-        self.jobs().into_iter().rev().find(|job| {
-            matches!(job.kind(), JobKind::ScenePlan | JobKind::SceneImages)
-                && serde_json::from_str::<ProjectOf>(job.payload())
-                    .is_ok_and(|p| p.project == project)
-        })
+        self.jobs()
+            .into_iter()
+            .rev()
+            .find(|job| is_scene_job(job, &project))
     }
 
     fn scenes_idle(&self, project: VideoProjectId) -> Result<(), SceneError> {
-        if self
-            .latest_scene_job(project)
-            .is_some_and(|job| job.state().is_active())
-        {
+        if self.scenes_busy(project) {
             return Err(SceneError::Busy);
         }
         Ok(())
@@ -1189,6 +1391,7 @@ impl Bardo {
                 None => Vec::new(),
             },
             plan,
+            stopping: self.scenes_stopping(project.id),
             job: self.latest_scene_job(project.id),
             template,
             plan_estimate,
@@ -2993,6 +3196,304 @@ pub(crate) mod tests {
             job.failure().unwrap().kind,
             JobFailureKind::UnexpectedAnswer
         );
-        assert_eq!(app.scenes(project.id).unwrap().plan, Some(planned));
+        assert_eq!(app.scenes(project.id).unwrap().plan, Some(planned.clone()));
+
+        // The request was answered: asked for again, the job sends a new
+        // one, and does not take the first for lost.
+        let asked = h.text.requests().len();
+        h.answer(plan_answer());
+        app.retry_job(job.id()).unwrap();
+        done(&app, job.id());
+        assert_eq!(h.text.requests().len(), asked + 1);
+        assert_ne!(app.scenes(project.id).unwrap().plan, Some(planned));
+    }
+
+    /// A scene plan whose job is stopped while Claude writes it (#295).
+    mod stopped_plans {
+        use bardo_domain::{Cost, CostPurpose, CostRecord, CostRepository, Money};
+
+        use super::*;
+
+        /// Far longer than any of these tests waits: an answer only a stop
+        /// ends.
+        const LONG: Duration = Duration::from_secs(120);
+
+        fn plan_costs(h: &Harness, project: VideoProjectId) -> Vec<CostRecord> {
+            h.db.project_costs(project)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == CostPurpose::ScenePlan)
+                .collect()
+        }
+
+        fn wait_until(what: &str, done: impl Fn() -> bool) {
+            let deadline = Instant::now() + PATIENCE;
+            while !done() {
+                assert!(Instant::now() < deadline, "never: {what}");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        /// Starts a plan whose answer takes `takes`, and waits until its
+        /// request left.
+        fn plan_taking(
+            h: &Harness,
+            app: &Bardo,
+            project: VideoProjectId,
+            takes: Duration,
+        ) -> JobId {
+            let asked = h.text.requests().len();
+            *h.text.delay.lock().unwrap() = takes;
+            let id = app
+                .plan_scenes(project, false, BudgetConsent::Confirmed)
+                .unwrap();
+            wait_until("the request left", || h.text.requests().len() > asked);
+            id
+        }
+
+        fn given_up(h: &Harness) -> u32 {
+            h.text.given_up.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        #[test]
+        fn cancelling_a_plan_gives_its_request_up_within_moments() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let asked = h.text.requests().len();
+            let id = plan_taking(&h, &app, project.id, LONG);
+
+            let cancelled_at = Instant::now();
+            app.cancel_job(id).unwrap();
+            wait_until("the handler let go", || !app.job_runs_here(id));
+
+            assert!(
+                cancelled_at.elapsed() < Duration::from_secs(10),
+                "long before the answer's end"
+            );
+            assert_eq!(given_up(&h), 1, "the request was given up, not awaited");
+            let job = wait_done(&app, id);
+            assert_eq!(job.state(), JobState::Cancelled);
+            assert_eq!(app.scenes(project.id).unwrap().plan, None);
+            // Claude bills what it wrote until then, and the stream never
+            // said how much: what such a plan usually takes is in Costs.
+            let records = plan_costs(&h, project.id);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].job, Some(id));
+            assert!(
+                matches!(records[0].cost, Cost::Estimated(amount) if amount > Money::ZERO),
+                "{:?}",
+                records[0].cost
+            );
+
+            // The user asks again: a new request, and its plan.
+            *h.text.delay.lock().unwrap() = Duration::ZERO;
+            h.answer(plan_answer());
+            app.retry_job(id).unwrap();
+            done(&app, id);
+            assert_eq!(h.text.requests().len(), asked + 2);
+            assert!(app.scenes(project.id).unwrap().plan.is_some());
+            assert_eq!(plan_costs(&h, project.id).len(), 2);
+        }
+
+        #[test]
+        fn no_second_plan_starts_while_a_cancelled_one_still_stops() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            // An answer that goes on a little after the cancel, as one
+            // whose connection is slow to close.
+            *h.text.deaf.lock().unwrap() = true;
+            h.answer(plan_answer());
+            let id = plan_taking(&h, &app, project.id, Duration::from_millis(400));
+            let asked = h.text.requests().len();
+
+            app.cancel_job(id).unwrap();
+            assert_eq!(wait_done(&app, id).state(), JobState::Cancelled);
+            assert!(app.job_runs_here(id), "the handler has not returned yet");
+
+            // The job reads cancelled, and its request is still out: a
+            // second one beside it would be paid for as well.
+            let view = app.scenes(project.id).unwrap();
+            assert!(view.stopping && view.is_busy());
+            assert!(matches!(
+                app.plan_scenes(project.id, false, BudgetConsent::Confirmed),
+                Err(SceneError::Busy)
+            ));
+            assert_eq!(h.text.requests().len(), asked, "nothing was sent");
+
+            wait_until("the handler let go", || !app.job_runs_here(id));
+            let view = app.scenes(project.id).unwrap();
+            assert!(!view.stopping && !view.is_busy());
+            *h.text.deaf.lock().unwrap() = false;
+            *h.text.delay.lock().unwrap() = Duration::ZERO;
+            h.answer(plan_answer());
+            done(
+                &app,
+                app.plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+        }
+
+        #[test]
+        fn an_answer_that_arrives_as_its_plan_is_cancelled_is_kept_for_a_retry() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            *h.text.usage.lock().unwrap() = bardo_domain::TokenUsage {
+                input_tokens: 900,
+                output_tokens: 2_400,
+            };
+            *h.text.deaf.lock().unwrap() = true;
+            h.answer(plan_answer());
+            let id = plan_taking(&h, &app, project.id, Duration::from_millis(200));
+            let asked = h.text.requests().len();
+
+            app.cancel_job(id).unwrap();
+            wait_until("the handler let go", || !app.job_runs_here(id));
+
+            // The user cancelled: the plan does not appear behind their
+            // back. It is paid for, at what Claude counted.
+            assert_eq!(wait_done(&app, id).state(), JobState::Cancelled);
+            assert_eq!(app.scenes(project.id).unwrap().plan, None);
+            let records = plan_costs(&h, project.id);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].usage.output_tokens, 2_400);
+
+            // Asked for again, the job plans from the answer it kept.
+            app.retry_job(id).unwrap();
+            done(&app, id);
+            let plan = app.scenes(project.id).unwrap().plan.expect("planned");
+            assert_eq!(plan.generation.job, Some(id));
+            assert_eq!(plan.generation.usage.output_tokens, 2_400);
+            assert_eq!(h.text.requests().len(), asked, "Claude is not asked again");
+            assert_eq!(plan_costs(&h, project.id).len(), 1, "nor paid again");
+        }
+
+        #[test]
+        fn a_kept_answer_that_is_no_plan_fails_once_and_then_claude_is_asked_again() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            *h.text.deaf.lock().unwrap() = true;
+            h.answer("{\"cast\":[],\"places\":[],\"scenes\":[]}".to_owned());
+            let id = plan_taking(&h, &app, project.id, Duration::from_millis(200));
+            let asked = h.text.requests().len();
+            app.cancel_job(id).unwrap();
+            wait_until("the handler let go", || !app.job_runs_here(id));
+            assert_eq!(wait_done(&app, id).state(), JobState::Cancelled);
+
+            // The kept answer is no plan: the retry says so, without a
+            // request.
+            app.retry_job(id).unwrap();
+            let job = wait_done(&app, id);
+            assert_eq!(
+                job.failure().unwrap().kind,
+                JobFailureKind::UnexpectedAnswer
+            );
+            assert_eq!(h.text.requests().len(), asked);
+
+            // It is not kept past that: the next retry asks Claude.
+            *h.text.deaf.lock().unwrap() = false;
+            *h.text.delay.lock().unwrap() = Duration::ZERO;
+            h.answer(plan_answer());
+            app.retry_job(id).unwrap();
+            done(&app, id);
+            assert_eq!(h.text.requests().len(), asked + 1);
+            assert!(app.scenes(project.id).unwrap().plan.is_some());
+        }
+
+        #[test]
+        fn a_plan_cut_by_closing_the_app_is_not_asked_again_by_itself() {
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let asked = h.text.requests().len();
+            let id = plan_taking(&h, &app, project.id, LONG);
+
+            // Bardo closes while Claude writes: the request is given up,
+            // and the job stays as it was for the next start.
+            drop(app);
+            assert_eq!(given_up(&h), 1);
+            assert!(plan_costs(&h, project.id).is_empty());
+
+            // The next start takes the job up by itself, finds its request
+            // already asked, and does not send it again: Claude billed
+            // what it wrote of the first.
+            *h.text.delay.lock().unwrap() = Duration::ZERO;
+            let app = h.start();
+            let job = wait_done(&app, id);
+            assert_eq!(job.state(), JobState::Failed);
+            let failure = job.failure().unwrap();
+            assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+            assert!(
+                failure.detail.contains("Bardo closed"),
+                "{}",
+                failure.detail
+            );
+            assert_eq!(h.text.requests().len(), asked + 1, "sent once");
+            let records = plan_costs(&h, project.id);
+            assert_eq!(records.len(), 1, "what it may have cost is in Costs");
+            assert!(matches!(records[0].cost, Cost::Estimated(amount) if amount > Money::ZERO));
+            assert_eq!(app.scenes(project.id).unwrap().plan, None);
+
+            // Only the user's retry sends it again.
+            h.answer(plan_answer());
+            app.retry_job(id).unwrap();
+            done(&app, id);
+            assert_eq!(h.text.requests().len(), asked + 2);
+            assert_eq!(plan_costs(&h, project.id).len(), 2);
+            assert!(app.scenes(project.id).unwrap().plan.is_some());
+        }
+
+        #[test]
+        fn a_plan_answered_while_the_app_closes_is_saved_and_not_asked_again() {
+            let mut h = Harness::new();
+            // The app does not wait for the answer.
+            h.closing_wait = Some(Duration::from_millis(20));
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            *h.text.deaf.lock().unwrap() = true;
+            h.answer(plan_answer());
+            let id = plan_taking(&h, &app, project.id, Duration::from_millis(300));
+            let asked = h.text.requests().len();
+            let probe = app.jobs.probe();
+
+            drop(app);
+            wait_until("the handler let go", || !probe.runs(id));
+
+            // The answer arrived whole and nobody cancelled: it is the
+            // project's plan, and the job finds it there.
+            let app = h.start();
+            done(&app, id);
+            assert_eq!(h.text.requests().len(), asked);
+            let plan = app.scenes(project.id).unwrap().plan.expect("planned");
+            assert_eq!(plan.generation.job, Some(id));
+            assert_eq!(plan_costs(&h, project.id).len(), 1);
+        }
+
+        #[test]
+        fn a_plan_that_never_left_is_sent_again_by_the_queue() {
+            // A failure that says nothing was sent leaves nothing asked:
+            // the queue's own retry sends the request.
+            let h = Harness::new();
+            let app = h.start();
+            let project = h.narrated_project(&app);
+            let asked = h.text.requests().len();
+            *h.text.failure.lock().unwrap() = Some(ProviderFailure::new(
+                ProviderFailureKind::Unreachable,
+                "host not found",
+            ));
+            let id = app
+                .plan_scenes(project.id, false, BudgetConsent::Confirmed)
+                .unwrap();
+            let job = wait_done(&app, id);
+            assert_eq!(
+                job.failure().unwrap().kind,
+                JobFailureKind::ProviderUnavailable
+            );
+            assert_eq!(h.text.requests().len(), asked + 2, "every attempt");
+            assert!(plan_costs(&h, project.id).is_empty());
+        }
     }
 }
