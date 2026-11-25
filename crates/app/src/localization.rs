@@ -1678,6 +1678,54 @@ mod tests {
     }
 
     #[test]
+    fn a_version_carries_the_places_and_keeps_them_when_its_scenes_are_placed() {
+        let h = Harness::new();
+        let app = h.start();
+        let source = crate::scenes::tests::storyboard_project(&h, &app);
+        done(
+            &app,
+            app.generate_scene_images(source.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let planned = app.scenes(source.id).unwrap().plan.unwrap();
+        assert_eq!(planned.places().len(), 2);
+        let channel = english_channel(&app);
+        answer(&h, &ADAPTED);
+        done(
+            &app,
+            app.make_version(source.id, channel.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let version = app.versions(source.id).unwrap().made[0].project.clone();
+
+        let carried = app.scenes(version.id).unwrap().plan.unwrap();
+        assert_eq!(carried.places(), planned.places());
+        let of = |plan: &ScenePlan| -> Vec<Option<usize>> {
+            (0..plan.scenes().len())
+                .map(|index| plan.scene_place(index))
+                .collect()
+        };
+        assert_eq!(of(&carried), [Some(0), Some(0), Some(0), Some(1)]);
+
+        done(
+            &app,
+            app.generate_narration(version.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let placed = app.place_scenes(version.id).unwrap();
+        assert_eq!(placed.places(), planned.places());
+        assert_eq!(of(&placed), of(&carried));
+        // A scene of the version drawn again still follows its place.
+        assert_eq!(
+            placed.reference_shots(2),
+            [
+                (0, bardo_domain::OtherShot::SamePlace),
+                (1, bardo_domain::OtherShot::Before)
+            ]
+        );
+    }
+
+    #[test]
     fn the_carried_scenes_are_placed_on_the_version_s_narration() {
         let h = Harness::new();
         let app = h.start();

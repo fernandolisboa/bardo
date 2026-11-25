@@ -64,6 +64,7 @@ pub(crate) fn remove_media(files: &dyn ProjectFiles, project: VideoProjectId, fi
     for kind in ProxyKind::ALL {
         let _ = files.remove(project, &proxy_name(file, kind));
     }
+    let _ = files.remove(project, &crate::scenes::reference_name(file));
 }
 
 /// Peaks as the proxy file stores them.

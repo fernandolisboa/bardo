@@ -323,17 +323,17 @@ pub fn scene_image_prompt(
         }
     }
     if let Some(place) = setting.place {
-        text.push_str(&format!(
-            "\n\nThe scene happens in {}: {}",
-            place.name,
-            place.description.as_str()
-        ));
+        text.push_str("\n\n");
+        text.push_str(&place.setting());
     }
     if !setting.shots.is_empty() {
-        text.push_str(
-            "\n\nThe other reference images are other shots of the same video, so that this \
-             image belongs with them.",
-        );
+        text.push_str(if with.is_empty() {
+            "\n\nThe reference images are other shots of the same video, so that this image \
+             belongs with them."
+        } else {
+            "\n\nThe reference images after those are other shots of the same video, so that \
+             this image belongs with them."
+        });
     }
     for (offset, shot) in setting.shots.iter().enumerate() {
         let number = with.len() + offset + 1;
@@ -342,19 +342,21 @@ pub fn scene_image_prompt(
             OtherShot::SamePlace => {
                 "another shot in this same place. Keep the place as it is there: its \
                  architecture, objects, colors, light and time of day, and the same rendering \
-                 style. Draw a new shot of it, from another angle or distance; do not repeat \
-                 its composition."
+                 style. People in it are in this scene only if this prompt names them. Draw \
+                 a new shot, framed as this prompt says; do not repeat the reference's \
+                 composition."
             }
             OtherShot::Before => {
                 "the shot right before this one, in this same place. This scene continues \
                  from it: keep the place, the light, the time of day, what people wear and \
-                 where things are, and the same rendering style. Draw the next moment as a \
-                 new shot, from another angle or distance; do not repeat its composition."
+                 where things are, and the same rendering style. People in it are in this \
+                 scene only if this prompt names them. Draw the next moment as a new shot, \
+                 framed as this prompt says; do not repeat the reference's composition."
             }
             OtherShot::Look => {
-                "a shot in another place. Match only its rendering style, palette and level \
-                 of detail; its place, its people and its composition are not part of this \
-                 scene."
+                "another shot of this video. Match only how it is rendered: the medium, the \
+                 line, the texture and the level of detail. Its place, its light and colors, \
+                 its people and its composition are not part of this scene."
             }
         });
     }
@@ -452,6 +454,28 @@ impl Place {
     fn called(&self) -> &str {
         without_article(&self.name)
     }
+
+    /// What an image prompt says about a scene that happens here.
+    pub fn setting(&self) -> String {
+        format!(
+            "The scene happens in {}: {}",
+            self.name,
+            self.description.as_str()
+        )
+    }
+}
+
+/// Whether `text` names `name` as whole words, whatever the case: "the
+/// bar" is not named by "barn".
+fn names(text: &str, name: &str) -> bool {
+    let text = text.to_lowercase();
+    let name = name.to_lowercase();
+    !name.is_empty()
+        && text.match_indices(&name).any(|(at, found)| {
+            let before = text[..at].chars().next_back();
+            let after = text[at + found.len()..].chars().next();
+            !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+        })
 }
 
 /// A user action on a place that does not apply.
@@ -958,7 +982,32 @@ impl ScenePlan {
             .filter_map(|(index, draft)| Some((index, Place::planned(draft)?)))
             .collect();
         somewhere.retain(|(index, _)| starts.iter().any(|start| start.place == Some(*index)));
-        somewhere.truncate(MAX_PLACES);
+        // Past the limit, the places with the most scenes stay, and a
+        // scene of another keeps its description in its own prompt.
+        let mut crowded: Vec<usize> = somewhere.iter().map(|(index, _)| *index).collect();
+        crowded.sort_by_key(|index| {
+            std::cmp::Reverse(
+                starts
+                    .iter()
+                    .filter(|start| start.place == Some(*index))
+                    .count(),
+            )
+        });
+        crowded.truncate(MAX_PLACES);
+        let (somewhere, dropped): (Vec<_>, Vec<_>) = somewhere
+            .into_iter()
+            .partition(|(index, _)| crowded.contains(index));
+        for start in &mut starts {
+            let described = dropped
+                .iter()
+                .find(|(index, _)| start.place == Some(*index))
+                .and_then(|(_, place)| {
+                    ScenePrompt::new(&format!("{} {}", start.prompt.as_str(), place.setting())).ok()
+                });
+            if let Some(prompt) = described {
+                start.prompt = prompt;
+            }
+        }
         for start in &mut starts {
             let mut kept: Vec<usize> = Vec::new();
             for drafted in &start.cast {
@@ -1085,13 +1134,7 @@ impl ScenePlan {
     pub fn scene_place(&self, index: usize) -> Option<usize> {
         let scene = self.scenes.get(index)?;
         let place = self.places.get(scene.place?)?;
-        let named = || {
-            scene
-                .prompt
-                .as_str()
-                .to_lowercase()
-                .contains(&place.called().to_lowercase())
-        };
+        let named = || names(scene.prompt.as_str(), place.called());
         (!scene.is_edited() || named()).then_some(scene.place?)
     }
 
@@ -1105,14 +1148,29 @@ impl ScenePlan {
     ///   it continues from (alone when it is also the first of the place);
     /// - for a scene whose place has no image yet, or with no place: the
     ///   video's first other image, for its look only.
+    ///
+    /// An image shows a place only when it was drawn from the place as it
+    /// is described now: once the user describes a place again, the images
+    /// of how it was no longer hold the next ones to it.
     pub fn reference_shots(&self, index: usize) -> Vec<(usize, OtherShot)> {
         let drawn = |other: usize| other != index && self.scenes[other].image.is_some();
         if index >= self.scenes.len() {
             return Vec::new();
         }
         let place = self.scene_place(index);
-        let same_place =
-            |other: usize| place.is_some() && self.scene_place(other) == place && drawn(other);
+        let setting = place
+            .and_then(|place| self.places.get(place))
+            .map(Place::setting);
+        let same_place = |other: usize| {
+            place.is_some()
+                && other != index
+                && self.scene_place(other) == place
+                && self.scenes[other].image.as_ref().is_some_and(|image| {
+                    setting
+                        .as_deref()
+                        .is_some_and(|setting| image.generation.prompt.contains(setting))
+                })
+        };
         let before = index
             .checked_sub(1)
             .filter(|&before| same_place(before))
@@ -1877,10 +1935,24 @@ mod tests {
         .unwrap()
     }
 
+    /// Gives scene `index` an image drawn from its prompt and its place as
+    /// they are now.
     fn draw(plan: &mut ScenePlan, n: &Narration, index: usize) {
+        let mut image = image(n, &format!("scene-{index}.png"));
+        image.generation.prompt = scene_image_prompt(
+            plan.scenes()[index].prompt().as_str(),
+            &[],
+            &[],
+            SceneSetting {
+                place: plan
+                    .scene_place(index)
+                    .and_then(|place| plan.place(place).ok()),
+                shots: &[],
+            },
+        );
         plan.scene_mut(index, SystemTime::UNIX_EPOCH)
             .unwrap()
-            .add_image(image(n, &format!("scene-{index}.png")));
+            .add_image(image);
     }
 
     #[test]
@@ -1930,6 +2002,46 @@ mod tests {
         assert_eq!(plan.places().len(), MAX_PLACES);
         assert_eq!(plan.scenes()[MAX_PLACES - 1].place(), Some(MAX_PLACES - 1));
         assert_eq!(plan.scenes()[MAX_PLACES].place(), None, "past the limit");
+        assert_eq!(
+            plan.scenes()[MAX_PLACES].prompt().as_str(),
+            format!("A room. The scene happens in room {MAX_PLACES}: A room."),
+            "its description stays in its own prompt"
+        );
+        assert!(!plan.scenes()[MAX_PLACES].is_edited());
+        assert_eq!(plan.scenes()[0].prompt().as_str(), "A room.");
+    }
+
+    #[test]
+    fn past_the_limit_the_places_with_the_most_scenes_stay() {
+        let text = ["Go."; MAX_PLACES + 3].join(" ");
+        let n = narration(&text, 0);
+        // One scene in each of nine rooms, then two more in the last room.
+        let last = MAX_PLACES;
+        let plan = ScenePlan::from_draft(
+            generation(&n, Provider::Claude, "{}"),
+            &n,
+            PlanDraft {
+                cast: Vec::new(),
+                places: (0..=last)
+                    .map(|index| somewhere(&format!("room {index}"), "A room."))
+                    .collect(),
+                scenes: (0..MAX_PLACES + 3)
+                    .map(|index| placed(index, "A room.", Some(index.min(last))))
+                    .collect(),
+            },
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        let names: Vec<&str> = plan
+            .places()
+            .iter()
+            .map(|place| place.name.as_str())
+            .collect();
+        assert_eq!(names.len(), MAX_PLACES);
+        assert_eq!(names.last(), Some(&"room 8"), "three scenes happen there");
+        assert!(!names.contains(&"room 7"), "the last listed with one scene");
+        assert_eq!(plan.scenes()[7].place(), None);
+        assert_eq!(plan.scenes()[MAX_PLACES + 2].place(), Some(MAX_PLACES - 1));
     }
 
     #[test]
@@ -2026,6 +2138,44 @@ mod tests {
     }
 
     #[test]
+    fn a_place_is_named_by_whole_words_only() {
+        assert!(names("Close on the stove in the Kitchen.", "kitchen"));
+        assert!(names("The kitchen's window, open.", "kitchen"));
+        assert!(names("launch pad at dawn", "launch pad"));
+        assert!(!names("A red barn in a field.", "bar"));
+        assert!(!names("She ties her scarf.", "car"));
+        assert!(!names("A streetlamp flickers.", "street"));
+        assert!(!names("Anything.", ""));
+    }
+
+    #[test]
+    fn an_image_of_a_place_as_it_was_no_longer_holds_the_next_ones_to_it() {
+        let n = narration(STORY, 0);
+        let mut plan = storyboard(&n);
+        draw(&mut plan, &n, 0);
+        assert_eq!(plan.reference_shots(3), [(0, OtherShot::SamePlace)]);
+
+        let noon = ScenePrompt::new("A wide farmhouse kitchen at noon.").unwrap();
+        plan.place_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .edit_description(noon);
+        assert_eq!(
+            plan.reference_shots(3),
+            [(0, OtherShot::Look)],
+            "the old kitchen only lends its look"
+        );
+        // Drawn again from the new description, it only counts once the
+        // user took the new image.
+        draw(&mut plan, &n, 0);
+        assert_eq!(plan.reference_shots(3), [(0, OtherShot::Look)]);
+        plan.scene_mut(0, SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .accept_image()
+            .unwrap();
+        assert_eq!(plan.reference_shots(3), [(0, OtherShot::SamePlace)]);
+    }
+
+    #[test]
     fn a_place_can_be_described_again() {
         let n = narration(STORY, 0);
         let mut plan = storyboard(&n);
@@ -2091,7 +2241,9 @@ mod tests {
             },
         );
         assert!(prompt.contains("Reference 1: the chef, A man in his fifties."));
+        assert!(prompt.contains("\n\nThe reference images after those are other shots"));
         assert!(prompt.contains("Reference 2: another shot in this same place."));
+        assert!(prompt.contains("only if this prompt names them"));
         assert!(prompt.contains("Reference 3: the shot right before this one"));
         assert!(!prompt.contains("Reference 4"));
         let place = prompt.find("The scene happens in the kitchen").unwrap();
@@ -2107,8 +2259,9 @@ mod tests {
                 shots: &[OtherShot::Look],
             },
         );
-        assert!(look.contains("Reference 1: a shot in another place."));
-        assert!(look.contains("its place, its people and its composition are not part"));
+        assert!(look.contains("\n\nThe reference images are other shots of the same video"));
+        assert!(look.contains("Reference 1: another shot of this video. Match only how"));
+        assert!(look.contains("its people and its composition are not part of this scene."));
         assert!(!look.contains("The scene happens in"));
     }
 

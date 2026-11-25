@@ -46,14 +46,14 @@ Quando mais de uma cena acontece no mesmo lugar (a cozinha, a sala de controle),
 
 Toda imagem é desenhada com outras imagens do vídeo, que o Nano Banana recebe como referências ao lado do prompt:
 
-- **Uma cena num lugar já desenhado** recebe a descrição do lugar, a primeira imagem desenhada ali e, quando a cena logo antes dela é no mesmo lugar, essa imagem também, para continuar a partir dela: a mesma sala, luz e hora do dia, vistas de outro ângulo.
-- **A primeira cena de um lugar**, e uma cena num lugar só dela, recebe a primeira imagem do vídeo, só para seguir o estilo e as cores.
+- **Uma cena num lugar já desenhado** recebe a descrição do lugar, a primeira imagem desenhada ali e, quando a cena logo antes dela acontece no mesmo lugar, essa imagem também, para continuar a partir dela: a mesma sala, luz e hora do dia, vistas de outro ângulo.
+- **A primeira cena de um lugar** recebe a descrição do lugar e a primeira imagem do vídeo, só para seguir o jeito como ela é desenhada (a técnica, o traço, o nível de detalhe). **Uma cena num lugar só dela** também recebe essa imagem.
 
-A primeira imagem de todas não tem o que seguir, então ela define a cara do vídeo: desenhe-a de novo até ficar boa antes de desenhar o resto. As referências quase não custam nada a mais: uma imagem custa o mesmo com ou sem elas.
+A primeira imagem de todas não tem o que seguir, então ela define a cara do vídeo. Uma cena desenhada de novo segue as imagens que o vídeo tem naquele momento, inclusive a primeira cena, então desenhar uma cena de novo mantém a cara das outras. Uma imagem que espera a sua revisão ainda não é referência: aceite-a, e as cenas desenhadas depois passam a segui-la. As referências quase não custam nada a mais: uma imagem custa o mesmo com ou sem elas. Uma imagem grande vai como uma cópia menor (um JPEG do mesmo tamanho), que o Bardo guarda ao lado dela na pasta do projeto.
 
-**Editar lugar** muda a descrição para todas as cenas do lugar; um lugar que você mudou ganha a marca **Editado**. As cenas já desenhadas mantêm a imagem: desenhe-as de novo para usar a nova descrição. Um lugar não pode ser editado enquanto imagens estão sendo desenhadas. Se você reescrever o prompt de uma cena de modo que ele não cite mais o lugar, a cena sai do lugar e é desenhada sem ele.
+**Editar lugar** muda a descrição para todas as cenas do lugar; um lugar que você mudou ganha a marca **Editado**. As cenas já desenhadas mantêm a imagem: desenhe-as de novo para usar a nova descrição. As imagens desenhadas com a descrição antiga deixam de amarrar o lugar, então desenhe de novo a primeira cena do lugar, aceite a nova imagem, e as cenas desenhadas depois passam a segui-la. Um lugar não pode ser editado enquanto imagens estão sendo desenhadas. Se você reescrever o prompt de uma cena de modo que ele não cite mais o lugar (o nome em palavras inteiras, com ou sem "the"), a cena sai do lugar e é desenhada sem ele.
 
-Cenas planejadas antes de existirem lugares não têm nenhum; ainda assim recebem a primeira imagem do vídeo, pelo estilo. **Planejar de novo** dá lugares a elas.
+Um plano guarda no máximo oito lugares, os que têm mais cenas; uma cena em qualquer outro leva a descrição no próprio prompt. Cenas planejadas antes de existirem lugares não têm nenhum; ainda assim recebem a primeira imagem do vídeo, pelo estilo. **Planejar de novo** dá lugares a elas. Um [modelo](templates.md) de plano de cenas que você mesmo editou também recebe lugares, mas não as regras de storyboard do modelo padrão (uma história em ordem, ficando num lugar por várias cenas).
 
 <a id="filter"></a>
 ## Todas ou pendentes

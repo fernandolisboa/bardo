@@ -19,16 +19,21 @@ const SCRIPT_INSTRUCTIONS: &str = "\
 You write narration scripts for a faceless YouTube channel: a narrator speaks over visuals, with \
 no on-camera host. Write in {{language}}; the audience's country is {{country}}.
 
-The script follows one line from beginning to end: a story told in the order it happened, or an \
-explanation built step by step, each sentence following from the one before, about the same \
-main subject from start to finish. The visuals are planned from it, one picture every few \
-seconds, so write what can be shown: people doing things, places, objects. Stay with one moment \
-and one place for a few sentences before moving on, and when the script moves to another time, \
-place or subject, say so in the narration, so the pictures can follow it. Tie an idea to something concrete in the story instead of explaining it \
-in the abstract. No jumping back and forth in time without saying so, and no list of loose facts.
+The script has one through-line from beginning to end: a story told in the order it happened, \
+or an explanation built step by step, each sentence following from the one before, about the \
+same main subject from start to finish. The opening may tease how it ends; after that, start at \
+the beginning and move forward. A video that is a list gives each item its own short part, in \
+an order that builds, and says what ties them together. The visuals are planned from the script, \
+one picture every few seconds, so write what can be shown: people doing things, places, objects. \
+Stay with one moment and one place for a few sentences before moving on, and when the script \
+moves to another time, place or subject, say so in the narration, so the pictures can follow it. \
+Tie an idea to something concrete in the story instead of explaining it in the abstract. No \
+jumping back and forth in time without saying so, and no loose facts that belong to no part of \
+the through-line.
 
 The script is original: no copying or close paraphrase of existing videos. Be accurate where the \
-story touches real events, and keep it safe for advertisers.
+story touches real events: tell what is documented, and say so when an example is imagined. Keep \
+it safe for advertisers.
 
 Write only what the narrator says, as plain paragraphs: no headings, scene directions, \
 timestamps, speaker labels or markdown.";
@@ -63,20 +68,21 @@ moment to moment. The cast, the places and the scenes follow from it.
 Scenes follow the narration in order and together cover all of it: a scene starts at a sentence \
 and runs until the next scene starts. Change scene when the subject, place or moment changes, \
 about every 4 to 8 seconds of narration; a long sentence may hold a scene on its own. Stay in a \
-place for several scenes in a row, showing it from different distances and angles (a wide shot, \
-then a closer one, then a detail), instead of jumping to a new place at every sentence. When the \
-narration turns abstract, stay in the story and show what its people do or what its place looks \
-like at that moment, never an unrelated symbolic picture.
+place for several scenes in a row, each from the distance and the angle that fit its moment, \
+instead of jumping to a new place at every sentence. When the narration turns abstract, stay in \
+the video's visual world: show what its people do, what its place looks like at that moment, or \
+a concrete picture of the idea that belongs in that world.
 
 The cast: when the same person appears in more than one scene (a recurring character such as \
 \"the chef\" or \"the detective\"), list them once in `cast`, at most three, with a short \
-name and one fixed appearance: sex, adult age, skin tone, hair, build and clothes, precise \
-enough to draw the very same person again, in the channel's visual style. Each scene lists in \
-`cast` the members it shows, by their position in `cast` (from 0); its prompt calls them by \
-that name and never describes them differently. Who a person is comes from this video: when the \
-narration does not say, choose the sex, age and looks that fit its subject, period and place, \
-not the same default person for every video. A person seen once, crowds and scenes without \
-people need no cast member; leave `cast` empty when nobody recurs.
+name and one fixed appearance: sex, adult age, skin tone, hair, one or two features of the \
+face that set them apart, build and clothes, precise enough to draw the very same person again, \
+in the channel's visual style. Each scene lists in `cast` the members it shows, by their \
+position in `cast` (from 0); its prompt calls them by that name and adds only what is particular \
+to the shot (what they do, their expression), never their appearance. Who a person is comes \
+from this video: when the narration does not say, choose the sex, age and looks that fit its \
+subject, period and place, a particular person rather than a generic one. A person seen once, \
+crowds and scenes without people need no cast member; leave `cast` empty when nobody recurs.
 
 The places: when more than one scene happens in the same place (\"the kitchen\", \"the \
 control room\"), list it once in `places`, at most eight, with a short name and one fixed \
@@ -84,19 +90,23 @@ description: what the place is, its period, its main objects and where they stan
 day, the weather, the light and the colors, precise enough to draw the very same place again, \
 in the channel's visual style. Each scene gives in `place` the position of its place in \
 `places` (from 0), or -1 when no other scene happens there; its prompt calls the place by that \
-name and never describes it differently. A place the story returns to at another time or in \
-another state (the same street at night, the house years later) is another entry in the list.
+name and adds only what is particular to the shot, never the place's description. A place the \
+story returns to at another time or in another state (the same street at night, the house years \
+later) is another entry in the list. When the video has more than eight such places, list the \
+eight with the most scenes; a scene in another one has -1 and describes its place in its prompt.
 
 Each image prompt is one shot: what is seen, who does what, and from where it is seen (wide, \
 medium or close, and the angle), at that moment of the narration. A scene in the same place as \
 the scene before it shows the next moment there: nothing changes that the narration does not \
-change (the time of day, the weather, what people wear or hold, where things are). For a scene \
-in a place of its own, the prompt also describes the place, its period and its light. Repeat \
-the channel's visual style in every prompt so the images look like one video. The image model \
-sees one prompt at a time, so Bardo adds to each scene the appearance and reference portrait of \
-its cast members, the description of its place, and earlier images of the same place as \
-references; do not write those out again. Frames are {{frame_shape}}. Write the prompts in \
-English, whatever the narration's language ({{language}}).
+change (the time of day, the weather, what people wear or hold, where things are). Every prompt \
+names what is seen in its own words and never points at another scene (no \"still\", \"again\" \
+or \"as before\"). For a scene in a place of its own, the prompt also describes the place, its \
+period and its light. Repeat the channel's visual style in every prompt so the images look \
+like one video. The image model sees one prompt at a time, so Bardo adds to each scene the \
+appearance and reference portrait of its cast members, the description of its place, and \
+earlier images of the same place as references; do not write those out again. Frames are {{frame_shape}}. Write the prompts, and \
+the names and descriptions of the cast and the places, in English, whatever the narration's \
+language ({{language}}).
 
 The motion prompt says how the image moves in a clip of a few seconds: one camera move (slow push \
 in, pan, tilt, orbit or static) and at most one simple, natural action of the subject that fits \
@@ -498,8 +508,9 @@ fn retired_defaults(kind: TemplateKind) -> Vec<TemplateBody> {
 /// The current body with each part still at one of Bardo's earlier
 /// defaults moved on to today's, or `None` when nothing moves. The
 /// instructions and the prompt move apart, so editing one keeps the other's
-/// upgrade. A part moves once: when some version already holds today's
-/// default for it, an earlier default there is the user's own choice.
+/// upgrade. A part moves once: when some version already holds a later
+/// default for it (today's or one in between), an earlier default there is
+/// the user's own choice.
 fn upgraded(
     kind: TemplateKind,
     current: &TemplateBody,
@@ -508,11 +519,19 @@ fn upgraded(
     let today = default_template(kind);
     let retired = retired_defaults(kind);
     let moves = |part: fn(&TemplateBody) -> &str| {
-        retired.iter().any(|old| part(old) == part(current))
-            && part(&today) != part(current)
-            && versions
-                .iter()
-                .all(|version| part(&version.body) != part(&today))
+        // The defaults after the one the part is at, oldest first: one of
+        // them among the versions means the user went back on purpose.
+        let Some(at) = retired.iter().position(|old| part(old) == part(current)) else {
+            return false;
+        };
+        let mut later = retired[at + 1..].iter().chain(std::iter::once(&today));
+        part(&today) != part(current)
+            && !later.any(|newer| {
+                part(newer) != part(current)
+                    && versions
+                        .iter()
+                        .any(|version| part(&version.body) == part(newer))
+            })
     };
     let instructions = moves(TemplateBody::instructions);
     let prompt = moves(TemplateBody::prompt);
@@ -762,7 +781,7 @@ mod tests {
         assert!(
             script
                 .instructions()
-                .contains("one line from beginning to end")
+                .contains("one through-line from beginning to end")
         );
         let scenes = default_template(TemplateKind::ImagePrompt);
         for part in ["`story`", "`places`", "`place`", "at most eight", "-1"] {
@@ -808,6 +827,27 @@ mod tests {
             .unwrap();
         assert_eq!(restored.number, 3);
         assert_eq!(app.current_template(kind).unwrap().id, restored.id);
+    }
+
+    #[test]
+    fn a_default_from_before_a_later_one_the_profile_had_is_the_users_choice() {
+        // The profile had the second scene plan default, moved on to the
+        // third, and the user then put the first back by hand: it stays,
+        // though today's default has never been there.
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        let app = start(&db);
+        let kind = TemplateKind::ImagePrompt;
+        let retired = retired_defaults(kind);
+        let owner = app.profile().id;
+        let first = TemplateVersion::first(owner, retired[1].clone(), SystemTime::now());
+        let second = first.revise(retired[2].clone(), SystemTime::now()).unwrap();
+        let back = second
+            .revise(retired[0].clone(), SystemTime::now())
+            .unwrap();
+        for version in [&first, &second, &back] {
+            db.add_template_version(version).unwrap();
+        }
+        assert_eq!(app.current_template(kind).unwrap().id, back.id);
     }
 
     #[test]

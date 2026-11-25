@@ -47,13 +47,13 @@ When more than one scene happens in the same place (the kitchen, the control roo
 Every image is drawn with other images of the video, which Nano Banana receives as references next to the prompt:
 
 - **A scene in a place already drawn** gets the place's description, the first image drawn there and, when the scene right before it is in the same place, that image too, so it continues from it: the same room, light and time of day, seen from another angle.
-- **The first scene of a place**, and a scene in a place of its own, gets the video's first image, only to match its style and colors.
+- **The first scene of a place** gets the place's description and the video's first image, only to match how it is rendered (the medium, the line, the level of detail). **A scene in a place of its own** gets that image too.
 
-The very first image has nothing to follow, so it sets the look of the video: draw it again until it is right before drawing the rest. References cost nothing extra to speak of: an image costs the same with or without them.
+The very first image has nothing to follow, so it sets the look of the video. A scene drawn again follows the images the video has at that moment, the first scene included, so drawing one scene again keeps the look of the others. An image waiting for your review is not a reference yet: accept it, and the scenes drawn after it follow it. References cost nothing extra to speak of: an image costs the same with or without them. A large image goes as a smaller copy (a JPEG of the same size), which Bardo keeps beside it in the project folder.
 
-**Edit place** changes the description for every scene of the place; a place you changed is marked **Edited**. Scenes already drawn keep their image: draw them again to use the new description. A place cannot be edited while images are being drawn. If you rewrite a scene's prompt so that it no longer names its place, the scene leaves the place and is drawn without it.
+**Edit place** changes the description for every scene of the place; a place you changed is marked **Edited**. Scenes already drawn keep their image: draw them again to use the new description. The images drawn from the old description stop holding the place together, so draw the place's first scene again, accept the new image, and the scenes drawn after it follow it. A place cannot be edited while images are being drawn. If you rewrite a scene's prompt so that it no longer names its place (the name as whole words, with or without "the"), the scene leaves the place and is drawn without it.
 
-Scenes planned before places existed have none; they still get the video's first image for its look. **Plan again** gives them places.
+A plan keeps at most eight places, the ones with the most scenes; a scene in any other carries the description in its own prompt. Scenes planned before places existed have none; they still get the video's first image for its look. **Plan again** gives them places. A scene plan [template](templates.md) you edited yourself gets places too, but not the default template's storyboard rules (one story in order, staying in a place for several scenes).
 
 <a id="filter"></a>
 ## All or pending

@@ -90,6 +90,11 @@ fn a_careful_request_asks_for_more_thought_and_more_room() {
     assert_eq!(body["output_config"]["effort"], "high");
     assert_eq!(body["max_tokens"], 32_000);
     assert!(body.get("thinking").is_none(), "the model decides");
+    assert_eq!(
+        claude.transport().sent()[0].timeout,
+        Some(Duration::from_secs(600)),
+        "and waits longer for the answer"
+    );
 
     // Everyday requests are as they were.
     let claude = generator(&["messages-themes"]);
@@ -99,6 +104,27 @@ fn a_careful_request_asks_for_more_thought_and_more_room() {
     let body = &claude.transport().sent()[0].body;
     assert_eq!(body["output_config"]["effort"], "medium");
     assert_eq!(body["max_tokens"], 16_000);
+    assert_eq!(claude.transport().sent()[0].timeout, None);
+}
+
+#[test]
+fn the_schema_is_sent_in_the_order_it_was_written() {
+    // Claude answers in the schema's order, so a field written first in
+    // the schema is thought through first.
+    let schema = r#"{"type":"object","properties":{"story":{"type":"string"},"cast":{"type":"string"},"answer":{"type":"string"}},"required":["story","cast","answer"],"additionalProperties":false}"#;
+    let claude = generator(&["messages-themes"]);
+    claude
+        .generate(
+            &key(),
+            &request(TextFormat::Json {
+                schema: schema.into(),
+            }),
+        )
+        .unwrap();
+    let sent = String::from_utf8(claude.transport().sent()[0].raw_body.clone()).unwrap();
+    let at = |name: &str| sent.find(&format!("\"{name}\":{{")).unwrap();
+    assert!(at("story") < at("cast"));
+    assert!(at("cast") < at("answer"), "not sorted by name");
 }
 
 #[test]

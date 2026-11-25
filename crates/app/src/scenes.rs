@@ -43,6 +43,7 @@ use bardo_domain::{
     TextEffort, TextFormat, TextGenerator, TextRequest, VideoProject, VideoProjectId,
     scene_image_prompt, sentences,
 };
+use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
 
 use crate::clips::{ClipsView, SceneClipView};
@@ -209,10 +210,15 @@ impl ScenesView {
 /// in `cast`), the place it happens in (by its index in `places`, -1 for
 /// a place of its own) and how its clip moves. The story is only there to
 /// be written before the scenes; Bardo keeps it in the plan's provenance.
+/// The fields a template may not mention say what they are for, so a
+/// template written before them still gets an answer Bardo can use.
 const PLAN_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
-    "story": {"type": "string"},
+    "story": {
+      "type": "string",
+      "description": "One short paragraph: the story the images tell from the first to the last, in order."
+    },
     "cast": {
       "type": "array",
       "items": {
@@ -227,6 +233,7 @@ const PLAN_SCHEMA: &str = r#"{
     },
     "places": {
       "type": "array",
+      "description": "The places where more than one scene happens, each once, with one fixed description. Empty when no place recurs.",
       "items": {
         "type": "object",
         "properties": {
@@ -243,7 +250,10 @@ const PLAN_SCHEMA: &str = r#"{
         "type": "object",
         "properties": {
           "first_sentence": {"type": "integer"},
-          "place": {"type": "integer"},
+          "place": {
+            "type": "integer",
+            "description": "The position in `places` (from 0) of the place this scene happens in, or -1 when it happens in none of them."
+          },
           "prompt": {"type": "string"},
           "cast": {"type": "array", "items": {"type": "integer"}},
           "motion": {"type": "string"}
@@ -387,9 +397,55 @@ fn saved_format(file: &str) -> Option<ImageFormat> {
         .find(|format| format.extension() == extension)
 }
 
+/// How many bytes one reference image takes at most. A drawing at 2K is
+/// several megabytes as it was saved, and five of them would not fit in a
+/// request, so a larger one goes as a JPEG of the same size within this.
+const REFERENCE_BYTES: usize = 2 * 1024 * 1024;
+
 /// How many bytes of reference images one image request carries at most.
-/// Gemini takes 100 MB of inline data a request, and base64 adds a third.
-const MAX_REFERENCE_BYTES: usize = 48 * 1024 * 1024;
+/// Google's documentation gives 20 MB for a whole request with inline
+/// images in one place and 100 MB in another; this keeps to the smaller
+/// (base64 adds a third), with room for five references.
+const MAX_REFERENCE_BYTES: usize = 12 * 1024 * 1024;
+
+/// The name of the small copy of the image `file` that goes as a
+/// reference, kept beside it in the project folder.
+pub(crate) fn reference_name(file: &str) -> String {
+    format!("reference-{file}.jpg")
+}
+
+/// The image `file` as a JPEG within [`REFERENCE_BYTES`]: the copy made
+/// before, or a new one, kept for the next request. `None` when the image
+/// is small enough as it is, or will not be rewritten (then it goes as it
+/// was saved, if the request has room).
+fn small_copy(
+    files: &dyn ProjectFiles,
+    media: &dyn MediaEngine,
+    project: VideoProjectId,
+    file: &str,
+) -> Option<Vec<u8>> {
+    let name = reference_name(file);
+    if let Ok(bytes) = files.read(project, &name) {
+        return Some(bytes);
+    }
+    if files.size(project, file).ok()? <= REFERENCE_BYTES as u64 {
+        return None;
+    }
+    let folder = tempfile::Builder::new()
+        .prefix("bardo-reference-")
+        .tempdir()
+        .ok()?;
+    let source = folder.path().join(file);
+    let destination = folder.path().join("reference.jpg");
+    std::fs::write(&source, files.read(project, file).ok()?).ok()?;
+    if let Err(error) = media.fit_picture(&source, &destination, REFERENCE_BYTES as u64) {
+        tracing::warn!("could not make a small copy of a reference image: {error}");
+        return None;
+    }
+    let bytes = std::fs::read(&destination).ok()?;
+    let _ = files.write(project, &name, &bytes);
+    Some(bytes)
+}
 
 /// The reference images of one image request, in the order they are sent.
 struct References {
@@ -408,14 +464,24 @@ impl Default for References {
 }
 
 impl References {
-    /// Adds the project's image `file`; `false` when it is not an image
-    /// Bardo saved, will not read, or would take the request past
-    /// [`MAX_REFERENCE_BYTES`], and the request then goes without it.
-    fn add(&mut self, files: &dyn ProjectFiles, project: VideoProjectId, file: &str) -> bool {
+    /// Adds the project's image `file`, as a small copy when it is large;
+    /// `false` when it is not an image Bardo saved, will not read, or
+    /// would take the request past [`MAX_REFERENCE_BYTES`], and the
+    /// request then goes without it.
+    fn add(
+        &mut self,
+        files: &dyn ProjectFiles,
+        media: &dyn MediaEngine,
+        project: VideoProjectId,
+        file: &str,
+    ) -> bool {
         let Some(format) = saved_format(file) else {
             return false;
         };
-        let Ok(bytes) = files.read(project, file) else {
+        let small = small_copy(files, media, project, file).map(|bytes| (bytes, ImageFormat::Jpeg));
+        let Some((bytes, format)) =
+            small.or_else(|| Some((files.read(project, file).ok()?, format)))
+        else {
             return false;
         };
         let Some(room) = self.room.checked_sub(bytes.len()) else {
@@ -445,6 +511,8 @@ pub(crate) struct SceneHandler {
     pub(crate) files: Arc<dyn ProjectFiles>,
     pub(crate) text: Arc<dyn TextGenerator>,
     pub(crate) images: Arc<dyn ImageGenerator>,
+    /// Makes the small copies of the images sent as references.
+    pub(crate) media: Arc<dyn MediaEngine>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
 }
@@ -713,7 +781,12 @@ impl SceneHandler {
                 .iter()
                 .map(|member| {
                     member.portrait().is_some_and(|portrait| {
-                        references.add(self.files.as_ref(), project, &portrait.file)
+                        references.add(
+                            self.files.as_ref(),
+                            self.media.as_ref(),
+                            project,
+                            &portrait.file,
+                        )
                     })
                 })
                 .collect();
@@ -727,7 +800,12 @@ impl SceneHandler {
                         .ok()
                         .and_then(|other| other.image())
                         .is_some_and(|image| {
-                            references.add(self.files.as_ref(), project, &image.file)
+                            references.add(
+                                self.files.as_ref(),
+                                self.media.as_ref(),
+                                project,
+                                &image.file,
+                            )
                         })
                 })
                 .map(|(_, shot)| shot)
@@ -1238,7 +1316,8 @@ impl Bardo {
 
     /// Replaces place `place`'s description with the user's. The next
     /// images drawn there follow it; scenes already drawn keep theirs
-    /// until drawn again.
+    /// until drawn again, and those images stop being references of the
+    /// place.
     pub fn edit_place_description(
         &self,
         project: VideoProjectId,
@@ -1815,14 +1894,14 @@ pub(crate) mod tests {
         assert!(
             requests[2]
                 .prompt
-                .contains("Reference 1: a shot in another place.")
+                .contains("Reference 1: another shot of this video.")
         );
         assert_eq!(requests[3].references.len(), 2);
         assert_eq!(requests[3].references[1].bytes, first);
         assert!(
             requests[3]
                 .prompt
-                .contains("Reference 2: a shot in another place.")
+                .contains("Reference 2: another shot of this video.")
         );
         assert_eq!(
             plan.scenes()[0].image().unwrap().generation.prompt,
@@ -1927,7 +2006,7 @@ pub(crate) mod tests {
 
     /// The plan of `plan_answer` as a storyboard: the launch pad twice,
     /// then the control room.
-    fn storyboard_answer() -> String {
+    pub(crate) fn storyboard_answer() -> String {
         serde_json::json!({
             "story": "A probe is launched, drifts away and is lost; the control room goes quiet.",
             "cast": [],
@@ -1941,16 +2020,16 @@ pub(crate) mod tests {
                  "cast": [], "motion": "Slow push in"},
                 {"first_sentence": 1, "place": 0, "prompt": "Close on the rocket lifting off the launch pad",
                  "cast": [], "motion": "Tilt up"},
-                {"first_sentence": 2, "place": 1, "prompt": "The control room, a screen gone dark",
-                 "cast": [], "motion": "Static shot"},
-                {"first_sentence": 3, "place": -1, "prompt": "Deep space, a faint dot among the stars",
+                {"first_sentence": 2, "place": 0, "prompt": "The launch pad empty, smoke drifting over the sea",
                  "cast": [], "motion": "Slow drift"},
+                {"first_sentence": 3, "place": 1, "prompt": "The control room, a screen gone dark",
+                 "cast": [], "motion": "Static shot"},
             ],
         })
         .to_string()
     }
 
-    fn storyboard_project(h: &Harness, app: &Bardo) -> VideoProject {
+    pub(crate) fn storyboard_project(h: &Harness, app: &Bardo) -> VideoProject {
         let project = h.narrated_project(app);
         h.answer(storyboard_answer());
         done(
@@ -1990,7 +2069,7 @@ pub(crate) mod tests {
             "a place no scene happens in is dropped"
         );
         let of: Vec<_> = plan.scenes().iter().map(|scene| scene.place()).collect();
-        assert_eq!(of, [Some(0), Some(0), Some(1), None]);
+        assert_eq!(of, [Some(0), Some(0), Some(0), Some(1)]);
         assert!(plan.generation.output.contains("\"story\""));
 
         done(
@@ -2001,7 +2080,7 @@ pub(crate) mod tests {
         let requests = h.images.requests.lock().unwrap().clone();
         assert_eq!(requests.len(), 4);
         let references: Vec<_> = requests.iter().map(|r| r.references.len()).collect();
-        assert_eq!(references, [0, 1, 1, 1]);
+        assert_eq!(references, [0, 1, 2, 1]);
         // The first scene of a place: its description, nothing to follow.
         assert_eq!(
             requests[0].prompt,
@@ -2019,23 +2098,29 @@ pub(crate) mod tests {
                 .prompt
                 .contains("Reference 1: the shot right before this one, in this same place.")
         );
-        // A new place, and a scene in a place of its own: only the look.
+        // The third there gets the place's first image and the one before.
         assert!(
             requests[2]
+                .prompt
+                .contains("Reference 1: another shot in this same place.")
+        );
+        assert!(
+            requests[2]
+                .prompt
+                .contains("Reference 2: the shot right before this one, in this same place.")
+        );
+        // A new place: its own description, and only the video's look.
+        assert!(
+            requests[3]
                 .prompt
                 .contains("The scene happens in the control room:")
         );
         assert!(
-            requests[2]
-                .prompt
-                .contains("Reference 1: a shot in another place.")
-        );
-        assert!(!requests[3].prompt.contains("The scene happens in"));
-        assert!(
             requests[3]
                 .prompt
-                .contains("Reference 1: a shot in another place.")
+                .contains("Reference 1: another shot of this video.")
         );
+        assert!(!requests[3].prompt.contains("in this same place"));
 
         // Drawn again, the first scene follows the other shot of its place.
         done(
@@ -2050,6 +2135,29 @@ pub(crate) mod tests {
                 .prompt
                 .contains("Reference 1: another shot in this same place.")
         );
+
+        // Described again, the place is drawn from its new description: the
+        // images of how it was only lend their look.
+        app.edit_place_description(project.id, 0, "A pad in a desert at noon")
+            .unwrap();
+        done(
+            &app,
+            app.regenerate_scene_image(project.id, 2, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let moved = h.images.requests.lock().unwrap().last().unwrap().clone();
+        assert!(
+            moved
+                .prompt
+                .contains("The scene happens in the launch pad: A pad in a desert at noon")
+        );
+        assert_eq!(moved.references.len(), 1);
+        assert!(
+            moved
+                .prompt
+                .contains("Reference 1: another shot of this video.")
+        );
+        assert!(!moved.prompt.contains("in this same place"));
     }
 
     #[test]
@@ -2095,7 +2203,7 @@ pub(crate) mod tests {
         let prompts = h.images.prompts();
         assert!(prompts[0].contains("the launch pad: A pad in a desert at noon, harsh light"));
         assert!(!prompts[1].contains("The scene happens in"));
-        assert!(prompts[1].contains("Reference 1: a shot in another place."));
+        assert!(prompts[1].contains("Reference 1: another shot of this video."));
     }
 
     #[test]
@@ -2105,20 +2213,69 @@ pub(crate) mod tests {
         files.write(project, "scene-a.png", &[1; 40]).unwrap();
         files.write(project, "scene-b.png", &[2; 40]).unwrap();
         files.write(project, "notes.txt", &[3; 4]).unwrap();
+        let media = crate::editor::testing::FakeMedia::default();
         let mut references = References {
             images: Vec::new(),
             room: 60,
         };
-        assert!(references.add(&files, project, "scene-a.png"));
+        assert!(references.add(&files, &media, project, "scene-a.png"));
         assert!(
-            !references.add(&files, project, "scene-b.png"),
+            !references.add(&files, &media, project, "scene-b.png"),
             "past the request's limit"
         );
-        assert!(!references.add(&files, project, "scene-gone.png"));
-        assert!(!references.add(&files, project, "notes.txt"));
+        assert!(!references.add(&files, &media, project, "scene-gone.png"));
+        assert!(!references.add(&files, &media, project, "notes.txt"));
         assert_eq!(references.images.len(), 1);
         assert_eq!(references.images[0].bytes, [1; 40]);
+        assert_eq!(references.images[0].format, ImageFormat::Png);
         assert_eq!(references.room, 20);
+        assert!(media.fitted.lock().unwrap().is_empty(), "small as they are");
+    }
+
+    #[test]
+    fn a_large_reference_goes_as_a_small_copy_made_once() {
+        let files = MemoryProjectFiles::default();
+        let project = VideoProjectId::new();
+        // A PNG header of a 2752 x 1536 drawing, then megabytes of pixels.
+        let mut drawing = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".to_vec();
+        drawing.extend(2752u32.to_be_bytes());
+        drawing.extend(1536u32.to_be_bytes());
+        drawing.resize(REFERENCE_BYTES + 1, 7);
+        files.write(project, "scene-a.png", &drawing).unwrap();
+        // One that is not a picture cannot be rewritten: it goes as it is.
+        files
+            .write(project, "scene-b.png", &vec![9; REFERENCE_BYTES + 1])
+            .unwrap();
+        let media = crate::editor::testing::FakeMedia::default();
+
+        let mut references = References::default();
+        assert!(references.add(&files, &media, project, "scene-a.png"));
+        assert_eq!(references.images[0].format, ImageFormat::Jpeg);
+        assert!(references.images[0].bytes.starts_with(&[0xFF, 0xD8]));
+        assert!(references.images[0].bytes.len() < 100);
+        assert_eq!(
+            *media.fitted.lock().unwrap(),
+            [REFERENCE_BYTES as u64],
+            "within a reference's size"
+        );
+        assert_eq!(
+            files.read(project, "reference-scene-a.png.jpg").unwrap(),
+            references.images[0].bytes,
+            "kept beside the image"
+        );
+        assert!(references.add(&files, &media, project, "scene-b.png"));
+        assert_eq!(references.images[1].format, ImageFormat::Png);
+        assert_eq!(references.images[1].bytes.len(), REFERENCE_BYTES + 1);
+
+        // The next request reads the copy instead of making it again.
+        let mut again = References::default();
+        assert!(again.add(&files, &media, project, "scene-a.png"));
+        assert_eq!(again.images[0].format, ImageFormat::Jpeg);
+        assert_eq!(media.fitted.lock().unwrap().len(), 1);
+
+        // And the copy goes with its image.
+        crate::proxies::remove_media(&files, project, "scene-a.png");
+        assert!(!files.exists(project, "reference-scene-a.png.jpg"));
     }
 
     #[test]
@@ -2165,7 +2322,8 @@ pub(crate) mod tests {
         for (scene, request) in planned.scenes().iter().zip(&requests).skip(1) {
             let prompt = format!("{}\n\n", scene.prompt().as_str());
             assert!(request.prompt.starts_with(&prompt), "{}", request.prompt);
-            assert!(request.prompt.contains("Match only its rendering style"));
+            assert!(request.prompt.contains("Match only how it is rendered"));
+            assert!(!request.prompt.contains("The scene happens in"));
             assert_eq!(request.references.len(), 1);
             assert_eq!(request.references[0].bytes, SCENE_IMAGE);
         }

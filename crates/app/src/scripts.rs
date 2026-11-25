@@ -641,6 +641,11 @@ mod tests {
         assert_eq!(script.pending(), None);
         let generation = script.source().generation();
         let request = &h.text.requests()[0];
+        assert_eq!(
+            request.effort,
+            TextEffort::Careful,
+            "the whole video is built on the script"
+        );
         assert_eq!(generation.provider, Provider::Claude);
         assert_eq!(generation.model, "claude-fake");
         assert_eq!(generation.prompt, request.prompt);

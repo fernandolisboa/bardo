@@ -28,6 +28,8 @@ pub struct Sent {
     pub body: serde_json::Value,
     /// The body as sent, for bodies that are not JSON (forms, files).
     pub raw_body: Vec<u8>,
+    /// The wait the request asked for, when it asked for its own.
+    pub timeout: Option<std::time::Duration>,
 }
 
 impl Sent {
@@ -97,6 +99,7 @@ impl Transport for Scripted {
                 })
                 .unwrap_or_default(),
             raw_body: request.body.clone().unwrap_or_default(),
+            timeout: request.timeout,
         });
         self.answers
             .lock()
