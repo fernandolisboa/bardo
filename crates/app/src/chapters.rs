@@ -19,10 +19,10 @@ use bardo_domain::{
     ApiKey, Chapter, ChapterFieldError, ChapterProblem, ChapterRepository, Chapters, CostPurpose,
     Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Narration,
     NarrationRepository, Network, ProfileId, Provider, RenderedPrompt, RepositoryError,
-    SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, VideoFormat,
-    VideoProject, VideoProjectId, chapter_lines, chapter_problems, chapter_title, fitting_chapters,
-    place_chapters, sentences,
+    SecretStore, Stop, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest,
+    VideoFormat, VideoProject, VideoProjectId, chapter_lines, chapter_problems, chapter_title,
+    fitting_chapters, place_chapters, sentences,
 };
 use serde::{Deserialize, Serialize};
 
@@ -259,7 +259,7 @@ pub(crate) struct ChaptersHandler {
 
 impl JobHandler for ChaptersHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.write(payload, cx.id())
+        self.write(payload, cx.id(), &cx.stop())
     }
 }
 
@@ -272,7 +272,7 @@ impl ChaptersHandler {
     }
 
     /// Writes the chapters `job` asked for, in place of the project's.
-    pub(crate) fn write(&self, payload: &str, job: JobId) -> Result<(), JobFailure> {
+    pub(crate) fn write(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
         let payload: ChaptersPayload = serde_json::from_str(payload)
             .map_err(|e| JobFailure::unexpected(format!("invalid chapters payload: {e}")))?;
         let project: VideoProjectId = crate::scenes::id(&payload.project)?;
@@ -306,12 +306,14 @@ impl ChaptersHandler {
         let paid_call = PlannedCall::text(CostPurpose::Chapters, &request);
         let generated = {
             let _paying = self.costs.paying_for_project(job, &paid_call, project)?;
-            self.text.generate(&key, &request).map_err(|failure| {
-                // An answer that was lost or cut may still have been billed.
-                self.costs
-                    .record_failed_for_project(&failure, &paid_call, Some(job), project);
-                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-            })
+            self.text
+                .generate_until(&key, &request, stop)
+                .map_err(|failure| {
+                    // An answer that was lost or cut may still have been billed.
+                    self.costs
+                        .record_failed_for_project(&failure, &paid_call, Some(job), project);
+                    JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+                })
         }?;
         self.costs.record_for_project(
             PaidCall {
@@ -746,6 +748,7 @@ mod tests {
         assert_eq!(job.attempts(), 1, "not made again by the queue");
         assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
         assert_eq!(h.text.requests().len() - before, 1);
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         let cost = only_cost(&*h.db, app.profile().id, CostPurpose::Chapters);
         assert_eq!((cost.project, cost.job), (Some(project.id), Some(id)));
     }
@@ -1105,7 +1108,9 @@ mod tests {
             },
         };
         let asked = h.text.requests().len();
-        handler.write(job.payload(), job.id()).unwrap();
+        handler
+            .write(job.payload(), job.id(), &Stop::never())
+            .unwrap();
         assert_eq!(h.text.requests().len(), asked);
 
         h.answer(answer(&[(0, "Launch")]));

@@ -25,6 +25,8 @@ A running job shows a bar and its percent. Screens show their own jobs too: a st
 
 **Cancel** stops a running or queued job. What it already made is kept for a retry, and a call a provider already answered is paid and counted in [Costs](costs.md#spent). A cancelled render or export keeps the networks it finished, and a retry does the ones left.
 
+A text Claude is still writing (a script, a scene plan, a title) is given up when its job is cancelled: Bardo stops reading and closes the connection instead of waiting for the end. Claude may charge for what it wrote until then, so [Costs](costs.md#spent) counts an estimate of the whole text, which may be more than a text cancelled early cost. A scene plan whose answer arrives just as you cancel is not applied to the project; it is paid, and **Retry** on that job, or **Plan scenes** on the Scenes stage, makes the plan from it without asking Claude again.
+
 <a id="retry"></a>
 ## Retrying
 
@@ -35,6 +37,8 @@ A paid request for text, an image, a voice or music that was sent and got no ans
 A clip request the provider took and that then ended without a clip (failed, cancelled or forgotten there) is not sent again by itself either, since sending it again is a new request. Its scene shows the failure, the job stops as **Failed** once the other scenes are done, and **Retry** is what sends it again ([Clips](clips.md)).
 
 **Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start, and an image or clip job does only the scenes it has not delivered: what you did with a delivered image or clip since (rejected it, replaced it) does not bring it back. An image or clip job is not retried while another job works on the same scenes: wait for that one to end, so that no scene is paid for twice. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
+
+A scene plan or image job is not queued again while another scene job of its project is queued, running or still stopping: the two would pay for the same work. And an older scene plan job is not queued again once a newer scene job of the project came after it, since it could replace the plan made since: retry the newer job, or plan again from the [Scenes](scenes.md) stage, which asks first.
 
 <a id="restart"></a>
 ## Closing Bardo mid-job

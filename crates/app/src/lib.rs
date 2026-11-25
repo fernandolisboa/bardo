@@ -1335,9 +1335,9 @@ pub(crate) mod testing {
         ImageFormat, ImageGenerator, ImageRequest, KeyCheck, KeyCheckOutcome, KeyChecker, Market,
         MarketData, MarketSample, Money, MusicGenerator, MusicRequest, Niche, Provider,
         ProviderFailure, Question, Questions, ScoreAnswer, Speech, SpeechRequest,
-        SpeechSynthesizer, StagedFile, StagedImage, TakeDone, TakeGenerator, TakeInput, TakeMode,
-        TakeModel, TakeRequest, TakeStatus, TakeTier, TextGenerator, TextRequest, TokenUsage,
-        UploadSample, Voice, VoiceLibrary, YesNoAnswer,
+        SpeechSynthesizer, StagedFile, StagedImage, Stop, TakeDone, TakeGenerator, TakeInput,
+        TakeMode, TakeModel, TakeRequest, TakeStatus, TakeTier, TextGenerator, TextRequest,
+        TokenUsage, UploadSample, Voice, VoiceLibrary, YesNoAnswer,
     };
 
     use crate::Providers;
@@ -1456,6 +1456,19 @@ pub(crate) mod testing {
         pub(crate) usage: Mutex<TokenUsage>,
         /// How long each call takes, to catch a job mid-run.
         pub(crate) delay: Mutex<Duration>,
+        /// Answers although it was told to stop: the answer that arrives
+        /// whole just as its job is stopped.
+        pub(crate) deaf: Mutex<bool>,
+        /// While set, an answer on its way is held back, for a test to
+        /// act while the request is out; with `deaf`, the answer then
+        /// arrives whole whatever the stop said meanwhile.
+        pub(crate) held: std::sync::atomic::AtomicBool,
+        /// Answers given up midway because their stop asked.
+        pub(crate) given_up: std::sync::atomic::AtomicU32,
+        /// Requests nobody could have stopped (`Stop::never`): a job hands
+        /// over its own stop, so a request made by one is never among
+        /// these.
+        pub(crate) unstoppable: std::sync::atomic::AtomicU32,
         /// The next call hangs until `release`, as when Bardo closes while
         /// the provider works, and then answers nothing: the process that
         /// sent it is gone.
@@ -1469,6 +1482,20 @@ pub(crate) mod testing {
     impl FakeTextGenerator {
         pub(crate) fn requests(&self) -> Vec<TextRequest> {
             self.requests.lock().unwrap().clone()
+        }
+
+        /// Holds answers back from now on, until `let_go`.
+        pub(crate) fn hold(&self) {
+            self.held.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        pub(crate) fn let_go(&self) {
+            self.held.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        /// How many requests came with a stop nobody can ask.
+        pub(crate) fn unstoppable(&self) -> u32 {
+            self.unstoppable.load(std::sync::atomic::Ordering::SeqCst)
         }
 
         /// Queues an answer proposing these titles, each with an angle.
@@ -1486,18 +1513,61 @@ pub(crate) mod testing {
     }
 
     impl TextGenerator for FakeTextGenerator {
-        fn generate(
+        fn generate_until(
             &self,
             _key: &ApiKey,
             request: &TextRequest,
+            stop: &Stop,
         ) -> Result<GeneratedText, ProviderFailure> {
+            // As the adapter: nothing is sent once the stop asked, and an
+            // answer on its way is given up where it is.
+            if stop.asked() {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unreachable,
+                    "given up before the request was sent",
+                ));
+            }
+            if !stop.may_ask() {
+                self.unstoppable
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             self.requests.lock().unwrap().push(request.clone());
             let delay = *self.delay.lock().unwrap();
-            std::thread::sleep(delay);
+            let deaf = *self.deaf.lock().unwrap();
+            let until = std::time::Instant::now() + delay;
+            loop {
+                let held = self.held.load(std::sync::atomic::Ordering::SeqCst);
+                let left = until.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() && !held {
+                    break;
+                }
+                let left = if held { Duration::from_millis(5) } else { left };
+                if !deaf && stop.asked() {
+                    self.given_up
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    return Err(ProviderFailure::new(
+                        bardo_domain::ProviderFailureKind::AnswerLost,
+                        "the answer stopped midway, and Claude bills what it wrote of it (given up while Claude was writing it)",
+                    ));
+                }
+                std::thread::sleep(left.min(Duration::from_millis(5)));
+            }
             if self.hang.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 self.hanging
                     .store(true, std::sync::atomic::Ordering::SeqCst);
                 while !self.release.load(std::sync::atomic::Ordering::SeqCst) {
+                    // A call that hangs is given up like any other once
+                    // its stop asks.
+                    if !deaf && stop.asked() {
+                        self.hanging
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        self.given_up
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        return Err(ProviderFailure::new(
+                            bardo_domain::ProviderFailureKind::AnswerLost,
+                            "the answer stopped midway, and Claude bills what it wrote of it (given up while Claude was writing it)",
+                        ));
+                    }
                     std::thread::sleep(Duration::from_millis(2));
                 }
                 self.hanging

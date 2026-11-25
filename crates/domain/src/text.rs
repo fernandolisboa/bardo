@@ -87,21 +87,79 @@ pub struct GeneratedText {
     pub usage: TokenUsage,
 }
 
+/// Asked while an answer is awaited: whether whoever wanted it no longer
+/// does (its job was cancelled, or another runner took it). A writer that
+/// sees it gives the answer up there, so a provider that bills what it
+/// writes is not left writing an answer nobody reads.
+#[derive(Clone, Default)]
+pub struct Stop(Option<Arc<dyn Fn() -> bool + Send + Sync>>);
+
+impl Stop {
+    /// Nobody stops this answer.
+    pub fn never() -> Self {
+        Self(None)
+    }
+
+    /// Stops once `asked` says so. It is asked often, from the thread that
+    /// waits for the answer.
+    pub fn when(asked: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        Self(Some(Arc::new(asked)))
+    }
+
+    /// Whether the answer is no longer wanted.
+    pub fn asked(&self) -> bool {
+        self.0.as_ref().is_some_and(|asked| asked())
+    }
+
+    /// Whether anybody may stop the answer at all.
+    pub fn may_ask(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
+impl std::fmt::Debug for Stop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            None => f.write_str("Stop(never)"),
+            // Not asked here: asking may take a lock.
+            Some(_) => f.write_str("Stop(..)"),
+        }
+    }
+}
+
 /// Writes text. Calls the network and blocks, so it runs inside a job.
 pub trait TextGenerator: Send + Sync {
-    fn generate(
+    /// Writes the text, and gives up as soon as `stop` asks. An answer
+    /// given up after its request left fails as a lost answer
+    /// (`ProviderFailureKind::AnswerLost`): the provider bills what it
+    /// wrote of it. One given up before anything was sent fails as
+    /// `Unreachable`, which nothing is billed for. An answer that arrived
+    /// whole is returned although `stop` asked meanwhile: it is paid for,
+    /// and the caller decides what to do with it.
+    fn generate_until(
         &self,
         key: &ApiKey,
         request: &TextRequest,
+        stop: &Stop,
     ) -> Result<GeneratedText, ProviderFailure>;
-}
 
-impl<T: TextGenerator + ?Sized> TextGenerator for Arc<T> {
+    /// Writes the text and waits for all of it.
     fn generate(
         &self,
         key: &ApiKey,
         request: &TextRequest,
     ) -> Result<GeneratedText, ProviderFailure> {
-        (**self).generate(key, request)
+        self.generate_until(key, request, &Stop::never())
+    }
+}
+
+impl<T: TextGenerator + ?Sized> TextGenerator for Arc<T> {
+    fn generate_until(
+        &self,
+        key: &ApiKey,
+        request: &TextRequest,
+        stop: &Stop,
+    ) -> Result<GeneratedText, ProviderFailure> {
+        (**self).generate_until(key, request, stop)
     }
 }

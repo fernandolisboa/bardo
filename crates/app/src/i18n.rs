@@ -873,6 +873,8 @@ pub enum Text {
     CancelReplanScenes,
     ScenesPlanning,
     ScenesDrawing,
+    /// A cancelled scene job is still letting go of what it had sent.
+    ScenesStopping,
     ScenesStopped,
     ScenesStale,
     /// `ScenesStale` when the scenes can be fitted to the narration.
@@ -2099,6 +2101,8 @@ pub enum Text {
     JobRunsElsewhere,
     JobSuperseded,
     JobRestyled,
+    /// A scene plan job retried after a newer scene job of its project.
+    JobScenesMovedOn,
     /// An image or clip job retried while another job works on one of its
     /// scenes.
     JobScenesTaken,
@@ -2107,7 +2111,8 @@ pub enum Text {
     JobTakeFromItsPage,
     /// A scene job retried while a narration of its project is being made.
     JobNarrationBusy,
-    /// A narration job retried while scenes of its project are being made.
+    /// A narration or scene job retried while scenes of its project are
+    /// being made, or a cancelled scene job is still stopping.
     JobScenesBusy,
     JobAsksFirst,
     SettingsPublishingTab,
@@ -3683,6 +3688,7 @@ impl Text {
             Text::CancelReplanScenes => "scenes.replan_cancel",
             Text::ScenesPlanning => "scenes.planning",
             Text::ScenesDrawing => "scenes.drawing",
+            Text::ScenesStopping => "scenes.stopping",
             Text::ScenesStopped => "scenes.stopped",
             Text::ScenesStale => "scenes.stale",
             Text::ScenesStaleFit => "scenes.stale_fit",
@@ -4866,6 +4872,7 @@ impl Text {
             Text::JobRunsElsewhere => "job.error.runs_elsewhere",
             Text::JobSuperseded => "job.error.superseded",
             Text::JobRestyled => "job.error.restyled",
+            Text::JobScenesMovedOn => "job.error.scenes_moved_on",
             Text::JobScenesTaken => "job.error.scenes_taken",
             Text::JobTakeFromItsPage => "job.error.take_from_page",
             Text::JobNarrationBusy => "job.error.narration_busy",
@@ -6201,6 +6208,7 @@ mod tests {
             Text::CancelReplanScenes,
             Text::ScenesPlanning,
             Text::ScenesDrawing,
+            Text::ScenesStopping,
             Text::ScenesStopped,
             Text::ScenesStale,
             Text::ScenesStaleFit,
@@ -7721,6 +7729,7 @@ mod tests {
             Text::JobRunsElsewhere,
             Text::JobSuperseded,
             Text::JobRestyled,
+            Text::JobScenesMovedOn,
             Text::JobScenesTaken,
             Text::JobTakeFromItsPage,
             Text::JobNarrationBusy,

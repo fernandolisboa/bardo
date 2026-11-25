@@ -6,9 +6,12 @@
 //! says how far it got. Claude bills what it writes, read or not, so a
 //! request that left is never sent again by itself (ADR-0030): one whose
 //! answer never arrives, stops midway or cannot be read is a lost answer,
-//! not an outage. JSON output uses structured outputs
-//! (`output_config.format`), so the answer always matches the schema, and
-//! its fields come in the schema's order: the schema is sent as written
+//! not an outage. A request whose job was cancelled is given up as soon as
+//! the adapter is told: the stream is dropped, which closes its
+//! connection, and what Claude wrote until then is a lost answer too. JSON
+//! output uses structured outputs (`output_config.format`), so the answer
+//! always matches the schema, and its fields come in the schema's order:
+//! the schema is sent as written
 //! (`serde_json` keeps the order of keys, see the workspace manifest), so a
 //! schema can make Claude write one field before another. If Claude's
 //! safety rules decline a request, the API re-runs it on Anthropic's
@@ -19,15 +22,17 @@ use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 
 use bardo_domain::{
-    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, TextEffort, TextFormat,
-    TextGenerator, TextRequest, TokenUsage,
+    ApiKey, GeneratedText, Provider, ProviderFailure, ProviderFailureKind, Stop, TextEffort,
+    TextFormat, TextGenerator, TextRequest, TokenUsage,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::claude_stream::{self, StreamEnd, StreamedAnswer};
-use crate::http::{HttpRequest, HttpResponse, StreamedResponse, Transport, UreqTransport};
-use crate::idle::Watched;
+use crate::http::{
+    GIVEN_UP_UNSENT, HttpRequest, HttpResponse, StreamedResponse, Transport, UreqTransport,
+};
+use crate::idle::{STOP_POLL, Watched};
 use crate::key_check::failure;
 use crate::retry::{
     Backoff, PaidAnswer, Sleeper, lost_upstream, thread_sleeper, unanswered, unreadable,
@@ -328,6 +333,35 @@ fn comes_back_shortly(answer: &StreamedAnswer) -> bool {
         )
 }
 
+/// A request given up before it was sent: nothing is billed for it.
+fn not_sent() -> ProviderFailure {
+    ProviderFailure::new(ProviderFailureKind::Unreachable, GIVEN_UP_UNSENT)
+}
+
+/// A request Claude said it started nothing of (a rate limit, an
+/// overload), given up during the wait to send it again: nothing is
+/// billed for it.
+fn not_sent_again() -> ProviderFailure {
+    ProviderFailure::new(
+        ProviderFailureKind::Unreachable,
+        "Claude was busy and started nothing, and the wait to send the request again was given up",
+    )
+}
+
+/// An answer given up after its request left, as far as it had got: a
+/// lost answer, like any stream that stops before its end. Claude bills
+/// what it wrote until the connection closed.
+fn given_up(answer: &StreamedAnswer) -> ProviderFailure {
+    if answer.started() {
+        stopped_midway("given up while Claude was writing it")
+    } else {
+        ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            "Claude took the request and its answer was given up before it began, so it may have written and billed part of one",
+        )
+    }
+}
+
 fn unexpected(detail: impl Into<String>) -> ProviderFailure {
     ProviderFailure::new(ProviderFailureKind::Unexpected, detail)
 }
@@ -479,16 +513,22 @@ impl<T: Transport> ClaudeTextGenerator<T> {
     /// place of the answer, and never when the answer's `x-should-retry`
     /// header says not to. An error status that is not Claude speaking is
     /// a lost answer, as for every paid call; so is Claude's own word that
-    /// it ran out of time, or a failure it asks not to be sent again.
+    /// it ran out of time, or a failure it asks not to be sent again. Once
+    /// `stop` asks, nothing more is sent, and an answer on its way is
+    /// given up where it is.
     fn send(
         &self,
         key: &ApiKey,
         request: &TextRequest,
         with_fallback: bool,
+        stop: &Stop,
     ) -> Result<Answered, ProviderFailure> {
         let http = message_request(key, request, with_fallback)?;
         let mut retry = 0;
         loop {
+            if stop.asked() {
+                return Err(not_sent());
+            }
             // Billed for what it writes, read or not: a request that left
             // and got no answer is a lost answer, never sent again by
             // itself.
@@ -496,7 +536,10 @@ impl<T: Transport> ClaudeTextGenerator<T> {
                 status,
                 headers,
                 body,
-            } = self.transport.send_streamed(&http).map_err(unanswered)?;
+            } = self
+                .transport
+                .send_streamed_until(&http, stop)
+                .map_err(unanswered)?;
             let mut body = BufReader::new(body);
             // What the answer's headers ask of a client that sends again.
             let asked = HttpResponse {
@@ -509,10 +552,24 @@ impl<T: Transport> ClaudeTextGenerator<T> {
                 let answer = match comes_whole(&mut body) {
                     // A server that does not stream hands the answer over
                     // whole.
-                    Ok(true) => parse_whole(&buffered(status, headers, body))?,
+                    Ok(true) => match parse_whole(&buffered(status, headers, body)) {
+                        Ok(answer) => answer,
+                        // Cut by the stop, not by the server.
+                        Err(_) if stop.asked() => {
+                            StreamedAnswer::unstarted(StreamEnd::Broken("given up".to_owned()))
+                        }
+                        Err(failure) => return Err(failure),
+                    },
                     Ok(false) => claude_stream::read(body),
                     Err(error) => StreamedAnswer::unstarted(StreamEnd::Broken(error.to_string())),
                 };
+                // Only an answer that broke off is given up. One that
+                // arrived whole all the same is an answer: it is paid for,
+                // and the caller decides what to do with it. And an error
+                // Claude sent in its place still says what it says.
+                if stop.asked() && matches!(answer.end, StreamEnd::Broken(_)) {
+                    return Err(given_up(&answer));
+                }
                 let wait = (comes_back_shortly(&answer) && may_resend).then(|| {
                     let mut busy = asked;
                     busy.status = 529;
@@ -547,26 +604,48 @@ impl<T: Transport> ClaudeTextGenerator<T> {
             };
             match wait {
                 Some(wait) if retry < self.backoff.retries => {
-                    (self.sleep)(wait);
+                    if !self.pause(wait, stop) {
+                        return Err(not_sent_again());
+                    }
                     retry += 1;
                 }
                 _ => return Ok(answered),
             }
         }
     }
+
+    /// Waits before sending again, in short steps when somebody may stop
+    /// the wait. False once `stop` asked.
+    fn pause(&self, wait: Duration, stop: &Stop) -> bool {
+        if !stop.may_ask() {
+            (self.sleep)(wait);
+            return true;
+        }
+        let mut left = wait;
+        while !left.is_zero() {
+            if stop.asked() {
+                return false;
+            }
+            let step = left.min(STOP_POLL);
+            (self.sleep)(step);
+            left -= step;
+        }
+        !stop.asked()
+    }
 }
 
 impl<T: Transport> TextGenerator for ClaudeTextGenerator<T> {
-    fn generate(
+    fn generate_until(
         &self,
         key: &ApiKey,
         request: &TextRequest,
+        stop: &Stop,
     ) -> Result<GeneratedText, ProviderFailure> {
-        let mut answered = self.send(key, request, true)?;
+        let mut answered = self.send(key, request, true, stop)?;
         // An account without access to the fallback beta still gets its
         // text, only without the fallback.
         if bad_request(&answered).is_some_and(|message| message.contains("anthropic-beta")) {
-            answered = self.send(key, request, false)?;
+            answered = self.send(key, request, false, stop)?;
         }
         // An empty balance is reported as a bad request.
         if let Some(message) = bad_request(&answered)

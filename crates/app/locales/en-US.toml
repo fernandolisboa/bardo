@@ -391,10 +391,11 @@ not_started = "Could not start the job. Try again."
 runs_elsewhere = "The background agent is running this job right now. Try again when it finishes."
 superseded = "A newer narration of this project replaced this import, so it cannot run again."
 restyled = "The video's visual style changed after this job started, so it cannot run again. Draw the scenes from the Scenes stage, which shows what they cost in the current style."
+scenes_moved_on = "A newer scene job of this project came after this one, so it cannot run again: it could replace a plan made since. Retry the newer job, or plan the scenes from the Scenes stage."
 scenes_taken = "Another job is working on these scenes now. Retry this one when it is over, so no scene is paid for twice."
 take_from_page = "Nothing of this take reached its provider yet. Make it again on the Capture step, which checks the video's cap, the test take and the preflight checks first."
 narration_busy = "A narration is being made for this project, and what this job makes now would be out of date at once. When the narration is ready, bring the scenes onto it on the Scenes stage first."
-scenes_busy = "Scenes, images or clips are being made for this project. Run this again when they are done, or cancel them first."
+scenes_busy = "Scenes, images or clips are being made for this project, or a cancelled job is still stopping. Run this again when they are done, or cancel them first."
 asks_first = "This video's scenes hold images or clips that running this again would put out of date or discard. Start it from its stage in the project instead, which shows what is at stake and asks first."
 
 [setup]
@@ -727,7 +728,7 @@ voice_unchecked = "The narrator's voice has not been checked in your ElevenLabs 
 voice_unavailable = "The narrator's voice is not in your ElevenLabs account. Fix it on the Personas screen or choose another narrator."
 missing_key = "Save an ElevenLabs key under Settings to generate or import narration."
 busy = "A narration is already being made for this project."
-scenes_busy = "Scenes, images or clips are being made for this project on the current narration. Wait for them, or cancel them on the Jobs panel, before replacing the narration."
+scenes_busy = "Scenes, images or clips are being made for this project on the current narration, or a cancelled job is still stopping. Wait for them, or cancel them on the Jobs panel, before replacing the narration."
 outdates_pictures = "A new narration puts the images and clips of this video's scenes out of date. Confirm to go ahead."
 missing = "Generate or import the narration first."
 audio_missing = "The narration's audio file is missing from the project folder. Generate it again."
@@ -1022,6 +1023,7 @@ replan_confirm_button = "Plan again and discard the files"
 replan_cancel = "Keep these scenes"
 planning = "Planning the scenes…"
 drawing = "Drawing the images…"
+stopping = "Cancelled. Finishing what was already sent…"
 stopped = "The last run stopped:"
 stale = "The narration was made again after these scenes were planned and reads other text, so the scenes cannot be fitted to it. Plan them again. Until then no image or clip is made for them: it would be timed for a narration that is gone."
 stale_fit = "The narration was made again after these scenes were planned, so their times no longer match. It reads the same text: Fit to the narration moves each scene to its new time and keeps every image and clip. Until then no image or clip is made for them."
@@ -1090,7 +1092,7 @@ narration_too_long = "This narration is too long to plan at once: its plan may n
 scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
 missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."
-busy = "Scenes, images or clips are already being made for this project."
+busy = "Scenes, images or clips are already being made for this project, or a cancelled job is still stopping."
 narration_busy = "A narration is being made for this project. Wait for it, or cancel it on the Jobs panel: scenes planned, drawn or animated now would be out of date as soon as it is ready."
 plan_out_of_date = "These scenes are out of date: the narration changed since they were planned, so an image or clip made now would be timed for a narration that is gone. Fit the scenes to the narration or plan them again first (on a version, place them)."
 other_text = "The narration reads other text than these scenes were planned on, so they cannot be fitted to it. Plan them again."
@@ -3437,7 +3439,7 @@ body = "A passing failure, like a connection that could not be made, is tried ag
 
 [tour.jobs.restart]
 title = "Closing Bardo mid-job"
-body = "Close Bardo whenever you like: next time it opens, each job picks up from its last saved point, and work a provider already did is not paid twice."
+body = "Close Bardo whenever you like: next time it opens, each job picks up from its last saved point, and work a provider already did is not paid twice. A paid request that was still waiting for its answer is not sent again by itself: its job shows as failed, and Retry asks again."
 
 [tour.keys]
 name = "API keys tour"

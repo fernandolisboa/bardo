@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use std::fmt;
 use std::time::Duration;
 
+use bardo_domain::Stop;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Get,
@@ -16,6 +18,7 @@ pub enum Method {
 /// A request. Header values may hold keys, query strings tokens and
 /// secrets, and bodies user content, so `Debug` shows only the address
 /// without its query, the header names and the body size.
+#[derive(Clone)]
 pub struct HttpRequest {
     pub method: Method,
     pub url: String,
@@ -368,7 +371,31 @@ pub trait Transport: Send + Sync {
             body: Box::new(std::io::Cursor::new(response.body.into_bytes())),
         })
     }
+
+    /// `send_streamed`, given up as soon as `stop` asks: while the answer
+    /// is awaited, and at every read of its body.
+    ///
+    /// Every transport asks `stop` as the request is about to leave, and
+    /// sends nothing when it asks then: the error says the request never
+    /// left. A caller whose `stop` was not asked yet knows by that that
+    /// nothing was sent (`Watched` decides so what a wait given up before
+    /// the answer began may have cost). A transport that cannot give an
+    /// answer up (this default) asks that once and reads the answer to its
+    /// end.
+    fn send_streamed_until(
+        &self,
+        request: &HttpRequest,
+        stop: &Stop,
+    ) -> Result<StreamedResponse, TransportError> {
+        if stop.asked() {
+            return Err(TransportError::not_sent(GIVEN_UP_UNSENT));
+        }
+        self.send_streamed(request)
+    }
 }
+
+/// What a request given up before it left says.
+pub const GIVEN_UP_UNSENT: &str = "given up before the request was sent";
 
 /// Real HTTPS through `ureq`. Trusts the operating system's certificate
 /// store (so a corporate proxy's root installed on Windows works) and the
@@ -549,6 +576,10 @@ impl UreqTransport {
 struct TrackedBody<'a> {
     /// What was not handed over yet.
     bytes: &'a [u8],
+    /// Asked once, when the connection first asks for the body: the last
+    /// moment the request can be kept from leaving. Asked then, nothing of
+    /// the body is handed over.
+    leave: Option<&'a Stop>,
 }
 
 impl TrackedBody<'_> {
@@ -559,6 +590,9 @@ impl TrackedBody<'_> {
 
 impl std::io::Read for TrackedBody<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.leave.take().is_some_and(Stop::asked) {
+            return Err(std::io::Error::other(GIVEN_UP_UNSENT));
+        }
         self.bytes.read(buffer)
     }
 }
@@ -605,9 +639,25 @@ impl UreqTransport {
         &self,
         request: &HttpRequest,
     ) -> Result<ureq::http::Response<ureq::Body>, TransportError> {
+        self.call_until(request, &Stop::never())
+    }
+
+    /// Sends `request` unless `stop` asks as it is about to leave: when
+    /// the connection is there and asks for the body, or, for a request
+    /// without one, before connecting.
+    fn call_until(
+        &self,
+        request: &HttpRequest,
+        stop: &Stop,
+    ) -> Result<ureq::http::Response<ureq::Body>, TransportError> {
         let failed = |error: ureq::Error, body_handed_over: Option<bool>| {
             TransportError(error.to_string(), delivery(&error, body_handed_over))
         };
+        let has_body = matches!(request.method, Method::Post | Method::Put)
+            && request.body.as_deref().is_some_and(|body| !body.is_empty());
+        if !has_body && stop.asked() {
+            return Err(TransportError::not_sent(GIVEN_UP_UNSENT));
+        }
         match request.method {
             Method::Get => {
                 let mut call = self.agent.get(&request.url);
@@ -643,7 +693,10 @@ impl UreqTransport {
                 {
                     call = call.header("content-length", bytes.len().to_string());
                 }
-                let mut body = TrackedBody { bytes };
+                let mut body = TrackedBody {
+                    bytes,
+                    leave: Some(stop),
+                };
                 let sent = call.send(ureq::SendBody::from_reader(&mut body));
                 sent.map_err(|error| failed(error, Some(body.all_handed_over())))
             }
@@ -723,7 +776,17 @@ impl Transport for UreqTransport {
     }
 
     fn send_streamed(&self, request: &HttpRequest) -> Result<StreamedResponse, TransportError> {
-        let response = self.call(request)?;
+        self.send_streamed_until(request, &Stop::never())
+    }
+
+    /// Asks `stop` only as the request is about to leave: the answer is
+    /// given up by whoever reads it (`Watched`).
+    fn send_streamed_until(
+        &self,
+        request: &HttpRequest,
+        stop: &Stop,
+    ) -> Result<StreamedResponse, TransportError> {
+        let response = self.call_until(request, stop)?;
         let status = response.status().as_u16();
         let headers = response
             .headers()
@@ -1023,6 +1086,45 @@ mod tests {
         ] {
             assert_eq!(delivery(&error, None), Delivery::Unknown, "{error}");
         }
+    }
+
+    #[test]
+    fn a_request_given_up_as_it_is_about_to_leave_hands_no_body_over() {
+        use std::io::Read as _;
+
+        // The connection is made, and the job is cancelled before the
+        // request goes down it (a slow network, a slow TLS session).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut received = Vec::new();
+            let _ = stream.read_to_end(&mut received);
+            String::from_utf8_lossy(&received).into_owned()
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_secs(10));
+        let request = HttpRequest::post_json(
+            format!("http://{address}/v1/messages"),
+            "{\"a paid request\":true}",
+        );
+        let Err(error) = transport.send_streamed_until(&request, &Stop::when(|| true)) else {
+            panic!("given up");
+        };
+        assert!(error.never_left(), "{}", error.0);
+        assert!(error.0.contains(GIVEN_UP_UNSENT), "{}", error.0);
+        // Its length was announced and none of it came: the server has
+        // nothing to act on.
+        let received = server.join().unwrap();
+        assert!(!received.contains("a paid request"), "{received}");
+
+        // A request without a body is not sent at all.
+        let Err(error) = transport.send_streamed_until(
+            &HttpRequest::get(format!("http://{address}/")),
+            &Stop::when(|| true),
+        ) else {
+            panic!("given up");
+        };
+        assert!(error.never_left());
     }
 
     #[test]

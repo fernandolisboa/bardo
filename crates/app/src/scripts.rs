@@ -14,7 +14,7 @@ use std::time::SystemTime;
 use bardo_domain::{
     ApiKey, Channel, ChannelId, CostPurpose, GeneratedScript, Generation, GenerationId, Job,
     JobFailure, JobFailureKind, JobId, JobKind, Money, NoPendingScript, ProfileId, Provider,
-    RepositoryError, Script, ScriptFieldError, ScriptRepository, ScriptText, SecretStore,
+    RepositoryError, Script, ScriptFieldError, ScriptRepository, ScriptText, SecretStore, Stop,
     TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
     TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, UiLanguage,
     VideoProject, VideoProjectId,
@@ -166,13 +166,13 @@ impl ScriptHandler {
 
 impl JobHandler for ScriptHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.generate(payload, cx.id())
+        self.generate(payload, cx.id(), &cx.stop())
     }
 }
 
 impl ScriptHandler {
     /// Generates the script `job` asked for and saves it.
-    fn generate(&self, payload: &str, job: JobId) -> Result<(), JobFailure> {
+    fn generate(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
         let payload = ScriptPayload::parse(payload)?;
         let project = payload.project()?;
         // An earlier attempt of this job may have saved its script and
@@ -198,12 +198,15 @@ impl ScriptHandler {
         };
         let call = PlannedCall::text(CostPurpose::Script, &request);
         let paying = self.costs.paying_for_project(job, &call, project)?;
-        let generated = self.text.generate(&key, &request).map_err(|failure| {
-            // An answer that was lost or cut may still have been billed.
-            self.costs
-                .record_failed_for_project(&failure, &call, Some(job), project);
-            JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-        });
+        let generated = self
+            .text
+            .generate_until(&key, &request, stop)
+            .map_err(|failure| {
+                // An answer that was lost or cut may still have been billed.
+                self.costs
+                    .record_failed_for_project(&failure, &call, Some(job), project);
+                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+            });
         drop(paying);
         let generated = generated?;
         self.costs.record_for_project(
@@ -653,6 +656,7 @@ mod tests {
         assert_eq!(script.pending(), None);
         let generation = script.source().generation();
         let request = &h.text.requests()[0];
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         assert_eq!(
             request.effort,
             TextEffort::Careful,
@@ -1009,7 +1013,7 @@ mod tests {
                 in_flight: std::sync::Arc::default(),
             },
         };
-        handler.generate(&payload, id).unwrap();
+        handler.generate(&payload, id, &Stop::never()).unwrap();
         assert_eq!(first.text.requests().len(), 1, "Claude is asked once");
         assert_eq!(script(&app, &project), saved);
     }

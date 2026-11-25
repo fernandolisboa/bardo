@@ -21,11 +21,11 @@ use bardo_domain::{
     NarrationRepository, NewVersion, PlacedScene, ProfileId, ProjectFiles, Provider,
     RenderedPrompt, RepositoryError, Scene, SceneClip, SceneImage, ScenePlan, ScenePlanId,
     ScenePlanRecord, ScenePlanRepository, SceneRecord, Script, ScriptRepository, SecretStore,
-    SourceSentence, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeIdea,
-    ThemeRepository, TimelineRepository, UiLanguage, VideoProject, VideoProjectId, adaptation_gaps,
-    join_adapted, localized_cut, place_scenes, placed_scene_notes, scene_sentences, sentence_times,
-    sentence_words, sentences, source_gaps,
+    SourceSentence, Stop, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable,
+    TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, Theme,
+    ThemeIdea, ThemeRepository, TimelineRepository, UiLanguage, VideoProject, VideoProjectId,
+    adaptation_gaps, join_adapted, localized_cut, place_scenes, placed_scene_notes,
+    scene_sentences, sentence_times, sentence_words, sentences, source_gaps,
 };
 use serde::{Deserialize, Serialize};
 
@@ -433,9 +433,10 @@ impl JobHandler for LocalizationHandler {
             Some(channel) => {
                 let channel = parse_id::<ChannelId>(channel)?;
                 let id = cx.id();
-                self.make(&payload, channel, id, &|| cx.should_stop())
+                let stop = cx.stop();
+                self.make(&payload, channel, id, &stop, &|| cx.should_stop())
             }
-            None => self.adapt_again(&payload, cx.id()),
+            None => self.adapt_again(&payload, cx.id(), &cx.stop()),
         }
     }
 }
@@ -461,6 +462,7 @@ impl LocalizationHandler {
         job: JobId,
         channel: Option<ChannelId>,
         project: Option<VideoProjectId>,
+        stop: &Stop,
     ) -> Result<bardo_domain::GeneratedText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
@@ -481,7 +483,7 @@ impl LocalizationHandler {
         let paid_call = PlannedCall::text(CostPurpose::Script, &request);
         let generated = {
             let _paying = self.costs.paying(job, &paid_call, channel, project)?;
-            self.text.generate(&key, &request)
+            self.text.generate_until(&key, &request, stop)
         };
         generated.map_err(|failure| {
             self.costs
@@ -519,6 +521,7 @@ impl LocalizationHandler {
         payload: &LocalizationPayload,
         channel: ChannelId,
         job: JobId,
+        stop: &Stop,
         should_stop: &dyn Fn() -> bool,
     ) -> Result<(), JobFailure> {
         let source_id = parse_id::<VideoProjectId>(&payload.project)?;
@@ -605,7 +608,7 @@ impl LocalizationHandler {
 
         // The adaptation is billed on the version once it exists; an
         // unusable, stopped or failed one only on the channel.
-        let generated = self.ask(payload, job, Some(target.id), None)?;
+        let generated = self.ask(payload, job, Some(target.id), None, stop)?;
         let saved = (|| -> Result<bool, JobFailure> {
             let adapted: Adapted =
                 serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
@@ -804,7 +807,12 @@ impl LocalizationHandler {
 
     /// Adapts the version `payload` names again; the new adaptation waits
     /// for review.
-    fn adapt_again(&self, payload: &LocalizationPayload, job: JobId) -> Result<(), JobFailure> {
+    fn adapt_again(
+        &self,
+        payload: &LocalizationPayload,
+        job: JobId,
+        stop: &Stop,
+    ) -> Result<(), JobFailure> {
         let project = parse_id::<VideoProjectId>(&payload.project)?;
         let saved = self.scripts.script(project).map_err(unexpected)?;
         if saved.as_ref().is_some_and(|script| {
@@ -841,7 +849,7 @@ impl LocalizationHandler {
             .project(project)
             .map_err(unexpected)?
             .map(|project| project.channel);
-        let generated = self.ask(payload, job, channel, Some(project))?;
+        let generated = self.ask(payload, job, channel, Some(project), stop)?;
         self.bill(&generated, job, channel, Some(project));
         let adapted: Adapted =
             serde_json::from_str(&generated.text).map_err(|e| not_usable(&e.to_string()))?;
@@ -1397,6 +1405,7 @@ mod tests {
         assert_eq!(job.attempts(), 1, "not made again by the queue");
         assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
         assert_eq!(h.text.requests().len() - before, 1);
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         // The source's own script is a Script cost too: this one is the job's.
         let costs: Vec<_> =
             h.db.recent_costs(app.profile().id, CostPurpose::Script, 10)
@@ -1654,7 +1663,7 @@ mod tests {
 
         let payload = LocalizationPayload::of(&job).unwrap();
         handler(&h, &app)
-            .make(&payload, channel.id, job.id(), &|| false)
+            .make(&payload, channel.id, job.id(), &Stop::never(), &|| false)
             .unwrap();
         assert_eq!(h.text.requests().len(), asked, "Claude is asked once");
         assert_eq!(app.video_projects(channel.id).unwrap(), [version]);
@@ -1677,7 +1686,7 @@ mod tests {
         answer(&h, &ADAPTED);
         let calls = std::cell::Cell::new(0);
         handler(&h, &app)
-            .make(&payload, channel.id, id, &|| {
+            .make(&payload, channel.id, id, &Stop::never(), &|| {
                 calls.set(calls.get() + 1);
                 calls.get() > 1
             })

@@ -873,6 +873,16 @@ impl ProjectsScreen {
             .and_then(|job| self.render_scenes_job(job, cx));
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
+        // A cancelled job reads cancelled at once, and the stage stays busy
+        // until its handler lets go of what it had sent: say why.
+        let stopping = view.stopping.then(|| {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(Spinner::new().small())
+                .child(div().text_sm().child(tr(bardo, Text::ScenesStopping)))
+                .into_any_element()
+        });
         let files = view.plan.as_ref().map_or(0, |plan| plan.files().count());
         let confirm = self.confirm_replan.then(|| {
             kit::card(cx)
@@ -947,6 +957,7 @@ impl ProjectsScreen {
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element())
             .into_iter()
             .chain(job)
+            .chain(stopping)
             .chain(no_narration)
             .chain(too_long)
             .chain(place)
