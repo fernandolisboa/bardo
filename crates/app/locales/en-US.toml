@@ -384,6 +384,7 @@ checksum = "The installer doesn't match the checksum its release publishes, so B
 off_script = "The recording does not follow the script closely enough. Record it again reading the current script, then import it."
 vision_models = "The face, depth and mask models are missing, damaged or would not run. Reinstall Bardo to put them back, then retry."
 out_of_date = "The narration was made again since these scenes were planned, so nothing more was made for them. On the Scenes stage, fit the scenes to the narration or plan them again (on a version, place them), then start again."
+portrait_missing = "The portrait of a person in the scene is missing or could not be sent, and a scene is not drawn without it. Draw the portrait again under People in this scene, or choose Draw without a portrait there, then draw the scene."
 
 [job.error]
 not_updated = "Could not update the job. Try again."
@@ -1908,6 +1909,17 @@ edit = "Edit look"
 redraw = "Draw portrait again"
 failed = "The portrait was not drawn:"
 edited = "Edited"
+described_only = "No portrait"
+described_only_hint = "Drawn from the description alone, as you chose: no portrait is drawn or sent for this person, so their face may change from scene to scene."
+draw_without = "Draw without a portrait"
+use_portrait = "Use a portrait"
+
+[scenes.old_portraits]
+title = "Scenes showing an older face: {n}"
+hint = "These images do not match the portrait of someone they show: they were drawn with an older portrait of that person, or without one. They stay as they are until drawn again, and each new image waits for review beside the current one. A missing portrait is drawn first."
+redraw = "Draw them again"
+scene = "This image does not match the portrait of someone in it: it was drawn with an older portrait, or without one. Draw it again to match."
+card = "Older face"
 
 [scenes.restyled]
 title = "Scenes in another style: {n}"
@@ -3034,7 +3046,7 @@ body = "Each scene in order, with its time, its image and where it stands: to dr
 
 [tour.scenes.scene]
 title = "A scene"
-body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. Edit the prompt to change what the next drawing shows."
+body = "The scene you picked: the narration it covers, its image and its image prompt, the place it happens in, and the people who come back in the video with their reference portraits, so places and people look the same in every scene. A scene is not drawn without the portrait of everyone in it, except a person you chose to draw without one, and one drawn with an older portrait is marked. Edit the prompt to change what the next drawing shows."
 
 [tour.scenes.redraw]
 title = "Draw again"

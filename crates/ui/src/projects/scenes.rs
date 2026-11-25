@@ -54,8 +54,23 @@ pub(super) enum SceneAction {
     RedrawPortrait(usize),
     /// Draw again every scene drawn in another style than the video's.
     RedrawRestyled,
+    /// Draw again every scene that shows a person as an older portrait of
+    /// theirs did, or was drawn without one.
+    RedrawOldPortraits,
     AnimateMissing,
     Animate(usize),
+}
+
+/// What a card for scenes with an out-of-date image says and does.
+struct OutdatedScenes<'a> {
+    /// Names the card's controls.
+    id: &'static str,
+    title: String,
+    hint: String,
+    about: bardo_app::GuideRef,
+    estimate: Option<&'a bardo_app::SpendEstimate>,
+    redraw: Text,
+    action: SceneAction,
 }
 
 /// Which prompt of a scene the editor holds.
@@ -127,6 +142,7 @@ impl ProjectsScreen {
             SceneAction::Redraw(index) => bardo.regenerate_scene_image(id, index, consent),
             SceneAction::RedrawPortrait(member) => bardo.redraw_cast_portrait(id, member, consent),
             SceneAction::RedrawRestyled => bardo.redraw_restyled_scenes(id, consent),
+            SceneAction::RedrawOldPortraits => bardo.redraw_scenes_with_old_portraits(id, consent),
             SceneAction::AnimateMissing => bardo.generate_missing_clips(id, consent),
             SceneAction::Animate(index) => bardo.generate_scene_clip(id, index, consent),
         };
@@ -797,13 +813,66 @@ impl ProjectsScreen {
             return None;
         }
         let bardo = self.bardo.read(cx);
-        let busy = view.is_busy() || view.is_animating();
         let style = bardo.text(Text::VisualStyleName(view.style));
-        let estimate = view
-            .restyle_estimate
-            .as_ref()
+        let card = OutdatedScenes {
+            id: "restyled",
+            title: bardo.text_with(
+                Text::ScenesRestyled,
+                &[("n", &view.restyled.len().to_string())],
+            ),
+            hint: bardo.text_with(Text::ScenesRestyledHint, &[("style", &style)]),
+            about: guide::refs::SCENES_STYLE,
+            estimate: view.restyle_estimate.as_ref(),
+            redraw: Text::RedrawRestyled,
+            action: SceneAction::RedrawRestyled,
+        };
+        Some(self.render_outdated(view, card, cx))
+    }
+
+    /// The scenes whose image shows a person as an older portrait of
+    /// theirs did, or was drawn without their portrait (#269): how many,
+    /// why behind the ⓘ, and one button that draws them again, with what
+    /// it costs.
+    fn render_old_portraits(
+        &self,
+        view: &ScenesView,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if view.old_portraits.is_empty() {
+            return None;
+        }
+        let bardo = self.bardo.read(cx);
+        let card = OutdatedScenes {
+            id: "old-portraits",
+            title: bardo.text_with(
+                Text::ScenesOldPortraits,
+                &[("n", &view.old_portraits.len().to_string())],
+            ),
+            hint: bardo.text(Text::ScenesOldPortraitsHint).into_owned(),
+            about: guide::refs::SCENES_CAST,
+            estimate: view.old_portraits_estimate.as_ref(),
+            redraw: Text::RedrawOldPortraits,
+            action: SceneAction::RedrawOldPortraits,
+        };
+        Some(self.render_outdated(view, card, cx))
+    }
+
+    /// A card for scenes whose image is out of date in one way: its title
+    /// with the count, the why behind the ⓘ, and the button that draws
+    /// them again with what that costs.
+    fn render_outdated(
+        &self,
+        view: &ScenesView,
+        outdated: OutdatedScenes<'_>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let busy = view.is_busy() || view.is_animating();
+        let estimate = outdated
+            .estimate
             .filter(|_| !busy)
             .and_then(|estimate| estimate_note(bardo, estimate, Text::EstimateCost, cx));
+        let action = outdated.action;
         let card = kit::card(cx)
             .px_3()
             .py_2()
@@ -821,41 +890,31 @@ impl ProjectsScreen {
                     .child(
                         div()
                             .font_medium()
-                            .child(SharedString::from(bardo.text_with(
-                                Text::ScenesRestyled,
-                                &[("n", &view.restyled.len().to_string())],
-                            ))),
+                            .child(SharedString::from(outdated.title)),
                     )
                     .child(guide::info(
                         bardo,
-                        "scenes-restyled-info",
-                        SharedString::from(
-                            bardo.text_with(Text::ScenesRestyledHint, &[("style", &style)]),
-                        ),
-                        guide::refs::SCENES_STYLE,
+                        SharedString::from(format!("scenes-{}-info", outdated.id)),
+                        SharedString::from(outdated.hint),
+                        outdated.about,
                     )),
             )
             .children(estimate)
             .when(!busy, |card| {
                 card.child(
                     self.paid(
-                        Button::new("redraw-restyled-scenes")
+                        Button::new(SharedString::from(format!("redraw-{}-scenes", outdated.id)))
                             .outline()
                             .small()
-                            .label(tr(bardo, Text::RedrawRestyled))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.run_scene(
-                                    SceneAction::RedrawRestyled,
-                                    BudgetConsent::Ask,
-                                    window,
-                                    cx,
-                                )
+                            .label(tr(bardo, outdated.redraw))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.run_scene(action, BudgetConsent::Ask, window, cx)
                             })),
                         cx,
                     ),
                 )
             });
-        Some(card.into_any_element())
+        card.into_any_element()
     }
 
     /// What happened to the scenes: an error, the job, why nothing can be
@@ -942,6 +1001,9 @@ impl ProjectsScreen {
         let place = self.render_place_scenes(view, cx);
         let fit = self.render_fit_scenes(view, cx);
         let restyled = self.render_restyled(view, cx);
+        // Shown where clips are bought too: a clip of an image that shows
+        // an older face costs more than the image.
+        let old_portraits = self.render_old_portraits(view, cx);
         let bardo = self.bardo.read(cx);
         self.scenes_error
             .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx).into_any_element())
@@ -952,6 +1014,7 @@ impl ProjectsScreen {
             .chain(place)
             .chain(fit)
             .chain(restyled)
+            .chain(old_portraits)
             .chain(confirm)
             .chain(ask)
             .collect()
@@ -1022,7 +1085,14 @@ impl ProjectsScreen {
                     clock(scene.end)
                 )));
                 tile.text = Some(SharedString::from(scene.text.clone()));
-                tile.status = scene_chip(bardo, state, cx);
+                // A scene with nothing left to do may still show an older
+                // face: said on its card.
+                tile.status = scene_chip(bardo, state, cx).or_else(|| {
+                    view.old_portraits.contains(&index).then(|| {
+                        kit::status(Tone::Warning, tr(bardo, Text::SceneCardOldPortrait), cx)
+                            .into_any_element()
+                    })
+                });
                 tile.marks = mark(Lucide::Image, scene.image().is_some())
                     .into_iter()
                     .chain(mark(Lucide::Film, scene.clip().is_some()))
@@ -1033,7 +1103,16 @@ impl ProjectsScreen {
                 tile.facts = vec![
                     Fact {
                         label: tr(bardo, Text::SceneColumnImage),
-                        value: state_chip(bardo, image_states[index], cx),
+                        // The table's image column says it at any stage.
+                        value: match image_states[index] {
+                            SceneState::Done if view.old_portraits.contains(&index) => kit::status(
+                                Tone::Warning,
+                                tr(bardo, Text::SceneCardOldPortrait),
+                                cx,
+                            )
+                            .into_any_element(),
+                            image_state => state_chip(bardo, image_state, cx),
+                        },
                         numeric: false,
                     },
                     Fact {
@@ -1382,6 +1461,18 @@ impl ProjectsScreen {
             .into_any_element()
         });
 
+        // The image shows someone as an older portrait did, or was drawn
+        // without one: said where drawing again fixes it.
+        let old_portrait = self
+            .scenes
+            .as_ref()
+            .is_some_and(|view| view.old_portraits.contains(&index))
+            .then(|| {
+                kit::notice(Tone::Warning, tr(bardo, Text::SceneOldPortrait), cx)
+                    .text_xs()
+                    .into_any_element()
+            });
+
         let media = usize::from(failure.is_some());
         let place = self.render_scene_place(index, scene, open, busy, cx);
         let cast = self.render_scene_cast(index, scene, open, busy, cx);
@@ -1395,6 +1486,7 @@ impl ProjectsScreen {
                     .child(prompt)
                     .into_any_element(),
             ))
+            .chain(old_portrait)
             .chain(redraw)
             .chain(place)
             .chain(cast)
@@ -1542,6 +1634,13 @@ impl ProjectsScreen {
                     )
                     .when(cast.is_edited(), |row| {
                         row.child(kit::status(Tone::Info, tr(bardo, Text::CastEdited), cx))
+                    })
+                    .when(cast.is_described_only(), |row| {
+                        row.child(kit::status(
+                            Tone::Warning,
+                            tr(bardo, Text::CastDescribedOnly),
+                            cx,
+                        ))
                     });
                 let description: AnyElement = match editor {
                     Some(editor) => editor,
@@ -1562,11 +1661,18 @@ impl ProjectsScreen {
                     )
                     .text_xs()
                 });
-                let later = cast.portrait().is_none().then(|| {
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(tr(bardo, Text::CastPortraitLater))
+                // Without a portrait: it comes with the next drawing, or the
+                // user chose to go without one.
+                let described_only = cast.is_described_only();
+                let later = (described_only || cast.portrait().is_none()).then(|| {
+                    div().text_xs().text_color(theme.muted_foreground).child(tr(
+                        bardo,
+                        if described_only {
+                            Text::CastDescribedOnlyHint
+                        } else {
+                            Text::CastPortraitLater
+                        },
+                    ))
                 });
                 let actions = (open.is_none() && !busy).then(|| {
                     h_flex()
@@ -1586,8 +1692,41 @@ impl ProjectsScreen {
                                     )
                                 })),
                         )
+                        // Going without a portrait is the user's to choose
+                        // for anyone, and taken back from the same place.
+                        .when(described_only, |row| {
+                            row.child(
+                                Button::new(("use-portrait", member))
+                                    .outline()
+                                    .xsmall()
+                                    .label(tr(bardo, Text::CastUsePortrait))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, id| {
+                                                bardo.set_cast_described_only(id, member, false)
+                                            });
+                                        },
+                                    )),
+                            )
+                        })
+                        .when(!described_only, |row| {
+                            row.child(
+                                Button::new(("draw-without-portrait", member))
+                                    .ghost()
+                                    .xsmall()
+                                    .label(tr(bardo, Text::CastDrawWithoutPortrait))
+                                    .on_click(cx.listener(
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.scene_action(window, cx, |bardo, id| {
+                                                bardo.set_cast_described_only(id, member, true)
+                                            });
+                                        },
+                                    )),
+                            )
+                        })
                         .when(
-                            cast.portrait().is_some() || cast.failure().is_some(),
+                            !described_only
+                                && (cast.portrait().is_some() || cast.failure().is_some()),
                             |row| {
                                 row.child(
                                     self.paid(Button::new(("redraw-portrait", member)), cx)
@@ -2189,8 +2328,11 @@ impl ProjectsScreen {
 /// A scene's image filling a 16:9 box, or the box saying there is none.
 fn scene_picture(bardo: &Bardo, image: Option<&SceneImage>, cx: &App) -> AnyElement {
     let t = look(cx).tokens;
+    // Never shrunk: in an inspector taller than its panel, the picture
+    // would give all its height to the text under it.
     let frame = div()
         .w_full()
+        .flex_none()
         .aspect_ratio(16. / 9.)
         .rounded(t.radius)
         .overflow_hidden()

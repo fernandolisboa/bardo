@@ -318,9 +318,9 @@ pub use scene::{
     CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
     MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchPlace,
     NoSuchScene, OtherShot, OtherText, PaidPictures, Place, PlaceDraft, PlaceRecord, PlanDraft,
-    Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
-    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence,
-    scene_image_prompt, sentences,
+    PortraitsUsed, Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage, ScenePlan,
+    ScenePlanId, ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting,
+    Sentence, scene_image_prompt, sentences,
 };
 pub use scene_plan_size::ScenePlanSize;
 pub use schedule::{
