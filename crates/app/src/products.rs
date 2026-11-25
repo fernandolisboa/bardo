@@ -34,6 +34,11 @@ pub enum ProductError {
     /// nobody keeps.
     #[error("the product's sheet is being written")]
     SheetBusy,
+    /// Ad angles are being proposed or ranked for the product: it stays
+    /// until the job ends, so the job does not pay for angles nobody
+    /// keeps.
+    #[error("ad angles are being proposed for the product")]
+    AnglesBusy,
     /// The user did not confirm they may use the image or logo and the
     /// brand it shows.
     #[error("the right to use the image was not confirmed")]
@@ -65,6 +70,7 @@ impl ProductError {
             ProductError::NotFound => Some(Text::ProductNotFound),
             ProductError::InUse(_) => Some(Text::ProductInUse),
             ProductError::SheetBusy => Some(Text::SheetBusy),
+            ProductError::AnglesBusy => Some(Text::AdAnglesBusy),
             ProductError::NotConfirmed => Some(Text::ProductImageNotConfirmed),
             ProductError::TooManyImages => Some(Text::ProductTooManyImages),
             ProductError::Image(_) => Some(Text::ProductImageRefused),
@@ -231,11 +237,14 @@ impl Bardo {
 
     /// Deletes the product with its images, logo and sheet. Refused while
     /// a video project uses it (archiving hides it instead) and while a
-    /// job fills its sheet.
+    /// job fills its sheet or proposes or ranks its ad angles.
     pub fn delete_product(&self, id: ProductId) -> Result<(), ProductError> {
         let product = self.own_product(id)?;
         if self.sheet_is_busy(id) {
             return Err(ProductError::SheetBusy);
+        }
+        if self.ad_angles_busy(id) {
+            return Err(ProductError::AnglesBusy);
         }
         let projects = self.products.projects_using(id)?;
         product

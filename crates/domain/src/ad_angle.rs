@@ -190,16 +190,18 @@ impl AdRanking {
     /// Composite weights, applied in code rather than asked of the engine
     /// so they stay visible and tunable, like the theme ranking's. The
     /// hook leads: an ad nobody stays for sells nothing.
-    pub const HOOK_WEIGHT: f64 = 0.40;
-    pub const AUDIENCE_FIT_WEIGHT: f64 = 0.35;
-    pub const CLARITY_WEIGHT: f64 = 0.25;
+    /// In hundredths, so that the sum is exact.
+    pub const HOOK_WEIGHT: u32 = 40;
+    pub const AUDIENCE_FIT_WEIGHT: u32 = 35;
+    pub const CLARITY_WEIGHT: u32 = 25;
 
-    /// The ranking key, 0–100.
+    /// The ranking key, 0–100: the weighted mean, a half rounded up.
     pub fn priority(&self) -> Score {
-        let value = Self::HOOK_WEIGHT * f64::from(self.hook.score.value())
-            + Self::AUDIENCE_FIT_WEIGHT * f64::from(self.audience_fit.score.value())
-            + Self::CLARITY_WEIGHT * f64::from(self.clarity.score.value());
-        Score::new(value.round() as u8)
+        let hundredths = Self::HOOK_WEIGHT * u32::from(self.hook.score.value())
+            + Self::AUDIENCE_FIT_WEIGHT * u32::from(self.audience_fit.score.value())
+            + Self::CLARITY_WEIGHT * u32::from(self.clarity.score.value());
+        // At most 100: the weights add up to 100 and a score is 0 to 100.
+        Score::new(((hundredths + 50) / 100) as u8)
     }
 
     /// The ranking is only as sure as its least sure reason.
@@ -427,8 +429,16 @@ pub trait AdRepository: Send + Sync {
     /// Inserts new angles and updates existing ones, all or none.
     fn save_angles(&self, angles: &[AdAngle]) -> Result<(), RepositoryError>;
 
+    /// Writes the ranking of each of `ranked` and nothing else of it, and
+    /// only where the stored angle is still what was ranked: suggested,
+    /// without a ranking, with the same words. An angle the user edited,
+    /// discarded or approved while it was being ranked keeps what the
+    /// user made of it.
+    fn save_rankings(&self, ranked: &[AdAngle]) -> Result<(), RepositoryError>;
+
     /// Saves the approved angle with the theme, the ad project and the
-    /// brief it starts, all or none.
+    /// brief it starts, all or none. Refused when the stored angle is no
+    /// longer a suggestion, so an angle starts one project at most.
     fn start_ad_project(
         &self,
         angle: &AdAngle,
@@ -461,6 +471,10 @@ impl<T: AdRepository + ?Sized> AdRepository for std::sync::Arc<T> {
 
     fn save_angles(&self, angles: &[AdAngle]) -> Result<(), RepositoryError> {
         (**self).save_angles(angles)
+    }
+
+    fn save_rankings(&self, ranked: &[AdAngle]) -> Result<(), RepositoryError> {
+        (**self).save_rankings(ranked)
     }
 
     fn start_ad_project(
@@ -616,14 +630,15 @@ mod tests {
 
     #[test]
     fn priority_weighs_the_hook_then_the_audience_then_clarity() {
-        assert!(
-            (AdRanking::HOOK_WEIGHT + AdRanking::AUDIENCE_FIT_WEIGHT + AdRanking::CLARITY_WEIGHT
-                - 1.0)
-                .abs()
-                < 1e-9
+        assert_eq!(
+            AdRanking::HOOK_WEIGHT + AdRanking::AUDIENCE_FIT_WEIGHT + AdRanking::CLARITY_WEIGHT,
+            100
         );
         // 0.35 * 80 + 0.40 * 60 + 0.25 * 40 = 62.
         assert_eq!(ranking(80, 60, 40).priority(), Score::new(62));
+        // 0.35 * 90 = 31.5, a half that rounds up whatever a float makes
+        // of it.
+        assert_eq!(ranking(90, 0, 0).priority(), Score::new(32));
         assert_eq!(ranking(100, 100, 100).priority(), Score::MAX);
         assert_eq!(ranking(0, 0, 0).priority(), Score::new(0));
         // The hook weighs most: the same points count for more there.

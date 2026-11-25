@@ -79,6 +79,9 @@ pub struct AnglesSection {
     /// only ranks, and what it would cost.
     ask: Option<(bool, SpendEstimate)>,
     error: Option<Text>,
+    /// The angle the error is about, so it shows on that angle's card;
+    /// `None` when it is about a run.
+    error_on: Option<AdAngleId>,
     /// The ad project the last approval started.
     started: Option<VideoProjectId>,
     revision: u64,
@@ -126,6 +129,7 @@ impl AnglesSection {
             hook,
             ask: None,
             error: None,
+            error_on: None,
             started: None,
             revision,
             _poll: poll,
@@ -140,10 +144,13 @@ impl AnglesSection {
             self.product = product;
             self.channel = None;
             self.editing = None;
-            self.ask = None;
-            self.error = None;
-            self.started = None;
         }
+        // What the last visit asked or said is over: the product, its
+        // sheet or its budget may have changed since.
+        self.ask = None;
+        self.error = None;
+        self.error_on = None;
+        self.started = None;
         self.load(cx);
         cx.notify();
     }
@@ -219,6 +226,7 @@ impl AnglesSection {
         self.editing = None;
         self.ask = None;
         self.error = None;
+        self.error_on = None;
         self.started = None;
         self.load(cx);
         cx.notify();
@@ -238,6 +246,7 @@ impl AnglesSection {
         } else {
             bardo.suggest_ad_angles(product, channel, consent)
         };
+        self.error_on = None;
         self.error = match started {
             Ok(_) => None,
             Err(AdAngleError::OverBudget(estimate)) => {
@@ -268,6 +277,7 @@ impl AnglesSection {
             errors: Vec::new(),
         });
         self.error = None;
+        self.error_on = None;
         cx.notify();
     }
 
@@ -283,11 +293,13 @@ impl AnglesSection {
             hook: self.hook.read(cx).value().to_string(),
             claims: editing.claims.clone(),
         };
-        let saved = self.bardo.read(cx).edit_ad_angle(editing.id, &draft);
+        let id = editing.id;
+        let saved = self.bardo.read(cx).edit_ad_angle(id, &draft);
         match saved {
             Ok(_) => {
                 self.editing = None;
                 self.error = None;
+                self.error_on = None;
             }
             Err(error) if !error.field_errors().is_empty() => {
                 if let Some(editing) = self.editing.as_mut() {
@@ -297,6 +309,7 @@ impl AnglesSection {
             Err(error) => {
                 self.editing = None;
                 self.error = Some(error.message());
+                self.error_on = Some(id);
             }
         }
         self.load(cx);
@@ -310,6 +323,7 @@ impl AnglesSection {
             .discard_ad_angle(id)
             .err()
             .map(|error| error.message());
+        self.error_on = self.error.map(|_| id);
         self.started = None;
         self.load(cx);
         cx.notify();
@@ -319,9 +333,13 @@ impl AnglesSection {
         match self.bardo.read(cx).approve_ad_angle(id) {
             Ok(project) => {
                 self.error = None;
+                self.error_on = None;
                 self.started = Some(project.id);
             }
-            Err(error) => self.error = Some(error.message()),
+            Err(error) => {
+                self.error = Some(error.message());
+                self.error_on = Some(id);
+            }
         }
         self.load(cx);
         cx.notify();
@@ -461,6 +479,10 @@ impl AnglesSection {
             kit::notice(Tone::Warning, tr(bardo, Text::AdAnglesMissing(missing)), cx)
         });
         let ready = view.missing.is_none();
+        // An error about an angle on show is told on that angle's card.
+        let on_card = self
+            .error_on
+            .is_some_and(|id| view.angles.iter().any(|row| row.angle.id == id));
         let buttons = h_flex()
             .gap_2()
             .flex_wrap()
@@ -549,6 +571,7 @@ impl AnglesSection {
             .children(ask)
             .children(
                 self.error
+                    .filter(|_| !on_card)
                     .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx)),
             )
             .children(self.render_job(view, cx))
@@ -764,37 +787,46 @@ impl AnglesSection {
                 cx,
             ));
 
-        let reasons: AnyElement = match angle.ranking() {
-            Some(ranking) => h_flex()
-                .flex_wrap()
-                .gap_x_6()
-                .gap_y_2()
-                .child(reason(bardo, cx, Text::AdAngleHookScore, ranking.hook))
-                .child(reason(
-                    bardo,
-                    cx,
-                    Text::AdAngleAudienceFit,
-                    ranking.audience_fit,
-                ))
-                .child(reason(bardo, cx, Text::AdAngleClarity, ranking.clarity))
-                .child(div().self_end().child(kit::details(
-                    ("ad-angle-ranking-details", ix),
-                    tr(bardo, Text::Details),
-                    vec![SharedString::from(format!(
-                        "{} · {}",
-                        bardo.text_with(Text::ThemeRankedBy, &[("model", &ranking.model)]),
-                        bardo.time_ago(ranking.ranked_at)
-                    ))],
-                )))
-                .into_any_element(),
-            None => h_flex()
-                .child(kit::status(
-                    Tone::Warning,
-                    tr(bardo, Text::AdAngleNotRanked),
-                    cx,
-                ))
-                .into_any_element(),
+        let reasons: Option<AnyElement> = match angle.ranking() {
+            Some(ranking) => Some(
+                h_flex()
+                    .flex_wrap()
+                    .gap_x_6()
+                    .gap_y_2()
+                    .child(reason(bardo, cx, Text::AdAngleHookScore, ranking.hook))
+                    .child(reason(
+                        bardo,
+                        cx,
+                        Text::AdAngleAudienceFit,
+                        ranking.audience_fit,
+                    ))
+                    .child(reason(bardo, cx, Text::AdAngleClarity, ranking.clarity))
+                    .child(div().self_end().child(kit::details(
+                        ("ad-angle-ranking-details", ix),
+                        tr(bardo, Text::Details),
+                        vec![SharedString::from(format!(
+                            "{} · {}",
+                            bardo.text_with(Text::ThemeRankedBy, &[("model", &ranking.model)]),
+                            bardo.time_ago(ranking.ranked_at)
+                        ))],
+                    )))
+                    .into_any_element(),
+            ),
+            // An approved angle is ranked no more.
+            None => (!approved).then(|| {
+                h_flex()
+                    .child(kit::status(
+                        Tone::Warning,
+                        tr(bardo, Text::AdAngleNotRanked),
+                        cx,
+                    ))
+                    .into_any_element()
+            }),
         };
+        let failed = self
+            .error
+            .filter(|_| self.error_on == Some(angle.id))
+            .map(|error| kit::notice(Tone::Danger, tr(bardo, error), cx));
 
         let actions: AnyElement = if approved {
             h_flex()
@@ -856,7 +888,7 @@ impl AnglesSection {
             .gap_3()
             .child(header)
             .child(parts)
-            .child(reasons)
+            .children(reasons)
             .into_any_element();
         let (said, actions) = if toured {
             (
@@ -881,6 +913,7 @@ impl AnglesSection {
             .p_3()
             .gap_3()
             .child(said)
+            .children(failed)
             .child(actions)
             .into_any_element()
     }
@@ -931,37 +964,33 @@ impl AnglesSection {
                 .text_color(theme.muted_foreground)
                 .child(tr(bardo, Text::AdFrameworkSteps(editing.framework))),
         );
-        let full = editing.claims.len() >= bardo_app::bardo_domain::AdAngleIdea::MAX_CLAIMS;
+        // Only the claims on show count: one the sheet no longer confirms
+        // has no box to untick, and saving drops it.
+        let ticked = view
+            .claims
+            .iter()
+            .filter(|claim| editing.claims.contains(&claim.id))
+            .count();
+        let full = ticked >= bardo_app::bardo_domain::AdAngleIdea::MAX_CLAIMS;
         let claims = v_flex()
             .gap_1()
             .children(view.claims.iter().enumerate().map(|(ix, claim)| {
                 let id = claim.id;
                 let checked = editing.claims.contains(&id);
-                h_flex()
-                    .gap_2()
-                    .items_start()
-                    .child(
-                        Checkbox::new(("ad-angle-claim", ix))
-                            .small()
-                            .checked(checked)
-                            .disabled(!checked && full)
-                            .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                if let Some(editing) = this.editing.as_mut() {
-                                    editing.claims.retain(|claim| *claim != id);
-                                    if *checked {
-                                        editing.claims.push(id);
-                                    }
-                                    cx.notify();
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_sm()
-                            .child(SharedString::from(claim.text().to_owned())),
-                    )
+                Checkbox::new(("ad-angle-claim", ix))
+                    .small()
+                    .label(SharedString::from(claim.text().to_owned()))
+                    .checked(checked)
+                    .disabled(!checked && full)
+                    .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                        if let Some(editing) = this.editing.as_mut() {
+                            editing.claims.retain(|claim| *claim != id);
+                            if *checked {
+                                editing.claims.push(id);
+                            }
+                            cx.notify();
+                        }
+                    }))
             }));
         v_flex()
             .gap_3()

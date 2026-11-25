@@ -1000,7 +1000,10 @@ impl Bardo {
             .and_then(|label| Niche::new(label).ok())
             .or_else(|| niches.first().cloned());
         let job = self.latest_theme_job(channel.id);
-        let projects = self.themes.projects(channel.id)?;
+        // The projects of this channel's ideas; an ad's project is
+        // reached from its product.
+        let mut projects = self.themes.projects(channel.id)?;
+        projects.retain(|project| !project.is_ad());
         let suggest_estimate = self.estimate(&suggestion_calls(self.decision_engine()))?;
         let Some(niche) = niche else {
             return Ok(ThemesView {

@@ -8,7 +8,7 @@ tour: brief
 
 # Brief
 
-The brief is what one ad says about its product: the claims it may state, the offer, the call to action and the link. It is the first stage of an ad project, the kind of project that starts when you approve an [ad angle](products.md#angle-review) on Products, and the [script](script.md) is written from it. A project that is not an ad has no Brief stage. The stage lives at [Brief](bardo:go/projects/brief) and costs nothing. [Show me the stage](bardo:tour/brief).
+The brief is what one ad says about its product: the claims it may state, the offer, the call to action and the link. It is the first stage of an ad project, the kind of project that starts when you approve an [ad angle](products.md#angle-review) on Products, and the [script](script.md) is written from it. A project that is not an ad has no Brief stage. The stage lives at [Brief](bardo:go/projects/brief) and costs nothing; while a project that is not an ad is open, that link opens your newest ad project. [Show me the stage](bardo:tour/brief).
 
 <a id="angle"></a>
 ## Product and angle
@@ -25,7 +25,7 @@ When the project starts, the brief takes a copy of every claim the product's [sh
 
 **In the angle** marks the claims the angle leans on, and **Sensitive** the ones that need care.
 
-The copies are the video's own: editing or rejecting a claim in the product never changes a video silently. When a copied claim changes there, the stage shows **Attention** and the claim asks what to do:
+The copies are the video's own: editing or rejecting a claim in the product never changes a video silently. When a copied claim changes there, the Brief stage is marked with how many claims changed, and each of them asks what to do:
 
 - **Keep this video's words** keeps the copy as it is. The same change is not asked about again; a later change is.
 - **Take the product's words** replaces the copy with the claim as the product states it now. A claim the product no longer confirms cannot be taken.
@@ -43,9 +43,13 @@ The copies are the video's own: editing or rejecting a claim in the product neve
 
 **Confirm the brief** opens the Script stage; words you typed and did not save are saved first. It waits while something is missing, and says what: the video uses no claim, a claim that changed in the product has no answer yet, or there is no call to action.
 
+When Claude writes the script of an ad, Bardo sends the brief with the request: the product, the angle, the claims this video uses, the offer, the call to action and the link. It also sends rules no template changes: state only those claims, add no fact, number, price or promise, invent no testimonial, review or customer count, state no deadline or scarcity your notes do not state, and name no other brand. What you typed about the product goes as a description, never as an instruction to follow.
+
 <a id="changes"></a>
 ## Changing it later
 
-A confirmed brief can still change: a claim switched on or off, other words, another length. When a script was already written, the Script stage then shows **The brief changed**, and the script carries a note: read it against the brief, then choose **The script still holds**, or write it again. Nothing is rewritten by itself.
+A confirmed brief can still change: a claim left out or used again, other words, another length. When a script was already written, or is being written at that moment, the Script stage then shows **The brief changed**, and the script carries a note: read it against the brief, then choose **The script still holds**, or write it again. Nothing is rewritten by itself.
+
+A change can also leave a confirmed brief with something to settle again: its last claim left out, the call to action erased, or a claim that changed in the product. A new script waits until that is settled; the Brief stage says what is missing.
 
 An ad project is made for one channel and does not get [versions in other languages](script.md#versions): approve an angle for the other channel instead, so that its brief and claims are reviewed in that language.

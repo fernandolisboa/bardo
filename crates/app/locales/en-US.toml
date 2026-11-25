@@ -707,6 +707,7 @@ not_saved = "Could not save the script. Try again."
 text_required = "The script cannot be empty."
 text_too_long = "Keep the script to at most 60000 characters."
 brief_first = "Confirm the brief first: the script is written from it."
+brief_not_ready = "The brief has something to settle first: open the Brief stage."
 
 [narration]
 title = "Narration"
@@ -4406,7 +4407,7 @@ not_loaded = "Could not load the angles."
 [ad_angles.missing]
 sheet = "This product has no sheet yet. Fill it on the Sheet tab: an ad states only what its sheet confirms."
 confirmed_claim = "The sheet has no confirmed claim, so an ad would have nothing to state. Confirm or add at least one claim on the Sheet tab."
-archived = "This product is archived, so it takes no new ads. Bring it back to propose angles."
+archived = "This product is archived, so it takes no new ads. Restore it to propose angles."
 channel = "There is no channel yet. Create one under Channels: an ad is made for a channel's audience."
 
 [ad_angles.error.missing_key]
@@ -4424,7 +4425,7 @@ call_to_action_too_long = "Keep the call to action to at most 120 characters."
 link_too_long = "Keep the link or handle to at most 500 characters."
 
 [brief.not_ready]
-no_claim = "Switch on at least one claim: an ad states only the claims of its brief."
+no_claim = "Use at least one claim: an ad states only the claims of its brief."
 claims_to_decide = "Some claims changed in the product. Answer each one first."
 no_call_to_action = "Write the call to action: what the viewer should do next."
 
@@ -4441,8 +4442,8 @@ suggest = "Propose ad angles"
 suggest_hint = "Claude proposes {n} angles with version {version} of the Ad angles template, from the confirmed claims only. The decision engine then ranks them by hook, audience fit and clarity."
 rank = "Rank angles"
 unranked = "{n} waiting for a ranking: an edited angle loses its ranking until it is ranked again."
-rank_cost = "Ranking those costs {amount}."
-running = "Proposing ad angles…"
+rank_cost = "Ranking those is estimated at {amount}."
+running = "Proposing and ranking ad angles…"
 stopped = "The last run stopped before it finished."
 empty = "No angles for this channel yet."
 discarded = "Discarded angles, not shown: {n}."
@@ -4486,7 +4487,7 @@ after_confirm = "A change here after a script is written marks the script for yo
 
 [brief.claims]
 title = "Claims in this video ({n})"
-info = "The video keeps its own copy of each claim. Editing or rejecting a claim in the product never changes a video by itself: the stage shows Attention and you decide here."
+info = "The video keeps its own copy of each claim. Editing or rejecting a claim in the product never changes a video by itself: the Brief stage is marked with how many changed, and you decide here."
 hint = "The script may state only these. Leave out what this video should not say."
 none = "This video uses no claim yet."
 left_out = "Confirmed in the product, not in this video ({n})"

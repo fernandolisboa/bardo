@@ -2804,6 +2804,8 @@ pub enum Text {
     AdFrameworkName(AdFramework),
     /// What a script in an ad framework goes through, in one line.
     AdFrameworkSteps(AdFramework),
+    /// An ad's script is asked for while its confirmed brief is incomplete again.
+    ScriptBriefNotReady,
 }
 
 impl Text {
@@ -5823,6 +5825,7 @@ impl Text {
                 AdFramework::MythFact => "ad_framework.steps.myth_fact",
                 AdFramework::Offer => "ad_framework.steps.offer",
             },
+            Text::ScriptBriefNotReady => "script.error.brief_not_ready",
         };
         Cow::Borrowed(key)
     }
@@ -7959,6 +7962,7 @@ mod tests {
         texts.push(Text::BriefAfterConfirm);
         texts.extend(AdFramework::ALL.map(Text::AdFrameworkName));
         texts.extend(AdFramework::ALL.map(Text::AdFrameworkSteps));
+        texts.push(Text::ScriptBriefNotReady);
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

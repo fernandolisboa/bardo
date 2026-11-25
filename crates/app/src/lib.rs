@@ -796,6 +796,8 @@ impl Bardo {
         let ad_angle_handler = crate::ad_angles::AdAngleHandler {
             owner: profile.id,
             ads: Arc::clone(&ads),
+            products: Arc::clone(&products),
+            channels: Arc::clone(&channels),
             text: Arc::clone(&providers.text),
             engines: decision_engines.clone(),
             secrets: Arc::clone(&secrets),

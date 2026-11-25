@@ -65,6 +65,16 @@ pub struct BriefClaim {
 }
 
 impl BriefClaim {
+    /// Whether the claim needs care now: as the product marks it today,
+    /// or as it was marked when copied once the product no longer has it.
+    /// A mark switched in the product reaches every video that copied the
+    /// claim, without a question: it changes no word the video says.
+    pub fn sensitive_now(&self, sheet: &ProductSheet) -> bool {
+        sheet
+            .claim(self.claim)
+            .map_or(self.sensitive, Claim::sensitive)
+    }
+
     fn copy_of(claim: &Claim) -> Self {
         Self {
             claim: claim.id,

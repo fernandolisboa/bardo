@@ -14,8 +14,10 @@
 //! - "Vozes do Mar" (Portuguese, Brazil): one project with a script.
 //! - A persona, this month's spend against two budgets, and a finished and
 //!   a failed job.
-//! - A product to advertise, with a photo, a screen and a logo, and an
-//!   archived one.
+//! - A product to advertise, with a photo, a screen and a logo, the
+//!   sheet its facts make, two ad angles for the first channel and the ad
+//!   project one of them started, waiting at its Brief stage; and an
+//!   archived product.
 
 use std::path::Path;
 use std::process::Command;
@@ -145,7 +147,7 @@ pub fn seed_showcase(bardo: &mut Bardo) -> anyhow::Result<Value> {
         now,
     )?;
     let probe = render_ready(&db, &templates, &space, &projects_dir, &ffmpeg, now)?;
-    products(&db, profile, &ffmpeg, now)?;
+    products(&db, profile, &space, &ffmpeg, now)?;
     spend(&db, profile, &space, &sea, &probe, &ship, now)?;
     jobs(&db, profile, now)?;
 
@@ -203,6 +205,7 @@ fn persona(db: &Database, profile: ProfileId) -> anyhow::Result<PersonaId> {
 fn products(
     db: &Database,
     profile: ProfileId,
+    channel: &Channel,
     ffmpeg: &Path,
     now: SystemTime,
 ) -> anyhow::Result<()> {
@@ -278,6 +281,7 @@ fn products(
             confirmed_at: now,
         },
     )?;
+    ad(db, profile, channel, &product, now)?;
 
     let idea = ProductBrief::validate(ProductDraft {
         name: "Moon Calendar".into(),
@@ -293,6 +297,80 @@ fn products(
             ..Product::new(profile, idea)
         },
     )?;
+    Ok(())
+}
+
+/// The product's sheet as its facts make it, two ranked ad angles for
+/// `channel`, and the ad project the first one started, at its Brief
+/// stage. The project is a day old, so the channel's newest project stays
+/// the one ready to render.
+fn ad(
+    db: &Database,
+    profile: ProfileId,
+    channel: &Channel,
+    product: &Product,
+    now: SystemTime,
+) -> anyhow::Result<()> {
+    let earlier = now - Duration::from_secs(24 * 3600);
+    let mut sheet = ProductSheet::empty(product.id, earlier);
+    sheet.take_facts(product.brief.facts(), earlier);
+    ProductRepository::save_sheet(db, &sheet)?;
+    let claims: Vec<ClaimId> = sheet.confirmed().map(|claim| claim.id).collect();
+    let reason = |score: u8, confidence: f64| Reason {
+        score: Score::new(score),
+        confidence: Confidence::new(confidence),
+    };
+    let mut angles = Vec::new();
+    for (position, (title, angle, framework, segment, hook, scores)) in [
+        (
+            "The lamp that makes your desk a set",
+            "Late work looks better and feels calmer with a small planet glowing beside the notes.",
+            AdFramework::BeforeAfter,
+            "Students who film their desk",
+            "Your desk at 11 pm, before and after one lamp.",
+            (91, 84, 88),
+        ),
+        (
+            "No switch, just turn the ring",
+            "The ring dims the light in one move: the feature explains itself on camera.",
+            AdFramework::Demonstration,
+            "Home-office workers on late calls",
+            "Watch this lamp dim with one turn.",
+            (82, 77, 93),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let idea = AdAngleIdea::new(title, angle, framework, segment, hook, &claims)
+            .map_err(|errors| anyhow!("the ad angle: {errors:?}"))?;
+        let mut angle = AdAngle::suggested(
+            profile,
+            product.id,
+            channel.id,
+            idea,
+            earlier,
+            position as u32,
+            None,
+        );
+        let (hook, audience_fit, clarity) = scores;
+        angle
+            .rank(AdRanking {
+                audience_fit: reason(audience_fit, 0.81),
+                hook: reason(hook, 0.88),
+                clarity: reason(clarity, 0.9),
+                model: "jev-1".into(),
+                ranked_at: earlier,
+            })
+            .map_err(|error| anyhow!("ranking the ad angle: {error:?}"))?;
+        angles.push(angle);
+    }
+    AdRepository::save_angles(db, &angles)?;
+    let start = angles[0]
+        .approve(Niche::new("desk lamps").valid()?, earlier)
+        .map_err(|error| anyhow!("approving the ad angle: {error:?}"))?;
+    let brief = AdBrief::start(start.project.id, product, angles[0].id, &sheet, earlier);
+    AdRepository::start_ad_project(db, &angles[0], &start, &brief)?;
     Ok(())
 }
 

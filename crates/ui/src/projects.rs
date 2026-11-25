@@ -773,6 +773,7 @@ impl ProjectsScreen {
     ) {
         self.project = id;
         self.loaded = None;
+        self.page_scroll.set_offset(point(px(0.), px(0.)));
         // The cap box is filled again from the next project's own cap.
         self.production = None;
         self.spend_cap_note = None;
@@ -940,8 +941,67 @@ impl ProjectsScreen {
 
     /// Shows a stage of the open project, as the editor's "Review &
     /// render" asks.
-    pub fn show_stage(&mut self, stage: Stage, _window: &mut Window, cx: &mut Context<Self>) {
+    ///
+    /// The Brief is an ad project's stage: asked for while another kind
+    /// of project is open (a guide link), it opens the newest ad project,
+    /// the open channel's first.
+    pub fn show_stage(&mut self, stage: Stage, window: &mut Window, cx: &mut Context<Self>) {
+        if stage == Stage::Brief && !self.open_project_is_ad() {
+            self.show_an_ad_project(window, cx);
+        }
         self.pick_stage(stage, cx);
+    }
+
+    fn open_project_is_ad(&self) -> bool {
+        self.project.is_some_and(|id| {
+            self.projects
+                .iter()
+                .any(|project| project.id == id && project.is_ad())
+        })
+    }
+
+    /// Opens the newest ad project there is, looking in the open channel
+    /// first; nothing changes when there is none.
+    fn show_an_ad_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bardo = self.bardo.read(cx);
+        let open = self.channel;
+        let found = open
+            .into_iter()
+            .chain(
+                self.channels
+                    .iter()
+                    .map(|channel| channel.id)
+                    .filter(|id| Some(*id) != open),
+            )
+            .find_map(|channel| {
+                bardo
+                    .video_projects(channel)
+                    .ok()?
+                    .into_iter()
+                    .find(|project| project.is_ad())
+            })
+            .map(|project| project.id);
+        if let Some(project) = found {
+            self.show_project(project, window, cx);
+        }
+    }
+
+    /// The look job's walk ([`crate::showcase`]): past the Brief stage it
+    /// goes back to the open channel's newest project that is no ad, the
+    /// one whose other stages have something to show.
+    #[cfg(feature = "showcase")]
+    pub(crate) fn leave_ad_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.open_project_is_ad() {
+            return;
+        }
+        let other = self
+            .projects
+            .iter()
+            .find(|project| !project.is_ad())
+            .map(|project| project.id);
+        if other.is_some() {
+            self.select_project(other, window, cx);
+        }
     }
 
     /// The narrator choices: the channel's default (named), then every

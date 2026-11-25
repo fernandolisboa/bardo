@@ -5,7 +5,7 @@
 use bardo_domain::{
     AdAngle, AdAngleId, AdAngleIdea, AdAngleRecord, AdBrief, AdBriefRecord, AdFramework, AdRanking,
     AdRepository, AdStart, BriefClaim, BriefText, ChannelId, ClaimId, ClaimKind, ClaimSeen,
-    Confidence, JobId, ProductId, ProfileId, Reason, RepositoryError, Score, ThemeId,
+    Confidence, JobId, ProductId, ProfileId, Reason, RepositoryError, Score, ThemeId, ThemeStatus,
     VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
@@ -434,6 +434,48 @@ impl AdRepository for Database {
         tx.commit().map_err(boxed)
     }
 
+    fn save_rankings(&self, ranked: &[AdAngle]) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        for angle in ranked {
+            let Some(ranking) = angle.ranking() else {
+                continue;
+            };
+            let idea = angle.idea();
+            // Only the ranking, and only onto what was ranked: an edit, a
+            // discard or an approval made meanwhile stays as it is.
+            tx.execute(
+                "UPDATE ad_angle SET
+                     fit_score = ?1, fit_confidence = ?2,
+                     hook_score = ?3, hook_confidence = ?4,
+                     clarity_score = ?5, clarity_confidence = ?6,
+                     ranked_by = ?7, ranked_at = ?8
+                 WHERE id = ?9 AND status = ?10 AND theme_id IS NULL AND ranked_at IS NULL
+                     AND title = ?11 AND angle = ?12 AND framework = ?13 AND segment = ?14
+                     AND hook = ?15",
+                params![
+                    i64::from(ranking.audience_fit.score.value()),
+                    ranking.audience_fit.confidence.value(),
+                    i64::from(ranking.hook.score.value()),
+                    ranking.hook.confidence.value(),
+                    i64::from(ranking.clarity.score.value()),
+                    ranking.clarity.confidence.value(),
+                    ranking.model.as_str(),
+                    to_unix_millis(ranking.ranked_at),
+                    angle.id.to_string(),
+                    ThemeStatus::Suggested.code(),
+                    idea.title(),
+                    idea.angle(),
+                    idea.framework().code(),
+                    idea.segment(),
+                    idea.hook(),
+                ],
+            )
+            .map_err(boxed)?;
+        }
+        tx.commit().map_err(boxed)
+    }
+
     fn start_ad_project(
         &self,
         angle: &AdAngle,
@@ -442,6 +484,21 @@ impl AdRepository for Database {
     ) -> Result<(), RepositoryError> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(boxed)?;
+        // An angle starts one project: a second approval, from another
+        // window or beside a job, finds it taken.
+        let status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM ad_angle WHERE id = ?1",
+                [angle.id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(boxed)?;
+        if status.as_deref() != Some(ThemeStatus::Suggested.code()) {
+            return Err(boxed(std::io::Error::other(
+                "the ad angle is no longer a suggestion",
+            )));
+        }
         // The theme first: the angle and the project both name it.
         insert_project(&tx, &start.theme, &start.project)?;
         upsert_angle(&tx, angle)?;
@@ -646,9 +703,10 @@ mod tests {
         );
     }
 
-    /// Approves an angle and saves what it starts.
+    /// Approves a saved angle and saves what it starts.
     fn started(s: &Setup, title: &str) -> (AdAngle, AdStart, AdBrief) {
         let mut angle = angle(s, title, AdFramework::BeforeAfter, 0);
+        s.db.save_angles(std::slice::from_ref(&angle)).unwrap();
         let start = angle
             .approve(Niche::new("Desk lamps").unwrap(), time(1_800_000_200))
             .unwrap();
@@ -685,6 +743,131 @@ mod tests {
         assert_eq!(s.db.brief(start.project.id).unwrap(), Some(brief.clone()));
         assert_eq!(s.db.briefs_of(s.product.id).unwrap(), [brief]);
         assert_eq!(s.db.brief(VideoProjectId::new()).unwrap(), None);
+    }
+
+    #[test]
+    fn an_angle_starts_one_project_at_most() {
+        let s = setup();
+        let suggested = angle(&s, "A desk you can see", AdFramework::BeforeAfter, 0);
+        s.db.save_angles(std::slice::from_ref(&suggested)).unwrap();
+        // Two approvals of the same suggestion, each read before the
+        // other was saved.
+        let approve = |at: u64| {
+            let mut angle = suggested.clone();
+            let start = angle
+                .approve(Niche::new("Desk lamps").unwrap(), time(at))
+                .unwrap();
+            let brief = AdBrief::start(start.project.id, &s.product, angle.id, &s.sheet, time(at));
+            (angle, start, brief)
+        };
+        let (first, first_start, first_brief) = approve(1_800_000_200);
+        let (second, second_start, second_brief) = approve(1_800_000_300);
+
+        s.db.start_ad_project(&first, &first_start, &first_brief)
+            .unwrap();
+        assert!(
+            s.db.start_ad_project(&second, &second_start, &second_brief)
+                .is_err()
+        );
+        assert_eq!(
+            s.db.projects(s.channel.id).unwrap(),
+            std::slice::from_ref(&first_start.project)
+        );
+        assert_eq!(s.db.project(second_start.project.id).unwrap(), None);
+        assert_eq!(s.db.angle(suggested.id).unwrap(), Some(first));
+
+        // So is an angle that was never saved.
+        let mut unknown = angle(&s, "Never saved", AdFramework::Offer, 1);
+        let start = unknown
+            .approve(Niche::new("Desk lamps").unwrap(), time(1_800_000_300))
+            .unwrap();
+        let brief = AdBrief::start(
+            start.project.id,
+            &s.product,
+            unknown.id,
+            &s.sheet,
+            time(1_800_000_300),
+        );
+        assert!(s.db.start_ad_project(&unknown, &start, &brief).is_err());
+    }
+
+    #[test]
+    fn a_ranking_is_written_only_onto_the_angle_that_was_ranked() {
+        let s = setup();
+        let waiting = angle(&s, "A desk you can see", AdFramework::BeforeAfter, 0);
+        let edited = angle(&s, "Work after dark", AdFramework::Offer, 1);
+        let discarded = angle(&s, "One lamp, two moods", AdFramework::Demonstration, 2);
+        let approved = angle(&s, "The lamp that stays", AdFramework::ThreeReasons, 3);
+        s.db.save_angles(&[
+            waiting.clone(),
+            edited.clone(),
+            discarded.clone(),
+            approved.clone(),
+        ])
+        .unwrap();
+
+        // The engine answers about all four as they were read.
+        let ranked: Vec<AdAngle> = [&waiting, &edited, &discarded, &approved]
+            .into_iter()
+            .map(|angle| {
+                let mut angle = angle.clone();
+                angle.rank(ranking()).unwrap();
+                angle
+            })
+            .collect();
+
+        // Meanwhile the user edits one, discards one and approves one.
+        let mut edited_now = edited.clone();
+        edited_now
+            .edit(
+                AdAngleIdea::new(
+                    "Work after dark",
+                    "",
+                    AdFramework::Offer,
+                    "",
+                    "Another first line.",
+                    &s.claims,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let mut discarded_now = discarded.clone();
+        discarded_now.discard().unwrap();
+        s.db.save_angles(&[edited_now.clone(), discarded_now.clone()])
+            .unwrap();
+        let mut approved_now = approved.clone();
+        let start = approved_now
+            .approve(Niche::new("Desk lamps").unwrap(), time(1_800_000_200))
+            .unwrap();
+        let brief = AdBrief::start(
+            start.project.id,
+            &s.product,
+            approved_now.id,
+            &s.sheet,
+            time(1_800_000_200),
+        );
+        s.db.start_ad_project(&approved_now, &start, &brief)
+            .unwrap();
+
+        s.db.save_rankings(&ranked).unwrap();
+
+        assert_eq!(s.db.angle(waiting.id).unwrap().as_ref(), Some(&ranked[0]));
+        assert_eq!(s.db.angle(edited.id).unwrap(), Some(edited_now));
+        assert_eq!(s.db.angle(discarded.id).unwrap(), Some(discarded_now));
+        // Still approved, with its theme: the ad's theme stays off Themes.
+        assert_eq!(s.db.angle(approved.id).unwrap(), Some(approved_now));
+        assert!(s.db.themes(s.channel.id).unwrap().is_empty());
+
+        // A ranking already there is not written over.
+        let mut later = waiting.clone();
+        later
+            .rank(AdRanking {
+                model: "another".to_owned(),
+                ..ranking()
+            })
+            .unwrap();
+        s.db.save_rankings(&[later]).unwrap();
+        assert_eq!(s.db.angle(waiting.id).unwrap().as_ref(), Some(&ranked[0]));
     }
 
     #[test]

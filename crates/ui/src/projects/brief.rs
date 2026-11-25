@@ -7,7 +7,7 @@
 //! in `bardo_app`; this file maps them to the screen.
 
 use bardo_app::bardo_domain::{
-    AdBrief, BriefFieldError, ClaimDrift, ClaimId, VideoLength, VideoProjectId,
+    AdBrief, BriefFieldError, BriefNotReady, ClaimDrift, ClaimId, VideoLength, VideoProjectId,
 };
 use bardo_app::{BriefClaimRow, BriefError, BriefView, Control, Stage, Text, TourAnchor};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -58,6 +58,11 @@ impl ProjectsScreen {
                     self.brief_link
                         .update(cx, |input, cx| input.set_value(link, window, cx));
                     self.brief_loaded = Some(stored);
+                }
+                // What an earlier load failed with is over; what a change
+                // to a brief on screen was refused with stays.
+                if self.brief.is_none() {
+                    self.brief_error = None;
                 }
                 self.brief = Some(view);
             }
@@ -142,6 +147,31 @@ impl ProjectsScreen {
         }
         let confirmed = self.bardo.read(cx).confirm_brief(id);
         self.brief_changed(confirmed, Some(Text::BriefConfirmedNotice), window, cx);
+    }
+
+    /// Opens the Script stage; words typed and not saved are saved first,
+    /// and a brief they leave with something to settle stays open.
+    fn brief_to_script(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.brief_dirty(cx) {
+            if !self.save_brief(window, cx) {
+                return;
+            }
+            if self
+                .brief
+                .as_ref()
+                .is_none_or(|view| view.not_ready.is_some())
+            {
+                return;
+            }
+        }
+        self.pick_stage(Stage::Script, cx);
+    }
+
+    /// Whether all the brief waits for is a call to action, and one is
+    /// typed and not saved yet: confirming saves it first.
+    fn brief_waits_on_typed_words(&self, view: &BriefView, cx: &App) -> bool {
+        view.not_ready == Some(BriefNotReady::NoCallToAction)
+            && !self.brief_call_to_action.read(cx).value().trim().is_empty()
     }
 
     fn change_brief_claim(
@@ -280,7 +310,7 @@ impl ProjectsScreen {
                 tr(bardo, Text::ClaimKindName(row.copy.kind)),
                 cx,
             ))
-            .when(row.copy.sensitive, |marks| {
+            .when(row.sensitive, |marks| {
                 marks.child(kit::status(
                     Tone::Warning,
                     tr(bardo, Text::ClaimSensitive),
@@ -534,9 +564,11 @@ impl ProjectsScreen {
 
     /// Confirming the brief, or what stands in the way.
     fn render_brief_confirm(&self, view: &BriefView, cx: &mut Context<Self>) -> AnyElement {
+        let typed = self.brief_waits_on_typed_words(view, cx);
         let bardo = self.bardo.read(cx);
         let not_ready = view
             .not_ready
+            .filter(|_| !typed)
             .map(|reason| kit::notice(Tone::Warning, tr(bardo, Text::BriefNotReady(reason)), cx));
         let notice = self
             .brief_notice
@@ -559,8 +591,8 @@ impl ProjectsScreen {
                         .small()
                         .outline()
                         .label(tr(bardo, Text::BriefToScript))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.pick_stage(Stage::Script, cx)
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.brief_to_script(window, cx)
                         })),
                 )
         } else {
@@ -571,7 +603,7 @@ impl ProjectsScreen {
                     Button::new("confirm-brief")
                         .primary()
                         .label(tr(bardo, Text::BriefConfirm))
-                        .disabled(view.not_ready.is_some())
+                        .disabled(view.not_ready.is_some() && !typed)
                         .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                             this.confirm_brief(window, cx)
                         })),
@@ -609,8 +641,8 @@ impl ProjectsScreen {
             ];
         };
         let scroll = Some(&self.page_scroll);
-        let tagged = |control: Control, element: AnyElement| {
-            kit::anchor_in(TourAnchor::Control(control), element, scroll).into_any_element()
+        let tagged = |anchor: TourAnchor, element: AnyElement| {
+            kit::anchor_in(anchor, element, scroll).into_any_element()
         };
         let angle = self.render_brief_angle(&view, cx);
         let claims = self.render_brief_claims(&view, cx);
@@ -637,10 +669,10 @@ impl ProjectsScreen {
             .child(muted(cx, tr(bardo, Text::BriefHint)));
         vec![
             title.into_any_element(),
-            tagged(Control::BriefAngle, angle),
-            tagged(Control::BriefClaims, claims),
-            tagged(Control::BriefWords, words),
-            tagged(Control::BriefConfirm, confirm),
+            tagged(TourAnchor::Control(Control::BriefAngle), angle),
+            tagged(TourAnchor::Control(Control::BriefClaims), claims),
+            tagged(TourAnchor::Control(Control::BriefWords), words),
+            tagged(TourAnchor::Control(Control::BriefConfirm), confirm),
         ]
     }
 }

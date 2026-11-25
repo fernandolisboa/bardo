@@ -707,6 +707,7 @@ not_saved = "Não foi possível salvar o roteiro. Tente de novo."
 text_required = "O roteiro não pode ficar vazio."
 text_too_long = "Use no máximo 60000 caracteres no roteiro."
 brief_first = "Confirme o briefing primeiro: o roteiro é escrito a partir dele."
+brief_not_ready = "O briefing tem algo a resolver primeiro: abra a etapa Briefing."
 
 [narration]
 title = "Narração"
@@ -1197,12 +1198,12 @@ words = "O que a persona diz na tomada."
 instruction = "O que o modelo de vídeo faz com o vídeo de controle e a aparência, fixo para o modo da tomada."
 visual_style = "O estilo visual do vídeo: que um foi escolhido e o texto que o Bardo acrescenta a cada imagem por ele, ou que nenhum foi escolhido e o visual vem das notas de estética."
 product = "O produto: o nome, o tipo, a categoria e o que ele é, pelo briefing e pela ficha."
-product_audience = "Para quem é o produto: o público do briefing e os segmentos da ficha, cada um com o que quer e o que o segura."
+product_audience = "Para quem é o produto: o público do briefing e os segmentos da ficha, cada um com o que quer e o que os faz hesitar."
 product_claims = "As afirmações confirmadas da ficha, numeradas, uma por linha. As que aguardam ou foram rejeitadas ficam de fora."
 product_notes = "O que o anunciante pede: a oferta, a chamada para ação, o que precisa ser dito e o que nunca pode ser dito."
 ad_frameworks = "Os formatos de anúncio do Bardo, um por linha: o código, o nome e os passos."
-angles_to_avoid = "Os títulos dos ângulos já propostos para este produto neste canal (\"none yet\" antes da primeira rodada)."
-angle_count = "Quantos ângulos uma rodada pede."
+angles_to_avoid = "Os títulos dos ângulos já propostos para este produto neste canal (\"none yet\" antes da primeira execução)."
+angle_count = "Quantos ângulos uma execução pede."
 
 [templates.error]
 not_saved = "Não foi possível salvar o template. Tente de novo."
@@ -4406,7 +4407,7 @@ not_loaded = "Não foi possível carregar os ângulos."
 [ad_angles.missing]
 sheet = "Este produto ainda não tem ficha. Preencha na aba Ficha: um anúncio diz só o que a ficha confirma."
 confirmed_claim = "A ficha não tem nenhuma afirmação confirmada, então um anúncio não teria o que dizer. Confirme ou adicione pelo menos uma afirmação na aba Ficha."
-archived = "Este produto está arquivado, então não recebe anúncios novos. Traga o produto de volta para propor ângulos."
+archived = "Este produto está arquivado, então não recebe anúncios novos. Restaure o produto para propor ângulos."
 channel = "Ainda não há nenhum canal. Crie um em Canais: um anúncio é feito para o público de um canal."
 
 [ad_angles.error.missing_key]
@@ -4424,7 +4425,7 @@ call_to_action_too_long = "Use no máximo 120 caracteres na chamada para ação.
 link_too_long = "Use no máximo 500 caracteres no link ou no @."
 
 [brief.not_ready]
-no_claim = "Ligue pelo menos uma afirmação: um anúncio diz só as afirmações do briefing."
+no_claim = "Use pelo menos uma afirmação: um anúncio diz só as afirmações do briefing."
 claims_to_decide = "Algumas afirmações mudaram no produto. Responda cada uma primeiro."
 no_call_to_action = "Escreva a chamada para ação: o que quem assiste deve fazer em seguida."
 
@@ -4436,13 +4437,13 @@ save_first = "Salve o produto para propor ângulos de anúncio para ele."
 brief_unsaved = "O briefing tem mudanças que você não salvou. Os ângulos são propostos a partir do que está salvo."
 propose_title = "Propor ângulos"
 channel = "Para o canal"
-channel_hint = "Um ângulo fala com o público de um canal, na língua e no estilo dele. Cada canal guarda os próprios ângulos deste produto."
+channel_hint = "Um ângulo fala com o público de um canal, no idioma e no estilo dele. Cada canal guarda os próprios ângulos deste produto."
 suggest = "Propor ângulos de anúncio"
 suggest_hint = "O Claude propõe {n} ângulos com a versão {version} do template Ângulos de anúncio, só a partir das afirmações confirmadas. Depois o motor de decisão ranqueia por gancho, encaixe com o público e clareza."
 rank = "Ranquear ângulos"
 unranked = "{n} esperando ranqueamento: um ângulo editado perde o ranqueamento até ser ranqueado de novo."
-rank_cost = "Ranquear esses custa {amount}."
-running = "Propondo ângulos de anúncio…"
+rank_cost = "Ranquear esses: estimativa de {amount}."
+running = "Propondo e ranqueando ângulos de anúncio…"
 stopped = "A última execução parou antes de terminar."
 empty = "Ainda não há ângulos para este canal."
 discarded = "Ângulos descartados, que não aparecem: {n}."
@@ -4460,7 +4461,7 @@ claim_gone = "Uma afirmação que a ficha não confirma mais"
 approve = "Aprovar e começar o anúncio"
 approve_hint = "Aprovar começa um projeto de anúncio neste canal, na etapa Briefing, onde você escolhe o que este vídeo diz. A prioridade pesa o gancho (40%), o encaixe com o público (35%) e a clareza (25%). Editar um ângulo tira o ranqueamento dele."
 edit_hint = "Salvar uma mudança tira o ranqueamento até você ranquear o ângulo de novo. Um ângulo usa até 8 afirmações confirmadas."
-started = "Projeto de anúncio começado. A etapa Briefing está esperando você."
+started = "Projeto de anúncio iniciado. A etapa Briefing está esperando você."
 open_project = "Abrir o projeto"
 
 [ad_angle.score]
@@ -4486,7 +4487,7 @@ after_confirm = "Uma mudança aqui depois que o roteiro foi escrito marca o rote
 
 [brief.claims]
 title = "Afirmações neste vídeo ({n})"
-info = "O vídeo guarda a própria cópia de cada afirmação. Editar ou rejeitar uma afirmação no produto nunca muda um vídeo sozinho: a etapa mostra Atenção e você decide aqui."
+info = "O vídeo guarda a própria cópia de cada afirmação. Editar ou rejeitar uma afirmação no produto nunca muda um vídeo sozinho: a etapa Briefing fica marcada com quantas mudaram, e você decide aqui."
 hint = "O roteiro só pode dizer estas. Tire o que este vídeo não deve dizer."
 none = "Este vídeo ainda não usa nenhuma afirmação."
 left_out = "Confirmadas no produto, fora deste vídeo ({n})"

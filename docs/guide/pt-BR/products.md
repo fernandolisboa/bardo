@@ -8,7 +8,7 @@ tour: products
 
 # Produtos
 
-Um produto é algo que você anuncia: um produto digital, como um app ou um curso, um produto físico, um serviço, ou uma ideia que ainda não existe. Você o descreve uma vez e o reaproveita em todo anúncio, em qualquer canal. Os produtos ficam em [Produtos](bardo:go/products). O briefing, as imagens e o logo não custam nada; só [preencher a ficha](#research) com o Claude é pago, e o custo aparece antes. [Mostre a tela para mim](bardo:tour/products), ou a [parte 2 do tour](bardo:tour/products-sheet), sobre a ficha e as afirmações, e a [parte 3](bardo:tour/products-angles), sobre os ângulos de anúncio.
+Um produto é algo que você anuncia: um produto digital, como um app ou um curso, um produto físico, um serviço, ou uma ideia que ainda não existe. Você o descreve uma vez e o reaproveita em todo anúncio, em qualquer canal. Os produtos ficam em [Produtos](bardo:go/products). O briefing, as imagens e o logo não custam nada; [preencher a ficha](#research) com o Claude e [propor ou ranquear ângulos de anúncio](#angles) são pagos, e cada um mostra o custo antes. [Mostre a tela para mim](bardo:tour/products), ou a [parte 2 do tour](bardo:tour/products-sheet), sobre a ficha e as afirmações, e a [parte 3](bardo:tour/products-angles), sobre os ângulos de anúncio.
 
 <a id="library"></a>
 ## Seus produtos
@@ -96,9 +96,9 @@ Um anúncio só afirma o que está **confirmado**. Uma afirmação é uma frase 
 
 **Ângulos**, a terceira aba de um produto salvo, é onde um anúncio dele começa. Um ângulo de anúncio é um jeito de um anúncio falar com o público de um canal: o que ele diz, o formato que segue, a parte do público com quem fala, um rascunho das primeiras palavras e as afirmações confirmadas que ele usa.
 
-Escolha o canal em **Para o canal**: um ângulo é escrito para o público de um canal, no idioma dele, e cada canal guarda os próprios ângulos do produto. **Propor ângulos de anúncio** começa então uma execução. O Claude propõe cinco ângulos com o modelo **Ângulos de anúncio** ([Modelos](templates.md#kinds)), só a partir do briefing do produto, da ficha e das afirmações confirmadas, e evita repetir os que já existem. Depois o motor de decisão ranqueia. A estimativa aparece antes de a execução começar, uma execução que levaria um provedor além do orçamento pergunta antes, e as duas chamadas aparecem em [Custos](costs.md), no canal. Você precisa de uma chave do Claude e da chave do motor de decisão ([Chaves de API](api-keys.md)); a execução também aparece em [Tarefas](jobs.md).
+Escolha o canal em **Para o canal**: um ângulo é escrito para o público de um canal, no idioma dele, e cada canal guarda os próprios ângulos do produto. **Propor ângulos de anúncio** começa então uma execução. O Claude propõe cinco ângulos com o modelo **Ângulos de anúncio** ([Modelos](templates.md#kinds)), só a partir do briefing do produto, da ficha e das afirmações confirmadas, e evita repetir os que já existem. Depois o motor de decisão ranqueia. A estimativa aparece antes de a execução começar e conta os ângulos que já esperam um ranqueamento, que a mesma execução ranqueia; uma execução que levaria um provedor além do orçamento pergunta antes, e **Tentar de novo** em [Tarefas](jobs.md) também pergunta, pelo que uma execução que falhou ainda tem a pagar. As duas chamadas aparecem em [Custos](costs.md), no canal. Você precisa de uma chave do Claude e da chave do motor de decisão ([Chaves de API](api-keys.md)). Enquanto uma execução roda, o produto não pode ser excluído; uma execução que não encontra mais o produto ou o canal para antes de pagar por qualquer coisa.
 
-Um produto recebe ângulos quando a ficha tem pelo menos uma afirmação confirmada, porque um anúncio não diz mais nada; a aba mostra o que falta. Um produto sem imagens pode ter ângulos; um arquivado não.
+Um produto recebe ângulos quando a ficha tem pelo menos uma afirmação confirmada, porque um anúncio não diz mais nada; a aba mostra o que falta. Um produto sem imagens pode ter ângulos; um arquivado não. Um ângulo proposto pelo Claude que não usa nenhuma das afirmações confirmadas não é guardado.
 
 Cada ângulo segue um de nove formatos: problema e solução, demonstração, antes e depois, como funciona, a história por trás, jeito antigo e jeito novo, três motivos, mito e fato, ou oferta. Não existe formato de depoimento: um anúncio nunca apresenta um cliente inventado.
 
@@ -107,7 +107,7 @@ Cada ângulo segue um de nove formatos: problema e solução, demonstração, an
 
 O motor de decisão responde três perguntas sobre cada ângulo, cada uma com uma nota de 0 a 100 e o quanto ele tinha certeza: a força do **gancho**, o **encaixe com o público** que o ângulo indica e a **clareza**. A **Prioridade** pesa o gancho 40%, o encaixe com o público 35% e a clareza 25%, e a lista mostra o melhor primeiro; a **Confiança** é a da resposta de que o motor tinha menos certeza. **Usa uma afirmação sensível** é uma marca do próprio Bardo, não de um modelo: uma das afirmações do ângulo está marcada como sensível na ficha.
 
-- **Aprovar e começar o anúncio** começa um projeto de anúncio naquele canal, com o título do ângulo, e abre a etapa [Briefing](brief.md); **Abrir o projeto** leva você até lá. O ângulo continua na lista, marcado como aprovado.
+- **Aprovar e começar o anúncio** começa um projeto de anúncio naquele canal, com o título do ângulo; o projeto começa pela etapa [Briefing](brief.md), e **Abrir o projeto** leva você até lá. O ângulo continua na lista, marcado como aprovado, e começa um projeto só. Aprovar exige o mesmo que propor: um produto que não está arquivado, com uma afirmação confirmada na ficha.
 - **Editar** muda o título, o ângulo, o formato, com quem ele fala, as primeiras palavras e as afirmações que ele usa (até 8, só confirmadas). Um ângulo editado perde o ranqueamento; **Ranquear ângulos** ranqueia os que estão esperando.
 - **Descartar** tira o ângulo da lista. A aba conta quantos foram descartados.
 
@@ -116,4 +116,4 @@ Os ângulos de anúncio aparecem aqui e não em [Temas](themes-ranking.md), e um
 <a id="archive"></a>
 ## Duplicar, arquivar e excluir
 
-**Duplicar** salva as alterações que você fez e depois copia o briefing, as imagens, o logo e a ficha com um novo nome, para uma variação do mesmo produto. **Arquivar** esconde da lista e de novos anúncios um produto que você não anuncia mais; **Restaurar** traz ele de volta. **Excluir…** remove o produto com as imagens, o logo e a ficha depois que você confirma, e é recusado enquanto algum vídeo usa o produto (arquive em vez disso) ou enquanto uma execução preenche a ficha.
+**Duplicar** salva as alterações que você fez e depois copia o briefing, as imagens, o logo e a ficha com um novo nome, para uma variação do mesmo produto. **Arquivar** esconde da lista e de novos anúncios um produto que você não anuncia mais; **Restaurar** traz ele de volta. **Excluir…** remove o produto com as imagens, o logo e a ficha depois que você confirma, e é recusado enquanto algum vídeo usa o produto (arquive em vez disso), enquanto uma execução preenche a ficha, ou enquanto os ângulos dele são propostos ou ranqueados.

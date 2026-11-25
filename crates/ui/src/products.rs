@@ -1755,6 +1755,10 @@ impl Render for ProductsScreen {
             _ => None,
         };
         if let Some(tab) = toured {
+            if self.tab != tab {
+                // Shown as stored, like a tab the user picks.
+                self.angles_pending = true;
+            }
             self.tab = tab;
         }
         if self.tab == Tab::Sheet && self.sheet_pending {

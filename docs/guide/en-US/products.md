@@ -8,7 +8,7 @@ tour: products
 
 # Products
 
-A product is something you advertise: a digital product such as an app or a course, a physical product, a service, or an idea that does not exist yet. You describe it once and reuse it in every ad, on any channel. Products live on [Products](bardo:go/products). The brief, the images and the logo cost nothing; only [filling the sheet](#research) with Claude is paid, and it shows its cost first. [Show me the screen](bardo:tour/products), or [part 2 of the tour](bardo:tour/products-sheet) for the sheet and its claims, and [part 3](bardo:tour/products-angles) for its ad angles.
+A product is something you advertise: a digital product such as an app or a course, a physical product, a service, or an idea that does not exist yet. You describe it once and reuse it in every ad, on any channel. Products live on [Products](bardo:go/products). The brief, the images and the logo cost nothing; [filling the sheet](#research) with Claude and [proposing or ranking ad angles](#angles) are paid, and each shows its cost first. [Show me the screen](bardo:tour/products), or [part 2 of the tour](bardo:tour/products-sheet) for the sheet and its claims, and [part 3](bardo:tour/products-angles) for its ad angles.
 
 <a id="library"></a>
 ## Your products
@@ -96,9 +96,9 @@ An ad states only **confirmed** claims. A claim is one statement of at most 300 
 
 **Ad angles**, the third tab of a saved product, is where an ad for it begins. An ad angle is one way an ad could speak to a channel's audience: what it says, the format it follows, the part of the audience it speaks to, a draft of its first words and the confirmed claims it leans on.
 
-Pick the channel under **For the channel**: an angle is written for one channel's audience, in its language, and each channel keeps its own angles for the product. **Propose ad angles** then starts one run. Claude proposes five angles with the **Ad angles** template ([Templates](templates.md#kinds)), from the product's brief, the sheet and its confirmed claims only, and avoids repeating the ones already there. The decision engine then ranks them. The estimate shows before the run starts, a run that would take a provider past its budget asks first, and both calls appear on [Costs](costs.md) under the channel. You need a Claude key and the decision engine's key ([API keys](api-keys.md)); the run also appears on [Jobs](jobs.md).
+Pick the channel under **For the channel**: an angle is written for one channel's audience, in its language, and each channel keeps its own angles for the product. **Propose ad angles** then starts one run. Claude proposes five angles with the **Ad angles** template ([Templates](templates.md#kinds)), from the product's brief, the sheet and its confirmed claims only, and avoids repeating the ones already there. The decision engine then ranks them. The estimate shows before the run starts and counts the angles already waiting for a ranking, which the same run ranks; a run that would take a provider past its budget asks first, and so does **Retry** on [Jobs](jobs.md) for what a failed run still has to pay. Both calls appear on [Costs](costs.md) under the channel. You need a Claude key and the decision engine's key ([API keys](api-keys.md)). While a run goes, the product cannot be deleted; a run that finds its product or its channel gone stops before it pays for anything.
 
-A product gets angles once its sheet has at least one confirmed claim, because an ad states nothing else; the tab says what is missing. A product without images can have angles; an archived one cannot.
+A product gets angles once its sheet has at least one confirmed claim, because an ad states nothing else; the tab says what is missing. A product without images can have angles; an archived one cannot. An angle Claude proposes that leans on none of the confirmed claims is not kept.
 
 Each angle follows one of nine formats: problem and solution, demonstration, before and after, how it works, the story behind it, old way and new way, three reasons, myth and fact, or offer. There is no testimonial format: an ad never presents an invented customer.
 
@@ -107,7 +107,7 @@ Each angle follows one of nine formats: problem and solution, demonstration, bef
 
 The decision engine answers three questions about each angle, each with a score from 0 to 100 and how sure it was: how strong the **hook** is, how well the angle **fits the audience** it names, and how **clear** it is. **Priority** weighs the hook 40%, audience fit 35% and clarity 25%, and the list shows the best first; **Confidence** is that of the engine's least certain answer. **Leans on a sensitive claim** is Bardo's own mark, no model's: one of the angle's claims is marked sensitive on the sheet.
 
-- **Approve and start the ad** starts an ad project in that channel, with the angle's title, and opens its [Brief](brief.md) stage; **Open the project** takes you there. The angle stays in the list, marked approved.
+- **Approve and start the ad** starts an ad project in that channel, with the angle's title; the project begins at its [Brief](brief.md) stage, and **Open the project** takes you there. The angle stays in the list, marked approved, and starts one project only. Approving needs what proposing needs: a product that is not archived, with a confirmed claim on its sheet.
 - **Edit** changes the title, the angle, the format, who it speaks to, the first words and the claims it leans on (up to 8, confirmed ones only). An edited angle loses its ranking; **Rank angles** ranks the ones waiting.
 - **Discard** takes the angle out of the list. The tab counts how many were discarded.
 
@@ -116,4 +116,4 @@ Ad angles show here and not on [Themes](themes-ranking.md), and an ad project do
 <a id="archive"></a>
 ## Duplicating, archiving and deleting
 
-**Duplicate** saves the changes you have made, then copies the brief, the images, the logo and the sheet under a new name, for a variant of the same product. **Archive** hides a product you no longer advertise from the list and from new ads; **Restore** brings it back. **Delete…** removes the product with its images, logo and sheet after you confirm, and is refused while any video uses the product (archive it instead) or while a run fills its sheet.
+**Duplicate** saves the changes you have made, then copies the brief, the images, the logo and the sheet under a new name, for a variant of the same product. **Archive** hides a product you no longer advertise from the list and from new ads; **Restore** brings it back. **Delete…** removes the product with its images, logo and sheet after you confirm, and is refused while any video uses the product (archive it instead), while a run fills its sheet, or while its angles are being proposed or ranked.

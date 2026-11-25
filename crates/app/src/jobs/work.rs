@@ -9,8 +9,9 @@ use crate::Bardo;
 
 /// What a text job works on: one text of a project, the ideas of a
 /// channel, the look of a persona, one take of a capture, the sheet of a
-/// product or its ad angles for a channel. Two jobs with the same `Work` would pay for the same thing and save over each other,
-/// so one is not started, or queued again, while another is at work
+/// product or its ad angles for a channel. Two jobs with the same `Work`
+/// would pay for the same thing and save over each other, so one is not
+/// started, or queued again, while another is at work
 /// ([`Bardo::work_busy`]).
 ///
 /// The jobs that draw what such a text describes (a thumbnail's

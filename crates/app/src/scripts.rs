@@ -9,7 +9,7 @@
 //! the template is edited while it runs.
 
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
     ApiKey, Channel, ChannelId, CostPurpose, GeneratedScript, Generation, GenerationId, Job,
@@ -21,6 +21,7 @@ use bardo_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::ads::with_ad_rules;
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, Catalog, KeyState, TemplateError, Text};
@@ -61,6 +62,11 @@ pub enum ScriptError {
     /// An ad project's script is written once its brief is confirmed.
     #[error("the brief is not confirmed yet")]
     BriefNotConfirmed,
+    /// The brief was confirmed and has since lost what confirming needs:
+    /// a claim, an answer about a claim that changed in the product, or
+    /// the call to action.
+    #[error("the brief is incomplete")]
+    BriefNotReady,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -81,6 +87,7 @@ impl ScriptError {
             ScriptError::OverBudget(_) => Text::BudgetReachedTitle,
             ScriptError::CapInvalid => Text::SpendCapInvalid,
             ScriptError::BriefNotConfirmed => Text::ScriptBriefFirst,
+            ScriptError::BriefNotReady => Text::ScriptBriefNotReady,
             ScriptError::Template(error) => error.message(),
             ScriptError::Repository(_) => Text::ScriptNotSaved,
         }
@@ -121,6 +128,11 @@ struct ScriptPayload {
     template_number: u32,
     instructions: String,
     prompt: String,
+    /// For an ad: when the brief the prompt was rendered from last
+    /// changed, in Unix milliseconds. A brief changed after that marks
+    /// the script this job writes, however late the job runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brief_at: Option<u64>,
 }
 
 impl ScriptPayload {
@@ -381,7 +393,7 @@ impl Bardo {
             Some(localization) => self.adaptation_estimate(&project, &localization)?,
             None => {
                 let template = self.current_template(TemplateKind::Script)?;
-                let rendered = self.render_script(&project, &template)?;
+                let (rendered, _) = self.render_script(&project, &template)?;
                 let estimate = self.estimate(&[script_call(&rendered)])?;
                 (template, estimate)
             }
@@ -398,18 +410,41 @@ impl Bardo {
         })
     }
 
-    /// The script template filled with the project's facts.
+    /// The script template filled with the project's facts. An ad's
+    /// request also carries its brief after the template's prompt and the
+    /// rules of every ad after the template's instructions, whatever the
+    /// template says; with it, when that brief last changed.
     fn render_script(
         &self,
         project: &VideoProject,
         template: &TemplateVersion,
-    ) -> Result<bardo_domain::RenderedPrompt, ScriptError> {
-        template
+    ) -> Result<(bardo_domain::RenderedPrompt, Option<SystemTime>), ScriptError> {
+        let mut rendered = template
             .body
             .render(&self.script_values(project)?)
             .map_err(|missing| {
                 // Every script variable has a value above.
                 ScriptError::Repository(RepositoryError(Box::new(missing)))
+            })?;
+        let Some((brief, changed_at)) = self.script_brief(project)? else {
+            return Ok((rendered, None));
+        };
+        rendered.prompt = format!("{}\n\n{brief}", rendered.prompt.trim_end());
+        rendered.instructions = with_ad_rules(&rendered.instructions);
+        Ok((rendered, Some(changed_at)))
+    }
+
+    /// When the request that wrote `script` read its project's brief: the
+    /// time its job kept, else when the answer arrived.
+    pub(crate) fn script_read_brief_at(&self, script: &Script) -> SystemTime {
+        let generation = script.source().generation();
+        generation
+            .job
+            .and_then(|id| self.jobs().into_iter().find(|job| job.id() == id))
+            .and_then(|job| ScriptPayload::parse(job.payload()).ok())
+            .and_then(|payload| payload.brief_at)
+            .map_or(generation.generated_at, |millis| {
+                SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
             })
     }
 
@@ -431,14 +466,18 @@ impl Bardo {
         if let Some(localization) = self.localizations.localization(project.id)? {
             return self.adapt_version_again(&project, &localization, consent);
         }
-        if self
-            .brief_standing(&project, None)?
-            .is_some_and(|brief| !brief.confirmed)
-        {
-            return Err(ScriptError::BriefNotConfirmed);
+        if let Some(brief) = self.brief_standing(&project, None)? {
+            if !brief.confirmed {
+                return Err(ScriptError::BriefNotConfirmed);
+            }
+            // Confirmed once is not ready now: a claim the product
+            // rejected since waits for an answer before a script reads it.
+            if !brief.ready {
+                return Err(ScriptError::BriefNotReady);
+            }
         }
         let template = self.current_template(TemplateKind::Script)?;
-        let rendered = self.render_script(&project, &template)?;
+        let (rendered, brief_at) = self.render_script(&project, &template)?;
         if let Err(estimate) =
             self.check_video_budget(project.id, &[script_call(&rendered)], consent)?
         {
@@ -450,6 +489,10 @@ impl Bardo {
             template_number: template.number,
             instructions: rendered.instructions,
             prompt: rendered.prompt,
+            brief_at: brief_at.map(|at| {
+                at.duration_since(SystemTime::UNIX_EPOCH)
+                    .map_or(0, |since| since.as_millis() as u64)
+            }),
         };
         let job = Job::new(
             self.profile.id,
