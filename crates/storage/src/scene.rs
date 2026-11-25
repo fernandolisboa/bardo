@@ -1,10 +1,11 @@
 use std::time::Duration;
 
 use bardo_domain::{
-    AspectRatio, CastMember, CastRecord, ComposedShot, GenerationId, JobFailureKind, NarrationId,
-    Place, PlaceRecord, PortraitsUsed, ProductImageId, ProfileId, RepositoryError, Scene,
-    SceneClip, SceneImage, SceneKind, ScenePlan, ScenePlanId, ScenePlanRecord, ScenePlanRepository,
-    ScenePrompt, SceneRecord, StretchLimit, VideoProjectId,
+    AspectRatio, BackdropId, CastMember, CastRecord, ComposedShot, GenerationId, JobFailureKind,
+    JobId, NarrationId, Place, PlaceRecord, PortraitsUsed, ProductImageId, ProfileId, Provider,
+    RepositoryError, Scene, SceneClip, SceneImage, SceneKind, ScenePlan, ScenePlanId,
+    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, ShotBackdropDrawing, ShotColor,
+    ShotLook, StretchLimit, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use uuid::Uuid;
@@ -61,23 +62,54 @@ struct SceneRow {
     product_image: Option<String>,
     /// The composed picture's file, product image and frame shape.
     shot: (Option<String>, Option<String>, Option<String>),
+    /// The look chosen for its product shot, and the look and tones of
+    /// its composed picture.
+    look: Option<String>,
+    shot_look: Option<String>,
+    shot_tones: Option<String>,
 }
 
 /// The picture composed for a scene, as stored: its three columns are set
 /// together.
 fn composed_shot(
     (file, image, aspect): (Option<String>, Option<String>, Option<String>),
+    look: Option<&str>,
+    tones: Option<&str>,
 ) -> Result<Option<ComposedShot>, RepositoryError> {
     match (file, image, aspect) {
         (Some(file), Some(image), Some(aspect)) => Ok(Some(ComposedShot {
             file,
             image: ProductImageId::from(uuid(&image)?),
             aspect: aspect.parse::<AspectRatio>().map_err(boxed)?,
+            // A look that will not read is no look: the picture is
+            // composed again, for free.
+            look: look.and_then(ShotLook::from_code),
+            tones: tones.map(ShotColor::list_from_code).unwrap_or_default(),
         })),
         // Half a composed picture is no picture: the scene waits to be
         // composed again, for free, and the rest of the plan still loads.
         _ => Ok(None),
     }
+}
+
+/// The look chosen for a scene's product shot as stored: none for the
+/// first look.
+fn look_code(scene: &Scene) -> Option<String> {
+    (scene.look() != ShotLook::default()).then(|| scene.look().code())
+}
+
+fn shot_look_code(scene: &Scene) -> Option<String> {
+    scene
+        .shot()
+        .and_then(|shot| shot.look)
+        .map(|look| look.code())
+}
+
+fn shot_tones_code(scene: &Scene) -> Option<String> {
+    scene
+        .shot()
+        .filter(|shot| !shot.tones.is_empty())
+        .map(|shot| ShotColor::list_code(&shot.tones))
 }
 
 /// A scene's cast members as stored: positions separated by commas.
@@ -230,7 +262,18 @@ impl SceneRow {
                 .map(uuid)
                 .transpose()?
                 .map(ProductImageId::from),
-            composed_shot(self.shot)?,
+            composed_shot(
+                self.shot,
+                self.shot_look.as_deref(),
+                self.shot_tones.as_deref(),
+            )?,
+        )
+        // A look that will not read is the first look.
+        .with_look(
+            self.look
+                .as_deref()
+                .and_then(ShotLook::from_code)
+                .unwrap_or_default(),
         ))
     }
 }
@@ -243,7 +286,7 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                  motion_prompt, clip_provider, clip_model, clip_failure, position,
                  cast_members, planned_motion_prompt, place, image_portraits,
                  pending_portraits, kind, product_image_id, shot_file, shot_image_id,
-                 shot_aspect
+                 shot_aspect, look, shot_look, shot_tones
              FROM scene WHERE plan_id = ?1 ORDER BY position",
         )
         .map_err(boxed)?;
@@ -270,6 +313,9 @@ fn scenes(conn: &Connection, plan: &str) -> Result<Vec<Scene>, RepositoryError> 
                     kind: row.get(20)?,
                     product_image: row.get(21)?,
                     shot: (row.get(22)?, row.get(23)?, row.get(24)?),
+                    look: row.get(25)?,
+                    shot_look: row.get(26)?,
+                    shot_tones: row.get(27)?,
                 },
                 row.get::<_, i64>(14)?,
             ))
@@ -482,9 +528,10 @@ fn insert_scene(
              prompt, image_file, image_generation_id, pending_file, pending_generation_id,
              failure, motion_prompt, clip_provider, clip_model, clip_failure, cast_members,
              planned_motion_prompt, place, image_portraits, pending_portraits, kind,
-             product_image_id, shot_file, shot_image_id, shot_aspect)
+             product_image_id, shot_file, shot_image_id, shot_aspect, look, shot_look,
+             shot_tones)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
         params![
             plan,
             position(index)?,
@@ -512,6 +559,9 @@ fn insert_scene(
             scene.shot().map(|shot| shot.file.as_str()),
             scene.shot().map(|shot| shot.image.to_string()),
             scene.shot().map(|shot| shot.aspect.code()),
+            look_code(scene),
+            shot_look_code(scene),
+            shot_tones_code(scene),
         ],
     )
     .map_err(boxed)?;
@@ -647,7 +697,8 @@ impl ScenePlanRepository for Database {
                      motion_prompt = ?9, clip_provider = ?10, clip_model = ?11,
                      clip_failure = ?12, image_portraits = ?13, pending_portraits = ?14,
                      kind = ?15, product_image_id = ?16, shot_file = ?17,
-                     shot_image_id = ?18, shot_aspect = ?19
+                     shot_image_id = ?18, shot_aspect = ?19, look = ?20, shot_look = ?21,
+                     shot_tones = ?22
                  WHERE plan_id = ?1 AND position = ?2",
                 params![
                     id,
@@ -669,6 +720,9 @@ impl ScenePlanRepository for Database {
                     scene.shot().map(|shot| shot.file.as_str()),
                     scene.shot().map(|shot| shot.image.to_string()),
                     scene.shot().map(|shot| shot.aspect.code()),
+                    look_code(scene),
+                    shot_look_code(scene),
+                    shot_tones_code(scene),
                 ],
             )
             .map_err(boxed)?;
@@ -717,6 +771,93 @@ impl ScenePlanRepository for Database {
         }
         write_place(&tx, &id, index, place)?;
         tx.commit().map_err(boxed)
+    }
+
+    fn shot_backdrops(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<Vec<ShotBackdropDrawing>, RepositoryError> {
+        let conn = self.conn();
+        let mut statement = conn
+            .prepare(
+                "SELECT id, file, prompt, provider, model, job_id, drawn_at, kept
+                 FROM shot_backdrop WHERE project_id = ?1
+                 ORDER BY drawn_at DESC, id",
+            )
+            .map_err(boxed)?;
+        let rows = statement
+            .query_map([project.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            })
+            .map_err(boxed)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(boxed)?;
+        rows.into_iter()
+            .map(|(id, file, prompt, provider, model, job, drawn_at, kept)| {
+                Ok(ShotBackdropDrawing {
+                    id: BackdropId::from(uuid(&id)?),
+                    project,
+                    file,
+                    prompt,
+                    provider: provider.parse::<Provider>().map_err(boxed)?,
+                    model,
+                    job: job.as_deref().map(uuid).transpose()?.map(JobId::from),
+                    drawn_at: from_unix_millis(drawn_at),
+                    kept: kept != 0,
+                })
+            })
+            .collect()
+    }
+
+    fn add_shot_backdrop(&self, backdrop: &ShotBackdropDrawing) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "INSERT INTO shot_backdrop (id, project_id, file, prompt, provider, model, job_id,
+                                            drawn_at, kept)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    backdrop.id.to_string(),
+                    backdrop.project.to_string(),
+                    backdrop.file,
+                    backdrop.prompt,
+                    backdrop.provider.code(),
+                    backdrop.model,
+                    backdrop.job.map(|job| job.to_string()),
+                    to_unix_millis(backdrop.drawn_at),
+                    i64::from(backdrop.kept),
+                ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn keep_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "UPDATE shot_backdrop SET kept = 1 WHERE id = ?1",
+                [backdrop.to_string()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn remove_shot_backdrop(&self, backdrop: BackdropId) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM shot_backdrop WHERE id = ?1",
+                [backdrop.to_string()],
+            )
+            .map_err(boxed)?;
+        Ok(())
     }
 }
 
@@ -963,7 +1104,11 @@ mod tests {
             // then migrated.
             let mut conn = s.db.conn();
             conn.execute_batch(
-                "ALTER TABLE scene DROP COLUMN shot_aspect;
+                "DROP TABLE shot_backdrop;
+                 ALTER TABLE scene DROP COLUMN shot_tones;
+                 ALTER TABLE scene DROP COLUMN shot_look;
+                 ALTER TABLE scene DROP COLUMN look;
+                 ALTER TABLE scene DROP COLUMN shot_aspect;
                  ALTER TABLE scene DROP COLUMN shot_image_id;
                  ALTER TABLE scene DROP COLUMN shot_file;
                  ALTER TABLE scene DROP COLUMN product_image_id;
@@ -1202,11 +1347,19 @@ mod tests {
         assert_eq!(s.db.scene_plan(s.project.id).unwrap().as_ref(), Some(&plan));
 
         // Its composed picture is saved with the scene alone.
+        let look = ShotLook {
+            layout: Some(bardo_domain::ProductLayout::Card),
+            placement: bardo_domain::ShotPlacement::Right,
+            backdrop: bardo_domain::ShotBackdrop::Drawn(BackdropId::new()),
+        };
         let shot = ComposedShot {
             file: "shot-0.png".into(),
             image: photo,
             aspect: AspectRatio::Vertical,
+            look: Some(look),
+            tones: vec![ShotColor([1, 2, 3]), ShotColor([200, 100, 0])],
         };
+        plan.set_shot_look(0, look, time(1_800_000_019)).unwrap();
         plan.scene_mut(0, time(1_800_000_020))
             .unwrap()
             .add_shot(shot.clone());
@@ -1214,8 +1367,24 @@ mod tests {
         let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
         assert_eq!(stored, plan);
         assert_eq!(stored.scenes()[0].shot(), Some(&shot));
+        assert_eq!(stored.scenes()[0].look(), look);
         assert_eq!(stored.scenes()[0].picture(), Some("shot-0.png"));
         assert_eq!(stored.scenes()[1].shot(), None);
+        assert_eq!(stored.scenes()[1].look(), ShotLook::default());
+
+        // A look that will not read is the first look, and a picture whose
+        // look will not read is composed again.
+        s.db.conn()
+            .execute(
+                "UPDATE scene SET look = 'round', shot_look = 'x' WHERE position = 0",
+                [],
+            )
+            .unwrap();
+        let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
+        assert_eq!(stored.scenes()[0].look(), ShotLook::default());
+        assert_eq!(stored.scenes()[0].shot().unwrap().look, None);
+        assert!(stored.scenes()[0].needs_shot(AspectRatio::Vertical));
+        s.db.save_scene(&plan, 0).unwrap();
 
         // A drawn scene again keeps neither the image nor the picture.
         plan.set_scene_kind(0, SceneKind::Drawn, None, &pictures, time(1_800_000_030))
@@ -1242,6 +1411,41 @@ mod tests {
         let stored = s.db.scene_plan(s.project.id).unwrap().unwrap();
         assert_eq!(stored.scenes()[1].kind(), SceneKind::EndCard);
         assert_eq!(stored.scenes()[1].shot(), None);
+    }
+
+    #[test]
+    fn drawn_backdrops_list_newest_first_and_are_kept_or_removed() {
+        let s = setup();
+        let backdrop = |at: u64| ShotBackdropDrawing {
+            id: BackdropId::new(),
+            project: s.project.id,
+            file: format!("backdrop-{at}.png"),
+            prompt: "An empty marble counter.".into(),
+            provider: Provider::Gemini,
+            model: "gemini-image".into(),
+            job: Some(JobId::new()),
+            drawn_at: time(at),
+            kept: false,
+        };
+        let (first, second) = (backdrop(1_800_000_001), backdrop(1_800_000_002));
+        s.db.add_shot_backdrop(&first).unwrap();
+        s.db.add_shot_backdrop(&second).unwrap();
+        assert_eq!(
+            s.db.shot_backdrops(s.project.id).unwrap(),
+            [second.clone(), first.clone()]
+        );
+        s.db.keep_shot_backdrop(first.id).unwrap();
+        s.db.remove_shot_backdrop(second.id).unwrap();
+        let kept = ShotBackdropDrawing {
+            kept: true,
+            ..first
+        };
+        assert_eq!(s.db.shot_backdrops(s.project.id).unwrap(), [kept]);
+        assert!(
+            s.db.shot_backdrops(VideoProjectId::new())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

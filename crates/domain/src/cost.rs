@@ -577,6 +577,9 @@ pub enum CostPurpose {
     /// Claude checking an ad script's statements about the product
     /// against the claims of its Brief stage (#276).
     ClaimsCheck,
+    /// The image provider drawing a backdrop for an ad's product shots
+    /// (#285).
+    ShotBackdrop,
 }
 
 /// The rate-table model of a post X bills without a link in its text.
@@ -627,7 +630,7 @@ fn holds_link(text: &str) -> bool {
 pub struct UnknownCostPurpose(pub String);
 
 impl CostPurpose {
-    pub const ALL: [CostPurpose; 30] = [
+    pub const ALL: [CostPurpose; 31] = [
         CostPurpose::ThemeIdeas,
         CostPurpose::ThemeRanking,
         CostPurpose::Script,
@@ -658,6 +661,7 @@ impl CostPurpose {
         CostPurpose::AdAngles,
         CostPurpose::AdAngleRanking,
         CostPurpose::ClaimsCheck,
+        CostPurpose::ShotBackdrop,
     ];
 
     /// Stable identifier for storage. Never change one.
@@ -693,6 +697,7 @@ impl CostPurpose {
             CostPurpose::AdAngles => "ad_angles",
             CostPurpose::AdAngleRanking => "ad_angle_ranking",
             CostPurpose::ClaimsCheck => "claims_check",
+            CostPurpose::ShotBackdrop => "shot_backdrop",
         }
     }
 }

@@ -59,6 +59,7 @@ mod selection;
 mod settings_file;
 mod settings_transfer;
 mod shortcuts;
+mod shot_looks;
 mod showcase;
 mod stages;
 mod styles;

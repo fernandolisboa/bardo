@@ -360,6 +360,7 @@ look_framing = "Enquadramento da aparência"
 ad_angle_suggestion = "Sugestão de ângulos de anúncio"
 ad_angle_ranking = "Ranqueamento de ângulos de anúncio"
 claims_check = "Checagem de afirmações"
+shot_backdrop = "Fundo de foto do produto"
 
 [job.state]
 queued = "Na fila"
@@ -4628,3 +4629,41 @@ drawn = "Desenhada"
 product_in_use = "Produto em uso"
 product_shot = "Foto do produto"
 end_card = "Cartão final"
+
+[scenes.look]
+backdrop_gone = "Esse fundo não existe mais. Escolha outro."
+backdrop_in_use = "Uma foto do produto ainda mostra este fundo. Dê outro fundo a ela antes."
+layout = "Layout"
+layout_hint = "Como a imagem do produto é posta: como um cartão de cantos arredondados, recortada sobre o fundo (uma foto com fundo transparente) ou dentro de um contorno simples de celular ou de navegador (uma tela). Em qualquer layout a imagem só é redimensionada: nunca esticada, cortada ou redesenhada."
+placement = "Posição"
+backdrop = "Fundo"
+backdrop_hint = "O que fica atrás do produto: um tom da própria imagem, uma cor ou um degradê entre duas (escolhidas entre os tons da imagem) ou um fundo desenhado para este projeto. Trocar compõe a imagem de novo, de graça."
+auto = "Da imagem"
+from = "Cor"
+to = "Degradê até"
+drawn = "Fundos desenhados"
+draw = "Desenhar um fundo"
+draw_hint = "O gerador de imagens desenha uma superfície ou um cenário vazio no estilo do vídeo, sem produto, texto ou logo, e não vê nenhuma imagem do produto. Custa uma imagem de cena e espera a sua revisão. Um fundo mantido sai de graça para toda foto do produto deste projeto."
+drawing = "Desenhando um fundo…"
+to_review = "Fundo novo: mantenha para usar, ou descarte."
+keep = "Manter e usar"
+discard = "Descartar"
+
+[scenes.look.layout_name]
+card = "Cartão"
+cutout = "Recortado"
+device = "Aparelho"
+
+[scenes.look.placement_name]
+left = "Esquerda"
+center = "Centro"
+right = "Direita"
+
+[scenes.look.direction]
+down = "De cima para baixo"
+across = "Da esquerda para a direita"
+diagonal = "Diagonal"
+
+[tour.scenes.shot_look]
+title = "A aparência da foto do produto"
+body = "Na foto do produto de um anúncio: o layout (um cartão, uma foto recortada em pé sobre o fundo ou uma tela num contorno simples de celular ou navegador), onde ela fica e o fundo: um tom da imagem, uma cor ou degradê, ou um fundo desenhado para o projeto. Toda mudança é composta de novo de graça; só desenhar um fundo é pago, depois da estimativa, e um fundo novo espera você manter ou descartar."

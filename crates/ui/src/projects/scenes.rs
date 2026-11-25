@@ -9,8 +9,9 @@
 //! video player until the editor has its own.
 
 use bardo_app::bardo_domain::{
-    AnimatedScenes, CastMember, ClipModel, ClipModelRef, Job, JobState, ProductImageId, Scene,
-    SceneClip, SceneImage, SceneKind, TemplateKind, VideoProjectId,
+    AnimatedScenes, BackdropDirection, CastMember, ClipModel, ClipModelRef, Job, JobState,
+    ProductImageId, Scene, SceneClip, SceneImage, SceneKind, ShotBackdrop, ShotColor, ShotLook,
+    ShotPlacement, TemplateKind, VideoProjectId,
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -30,7 +31,7 @@ use gpui_kit::component::{
     StyledExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div, img, px};
+use gpui_kit::{AnyElement, App, ClickEvent, ObjectFit, SharedString, Window, div, img, px, rgb};
 
 use super::{ProjectsScreen, PromptShown, clock, muted};
 use crate::appearance::look;
@@ -52,6 +53,8 @@ pub(super) enum SceneAction {
     DrawMissing,
     /// Compose the pictures an ad's composed scenes wait for (#278).
     ComposeMissing,
+    /// Draw a backdrop for the project's product shots (#285).
+    DrawBackdrop,
     Redraw(usize),
     /// Draw a cast member's portrait again.
     RedrawPortrait(usize),
@@ -143,6 +146,7 @@ impl ProjectsScreen {
             SceneAction::Plan { discard_images } => bardo.plan_scenes(id, discard_images, consent),
             SceneAction::DrawMissing => bardo.generate_scene_images(id, consent),
             SceneAction::ComposeMissing => bardo.compose_missing_shots(id),
+            SceneAction::DrawBackdrop => bardo.draw_shot_backdrop(id, consent),
             SceneAction::Redraw(index) => bardo.regenerate_scene_image(id, index, consent),
             SceneAction::RedrawPortrait(member) => bardo.redraw_cast_portrait(id, member, consent),
             SceneAction::RedrawRestyled => bardo.redraw_restyled_scenes(id, consent),
@@ -1638,7 +1642,7 @@ impl ProjectsScreen {
                     ))
             });
         let too_small = shown
-            .filter(|shown| kinds.too_small(*shown))
+            .filter(|shown| kinds.too_small(*shown, &scene.look()))
             .map(|_| kit::notice(Tone::Warning, tr(bardo, Text::SceneImageTooSmall), cx).text_xs());
         let removed = shown
             .filter(|shown| !kinds.images.iter().any(|image| image.id == *shown))
@@ -1715,14 +1719,345 @@ impl ProjectsScreen {
         });
         let note = muted(cx, tr(bardo, Text::SceneComposed));
         let media = usize::from(failure.is_some());
+        let look = self.render_shot_look(index, scene, busy, cx);
         let body = failure
             .into_iter()
             .chain(Some(picture))
             .chain(compose)
             .chain(kind)
+            .chain(look)
             .chain(Some(note))
             .collect();
         (body, media)
+    }
+
+    /// How a product shot looks (#285): its layout (where its image
+    /// offers more than one), where it sits and its backdrop, with
+    /// drawing a backdrop and the drawn ones to keep or discard. Every
+    /// change but drawing composes the picture again, for free.
+    fn render_shot_look(
+        &self,
+        index: usize,
+        scene: &Scene,
+        busy: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let view = self.scenes.as_ref()?;
+        let kinds = &view.kinds;
+        let image = kinds.image(scene.product_image()?)?;
+        let project = view.project.id;
+        let locked = busy || view.is_animating();
+        let look = scene.look();
+        let bardo = self.bardo.read(cx);
+        let theme = cx.theme();
+        let set = move |next: ShotLook| {
+            move |this: &mut Self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>| {
+                this.scene_action(window, cx, |bardo, id| bardo.set_shot_look(id, index, next));
+            }
+        };
+        let label = |text: Text, hint: Option<(Text, &'static str)>| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(field_label(tr(bardo, text)))
+                .children(hint.map(|(hint, id)| {
+                    guide::info(
+                        bardo,
+                        (id, index),
+                        tr(bardo, hint),
+                        guide::refs::SCENES_SHOT_LOOK,
+                    )
+                }))
+        };
+        let shown_layout = look.layout_for(image.kind, image.cut_out);
+        let layout = (image.layouts.len() > 1).then(|| {
+            v_flex()
+                .gap_1()
+                .child(label(
+                    Text::ShotLayoutLabel,
+                    Some((Text::ShotLayoutHint, "shot-layout-info")),
+                ))
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1()
+                        .children(image.layouts.iter().map(|layout| {
+                            let next = ShotLook {
+                                layout: Some(*layout),
+                                ..look
+                            };
+                            Button::new(("shot-layout", index * 10 + *layout as usize))
+                                .xsmall()
+                                .outline()
+                                .label(tr(bardo, Text::ProductLayoutName(*layout)))
+                                .selected(*layout == shown_layout)
+                                .disabled(locked && *layout != shown_layout)
+                                .on_click(cx.listener(set(next)))
+                        })),
+                )
+        });
+        let placement = v_flex()
+            .gap_1()
+            .child(label(Text::ShotPlacementLabel, None))
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(ShotPlacement::ALL.into_iter().map(|place| {
+                        let next = ShotLook {
+                            placement: place,
+                            ..look
+                        };
+                        Button::new(("shot-place", index * 10 + place as usize))
+                            .xsmall()
+                            .outline()
+                            .label(tr(bardo, Text::ShotPlacementName(place)))
+                            .selected(place == look.placement)
+                            .disabled(locked && place != look.placement)
+                            .on_click(cx.listener(set(next)))
+                    })),
+            );
+        // The colors to build a backdrop from: the image's tones, then
+        // white and black.
+        let mut colors: Vec<ShotColor> = scene
+            .shot()
+            .map(|shot| shot.tones.clone())
+            .unwrap_or_default();
+        for plain in [ShotColor::WHITE, ShotColor::BLACK] {
+            if !colors.contains(&plain) {
+                colors.push(plain);
+            }
+        }
+        let (from, to, direction) = match look.backdrop {
+            ShotBackdrop::Plain {
+                from,
+                to,
+                direction,
+            } => (Some(from), Some(to), direction),
+            _ => (None, None, BackdropDirection::Down),
+        };
+        let swatches =
+            |row: usize, picked: Option<ShotColor>, pick: &dyn Fn(ShotColor) -> ShotLook| {
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(colors.iter().enumerate().map(|(n, color)| {
+                        let [r, g, b] = color.0;
+                        let next = pick(*color);
+                        div()
+                            .id(("shot-swatch", (index * 4 + row) * 100 + n))
+                            .size(px(22.))
+                            .rounded_sm()
+                            .border_2()
+                            .border_color(if picked == Some(*color) {
+                                theme.primary
+                            } else {
+                                theme.border
+                            })
+                            .bg(rgb((u32::from(r) << 16)
+                                | (u32::from(g) << 8)
+                                | u32::from(b)))
+                            .when(!locked, |swatch| {
+                                swatch.cursor_pointer().on_click(cx.listener(set(next)))
+                            })
+                    }))
+            };
+        let first = swatches(0, from, &|color| ShotLook {
+            backdrop: ShotBackdrop::Plain {
+                from: color,
+                to: to.filter(|to| Some(*to) != from).unwrap_or(color),
+                direction,
+            },
+            ..look
+        });
+        let second = from.map(|from| {
+            swatches(1, to.filter(|to| *to != from), &|color| ShotLook {
+                backdrop: ShotBackdrop::Plain {
+                    from,
+                    to: color,
+                    direction,
+                },
+                ..look
+            })
+        });
+        let directions = from.zip(to).filter(|(from, to)| from != to).map(|_| {
+            h_flex()
+                .flex_wrap()
+                .gap_1()
+                .children(BackdropDirection::ALL.into_iter().map(|way| {
+                    let next = ShotLook {
+                        backdrop: ShotBackdrop::Plain {
+                            from: from.unwrap_or(ShotColor::WHITE),
+                            to: to.unwrap_or(ShotColor::WHITE),
+                            direction: way,
+                        },
+                        ..look
+                    };
+                    Button::new(("shot-direction", index * 10 + way as usize))
+                        .xsmall()
+                        .outline()
+                        .label(tr(bardo, Text::BackdropDirectionName(way)))
+                        .selected(way == direction)
+                        .disabled(locked && way != direction)
+                        .on_click(cx.listener(set(next)))
+                }))
+        });
+        let auto = Button::new(("shot-backdrop-auto", index))
+            .xsmall()
+            .outline()
+            .label(tr(bardo, Text::ShotBackdropAuto))
+            .selected(look.backdrop == ShotBackdrop::Auto)
+            .disabled(locked && look.backdrop != ShotBackdrop::Auto)
+            .on_click(cx.listener(set(ShotLook {
+                backdrop: ShotBackdrop::Auto,
+                ..look
+            })));
+        let thumb = |id: (&'static str, usize), path: PathBuf, picked: bool| {
+            div()
+                .id(id)
+                .w(px(54.))
+                .h(px(96.))
+                .rounded_sm()
+                .overflow_hidden()
+                .border_2()
+                .border_color(if picked { theme.primary } else { theme.border })
+                .child(img(path).size_full().object_fit(ObjectFit::Cover))
+        };
+        let kept: Vec<_> = kinds
+            .kept_backdrops()
+            .enumerate()
+            .map(|(n, backdrop)| {
+                let picked = look.drawn_backdrop() == Some(backdrop.id);
+                let next = ShotLook {
+                    backdrop: ShotBackdrop::Drawn(backdrop.id),
+                    ..look
+                };
+                thumb(
+                    ("shot-backdrop-kept", index * 100 + n),
+                    bardo.shot_backdrop_path(project, backdrop),
+                    picked,
+                )
+                .when(!locked, |thumb| {
+                    thumb.cursor_pointer().on_click(cx.listener(set(next)))
+                })
+                .into_any_element()
+            })
+            .collect();
+        let drawn = (!kept.is_empty()).then(|| {
+            v_flex()
+                .gap_1()
+                .child(muted(cx, tr(bardo, Text::ShotBackdropDrawn)))
+                .child(h_flex().flex_wrap().gap_1().children(kept))
+        });
+        let review = kinds.backdrops_to_review().next().map(|backdrop| {
+            let id = backdrop.id;
+            v_flex()
+                .gap_1()
+                .child(muted(cx, tr(bardo, Text::ShotBackdropToReview)))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_end()
+                        .child(thumb(
+                            ("shot-backdrop-review", index),
+                            bardo.shot_backdrop_path(project, backdrop),
+                            false,
+                        ))
+                        .child(
+                            Button::new(("keep-shot-backdrop", index))
+                                .xsmall()
+                                .outline()
+                                .label(tr(bardo, Text::KeepShotBackdrop))
+                                .disabled(locked)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.scene_action(window, cx, |bardo, project| {
+                                        bardo.keep_shot_backdrop(project, id, Some(index))
+                                    });
+                                })),
+                        )
+                        .child(
+                            Button::new(("discard-shot-backdrop", index))
+                                .xsmall()
+                                .ghost()
+                                .label(tr(bardo, Text::DiscardShotBackdrop))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.scene_action(window, cx, |bardo, project| {
+                                        bardo.discard_shot_backdrop(project, id)
+                                    });
+                                })),
+                        ),
+                )
+        });
+        let draw: AnyElement = if kinds.drawing_backdrop {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(Spinner::new().xsmall())
+                .child(muted(cx, tr(bardo, Text::DrawingShotBackdrop)))
+                .into_any_element()
+        } else {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .flex_wrap()
+                .child(
+                    self.paid(Button::new(("draw-shot-backdrop", index)), cx)
+                        .outline()
+                        .xsmall()
+                        .label(tr(bardo, Text::DrawShotBackdrop))
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.run_scene(
+                                SceneAction::DrawBackdrop,
+                                BudgetConsent::Ask,
+                                window,
+                                cx,
+                            );
+                        })),
+                )
+                .child(guide::info(
+                    bardo,
+                    ("draw-shot-backdrop-info", index),
+                    tr(bardo, Text::DrawShotBackdropHint),
+                    guide::refs::SCENES_SHOT_LOOK,
+                ))
+                .children(estimate_note(
+                    bardo,
+                    &kinds.backdrop_estimate,
+                    Text::EstimateCost,
+                    cx,
+                ))
+                .into_any_element()
+        };
+        let backdrop = v_flex()
+            .gap_1()
+            .child(label(
+                Text::ShotBackdropLabel,
+                Some((Text::ShotBackdropHint, "shot-backdrop-info")),
+            ))
+            .child(h_flex().child(auto))
+            .child(muted(cx, tr(bardo, Text::ShotBackdropFrom)))
+            .child(first)
+            .children(second.map(|second| {
+                v_flex()
+                    .gap_1()
+                    .child(muted(cx, tr(bardo, Text::ShotBackdropTo)))
+                    .child(second)
+            }))
+            .children(directions)
+            .children(drawn)
+            .children(review)
+            .child(draw);
+        Some(
+            kit::anchor(
+                TourAnchor::Control(Control::ShotLook),
+                v_flex()
+                    .gap_3()
+                    .children(layout)
+                    .child(placement)
+                    .child(backdrop),
+            )
+            .into_any_element(),
+        )
     }
 
     /// The recurring place scene `index` happens in (#258): its name and

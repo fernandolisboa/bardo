@@ -45,11 +45,28 @@ The scenes of an [ad](brief.md) are planned from the **Ad scene plan** template 
 
 Which kinds a plan may use follows the product's [images](products.md#pictures): a product shot needs an image, and the product in use needs a **Photo**, since a **Screen** is only ever shown as it is. A product with no image gets drawn scenes and a drawn end card. Claude is told which kinds it may use and, by number, which images the product has; a kind the product does not allow comes back as a drawn scene, and a product shot that names an image the product does not have shows its first one. When the product has an image, the plan is asked to have the product on screen by the time the narration names it, with at least one product shot.
 
-Bardo composes a product shot itself, on your computer, as soon as the plan is saved: the product's image, whole, as a card with rounded corners over a plain backdrop in a color taken from the image, 1080 × 1920 for a vertical video and 1920 × 1080 for a wide one. The image is scaled to fit and never stretched, cut or redrawn, and it sits where neither the cut's motion nor a caption covers it. Composing costs nothing and needs no key, and the product's image never goes to an image or video model from a product shot. A composed picture is never animated ([Clips](clips.md#animate)), is never a reference for drawing another scene, is not offered as the set of a performed take, and in the editor it [only zooms](editor.md#motion).
+Bardo composes a product shot itself, on your computer, as soon as the plan is saved: the product's image, whole, over a plain backdrop in a color taken from the image ([how it looks](#shot-look) is yours to change), 1080 × 1920 for a vertical video and 1920 × 1080 for a wide one. The image is scaled to fit and never stretched, cut or redrawn, and it sits where neither the cut's motion nor a caption covers it. Composing costs nothing and needs no key, and the product's image never goes to an image or video model from a product shot. A composed picture is never animated ([Clips](clips.md#animate)), is never a reference for drawing another scene, is not offered as the set of a performed take, and in the editor it [only zooms](editor.md#motion).
 
 **Scene kind** in the picked scene changes what it is, among the kinds the product allows; **End card** is offered on the last scene only. A scene made a product shot is composed at once, and **Product image** picks which of the product's images it shows, numbered as on the product. When that image is small for the frame, the scene says so: enlarged, it may look soft. A scene made **Drawn** again goes back to the drawing it had; when it never had one, nothing is drawn until you ask with **Generate N images**, which shows the cost first. When the video changes shape, the composed pictures no longer fit and read **To compose**: **Compose product shots** (or **Compose picture** on the scene) makes them again, for free, and **Generate N images** makes them along with the drawings. A scene whose image was removed from the product says so and keeps the picture it has; when that picture has to be made again, the scene fails until you pick another image or kind for it. A render in the other shape (a long ad posted to a 9:16 network, or the other way round) shows a composed picture whole, with bars.
 
 The video's [estimate](projects.md#mode) counts composed scenes as free. Before an ad has a plan, it is estimated with a scene about every 3 seconds, of which two product shots and the end card are free when the product has an image.
+
+<a id="shot-look"></a>
+## How a product shot looks
+
+A product shot (and an end card composed from a product image) has its own controls under **Scene kind**. Every one of them composes the picture again, on your computer, for free.
+
+- **Layout**, when the image offers more than one:
+  - **Card**: the image with rounded corners. Every image may be a card.
+  - **Cut out**: a **Photo** whose background is see-through (a PNG with transparency) stands on the backdrop with a soft shadow. It is what such a photo gets first. A photo with no see-through pixel is shown as a card.
+  - **Device**: a **Screen** inside a plain outline Bardo draws: a phone for a tall screen, a browser window for a wide or square one, with no maker's marks. It is what a screen gets first.
+- **Position**: **Left**, **Center** or **Right** within the room the frame leaves. The margins and the caption band stay clear, and the product stays on screen under the strongest zoom.
+- **Backdrop**:
+  - **From the image**: a deep or pale tone of the image's own color, as at first.
+  - **Color**: one of the image's tones, white or black. Pick a second one under **Gradient to** for a gradient between the two, and its direction: top to bottom, left to right or diagonal.
+  - **Drawn backdrops**: **Draw a backdrop** has the image generator draw an empty surface or set in the video's [style](#style) and shape, with no product, text or logo. It sees none of the product's images, and is told only what kind of product it is. It costs one scene image: the estimate is beside the button, it counts toward the video's [cap](projects.md#mode), and it shows in Costs as **Product shot backdrop**. The new backdrop waits for you: **Keep and use** puts it behind this scene, **Discard** deletes it. A kept backdrop is listed for every product shot of the project and costs nothing more; one that a scene shows cannot be discarded.
+
+Whatever the look, the product's image is only scaled: never stretched, cut or redrawn. A picture composed before looks existed reads **To compose** and is made again, for free, with **Compose product shots**.
 
 <a id="redraw"></a>
 ## Drawing again

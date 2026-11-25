@@ -151,6 +151,9 @@ pub enum Control {
     ScenesPlace,
     /// Scenes: drawing a scene's image again, or the new one to review.
     SceneRedraw,
+    /// Scenes: how an ad's picked product shot looks: its layout,
+    /// position and backdrop (#285).
+    ShotLook,
     /// Clips: animating every scene without a clip.
     ClipsAnimate,
     /// Clips: the picked scene's motion prompt.
@@ -788,7 +791,7 @@ pub const SCENES: Tour = {
     const TOOLBAR: WhenMissing = WhenMissing::LightPart(TourAnchor::Toolbar);
     Tour {
         id: TourId::Scenes,
-        version: 7,
+        version: 8,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "plan", control(Control::ScenesPlan))
@@ -802,6 +805,10 @@ pub const SCENES: Tour = {
             at_stage(AT, "redraw", control(Control::SceneRedraw))
                 .missing(WhenMissing::LightPart(TourAnchor::Inspector))
                 .learn(PAGE, "redraw"),
+            // Only on an ad's product shot.
+            at_stage(AT, "shot_look", control(Control::ShotLook))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "shot-look"),
             at_stage(AT, "filter", control(Control::ScenesFilter))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "filter"),

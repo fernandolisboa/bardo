@@ -12,16 +12,17 @@ use bardo_domain::SceneKind;
 use bardo_domain::VideoLength;
 use bardo_domain::{AdAngleFieldError, AdFramework, BriefFieldError, BriefNotReady};
 use bardo_domain::{
-    AnalysisPart, ApiKeyError, AppCredentialsFieldError, AspectRatio, CaptionHighlight,
-    CaptionStyle, CaptureProblem, ChannelFieldError, ContentLanguage, Country, DateOrder, Decibels,
-    DecisionEngineId, JobFailureKind, JobKind, JobState, KeyCheckOutcome, LayoutId, LocalTime,
-    LookDescriptionError, LookImageError, MetadataProblem, Meter, MetricsSyncOnStart, Money,
-    MoneyError, Month, MotionKind, MotionStrength, MusicPromptFieldError, Network,
-    NetworkAccountFieldError, NicheSeedError, Outbound, PastedTokenError, PersonaFieldError,
-    PostLinkError, Provider, RateFieldError, SceneFieldError, ScheduleProblem, Score,
-    ScriptFieldError, Share, SignInFailureKind, TakeMode, TemplateKind, TemplateProblem,
-    TemplateVariable, ThemeFamily, ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage,
-    UiTheme, VideoFormat, Visibility, VoiceCategory, VoiceFlag,
+    AnalysisPart, ApiKeyError, AppCredentialsFieldError, AspectRatio, BackdropDirection,
+    CaptionHighlight, CaptionStyle, CaptureProblem, ChannelFieldError, ContentLanguage, Country,
+    DateOrder, Decibels, DecisionEngineId, JobFailureKind, JobKind, JobState, KeyCheckOutcome,
+    LayoutId, LocalTime, LookDescriptionError, LookImageError, MetadataProblem, Meter,
+    MetricsSyncOnStart, Money, MoneyError, Month, MotionKind, MotionStrength,
+    MusicPromptFieldError, Network, NetworkAccountFieldError, NicheSeedError, Outbound,
+    PastedTokenError, PersonaFieldError, PostLinkError, ProductLayout, Provider, RateFieldError,
+    SceneFieldError, ScheduleProblem, Score, ScriptFieldError, Share, ShotPlacement,
+    SignInFailureKind, TakeMode, TemplateKind, TemplateProblem, TemplateVariable, ThemeFamily,
+    ThemeFieldError, ThemeMode, TourId, TransitionKind, UiLanguage, UiTheme, VideoFormat,
+    Visibility, VoiceCategory, VoiceFlag,
 };
 use bardo_domain::{
     BytePlusField, BytePlusFieldError, ChapterFieldError, ChapterProblem, LookAssetError,
@@ -2864,6 +2865,28 @@ pub enum Text {
     EditorSourceComposed,
     /// A composed scene whose product image was removed (#278).
     SceneImageRemoved,
+    /// A drawn backdrop that was removed or never kept.
+    ShotBackdropGone,
+    /// A backdrop a scene shows cannot be discarded.
+    ShotBackdropInUse,
+    ShotLayoutLabel,
+    ShotLayoutHint,
+    ShotPlacementLabel,
+    ShotBackdropLabel,
+    ShotBackdropHint,
+    ShotBackdropAuto,
+    ShotBackdropFrom,
+    ShotBackdropTo,
+    ShotBackdropDrawn,
+    DrawShotBackdrop,
+    DrawShotBackdropHint,
+    DrawingShotBackdrop,
+    ShotBackdropToReview,
+    KeepShotBackdrop,
+    DiscardShotBackdrop,
+    ProductLayoutName(ProductLayout),
+    ShotPlacementName(ShotPlacement),
+    BackdropDirectionName(BackdropDirection),
 }
 
 impl Text {
@@ -5932,6 +5955,38 @@ impl Text {
             Text::SceneCardToCompose => "scenes.card.to_compose",
             Text::EditorSourceComposed => "editor.inspector.source_composed",
             Text::SceneImageRemoved => "scenes.kind.image_removed",
+            Text::ShotBackdropGone => "scenes.look.backdrop_gone",
+            Text::ShotBackdropInUse => "scenes.look.backdrop_in_use",
+            Text::ShotLayoutLabel => "scenes.look.layout",
+            Text::ShotLayoutHint => "scenes.look.layout_hint",
+            Text::ShotPlacementLabel => "scenes.look.placement",
+            Text::ShotBackdropLabel => "scenes.look.backdrop",
+            Text::ShotBackdropHint => "scenes.look.backdrop_hint",
+            Text::ShotBackdropAuto => "scenes.look.auto",
+            Text::ShotBackdropFrom => "scenes.look.from",
+            Text::ShotBackdropTo => "scenes.look.to",
+            Text::ShotBackdropDrawn => "scenes.look.drawn",
+            Text::DrawShotBackdrop => "scenes.look.draw",
+            Text::DrawShotBackdropHint => "scenes.look.draw_hint",
+            Text::DrawingShotBackdrop => "scenes.look.drawing",
+            Text::ShotBackdropToReview => "scenes.look.to_review",
+            Text::KeepShotBackdrop => "scenes.look.keep",
+            Text::DiscardShotBackdrop => "scenes.look.discard",
+            Text::ProductLayoutName(value) => match value {
+                ProductLayout::Card => "scenes.look.layout_name.card",
+                ProductLayout::Cutout => "scenes.look.layout_name.cutout",
+                ProductLayout::Device => "scenes.look.layout_name.device",
+            },
+            Text::ShotPlacementName(value) => match value {
+                ShotPlacement::Left => "scenes.look.placement_name.left",
+                ShotPlacement::Center => "scenes.look.placement_name.center",
+                ShotPlacement::Right => "scenes.look.placement_name.right",
+            },
+            Text::BackdropDirectionName(value) => match value {
+                BackdropDirection::Down => "scenes.look.direction.down",
+                BackdropDirection::Across => "scenes.look.direction.across",
+                BackdropDirection::Diagonal => "scenes.look.direction.diagonal",
+            },
         };
         Cow::Borrowed(key)
     }
@@ -8111,6 +8166,26 @@ mod tests {
         texts.push(Text::SceneCardToCompose);
         texts.push(Text::EditorSourceComposed);
         texts.push(Text::SceneImageRemoved);
+        texts.push(Text::ShotBackdropGone);
+        texts.push(Text::ShotBackdropInUse);
+        texts.push(Text::ShotLayoutLabel);
+        texts.push(Text::ShotLayoutHint);
+        texts.push(Text::ShotPlacementLabel);
+        texts.push(Text::ShotBackdropLabel);
+        texts.push(Text::ShotBackdropHint);
+        texts.push(Text::ShotBackdropAuto);
+        texts.push(Text::ShotBackdropFrom);
+        texts.push(Text::ShotBackdropTo);
+        texts.push(Text::ShotBackdropDrawn);
+        texts.push(Text::DrawShotBackdrop);
+        texts.push(Text::DrawShotBackdropHint);
+        texts.push(Text::DrawingShotBackdrop);
+        texts.push(Text::ShotBackdropToReview);
+        texts.push(Text::KeepShotBackdrop);
+        texts.push(Text::DiscardShotBackdrop);
+        texts.extend(ProductLayout::ALL.map(Text::ProductLayoutName));
+        texts.extend(ShotPlacement::ALL.map(Text::ShotPlacementName));
+        texts.extend(BackdropDirection::ALL.map(Text::BackdropDirectionName));
         texts.extend(Stage::ALL.map(Text::StageName));
         texts.extend(Stage::ALL.map(Text::StageAfter));
         texts.push(Text::RenderNoCut);

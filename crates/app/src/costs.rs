@@ -362,7 +362,7 @@ fn first_guess(purpose: CostPurpose, provider: Provider) -> Metered {
         // A few words and a paragraph of prompt.
         CostPurpose::Thumbnail => tokens(600, 300),
         // A 2K image, as a scene's.
-        CostPurpose::ThumbnailImage => Metered {
+        CostPurpose::ThumbnailImage | CostPurpose::ShotBackdrop => Metered {
             input_tokens: 40,
             output_tokens: 250,
             image_tokens: 1_680,

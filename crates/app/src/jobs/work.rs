@@ -46,6 +46,8 @@ pub(crate) enum Work {
         product: String,
         channel: String,
     },
+    /// A backdrop drawn for the project's product shots (#285).
+    Backdrop(String),
 }
 
 /// The fields the payloads of these jobs name what they work on with.
@@ -87,6 +89,7 @@ impl Work {
                 | JobKind::ProductResearch
                 | JobKind::AdAngleSuggestion
                 | JobKind::AdAngleRanking
+                | JobKind::ShotBackdrop
         ) {
             return None;
         }
@@ -115,6 +118,7 @@ impl Work {
                 product: on.product?,
                 channel: on.channel?,
             },
+            JobKind::ShotBackdrop => Self::Backdrop(on.project?),
             _ => return None,
         })
     }
@@ -180,6 +184,7 @@ mod tests {
             (JobKind::Chapters, Work::Chapters("p".into())),
             (JobKind::Thumbnail, Work::Thumbnail("p".into())),
             (JobKind::ThumbnailImage, Work::Thumbnail("p".into())),
+            (JobKind::ShotBackdrop, Work::Backdrop("p".into())),
             (JobKind::MusicPrompt, Work::MusicPrompt("p".into())),
             (JobKind::Metadata, Work::Metadata("p".into())),
             // Without a channel, the version's script is adapted again.

@@ -1725,6 +1725,10 @@ mod tests {
             let mut conn = db.conn();
             conn.execute_batch(&format!(
                 "{before}
+                 DROP TABLE shot_backdrop;
+                 ALTER TABLE scene DROP COLUMN shot_tones;
+                 ALTER TABLE scene DROP COLUMN shot_look;
+                 ALTER TABLE scene DROP COLUMN look;
                  ALTER TABLE scene DROP COLUMN shot_aspect;
                  ALTER TABLE scene DROP COLUMN shot_image_id;
                  ALTER TABLE scene DROP COLUMN shot_file;
