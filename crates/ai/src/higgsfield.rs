@@ -594,7 +594,7 @@ impl<T: Transport> HiggsfieldClips<T> {
         match response.status {
             200..=299 => parse_status(&response),
             // Gone for good, as far as this request goes.
-            404 => Ok(ClipStatus::Failed(unexpected(
+            404 => Ok(ClipStatus::Lost(unexpected(
                 "Higgsfield does not know this request",
             ))),
             _ => Err(higgsfield_failure(&response)),
@@ -701,7 +701,7 @@ impl<T: Transport> TakeGenerator for HiggsfieldClips<T> {
             ClipStatus::Queued => TakeStatus::Queued,
             ClipStatus::Running => TakeStatus::Running,
             ClipStatus::Done { video } => TakeStatus::Done(TakeDone::at(video)),
-            ClipStatus::Failed(failure) => TakeStatus::Failed(failure),
+            ClipStatus::Failed(failure) | ClipStatus::Lost(failure) => TakeStatus::Failed(failure),
         })
     }
 

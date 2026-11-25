@@ -151,7 +151,7 @@ impl CostRepository for Database {
                  input_tokens, output_tokens, image_tokens, characters, basis, amount_micros, \
                  channel_id, project_id, job_id, at, video_seconds, audio_seconds, posts) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                 ?17, ?18)",
+                 ?17, ?18) ON CONFLICT (id) DO NOTHING",
                 params![
                     record.id.to_string(),
                     record.owner.to_string(),
@@ -172,6 +172,16 @@ impl CostRepository for Database {
                     sql_count(usage.audio_seconds),
                     sql_count(usage.posts),
                 ],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn remove_cost(&self, id: CostRecordId) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM cost_record WHERE id = ?1",
+                params![id.to_string()],
             )
             .map_err(boxed)?;
         Ok(())
@@ -369,6 +379,36 @@ mod tests {
             job: Some(JobId::new()),
             at,
         }
+    }
+
+    #[test]
+    fn a_record_is_saved_once_and_can_be_taken_back() {
+        let (db, owner) = database();
+        let month = (at(1_790_000_000), at(1_800_000_000));
+        let first = record(
+            owner,
+            CostPurpose::SceneClip,
+            Cost::Reported(Money::from_cents(42)),
+            at(1_790_916_201),
+        );
+        db.record_cost(&first).unwrap();
+        // Recorded again under the same id (after a crash, say): the first
+        // stays as it is.
+        db.record_cost(&CostRecord {
+            cost: Cost::Reported(Money::from_cents(99)),
+            ..first.clone()
+        })
+        .unwrap();
+        let id = first.id;
+        assert_eq!(db.costs_between(owner, month.0, month.1).unwrap(), [first]);
+
+        db.remove_cost(id).unwrap();
+        db.remove_cost(id).unwrap();
+        assert!(
+            db.costs_between(owner, month.0, month.1)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

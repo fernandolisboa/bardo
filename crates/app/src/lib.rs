@@ -1925,6 +1925,12 @@ pub(crate) mod testing {
         pub(crate) refusals: Mutex<u32>,
         /// A call held open (`pause_at`).
         pub(crate) pause: Pause,
+        /// How many downloads of a finished clip answer 404 first, as an
+        /// expired link does.
+        pub(crate) gone: Mutex<u32>,
+        /// The provider no longer knows any request: every status answers
+        /// that it is lost.
+        pub(crate) forgot: std::sync::atomic::AtomicBool,
     }
 
     impl FakeClips {
@@ -2112,6 +2118,12 @@ pub(crate) mod testing {
             if self.hold.load(std::sync::atomic::Ordering::SeqCst) {
                 return Ok(ClipStatus::Running);
             }
+            if self.forgot.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(ClipStatus::Lost(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unexpected,
+                    "the provider does not know this request",
+                )));
+            }
             if let Some(word) = self
                 .failing
                 .lock()
@@ -2131,6 +2143,12 @@ pub(crate) mod testing {
 
         fn download(&self, key: &ApiKey, _video: &str) -> Result<GeneratedClip, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
+            if Self::take(&self.gone) {
+                return Err(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::Unexpected,
+                    "HTTP 404",
+                ));
+            }
             Ok(GeneratedClip {
                 bytes: CLIP.to_vec(),
             })

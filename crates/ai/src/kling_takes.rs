@@ -190,7 +190,7 @@ pub fn parse_take_status(response: &HttpResponse) -> Result<TakeStatus, Provider
             usage: output_seconds(response).map(Metered::video_seconds),
             seed: None,
         }),
-        ClipStatus::Failed(failure) => TakeStatus::Failed(failure),
+        ClipStatus::Failed(failure) | ClipStatus::Lost(failure) => TakeStatus::Failed(failure),
     })
 }
 
