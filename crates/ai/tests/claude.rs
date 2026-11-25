@@ -9,8 +9,8 @@ use bardo_ai::ClaudeTextGenerator;
 use bardo_ai::claude::{FALLBACK_BETA, MESSAGES_URL, MODEL};
 use bardo_ai::http::Method;
 use bardo_domain::{
-    ApiKey, ImageFormat, Provider, ProviderFailureKind, TextEffort, TextFormat, TextGenerator,
-    TextImage, TextRequest, TokenUsage,
+    ApiKey, BilledUse, ImageFormat, Metered, Provider, ProviderFailureKind, TextEffort, TextFormat,
+    TextGenerator, TextImage, TextRequest, TokenUsage,
 };
 use common::{Scripted, fixture, recording_sleeper};
 use serde_json::json;
@@ -212,11 +212,59 @@ fn a_refusal_is_declined_with_the_reason() {
 }
 
 #[test]
-fn an_answer_cut_at_the_limit_is_unexpected() {
+fn an_answer_cut_at_the_limit_is_unexpected_and_says_what_it_billed() {
     let failure = generator(&["messages-max-tokens"])
         .generate(&key(), &json_request())
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    // Claude bills every token of an answer it cuts.
+    assert_eq!(
+        failure.billed,
+        Some(BilledUse {
+            model: "claude-opus-5-5".into(),
+            usage: Metered {
+                input_tokens: 412,
+                output_tokens: 16_000,
+                ..Metered::default()
+            },
+        })
+    );
+}
+
+#[test]
+fn an_answer_without_text_says_what_it_billed() {
+    let failure = generator(&["messages-no-text"])
+        .generate(&key(), &json_request())
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
+    let billed = failure.billed.expect("the answer reports its usage");
+    assert_eq!(
+        (billed.usage.input_tokens, billed.usage.output_tokens),
+        (412, 950)
+    );
+}
+
+#[test]
+fn a_refusal_says_what_it_billed_under_the_model_that_refused() {
+    let failure = generator(&["messages-refusal"])
+        .generate(&key(), &json_request())
+        .unwrap_err();
+    let billed = failure.billed.expect("the answer reports its usage");
+    assert_eq!(billed.model, "claude-opus-4-8");
+    assert_eq!(
+        (billed.usage.input_tokens, billed.usage.output_tokens),
+        (380, 0)
+    );
+}
+
+#[test]
+fn a_failure_that_started_nothing_bills_nothing() {
+    for name in ["messages-rejected", "messages-credit-balance"] {
+        let failure = generator(&[name])
+            .generate(&key(), &json_request())
+            .unwrap_err();
+        assert_eq!(failure.billed, None, "{name}");
+    }
 }
 
 #[test]
@@ -272,11 +320,39 @@ fn a_lasting_overload_is_reported_as_provider_down() {
 }
 
 #[test]
-fn no_answer_is_unreachable() {
+fn a_request_that_never_left_is_unreachable() {
     let claude = ClaudeTextGenerator::with_transport(Scripted::offline());
     let failure = claude.generate(&key(), &json_request()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
     assert!(failure.detail.contains("dns"));
+}
+
+#[test]
+fn a_request_that_was_sent_and_got_no_answer_is_a_lost_answer_sent_once() {
+    let claude = ClaudeTextGenerator::with_transport(Scripted::losing_the_answer());
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert!(failure.detail.contains("timeout"), "{}", failure.detail);
+    assert_eq!(failure.billed, None, "nothing says what it used");
+    assert_eq!(claude.transport().sent().len(), 1);
+}
+
+#[test]
+fn a_gateway_that_gave_up_on_claude_is_a_lost_answer_sent_once() {
+    let claude = generator(&["messages-gateway-timeout"]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert!(failure.detail.contains("504"), "{}", failure.detail);
+    assert_eq!(claude.transport().sent().len(), 1);
+}
+
+#[test]
+fn claude_failing_on_its_side_is_told_once_and_left_to_the_queue() {
+    let claude = generator(&["messages-api-error"]);
+    let failure = claude.generate(&key(), &json_request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(failure.detail, "Internal server error");
+    assert_eq!(claude.transport().sent().len(), 1);
 }
 
 #[test]

@@ -220,7 +220,8 @@ fn voice_change_failures_say_why() {
             "voice-changer-voice-not-found",
             ProviderFailureKind::Unexpected,
         ),
-        ("voice-changer-empty", ProviderFailureKind::Unexpected),
+        // Answered, with nothing in it: done and billed, for all Bardo knows.
+        ("voice-changer-empty", ProviderFailureKind::AnswerLost),
         ("isolation-missing-file", ProviderFailureKind::Unexpected),
     ] {
         let failure = changer(&[name])
@@ -287,4 +288,43 @@ fn isolates_the_voice_in_one_call() {
             .unwrap_err();
         assert_eq!(failure.kind, kind, "{name}: {}", failure.detail);
     }
+}
+
+#[test]
+fn a_capture_step_whose_answer_is_lost_is_asked_for_once() {
+    // Each is billed by the length of the sound once ElevenLabs has it.
+    let adapter = ElevenLabsTranscription::with_transport(Scripted::losing_the_answer());
+    let failure = adapter.transcribe(&key(), &transcription()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+    let adapter = transcriber(&["stt-gateway-timeout"]);
+    let failure = adapter.transcribe(&key(), &transcription()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+
+    let adapter = ElevenLabsVoiceChanger::with_transport(Scripted::losing_the_answer());
+    let failure = adapter
+        .change(&key(), &voice(), GenerationPresets::default(), &part())
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+    let adapter = changer(&["voice-changer-gateway-timeout"]);
+    let failure = adapter
+        .change(&key(), &voice(), GenerationPresets::default(), &part())
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+
+    let sound = VoiceChangeRequest {
+        audio: AUDIO,
+        file_name: "capture.wav",
+    };
+    let adapter = ElevenLabsVoiceIsolator::with_transport(Scripted::losing_the_answer());
+    let failure = adapter.isolate(&key(), &sound).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+    let adapter = isolator(&["isolation-gateway-timeout"]);
+    let failure = adapter.isolate(&key(), &sound).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
 }

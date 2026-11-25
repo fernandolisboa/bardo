@@ -288,10 +288,41 @@ impl HttpResponse {
     }
 }
 
-/// No answer: DNS, connection, TLS, proxy or timeout.
+/// Whether a request that got no answer may have reached the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// Nothing the server could act on left this computer: no address, no
+    /// connection, no TLS session, or part of the body was never handed
+    /// over. Sending the request again is safe.
+    NotSent,
+    /// The request was sent, in whole or in part, or nothing says it was
+    /// not: the server may have acted on it.
+    Unknown,
+}
+
+/// No answer: DNS, connection, TLS, proxy, timeout, or an answer cut
+/// before its end. The second field says whether the request may have
+/// reached the server, which decides if a paid call is safe to make again.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
-pub struct TransportError(pub String);
+pub struct TransportError(pub String, pub Delivery);
+
+impl TransportError {
+    /// A request that never left.
+    pub fn not_sent(detail: impl Into<String>) -> Self {
+        Self(detail.into(), Delivery::NotSent)
+    }
+
+    /// A request that was sent, or may have been, and got no answer.
+    pub fn unanswered(detail: impl Into<String>) -> Self {
+        Self(detail.into(), Delivery::Unknown)
+    }
+
+    /// Whether the request never left, so sending it again is safe.
+    pub fn never_left(&self) -> bool {
+        self.1 == Delivery::NotSent
+    }
+}
 
 /// An answer whose body is kept as bytes (a downloaded file).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -332,7 +363,8 @@ pub trait Transport: Send + Sync {
     ) -> Result<BinaryResponse, TransportError> {
         let response = self.send(request)?;
         if response.body.len() as u64 > max_bytes {
-            return Err(TransportError(format!(
+            // The server answered, so it did the work.
+            return Err(TransportError::unanswered(format!(
                 "the body is over {max_bytes} bytes"
             )));
         }
@@ -379,10 +411,18 @@ impl UreqTransport {
     }
 
     fn with_redirects(timeout: Duration, follow: bool) -> Self {
-        Self::configured(timeout, follow, false)
+        Self::configured(timeout, follow, false, true)
     }
 
-    fn configured(timeout: Duration, follow: bool, https_only: bool) -> Self {
+    /// For calls the provider bills for the work it does: `new`, with a
+    /// new connection for every request. A kept connection that died
+    /// unnoticed takes the request before it fails, which would make a
+    /// request that never arrived look like one that may have.
+    pub fn for_paid_calls(timeout: Duration) -> Self {
+        Self::configured(timeout, true, false, false)
+    }
+
+    fn configured(timeout: Duration, follow: bool, https_only: bool, keep: bool) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
             .root_certs(ureq::tls::RootCerts::PlatformVerifier)
             .build();
@@ -395,6 +435,11 @@ impl UreqTransport {
         if !follow {
             config = config.max_redirects(0);
         }
+        if !keep {
+            config = config
+                .max_idle_connections(0)
+                .max_idle_connections_per_host(0);
+        }
         Self {
             agent: config.build().new_agent(),
             max_body_bytes: Self::MAX_BODY_BYTES,
@@ -404,7 +449,7 @@ impl UreqTransport {
     /// For public links (voice previews): follows redirects, but only to
     /// HTTPS, so a link checked as HTTPS stays HTTPS to the end.
     pub fn https_only(timeout: Duration) -> Self {
-        Self::configured(timeout, true, true)
+        Self::configured(timeout, true, true, true)
     }
 
     /// For downloading large files (an update's installer): follows
@@ -469,25 +514,88 @@ impl UreqTransport {
     }
 }
 
+/// A request body that knows whether all of it was handed to the
+/// connection. The body's length is announced, so a server cannot act on
+/// a request while part of its body is still here: this tells a request
+/// that cannot have arrived whole from one that may have, whatever the
+/// error that followed. The last piece handed over may not have been
+/// written, so "all handed over" is an upper bound, never the reverse.
+struct TrackedBody<'a> {
+    /// What was not handed over yet.
+    bytes: &'a [u8],
+}
+
+impl TrackedBody<'_> {
+    fn all_handed_over(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+impl std::io::Read for TrackedBody<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.bytes.read(buffer)
+    }
+}
+
+/// Whether a request that failed with `error` may have reached the
+/// server. `body_handed_over` says whether the whole body was handed to
+/// the connection; it is `None` for a request without a body, where only
+/// the error tells: one from before the request is written (no address,
+/// no connection, no TLS session) means it never left.
+fn delivery(error: &ureq::Error, body_handed_over: Option<bool>) -> Delivery {
+    use std::io::ErrorKind;
+
+    let never_left = match body_handed_over {
+        Some(handed_over) => !handed_over,
+        None => match error {
+            ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::ConnectProxyFailed(_)
+            | ureq::Error::InvalidProxyUrl
+            | ureq::Error::BadUri(_)
+            | ureq::Error::Http(_)
+            | ureq::Error::RequireHttpsOnly(_)
+            | ureq::Error::TlsRequired
+            | ureq::Error::Tls(_)
+            | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => true,
+            // Only what connecting alone reports: an unreachable network
+            // can also show on a connection the request already went down.
+            ureq::Error::Io(error) => matches!(
+                error.kind(),
+                ErrorKind::ConnectionRefused | ErrorKind::AddrNotAvailable
+            ),
+            _ => false,
+        },
+    };
+    if never_left {
+        Delivery::NotSent
+    } else {
+        Delivery::Unknown
+    }
+}
+
 impl UreqTransport {
     fn call(
         &self,
         request: &HttpRequest,
     ) -> Result<ureq::http::Response<ureq::Body>, TransportError> {
-        let sent = match request.method {
+        let failed = |error: ureq::Error, body_handed_over: Option<bool>| {
+            TransportError(error.to_string(), delivery(&error, body_handed_over))
+        };
+        match request.method {
             Method::Get => {
                 let mut call = self.agent.get(&request.url);
                 for (name, value) in &request.headers {
                     call = call.header(name.as_ref(), value.as_str());
                 }
-                call.call()
+                call.call().map_err(|error| failed(error, None))
             }
             Method::Delete => {
                 let mut call = self.agent.delete(&request.url);
                 for (name, value) in &request.headers {
                     call = call.header(name.as_ref(), value.as_str());
                 }
-                call.call()
+                call.call().map_err(|error| failed(error, None))
             }
             Method::Post | Method::Put => {
                 let mut call = if request.method == Method::Post {
@@ -501,10 +609,32 @@ impl UreqTransport {
                 if let Some(timeout) = request.timeout {
                     call = call.config().timeout_global(Some(timeout)).build();
                 }
-                call.send(request.body.as_deref().unwrap_or_default())
+                let bytes = request.body.as_deref().unwrap_or_default();
+                if bytes.is_empty() {
+                    return call.send(bytes).map_err(|error| failed(error, None));
+                }
+                // Read through the tracker, the body has no length of its
+                // own, so the header states it.
+                if request.header_value("content-length").is_none()
+                    && request.header_value("transfer-encoding").is_none()
+                {
+                    call = call.header("content-length", bytes.len().to_string());
+                }
+                let mut body = TrackedBody { bytes };
+                let sent = call.send(ureq::SendBody::from_reader(&mut body));
+                sent.map_err(|error| failed(error, Some(body.all_handed_over())))
             }
-        };
-        sent.map_err(|error| TransportError(error.to_string()))
+        }
+    }
+}
+
+/// Whether reading a body failed because it stopped arriving, as opposed
+/// to arriving whole but too long or not as text.
+fn is_cut(error: &ureq::Error) -> bool {
+    match error {
+        ureq::Error::BodyExceedsLimit(_) => false,
+        ureq::Error::Io(error) => error.kind() != std::io::ErrorKind::InvalidData,
+        _ => true,
     }
 }
 
@@ -519,13 +649,24 @@ impl Transport for UreqTransport {
                 Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned()))
             })
             .collect();
-        // An unreadable body still tells the status; the body is only detail.
-        let body = response
+        let read = response
             .body_mut()
             .with_config()
             .limit(self.max_body_bytes)
-            .read_to_string()
-            .unwrap_or_default();
+            .read_to_string();
+        let body = match read {
+            Ok(body) => body,
+            // A success cut before its end (the connection dropped, the
+            // time ran out) is no answer: what was asked for is lost.
+            Err(error) if (200..=299).contains(&status) && is_cut(&error) => {
+                return Err(TransportError::unanswered(format!(
+                    "the answer was cut off: {error}"
+                )));
+            }
+            // Otherwise an unreadable body (too long, not text) still
+            // tells the status; the body is only detail.
+            Err(_) => String::new(),
+        };
         Ok(HttpResponse {
             status,
             headers,
@@ -540,13 +681,21 @@ impl Transport for UreqTransport {
     ) -> Result<BinaryResponse, TransportError> {
         let mut response = self.call(request)?;
         let status = response.status().as_u16();
-        // A file is useless when cut, so reading too much is an error.
-        let bytes = response
+        let read = response
             .body_mut()
             .with_config()
             .limit(max_bytes)
-            .read_to_vec()
-            .map_err(|error| TransportError(error.to_string()))?;
+            .read_to_vec();
+        let bytes = match read {
+            Ok(bytes) => bytes,
+            // A file is useless when cut, so a success that is cut or too
+            // long is an error. The server answered: it did the work.
+            Err(error) if (200..=299).contains(&status) => {
+                return Err(TransportError::unanswered(error.to_string()));
+            }
+            // A failed status still tells; its body is only detail.
+            Err(_) => Vec::new(),
+        };
         Ok(BinaryResponse { status, bytes })
     }
 
@@ -616,6 +765,250 @@ mod tests {
         response.body.read_to_string(&mut body).unwrap();
         assert_eq!(body, "hello world");
         server.join().unwrap();
+    }
+
+    /// A server on this computer that takes one request and does `then`
+    /// with the connection. Returns its address and the request it read.
+    fn one_request(
+        then: impl FnOnce(&mut std::net::TcpStream) + Send + 'static,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<String>) {
+        use std::io::Read as _;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            // Headers, then as many body bytes as they announce.
+            loop {
+                let read = stream.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..read]);
+                let text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                let Some(head) = text.find("\r\n\r\n") else {
+                    assert!(read > 0, "the request ended early");
+                    continue;
+                };
+                let length: usize = text[..head]
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .map_or(0, |value| value.trim().parse().unwrap());
+                if request.len() >= head + 4 + length {
+                    break;
+                }
+                assert!(read > 0, "the request ended early");
+            }
+            then(&mut stream);
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (address, server)
+    }
+
+    fn paid_call(address: std::net::SocketAddr) -> HttpRequest {
+        HttpRequest::post_json(format!("http://{address}/v1/generate"), r#"{"prompt":"a"}"#)
+    }
+
+    #[test]
+    fn a_refused_connection_never_left() {
+        // Nothing listens on a port that was just given back.
+        let address = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap()
+        };
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let error = transport.send(&paid_call(address)).unwrap_err();
+        assert!(error.never_left(), "{error}");
+        assert_eq!(error.1, Delivery::NotSent);
+    }
+
+    #[test]
+    fn a_request_the_server_took_without_answering_may_have_been_done() {
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        let (address, server) = one_request(move |_| {
+            // Busy with the work until the client has given up.
+            let _ = hold.recv();
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_millis(300));
+        let error = transport.send(&paid_call(address)).unwrap_err();
+        assert!(!error.never_left(), "{error}");
+        assert_eq!(error.1, Delivery::Unknown);
+        release.send(()).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_connection_dropped_after_the_request_may_have_been_done() {
+        let (address, server) = one_request(|_| {});
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let error = transport.send(&paid_call(address)).unwrap_err();
+        assert!(!error.never_left(), "{error}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_body_cut_on_its_way_never_arrived_whole() {
+        use std::io::Read as _;
+
+        // The server reads the start of a large body and hangs up.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut start = [0u8; 1024];
+            stream.read_exact(&mut start).unwrap();
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let request = HttpRequest::post_json(
+            format!("http://{address}/v1/speech-to-text"),
+            "a".repeat(32 * 1024 * 1024),
+        );
+        let error = transport.send(&request).unwrap_err();
+        assert!(error.never_left(), "{error}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_failed_tls_session_never_left() {
+        // A server that is not speaking TLS: the session is never made.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || drop(listener.accept().unwrap()));
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let request = HttpRequest::post_json(format!("https://{address}/v1/generate"), "{}");
+        let error = transport.send(&request).unwrap_err();
+        assert!(error.never_left(), "{error}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_body_goes_whole_with_its_length() {
+        use std::io::Write as _;
+
+        let (address, server) = one_request(|stream| {
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .unwrap();
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let response = transport.send(&paid_call(address)).unwrap();
+        assert_eq!((response.status, response.body.as_str()), (200, "ok"));
+        let request = server.join().unwrap();
+        let (head, body) = request.split_once("\r\n\r\n").unwrap();
+        let head = head.to_ascii_lowercase();
+        assert!(head.contains("content-length: 14"), "{head}");
+        assert!(!head.contains("transfer-encoding"), "{head}");
+        assert_eq!(body, r#"{"prompt":"a"}"#);
+    }
+
+    #[test]
+    fn an_answer_cut_before_its_end_is_no_answer() {
+        use std::io::Write as _;
+
+        let cut = |stream: &mut std::net::TcpStream| {
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"half\":")
+                .unwrap();
+        };
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+
+        let (address, server) = one_request(cut);
+        let error = transport.send(&paid_call(address)).unwrap_err();
+        assert!(!error.never_left(), "{error}");
+        server.join().unwrap();
+
+        let (address, server) = one_request(cut);
+        let error = transport
+            .send_for_bytes(&paid_call(address), 1024)
+            .unwrap_err();
+        assert!(!error.never_left(), "{error}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_failed_status_is_told_even_when_its_body_is_cut() {
+        use std::io::Write as _;
+
+        let (address, server) = one_request(|stream| {
+            stream
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 100\r\n\r\n<html>")
+                .unwrap();
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+        let response = transport.send(&paid_call(address)).unwrap();
+        assert_eq!(response.status, 502);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_file_keeps_a_failed_status_when_cut_and_is_no_answer_when_a_success_is_cut() {
+        use std::io::Write as _;
+
+        for (status_line, told) in [("401 Unauthorized", Some(401)), ("200 OK", None)] {
+            let (address, server) = one_request(move |stream| {
+                let head = format!("HTTP/1.1 {status_line}\r\nContent-Length: 100\r\n\r\nhalf");
+                stream.write_all(head.as_bytes()).unwrap();
+            });
+            let transport = UreqTransport::without_proxy(Duration::from_secs(5));
+            let answer = transport.send_for_bytes(&paid_call(address), 1024);
+            match told {
+                Some(status) => assert_eq!(answer.unwrap().status, status),
+                None => assert!(!answer.unwrap_err().never_left()),
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn an_answer_over_the_size_limit_keeps_its_status() {
+        use std::io::Write as _;
+
+        let (address, server) = one_request(|stream| {
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello world")
+                .unwrap();
+        });
+        let transport = UreqTransport::without_proxy(Duration::from_secs(5)).with_max_body(4);
+        let response = transport.send(&paid_call(address)).unwrap();
+        assert_eq!((response.status, response.body.as_str()), (200, ""));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn without_a_body_the_error_tells_whether_the_request_left() {
+        use std::io::ErrorKind;
+
+        let io = |kind: ErrorKind| ureq::Error::Io(kind.into());
+        for error in [
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+            ureq::Error::ConnectProxyFailed("407".into()),
+            ureq::Error::Timeout(ureq::Timeout::Resolve),
+            ureq::Error::Timeout(ureq::Timeout::Connect),
+            ureq::Error::Tls("no certificate"),
+            io(ErrorKind::ConnectionRefused),
+            io(ErrorKind::AddrNotAvailable),
+        ] {
+            assert_eq!(delivery(&error, None), Delivery::NotSent, "{error}");
+        }
+        for error in [
+            ureq::Error::Timeout(ureq::Timeout::Global),
+            ureq::Error::Timeout(ureq::Timeout::RecvResponse),
+            io(ErrorKind::ConnectionReset),
+            io(ErrorKind::NetworkUnreachable),
+            io(ErrorKind::UnexpectedEof),
+            io(ErrorKind::InvalidData),
+        ] {
+            assert_eq!(delivery(&error, None), Delivery::Unknown, "{error}");
+        }
+    }
+
+    #[test]
+    fn with_a_body_whether_it_was_handed_over_tells() {
+        // Without its whole body the server has nothing to act on; with
+        // it, nothing says the server did not.
+        let timed_out = ureq::Error::Timeout(ureq::Timeout::Global);
+        assert_eq!(delivery(&timed_out, Some(false)), Delivery::NotSent);
+        assert_eq!(delivery(&timed_out, Some(true)), Delivery::Unknown);
     }
 
     #[test]

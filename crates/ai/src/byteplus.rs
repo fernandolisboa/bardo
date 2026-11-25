@@ -630,7 +630,10 @@ fn failure_check(part: &str, failure: ProviderFailure) -> KeyCheck {
         ProviderFailureKind::NotAllowed => KeyCheckOutcome::NotAllowed,
         ProviderFailureKind::LimitReached => KeyCheckOutcome::LimitReached,
         ProviderFailureKind::ProviderDown => KeyCheckOutcome::ProviderDown,
-        ProviderFailureKind::Unreachable => KeyCheckOutcome::Unreachable,
+        // A key check spends nothing, so a lost answer is only no answer.
+        ProviderFailureKind::Unreachable | ProviderFailureKind::AnswerLost => {
+            KeyCheckOutcome::Unreachable
+        }
         ProviderFailureKind::Unexpected | ProviderFailureKind::Declined => {
             KeyCheckOutcome::Unexpected
         }

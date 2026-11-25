@@ -464,6 +464,13 @@ impl JobHandler for CutSuggestionHandler {
                 let decisions = engine
                     .decide(&key, &chunk_state(chunk), &questions)
                     .map_err(|failure| {
+                        // An answer that was lost may still have been billed.
+                        self.costs.record_failed_for_project(
+                            &failure,
+                            &PlannedCall::new(provider, CostPurpose::CutSuggestions, 1),
+                            Some(cx.id()),
+                            project,
+                        );
                         JobFailure::new(
                             failure.kind.into(),
                             format!("decision engine: {}", failure.detail),
@@ -1182,6 +1189,26 @@ mod tests {
                 .iter()
                 .all(|state| *state == SuggestionState::Pending)
         );
+    }
+
+    #[test]
+    fn suggestions_whose_answer_is_lost_are_asked_for_once_and_are_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let h = Harness::new();
+        let (app, project) = drawn(&h);
+        *h.decisions.failure.lock().unwrap() = Some(lost_answer());
+        let mut editor = app.open_editor(project.id).unwrap();
+        let job = wait_done(
+            &app,
+            app.suggest_cuts(&mut editor, BudgetConsent::Ask).unwrap(),
+        );
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::CutSuggestions);
+        assert_eq!(cost.provider, Provider::TypeSafe);
+        assert_eq!((cost.project, cost.job), (Some(project.id), Some(job.id())));
     }
 
     #[test]

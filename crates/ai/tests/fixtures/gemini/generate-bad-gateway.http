@@ -1,0 +1,6 @@
+HTTP/2 502
+content-type: text/html; charset=UTF-8
+
+<html><head><title>502 Bad Gateway</title></head>
+<body><h1>Error: Server Error</h1>
+<h2>The server encountered a temporary error and could not complete your request.</h2></body></html>

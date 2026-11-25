@@ -283,8 +283,8 @@ pub use production::{
 };
 pub use profile::{ProfileId, ProfileRepository, UiLanguage, UnsupportedLanguage, UserProfile};
 pub use provider_key::{
-    ApiKey, ApiKeyError, KeyCheck, KeyCheckOutcome, KeyChecker, Provider, ProviderFailure,
-    ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,
+    ApiKey, ApiKeyError, BilledUse, KeyCheck, KeyCheckOutcome, KeyChecker, Provider,
+    ProviderFailure, ProviderFailureKind, SecretStore, SecretStoreError, UnknownProvider,
 };
 pub use publication::{
     ChannelPoint, MetricsSnapshot, MetricsSyncOnStart, MetricsTotals, OwnerTotals, PostLink,

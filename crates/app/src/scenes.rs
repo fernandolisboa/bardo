@@ -572,6 +572,13 @@ impl SceneHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::ScenePlan, &request),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -874,6 +881,13 @@ impl SceneHandler {
                     }
                 }
                 Err(failure) => {
+                    // An answer that was lost may still have been billed.
+                    self.costs.record_failed_for_project(
+                        &failure,
+                        &images_call(1),
+                        Some(job),
+                        project,
+                    );
                     let kind = JobFailureKind::from(failure.kind);
                     let failure = JobFailure::new(
                         kind,
@@ -999,6 +1013,9 @@ impl SceneHandler {
                 Ok(())
             }
             Err(failure) => {
+                // An answer that was lost may still have been billed.
+                self.costs
+                    .record_failed_for_project(&failure, &images_call(1), Some(job), project);
                 let kind = JobFailureKind::from(failure.kind);
                 let failure = JobFailure::new(
                     kind,

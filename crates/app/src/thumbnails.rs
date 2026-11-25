@@ -319,6 +319,13 @@ impl ThumbnailHandler {
             },
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::Thumbnail, &request),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -401,6 +408,9 @@ impl ThumbnailHandler {
             references: Vec::new(),
         };
         let image = self.images.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost may still have been billed.
+            self.costs
+                .record_failed_for_project(&failure, &draw_call(), Some(job), project);
             JobFailure::new(failure.kind.into(), format!("Gemini: {}", failure.detail))
         })?;
         self.costs.record_for_project(
@@ -846,6 +856,38 @@ pub(crate) mod tests {
     fn write(app: &Bardo, project: VideoProjectId) -> Job {
         let id = app.write_thumbnail(project, BudgetConsent::Ask).unwrap();
         wait_done(app, id)
+    }
+
+    #[test]
+    fn a_thumbnail_whose_text_or_background_is_lost_is_asked_for_once_and_is_in_costs() {
+        use crate::costs::tests::{lost_answer, only_cost};
+
+        let h = Harness::new();
+        let app = h.start();
+        let project = project(&app);
+        let before = h.text.requests().len();
+        *h.text.failure.lock().unwrap() = Some(lost_answer());
+        let job = write(&app, project.id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(h.text.requests().len() - before, 1);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::Thumbnail);
+        assert_eq!((cost.project, cost.job), (Some(project.id), Some(job.id())));
+
+        *h.text.failure.lock().unwrap() = None;
+        h.answer(answer("Lost signal", "A lone probe, wide"));
+        write(&app, project.id);
+        *h.images.failure.lock().unwrap() = Some(lost_answer());
+        let id = app
+            .draw_thumbnail_background(project.id, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "not made again by the queue");
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        let cost = only_cost(&*h.db, app.profile().id, CostPurpose::ThumbnailImage);
+        assert_eq!((cost.project, cost.job), (Some(project.id), Some(id)));
     }
 
     #[test]

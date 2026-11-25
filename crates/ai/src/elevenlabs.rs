@@ -35,7 +35,7 @@ use std::time::Duration;
 
 use bardo_domain::{
     AlignedSpeech, Alignment, AlignmentRequest, ApiKey, ChangedSpeech, CharTiming, ComposedMusic,
-    GenerationPresets, HeardWord, MusicGenerator, MusicRequest, Provider, ProviderFailure,
+    GenerationPresets, HeardWord, Metered, MusicGenerator, MusicRequest, Provider, ProviderFailure,
     ProviderFailureKind, Speech, SpeechAligner, SpeechRequest, SpeechSynthesizer,
     SpeechTranscriber, Transcript, TranscriptionRequest, Voice, VoiceCategory, VoiceChangeRequest,
     VoiceChanger, VoiceIsolator, VoiceLibrary, VoicePreviews, VoiceRef,
@@ -327,6 +327,11 @@ fn unexpected(detail: impl Into<String>) -> ProviderFailure {
     ProviderFailure::new(ProviderFailureKind::Unexpected, detail)
 }
 
+/// Whether an error body is the API's own: `{"detail": ...}`.
+fn own_words(body: &Value) -> bool {
+    !body["detail"].is_null()
+}
+
 /// Reads a successful answer: the audio, the character timings (of the
 /// text as sent; of the normalized text when only those come back) and
 /// what was billed (the text's length when the header is missing).
@@ -347,16 +352,21 @@ pub fn parse_speech(response: &HttpResponse, text: &str) -> Result<Speech, Provi
         .find(|alignment| alignment.is_object())
         .ok_or_else(|| unexpected("the answer has no timings"))
         .and_then(alignment)?;
-    let billed_characters = response
-        .header("character-cost")
-        .and_then(|cost| cost.trim().parse().ok())
-        .unwrap_or(text.chars().count() as u64);
     Ok(Speech {
         audio,
         alignment,
         model: SPEECH_MODEL.to_owned(),
-        billed_characters,
+        billed_characters: billed_characters(response, text),
     })
+}
+
+/// What a reading billed: what its `character-cost` header says, else the
+/// length of the text.
+fn billed_characters(response: &HttpResponse, text: &str) -> u64 {
+    response
+        .header("character-cost")
+        .and_then(|cost| cost.trim().parse().ok())
+        .unwrap_or(text.chars().count() as u64)
 }
 
 fn alignment(value: &Value) -> Result<Alignment, ProviderFailure> {
@@ -409,7 +419,9 @@ impl ElevenLabsSpeech {
     pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES),
+        )
     }
 }
 
@@ -452,14 +464,24 @@ impl<T: Transport> SpeechSynthesizer for ElevenLabsSpeech<T> {
                 request.voice
             )));
         }
-        let response = self
-            .backoff
-            .send(&self.transport, &speech_request(key, request), &self.sleep)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        // Billed once read aloud, heard or not: never sent again after an
+        // answer that may have been made (ADR-0030).
+        let response = self.backoff.send_paid(
+            &self.transport,
+            &speech_request(key, request),
+            own_words,
+            &self.sleep,
+        )?;
         if !(200..=299).contains(&response.status) {
             return Err(failure(Provider::ElevenLabs, &response));
         }
-        parse_speech(&response, &request.text)
+        // A reading that cannot be used was still read, and billed.
+        parse_speech(&response, &request.text).map_err(|failure| {
+            failure.billed(
+                SPEECH_MODEL,
+                Metered::characters(billed_characters(&response, &request.text)),
+            )
+        })
     }
 }
 
@@ -538,7 +560,9 @@ impl ElevenLabsAlignment {
     pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES),
+        )
     }
 }
 
@@ -580,14 +604,13 @@ impl<T: Transport> SpeechAligner for ElevenLabsAlignment<T> {
                 "the recording is over 1 GB, the most ElevenLabs aligns",
             ));
         }
-        let response = self
-            .backoff
-            .send(
-                &self.transport,
-                &alignment_request(key, request),
-                &self.sleep,
-            )
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        // Billed by the length of the recording once aligned (ADR-0030).
+        let response = self.backoff.send_paid(
+            &self.transport,
+            &alignment_request(key, request),
+            own_words,
+            &self.sleep,
+        )?;
         if !(200..=299).contains(&response.status) {
             return Err(form_failure(&response));
         }
@@ -647,7 +670,9 @@ impl ElevenLabsMusic {
     pub const TIMEOUT: Duration = Duration::from_secs(600);
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_MUSIC_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(MAX_MUSIC_BYTES),
+        )
     }
 }
 
@@ -688,30 +713,27 @@ impl<T: Transport> MusicGenerator for ElevenLabsMusic<T> {
         key: &ApiKey,
         request: &MusicRequest,
     ) -> Result<ComposedMusic, ProviderFailure> {
-        let call = music_request(key, request);
-        let mut retry = 0;
-        loop {
-            let answer = self
-                .transport
-                .send_for_bytes(&call, MAX_MUSIC_BYTES)
-                .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
-            if (200..=299).contains(&answer.status) {
-                if answer.bytes.is_empty() {
-                    return Err(unexpected("the answer has no audio"));
-                }
-                return Ok(ComposedMusic {
-                    audio: answer.bytes,
-                    model: MUSIC_MODEL.to_owned(),
-                });
-            }
+        // Billed by the length of the track once composed, heard or not:
+        // never sent again after an answer that may have been made
+        // (ADR-0030).
+        let answer = self.backoff.send_paid_for_bytes(
+            &self.transport,
+            &music_request(key, request),
+            MAX_MUSIC_BYTES,
+            own_words,
+            &self.sleep,
+        )?;
+        if !(200..=299).contains(&answer.status) {
             // An error answer is a short JSON text.
-            let response = HttpResponse::new(answer.status, String::from_utf8_lossy(&answer.bytes));
-            if retry >= self.backoff.retries || !Backoff::is_retryable(&response) {
-                return Err(music_failure(&response));
-            }
-            (self.sleep)(self.backoff.delay(retry, &response));
-            retry += 1;
+            return Err(music_failure(&HttpResponse::new(
+                answer.status,
+                String::from_utf8_lossy(&answer.bytes),
+            )));
         }
+        Ok(ComposedMusic {
+            audio: answer.bytes,
+            model: MUSIC_MODEL.to_owned(),
+        })
     }
 }
 
@@ -740,8 +762,9 @@ fn form_failure(response: &HttpResponse) -> ProviderFailure {
     failure(Provider::ElevenLabs, response)
 }
 
-/// Sends `call` and keeps its answer as audio bytes, retrying as the
-/// backoff says on a rate limit or an outage.
+/// Sends `call`, billed by the length of the sound once ElevenLabs made
+/// it (ADR-0030), and keeps its answer as audio bytes. It goes again only
+/// after an answer that started nothing.
 fn audio_answer<T: Transport>(
     transport: &T,
     backoff: &Backoff,
@@ -749,25 +772,15 @@ fn audio_answer<T: Transport>(
     call: &HttpRequest,
     max_bytes: u64,
 ) -> Result<Vec<u8>, ProviderFailure> {
-    let mut retry = 0;
-    loop {
-        let answer = transport
-            .send_for_bytes(call, max_bytes)
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
-        if (200..=299).contains(&answer.status) {
-            if answer.bytes.is_empty() {
-                return Err(unexpected("the answer has no audio"));
-            }
-            return Ok(answer.bytes);
-        }
+    let answer = backoff.send_paid_for_bytes(transport, call, max_bytes, own_words, sleep)?;
+    if !(200..=299).contains(&answer.status) {
         // An error answer is a short JSON text.
-        let response = HttpResponse::new(answer.status, String::from_utf8_lossy(&answer.bytes));
-        if retry >= backoff.retries || !Backoff::is_retryable(&response) {
-            return Err(form_failure(&response));
-        }
-        (sleep)(backoff.delay(retry, &response));
-        retry += 1;
+        return Err(form_failure(&HttpResponse::new(
+            answer.status,
+            String::from_utf8_lossy(&answer.bytes),
+        )));
     }
+    Ok(answer.bytes)
 }
 
 pub const TRANSCRIPTION_URL: &str = "https://api.elevenlabs.io/v1/speech-to-text";
@@ -863,7 +876,9 @@ impl ElevenLabsTranscription {
     pub const MAX_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(Self::MAX_BODY_BYTES),
+        )
     }
 }
 
@@ -900,14 +915,13 @@ impl<T: Transport> SpeechTranscriber for ElevenLabsTranscription<T> {
         key: &ApiKey,
         request: &TranscriptionRequest<'_>,
     ) -> Result<Transcript, ProviderFailure> {
-        let response = self
-            .backoff
-            .send(
-                &self.transport,
-                &transcription_request(key, request),
-                &self.sleep,
-            )
-            .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))?;
+        // Billed by the length of the recording once heard (ADR-0030).
+        let response = self.backoff.send_paid(
+            &self.transport,
+            &transcription_request(key, request),
+            own_words,
+            &self.sleep,
+        )?;
         if !(200..=299).contains(&response.status) {
             return Err(form_failure(&response));
         }
@@ -985,7 +999,9 @@ impl ElevenLabsVoiceChanger {
     pub const TIMEOUT: Duration = Duration::from_secs(600);
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_CHANGED_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(MAX_CHANGED_BYTES),
+        )
     }
 }
 
@@ -1085,7 +1101,9 @@ impl ElevenLabsVoiceIsolator {
     pub const TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_ISOLATED_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(MAX_ISOLATED_BYTES),
+        )
     }
 }
 

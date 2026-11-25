@@ -215,3 +215,59 @@ fn offline_is_unreachable() {
         .unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
 }
+
+#[test]
+fn an_image_whose_answer_is_lost_is_asked_for_once() {
+    let adapter = GeminiImages::with_transport(Scripted::losing_the_answer());
+    let failure = adapter.generate(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+
+    let adapter = images(&["generate-bad-gateway"]);
+    let failure = adapter.generate(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+}
+
+#[test]
+fn gemini_failing_on_its_side_is_told_once_and_left_to_the_queue() {
+    let adapter = images(&["generate-internal"]);
+    let failure = adapter.generate(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(adapter.transport().sent().len(), 1);
+}
+
+#[test]
+fn an_answer_without_an_image_says_what_it_billed() {
+    let failure = images(&["generate-text-only"])
+        .generate(&key(), &request())
+        .unwrap_err();
+    let billed = failure.billed.expect("the answer reports its usage");
+    assert_eq!(billed.model, IMAGE_MODEL);
+    // Without a breakdown the answer's tokens count as image tokens.
+    assert_eq!(
+        billed.usage,
+        Metered {
+            input_tokens: 12,
+            image_tokens: 10,
+            ..Metered::default()
+        }
+    );
+    // An image held back by the safety filter was still thought about.
+    let filtered = images(&["generate-image-safety"])
+        .generate(&key(), &request())
+        .unwrap_err();
+    assert_eq!(
+        filtered.billed.map(|billed| billed.usage),
+        Some(Metered {
+            input_tokens: 12,
+            output_tokens: 128,
+            ..Metered::default()
+        })
+    );
+    // A refused key used nothing.
+    let rejected = images(&["generate-rejected"])
+        .generate(&key(), &request())
+        .unwrap_err();
+    assert_eq!(rejected.billed, None);
+}

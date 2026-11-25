@@ -120,3 +120,16 @@ fn an_unreachable_host_is_reported_as_such() {
     let failure = adapter.compose(&key(), &request()).unwrap_err();
     assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
 }
+
+#[test]
+fn a_track_whose_answer_is_lost_is_asked_for_once() {
+    let adapter = ElevenLabsMusic::with_transport(Scripted::losing_the_answer());
+    let failure = adapter.compose(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+
+    let adapter = music(&["music-gateway-timeout"]);
+    let failure = adapter.compose(&key(), &request()).unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::AnswerLost);
+    assert_eq!(adapter.transport().sent().len(), 1);
+}

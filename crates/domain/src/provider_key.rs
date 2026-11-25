@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zeroize::Zeroize;
 
-use crate::ProfileId;
+use crate::{Metered, ProfileId};
 
 /// A service Bardo calls, with the user's own API key (PRD story 1) or,
 /// for X, through the network account the user connected (#147): what
@@ -378,7 +378,8 @@ impl KeyCheck {
 }
 
 /// Why a provider call returned no result. The same causes a key check
-/// tells apart, minus success.
+/// tells apart, minus success, plus the two only a real call meets: a lost
+/// answer and a declined request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProviderFailureKind {
     /// Wrong, revoked or expired key.
@@ -389,8 +390,18 @@ pub enum ProviderFailureKind {
     LimitReached,
     /// The provider is failing on its side.
     ProviderDown,
-    /// No answer: offline, DNS, TLS, proxy or timeout.
+    /// No answer, and asking again is safe: the request never left
+    /// (offline, DNS, a refused connection, TLS, a proxy), or it was a call
+    /// the provider does not bill (a read, a status check) that timed out.
+    /// Clip and take submissions still report every lost connection this
+    /// way and guard against paying twice by their own means (a saved
+    /// request id, a note of what was sent).
     Unreachable,
+    /// A paid request was sent and its answer never came: a timeout, a
+    /// dropped connection, or a gateway that gave up on the provider. The
+    /// provider may have done the work and billed it, so the call is not
+    /// made again unless the user asks.
+    AnswerLost,
     /// An answer the adapter does not understand.
     Unexpected,
     /// The provider's safety rules declined the request. Not a key
@@ -406,6 +417,17 @@ pub struct ProviderFailure {
     /// The provider's own message or the network error, in English, for
     /// logs and the jobs panel. Callers redact it before showing it.
     pub detail: String,
+    /// What the call used although it gave no result, when the provider's
+    /// answer says: an answer cut at the token limit is billed in full.
+    pub billed: Option<BilledUse>,
+}
+
+/// What a provider's answer says a call used, and so billed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BilledUse {
+    /// The model that answered, as the provider named it.
+    pub model: String,
+    pub usage: Metered,
 }
 
 impl ProviderFailure {
@@ -413,7 +435,17 @@ impl ProviderFailure {
         Self {
             kind,
             detail: detail.into(),
+            billed: None,
         }
+    }
+
+    /// The failure of a call whose answer reported what it used.
+    pub fn billed(mut self, model: impl Into<String>, usage: Metered) -> Self {
+        self.billed = Some(BilledUse {
+            model: model.into(),
+            usage,
+        });
+        self
     }
 }
 

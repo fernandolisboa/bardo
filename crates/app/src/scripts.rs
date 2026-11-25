@@ -196,6 +196,13 @@ impl ScriptHandler {
             format: TextFormat::Prose,
         };
         let generated = self.text.generate(&key, &request).map_err(|failure| {
+            // An answer that was lost or cut may still have been billed.
+            self.costs.record_failed_for_project(
+                &failure,
+                &PlannedCall::text(CostPurpose::Script, &request),
+                Some(job),
+                project,
+            );
             JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
         })?;
         self.costs.record_for_project(

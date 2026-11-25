@@ -28,7 +28,9 @@ A running job shows a bar and its percent. Screens show their own jobs too: a st
 <a id="retry"></a>
 ## Retrying
 
-When a provider fails for a passing reason (a timeout, a busy server, a rate limit), Bardo tries again by itself, up to four attempts in all, waiting longer each time, and the card says which attempt failed. When the failure is lasting, like a missing key or a refused sign-in, the job stops as **Failed**, with what went wrong and **Details**.
+When a provider fails for a passing reason (a connection that could not be made, a busy server, a rate limit), Bardo tries again by itself, up to four attempts in all, waiting longer each time, and the card says which attempt failed. When the failure is lasting, like a missing key or a refused sign-in, the job stops as **Failed**, with what went wrong and **Details**.
+
+A paid request for text, an image, a voice or music that was sent and got no answer is not tried again by itself: the provider may have done the work and charged for it. The job stops as **Failed** and says so, and [Costs](costs.md#spent) counts an estimate of what it may have cost. See [A paid request got no answer](troubleshooting.md#answer-lost).
 
 **Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
 

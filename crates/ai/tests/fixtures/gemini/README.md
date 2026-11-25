@@ -26,3 +26,8 @@ breakdown),
 
 Not an answer: `look-2x3.png` is a 400×600 gradient the app's fake image
 generator returns for a persona's look (#188).
+
+Lost and failed answers (ADR-0030): `generate-internal.http` (the API's
+own 500, `INTERNAL`, written from the documented error shape) and
+`generate-bad-gateway.http` (synthetic, a front end's 502 page in place of
+the API's answer).

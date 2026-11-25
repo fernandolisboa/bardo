@@ -366,6 +366,15 @@ impl NarrationHandler {
                 next_text: piece(index + 1),
             };
             let speech = self.speech.synthesize(key, &request).map_err(|failure| {
+                // A reading that was lost or cannot be used may still have
+                // been billed, by its characters.
+                self.costs.record_failed_for_project(
+                    &failure,
+                    &PlannedCall::new(Provider::ElevenLabs, CostPurpose::Narration, 1)
+                        .with_characters(request.text.chars().count()),
+                    Some(job),
+                    project,
+                );
                 JobFailure::new(
                     failure.kind.into(),
                     format!("ElevenLabs: {}", failure.detail),

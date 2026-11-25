@@ -23,6 +23,11 @@ O que as mensagens do Bardo querem dizer quando algo para, e o que fazer. Uma ta
 
 "Uma cota ou limite de uso parou o provedor" quer dizer que o provedor está recusando chamadas por enquanto, não que algo quebrou. As cotas do YouTube, da Data API e de envios, renovam todo dia à meia-noite do horário do Pacífico; os resultados de pesquisa ficam guardados por sete dias, então rodar de novo dentro de uma semana não gasta nada. Um provedor que funciona com créditos para quando eles acabam: adicione crédito no painel dele. Tarefas paradas por limite de requisições tentam de novo sozinhas primeiro; quando desistem, use **Tentar de novo** mais tarde.
 
+<a id="answer-lost"></a>
+## Um pedido pago ficou sem resposta
+
+"O pedido foi enviado, mas a resposta não voltou" quer dizer que o Bardo enviou um pedido pago (um roteiro, um plano de cenas, uma imagem, uma parte da narração, uma trilha) e a conexão caiu, ou a espera acabou, antes de o provedor responder. O provedor pode ter feito o trabalho e cobrado por ele, então o Bardo não enviou de novo sozinho: a tarefa parou depois desse único pedido, e [Custos](costs.md#spent) conta uma estimativa do que ele pode ter custado, para que os orçamentos e o teto de gasto do vídeo não fiquem abaixo do real. Confira a conexão, olhe a página de uso do provedor se o valor importar e use **Tentar de novo** quando quiser; a nova tentativa é um novo pedido pago. Um pedido que nem saiu do computador, como quando a rede está fora, não custa nada e continua sendo repetido sozinho.
+
 <a id="reconnect"></a>
 ## Uma conta precisa reconectar
 
