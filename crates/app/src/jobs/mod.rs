@@ -57,6 +57,7 @@ pub(crate) struct BuiltInHandlers {
     pub(crate) music: MusicHandler,
     pub(crate) thumbnails: ThumbnailHandler,
     pub(crate) looks: PersonaLookHandler,
+    pub(crate) sheets: crate::product_sheets::ProductSheetHandler,
     pub(crate) chapters: ChaptersHandler,
     pub(crate) renders: RenderHandler,
     pub(crate) metadata: MetadataHandler,
@@ -94,6 +95,7 @@ pub(crate) fn built_in_handlers(
         music,
         thumbnails,
         looks,
+        sheets,
         chapters,
         renders,
         metadata,
@@ -133,6 +135,7 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::Thumbnail, Arc::clone(&thumbnails) as _);
     handlers.insert(JobKind::ThumbnailImage, thumbnails);
     handlers.insert(JobKind::PersonaLook, Arc::new(looks));
+    handlers.insert(JobKind::ProductResearch, Arc::new(sheets));
     handlers.insert(JobKind::Chapters, Arc::new(chapters));
     handlers.insert(JobKind::Render, Arc::new(renders));
     handlers.insert(JobKind::Metadata, Arc::new(metadata));
@@ -160,6 +163,7 @@ impl JobActionError {
             JobActionError::NarrationBusy => Text::JobNarrationBusy,
             JobActionError::ScenesBusy => Text::JobScenesBusy,
             JobActionError::AsksFirst => Text::JobAsksFirst,
+            JobActionError::SheetBusy => Text::SheetBusy,
             _ => Text::JobNotUpdated,
         }
     }
@@ -277,6 +281,9 @@ impl Bardo {
         }
         if let Some(held) = self.retry_held(id) {
             return Err(held);
+        }
+        if self.sheet_retry_waits(id) {
+            return Err(JobActionError::SheetBusy);
         }
         self.jobs.retry(id)
     }

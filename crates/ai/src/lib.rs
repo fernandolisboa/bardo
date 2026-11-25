@@ -3,6 +3,7 @@
 
 pub mod byteplus;
 pub mod claude;
+pub mod claude_research;
 pub mod claude_stream;
 pub mod elevenlabs;
 pub mod gemini;
@@ -24,6 +25,7 @@ pub mod youtube_stats;
 
 pub use byteplus::BytePlusTakes;
 pub use claude::ClaudeTextGenerator;
+pub use claude_research::ClaudeWebResearcher;
 pub use elevenlabs::{
     ElevenLabsAlignment, ElevenLabsMusic, ElevenLabsPreviews, ElevenLabsSpeech,
     ElevenLabsTranscription, ElevenLabsVoiceChanger, ElevenLabsVoiceIsolator, ElevenLabsVoices,

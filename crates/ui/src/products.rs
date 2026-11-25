@@ -29,6 +29,7 @@ use gpui_kit::{
 
 use crate::kit::{self, Tone};
 use crate::parts::{Collection, CollectionKind, Header, Inspector, ScreenParts, Tile};
+use crate::product_sheet::SheetSection;
 use crate::shell::tr;
 use crate::{guide, layout};
 
@@ -103,6 +104,24 @@ fn decoded(picture: &ProductPicture) -> Arc<Image> {
     Arc::new(Image::from_bytes(format, picture.bytes().to_vec()))
 }
 
+/// What the form shows of the product.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Brief,
+    Sheet,
+}
+
+impl Tab {
+    const ALL: [Tab; 2] = [Tab::Brief, Tab::Sheet];
+
+    fn label(self) -> Text {
+        match self {
+            Tab::Brief => Text::ProductTabBrief,
+            Tab::Sheet => Text::ProductTabSheet,
+        }
+    }
+}
+
 struct ShownImage {
     image: ProductImage,
     picture: Arc<Image>,
@@ -122,6 +141,12 @@ pub struct ProductsScreen {
     form_scroll: ScrollHandle,
     /// The product being edited; `None` while creating a new one.
     editing: Option<ProductId>,
+    tab: Tab,
+    /// The Sheet tab, which reads and edits the product's sheet itself.
+    sheet: Entity<SheetSection>,
+    /// The Sheet tab is not showing the edited product as it is stored
+    /// (or not yet): the next frame that shows the tab reads it.
+    sheet_pending: bool,
     name: Entity<InputState>,
     kind: ProductKind,
     description: Entity<TextareaState>,
@@ -201,13 +226,19 @@ impl ProductsScreen {
             }),
         ];
 
+        let form_scroll = ScrollHandle::new();
+        let sheet = cx.new(|cx| SheetSection::new(bardo.clone(), form_scroll.clone(), window, cx));
+
         let mut screen = Self {
             bardo,
             products: Vec::new(),
             load_failed: false,
             show_archived: false,
-            form_scroll: ScrollHandle::new(),
+            form_scroll,
             editing: None,
+            tab: Tab::Brief,
+            sheet,
+            sheet_pending: true,
             name,
             kind: ProductKind::default(),
             description,
@@ -246,6 +277,7 @@ impl ProductsScreen {
     /// file may have changed them.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reload_list(cx);
+        self.sheet_pending = true;
         if let Some(id) = self.editing {
             let stored = self
                 .products
@@ -461,6 +493,9 @@ impl ProductsScreen {
 
     fn start_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
+        // A product has a sheet only once it is saved.
+        self.tab = Tab::Brief;
+        self.sheet_pending = true;
         self.filled = None;
         self.reset_feedback();
         self.fill(&ProductDraft::default(), window, cx);
@@ -475,6 +510,7 @@ impl ProductsScreen {
         let draft = ProductDraft::from(&product.brief);
         self.filled = Some(product.brief.clone());
         self.editing = Some(id);
+        self.sheet_pending = true;
         self.reset_feedback();
         self.fill(&draft, window, cx);
         self.pictures_pending = true;
@@ -495,6 +531,8 @@ impl ProductsScreen {
                 self.reload_list(cx);
                 let created = self.editing.is_none();
                 self.editing = Some(saved.id);
+                // Facts added to the brief are on the sheet now.
+                self.sheet_pending = true;
                 // The pictures section stays as it is: saving the brief
                 // says nothing about a picture being chosen.
                 self.field_errors.clear();
@@ -1394,7 +1432,54 @@ impl ProductsScreen {
             .into_any_element()
     }
 
-    fn render_form(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The switch between the brief and the sheet.
+    fn render_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bardo = self.bardo.read(cx);
+        let group = ButtonGroup::new("product-tab")
+            .small()
+            .outline()
+            .children(Tab::ALL.map(|tab| {
+                Button::new(("product-tab", tab as usize))
+                    .label(tr(bardo, tab.label()))
+                    .selected(tab == self.tab)
+            }))
+            .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
+                if let Some(tab) = clicked.first().and_then(|&i| Tab::ALL.get(i)) {
+                    this.tab = *tab;
+                    cx.notify();
+                }
+            }));
+        kit::anchor_in(
+            TourAnchor::Control(Control::ProductSheet),
+            h_flex().child(group),
+            Some(&self.form_scroll),
+        )
+        .into_any_element()
+    }
+
+    fn render_form(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tabs = self.render_tabs(cx);
+        if self.tab == Tab::Sheet {
+            // A run works from the saved brief, so edits waiting in the
+            // other tab are pointed out.
+            let unsaved = (self.editing.is_some() && self.dirty(cx)).then(|| {
+                kit::notice(
+                    Tone::Warning,
+                    tr(self.bardo.read(cx), Text::SheetBriefUnsaved),
+                    cx,
+                )
+            });
+            return div()
+                .child(
+                    v_flex()
+                        .max_w(px(720.))
+                        .gap_4()
+                        .child(tabs)
+                        .children(unsaved)
+                        .child(self.sheet.clone()),
+                )
+                .into_any_element();
+        }
         let kind = self.render_kind(cx);
         let ownership = self.render_ownership(cx);
         let facts = self.render_facts(cx);
@@ -1514,100 +1599,132 @@ impl ProductsScreen {
             })
             .children(notice.map(|notice| notice.flex_1().min_w_0()));
 
-        div().child(
-            v_flex()
-                .max_w(px(720.))
-                .gap_4()
-                .child(
-                    v_flex().gap_1().child(kit::title(tr(bardo, title))).child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child(tr(bardo, Text::ProductBriefHint)),
-                    ),
-                )
-                .child(
-                    kit::card(cx)
-                        .p_4()
-                        .gap_4()
-                        .child(kit::anchor_in(
-                            TourAnchor::Control(Control::ProductBrief),
-                            v_flex()
-                                .gap_4()
-                                .child(field(
-                                    Text::ProductName,
-                                    Input::new(&self.name).into_any_element(),
-                                    name_error,
-                                ))
-                                .child(kind)
-                                .child(field(
-                                    Text::ProductDescription,
-                                    Textarea::new(&self.description).into_any_element(),
-                                    description_error,
-                                ))
-                                .child(field(
-                                    Text::ProductAudience,
-                                    Textarea::new(&self.audience).into_any_element(),
-                                    audience_error,
-                                ))
-                                .child(field(
-                                    Text::ProductOffer,
-                                    Input::new(&self.offer).into_any_element(),
-                                    offer_error,
-                                ))
-                                .child(field(
-                                    Text::ProductLink,
-                                    Input::new(&self.link).into_any_element(),
-                                    link_error,
-                                ))
-                                .child(field(
-                                    Text::ProductCallToAction,
-                                    Input::new(&self.call_to_action).into_any_element(),
-                                    call_to_action_error,
-                                )),
-                            scroll,
-                        ))
-                        .child(kit::anchor_in(
-                            TourAnchor::Control(Control::ProductFacts),
-                            facts,
-                            scroll,
-                        ))
-                        .child(kit::anchor_in(
-                            TourAnchor::Control(Control::ProductOwnership),
-                            v_flex()
-                                .gap_4()
-                                .child(ownership)
-                                .child(field(
-                                    Text::ProductMustSay,
-                                    Textarea::new(&self.must_say).into_any_element(),
-                                    must_say_error,
-                                ))
-                                .child(field(
-                                    Text::ProductNeverSay,
-                                    Textarea::new(&self.never_say).into_any_element(),
-                                    never_say_error,
-                                )),
-                            scroll,
-                        )),
-                )
-                .children(delete)
-                .child(kit::anchor_in(
-                    TourAnchor::Control(Control::ProductActions),
-                    actions,
-                    scroll,
-                ))
-                .child(pictures),
-        )
+        div()
+            .child(
+                v_flex()
+                    .max_w(px(720.))
+                    .gap_4()
+                    .child(tabs)
+                    .child(
+                        v_flex().gap_1().child(kit::title(tr(bardo, title))).child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child(tr(bardo, Text::ProductBriefHint)),
+                        ),
+                    )
+                    .child(
+                        kit::card(cx)
+                            .p_4()
+                            .gap_4()
+                            .child(kit::anchor_in(
+                                TourAnchor::Control(Control::ProductBrief),
+                                v_flex()
+                                    .gap_4()
+                                    .child(field(
+                                        Text::ProductName,
+                                        Input::new(&self.name).into_any_element(),
+                                        name_error,
+                                    ))
+                                    .child(kind)
+                                    .child(field(
+                                        Text::ProductDescription,
+                                        Textarea::new(&self.description).into_any_element(),
+                                        description_error,
+                                    ))
+                                    .child(field(
+                                        Text::ProductAudience,
+                                        Textarea::new(&self.audience).into_any_element(),
+                                        audience_error,
+                                    ))
+                                    .child(field(
+                                        Text::ProductOffer,
+                                        Input::new(&self.offer).into_any_element(),
+                                        offer_error,
+                                    ))
+                                    .child(field(
+                                        Text::ProductLink,
+                                        Input::new(&self.link).into_any_element(),
+                                        link_error,
+                                    ))
+                                    .child(field(
+                                        Text::ProductCallToAction,
+                                        Input::new(&self.call_to_action).into_any_element(),
+                                        call_to_action_error,
+                                    )),
+                                scroll,
+                            ))
+                            .child(kit::anchor_in(
+                                TourAnchor::Control(Control::ProductFacts),
+                                facts,
+                                scroll,
+                            ))
+                            .child(kit::anchor_in(
+                                TourAnchor::Control(Control::ProductOwnership),
+                                v_flex()
+                                    .gap_4()
+                                    .child(ownership)
+                                    .child(field(
+                                        Text::ProductMustSay,
+                                        Textarea::new(&self.must_say).into_any_element(),
+                                        must_say_error,
+                                    ))
+                                    .child(field(
+                                        Text::ProductNeverSay,
+                                        Textarea::new(&self.never_say).into_any_element(),
+                                        never_say_error,
+                                    )),
+                                scroll,
+                            )),
+                    )
+                    .children(delete)
+                    .child(kit::anchor_in(
+                        TourAnchor::Control(Control::ProductActions),
+                        actions,
+                        scroll,
+                    ))
+                    .child(pictures),
+            )
+            .into_any_element()
     }
 }
 
 impl Render for ProductsScreen {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.pictures_pending {
             self.load_pictures(cx);
         }
+        // A tour's step about a part of the form shows the tab it is on.
+        let toured = match self
+            .bardo
+            .read(cx)
+            .tour_step(false)
+            .and_then(|step| step.anchor)
+        {
+            Some(TourAnchor::Control(Control::ProductResearch | Control::ProductClaims)) => {
+                Some(Tab::Sheet)
+            }
+            Some(TourAnchor::Control(
+                Control::ProductBrief
+                | Control::ProductFacts
+                | Control::ProductOwnership
+                | Control::ProductActions
+                | Control::ProductPictures
+                | Control::ProductLogo,
+            )) => Some(Tab::Brief),
+            _ => None,
+        };
+        if let Some(tab) = toured {
+            self.tab = tab;
+        }
+        if self.tab == Tab::Sheet && self.sheet_pending {
+            self.sheet_pending = false;
+            let product = self.editing;
+            self.sheet
+                .update(cx, |sheet, cx| sheet.show(product, window, cx));
+        }
         let collection = self.collection(cx);
-        let form = self.render_form(cx).into_any_element();
+        let form = self.render_form(cx);
         let archived = self.archived_count();
         let bardo = self.bardo.read(cx);
         let mut header = Header::place(bardo, Destination::Products);

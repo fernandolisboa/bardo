@@ -37,6 +37,7 @@ mod persona_looks;
 mod persona_package;
 mod personas;
 mod plans;
+mod product_sheets;
 mod production;
 mod products;
 mod provider_keys;
@@ -169,6 +170,7 @@ pub use plans::{
     PlanCheck, PlanCheckResult, PlanConnect, PlanConnectResult, PlanConsent, PlanError, PlanState,
     PlanStatus,
 };
+pub use product_sheets::{SheetError, SheetRun, SheetView};
 pub use production::{ModeEstimate, ProductionView};
 pub use products::ProductError;
 pub use provider_keys::{KeyState, KeyTest, KeyTestResult, ProviderKeyError, ProviderKeyStatus};
@@ -435,6 +437,9 @@ pub struct Providers {
     pub video_stats: Arc<dyn VideoStats>,
     /// Generative text (Claude).
     pub text: Arc<dyn TextGenerator>,
+    /// Research on the web (Claude, with the provider's own search and
+    /// fetch tools).
+    pub researcher: Arc<dyn bardo_domain::WebResearcher>,
     /// Typed decisions, one adapter per engine the user can pick in
     /// Settings (JEV for now). Never empty.
     pub decisions: Vec<Arc<dyn DecisionEngine>>,
@@ -502,6 +507,7 @@ impl Providers {
             market_data: Arc::new(bardo_ai::YouTubeMarketData::new()),
             video_stats: Arc::new(bardo_ai::YouTubeStats::new()),
             text: Arc::new(bardo_ai::ClaudeTextGenerator::new()),
+            researcher: Arc::new(bardo_ai::ClaudeWebResearcher::new()),
             decisions: vec![Arc::new(bardo_ai::JevDecisionEngine::new())],
             voices: Arc::new(bardo_ai::ElevenLabsVoices::new()),
             speech: Arc::new(bardo_ai::ElevenLabsSpeech::new()),
@@ -606,6 +612,7 @@ pub struct Bardo {
     previews: Arc<dyn VoicePreviews>,
     samples_in_flight: Arc<voice_samples::SamplesInFlight>,
     media: Arc<dyn MediaEngine>,
+    researcher: Arc<dyn bardo_domain::WebResearcher>,
     market_data: Arc<dyn MarketData>,
     voices: Arc<dyn VoiceLibrary>,
     clips: Vec<Arc<dyn ClipGenerator>>,
@@ -948,6 +955,15 @@ impl Bardo {
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };
+        let sheet_handler = crate::product_sheets::ProductSheetHandler {
+            owner: profile.id,
+            products: Arc::clone(&products),
+            researcher: Arc::clone(&providers.researcher),
+            text: Arc::clone(&providers.text),
+            media: Arc::clone(&providers.media),
+            secrets: Arc::clone(&secrets),
+            costs: cost_book.clone(),
+        };
         let chapters_handler = crate::chapters::ChaptersHandler {
             owner: profile.id,
             chapters: Arc::clone(&chapters),
@@ -1059,6 +1075,7 @@ impl Bardo {
                     music: music_handler,
                     thumbnails: thumbnail_handler,
                     looks: look_handler,
+                    sheets: sheet_handler,
                     chapters: chapters_handler,
                     renders: render_handler,
                     metadata: metadata_handler,
@@ -1113,6 +1130,7 @@ impl Bardo {
             previews: providers.previews,
             samples_in_flight: Arc::default(),
             media: providers.media,
+            researcher: providers.researcher,
             market_data: providers.market_data,
             voices: providers.voices,
             clips: providers.clips,
@@ -3160,6 +3178,7 @@ pub(crate) mod testing {
             market_data,
             video_stats: Arc::new(FakeVideoStats::default()),
             text: Arc::new(FakeTextGenerator::default()),
+            researcher: Arc::new(crate::product_sheets::testing::FakeResearcher::default()),
             decisions: vec![Arc::new(FakeDecisionEngine::default())],
             voices: Arc::new(FakeVoiceLibrary::default()),
             speech: Arc::new(FakeSpeech::default()),

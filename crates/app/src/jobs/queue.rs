@@ -164,6 +164,9 @@ pub enum JobActionError {
     /// discard them, which its stage asks about first: it starts there.
     #[error("the job starts from its stage, which asks first")]
     AsksFirst,
+    /// A product's sheet job while another one fills the same sheet.
+    #[error("the product's sheet is being written")]
+    SheetBusy,
     #[error(transparent)]
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]

@@ -420,7 +420,8 @@ pub struct ProviderFailure {
     pub detail: String,
     /// What the call used although it gave no result, when the provider's
     /// answer says: an answer cut at the token limit is billed in full.
-    pub billed: Option<BilledUse>,
+    /// Boxed, so a result that carries a failure stays small.
+    pub billed: Option<Box<BilledUse>>,
 }
 
 /// What a provider's answer says a call used, and so billed.
@@ -442,10 +443,10 @@ impl ProviderFailure {
 
     /// The failure of a call whose answer reported what it used.
     pub fn billed(mut self, model: impl Into<String>, usage: Metered) -> Self {
-        self.billed = Some(BilledUse {
+        self.billed = Some(Box::new(BilledUse {
             model: model.into(),
             usage,
-        });
+        }));
         self
     }
 }

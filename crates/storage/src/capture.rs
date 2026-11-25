@@ -1725,6 +1725,12 @@ mod tests {
             let mut conn = db.conn();
             conn.execute_batch(&format!(
                 "{before}
+                 DROP TABLE product_claim; DROP TABLE product_sheet_source;
+                 DROP TABLE product_sheet_alternative; DROP TABLE product_sheet_objection;
+                 DROP TABLE product_sheet_segment; DROP TABLE product_sheet;
+                 ALTER TABLE cost_record DROP COLUMN cache_read_tokens;
+                 ALTER TABLE cost_record DROP COLUMN cache_write_tokens;
+                 ALTER TABLE cost_record DROP COLUMN searches;
                  DROP TABLE product_logo; DROP TABLE product_image; DROP TABLE product;
                  ALTER TABLE job DROP COLUMN paid_call;
                  ALTER TABLE scene_clip DROP COLUMN stretch_percent;

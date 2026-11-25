@@ -5,6 +5,11 @@
 //! and the text so far. The reader therefore never fails; it reports how
 //! far the answer got and how it ended, and the adapter decides what that
 //! means.
+//!
+//! Besides the text, the reader rebuilds the answer's content blocks as a
+//! whole message would hold them (thought with its signature, a tool's
+//! input, a tool's result, the pages a text cites): a turn the API paused
+//! is taken up again by sending those blocks back unchanged.
 
 use std::io::Read;
 
@@ -50,7 +55,27 @@ pub struct StreamedAnswer {
     /// each `message_delta`. When more than one model worked on the answer
     /// (a fallback), the sum of what each used.
     pub usage: TokenUsage,
+    /// What the answer used beside those tokens.
+    pub extra: ExtraUsage,
+    /// The content blocks so far, in order, each as a message that was
+    /// not streamed would hold it.
+    pub content: Vec<Value>,
     pub end: StreamEnd,
+}
+
+/// What an answer used beside the tokens sent and written: the tokens that
+/// went through the provider's prompt cache, which `usage` leaves out, and
+/// the tools the provider ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ExtraUsage {
+    /// Tokens sent that were written to the cache.
+    pub cache_write_tokens: u64,
+    /// Tokens sent that were read from the cache.
+    pub cache_read_tokens: u64,
+    /// Web searches the provider ran.
+    pub searches: u64,
+    /// Pages the provider fetched.
+    pub fetches: u64,
 }
 
 impl StreamedAnswer {
@@ -63,6 +88,8 @@ impl StreamedAnswer {
             stop_reason: None,
             stop_details: Value::Null,
             usage: TokenUsage::default(),
+            extra: ExtraUsage::default(),
+            content: Vec::new(),
             end,
         }
     }
@@ -82,6 +109,7 @@ fn is_read(kind: &str) -> bool {
         "message_start"
             | "content_block_start"
             | "content_block_delta"
+            | "content_block_stop"
             | "message_delta"
             | "message_stop"
             | "error"
@@ -106,6 +134,8 @@ pub fn read(body: impl Read) -> StreamedAnswer {
 /// Reads events into `answer` and says how the stream ended. `stopped`
 /// says whether the last the message said was its stop reason.
 fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -> StreamEnd {
+    // A tool's input arrives as pieces of JSON, by the block's place.
+    let mut inputs: Vec<(usize, String)> = Vec::new();
     for event in Events::new(body.take(MAX_STREAM_BYTES)) {
         let event = match event {
             Ok(event) => event,
@@ -141,6 +171,7 @@ fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -
                 let message = &data["message"];
                 answer.model = Some(message["model"].as_str().unwrap_or_default().to_owned());
                 read_usage(&message["usage"], &mut answer.usage);
+                read_extra_usage(&message["usage"], &mut answer.extra);
             }
             // A text block may open with text already in it. A fallback
             // block marks where another model took the answer over: the
@@ -161,8 +192,14 @@ fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -
                 {
                     answer.model = Some(model.to_owned());
                 }
+                let place = place(&data, answer.content.len());
+                if place < answer.content.len() {
+                    answer.content[place] = block.clone();
+                } else {
+                    answer.content.resize(place, Value::Null);
+                    answer.content.push(block.clone());
+                }
             }
-            // Thinking, signatures and tool input arrive as other deltas.
             "content_block_delta" => {
                 answer.began = true;
                 *stopped = false;
@@ -171,6 +208,28 @@ fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -
                     answer
                         .text
                         .push_str(delta["text"].as_str().unwrap_or_default());
+                }
+                let place = place(&data, answer.content.len().saturating_sub(1));
+                if delta["type"] == "input_json_delta" {
+                    let piece = delta["partial_json"].as_str().unwrap_or_default();
+                    match inputs.iter_mut().find(|(at, _)| *at == place) {
+                        Some((_, input)) => input.push_str(piece),
+                        None => inputs.push((place, piece.to_owned())),
+                    }
+                } else if let Some(block) = answer.content.get_mut(place) {
+                    add_to_block(block, delta);
+                }
+            }
+            // A tool's input is whole when its block closes.
+            "content_block_stop" => {
+                let place = place(&data, answer.content.len().saturating_sub(1));
+                if let Some(at) = inputs.iter().position(|(at, _)| *at == place) {
+                    let (_, input) = inputs.swap_remove(at);
+                    if let Some(block) = answer.content.get_mut(place)
+                        && let Ok(input) = serde_json::from_str::<Value>(&input)
+                    {
+                        block["input"] = input;
+                    }
                 }
             }
             "message_delta" => {
@@ -188,6 +247,7 @@ fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -
                     }
                 }
                 read_usage(&data["usage"], &mut answer.usage);
+                read_extra_usage(&data["usage"], &mut answer.extra);
             }
             "message_stop" => return StreamEnd::Complete,
             "error" => {
@@ -201,6 +261,78 @@ fn read_into(answer: &mut StreamedAnswer, stopped: &mut bool, body: impl Read) -
         }
     }
     StreamEnd::Broken("the stream ended before the answer did".to_owned())
+}
+
+/// The place of the block an event is about: its `index`, or `otherwise`
+/// when the event does not say.
+fn place(data: &Value, otherwise: usize) -> usize {
+    data["index"]
+        .as_u64()
+        .and_then(|index| usize::try_from(index).ok())
+        // A stream is cut far below this many blocks; a larger place is
+        // not one.
+        .filter(|index| *index <= 100_000)
+        .unwrap_or(otherwise)
+}
+
+/// Adds what a delta carries to its block: more text, more thought, the
+/// thought's signature, or a page the text cites.
+fn add_to_block(block: &mut Value, delta: &Value) {
+    let (field, piece) = match delta["type"].as_str() {
+        Some("text_delta") => ("text", &delta["text"]),
+        Some("thinking_delta") => ("thinking", &delta["thinking"]),
+        Some("signature_delta") => ("signature", &delta["signature"]),
+        Some("citations_delta") => {
+            if !block.is_object() {
+                return;
+            }
+            match block["citations"].as_array_mut() {
+                Some(citations) => citations.push(delta["citation"].clone()),
+                None => block["citations"] = Value::Array(vec![delta["citation"].clone()]),
+            }
+            return;
+        }
+        _ => return,
+    };
+    if !block.is_object() {
+        return;
+    }
+    let mut whole = block[field].as_str().unwrap_or_default().to_owned();
+    whole.push_str(piece.as_str().unwrap_or_default());
+    block[field] = Value::String(whole);
+}
+
+/// The counts beside the tokens sent and written. Tokens through the
+/// cache are counted like the others: cumulative, and summed over
+/// `iterations` when the answer took more than one step (each search or
+/// fetch starts another). The tools the provider ran are counted for the
+/// whole answer.
+pub(crate) fn read_extra_usage(usage: &Value, into: &mut ExtraUsage) {
+    if let Some(written) = usage["cache_creation_input_tokens"].as_u64() {
+        into.cache_write_tokens = written;
+    }
+    if let Some(read) = usage["cache_read_input_tokens"].as_u64() {
+        into.cache_read_tokens = read;
+    }
+    if let Some(iterations) = usage["iterations"].as_array()
+        && !iterations.is_empty()
+    {
+        let sum = |count: &str| {
+            iterations
+                .iter()
+                .filter_map(|iteration| iteration[count].as_u64())
+                .fold(0u64, u64::saturating_add)
+        };
+        into.cache_write_tokens = sum("cache_creation_input_tokens");
+        into.cache_read_tokens = sum("cache_read_input_tokens");
+    }
+    let tools = &usage["server_tool_use"];
+    if let Some(searches) = tools["web_search_requests"].as_u64() {
+        into.searches = searches;
+    }
+    if let Some(fetches) = tools["web_fetch_requests"].as_u64() {
+        into.fetches = fetches;
+    }
 }
 
 /// Counts are cumulative, and an event may leave one out: a count that is
@@ -302,6 +434,129 @@ mod tests {
                 output_tokens: 893,
             }
         );
+    }
+
+    #[test]
+    fn the_content_is_rebuilt_block_by_block_as_a_whole_message_holds_it() {
+        let call = "event: content_block_start\n\
+            data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"server_tool_use\",\
+            \"id\":\"srvtoolu_01\",\"name\":\"web_search\",\"input\":{}}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\
+            \"partial_json\":\"{\\\"query\\\":\\\"desk \"}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\
+            \"partial_json\":\"lamps\\\"}\"}}\n\n\
+            event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n";
+        // A tool's result arrives whole when its block starts.
+        let result = "event: content_block_start\n\
+            data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\
+            \"web_search_tool_result\",\"tool_use_id\":\"srvtoolu_01\",\"content\":[{\"type\":\
+            \"web_search_result\",\"url\":\"https://example.com/lamps\",\"title\":\"Lamps\"}]}}\n\n\
+            event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n";
+        let cited = "event: content_block_start\n\
+            data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"text\",\
+            \"text\":\"\",\"citations\":[]}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"citations_delta\",\
+            \"citation\":{\"type\":\"web_search_result_location\",\"url\":\"https://example.com/lamps\",\
+            \"title\":\"Lamps\",\"cited_text\":\"lights a desk\"}}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"text_delta\",\
+            \"text\":\"It lights \"}}\n\n\
+            event: content_block_delta\n\
+            data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"text_delta\",\
+            \"text\":\"a desk.\"}}\n\n\
+            event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":3}\n\n";
+        let end = "event: message_delta\n\
+            data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"pause_turn\"},\"usage\":{\
+            \"input_tokens\":30,\"output_tokens\":95,\"cache_creation_input_tokens\":5200,\
+            \"cache_read_input_tokens\":410,\"server_tool_use\":{\"web_search_requests\":1,\
+            \"web_fetch_requests\":0}}}\n\n\
+            event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+        let stream = [START, THINKING, call, result, cited, end].concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(answer.end, StreamEnd::Complete);
+        assert_eq!(answer.stop_reason.as_deref(), Some("pause_turn"));
+        assert_eq!(
+            answer.content,
+            [
+                serde_json::json!({
+                    "type": "thinking", "thinking": "", "signature": "EqQBCkYIBxgCKkA0",
+                }),
+                serde_json::json!({
+                    "type": "server_tool_use", "id": "srvtoolu_01", "name": "web_search",
+                    "input": { "query": "desk lamps" },
+                }),
+                serde_json::json!({
+                    "type": "web_search_tool_result", "tool_use_id": "srvtoolu_01",
+                    "content": [{
+                        "type": "web_search_result", "url": "https://example.com/lamps",
+                        "title": "Lamps",
+                    }],
+                }),
+                serde_json::json!({
+                    "type": "text", "text": "It lights a desk.",
+                    "citations": [{
+                        "type": "web_search_result_location",
+                        "url": "https://example.com/lamps", "title": "Lamps",
+                        "cited_text": "lights a desk",
+                    }],
+                }),
+            ]
+        );
+        assert_eq!(answer.text, "It lights a desk.");
+        // Without a list of steps, the counts beside the tokens are the
+        // answer's own.
+        assert_eq!(
+            answer.extra,
+            ExtraUsage {
+                cache_write_tokens: 5_200,
+                cache_read_tokens: 410,
+                searches: 1,
+                fetches: 0,
+            }
+        );
+        assert_eq!(answer.usage.input_tokens, 30);
+    }
+
+    #[test]
+    fn tokens_through_the_cache_are_summed_over_the_steps_of_an_answer() {
+        let stream = [
+            START,
+            &text_block(0, &["Notes."]),
+            "event: message_delta\n\
+             data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\
+             \"usage\":{\"input_tokens\":12,\"output_tokens\":40,\"cache_creation_input_tokens\":900,\
+             \"cache_read_input_tokens\":7000,\"iterations\":[\
+             {\"type\":\"message\",\"input_tokens\":412,\"output_tokens\":80,\
+             \"cache_creation_input_tokens\":6100,\"cache_read_input_tokens\":0},\
+             {\"type\":\"message\",\"input_tokens\":12,\"output_tokens\":40,\
+             \"cache_creation_input_tokens\":900,\"cache_read_input_tokens\":7000}],\
+             \"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":1}}}\n\n\
+             event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        ]
+        .concat();
+        let answer = read(stream.as_bytes());
+        assert_eq!(
+            answer.extra,
+            ExtraUsage {
+                cache_write_tokens: 7_000,
+                cache_read_tokens: 7_000,
+                searches: 0,
+                fetches: 1,
+            }
+        );
+        assert_eq!(
+            answer.usage,
+            TokenUsage {
+                input_tokens: 424,
+                output_tokens: 120,
+            }
+        );
+        // An answer that used neither says so.
+        let plain = [START, &text_block(0, &["ok"]), &stop("end_turn", 2)].concat();
+        assert_eq!(read(plain.as_bytes()).extra, ExtraUsage::default());
     }
 
     #[test]

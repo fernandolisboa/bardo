@@ -349,6 +349,7 @@ thumbnail_image = "Fundo da miniatura"
 chapters = "Capítulos"
 localization = "Versão em outro idioma"
 persona_look = "Aparência da persona"
+product_research = "Pesquisa de produto"
 take_analysis = "Análise da tomada"
 control_video = "Vídeo de controle"
 take_prompt = "Prompt da tomada"
@@ -1443,6 +1444,9 @@ characters = "Caracteres"
 video_seconds = "Segundos de vídeo"
 audio_seconds = "Segundos de áudio"
 posts = "Posts"
+searches = "Buscas na web"
+cache_write_tokens = "Tokens gravados no cache"
+cache_read_tokens = "Tokens lidos do cache"
 
 [meter.unit]
 input_tokens = "por milhão de tokens"
@@ -1452,6 +1456,9 @@ characters = "por mil caracteres"
 video_seconds = "por segundo de vídeo"
 audio_seconds = "por hora de áudio"
 posts = "por post"
+searches = "por mil buscas"
+cache_write_tokens = "por milhão de tokens"
+cache_read_tokens = "por milhão de tokens"
 
 [costs]
 overview = "Visão geral"
@@ -3140,6 +3147,21 @@ body = "Um logo PNG opcional para o cartão final do anúncio. Como as imagens, 
 title = "Salvar e organizar"
 body = "Salve o briefing, duplique para uma variação, arquive um produto que você não anuncia mais, ou exclua um que nenhum projeto usa."
 
+[tour.products-sheet]
+name = "Tour de Produtos, parte 2: a ficha"
+
+[tour.products-sheet.sheet]
+title = "Briefing e ficha"
+body = "O briefing é o que você escreve. A ficha é o que o Bardo sabe além dele: quem compra, o que faz a pessoa hesitar, as alternativas e as afirmações que um anúncio pode fazer. Alterne entre os dois aqui."
+
+[tour.products-sheet.research]
+title = "Preencher a ficha"
+body = "Pesquise o produto na web, a partir do link dele, ou escreva a ficha só com o briefing. Cada opção mostra quanto custa antes de começar, e você também pode preencher a ficha à mão."
+
+[tour.products-sheet.claims]
+title = "Afirmações"
+body = "Tudo o que um modelo encontrou espera aqui, com a fonte. Confirme o que é verdade, rejeite o resto e marque Sensível onde a afirmação pede cuidado. Um anúncio usa só afirmações confirmadas."
+
 [tour.templates]
 name = "Tour dos Modelos"
 
@@ -4168,3 +4190,151 @@ too_small = "Ela tem {width}×{height} px: pequena demais. Uma imagem precisa de
 too_large = "Ela tem {width}×{height} px; cada lado pode ter no máximo 6.000 px."
 shape = "Ela tem {width}×{height} px: estreita ou larga demais. O lado maior de uma imagem pode ter no máximo 3 vezes o menor; o de um logo, 10 vezes."
 file_too_large = "O arquivo tem {mb} MB; o máximo é 10 MB."
+
+[product.tab]
+brief = "Briefing"
+sheet = "Ficha"
+
+[sheet]
+title = "Ficha do produto"
+hint = "O que o Bardo sabe do produto além do seu briefing. Você revisa aqui: um anúncio usa só as afirmações que você confirmou."
+info = "Uma pesquisa lê a página do produto e o que é público sobre o mercado dele, dentro de limites fixos. Uma segunda chamada transforma as anotações nesta ficha. Tudo o que um modelo escreveu espera a sua revisão."
+save_first = "Salve o produto para começar a ficha."
+brief_unsaved = "O briefing tem alterações que você ainda não salvou. Uma pesquisa ou uma ficha a partir do briefing trabalha com o que está salvo."
+not_loaded = "Não foi possível ler a ficha."
+busy_note = "A ficha poderá ser editada de novo quando a execução terminar."
+save = "Salvar a ficha"
+saved = "Ficha salva."
+
+[sheet.fill]
+title = "Preencher a ficha"
+research = "Pesquisar na web"
+research_again = "Pesquisar de novo"
+research_hint = "O Claude lê primeiro a página do produto e depois pesquisa: no máximo {searches} buscas e {fetches} páginas. O que ele encontra é somado à ficha, e nada do que você revisou muda."
+no_link = "O briefing não tem link, então a pesquisa busca pelo nome do produto."
+research_cost = "Custa no máximo {amount}, com todas as buscas e páginas no limite."
+research_usual = "Uma pesquisa costuma custar cerca de {amount}."
+from_brief = "Escrever a partir do meu briefing"
+from_brief_hint = "Uma chamada e nada de web: o Claude organiza o que o seu briefing e as imagens já dizem."
+from_brief_cost = "Custa cerca de {amount}."
+by_hand = "Preencher à mão"
+by_hand_hint = "Sem chamada e sem custo: a ficha começa com os fatos do seu briefing."
+fix_first = "A execução não começou: o texto da ficha é salvo antes, e não foi possível salvar. Corrija o que está marcado na ficha abaixo."
+
+[sheet.job]
+researching = "Pesquisando na web…"
+writing = "Escrevendo a ficha…"
+stopped = "A execução foi interrompida."
+failed = "A execução não terminou. Tarefas mostra o motivo; tentar de novo por lá mantém uma pesquisa que já foi feita."
+lost = "O pedido foi enviado e nenhuma resposta voltou, então o Claude pode ter cobrado. Custos conta como estimativa. O Bardo não envia de novo sozinho."
+declined = "O Claude recusou: {reason}"
+done = "Pronto. Afirmações aguardando sua revisão: {n}."
+left_out = "A ficha está cheia, então a execução deixou afirmações de fora: {n}. Uma ficha tem no máximo 80 afirmações, sem contar as rejeitadas. Rejeite as que você não quer antes da próxima execução."
+
+[sheet.restricted]
+notice = "Este produto é de uma categoria que as redes restringem: {category}. Cada rede tem regras próprias para ela, então confira antes de publicar. O Bardo não bloqueia o produto."
+health = "Saúde e medicamentos"
+finance = "Produtos financeiros"
+alcohol = "Álcool"
+gambling = "Jogos de azar"
+weight_loss = "Emagrecimento"
+adult = "Adulto"
+political = "Político"
+
+[sheet.about]
+title = "Sobre o produto"
+summary = "Resumo"
+category = "Categoria"
+restricted = "Categoria restrita"
+restricted_hint = "As redes têm regras próprias de anúncio para saúde e medicamentos, produtos financeiros, álcool, jogos de azar, emagrecimento, conteúdo adulto e político. Escolha a categoria deste produto, ou Nenhuma."
+restricted_none = "Nenhuma"
+looks = "Aparência"
+
+[sheet.segments]
+title = "Para quem é"
+name = "Grupo de compradores"
+wants = "O que querem"
+holds_back = "O que os faz hesitar"
+add = "Adicionar grupo"
+
+[sheet.objections]
+title = "Objeções e respostas"
+objection = "Objeção"
+answer = "Resposta"
+add = "Adicionar objeção"
+
+[sheet.alternatives]
+title = "Alternativas"
+name = "Alternativa"
+differs = "Como o produto se diferencia"
+add = "Adicionar alternativa"
+
+[sheet.rows]
+remove = "Remover"
+empty = "Nada aqui ainda."
+
+[sheet.claims]
+title = "Afirmações"
+hint = "O que um anúncio pode dizer sobre o produto. Os fatos do seu briefing e as afirmações que você adiciona aqui já começam confirmados. Tudo o que um modelo escreveu espera você confirmar ou rejeitar."
+waiting = "Aguardando você ({n})"
+confirmed = "Confirmadas ({n})"
+rejected = "Rejeitadas ({n})"
+none = "Nenhuma afirmação ainda."
+confirm = "Confirmar"
+reject = "Rejeitar"
+bring_back = "Trazer de volta"
+edit = "Editar"
+save = "Salvar"
+cancel = "Cancelar"
+sensitive = "Sensível"
+sensitive_hint = "Uma afirmação sensível tem um número, um superlativo, uma promessa de saúde, dinheiro ou resultado, uma garantia, um prazo ou um concorrente citado. Ela pode ser confirmada e usada; cada uma que um vídeo usar é listada de novo antes de o vídeo ser publicado."
+confirmed_at = "Confirmada em {when}"
+edited_at = "Editada em {when}"
+open_source = "Abrir a página"
+add = "Adicionar afirmação"
+add_placeholder = "Uma afirmação, com as suas palavras"
+
+[sheet.claims.source]
+typed = "Digitada por você"
+brief = "Leitura que o Claude fez do seu briefing, sem página por trás"
+page = "Página do produto"
+web = "Página da web"
+
+[sheet.sources]
+title = "Páginas lidas"
+researched_at = "Última pesquisa: {when}"
+none = "Nenhuma pesquisa leu a web para este produto ainda."
+
+[sheet.error]
+none = "O produto ainda não tem ficha."
+missing_key = "Adicione sua chave do Claude em Configurações para pesquisar o produto ou escrever a ficha."
+busy = "A ficha está sendo preenchida. Ela pode ser alterada quando a execução terminar."
+not_saved = "Não foi possível salvar a ficha."
+
+[sheet.claims.kind]
+benefit = "Benefício"
+feature = "Característica"
+proof = "Prova"
+offer = "Oferta"
+comparison = "Comparação"
+
+[sheet.error.field]
+summary_too_long = "Mantenha o resumo em até 1.500 caracteres."
+category_too_long = "Mantenha a categoria em até 80 caracteres."
+looks_too_long = "Mantenha a descrição da aparência em até 800 caracteres."
+too_many_segments = "Uma ficha tem no máximo 8 grupos de compradores."
+segment = "Cada grupo precisa de um nome de até 120 caracteres, e cada uma das outras partes cabe em 400."
+too_many_objections = "Uma ficha tem no máximo 12 objeções."
+objection = "Cada objeção precisa do seu texto, e cada parte cabe em 400 caracteres."
+too_many_alternatives = "Uma ficha tem no máximo 12 alternativas."
+alternative = "Cada alternativa precisa de um nome de até 120 caracteres, e a diferença do produto cabe em 400."
+
+[sheet.error.claim]
+text_required = "Escreva a afirmação."
+text_too_long = "Uma afirmação é uma frase de até 300 caracteres."
+not_found = "Só uma afirmação que aguarda pode ser confirmada."
+already_rejected = "Esta afirmação já está rejeitada."
+not_rejected = "Só uma afirmação rejeitada pode ser trazida de volta."
+known = "A ficha já tem uma afirmação que diz isso."
+too_many = "Uma ficha tem no máximo 80 afirmações, sem contar as rejeitadas. Rejeite uma que você não quer para abrir espaço."
+gone = "Esta afirmação não está mais na ficha."

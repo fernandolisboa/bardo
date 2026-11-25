@@ -175,6 +175,12 @@ pub enum Control {
     ProductLogo,
     /// Products: Save, Duplicate, Archive and Delete.
     ProductActions,
+    /// Products: the switch between a product's brief and its sheet.
+    ProductSheet,
+    /// Products: the ways to fill the sheet, with the research on the web.
+    ProductResearch,
+    /// Products: the claims of the sheet, to confirm or reject.
+    ProductClaims,
     /// Templates: one button per kind of template.
     TemplateKinds,
     /// Templates: the instructions and the prompt.
@@ -864,6 +870,34 @@ pub const PRODUCTS: Tour = {
     }
 };
 
+/// Products, part two: a product's sheet, the ways to fill it and its
+/// claims. Offered once part one is completed or dismissed. The screen
+/// shows the Sheet tab while a step is about it.
+pub const PRODUCT_SHEET: Tour = {
+    const AT: Destination = Destination::Products;
+    const PAGE: &str = "products";
+    const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::ProductSheet,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "sheet", control(Control::ProductSheet))
+                .missing(FORM)
+                .learn(PAGE, "sheet"),
+            // Shown for a saved product; else the form, which says to
+            // save it first.
+            on(AT, "research", control(Control::ProductResearch))
+                .missing(FORM)
+                .learn(PAGE, "research"),
+            // Shown once the product has a sheet.
+            on(AT, "claims", control(Control::ProductClaims))
+                .missing(FORM)
+                .learn(PAGE, "claims"),
+        ],
+    }
+};
+
 /// Templates: the kinds, their versions, instructions and prompt,
 /// variables, saving a version and Bardo's default.
 pub const TEMPLATES: Tour = {
@@ -1411,7 +1445,7 @@ pub const BACKUP: Tour = {
 
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 29] = [
+    pub const ALL: [&'static Tour; 30] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -1424,6 +1458,7 @@ impl Tour {
         &CLIPS,
         &PERSONAS,
         &PRODUCTS,
+        &PRODUCT_SHEET,
         &TEMPLATES,
         &EDITOR,
         &EDITOR_MORE,
@@ -1457,6 +1492,7 @@ impl Tour {
             TourId::Clips => &CLIPS,
             TourId::Personas => &PERSONAS,
             TourId::Products => &PRODUCTS,
+            TourId::ProductSheet => &PRODUCT_SHEET,
             TourId::Templates => &TEMPLATES,
             TourId::Editor => &EDITOR,
             TourId::EditorMore => &EDITOR_MORE,

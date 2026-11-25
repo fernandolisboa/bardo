@@ -11,7 +11,8 @@ use crate::{Database, boxed, from_unix_millis, to_unix_millis};
 
 const SELECT_RECORD: &str = "SELECT id, profile_id, provider, model, purpose, input_tokens, \
      output_tokens, image_tokens, characters, basis, amount_micros, channel_id, project_id, \
-     job_id, at, video_seconds, audio_seconds, posts FROM cost_record";
+     job_id, at, video_seconds, audio_seconds, posts, searches, cache_write_tokens, \
+     cache_read_tokens FROM cost_record";
 
 #[derive(Debug, thiserror::Error)]
 #[error("stored cost is invalid: {0}")]
@@ -24,7 +25,7 @@ struct RecordRow {
     provider: String,
     model: String,
     purpose: String,
-    usage: [i64; 7],
+    usage: [i64; 10],
     basis: String,
     amount_micros: i64,
     channel_id: Option<String>,
@@ -49,6 +50,9 @@ impl RecordRow {
                 row.get(15)?,
                 row.get(16)?,
                 row.get(17)?,
+                row.get(18)?,
+                row.get(19)?,
+                row.get(20)?,
             ],
             basis: row.get(9)?,
             amount_micros: row.get(10)?,
@@ -69,6 +73,9 @@ impl RecordRow {
             video_seconds,
             audio_seconds,
             posts,
+            searches,
+            cache_write,
+            cache_read,
         ] = self.usage;
         let amount = Money::from_micros(count(self.amount_micros)?);
         let cost = match self.basis.as_str() {
@@ -92,6 +99,9 @@ impl RecordRow {
                 video_seconds: count(video_seconds)?,
                 audio_seconds: count(audio_seconds)?,
                 posts: count(posts)?,
+                searches: count(searches)?,
+                cache_write_tokens: count(cache_write)?,
+                cache_read_tokens: count(cache_read)?,
             },
             cost,
             channel: self
@@ -149,9 +159,10 @@ impl CostRepository for Database {
             .execute(
                 "INSERT INTO cost_record (id, profile_id, provider, model, purpose, \
                  input_tokens, output_tokens, image_tokens, characters, basis, amount_micros, \
-                 channel_id, project_id, job_id, at, video_seconds, audio_seconds, posts) \
+                 channel_id, project_id, job_id, at, video_seconds, audio_seconds, posts, \
+                 searches, cache_write_tokens, cache_read_tokens) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                 ?17, ?18) ON CONFLICT (id) DO NOTHING",
+                 ?17, ?18, ?19, ?20, ?21) ON CONFLICT (id) DO NOTHING",
                 params![
                     record.id.to_string(),
                     record.owner.to_string(),
@@ -171,6 +182,9 @@ impl CostRepository for Database {
                     sql_count(usage.video_seconds),
                     sql_count(usage.audio_seconds),
                     sql_count(usage.posts),
+                    sql_count(usage.searches),
+                    sql_count(usage.cache_write_tokens),
+                    sql_count(usage.cache_read_tokens),
                 ],
             )
             .map_err(boxed)?;
@@ -471,7 +485,27 @@ mod tests {
                 at(1_790_916_206),
             )
         };
-        for record in [&estimated, &reported, &unpriced, &clip, &alignment, &post] {
+        let research = CostRecord {
+            usage: Metered {
+                input_tokens: 1_240,
+                output_tokens: 3_100,
+                searches: 6,
+                cache_write_tokens: 84_000,
+                cache_read_tokens: 512_000,
+                ..Metered::default()
+            },
+            channel: None,
+            project: None,
+            ..record(
+                owner,
+                CostPurpose::ProductResearch,
+                Cost::Estimated(Money::from_micros(649_360)),
+                at(1_790_916_207),
+            )
+        };
+        for record in [
+            &estimated, &reported, &unpriced, &clip, &alignment, &post, &research,
+        ] {
             db.record_cost(record).unwrap();
         }
         let october = Month::of(at(1_790_916_201));
@@ -480,7 +514,15 @@ mod tests {
             .unwrap();
         assert_eq!(
             stored,
-            [estimated.clone(), reported, unpriced, clip, alignment, post]
+            [
+                estimated.clone(),
+                reported,
+                unpriced,
+                clip,
+                alignment,
+                post,
+                research
+            ]
         );
         assert_eq!(
             db.project_costs(estimated.project.unwrap()).unwrap(),

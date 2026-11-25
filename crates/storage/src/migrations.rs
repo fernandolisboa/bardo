@@ -68,6 +68,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0064_clip_fit.sql"),
     include_str!("../migrations/0065_job_paid_call.sql"),
     include_str!("../migrations/0066_product.sql"),
+    include_str!("../migrations/0067_product_sheet.sql"),
 ];
 
 /// The schema version this build migrates every database to (SQLite's
@@ -613,6 +614,63 @@ mod tests {
             conn.execute(
                 "INSERT INTO rate (profile_id, provider, model, meter, price_micros)
                  VALUES ('p', 'x', 'post', 'likes', 1)",
+                [],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rebuilding_rates_for_searches_and_the_cache_keeps_the_users_prices() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        let before = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("CREATE TABLE product_sheet ("))
+            .unwrap();
+        for sql in &MIGRATIONS[..before] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", i64::try_from(before).unwrap())
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO user_profile (id, ui_language) VALUES ('p', 'en-US');
+             INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+             VALUES ('p', 'x', 'post', 'posts', 15000);
+             INSERT INTO cost_record (id, profile_id, provider, model, purpose, input_tokens,
+                                      output_tokens, image_tokens, characters, basis,
+                                      amount_micros, at)
+             VALUES ('c', 'p', 'claude', 'claude-opus-5-5', 'script', 800, 2400, 0, 0,
+                     'estimated', 51200, 1790916201000);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let kept: i64 = conn
+            .query_row("SELECT price_micros FROM rate", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(kept, 15_000);
+        let used: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT searches, cache_write_tokens, cache_read_tokens FROM cost_record",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(used, (0, 0, 0), "an earlier record used none of them");
+        for meter in ["searches", "cache_write_tokens", "cache_read_tokens"] {
+            conn.execute(
+                "INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+                 VALUES ('p', 'claude', 'claude-opus-5-5', ?1, 1)",
+                [meter],
+            )
+            .unwrap();
+        }
+        assert!(
+            conn.execute(
+                "INSERT INTO rate (profile_id, provider, model, meter, price_micros)
+                 VALUES ('p', 'claude', 'claude-opus-5-5', 'fetches', 1)",
                 [],
             )
             .is_err()

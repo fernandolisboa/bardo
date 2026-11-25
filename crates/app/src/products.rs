@@ -29,6 +29,11 @@ pub enum ProductError {
     /// Video projects use the product: it can be archived, not deleted.
     #[error("{0} video project(s) use the product")]
     InUse(usize),
+    /// A research or a writing of the product's sheet is under way: the
+    /// product stays until it ends, so the run does not pay for a sheet
+    /// nobody keeps.
+    #[error("the product's sheet is being written")]
+    SheetBusy,
     /// The user did not confirm they may use the image or logo and the
     /// brand it shows.
     #[error("the right to use the image was not confirmed")]
@@ -59,6 +64,7 @@ impl ProductError {
             ProductError::NameTaken => Some(Text::ProductNameTaken),
             ProductError::NotFound => Some(Text::ProductNotFound),
             ProductError::InUse(_) => Some(Text::ProductInUse),
+            ProductError::SheetBusy => Some(Text::SheetBusy),
             ProductError::NotConfirmed => Some(Text::ProductImageNotConfirmed),
             ProductError::TooManyImages => Some(Text::ProductTooManyImages),
             ProductError::Image(_) => Some(Text::ProductImageRefused),
@@ -160,11 +166,13 @@ impl Bardo {
         self.ensure_product_name_free(brief.name(), Some(id))?;
         product.brief = brief;
         self.products.save(&product)?;
+        // A fact typed since goes on the sheet, when there is one.
+        self.take_brief_facts(&product);
         Ok(product)
     }
 
-    /// A new product with the same brief, images and logo, named as a
-    /// copy, to vary without touching the original. The copy is not
+    /// A new product with the same brief, images, logo and sheet, named
+    /// as a copy, to vary without touching the original. The copy is not
     /// archived.
     pub fn duplicate_product(&self, id: ProductId) -> Result<Product, ProductError> {
         let original = self.own_product(id)?;
@@ -187,13 +195,21 @@ impl Bardo {
             for image in images {
                 self.products.add_image(&image.for_product(copy.id))?;
             }
-            match self.products.logo(original.id)? {
-                Some(logo) => self.products.save_logo(&logo.for_product(copy.id)),
+            if let Some(logo) = self.products.logo(original.id)? {
+                self.products.save_logo(&logo.for_product(copy.id))?;
+            }
+            // The sheet too, with every claim as the user left it: the
+            // research was paid for once.
+            match self.products.sheet(original.id)? {
+                Some(sheet) => self.products.save_sheet(&sheet.for_product(
+                    copy.id,
+                    crate::publications::whole_millis(SystemTime::now()),
+                )),
                 None => Ok(()),
             }
         });
         if let Err(error) = copied {
-            tracing::warn!(%error, "could not copy a product's pictures");
+            tracing::warn!(%error, "could not copy a product's pictures and sheet");
         }
         Ok(copy)
     }
@@ -213,10 +229,14 @@ impl Bardo {
         Ok(product)
     }
 
-    /// Deletes the product with its images and logo. Refused while a
-    /// video project uses it: archiving hides it instead.
+    /// Deletes the product with its images, logo and sheet. Refused while
+    /// a video project uses it (archiving hides it instead) and while a
+    /// job fills its sheet.
     pub fn delete_product(&self, id: ProductId) -> Result<(), ProductError> {
         let product = self.own_product(id)?;
+        if self.sheet_is_busy(id) {
+            return Err(ProductError::SheetBusy);
+        }
         let projects = self.products.projects_using(id)?;
         product
             .check_deletable(projects)
@@ -781,6 +801,15 @@ mod tests {
         }
         fn projects_using(&self, _id: ProductId) -> Result<usize, RepositoryError> {
             Ok(2)
+        }
+        fn sheet(
+            &self,
+            product: ProductId,
+        ) -> Result<Option<bardo_domain::ProductSheet>, RepositoryError> {
+            self.0.sheet(product)
+        }
+        fn save_sheet(&self, sheet: &bardo_domain::ProductSheet) -> Result<(), RepositoryError> {
+            self.0.save_sheet(sheet)
         }
         fn images(&self, product: ProductId) -> Result<Vec<ProductImage>, RepositoryError> {
             self.0.images(product)

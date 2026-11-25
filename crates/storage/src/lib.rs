@@ -24,6 +24,7 @@ mod narration;
 mod network_account;
 mod persona;
 mod product;
+mod product_sheet;
 mod profile;
 mod publication;
 mod render;

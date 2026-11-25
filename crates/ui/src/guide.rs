@@ -181,6 +181,9 @@ pub mod refs {
     pub const PRODUCTS_PICTURES: GuideRef = at("products", "pictures");
     pub const PRODUCTS_LOGO: GuideRef = at("products", "logo");
     pub const PRODUCTS_ARCHIVE: GuideRef = at("products", "archive");
+    pub const PRODUCTS_SHEET: GuideRef = at("products", "sheet");
+    pub const PRODUCTS_RESEARCH: GuideRef = at("products", "research");
+    pub const PRODUCTS_CLAIMS: GuideRef = at("products", "claims");
     pub const PERSONAS_LIBRARY: GuideRef = at("personas", "library");
     pub const PERSONAS_VOICE: GuideRef = at("personas", "voice");
     pub const PERSONAS_PRESETS: GuideRef = at("personas", "presets");
@@ -234,7 +237,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 106] = [
+    pub const ALL: [GuideRef; 109] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -291,6 +294,9 @@ pub mod refs {
         PRODUCTS_PICTURES,
         PRODUCTS_LOGO,
         PRODUCTS_ARCHIVE,
+        PRODUCTS_SHEET,
+        PRODUCTS_RESEARCH,
+        PRODUCTS_CLAIMS,
         PERSONAS_LIBRARY,
         PERSONAS_VOICE,
         PERSONAS_PRESETS,
