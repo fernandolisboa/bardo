@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=utf-8
+
+{"data":[{"id":"1880028106020516010","text":"A thread starts here.","edit_history_tweet_ids":["1880028106020516010"]},{"id":"1880028106020516005","text":"Another clip https://t.co/Zx81kQp2Lm","edit_history_tweet_ids":["1880028106020516005"],"attachments":{"media_keys":["7_1880028106020515841"]}},{"id":"1880028106020515999","text":"Por que Plutão deixou de ser planeta? #espaço https://t.co/Qw7RtYp0Aa","edit_history_tweet_ids":["1880028106020515999"],"attachments":{"media_keys":["7_1880028106020515840"]}}],"meta":{"newest_id":"1880028106020516010","oldest_id":"1880028106020515999","result_count":3}}

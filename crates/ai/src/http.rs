@@ -406,6 +406,13 @@ impl UreqTransport {
         Self::configured(timeout, true, false, false)
     }
 
+    /// `for_paid_calls` for a request that makes something public (a post
+    /// on a network): no redirect is followed either, since following one
+    /// turns the request into another one. It comes back as it is.
+    pub fn for_posts(timeout: Duration) -> Self {
+        Self::configured(timeout, false, false, false)
+    }
+
     fn configured(timeout: Duration, follow: bool, https_only: bool, keep: bool) -> Self {
         let tls = ureq::tls::TlsConfig::builder()
             .root_certs(ureq::tls::RootCerts::PlatformVerifier)

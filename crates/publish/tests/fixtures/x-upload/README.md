@@ -38,6 +38,21 @@ during the publishing regression pass if an upload misbehaves):
   `post-video-too-long.http`: a media id X refuses, a duplicate text, and
   a video over the account's length (403, as the post reference says).
   The messages are assumed.
+- `post-created-unreadable.http`: a post made whose answer was cut
+  before its id (201 with half a body).
+- `post-bad-gateway.http`: a gateway's page in place of X's answer to a
+  post (502).
+- `posts-with-video.http`, `posts-none.http`, `posts-more-to-come.http`,
+  `posts-same-video-twice.http`, `posts-errors-only.http`: the account's
+  own posts ([user posts](https://docs.x.com/x-api/users/get-posts) with
+  `tweet.fields=attachments`, checked 2026-11-25): three posts, two of
+  them with an uploaded video each; none in the time asked; a first page
+  with a `next_token`; two posts with the same video, the newer with a
+  key that is the bare media id; and a 200 that holds only `errors`. The
+  media keys follow the examples of the
+  [data dictionary](https://docs.x.com/x-api/fundamentals/data-dictionary)
+  (a kind, an underscore, the media's id), which does not spell the rule
+  out. Not recorded: re-record with the others.
 - `credits-depleted.http`: an app out of credits (402 `credits`). The
   title and detail are assumed.
 - `rate-limited.http`: over the 100 posts per 15 minutes per user (429).

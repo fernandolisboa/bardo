@@ -2630,6 +2630,7 @@ account_changed = "A conta foi reconectada a outra conta do {network}, diferente
 render_changed = "O render mudou depois da revisão, então o resto do arquivo não é o que você revisou. Revise o envio de novo."
 schedule_missed = "O horário de publicação passou antes de o envio começar, então nada foi enviado. Revise o envio de novo com um horário mais tarde."
 credits = "O X recusou o post: o seu app do X ficou sem créditos ou atingiu o limite de gastos. Adicione créditos ou aumente o limite no X Developer Console e tente de novo."
+answer_lost = "O {network} não respondeu depois que o Bardo enviou o post, então o post pode estar no ar. O Bardo não enviou de novo sozinho e somou o preço do post em Custos. Confira a conta no {network}. Tentar de novo procura o post lá primeiro e só posta outra vez se ele não estiver."
 
 [upload.block]
 not_offered = "O Bardo ainda não envia para esta rede. Exporte o arquivo e publique manualmente."
