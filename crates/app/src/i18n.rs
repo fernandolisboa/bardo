@@ -2096,6 +2096,9 @@ pub enum Text {
     JobRunsElsewhere,
     JobSuperseded,
     JobRestyled,
+    /// An image or clip job retried while another job works on one of its
+    /// scenes.
+    JobScenesTaken,
     /// A performed take that never reached its provider, retried from the
     /// jobs panel.
     JobTakeFromItsPage,
@@ -4751,6 +4754,7 @@ impl Text {
             Text::JobRunsElsewhere => "job.error.runs_elsewhere",
             Text::JobSuperseded => "job.error.superseded",
             Text::JobRestyled => "job.error.restyled",
+            Text::JobScenesTaken => "job.error.scenes_taken",
             Text::JobTakeFromItsPage => "job.error.take_from_page",
             Text::JobNarrationBusy => "job.error.narration_busy",
             Text::JobScenesBusy => "job.error.scenes_busy",
@@ -7358,6 +7362,7 @@ mod tests {
             Text::JobRunsElsewhere,
             Text::JobSuperseded,
             Text::JobRestyled,
+            Text::JobScenesTaken,
             Text::JobTakeFromItsPage,
             Text::JobNarrationBusy,
             Text::JobScenesBusy,

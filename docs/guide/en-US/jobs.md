@@ -34,7 +34,7 @@ A paid request for text, an image, a voice or music that was sent and got no ans
 
 A clip request the provider took and that then ended without a clip (failed, cancelled or forgotten there) is not sent again by itself either, since sending it again is a new request. Its scene shows the failure, the job stops as **Failed** once the other scenes are done, and **Retry** is what sends it again ([Clips](clips.md)).
 
-**Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
+**Retry**, on a failed or cancelled job, queues it again. It goes on from the last point it saved rather than from the start, and an image or clip job does only the scenes it has not delivered: what you did with a delivered image or clip since (rejected it, replaced it) does not bring it back. An image or clip job is not retried while another job works on the same scenes: wait for that one to end, so that no scene is paid for twice. Fix what the failure names first: see [Troubleshooting](troubleshooting.md).
 
 <a id="restart"></a>
 ## Closing Bardo mid-job

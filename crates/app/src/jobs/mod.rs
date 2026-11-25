@@ -154,6 +154,7 @@ impl JobActionError {
             JobActionError::Busy => Text::RestoreWaitsForJobs,
             JobActionError::Superseded => Text::JobSuperseded,
             JobActionError::Restyled => Text::JobRestyled,
+            JobActionError::ScenesTaken => Text::JobScenesTaken,
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
             JobActionError::NarrationBusy => Text::JobNarrationBusy,
             JobActionError::ScenesBusy => Text::JobScenesBusy,
@@ -266,6 +267,9 @@ impl Bardo {
         }
         if self.restyled_images(id) {
             return Err(JobActionError::Restyled);
+        }
+        if self.images_taken(id) || self.clips_taken(id) {
+            return Err(JobActionError::ScenesTaken);
         }
         if self.unsent_take_needs_asking(id) {
             return Err(JobActionError::TakeFromItsPage);

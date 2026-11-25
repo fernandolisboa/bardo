@@ -34,7 +34,7 @@ Um pedido pago de texto, imagem, voz ou música que foi enviado e ficou sem resp
 
 Um pedido de clipe que o provedor aceitou e que depois terminou sem clipe (falhou, foi cancelado ou esquecido do lado dele) também não é repetido sozinho, porque enviar de novo é um pedido novo. A cena mostra a falha, a tarefa para como **Com falha** quando as outras cenas terminam, e é o **Tentar de novo** que envia a cena outra vez ([Clipes](clips.md)).
 
-**Tentar de novo**, numa tarefa com falha ou cancelada, coloca ela na fila de novo. Ela continua do último ponto que salvou, não do começo. Resolva antes o que a falha aponta: veja [Solução de problemas](troubleshooting.md).
+**Tentar de novo**, numa tarefa com falha ou cancelada, coloca ela na fila de novo. Ela continua do último ponto que salvou, não do começo, e uma tarefa de imagens ou de clipes faz só as cenas que ainda não entregou: o que você fez depois com uma imagem ou um clipe já entregue (rejeitou, substituiu) não o traz de volta. Uma tarefa de imagens ou de clipes não é tentada de novo enquanto outra trabalha nas mesmas cenas: espere essa terminar, para nenhuma cena ser paga duas vezes. Resolva antes o que a falha aponta: veja [Solução de problemas](troubleshooting.md).
 
 <a id="restart"></a>
 ## Fechar o Bardo no meio de uma tarefa
