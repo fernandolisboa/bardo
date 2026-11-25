@@ -22,11 +22,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use bardo_domain::{
-    ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipModelRef,
+    ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipFit, ClipModelRef,
     ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
     Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
-    ProductionMode, Provider, Rate, Resolution, Score, StyleChoice, ThumbnailLook, TokenSet,
-    Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
+    ProductionMode, Provider, Rate, Resolution, Score, StretchLimit, StyleChoice, ThumbnailLook,
+    TokenSet, Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -430,6 +430,16 @@ struct ChannelEntry {
     /// does not know is read the same way.
     #[serde(default)]
     style: Option<String>,
+    /// Missing from files made before stretched clips: the default, as a
+    /// channel from before them got. A fit this version does not know is
+    /// read the same way.
+    #[serde(default)]
+    clip_fit: Option<String>,
+    /// How far a stretched clip goes, in percent. Missing from files made
+    /// before stretched clips: the default. One out of range is brought
+    /// into it.
+    #[serde(default)]
+    clip_stretch_percent: Option<u32>,
     /// Missing from files made before the word highlight: off, as those
     /// channels' captions were.
     #[serde(default)]
@@ -575,6 +585,13 @@ impl ChannelEntry {
                 .style
                 .as_deref()
                 .map_or_else(StyleChoice::default, StyleChoice::from_code),
+            clip_fit: self
+                .clip_fit
+                .as_deref()
+                .map_or_else(ClipFit::default, ClipFit::from_code),
+            stretch_limit: self
+                .clip_stretch_percent
+                .map_or_else(StretchLimit::default, StretchLimit::new),
         })
     }
 
@@ -936,6 +953,8 @@ impl Bardo {
                 }),
                 production: Some(details.production().code().to_owned()),
                 style: Some(details.style().code().to_owned()),
+                clip_fit: Some(details.clip_fit().code().to_owned()),
+                clip_stretch_percent: Some(details.stretch_limit().percent().into()),
                 accounts,
             });
         }
@@ -1463,6 +1482,8 @@ mod tests {
                 ),
                 format: VideoFormat::Short,
                 style: StyleChoice::Catalog(bardo_domain::VisualStyle::Anime),
+                clip_fit: ClipFit::Cover,
+                stretch_limit: StretchLimit::new(25),
                 ..ChannelDraft::default()
             })
             .unwrap();
@@ -1526,6 +1547,33 @@ mod tests {
         assert_eq!(
             manga.draft(None).unwrap().style,
             StyleChoice::Catalog(bardo_domain::VisualStyle::Manga)
+        );
+    }
+
+    #[test]
+    fn a_channel_from_a_file_made_before_stretched_clips_gets_the_default_fit() {
+        let before: ChannelEntry =
+            serde_json::from_str(r#"{"name": "Old", "language": "en", "country": "US"}"#).unwrap();
+        assert_eq!(before.draft(None).unwrap().clip_fit, ClipFit::default());
+        assert_eq!(
+            before.draft(None).unwrap().stretch_limit,
+            StretchLimit::default()
+        );
+        let newer: ChannelEntry = serde_json::from_str(
+            r#"{"name": "New", "language": "en", "country": "US", "clip_fit": "warp"}"#,
+        )
+        .unwrap();
+        assert_eq!(newer.draft(None).unwrap().clip_fit, ClipFit::default());
+        let cover: ChannelEntry = serde_json::from_str(
+            r#"{"name": "C", "language": "en", "country": "US", "clip_fit": "cover",
+                "clip_stretch_percent": 900}"#,
+        )
+        .unwrap();
+        assert_eq!(cover.draft(None).unwrap().clip_fit, ClipFit::Cover);
+        assert_eq!(
+            cover.draft(None).unwrap().stretch_limit,
+            StretchLimit::new(100),
+            "brought into range"
         );
     }
 
@@ -1736,6 +1784,8 @@ mod tests {
             channel.details.style(),
             StyleChoice::Catalog(bardo_domain::VisualStyle::Anime)
         );
+        assert_eq!(channel.details.clip_fit(), ClipFit::Cover);
+        assert_eq!(channel.details.stretch_limit(), StretchLimit::new(25));
         assert_eq!(channel.details.caption_highlight(), CaptionHighlight::Cyan);
         assert_eq!(channel.details.thumbnail_look(), ThumbnailLook::Banner);
         assert_eq!(

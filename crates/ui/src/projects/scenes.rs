@@ -1791,6 +1791,25 @@ impl ProjectsScreen {
                 .text_color(theme.muted_foreground)
                 .child(SharedString::from(text))
         });
+        // A clip asked for shorter than the scene says so on a line of its
+        // own, with why behind the ⓘ.
+        let slowed_note = (view.seconds.is_some() && view.stretched).then(|| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(tr(bardo, Text::SceneClipSlowedNext)),
+                )
+                .child(guide::info(
+                    bardo,
+                    ("next-clip-slowed-info", index),
+                    tr(bardo, Text::SceneClipSlowedHint),
+                    guide::refs::CLIPS_STRETCH,
+                ))
+        });
         // While a clip is being made its model can't change: the name
         // shows without the menu.
         let model_menu: AnyElement = if view.is_busy() {
@@ -1898,6 +1917,9 @@ impl ProjectsScreen {
         });
 
         let record = |clip: &SceneClip| clip_record(bardo, &models, clip);
+        // Tagged only while it plays slowed: a scene that shrank to the
+        // clip's own length plays it at its own speed.
+        let plays_slowed = |clip: &SceneClip| clip.played_over(scene.duration()) > clip.recorded();
         let current = scene.clip().map(|clip| {
             let played = clip.clone();
             h_flex()
@@ -1905,6 +1927,13 @@ impl ProjectsScreen {
                 .flex_wrap()
                 .items_center()
                 .child(Tag::secondary().small().child(record(clip)))
+                .when(plays_slowed(clip), |row| {
+                    row.child(
+                        Tag::secondary()
+                            .small()
+                            .child(tr(bardo, Text::SceneClipSlowed)),
+                    )
+                })
                 .when(scene.is_clip_stale(), |row| {
                     row.child(kit::status(
                         Tone::Warning,
@@ -1954,6 +1983,13 @@ impl ProjectsScreen {
                                 .child(tr(bardo, Text::ScenePendingClipTitle)),
                         )
                         .child(Tag::secondary().small().child(record(clip)))
+                        .when(plays_slowed(clip), |row| {
+                            row.child(
+                                Tag::secondary()
+                                    .small()
+                                    .child(tr(bardo, Text::SceneClipSlowed)),
+                            )
+                        })
                         .child(guide::info(
                             bardo,
                             ("pending-clip-info", index),
@@ -2036,6 +2072,7 @@ impl ProjectsScreen {
                         kit::anchor_in(TourAnchor::Control(Control::ClipCost), note, scroll)
                     })),
             )
+            .children(slowed_note)
             .children(model_gone)
             .children(model_replaced)
             .children(state)

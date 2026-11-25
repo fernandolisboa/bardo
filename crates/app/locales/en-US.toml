@@ -84,6 +84,11 @@ format = "Video format"
 format_hint = "Short: a vertical video of under a minute, for every network. Long: a 16:9 video of 8 to 10 minutes, for YouTube. It sets the script's length, the shape of the pictures and the cut, and YouTube's preset. Each project can pick the other."
 production = "Production mode"
 production_hint = "How this channel's videos are made: which scenes become AI clips and with which model; the rest stay stills with motion. Each project can pick another and shows what the whole video costs in each mode before anything is generated."
+clip_fit = "Clip length"
+clip_fit_hint = "Some video models only make set lengths, such as 5 or 10 seconds. With \"Shorter clip, slowed to fit\", a scene a little longer than one of those lengths pays for that length, and its clip plays slowed down to end with the scene: a 6 second scene pays for 5 seconds instead of 10. How much longer the scene may be is set just below. \"Always cover the scene\" asks for the longer clip and trims the rest; pick it when your clips show fast action, where slow motion is noticed. Models that make any length are asked for what the scene needs either way."
+stretch_limit = "Stretch a clip by up to"
+stretch_limit_hint = "How much longer than its own length a clip may play when it is slowed to fit its scene. A higher limit saves more and slows more: at 40%, a clip plays no slower than about 70% of its speed; at 100%, at half speed. The higher the limit, the more the slow motion shows, on fast movement first. Clips already made keep the limit they were made under."
+stretch_limit_choice = "{percent}% · a 10 s clip covers up to {seconds}"
 style = "Visual style"
 style_hint = "How this channel's videos are drawn: a photograph, a cartoon, manga, clay and so on. Bardo adds the style to every scene image, every cast portrait and the thumbnail's background, so every image is asked for the same look. \"From the channel's notes\" takes the look from the aesthetic notes instead, as Claude reads them. Each project can pick another; the ones that do not follow this choice when it changes."
 transition = "Default transition"
@@ -243,6 +248,10 @@ synthwave = "Synthwave"
 dark_fantasy = "Dark fantasy"
 woodblock = "Woodblock print"
 chalkboard = "Chalkboard"
+
+[clip_fit]
+stretch = "Shorter clip, slowed to fit"
+cover = "Always cover the scene"
 
 [production_mode]
 economy = "Economy"
@@ -1038,6 +1047,9 @@ model_replaced = "This scene's video model, {old}, was retired by its provider. 
 channel_model_replaced = "The channel's video model, {old}, was retired by its provider. New clips use {new}; saving the channel keeps it."
 plan = "Next clip: {seconds} s · {price}"
 plan_unpriced = "Next clip: {seconds} s · no rate for this model"
+slowed_next = "Plays slowed to fit the scene"
+slowed = "Slowed to fit"
+slowed_hint = "The next clip is asked for a little shorter than its scene on purpose: it costs less, and it plays slowed down to end when the scene does. Clip length, in the channel's settings, changes how far or turns this off for later clips."
 motion_prompt = "Motion"
 motion_from_image = "Same as the image prompt"
 edit_motion = "Edit motion"
@@ -1534,6 +1546,7 @@ clip = "Clip"
 source_image = "{provider} image · {model}"
 source_clip = "Animated with {provider} · {model}"
 source_still = "Still image"
+source_slowed = "Plays slowed to fit its scene: {recorded} of clip over {played}"
 source_none = "No image yet"
 source_footage = "Imported footage. Its picture plays without its sound: put sound on the music or SFX track."
 source_performed = "Performed clip: your take, performed by the persona. Its picture plays without its sound; the narration on A1 is its voice."
@@ -3037,7 +3050,7 @@ body = "A new clip waits beside the current one; play it before you use it. A sc
 
 [tour.clips.cost]
 title = "What a clip costs"
-body = "How long the scene's next clip will run and what it costs at the provider's rate, before you animate it. The provider bills each second."
+body = "How long the scene's next clip will run and what it costs at the provider's rate, before you animate it. The provider bills each second. With a model of fixed lengths, a scene a little longer than one of them pays for that shorter clip, which plays slowed to fit; the channel sets how far, or turns it off."
 
 [tour.personas]
 name = "Personas tour"
@@ -3203,7 +3216,7 @@ body = "Shorts are vertical and under a minute, and fit every network. Long vide
 
 [tour.channels.defaults]
 title = "Video model, captions and transitions"
-body = "The model that animates the channel's scene images into clips, the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
+body = "The model that animates the channel's scene images into clips, and whether a clip a little shorter than its scene is slowed to fit, and by how much, so you pay for fewer seconds. Then the look of the captions in its new projects and the color their spoken word lights up in, and the transition the editor puts on a cut. Any scene can pick another model, any project other captions, and any cut another transition."
 
 [tour.channels.accounts]
 title = "Network accounts"

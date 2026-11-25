@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::{
     ClipModelRef, Generation, GenerationId, JobFailureKind, Narration, NarrationId, ProfileId,
-    RepositoryError, StyleChoice, VideoProjectId,
+    RepositoryError, StretchLimit, StyleChoice, VideoProjectId,
 };
 
 uuid_id!(
@@ -552,9 +552,38 @@ pub struct SceneClip {
     pub file: String,
     /// The length asked for, in seconds.
     pub seconds: u32,
+    /// Set when it was asked for shorter than its scene on purpose
+    /// (`ClipLength`): it plays slowed, to end when the scene does, within
+    /// the limit it was made under.
+    pub stretch: Option<StretchLimit>,
     /// The generation of the image it starts from.
     pub source_image: GenerationId,
     pub generation: Generation,
+}
+
+impl SceneClip {
+    /// How long the clip runs at the speed it was made.
+    pub fn recorded(&self) -> Duration {
+        Duration::from_secs(self.seconds.into())
+    }
+
+    /// What a stretched clip plays past its scene's end when its limit
+    /// allows: the picture a transition out of it shows, which would
+    /// otherwise be its last frame held.
+    pub const STRETCH_HANDLE: Duration = Duration::from_millis(500);
+
+    /// How long it plays over a scene of `scene`: its own length, or for
+    /// a stretched clip the scene's and a handle after it, as far as its
+    /// limit goes. Past that it holds its last frame, as any clip shorter
+    /// than its scene does.
+    pub fn played_over(&self, scene: Duration) -> Duration {
+        match self.stretch {
+            Some(limit) if scene > self.recorded() => {
+                (scene + Self::STRETCH_HANDLE).min(limit.longest(self.seconds))
+            }
+            _ => self.recorded(),
+        }
+    }
 }
 
 /// A user action on a scene's clip that does not apply right now.
@@ -1663,6 +1692,7 @@ mod tests {
         SceneClip {
             file: file.into(),
             seconds: 5,
+            stretch: None,
             source_image: source.generation.id,
             generation: generation(narration, Provider::Higgsfield, file),
         }

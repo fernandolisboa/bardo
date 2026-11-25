@@ -1229,6 +1229,7 @@ mod tests {
         records[1].clip = Some(SceneClip {
             file: "clip-1.mp4".into(),
             seconds: 1,
+            stretch: None,
             source_image: picture.generation.id,
             generation: generation(),
         });

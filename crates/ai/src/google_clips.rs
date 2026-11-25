@@ -9,10 +9,13 @@
 //! keeps an interaction for 55 days unless the project asks for less.
 //!
 //! There is no staging step: the scene's image goes inline with the
-//! submission. The API takes no idempotency key either, so a submission
-//! whose answer is lost (the connection drops after Google took it) may be
-//! made, and billed, twice when the job sends it again. Refusals (429,
-//! 5xx) are safe to resend, as Google started nothing.
+//! submission. The API takes no idempotency key either, and Google offers
+//! no way to list the interactions a key started. So a submission is a paid
+//! call sent once (ADR-0030), without the adapter coming back by itself: a
+//! refusal in Google's words (429, its own 500 or 503) started nothing and
+//! is told as such, for the job and the queue to go again; a submission
+//! that was sent and got no answer, or whose answer does not name what it
+//! started, is a lost answer, which the job never sends again by itself.
 //!
 //! Google quotes no price before starting; the rate table prices each clip.
 //! Every clip carries Google's SynthID watermark and a soundtrack the
@@ -248,6 +251,18 @@ fn json_body(response: &HttpResponse) -> Result<Value, ProviderFailure> {
         .map_err(|error| unexpected(format!("unreadable response: {error}")))
 }
 
+/// Whether an error body is the Gemini API's own: an `error` with a
+/// message and either a `status` (`UNAVAILABLE`) or a code in snake case
+/// (`service_unavailable`, as the Interactions API documents), which that
+/// API may wrap in a one-element array.
+fn own_words(body: &Value) -> bool {
+    let error = &body.get(0).unwrap_or(body)["error"];
+    let snake_case =
+        |code: &str| !code.is_empty() && code.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+    error["message"].is_string()
+        && (error["status"].is_string() || error["code"].as_str().is_some_and(snake_case))
+}
+
 /// What a refused call means: Google's usual errors, and 404 when the key
 /// cannot use the model. The Interactions API wraps its error in a
 /// one-element array.
@@ -455,8 +470,13 @@ impl GoogleClips {
     /// Submissions carry the image and downloads the clip: megabytes.
     pub const TIMEOUT: Duration = Duration::from_secs(300);
 
+    /// A new connection for every request: a submission that fails on a
+    /// kept connection that had died would look like one Google may have
+    /// taken.
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::new(Self::TIMEOUT).with_max_body(MAX_ANSWER_BYTES))
+        Self::with_transport(
+            UreqTransport::for_paid_calls(Self::TIMEOUT).with_max_body(MAX_ANSWER_BYTES),
+        )
     }
 }
 
@@ -490,6 +510,19 @@ impl<T: Transport> GoogleClips<T> {
         self.backoff
             .send(&self.transport, request, &self.sleep)
             .map_err(|error| ProviderFailure::new(ProviderFailureKind::Unreachable, error.0))
+    }
+
+    /// Sends a submission: the one call here that starts paid work. It
+    /// goes once. The job has noted that it is being sent, and that note
+    /// must not outlive a refusal by the seconds of a wait in here: coming
+    /// back after "busy" is the job's and the queue's, with the note
+    /// cleared.
+    fn send_submission(&self, request: &HttpRequest) -> Result<HttpResponse, ProviderFailure> {
+        let once = Backoff {
+            retries: 0,
+            ..self.backoff
+        };
+        once.send_paid(&self.transport, request, own_words, &self.sleep)
     }
 
     /// Downloads a file Google serves (the key goes only to its API host).
@@ -537,7 +570,9 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
         Ok(StagedImage(INLINE.to_owned()))
     }
 
-    /// Google has no idempotency key, so `submission` is not sent.
+    /// Google has no idempotency key, so `submission` is not sent. A
+    /// failure of kind `AnswerLost` means Google may have started the
+    /// clip; any other means it did not.
     fn submit(
         &self,
         key: &ApiKey,
@@ -550,14 +585,30 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
                 format!("{} is not a Google video model", request.model),
             )
         })?;
-        let response = self.send(&http)?;
+        let response = self.send_submission(&http)?;
         if !(200..=299).contains(&response.status) {
             return Err(google_failure(&response));
         }
+        // Google took it; without the handle nobody can follow the clip.
+        let handle = parse_submission(&response).map_err(|failure| {
+            ProviderFailure::new(
+                ProviderFailureKind::AnswerLost,
+                format!(
+                    "Google took the submission and its answer does not say what it started, \
+                     so the clip may have been made and billed ({})",
+                    failure.detail
+                ),
+            )
+        })?;
         Ok(ClipSubmission {
-            handle: parse_submission(&response)?,
+            handle,
             quote: None,
         })
+    }
+
+    /// A repeated submission starts, and bills, a second clip.
+    fn dedupes_submissions(&self) -> bool {
+        false
     }
 
     fn status(&self, key: &ApiKey, handle: &ClipHandle) -> Result<ClipStatus, ProviderFailure> {
@@ -601,6 +652,28 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn googles_error_reports_are_told_from_what_stands_in_front_of_it() {
+        for own in [
+            json!({ "error": { "code": 503, "message": "overloaded", "status": "UNAVAILABLE" } }),
+            json!([{ "error": { "code": 503, "message": "overloaded", "status": "UNAVAILABLE" } }]),
+            json!({ "error": { "code": "service_unavailable", "message": "overloaded" } }),
+        ] {
+            assert!(own_words(&own), "{own}");
+        }
+        for other in [
+            json!({ "error": "upstream connect error" }),
+            json!({ "error": { "code": 503 } }),
+            json!({ "error": { "code": 503, "message": "Service Unavailable" } }),
+            json!({ "error": { "code": "E503", "message": "upstream", "type": "proxy" } }),
+            json!({ "message": "Service Unavailable" }),
+            json!([]),
+            json!("Bad Gateway"),
+        ] {
+            assert!(!own_words(&other), "{other}");
+        }
+    }
 
     #[test]
     fn the_default_model_comes_first_and_every_model_is_unique() {

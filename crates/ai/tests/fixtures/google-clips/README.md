@@ -38,6 +38,9 @@ key:
 Kept from an earlier shape of the API: `omni-queued.http`. The reference no
 longer lists `queued` among the statuses; the adapter still reads it.
 
-Synthetic, for edge cases: `download-clip.http` and the inline clip in
+Synthetic, for edge cases: `submit-bad-gateway.http` (a gateway's page in
+front of the API, not Google speaking), `submit-no-handle.http` (a submission
+answered without the interaction it started), `submit-internal.http` (500 in
+Google's words), and `download-clip.http` and the inline clip in
 `omni-completed.http` (not a real video: just the `ftyp` box marker an MP4
 starts with).

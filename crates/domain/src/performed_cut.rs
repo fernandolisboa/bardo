@@ -55,6 +55,7 @@ impl PerformedPlace {
             source: VideoSource::Clip {
                 file: self.file.clone(),
                 length: self.length,
+                stretched_from: None,
             },
             start: Duration::ZERO,
             at: Duration::ZERO,

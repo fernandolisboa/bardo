@@ -5,7 +5,7 @@ mod common;
 
 use bardo_ai::GoogleClips;
 use bardo_ai::google_clips::{API_URL, DEFAULT_MODEL, omni_body};
-use bardo_ai::http::Method;
+use bardo_ai::http::{HttpResponse, Method};
 use bardo_domain::{
     ApiKey, AspectRatio, ClipDurations, ClipGenerator, ClipHandle, ClipImage, ClipRequest,
     ClipStatus, ImageFormat, Provider, ProviderFailureKind, StagedImage,
@@ -285,22 +285,120 @@ fn refused_submissions_say_why() {
 }
 
 #[test]
-fn a_busy_or_throttled_api_is_retried_before_failing() {
-    let adapter = clips(&[
-        "omni-submit-overloaded",
-        "omni-submit-rate-limited",
-        "omni-submit",
-    ]);
-    let submission = adapter
-        .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
-        .unwrap();
-    assert_eq!(submission.handle, ClipHandle(INTERACTION.into()));
-    assert_eq!(adapter.transport().sent().len(), 3);
-
-    let throttled = clips(&["omni-submit-rate-limited"; 4])
+fn a_busy_or_throttled_api_is_told_once_and_left_to_the_job() {
+    // The job has noted the send: waiting in here would keep that note
+    // over a refusal that started nothing.
+    let busy = clips(&["omni-submit-overloaded"]);
+    let failure = busy
         .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
         .unwrap_err();
-    assert_eq!(throttled.kind, ProviderFailureKind::LimitReached);
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(busy.transport().sent().len(), 1);
+
+    let throttled = clips(&["omni-submit-rate-limited"]);
+    let failure = throttled
+        .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::LimitReached);
+    assert_eq!(throttled.transport().sent().len(), 1);
+}
+
+#[test]
+fn google_neither_recognizes_a_repeated_submission_nor_lists_what_it_started() {
+    let adapter = clips(&[]);
+    assert!(!adapter.dedupes_submissions(), "no idempotency key");
+    assert!(
+        !adapter.lists_submissions(),
+        "no way to list operations or interactions"
+    );
+    assert_eq!(
+        adapter.find_submitted(&key(), &request(DEFAULT_MODEL, 8)),
+        Ok(None)
+    );
+    assert!(adapter.transport().sent().is_empty(), "nothing to ask");
+}
+
+#[test]
+fn a_submission_whose_answer_is_lost_may_have_started_and_is_sent_once() {
+    let (sleeper, _) = recording_sleeper();
+    let timed_out =
+        GoogleClips::with_transport(Scripted::losing_the_answer()).with_sleeper(sleeper);
+    // A gateway that passed the request on, and an answer that does not
+    // say what was started.
+    let gateway = clips(&["submit-bad-gateway"]);
+    let no_handle = clips(&["submit-no-handle"]);
+    for adapter in [timed_out, gateway, no_handle] {
+        let failure = adapter
+            .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
+            .unwrap_err();
+        assert_eq!(
+            failure.kind,
+            ProviderFailureKind::AnswerLost,
+            "{}",
+            failure.detail
+        );
+        assert_eq!(adapter.transport().sent().len(), 1);
+    }
+}
+
+/// The adapter over one answer that is not a recording.
+fn answering(status: u16, body: &str) -> GoogleClips<Scripted> {
+    let (sleeper, _) = recording_sleeper();
+    GoogleClips::with_transport(Scripted::new(vec![HttpResponse::new(status, body)]))
+        .with_sleeper(sleeper)
+}
+
+#[test]
+fn only_googles_own_report_says_a_failed_submission_started_nothing() {
+    // The Interactions API's report, wrapped in its one-element array.
+    let own = answering(
+        503,
+        r#"[{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}]"#,
+    );
+    let failure = own
+        .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+
+    // The same status from something in front of Google says nothing
+    // about what Google did with the request.
+    for body in [
+        "<html><body><h1>503 Service Unavailable</h1></body></html>",
+        r#"{"error":"upstream connect error or disconnect/reset before headers"}"#,
+        r#"{"message":"Service Unavailable"}"#,
+        "",
+    ] {
+        for status in [500, 503] {
+            let adapter = answering(status, body);
+            let failure = adapter
+                .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
+                .unwrap_err();
+            assert_eq!(
+                failure.kind,
+                ProviderFailureKind::AnswerLost,
+                "{status} {body}"
+            );
+            assert_eq!(adapter.transport().sent().len(), 1);
+        }
+    }
+}
+
+#[test]
+fn a_submission_that_never_left_or_that_google_failed_started_nothing() {
+    let (sleeper, _) = recording_sleeper();
+    let offline = GoogleClips::with_transport(Scripted::offline()).with_sleeper(sleeper);
+    let failure = offline
+        .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::Unreachable);
+
+    // Google failing on its side says so once; the queue goes again.
+    let adapter = clips(&["submit-internal"]);
+    let failure = adapter
+        .submit(&key(), &request(DEFAULT_MODEL, 8), "s")
+        .unwrap_err();
+    assert_eq!(failure.kind, ProviderFailureKind::ProviderDown);
+    assert_eq!(adapter.transport().sent().len(), 1);
 }
 
 #[test]

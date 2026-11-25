@@ -130,8 +130,8 @@ pub use diagnostics::{
 };
 pub use editor::{
     BinScene, ClipMedia, ClipPerformance, ClipProblem, ClipShows, ClipView, CutBasis, EditAction,
-    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
-    media_framing, preview_size,
+    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT,
+    SlowedClip, WordMark, media_framing, preview_size,
 };
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,
@@ -1922,6 +1922,8 @@ pub(crate) mod testing {
         /// Starts a new clip on every submission, like a provider without
         /// an idempotency key (the Higgsfield plan).
         pub(crate) no_idempotency: bool,
+        /// Cannot list what it started either (Google's video API).
+        pub(crate) no_lookup: bool,
         /// Submissions sent, answered or not.
         pub(crate) sends: Mutex<u32>,
         /// How many submissions start a clip and lose the answer.
@@ -2057,11 +2059,16 @@ pub(crate) mod testing {
             }
             *self.sends.lock().unwrap() += 1;
             self.pause.pass(ClipCall::Submit);
+            // What each kind of provider answers when it cannot say: one
+            // that recognizes a repeated submission lets the queue send it
+            // again; one that does not says it may have started.
             let timed_out = || {
-                Err(ProviderFailure::new(
-                    bardo_domain::ProviderFailureKind::Unreachable,
-                    "timed out reading the answer",
-                ))
+                let kind = if self.no_idempotency {
+                    bardo_domain::ProviderFailureKind::AnswerLost
+                } else {
+                    bardo_domain::ProviderFailureKind::Unreachable
+                };
+                Err(ProviderFailure::new(kind, "timed out reading the answer"))
             };
             if Self::take(&self.unseen) {
                 return timed_out();
@@ -2092,6 +2099,10 @@ pub(crate) mod testing {
 
         fn dedupes_submissions(&self) -> bool {
             !self.no_idempotency
+        }
+
+        fn lists_submissions(&self) -> bool {
+            !self.no_lookup
         }
 
         fn check_submit(
