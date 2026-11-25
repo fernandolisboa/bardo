@@ -7,12 +7,16 @@
 # says which.
 #
 # Licenses, as each source states them:
-# - U²-Net: the repository is Apache-2.0 and distributes the weights.
-# - IS-Net: the repository is Apache-2.0 ("our code and evaluation metric
-#   use Apache License 2.0") and distributes the weights; its training set,
-#   DIS5K, has terms of its own (non-commercial research and education).
-# - BiRefNet: the repository and each model's page are MIT; the general
-#   models were trained on DIS5K among other sets.
+# - U²-Net: the repository is Apache-2.0; its README links to the weight
+#   files on a file host. Trained on DUTS-TR.
+# - IS-Net: the repository says its "code and evaluation metric use Apache
+#   License 2.0"; its README links to the weight files on a file host and
+#   does not say what the general-use weights were trained on. DIS5K, the
+#   set of its academic weights, has terms of its own (non-commercial
+#   research and education).
+# - BiRefNet: the repository is MIT, and each model's page, which holds
+#   the weight file, states MIT; the general-use weights were trained on
+#   DIS5K among other sets.
 # RMBG (CC BY-NC) is not here and must never be added.
 
 [sources.u2net]
