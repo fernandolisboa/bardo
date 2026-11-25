@@ -760,7 +760,7 @@ pub const CLIPS: Tour = {
     const SCENE: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Clips,
-        version: 2,
+        version: 3,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "animate", control(Control::ClipsAnimate))
@@ -937,7 +937,7 @@ pub const CHANNELS: Tour = {
     const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
     Tour {
         id: TourId::Channels,
-        version: 4,
+        version: 5,
         place: Some(TourPlace::Screen(AT)),
         steps: &[
             on(AT, "list", TourAnchor::Collection).learn(PAGE, "list"),

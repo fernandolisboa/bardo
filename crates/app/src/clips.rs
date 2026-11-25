@@ -34,12 +34,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef, ClipRequest,
-    ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId, ImageFormat,
-    Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId,
-    Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
-    SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage,
-    TokenUsage, VideoProject, VideoProjectId,
+    ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel, ClipModelRef,
+    ClipRequest, ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId,
+    ImageFormat, Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode,
+    ProfileId, Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind,
+    RepositoryError, Scene, SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt,
+    SecretStore, StagedImage, StretchLimit, TokenUsage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +79,10 @@ pub struct ClipsView {
     /// The video's production mode (#248), which says which scenes
     /// "animate missing" animates.
     pub mode: ProductionMode,
+    /// How far the channel's clips are stretched over a scene a little
+    /// longer than a length their model makes (#260); `None` when every
+    /// clip covers its scene.
+    pub stretch: Option<StretchLimit>,
     /// One per scene of the plan, in order.
     pub scenes: Vec<SceneClipView>,
     /// The scenes "animate missing" would animate: the ones the mode
@@ -96,6 +100,9 @@ pub struct SceneClipView {
     pub model: Option<ClipModel>,
     /// How long its next clip would be.
     pub seconds: Option<u32>,
+    /// Whether that is shorter than the scene on purpose: the clip would
+    /// play slowed, to end when the scene does (#260).
+    pub stretched: bool,
     /// What its next clip would cost at the rate table's price; `None`
     /// when no rate covers the model.
     pub price: Option<Money>,
@@ -119,6 +126,19 @@ struct ClipsPayload {
     project: String,
     plan: String,
     scenes: Vec<ClipOrder>,
+    /// How far a scene a little longer than a length its model makes
+    /// stretches a clip of that length, in percent (the channel's
+    /// `StretchLimit` when the job was queued: the budget was checked
+    /// against it too); 0 covers every scene, as a job queued before
+    /// stretching was priced.
+    #[serde(default)]
+    stretch_percent: u8,
+}
+
+impl ClipsPayload {
+    fn stretch(&self) -> Option<StretchLimit> {
+        (self.stretch_percent > 0).then(|| StretchLimit::new(self.stretch_percent.into()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +166,10 @@ struct ClipRun {
     submission: u32,
     prompt: String,
     seconds: u32,
+    /// The limit it was asked for shorter than the scene under, to play
+    /// slowed, in percent; 0 when it covers the scene.
+    #[serde(default)]
+    stretch_percent: u8,
     /// The image animated: its generation and file.
     source_image: String,
     image_file: String,
@@ -264,6 +288,8 @@ struct ClipJob<'a> {
     job: JobId,
     project: VideoProjectId,
     plan: ScenePlanId,
+    /// How far a clip of a model of fixed lengths stretches, as queued.
+    stretch: Option<StretchLimit>,
     state: ClipsState,
     keys: Vec<(Provider, ApiKey)>,
     /// A plan's token was renewed after the provider refused it, and no
@@ -283,6 +309,7 @@ impl JobHandler for ClipHandler {
             job: cx.id(),
             project: id(&payload.project)?,
             plan: id(&payload.plan)?,
+            stretch: payload.stretch(),
             state,
             keys: Vec::new(),
             renewed: false,
@@ -814,12 +841,14 @@ impl ClipJob<'_> {
             Err(failure) => return self.submit_failed(order, failure, cx).map(Err),
         };
         let prompt = scene.motion_prompt().as_str().to_owned();
-        let seconds = model.durations.fit(scene.duration());
+        let ClipLength { seconds, stretch } = model.durations.fit(scene.duration(), self.stretch);
+        let stretch_percent = stretch.map_or(0, StretchLimit::percent);
         let (source_image, image_file) = (image.generation.id.to_string(), image.file.clone());
         match self.run_of(order.scene) {
             Some(run) => {
                 run.prompt = prompt;
                 run.seconds = seconds;
+                run.stretch_percent = stretch_percent;
                 run.source_image = source_image;
                 run.image_file = image_file;
                 run.staged = Some(staged.clone());
@@ -829,6 +858,7 @@ impl ClipJob<'_> {
                 submission: 1,
                 prompt,
                 seconds,
+                stretch_percent,
                 source_image,
                 image_file,
                 staged: Some(staged.clone()),
@@ -943,6 +973,8 @@ impl ClipJob<'_> {
         let clip = SceneClip {
             file: file.clone(),
             seconds: run.seconds,
+            stretch: (run.stretch_percent > 0)
+                .then(|| StretchLimit::new(run.stretch_percent.into())),
             source_image: id(&run.source_image)?,
             generation: Generation {
                 id: generation,
@@ -951,7 +983,16 @@ impl ClipJob<'_> {
                 provider,
                 model: order.model.clone(),
                 template: plan.generation.template,
-                instructions: format!("Image to video, {} s, from {}", run.seconds, run.image_file),
+                instructions: format!(
+                    "Image to video, {} s{}, from {}",
+                    run.seconds,
+                    if run.stretch_percent > 0 {
+                        " (played slowed to fit the scene)"
+                    } else {
+                        ""
+                    },
+                    run.image_file
+                ),
                 prompt: run.prompt,
                 output: file,
                 usage: TokenUsage::default(),
@@ -1022,6 +1063,21 @@ impl Bardo {
             .cloned())
     }
 
+    /// How far `channel`'s clips stretch over a scene a little longer
+    /// than a length their model makes; `None` when they cover every
+    /// scene (the default limit when the channel is gone).
+    pub(crate) fn channel_clip_stretch(
+        &self,
+        channel: ChannelId,
+    ) -> Result<Option<StretchLimit>, RepositoryError> {
+        Ok(self
+            .channels
+            .get(channel)?
+            .map_or(Some(StretchLimit::DEFAULT), |channel| {
+                channel.details.clip_stretch()
+            }))
+    }
+
     /// The model a scene's next clip uses.
     fn scene_clip_model(
         models: &[ClipModel],
@@ -1070,6 +1126,7 @@ impl Bardo {
             });
         };
         let rates = self.cost_book.rates()?;
+        let stretch = self.channel_clip_stretch(project.channel)?;
         let jobs = self.clip_jobs(plan.project);
         let scenes: Vec<SceneClipView> = plan
             .scenes()
@@ -1077,14 +1134,14 @@ impl Bardo {
             .enumerate()
             .map(|(index, scene)| {
                 let model = Self::scene_clip_model(&models, default_model.as_ref(), scene);
-                let seconds = model
+                let length = model
                     .as_ref()
-                    .map(|model| model.durations.fit(scene.duration()));
-                let price = model.as_ref().zip(seconds).and_then(|(model, seconds)| {
+                    .map(|model| model.durations.fit(scene.duration(), stretch));
+                let price = model.as_ref().zip(length).and_then(|(model, length)| {
                     rates.price(
                         model.id.provider(),
                         model.id.model(),
-                        &Metered::video_seconds(u64::from(seconds)),
+                        &Metered::video_seconds(u64::from(length.seconds)),
                     )
                 });
                 let job = jobs
@@ -1097,7 +1154,8 @@ impl Bardo {
                     .map(|(job, _)| job.clone());
                 SceneClipView {
                     model,
-                    seconds,
+                    seconds: length.map(|length| length.seconds),
+                    stretched: length.is_some_and(|length| length.stretch.is_some()),
                     price,
                     job,
                 }
@@ -1120,6 +1178,7 @@ impl Bardo {
             models,
             default_model,
             mode,
+            stretch,
             scenes,
             missing,
             missing_estimate,
@@ -1159,7 +1218,7 @@ impl Bardo {
         if view.scenes[index].is_busy() {
             return Err(SceneError::Busy);
         }
-        self.animate(&plan, &view.scenes, vec![index], consent)
+        self.animate(&plan, &view, vec![index], consent)
     }
 
     /// Starts a job that animates every scene with an image and no clip.
@@ -1173,7 +1232,8 @@ impl Bardo {
         if view.missing.is_empty() {
             return Err(SceneError::NothingToAnimate);
         }
-        self.animate(&plan, &view.scenes, view.missing, consent)
+        let missing = view.missing.clone();
+        self.animate(&plan, &view, missing, consent)
     }
 
     fn clips_of(&self, project: VideoProjectId) -> Result<(ScenePlan, ClipsView), SceneError> {
@@ -1189,10 +1249,11 @@ impl Bardo {
     fn animate(
         &self,
         plan: &ScenePlan,
-        views: &[SceneClipView],
+        view: &ClipsView,
         scenes: Vec<usize>,
         consent: BudgetConsent,
     ) -> Result<JobId, SceneError> {
+        let views = &view.scenes;
         let mut orders = Vec::with_capacity(scenes.len());
         for &index in &scenes {
             let model = views[index]
@@ -1212,6 +1273,7 @@ impl Bardo {
             project: plan.project.to_string(),
             plan: plan.id.to_string(),
             scenes: orders,
+            stretch_percent: view.stretch.map_or(0, StretchLimit::percent),
         };
         let job = Job::new(self.profile.id, JobKind::SceneClips, to_json(&payload));
         Ok(self.jobs.enqueue(job)?)
@@ -1335,8 +1397,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use bardo_domain::{
-        ChannelDraft, ClipDurations, Cost, CostRepository, JobState, Meter, ProviderFailure,
-        VideoProject,
+        ChannelDraft, ClipDurations, ClipFit, Cost, CostRepository, JobState, Meter,
+        ProviderFailure, VideoProject,
     };
 
     use super::*;
@@ -1395,8 +1457,11 @@ mod tests {
         let seconds = view.scenes[0].seconds.unwrap();
         assert_eq!(
             seconds,
-            ClipDurations::Range { min: 3, max: 15 }.fit(scene.duration())
+            ClipDurations::Range { min: 3, max: 15 }
+                .fit(scene.duration(), Some(StretchLimit::DEFAULT))
+                .seconds
         );
+        assert!(!view.scenes[0].stretched, "a range is asked for what fits");
 
         let job = done(
             &app,
@@ -2035,6 +2100,249 @@ mod tests {
         // Back to the channel's model.
         let plan = app.set_scene_clip_model(project.id, 1, None).unwrap();
         assert_eq!(plan.scenes()[1].clip_model(), None);
+    }
+
+    /// Gives the plan's scenes these lengths, back to back, as a
+    /// narration of ordinary pace would (the fake one speaks each scene in
+    /// under a second).
+    fn scenes_last(h: &Harness, app: &Bardo, project: &VideoProject, millis: &[u64]) -> ScenePlan {
+        let mut plan = plan_of(app, project);
+        let mut start = Duration::ZERO;
+        for (index, &millis) in millis.iter().enumerate() {
+            let scene = plan.scene_mut(index, SystemTime::now()).unwrap();
+            scene.start = start;
+            start += Duration::from_millis(millis);
+            scene.end = start;
+        }
+        h.db.save_scene_plan(&plan).unwrap();
+        plan
+    }
+
+    fn channel_fits(app: &Bardo, project: &VideoProject, fit: ClipFit, percent: u32) {
+        let channel = app
+            .channels()
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.id == project.channel)
+            .unwrap();
+        app.update_channel(
+            channel.id,
+            ChannelDraft {
+                clip_fit: fit,
+                stretch_limit: StretchLimit::new(percent),
+                ..ChannelDraft::from(&channel.details)
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_scene_a_little_over_a_length_pays_for_it_and_its_clip_is_stretched() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        app.save_rate(Provider::Higgsfield, "fake/", Meter::VideoSeconds, "0.10")
+            .unwrap();
+
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.stretch, Some(StretchLimit::DEFAULT));
+        let asked: Vec<_> = view
+            .scenes
+            .iter()
+            .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+            .collect();
+        // 6.5 s plays a 5 s clip slowed; 8 s is past what 5 s stretches
+        // to and 4 s fits in 5.
+        assert_eq!(asked, [(5, true), (10, false), (5, false)]);
+        assert_eq!(view.scenes[0].price, Some(Money::from_cents(50)));
+        assert_eq!(
+            view.missing_estimate.as_ref().unwrap().total(),
+            Money::from_cents(200),
+            "20 seconds of clips, where covering every scene buys 25"
+        );
+
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        let sent: Vec<_> = h.clips.submissions().iter().map(|r| r.seconds).collect();
+        assert_eq!(sent, [5, 10, 5]);
+        let plan = plan_of(&app, &project);
+        let clips: Vec<_> = plan
+            .scenes()
+            .iter()
+            .map(|scene| scene.pending_clip().unwrap())
+            .map(|clip| (clip.seconds, clip.stretch))
+            .collect();
+        assert_eq!(
+            clips,
+            [(5, Some(StretchLimit::DEFAULT)), (10, None), (5, None)]
+        );
+        assert_eq!(
+            plan.scenes()[0]
+                .pending_clip()
+                .unwrap()
+                .generation
+                .instructions,
+            format!(
+                "Image to video, 5 s (played slowed to fit the scene), from {}",
+                plan.scenes()[0].image().unwrap().file
+            )
+        );
+        let recorded: u64 =
+            h.db.project_costs(project.id)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.purpose == CostPurpose::SceneClip)
+                .map(|record| record.usage.video_seconds)
+                .sum();
+        assert_eq!(recorded, 20, "what is recorded is what was estimated");
+    }
+
+    #[test]
+    fn the_editor_plays_a_stretched_clip_over_its_scene_and_the_others_as_made() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        done(
+            &app,
+            app.generate_missing_clips(project.id, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        for index in 0..3 {
+            app.accept_scene_clip(project.id, index).unwrap();
+        }
+
+        let editor = app.open_editor(project.id).unwrap();
+        let view = editor.view();
+        let slowed: Vec<_> = view.clips.iter().map(|clip| clip.slowed).collect();
+        // Five seconds of clip over the scene's 6.5 and the half second a
+        // transition out of it may show: as far as 40% goes.
+        let over_its_scene = crate::SlowedClip {
+            recorded: Duration::from_secs(5),
+            played: Duration::from_secs(7),
+        };
+        assert_eq!(slowed, [Some(over_its_scene), None, None]);
+        // The cut gives each clip its scene's time, so the narration
+        // stays in sync; what plays it reads the first one's file slower.
+        let plan = editor.preview_plan().unwrap();
+        assert_eq!(plan.video[0].duration, Duration::from_millis(6_500));
+        assert_eq!(
+            plan.video[0].slowed.map(|s| (s.recorded, s.played)),
+            Some((Duration::from_secs(5), Duration::from_secs(7)))
+        );
+        assert!(plan.video[1..].iter().all(|clip| clip.slowed.is_none()));
+    }
+
+    #[test]
+    fn a_channel_that_covers_every_scene_asks_for_the_longer_clip() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        channel_fits(&app, &project, ClipFit::Cover, 40);
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+
+        let view = app.scenes(project.id).unwrap().clips;
+        assert_eq!(view.stretch, None);
+        let asked: Vec<_> = view
+            .scenes
+            .iter()
+            .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+            .collect();
+        assert_eq!(asked, [(10, false), (10, false), (5, false)]);
+
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions()[0].seconds, 10);
+        let plan = plan_of(&app, &project);
+        assert_eq!(plan.scenes()[0].pending_clip().unwrap().stretch, None);
+    }
+
+    #[test]
+    fn the_channel_says_how_far_a_clip_stretches() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        let asked = |app: &Bardo| -> Vec<(u32, bool)> {
+            let view = app.scenes(project.id).unwrap().clips;
+            view.scenes
+                .iter()
+                .map(|scene| (scene.seconds.unwrap(), scene.stretched))
+                .collect()
+        };
+
+        // At 20%, five seconds cover six: 6.5 pays for ten again.
+        channel_fits(&app, &project, ClipFit::Stretch, 20);
+        assert_eq!(asked(&app), [(10, false), (10, false), (5, false)]);
+        // At 60%, five seconds cover eight.
+        channel_fits(&app, &project, ClipFit::Stretch, 60);
+        assert_eq!(asked(&app), [(5, true), (5, true), (5, false)]);
+
+        done(
+            &app,
+            app.generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        assert_eq!(h.clips.submissions()[0].seconds, 5);
+        let clip = plan_of(&app, &project).scenes()[1]
+            .pending_clip()
+            .unwrap()
+            .clone();
+        assert_eq!(clip.stretch, Some(StretchLimit::new(60)));
+        // It plays over its whole scene, as far as its own 60% goes,
+        // whatever the channel says later.
+        channel_fits(&app, &project, ClipFit::Stretch, 20);
+        assert_eq!(
+            clip.played_over(Duration::from_secs(8)),
+            Duration::from_secs(8)
+        );
+    }
+
+    #[test]
+    fn a_clip_job_keeps_the_fit_it_was_queued_with() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        channel_uses(&app, &project, Some(model("fake/choices")));
+        scenes_last(&h, &app, &project, &[6_500, 8_000, 4_000]);
+        // Queued while the channel stretches and held at the provider's
+        // door: what the budget was checked against is what is asked for.
+        *h.clips.submit_failure.lock().unwrap() = Some(ProviderFailure::new(
+            ProviderFailureKind::Rejected,
+            "invalid credentials",
+        ));
+        let job = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_done(&app, job);
+        channel_fits(&app, &project, ClipFit::Cover, 40);
+        *h.clips.submit_failure.lock().unwrap() = None;
+        app.retry_job(job).unwrap();
+        done(&app, job);
+        assert_eq!(h.clips.submissions().last().unwrap().seconds, 5);
+        assert_eq!(
+            plan_of(&app, &project).scenes()[0]
+                .pending_clip()
+                .unwrap()
+                .stretch,
+            Some(StretchLimit::DEFAULT)
+        );
+
+        // A job queued before clips were stretched covers its scenes.
+        let before: ClipsPayload =
+            serde_json::from_str(r#"{"project": "p", "plan": "s", "scenes": []}"#).unwrap();
+        assert_eq!(before.stretch(), None);
     }
 
     #[test]

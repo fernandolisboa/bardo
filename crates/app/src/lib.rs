@@ -130,8 +130,8 @@ pub use diagnostics::{
 };
 pub use editor::{
     BinScene, ClipMedia, ClipPerformance, ClipProblem, ClipShows, ClipView, CutBasis, EditAction,
-    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT, WordMark,
-    media_framing, preview_size,
+    Editor, EditorError, EditorView, NarrationTrack, PREVIEW_LANDSCAPE, PREVIEW_PORTRAIT,
+    SlowedClip, WordMark, media_framing, preview_size,
 };
 pub use export::{
     ExportBlock, ExportError, ExportSummary, ExportTarget, ExportView, export_job_networks,

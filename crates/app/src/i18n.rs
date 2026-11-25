@@ -25,7 +25,7 @@ use bardo_domain::{
     BytePlusField, BytePlusFieldError, ChapterFieldError, ChapterProblem, LookAssetError,
     LookAssetKind, TextPlacement, ThumbnailFieldError, ThumbnailLook,
 };
-use bardo_domain::{StyleChoice, VisualStyle};
+use bardo_domain::{ClipFit, StyleChoice, VisualStyle};
 
 /// Every string the UI shows. Adding a variant without adding its key to all
 /// resource files fails the catalog tests.
@@ -298,6 +298,23 @@ pub enum Text {
     RedrawRestyled,
     ChannelProduction,
     ChannelProductionHint,
+    /// How clips are asked of a model of fixed lengths (#260).
+    ChannelClipFit,
+    ChannelClipFitHint,
+    ClipFitName(ClipFit),
+    /// How far a clip is stretched (`StretchLimit`).
+    ChannelStretchLimit,
+    ChannelStretchLimitHint,
+    /// One limit in the menu. Placeholders: `{percent}`, `{seconds}`
+    /// (what 10 seconds of clip cover).
+    StretchLimitChoice,
+    /// After the next clip's length and price, when it would play slowed.
+    SceneClipSlowedNext,
+    /// On a clip made to play slowed.
+    SceneClipSlowed,
+    SceneClipSlowedHint,
+    /// Placeholders: `{recorded}`, `{played}`.
+    EditorSourceSlowed,
     ProjectMode,
     /// Placeholder: `{mode}`.
     ProjectModeChannel,
@@ -2804,6 +2821,19 @@ impl Text {
             },
             Text::ChannelProduction => "channel.production",
             Text::ChannelProductionHint => "channel.production_hint",
+            Text::ChannelClipFit => "channel.clip_fit",
+            Text::ChannelClipFitHint => "channel.clip_fit_hint",
+            Text::ClipFitName(fit) => match fit {
+                ClipFit::Stretch => "clip_fit.stretch",
+                ClipFit::Cover => "clip_fit.cover",
+            },
+            Text::ChannelStretchLimit => "channel.stretch_limit",
+            Text::ChannelStretchLimitHint => "channel.stretch_limit_hint",
+            Text::StretchLimitChoice => "channel.stretch_limit_choice",
+            Text::SceneClipSlowedNext => "scenes.clip.slowed_next",
+            Text::SceneClipSlowed => "scenes.clip.slowed",
+            Text::SceneClipSlowedHint => "scenes.clip.slowed_hint",
+            Text::EditorSourceSlowed => "editor.inspector.source_slowed",
             Text::ProjectMode => "projects.mode",
             Text::ProjectModeChannel => "projects.mode_channel",
             Text::ProjectModeHint => "projects.mode_hint",
@@ -6349,7 +6379,17 @@ mod tests {
         texts.extend(ProductionMode::ALL.map(Text::ProductionModeName));
         texts.extend(ProductionMode::ALL.map(Text::ProductionModeAbout));
         texts.extend(StyleChoice::all().map(Text::VisualStyleName));
+        texts.extend(ClipFit::ALL.map(Text::ClipFitName));
         texts.extend([
+            Text::ChannelClipFit,
+            Text::ChannelClipFitHint,
+            Text::ChannelStretchLimit,
+            Text::ChannelStretchLimitHint,
+            Text::StretchLimitChoice,
+            Text::SceneClipSlowedNext,
+            Text::SceneClipSlowed,
+            Text::SceneClipSlowedHint,
+            Text::EditorSourceSlowed,
             Text::ChannelStyle,
             Text::ChannelStyleHint,
             Text::ProjectStyle,
