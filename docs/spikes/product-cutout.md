@@ -217,7 +217,7 @@ In the container, three runs a photo (two for 768 and 512 with the arena off):
 | BiRefNet lite, 1024 | 94.7 MB | 3.0 s | 3,808 ms (3,708 to 4,011) | 3,346 MiB | 1,922 MiB | 4,134 ms |
 | BiRefNet lite matting | 94.7 MB | 2.6 s | 3,887 ms (3,718 to 4,007) | 3,472 MiB | | |
 
-On GitHub's runners, in the workflow's last run (an AMD EPYC 9V74 under Linux, an AMD EPYC 9V45 under Windows), two runs a photo (one for the matting weights):
+On GitHub's runners, in a later run of the workflow (an AMD EPYC 9V74 under Linux, an AMD EPYC 9V45 under Windows), two runs a photo (one for the matting weights):
 
 | Model | Run, `ubuntu-latest` | Peak memory | Run, `windows-latest` | Peak memory |
 | --- | --- | --- | --- | --- |
@@ -229,7 +229,7 @@ On GitHub's runners, in the workflow's last run (an AMD EPYC 9V74 under Linux, a
 | BiRefNet lite, 1024 | 5,139 ms (5,099 to 5,362) | 3,321 MiB | 4,562 ms (4,331 to 5,444) | 3,218 MiB |
 | BiRefNet lite matting | 5,255 ms (5,205 to 5,454) | 3,431 MiB | 4,611 ms (4,374 to 5,402) | 3,327 MiB |
 
-Runners are not one machine. The workflow's first run landed on a slower pair, whose CPUs it did not record: at three runs a photo, BiRefNet lite at 1024 × 1024 took 6.2 s under Linux and 8.6 s under Windows (1.6 and 2.2 times the container's time), and IS-Net 1.8 s and 2.1 s (3.1 and 3.7 times), with much the same peak memory. In the last run BiRefNet lite takes 1.1 to 1.4 times the container's time. The reference machine is a third kind of machine, which is what check `S2.18` is for.
+Runners are not one machine. The workflow's first run landed on a slower pair, whose CPUs it did not record: at three runs a photo, BiRefNet lite at 1024 × 1024 took 6.2 s under Linux and 8.6 s under Windows (1.6 and 2.2 times the container's time), and IS-Net 1.8 s and 2.1 s (3.1 and 3.7 times), with much the same peak memory. In the run of the table BiRefNet lite takes 1.1 to 1.4 times the container's time. The reference machine is a third kind of machine, which is what check `S2.18` is for.
 
 **Memory is the cost to watch, and it depends on how the session is used.** ONNX Runtime's CPU memory arena keeps every block it once asked for, so a session that cuts photo after photo grows. For one photo in a process of its own, which is what a job that drops its session does (box-1, one run):
 
