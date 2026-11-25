@@ -105,6 +105,8 @@ pub enum Control {
     ScriptActions,
     /// Script: what the next generation would cost.
     ScriptEstimate,
+    /// Script: an ad's claims check, and the button that checks again.
+    ScriptClaims,
     /// Script: the current script's details and prompt.
     ScriptDetails,
     /// Script: the music prompt.
@@ -668,16 +670,16 @@ pub const BRIEF: Tour = {
     }
 };
 
-/// Script: writing or generating it, a new version to review, saving,
-/// what a generation costs, where the script came from, the music, and
-/// versions in other languages.
+/// Script: writing or generating it and saving edits, a new version to
+/// review, what a generation costs, an ad's claims check, where the
+/// script came from, the music, and versions in other languages.
 pub const SCRIPT: Tour = {
     const AT: Stage = Stage::Script;
     const PAGE: &str = "script";
     const PAGE_PART: WhenMissing = WhenMissing::LightPart(TourAnchor::Content);
     Tour {
         id: TourId::Script,
-        version: 3,
+        version: 4,
         place: Some(TourPlace::Stage(AT)),
         steps: &[
             at_stage(AT, "write", control(Control::ScriptBody))
@@ -687,12 +689,13 @@ pub const SCRIPT: Tour = {
             at_stage(AT, "review", control(Control::ScriptReview))
                 .missing(WhenMissing::LightPart(control(Control::ScriptActions)))
                 .learn(PAGE, "review"),
-            at_stage(AT, "save", control(Control::ScriptActions))
-                .missing(PAGE_PART)
-                .learn(PAGE, "save"),
             at_stage(AT, "cost", control(Control::ScriptEstimate))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "cost"),
+            // Only an ad's script is checked against claims.
+            at_stage(AT, "claims", control(Control::ScriptClaims))
+                .missing(WhenMissing::Skip)
+                .learn(PAGE, "claims"),
             at_stage(AT, "details", control(Control::ScriptDetails))
                 .missing(WhenMissing::Skip)
                 .learn(PAGE, "details"),

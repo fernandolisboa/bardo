@@ -51,6 +51,7 @@ mod caption;
 mod capture;
 mod channel;
 mod chapters;
+mod claims_check;
 mod clip;
 mod connection;
 mod control_video;
@@ -164,6 +165,10 @@ pub use chapters::{
     MAX_CHAPTER_TITLE, MIN_CHAPTER_LENGTH, MIN_CHAPTERS, chapter_lines, chapter_problems,
     chapter_title, place_chapters, timestamp,
 };
+pub use claims_check::{
+    CheckedScript, CheckedStatement, ClaimsAnswerError, ClaimsCheck, checked_statements,
+    claims_check_schema,
+};
 pub use clip::{
     ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,
     ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, CurrentClipModel,
@@ -205,7 +210,7 @@ pub use decision::{
 pub use due::{DUE_GRACE, DueStep, PREPARE_AHEAD, UNPUBLISHED_LIFETIME, due_step, prepare_at};
 pub use edit::{Edge, Edit, EditError, HISTORY_DEPTH, History, Item, ItemRef, Shift, Track};
 pub use files::{ProjectFileError, ProjectFiles};
-pub use format::{UnknownVideoFormat, UnknownVideoLength, VideoFormat, VideoLength};
+pub use format::{AD_TAIL, UnknownVideoFormat, UnknownVideoLength, VideoFormat, VideoLength};
 pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop_window};
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{

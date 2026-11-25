@@ -1,12 +1,14 @@
 //! Ad angles and the briefs of the ad projects they start (#275). An
 //! approved angle, its theme, its project and the project's brief are
-//! saved in one transaction; a brief is saved whole with its claims.
+//! saved in one transaction; a brief is saved whole with its claims. The
+//! claims check of an ad script (#276) is saved whole with its
+//! statements, one per script of a project.
 
 use bardo_domain::{
     AdAngle, AdAngleId, AdAngleIdea, AdAngleRecord, AdBrief, AdBriefRecord, AdFramework, AdRanking,
-    AdRepository, AdStart, BriefClaim, BriefText, ChannelId, ClaimId, ClaimKind, ClaimSeen,
-    Confidence, JobId, ProductId, ProfileId, Reason, RepositoryError, Score, ThemeId, ThemeStatus,
-    VideoProjectId,
+    AdRepository, AdStart, BriefClaim, BriefText, ChannelId, CheckedScript, CheckedStatement,
+    ClaimId, ClaimKind, ClaimSeen, ClaimsCheck, Confidence, JobId, ProductId, ProfileId, Reason,
+    RepositoryError, Score, ThemeId, ThemeStatus, VideoProjectId,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -400,6 +402,44 @@ fn read_briefs(conn: &Connection, sql: &str, id: &str) -> Result<Vec<AdBrief>, R
     rows.into_iter().map(|row| row.into_brief(conn)).collect()
 }
 
+/// The statements of a stored check, in order.
+fn check_statements(
+    conn: &Connection,
+    project: &str,
+    script: &str,
+) -> Result<Vec<CheckedStatement>, RepositoryError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT sentence, says, claim_id FROM claims_check_statement
+             WHERE project_id = ?1 AND script = ?2 ORDER BY position",
+        )
+        .map_err(boxed)?;
+    let rows = statement
+        .query_map(params![project, script], |row| {
+            Ok((
+                row.get::<_, Option<i64>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(boxed)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(boxed)?;
+    rows.into_iter()
+        .map(|(sentence, says, claim)| {
+            Ok(CheckedStatement {
+                sentence: sentence
+                    .map(|sentence| usize::try_from(sentence).map_err(boxed))
+                    .transpose()?,
+                says,
+                claim: claim
+                    .map(|claim| uuid(&claim).map(ClaimId::from))
+                    .transpose()?,
+            })
+        })
+        .collect()
+}
+
 impl AdRepository for Database {
     fn angles(
         &self,
@@ -532,6 +572,128 @@ impl AdRepository for Database {
             &format!("{SELECT_BRIEF} WHERE product_id = ?1 ORDER BY project_id"),
             &product.to_string(),
         )
+    }
+
+    fn claims_check(
+        &self,
+        project: VideoProjectId,
+        of: CheckedScript,
+    ) -> Result<Option<ClaimsCheck>, RepositoryError> {
+        let conn = self.conn();
+        let id = project.to_string();
+        let row = conn
+            .query_row(
+                "SELECT text, brief_at, checked_at, model, job_id, notes FROM claims_check
+                 WHERE project_id = ?1 AND script = ?2",
+                params![id, of.code()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(boxed)?;
+        let Some((text, brief_at, checked_at, model, job, notes)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(ClaimsCheck {
+            project,
+            of,
+            text,
+            brief_at: from_unix_millis(brief_at),
+            notes,
+            statements: check_statements(&conn, &id, of.code())?,
+            checked_at: from_unix_millis(checked_at),
+            model,
+            job: job.map(|job| uuid(&job).map(JobId::from)).transpose()?,
+        }))
+    }
+
+    fn save_claims_check(&self, check: &ClaimsCheck) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let (project, script) = (check.project.to_string(), check.of.code());
+        // The statements go with the check they belonged to.
+        tx.execute(
+            "DELETE FROM claims_check WHERE project_id = ?1 AND script = ?2",
+            params![project, script],
+        )
+        .map_err(boxed)?;
+        tx.execute(
+            "INSERT INTO claims_check
+                (project_id, script, text, brief_at, checked_at, model, job_id, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                project,
+                script,
+                check.text,
+                to_unix_millis(check.brief_at),
+                to_unix_millis(check.checked_at),
+                check.model,
+                check.job.map(|job| job.to_string()),
+                check.notes,
+            ],
+        )
+        .map_err(boxed)?;
+        for (index, statement) in check.statements.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO claims_check_statement
+                    (project_id, script, position, sentence, says, claim_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    project,
+                    script,
+                    position(index),
+                    statement.sentence.map(position),
+                    statement.says,
+                    statement.claim.map(|claim| claim.to_string()),
+                ],
+            )
+            .map_err(boxed)?;
+        }
+        tx.commit().map_err(boxed)
+    }
+
+    fn drop_claims_check(
+        &self,
+        project: VideoProjectId,
+        of: CheckedScript,
+    ) -> Result<(), RepositoryError> {
+        self.conn()
+            .execute(
+                "DELETE FROM claims_check WHERE project_id = ?1 AND script = ?2",
+                params![project.to_string(), of.code()],
+            )
+            .map_err(boxed)?;
+        Ok(())
+    }
+
+    fn accept_claims_check(&self, project: VideoProjectId) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        let project = project.to_string();
+        tx.execute(
+            "DELETE FROM claims_check WHERE project_id = ?1 AND script = ?2",
+            params![project, CheckedScript::Current.code()],
+        )
+        .map_err(boxed)?;
+        // Its statements follow it (ON UPDATE CASCADE).
+        tx.execute(
+            "UPDATE claims_check SET script = ?2 WHERE project_id = ?1 AND script = ?3",
+            params![
+                project,
+                CheckedScript::Current.code(),
+                CheckedScript::Pending.code()
+            ],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)
     }
 }
 
@@ -940,5 +1102,129 @@ mod tests {
         );
         assert_eq!(stored.text().link(), "@lumen");
         assert!(stored.is_confirmed());
+    }
+
+    fn check(s: &Setup, project: VideoProjectId, of: CheckedScript, text: &str) -> ClaimsCheck {
+        ClaimsCheck {
+            project,
+            of,
+            text: text.to_owned(),
+            brief_at: time(1_800_000_800),
+            notes: "Offer: not set\nCall to action: Order yours today".into(),
+            statements: vec![
+                CheckedStatement {
+                    sentence: Some(1),
+                    says: "The lamp folds flat".into(),
+                    claim: Some(s.claims[0]),
+                },
+                CheckedStatement {
+                    sentence: None,
+                    says: "It is the brightest lamp ever made".into(),
+                    claim: None,
+                },
+            ],
+            checked_at: time(1_800_000_900),
+            model: "claude-test".into(),
+            job: Some(JobId::new()),
+        }
+    }
+
+    #[test]
+    fn a_claims_check_is_saved_whole_and_replaced_whole() {
+        let s = setup();
+        let (_, start, _) = started(&s, "A desk you can see");
+        let project = start.project.id;
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Current).unwrap(),
+            None
+        );
+
+        let first = check(&s, project, CheckedScript::Current, "It folds flat.");
+        s.db.save_claims_check(&first).unwrap();
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Current).unwrap(),
+            Some(first)
+        );
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Pending).unwrap(),
+            None
+        );
+
+        let mut again = check(&s, project, CheckedScript::Current, "It folds.");
+        again.statements.truncate(1);
+        again.job = None;
+        s.db.save_claims_check(&again).unwrap();
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Current).unwrap(),
+            Some(again)
+        );
+
+        s.db.drop_claims_check(project, CheckedScript::Current)
+            .unwrap();
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Current).unwrap(),
+            None
+        );
+        let left: i64 =
+            s.db.conn()
+                .query_row("SELECT COUNT(*) FROM claims_check_statement", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn accepting_gives_the_new_scripts_check_to_the_current_script() {
+        let s = setup();
+        let (_, start, _) = started(&s, "A desk you can see");
+        let project = start.project.id;
+        let old = check(&s, project, CheckedScript::Current, "The old script.");
+        let new = check(&s, project, CheckedScript::Pending, "The new script.");
+        s.db.save_claims_check(&old).unwrap();
+        s.db.save_claims_check(&new).unwrap();
+
+        s.db.accept_claims_check(project).unwrap();
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Current).unwrap(),
+            Some(new.accepted())
+        );
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Pending).unwrap(),
+            None
+        );
+
+        // With no check of the new script, the old script's still goes:
+        // it read another text.
+        s.db.accept_claims_check(project).unwrap();
+        assert_eq!(
+            s.db.claims_check(project, CheckedScript::Current).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_projects_checks_go_with_it() {
+        let s = setup();
+        let (_, start, _) = started(&s, "A desk you can see");
+        let project = start.project.id;
+        s.db.save_claims_check(&check(&s, project, CheckedScript::Current, "It folds."))
+            .unwrap();
+        s.db.conn()
+            .execute(
+                "DELETE FROM video_project WHERE id = ?1",
+                [project.to_string()],
+            )
+            .unwrap();
+        let left: i64 =
+            s.db.conn()
+                .query_row(
+                    "SELECT (SELECT COUNT(*) FROM claims_check)
+                      + (SELECT COUNT(*) FROM claims_check_statement)",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+        assert_eq!(left, 0);
     }
 }

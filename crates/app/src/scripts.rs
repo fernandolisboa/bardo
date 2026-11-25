@@ -1,7 +1,9 @@
 //! Script use cases (PRD stories 29-30, 43): Claude writes a video
 //! project's script from the script template, filled with the channel,
 //! niche, theme and the channel's default persona; the user edits it
-//! freely. Regenerating puts the new script up for review next to the
+//! freely. An ad project's script is written from the ad script template
+//! instead, filled with its product, its angle and its brief, and the job
+//! that writes it checks its claims (`claims_check`). Regenerating puts the new script up for review next to the
 //! current one, which stays until the user accepts the new one. Every generation records its provenance.
 //!
 //! Generating calls Claude, so it runs as a job. The template is rendered
@@ -9,19 +11,23 @@
 //! the template is edited while it runs.
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use bardo_domain::{
-    ApiKey, Channel, ChannelId, CostPurpose, GeneratedScript, Generation, GenerationId, Job,
-    JobFailure, JobFailureKind, JobId, JobKind, Money, NoPendingScript, ProfileId, Provider,
-    RepositoryError, Script, ScriptFieldError, ScriptRepository, ScriptText, SecretStore, Stop,
-    TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, UiLanguage,
-    VideoProject, VideoProjectId,
+    AdRepository, ApiKey, Channel, ChannelId, CheckedScript, CostPurpose, GeneratedScript,
+    Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Money,
+    NoPendingScript, ProfileId, Provider, RepositoryError, Script, ScriptFieldError,
+    ScriptRepository, ScriptText, SecretStore, Stop, TemplateKind, TemplateUsed, TemplateValues,
+    TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat, TextGenerator,
+    TextRequest, UiLanguage, VideoProject, VideoProjectId,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::ads::with_ad_rules;
+use crate::ad_briefs::{ScriptBrief, unset_ad_values};
+use crate::ads::{as_data, with_ad_rules, with_concept_rules};
+use crate::claims_check::{
+    CheckBrief, ScriptClaims, check_call_ahead, from_millis, millis, settle_checks,
+};
 use crate::costs::{BudgetConsent, CostBook, PaidCall, PlannedCall, SpendEstimate};
 use crate::jobs::{JobContext, JobHandler, Work};
 use crate::{Bardo, Catalog, KeyState, TemplateError, Text};
@@ -67,6 +73,9 @@ pub enum ScriptError {
     /// the call to action.
     #[error("the brief is incomplete")]
     BriefNotReady,
+    /// Only an ad project's script is checked against claims.
+    #[error("the project is not an ad")]
+    NotAnAd,
     #[error(transparent)]
     Template(#[from] TemplateError),
     #[error(transparent)]
@@ -88,6 +97,7 @@ impl ScriptError {
             ScriptError::CapInvalid => Text::SpendCapInvalid,
             ScriptError::BriefNotConfirmed => Text::ScriptBriefFirst,
             ScriptError::BriefNotReady => Text::ScriptBriefNotReady,
+            ScriptError::NotAnAd => Text::BriefNotAnAd,
             ScriptError::Template(error) => error.message(),
             ScriptError::Repository(_) => Text::ScriptNotSaved,
         }
@@ -107,7 +117,8 @@ pub struct ScriptView {
     pub project: VideoProject,
     /// `None` until the first script is generated.
     pub script: Option<Script>,
-    /// The project's latest script job.
+    /// The project's latest script job: writing it, or checking its
+    /// claims.
     pub job: Option<Job>,
     /// The template version the next generation uses.
     pub template: TemplateVersion,
@@ -118,6 +129,9 @@ pub struct ScriptView {
     /// Where the brief stands, for an ad project: its script is written
     /// once the brief is confirmed, and reads it.
     pub brief: Option<crate::BriefStanding>,
+    /// The claims checks of an ad project's scripts; `None` for any other
+    /// project, and before a script is written.
+    pub claims: Option<ScriptClaims>,
 }
 
 /// The script job's payload: the rendered prompt and where it came from.
@@ -133,6 +147,10 @@ struct ScriptPayload {
     /// the script this job writes, however late the job runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     brief_at: Option<u64>,
+    /// For an ad: what the claims check of the script reads of the brief,
+    /// as it was when the prompt was rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    check: Option<CheckBrief>,
 }
 
 impl ScriptPayload {
@@ -169,13 +187,15 @@ fn unexpected(error: impl std::fmt::Display) -> JobFailure {
 pub(crate) struct ScriptHandler {
     pub(crate) owner: ProfileId,
     pub(crate) scripts: Arc<dyn ScriptRepository>,
+    /// Where an ad script's claims check is kept.
+    pub(crate) ads: Arc<dyn AdRepository>,
     pub(crate) text: Arc<dyn TextGenerator>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) costs: CostBook,
 }
 
 impl ScriptHandler {
-    fn key(&self) -> Result<ApiKey, JobFailure> {
+    pub(crate) fn key(&self) -> Result<ApiKey, JobFailure> {
         self.secrets
             .get(self.owner, Provider::Claude)
             .map_err(|e| JobFailure::unexpected(format!("could not read the key: {e}")))?
@@ -185,27 +205,120 @@ impl ScriptHandler {
 
 impl JobHandler for ScriptHandler {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
-        self.generate(payload, cx.id(), &cx.stop())
+        if cx.kind() == JobKind::ClaimsCheck {
+            return self.check_on_request(payload, cx.id(), &cx.stop());
+        }
+        let (id, stop) = (cx.id(), cx.stop());
+        self.generate(payload, id, &stop, cx)
+    }
+}
+
+/// The script `job` wrote in an earlier attempt, while it is still one of
+/// the project's: the new one waiting for review, or the one the current
+/// script came from.
+fn written_by(
+    scripts: &dyn ScriptRepository,
+    project: VideoProjectId,
+    job: JobId,
+) -> Result<Option<ScriptText>, RepositoryError> {
+    let by_job = |generated: &GeneratedScript| generated.generation().job == Some(job);
+    Ok(scripts.script(project)?.and_then(|script| {
+        if let Some(pending) = script.pending().filter(|pending| by_job(pending)) {
+            Some(pending.text().clone())
+        } else if by_job(script.source()) {
+            Some(script.source().text().clone())
+        } else {
+            None
+        }
+    }))
+}
+
+/// What a script job's checkpoint reads once its script is saved.
+const WRITTEN: &str = "written";
+
+/// Where a script job notes that it wrote its script: the job's
+/// checkpoint, or a plain flag for a handler run outside the queue. The
+/// note outlives the script, which the user may put aside while the job
+/// waits to run again.
+pub(crate) trait WroteScript {
+    fn wrote(&self) -> bool;
+    fn note_written(&mut self);
+}
+
+impl WroteScript for JobContext {
+    fn wrote(&self) -> bool {
+        self.checkpoint() == Some(WRITTEN)
+    }
+
+    fn note_written(&mut self) {
+        if let Err(error) =
+            self.save_checkpoint(WRITTEN, bardo_domain::Progress::from_permille(500))
+        {
+            tracing::warn!(job = %self.id(), "could not note that a job wrote its script: {error}");
+        }
+    }
+}
+
+impl WroteScript for bool {
+    fn wrote(&self) -> bool {
+        *self
+    }
+
+    fn note_written(&mut self) {
+        *self = true;
     }
 }
 
 impl ScriptHandler {
-    /// Generates the script `job` asked for and saves it.
-    fn generate(&self, payload: &str, job: JobId, stop: &Stop) -> Result<(), JobFailure> {
+    /// Generates the script `job` asked for and saves it; an ad's script
+    /// is then checked against the claims of its brief.
+    fn generate(
+        &self,
+        payload: &str,
+        job: JobId,
+        stop: &Stop,
+        noted: &mut dyn WroteScript,
+    ) -> Result<(), JobFailure> {
         let payload = ScriptPayload::parse(payload)?;
         let project = payload.project()?;
+        let brief_at = payload.brief_at.map(from_millis);
+        let check = payload.check.clone();
         // An earlier attempt of this job may have saved its script and
-        // stopped before the queue recorded it as done.
-        let saved = self.scripts.script(project).map_err(unexpected)?;
-        if saved.as_ref().is_some_and(|script| {
-            script.source().generation().job == Some(job)
-                || script
-                    .pending()
-                    .is_some_and(|p| p.generation().job == Some(job))
-        }) {
-            return Ok(());
+        // stopped before its check, or before the queue recorded it as
+        // done.
+        let text = match written_by(&*self.scripts, project, job).map_err(unexpected)? {
+            Some(text) => text,
+            // It wrote one, and the user put it aside since: the job
+            // neither writes another nor checks one nobody kept.
+            None if noted.wrote() => return Ok(()),
+            None => {
+                let text = self.write(payload, project, job, stop)?;
+                noted.note_written();
+                text
+            }
+        };
+        match check {
+            Some(check) => self.check_claims(
+                project,
+                &text,
+                &check,
+                brief_at.unwrap_or_else(SystemTime::now),
+                job,
+                stop,
+            ),
+            None => Ok(()),
         }
+    }
 
+    /// Has Claude write the script and saves it: the project's first, or
+    /// a new one beside the current. Returns its text.
+    fn write(
+        &self,
+        payload: ScriptPayload,
+        project: VideoProjectId,
+        job: JobId,
+        stop: &Stop,
+    ) -> Result<ScriptText, JobFailure> {
         let key = self.key()?;
         let request = TextRequest {
             effort: TextEffort::Careful,
@@ -261,6 +374,7 @@ impl ScriptHandler {
             )
         })?;
 
+        let text = generated.text().clone();
         // Read again: the user may have edited the script meanwhile, and
         // their text must survive.
         let script = match self.scripts.script(project).map_err(unexpected)? {
@@ -270,7 +384,10 @@ impl ScriptHandler {
             }
             None => Script::first(generated, now),
         };
-        self.scripts.save_script(&script).map_err(unexpected)
+        self.scripts.save_script(&script).map_err(unexpected)?;
+        // The check of a new script this one replaced is no script's now.
+        settle_checks(&*self.ads, project, &script).map_err(unexpected)?;
+        Ok(text)
     }
 }
 
@@ -298,14 +415,95 @@ impl Bardo {
     }
 
     /// The project's latest script job; for a version, adapting it again
-    /// counts too.
+    /// counts too, and for an ad, checking its claims.
     fn latest_script_job(&self, project: VideoProjectId) -> Option<Job> {
         let id = project.to_string();
         self.jobs().into_iter().rev().find(|job| {
             (job.kind() == JobKind::ScriptGeneration
                 && ScriptPayload::parse(job.payload()).is_ok_and(|p| p.project == id))
                 || crate::localization::adapts_again(job, &id)
+                || Self::checks_claims_of(job, &id)
         })
+    }
+
+    /// What a failed or cancelled script job, or claims check, still pays
+    /// for when it is run again: the script it has yet to write and the
+    /// check it has yet to make. `None` when `job` is neither, or nothing
+    /// of it is left to pay for.
+    pub(crate) fn script_calls_left(
+        &self,
+        job: &Job,
+    ) -> Option<(VideoProjectId, Vec<PlannedCall>)> {
+        if job.kind() == JobKind::ClaimsCheck {
+            return self.check_call_left(job);
+        }
+        if job.kind() != JobKind::ScriptGeneration {
+            return None;
+        }
+        let payload = ScriptPayload::parse(job.payload()).ok()?;
+        let project = payload.project().ok()?;
+        let calls = match written_by(&*self.scripts, project, job.id()).ok()? {
+            Some(text) => {
+                let check = payload.check.as_ref()?;
+                if !self.check_left(project, &text, job.id()) {
+                    return None;
+                }
+                vec![check.call(&text)]
+            }
+            // It wrote its script, which was put aside since.
+            None if job.checkpoint() == Some(WRITTEN) => return None,
+            None => {
+                let mut calls = vec![
+                    PlannedCall::new(Provider::Claude, CostPurpose::Script, 1)
+                        .with_prompt(&payload.instructions, &payload.prompt),
+                ];
+                if payload.check.is_some() {
+                    calls.push(check_call_ahead());
+                }
+                calls
+            }
+        };
+        Some((project, calls))
+    }
+
+    /// The template a project's script is written from: the ad script
+    /// template for an ad, the script template for every other project.
+    fn script_template(&self, project: &VideoProject) -> Result<TemplateVersion, ScriptError> {
+        Ok(self.current_template(if project.is_ad() {
+            TemplateKind::AdScript
+        } else {
+            TemplateKind::Script
+        })?)
+    }
+
+    /// The facts an ad script template is filled with: the channel's and
+    /// the video's, as any script's, and the ad's own from `brief`. What
+    /// the user typed, a page said or a model wrote goes in as data.
+    fn ad_script_values(
+        &self,
+        project: &VideoProject,
+        brief: Option<&ScriptBrief>,
+    ) -> Result<TemplateValues, ScriptError> {
+        let mut values = self.script_values(project)?;
+        for typed in [
+            TemplateVariable::ChannelName,
+            TemplateVariable::ChannelNiche,
+            TemplateVariable::Persona,
+            TemplateVariable::ThemeTitle,
+            TemplateVariable::ThemeAngle,
+        ] {
+            if let Some(value) = values.get_mut(&typed) {
+                *value = as_data(value);
+            }
+        }
+        values.extend(match brief {
+            Some(brief) => {
+                let english = Catalog::load(UiLanguage::EnUs);
+                brief.values(&english.get(Text::ProductKindName(brief.product.brief.kind())))
+            }
+            None => unset_ad_values(),
+        });
+        Ok(values)
     }
 
     /// The facts a script template is filled with, in English as providers
@@ -389,17 +587,25 @@ impl Bardo {
     pub fn script(&self, project: VideoProjectId) -> Result<ScriptView, ScriptError> {
         let project = self.own_project(project)?;
         // A version is adapted again from what it carried.
-        let (template, estimate) = match self.localizations.localization(project.id)? {
-            Some(localization) => self.adaptation_estimate(&project, &localization)?,
+        let (template, estimate, brief) = match self.localizations.localization(project.id)? {
+            Some(localization) => {
+                let (template, estimate) = self.adaptation_estimate(&project, &localization)?;
+                (template, estimate, None)
+            }
             None => {
-                let template = self.current_template(TemplateKind::Script)?;
-                let (rendered, _) = self.render_script(&project, &template)?;
-                let estimate = self.estimate(&[script_call(&rendered)])?;
-                (template, estimate)
+                let template = self.script_template(&project)?;
+                let (rendered, brief) = self.render_script(&project, &template)?;
+                // An ad's script is checked by the job that writes it.
+                let mut calls = vec![script_call(&rendered)];
+                if project.is_ad() {
+                    calls.push(check_call_ahead());
+                }
+                (template, self.estimate(&calls)?, brief)
             }
         };
         let script = self.scripts.script(project.id)?;
         Ok(ScriptView {
+            claims: self.script_claims(&project, script.as_ref(), brief.as_ref())?,
             brief: self.brief_standing(&project, script.as_ref())?,
             script,
             job: self.latest_script_job(project.id),
@@ -410,28 +616,42 @@ impl Bardo {
         })
     }
 
-    /// The script template filled with the project's facts. An ad's
-    /// request also carries its brief after the template's prompt and the
-    /// rules of every ad after the template's instructions, whatever the
-    /// template says; with it, when that brief last changed.
-    fn render_script(
+    /// The project's script template (`script_template`) filled with its
+    /// facts. An ad's request carries the rules of every ad after the
+    /// template's instructions, and those of a concept for a product that
+    /// is one, whatever the template says; with it, what it read of the
+    /// ad's brief.
+    pub(crate) fn render_script(
         &self,
         project: &VideoProject,
         template: &TemplateVersion,
-    ) -> Result<(bardo_domain::RenderedPrompt, Option<SystemTime>), ScriptError> {
-        let mut rendered = template
-            .body
-            .render(&self.script_values(project)?)
-            .map_err(|missing| {
-                // Every script variable has a value above.
-                ScriptError::Repository(RepositoryError(Box::new(missing)))
-            })?;
-        let Some((brief, changed_at)) = self.script_brief(project)? else {
-            return Ok((rendered, None));
+    ) -> Result<(bardo_domain::RenderedPrompt, Option<ScriptBrief>), ScriptError> {
+        let brief = self.script_brief(project)?;
+        let values = if project.is_ad() {
+            self.ad_script_values(project, brief.as_ref())?
+        } else {
+            self.script_values(project)?
         };
-        rendered.prompt = format!("{}\n\n{brief}", rendered.prompt.trim_end());
-        rendered.instructions = with_ad_rules(&rendered.instructions);
-        Ok((rendered, Some(changed_at)))
+        let mut rendered = template.body.render(&values).map_err(|missing| {
+            // Every variable of the kind has a value above.
+            ScriptError::Repository(RepositoryError(Box::new(missing)))
+        })?;
+        if project.is_ad() {
+            rendered.instructions = with_ad_rules(&rendered.instructions);
+            if brief.as_ref().is_some_and(ScriptBrief::is_concept) {
+                rendered.instructions = with_concept_rules(&rendered.instructions);
+            }
+            // The rules speak of the numbered claims: an edited template
+            // that left them out still sends them.
+            let fixed = brief
+                .as_ref()
+                .map(|brief| brief.fixed_for(&template.body))
+                .unwrap_or_default();
+            if !fixed.is_empty() {
+                rendered.prompt = format!("{}\n\n{fixed}", rendered.prompt);
+            }
+        }
+        Ok((rendered, brief))
     }
 
     /// When the request that wrote `script` read its project's brief: the
@@ -443,14 +663,14 @@ impl Bardo {
             .and_then(|id| self.jobs().into_iter().find(|job| job.id() == id))
             .and_then(|job| ScriptPayload::parse(job.payload()).ok())
             .and_then(|payload| payload.brief_at)
-            .map_or(generation.generated_at, |millis| {
-                SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
-            })
+            .map_or(generation.generated_at, from_millis)
     }
 
-    /// Starts a job in which Claude writes the project's script from the
-    /// current script template. With a script already there, the new one
-    /// waits for review. Past Claude's budget it needs `consent`.
+    /// Starts a job in which Claude writes the project's script from its
+    /// current template: the ad script template for an ad, whose script
+    /// the job then checks against the brief's claims, and the script
+    /// template for every other project. With a script already there, the
+    /// new one waits for review. Past Claude's budget it needs `consent`.
     pub fn generate_script(
         &self,
         project: VideoProjectId,
@@ -476,11 +696,13 @@ impl Bardo {
                 return Err(ScriptError::BriefNotReady);
             }
         }
-        let template = self.current_template(TemplateKind::Script)?;
-        let (rendered, brief_at) = self.render_script(&project, &template)?;
-        if let Err(estimate) =
-            self.check_video_budget(project.id, &[script_call(&rendered)], consent)?
-        {
+        let template = self.script_template(&project)?;
+        let (rendered, brief) = self.render_script(&project, &template)?;
+        let mut calls = vec![script_call(&rendered)];
+        if brief.is_some() {
+            calls.push(check_call_ahead());
+        }
+        if let Err(estimate) = self.check_video_budget(project.id, &calls, consent)? {
             return Err(ScriptError::OverBudget(estimate));
         }
         let payload = ScriptPayload {
@@ -489,10 +711,8 @@ impl Bardo {
             template_number: template.number,
             instructions: rendered.instructions,
             prompt: rendered.prompt,
-            brief_at: brief_at.map(|at| {
-                at.duration_since(SystemTime::UNIX_EPOCH)
-                    .map_or(0, |since| since.as_millis() as u64)
-            }),
+            brief_at: brief.as_ref().map(|brief| millis(brief.brief.changed_at())),
+            check: brief.as_ref().map(CheckBrief::of),
         };
         let job = Job::new(
             self.profile.id,
@@ -519,19 +739,33 @@ impl Bardo {
         Ok(script)
     }
 
-    /// Makes the regenerated script the current one.
+    /// Makes the regenerated script the current one. Its claims check
+    /// comes with it, and the check of the script it replaces goes.
     pub fn accept_script(&self, project: VideoProjectId) -> Result<Script, ScriptError> {
         let mut script = self.own_script(project)?;
         script.accept(SystemTime::now())?;
         self.scripts.save_script(&script)?;
+        settle_checks(&*self.ads, project, &script)?;
+        // A new script accepted without a check of its own does not keep
+        // the check of the script it replaced.
+        if self
+            .ads
+            .claims_check(project, CheckedScript::Current)?
+            .is_some_and(|check| !check.reads(script.text()))
+        {
+            self.ads
+                .drop_claims_check(project, CheckedScript::Current)?;
+        }
         Ok(script)
     }
 
-    /// Drops the regenerated script and keeps the current one.
+    /// Drops the regenerated script and keeps the current one, with its
+    /// claims check.
     pub fn reject_script(&self, project: VideoProjectId) -> Result<Script, ScriptError> {
         let mut script = self.own_script(project)?;
         script.reject(SystemTime::now())?;
         self.scripts.save_script(&script)?;
+        settle_checks(&*self.ads, project, &script)?;
         Ok(script)
     }
 }
@@ -1060,6 +1294,7 @@ mod tests {
         let handler = ScriptHandler {
             owner: app.profile().id,
             scripts: Arc::clone(&first.db) as _,
+            ads: Arc::clone(&first.db) as _,
             text: Arc::clone(&first.text) as _,
             secrets: Arc::clone(&first.secrets) as _,
             costs: crate::costs::CostBook {
@@ -1069,7 +1304,9 @@ mod tests {
                 in_flight: std::sync::Arc::default(),
             },
         };
-        handler.generate(&payload, id, &Stop::never()).unwrap();
+        handler
+            .generate(&payload, id, &Stop::never(), &mut false)
+            .unwrap();
         assert_eq!(first.text.requests().len(), 1, "Claude is asked once");
         assert_eq!(script(&app, &project), saved);
     }

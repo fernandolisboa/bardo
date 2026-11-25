@@ -758,7 +758,7 @@ fn numbered_claims(claims: &[&Claim]) -> String {
 
 /// The product as an ad's planner reads it: its name, kind, category and
 /// what it is.
-fn describe_product(product: &Product, sheet: &ProductSheet, kind: &str) -> String {
+pub(crate) fn describe_product(product: &Product, sheet: &ProductSheet, kind: &str) -> String {
     let brief = &product.brief;
     let text = sheet.text();
     let what = if text.summary.trim().is_empty() {

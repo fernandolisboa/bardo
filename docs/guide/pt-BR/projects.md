@@ -30,9 +30,9 @@ O formato vale para o que for feito depois: o tamanho do próximo roteiro, o for
 <a id="length"></a>
 ## Quanto tempo dura
 
-**Duração**, ao lado do formato, diz quanto dura o roteiro deste vídeo. **Do formato** mantém a duração do formato: 45 a 60 segundos num Short, 8 a 10 minutos num vídeo longo. Escolha **30 segundos**, **1 minuto** ou **3 minutos** só para este vídeo. Toda duração fica abaixo de 3:00, o máximo que Shorts do YouTube e Reels do Instagram aceitam, então um Short de 3 minutos continua sendo publicado como Short (o roteiro mira uns 2:40 para sobrar folga); o X aceita só 2:20, então um vídeo de 3 minutos fica bloqueado para o X; um vídeo longo de 3 minutos é um vídeo 16:9 curto para o YouTube.
+**Duração**, ao lado do formato, diz quanto dura o roteiro deste vídeo. **Do formato** mantém a duração do formato: 45 a 60 segundos num Short, 8 a 10 minutos num vídeo longo. Escolha **15 segundos**, **30 segundos**, **1 minuto** ou **3 minutos** só para este vídeo. Quinze segundos são de 30 a 38 palavras, e toda rede aceita. Toda duração fica abaixo de 3:00, o máximo que Shorts do YouTube e Reels do Instagram aceitam, então um Short de 3 minutos continua sendo publicado como Short (o roteiro mira uns 2:40 para sobrar folga); o X aceita só 2:20, então um vídeo de 3 minutos fica bloqueado para o X; um vídeo longo de 3 minutos é um vídeo 16:9 curto para o YouTube.
 
-A duração define só quanto dura o próximo roteiro e a [estimativa do vídeo inteiro](#mode) enquanto não existe roteiro; o formato continua definindo a forma das imagens, o corte e o [preset de render](render.md#targets). Um roteiro já escrito mantém a duração dele: escreva de novo depois de trocar. A narração dura o que o roteiro leva para ser lido, então confira a duração dela na etapa Narração antes de seguir.
+A duração define só quanto dura o próximo roteiro e a [estimativa do vídeo inteiro](#mode) enquanto não existe roteiro; o formato continua definindo a forma das imagens, o corte e o [preset de render](render.md#targets). Um roteiro já escrito mantém a duração dele: escreva de novo depois de trocar. O roteiro de um [anúncio](brief.md) mira 2 segundos a menos que a duração, para o vídeo terminar no tempo. A narração dura o que o roteiro leva para ser lido, então confira a duração dela na etapa Narração antes de seguir.
 
 <a id="style"></a>
 ## Como é desenhado

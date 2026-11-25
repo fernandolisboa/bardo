@@ -36,7 +36,7 @@ As cópias são do vídeo: editar ou rejeitar uma afirmação no produto nunca m
 
 **Oferta**, **Chamada para ação** e **Link ou @** começam iguais aos do produto e passam a ser deste vídeo: mudar aqui não muda o produto nem outro vídeo. A oferta tem até 300 caracteres, a chamada para ação até 120 e o link ou @ até 500; o link fica como você digita, então um `@perfil` funciona. **Salvar as palavras** guarda o que você escreveu. A chamada para ação é obrigatória, porque é o que se pede a quem assiste.
 
-**Duração** é quanto tempo o anúncio tem: 30 segundos, 1 minuto ou 3 minutos. Um anúncio começa com 30 segundos, e a escolha é a mesma de [Duração](projects.md#length) no topo do projeto.
+**Duração** é quanto tempo o anúncio tem: 15 segundos, 30 segundos, 1 minuto ou 3 minutos. Um anúncio começa com 30 segundos, e a escolha é a mesma de [Duração](projects.md#length) no topo do projeto. O roteiro mira 2 segundos a menos ([Roteiro](script.md#write)).
 
 <a id="confirm"></a>
 ## Confirmar o briefing

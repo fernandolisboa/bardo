@@ -176,6 +176,10 @@ pub struct NarrationView {
     pub persona: Option<Persona>,
     /// What reading the current script would cost; `None` without one.
     pub estimate: Option<SpendEstimate>,
+    /// For an ad: what its script states that no claim of its brief
+    /// backs, or that the script was not checked as it reads now. Shown
+    /// beside the estimate; it holds nothing back.
+    pub claims: Option<crate::NarrationClaims>,
     /// The capture's takes' analyses, in order; empty without a capture.
     pub analyses: Vec<crate::TakeAnalysisView>,
     /// The capture's takes' control videos, in order; empty without a
@@ -755,6 +759,7 @@ impl Bardo {
             performed,
             capture,
             estimate,
+            claims: self.narration_claims(&project, script.as_ref())?,
             script: script.map(|script| script.text().clone()),
             narration,
             stale,

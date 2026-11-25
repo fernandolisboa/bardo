@@ -157,6 +157,11 @@ pub enum JobKind {
     /// Has the decision engine rank the ad angles of a product and a
     /// channel that have no ranking, e.g. after an edit.
     AdAngleRanking,
+    /// Has Claude check an ad project's script against the claims of its
+    /// Brief stage, on the user's request after an edit
+    /// (docs/spec/marketing-videos.md). A generated ad script is checked
+    /// by the job that wrote it.
+    ClaimsCheck,
     /// Writes a video project's export package: one folder per chosen
     /// network with its rendered file and metadata. Networks already
     /// written are not written again on resume.
@@ -185,7 +190,7 @@ pub enum JobKind {
 }
 
 impl JobKind {
-    pub const ALL: [JobKind; 37] = [
+    pub const ALL: [JobKind; 38] = [
         JobKind::Countdown,
         JobKind::NicheResearch,
         JobKind::ThemeSuggestion,
@@ -223,6 +228,7 @@ impl JobKind {
         JobKind::ProductResearch,
         JobKind::AdAngleSuggestion,
         JobKind::AdAngleRanking,
+        JobKind::ClaimsCheck,
     ];
 
     /// Stable name stored in the database.
@@ -265,6 +271,7 @@ impl JobKind {
             JobKind::ProductResearch => "product_research",
             JobKind::AdAngleSuggestion => "ad_angle_suggestion",
             JobKind::AdAngleRanking => "ad_angle_ranking",
+            JobKind::ClaimsCheck => "claims_check",
         }
     }
 }

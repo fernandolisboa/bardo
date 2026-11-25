@@ -15,7 +15,7 @@ Os modelos são os prompts que o Bardo envia à IA. Mude um para mudar como o Ba
 
 Há um modelo para cada tipo de geração:
 
-- **Roteiro**: o roteiro do vídeo ([Roteiro](script.md)).
+- **Roteiro**: o roteiro do vídeo ([Roteiro](script.md)). O roteiro de um anúncio vem do modelo Roteiro de anúncio.
 - **Prompts de imagem**: o plano de cenas e o prompt de imagem de cada cena ([Cenas e imagens](scenes.md#plan)).
 - **Prompt de música**: o prompt para a sua ferramenta de música ([Roteiro](script.md#music)).
 - **Metadados**: o título, a descrição e as tags de cada rede, na etapa Publicação.
@@ -25,6 +25,7 @@ Há um modelo para cada tipo de geração:
 - **Prompt de aparência**: o prompt de imagem da aparência desenhada de uma persona, a partir da sua descrição ([A aparência](personas.md#look)). Ele lê `{{persona}}` e `{{look_description}}`, e precisa continuar recusando pessoas reais.
 - **Prompt da tomada**: o prompt que um modelo de tomada recebe para uma tomada de uma captura ([O prompt da tomada](capture.md#take-prompt)). Ele lê `{{look}}`, `{{set}}`, `{{words}}` e `{{instruction}}`: o que o modelo faz com o modo da tomada, que o prompt deve manter.
 - **Ângulos de anúncio**: os ângulos de anúncio propostos para um produto em um canal ([Ângulos de anúncio](products.md#angles)). Além dos dados do canal, ele lê `{{product}}`, `{{product_audience}}`, `{{product_claims}}` (as afirmações confirmadas, numeradas), `{{product_notes}}`, `{{ad_frameworks}}`, `{{angles_to_avoid}}` e `{{angle_count}}`. Depois das instruções o Bardo sempre acrescenta as regras de todo anúncio, que nenhuma edição tira: dizer só o que as afirmações numeradas dizem; não inventar depoimento, avaliação, nota, número de clientes, prêmio ou menção na imprensa; não dizer prazo nem escassez que as notas do anunciante não dizem; nunca apresentar uma pessoa desenhada como cliente, médico ou especialista de verdade; nunca mostrar o logo de outra marca nem copiar o anúncio de um concorrente.
+- **Roteiro de anúncio**: o roteiro de um anúncio ([Roteiro](script.md#write)). Além dos dados do canal, do tema e de `{{target_length}}` (2 segundos a menos que a duração do anúncio), ele lê `{{product}}` (nome, tipo e resumo), `{{product_concept}}` (se o produto existe ou é um conceito), `{{ad_segment}}` (com quem o anúncio fala), `{{ad_hook}}` (as primeiras palavras do ângulo), `{{ad_framework}}` (o formato do anúncio e os passos dele), `{{brief_claims}}` (as afirmações da etapa Briefing, numeradas), `{{offer}}`, `{{call_to_action}}`, `{{must_say}}` e `{{never_say}}`. Depois das instruções dele, o Bardo sempre acrescenta as regras de todo anúncio, como nos ângulos de anúncio, e, num produto do tipo *ideia*, as regras de um conceito: falar dele como uma ideia, nunca dizer nem dar a entender que dá para comprar, encomendar, baixar ou usar hoje, e não dizer preço nem "compre agora", a menos que a sua própria chamada para ação diga. Uma edição que tire `{{brief_claims}}` ou `{{never_say}}` não deixa de enviá-los: o Bardo acrescenta as afirmações do briefing e o que nunca pode ser dito depois do prompt. A [checagem de afirmações](script.md#claims) que lê o roteiro depois não é um modelo.
 
 <a id="versions"></a>
 ## Versões

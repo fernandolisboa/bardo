@@ -119,7 +119,9 @@ pub(crate) fn built_in_handlers(
     handlers.insert(JobKind::NicheResearch, Arc::new(research));
     handlers.insert(JobKind::ThemeSuggestion, Arc::clone(&themes) as _);
     handlers.insert(JobKind::ThemeRanking, themes);
-    handlers.insert(JobKind::ScriptGeneration, Arc::new(scripts));
+    let scripts = Arc::new(scripts);
+    handlers.insert(JobKind::ScriptGeneration, Arc::clone(&scripts) as _);
+    handlers.insert(JobKind::ClaimsCheck, scripts);
     handlers.insert(JobKind::Localization, Arc::new(localizations));
     handlers.insert(JobKind::Narration, Arc::new(narrations));
     handlers.insert(JobKind::NarrationImport, Arc::new(imports));
@@ -271,7 +273,8 @@ impl Bardo {
     /// checkpoint. An image or clip job with scenes still to pay for asks
     /// first when those would reach a budget or pass the video's cap, or
     /// have no price (`JobActionError::OverBudget`); so does a product's
-    /// sheet job with a call still to pay for.
+    /// sheet job with a call still to pay for, and a script job or claims
+    /// check with its script or its check still to pay for.
     pub fn retry_job(&self, id: JobId) -> Result<(), JobActionError> {
         self.retry_job_with(id, BudgetConsent::Ask)
     }
@@ -359,7 +362,10 @@ impl Bardo {
         if let Some(calls) = self.ad_angle_calls_left(&job) {
             return Ok(self.check_budget(&calls, consent)?.err());
         }
-        let Some((project, calls)) = self.images_left(&job).or_else(|| self.clips_left(&job))
+        let Some((project, calls)) = self
+            .images_left(&job)
+            .or_else(|| self.clips_left(&job))
+            .or_else(|| self.script_calls_left(&job))
         else {
             return Ok(None);
         };

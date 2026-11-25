@@ -50,6 +50,22 @@ impl ScriptText {
     pub fn word_count(&self) -> usize {
         self.0.split_whitespace().count()
     }
+
+    /// Its sentences, in order, by the rules a narration's sentences
+    /// follow ([`crate::sentences`]): what a scene of the video can start
+    /// at, and what a check of the script names.
+    pub fn sentences(&self) -> Vec<&str> {
+        script_sentences(&self.0)
+    }
+}
+
+/// The sentences of `text`, as [`ScriptText::sentences`] splits them.
+pub(crate) fn script_sentences(text: &str) -> Vec<&str> {
+    let words = crate::spoken_words(text);
+    crate::scene::sentence_spans(text, &words)
+        .into_iter()
+        .map(|span| &text[words[span.start].start..words[span.end - 1].end])
+        .collect()
 }
 
 /// A generated script: the generation and its output as valid script text.
@@ -213,6 +229,26 @@ mod tests {
 
     fn at(secs: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000 + secs)
+    }
+
+    #[test]
+    fn a_script_splits_into_its_sentences_at_marks_and_line_breaks() {
+        let text = ScriptText::new(
+            "Still squinting at your desk? The lamp folds flat… \"Really,\" she said.\n\
+             A line with no mark\nOrder yours today.",
+        )
+        .unwrap();
+        assert_eq!(
+            text.sentences(),
+            [
+                "Still squinting at your desk?",
+                "The lamp folds flat…",
+                "\"Really,\" she said.",
+                "A line with no mark",
+                "Order yours today.",
+            ]
+        );
+        assert_eq!(ScriptText::new("One").unwrap().sentences(), ["One"]);
     }
 
     fn generated(project: VideoProjectId, output: &str) -> GeneratedScript {

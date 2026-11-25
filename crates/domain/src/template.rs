@@ -47,10 +47,14 @@ pub enum TemplateKind {
     /// The ad angles Claude proposes for a product and a channel, from the
     /// product sheet's confirmed claims and the ad frameworks (#275).
     AdAngles,
+    /// The narration script of an ad project, written from its brief:
+    /// the product, the approved angle and the claims the video uses
+    /// (#276). Every other project is written from `Script`.
+    AdScript,
 }
 
 impl TemplateKind {
-    pub const ALL: [TemplateKind; 10] = [
+    pub const ALL: [TemplateKind; 11] = [
         TemplateKind::Script,
         TemplateKind::ImagePrompt,
         TemplateKind::MusicPrompt,
@@ -61,6 +65,7 @@ impl TemplateKind {
         TemplateKind::LookPrompt,
         TemplateKind::TakePrompt,
         TemplateKind::AdAngles,
+        TemplateKind::AdScript,
     ];
 
     /// Stable name stored in the database.
@@ -76,6 +81,7 @@ impl TemplateKind {
             TemplateKind::LookPrompt => "look_prompt",
             TemplateKind::TakePrompt => "take_prompt",
             TemplateKind::AdAngles => "ad_angles",
+            TemplateKind::AdScript => "ad_script",
         }
     }
 
@@ -180,6 +186,26 @@ impl TemplateKind {
                 TemplateVariable::AnglesToAvoid,
                 TemplateVariable::AngleCount,
             ],
+            TemplateKind::AdScript => &[
+                TemplateVariable::ChannelName,
+                TemplateVariable::ChannelNiche,
+                TemplateVariable::Language,
+                TemplateVariable::Country,
+                TemplateVariable::Persona,
+                TemplateVariable::Product,
+                TemplateVariable::ProductConcept,
+                TemplateVariable::ThemeTitle,
+                TemplateVariable::ThemeAngle,
+                TemplateVariable::AdSegment,
+                TemplateVariable::AdHook,
+                TemplateVariable::AdFramework,
+                TemplateVariable::BriefClaims,
+                TemplateVariable::Offer,
+                TemplateVariable::CallToAction,
+                TemplateVariable::MustSay,
+                TemplateVariable::NeverSay,
+                TemplateVariable::TargetLength,
+            ],
         }
     }
 }
@@ -277,10 +303,30 @@ pub enum TemplateVariable {
     AnglesToAvoid,
     /// How many ad angles to propose.
     AngleCount,
+    /// Whether the product of an ad is a concept: an idea that does not
+    /// exist yet.
+    ProductConcept,
+    /// The part of the audience an ad speaks to, from its angle.
+    AdSegment,
+    /// A draft of an ad's first words, from its angle.
+    AdHook,
+    /// The framework an ad follows: its name and its steps in order.
+    AdFramework,
+    /// The claims an ad's video uses, numbered: the Brief stage's own
+    /// copies.
+    BriefClaims,
+    /// What the viewer of an ad gets, as its Brief stage has it.
+    Offer,
+    /// What the viewer of an ad is asked to do, in the user's words.
+    CallToAction,
+    /// What every ad for the product must say.
+    MustSay,
+    /// What no ad for the product may say.
+    NeverSay,
 }
 
 impl TemplateVariable {
-    pub const ALL: [TemplateVariable; 32] = [
+    pub const ALL: [TemplateVariable; 41] = [
         TemplateVariable::ChannelName,
         TemplateVariable::ChannelNiche,
         TemplateVariable::ChannelThemes,
@@ -313,6 +359,15 @@ impl TemplateVariable {
         TemplateVariable::AdFrameworks,
         TemplateVariable::AnglesToAvoid,
         TemplateVariable::AngleCount,
+        TemplateVariable::ProductConcept,
+        TemplateVariable::AdSegment,
+        TemplateVariable::AdHook,
+        TemplateVariable::AdFramework,
+        TemplateVariable::BriefClaims,
+        TemplateVariable::Offer,
+        TemplateVariable::CallToAction,
+        TemplateVariable::MustSay,
+        TemplateVariable::NeverSay,
     ];
 
     /// The name written between the braces.
@@ -350,6 +405,15 @@ impl TemplateVariable {
             TemplateVariable::AdFrameworks => "ad_frameworks",
             TemplateVariable::AnglesToAvoid => "angles_to_avoid",
             TemplateVariable::AngleCount => "angle_count",
+            TemplateVariable::ProductConcept => "product_concept",
+            TemplateVariable::AdSegment => "ad_segment",
+            TemplateVariable::AdHook => "ad_hook",
+            TemplateVariable::AdFramework => "ad_framework",
+            TemplateVariable::BriefClaims => "brief_claims",
+            TemplateVariable::Offer => "offer",
+            TemplateVariable::CallToAction => "call_to_action",
+            TemplateVariable::MustSay => "must_say",
+            TemplateVariable::NeverSay => "never_say",
         }
     }
 
@@ -501,6 +565,17 @@ impl TemplateBody {
 
     pub fn prompt(&self) -> &str {
         &self.prompt
+    }
+
+    /// Whether the instructions or the prompt place `variable`.
+    pub fn uses(&self, variable: TemplateVariable) -> bool {
+        [&self.instructions, &self.prompt].iter().any(|text| {
+            // The text was validated, so it parses.
+            parse(self.kind, text)
+                .unwrap_or_default()
+                .iter()
+                .any(|segment| matches!(segment, Segment::Variable(used) if *used == variable))
+        })
     }
 
     /// Places each value in its placeholder.
@@ -656,6 +731,14 @@ mod tests {
             rendered.prompt,
             "Title: The lost probe\nAgain: The lost probe. Niche: space history"
         );
+    }
+
+    #[test]
+    fn a_body_tells_which_variables_it_places() {
+        let body = body("Write in {{ language }}.", "About {{theme_title}}.");
+        assert!(body.uses(TemplateVariable::Language));
+        assert!(body.uses(TemplateVariable::ThemeTitle));
+        assert!(!body.uses(TemplateVariable::Persona));
     }
 
     #[test]

@@ -248,6 +248,11 @@ impl Bardo {
         let mut calls = Vec::new();
         if script.is_none() {
             calls.push(PlannedCall::new(Provider::Claude, CostPurpose::Script, 1));
+            // An ad's script is checked against its claims as it is
+            // written.
+            if project.is_ad() {
+                calls.push(crate::claims_check::check_call_ahead());
+            }
         }
         let length = match (&narration, &script) {
             (Some(narration), _) => narration.duration,

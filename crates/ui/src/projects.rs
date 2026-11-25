@@ -23,10 +23,11 @@ use bardo_app::bardo_domain::{
 };
 use bardo_app::{
     Bardo, BudgetConsent, ChaptersView, Control, Destination, ExportSummary, ExportView,
-    MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationError, NarrationPlayer,
-    NarrationView, PicturesConsent, ProductionView, Recording, RenderReview, RenderSummary,
-    ScenesView, ScriptError, ScriptView, SpendEstimate, Stage, StageState, StageStatus, Text,
-    ThumbnailView, TourAnchor, UploadChoices, UploadReview, opening_stage, project_stages,
+    MusicPromptView, MusicTrackPlayer, MusicTracksView, NarrationClaims, NarrationError,
+    NarrationPlayer, NarrationView, PicturesConsent, ProductionView, Recording, RenderReview,
+    RenderSummary, ScenesView, ScriptError, ScriptView, SpendEstimate, Stage, StageState,
+    StageStatus, Text, ThumbnailView, TourAnchor, UploadChoices, UploadReview, opening_stage,
+    project_stages,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -53,6 +54,7 @@ use crate::{guide, layout};
 
 mod brief;
 mod capture;
+mod claims;
 mod export;
 mod music;
 mod narration_ask;
@@ -180,6 +182,8 @@ pub struct ProjectsScreen {
     scenes_ask: Option<(scenes::SceneAction, SpendEstimate)>,
     /// A script generation held back at a budget.
     script_ask: Option<SpendEstimate>,
+    /// A claims check that waits for the user's word on its cost.
+    claims_ask: Option<SpendEstimate>,
     /// Versions in other languages, at the Script stage.
     versions: Option<bardo_app::VersionsView>,
     versions_error: Option<Text>,
@@ -561,6 +565,7 @@ impl ProjectsScreen {
             confirm_replan: false,
             scenes_ask: None,
             script_ask: None,
+            claims_ask: None,
             versions: None,
             versions_error: None,
             version_ask: None,
@@ -789,6 +794,7 @@ impl ProjectsScreen {
         self.confirm_replan = false;
         self.scenes_ask = None;
         self.script_ask = None;
+        self.claims_ask = None;
         self.versions_error = None;
         self.version_ask = None;
         self.narration_ask = None;
@@ -868,6 +874,11 @@ impl ProjectsScreen {
             if self.stage != stage {
                 // Another stage's page starts at its top.
                 self.page_scroll.set_offset(point(px(0.), px(0.)));
+            }
+            if self.stage != stage {
+                // A question about a cost belongs to the stage it was asked on.
+                self.script_ask = None;
+                self.claims_ask = None;
             }
             self.stage = stage;
             self.ensure_render_checked(cx);
@@ -1680,6 +1691,24 @@ impl ProjectsScreen {
             .is_some_and(|job| job.state().is_active())
     }
 
+    /// Whether the stage's job wrote a script that is here, the current
+    /// one or (`pending`) the new one waiting for review. What such a job
+    /// still does, or failed at, is the claims check.
+    fn job_wrote(&self, pending: bool) -> bool {
+        let Some(view) = self.view.as_ref() else {
+            return false;
+        };
+        let (Some(job), Some(script)) = (view.job.as_ref(), view.script.as_ref()) else {
+            return false;
+        };
+        let generation = if pending {
+            script.pending().map(|pending| pending.generation())
+        } else {
+            Some(script.source().generation())
+        };
+        generation.is_some_and(|generation| generation.job == Some(job.id()))
+    }
+
     fn generate(&mut self, consent: BudgetConsent, window: &mut Window, cx: &mut Context<Self>) {
         self.script_ask = None;
         let Some(id) = self.project else {
@@ -2152,6 +2181,9 @@ impl ProjectsScreen {
         let music = self
             .render_music(cx)
             .map(|music| tagged(TourAnchor::Control(Control::MusicPrompt), music));
+        let claims = self
+            .render_claims(cx)
+            .map(|claims| tagged(TourAnchor::Control(Control::ScriptClaims), claims));
         let version_of = self.render_version_of(cx);
         let versions = self.render_versions(cx);
         let bardo = self.bardo.read(cx);
@@ -2206,7 +2238,11 @@ impl ProjectsScreen {
                                     bardo,
                                     "generate-script-info",
                                     SharedString::from(bardo.text_with(
-                                        Text::GenerateScriptHint,
+                                        if view.template.body.kind() == TemplateKind::AdScript {
+                                            Text::GenerateAdScriptHint
+                                        } else {
+                                            Text::GenerateScriptHint
+                                        },
                                         &[("n", &view.template.number.to_string())],
                                     )),
                                     guide::refs::SCRIPT_WRITE,
@@ -2329,6 +2365,7 @@ impl ProjectsScreen {
             .chain(ask)
             .chain(pending)
             .chain(Some(body))
+            .chain(claims)
             .chain(provenance)
             .chain(music)
             .chain(versions)
@@ -2345,7 +2382,14 @@ impl ProjectsScreen {
                     .gap_2()
                     .items_center()
                     .child(Spinner::new().small())
-                    .child(div().text_sm().child(tr(bardo, Text::ScriptRunning)))
+                    .child(div().text_sm().child(tr(
+                        bardo,
+                        if job.kind() == JobKind::ClaimsCheck {
+                            Text::ScriptClaimsRunning
+                        } else {
+                            Text::ScriptRunning
+                        },
+                    )))
                     .into_any_element(),
             ),
             JobState::Failed => {
@@ -2355,7 +2399,17 @@ impl ProjectsScreen {
                         .gap_1()
                         .child(kit::notice(
                             Tone::Danger,
-                            tr(bardo, Text::ScriptStopped),
+                            tr(
+                                bardo,
+                                if job.kind() == JobKind::ClaimsCheck {
+                                    Text::ScriptClaimsStopped
+                                } else if self.job_wrote(false) || self.job_wrote(true) {
+                                    // The script is saved; only its check failed.
+                                    Text::ScriptWrittenCheckStopped
+                                } else {
+                                    Text::ScriptStopped
+                                },
+                            ),
                             cx,
                         ))
                         .child(
@@ -2412,6 +2466,8 @@ impl ProjectsScreen {
                     .overflow_y_scroll()
                     .child(SharedString::from(text.to_owned())),
             )
+            // What the new script states is read before choosing.
+            .children(self.render_pending_claims(cx))
             .child(
                 h_flex()
                     .gap_2()
@@ -2697,9 +2753,31 @@ impl ProjectsScreen {
                         .gap_1()
                         .children(blocked.map(|tone| kit::notice(tone, hint.clone(), cx)))
                         .when(can_generate, |panel| {
-                            panel.children(view.estimate.as_ref().and_then(|estimate| {
-                                estimate_note(bardo, estimate, Text::EstimateCost, cx)
-                            }))
+                            // An ad's script may state what no claim of
+                            // its brief backs: said here, it locks nothing.
+                            panel
+                                .children(view.claims.map(|claims| {
+                                    let (tone, text) = match claims {
+                                        NarrationClaims::Unbacked(1) => (
+                                            Tone::Warning,
+                                            tr(bardo, Text::NarrationClaimsUnbackedOne),
+                                        ),
+                                        NarrationClaims::Unbacked(n) => (
+                                            Tone::Warning,
+                                            SharedString::from(bardo.text_with(
+                                                Text::NarrationClaimsUnbacked,
+                                                &[("n", &n.to_string())],
+                                            )),
+                                        ),
+                                        NarrationClaims::NotChecked => {
+                                            (Tone::Info, tr(bardo, Text::NarrationClaimsNotChecked))
+                                        }
+                                    };
+                                    kit::notice(tone, text, cx).text_xs()
+                                }))
+                                .children(view.estimate.as_ref().and_then(|estimate| {
+                                    estimate_note(bardo, estimate, Text::EstimateCost, cx)
+                                }))
                         })
                         .child(
                             h_flex()

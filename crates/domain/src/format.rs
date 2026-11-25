@@ -54,6 +54,17 @@ impl VideoFormat {
         }
     }
 
+    /// How long an ad's script runs when its project follows the format:
+    /// 2 seconds under the format's length, as [`VideoLength::ad_target_length`].
+    pub fn ad_target_length(self) -> &'static str {
+        match self {
+            VideoFormat::Short => "about 105 to 145 words (42 to 58 seconds spoken)",
+            VideoFormat::Long => {
+                "about 1,200 to 1,495 words (8 minutes to 9 minutes 58 seconds spoken)"
+            }
+        }
+    }
+
     /// The shape of its pictures, as the scene template's `{{frame_shape}}`
     /// says it to the model.
     pub fn frame_shape(self) -> &'static str {
@@ -90,6 +101,9 @@ impl FromStr for VideoFormat {
 /// Instagram Reels take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VideoLength {
+    /// The shortest ad or teaser: a hook, one thing said and what to do
+    /// next.
+    Seconds15,
     /// A quick Reel or Short.
     Seconds30,
     /// A Short or Reel that fits every network.
@@ -98,8 +112,12 @@ pub enum VideoLength {
     Minutes3,
 }
 
+/// What an ad's script leaves of its length to the end card's tail.
+pub const AD_TAIL: Duration = Duration::from_secs(2);
+
 impl VideoLength {
-    pub const ALL: [VideoLength; 3] = [
+    pub const ALL: [VideoLength; 4] = [
+        VideoLength::Seconds15,
         VideoLength::Seconds30,
         VideoLength::Minute1,
         VideoLength::Minutes3,
@@ -108,6 +126,7 @@ impl VideoLength {
     /// The stable code it is stored under.
     pub fn code(self) -> &'static str {
         match self {
+            VideoLength::Seconds15 => "15s",
             VideoLength::Seconds30 => "30s",
             VideoLength::Minute1 => "1m",
             VideoLength::Minutes3 => "3m",
@@ -117,6 +136,7 @@ impl VideoLength {
     /// How long it runs at most.
     pub fn duration(self) -> Duration {
         Duration::from_secs(match self {
+            VideoLength::Seconds15 => 15,
             VideoLength::Seconds30 => 30,
             VideoLength::Minute1 => 60,
             VideoLength::Minutes3 => 180,
@@ -129,10 +149,24 @@ impl VideoLength {
     /// minutes keeps a margin under the 3:00 Shorts and Reels take.
     pub fn target_length(self) -> &'static str {
         match self {
+            VideoLength::Seconds15 => "about 30 to 38 words (12 to 15 seconds spoken)",
             VideoLength::Seconds30 => "about 60 to 75 words (25 to 30 seconds spoken)",
             VideoLength::Minute1 => "about 130 to 150 words (50 to 60 seconds spoken)",
             VideoLength::Minutes3 => {
                 "about 360 to 400 words (2 minutes 25 seconds to 2 minutes 40 seconds spoken)"
+            }
+        }
+    }
+
+    /// How long an ad's script runs: the length less `AD_TAIL`, so that
+    /// the end card's tail fits inside the length.
+    pub fn ad_target_length(self) -> &'static str {
+        match self {
+            VideoLength::Seconds15 => "about 26 to 32 words (10 to 13 seconds spoken)",
+            VideoLength::Seconds30 => "about 58 to 70 words (23 to 28 seconds spoken)",
+            VideoLength::Minute1 => "about 125 to 145 words (50 to 58 seconds spoken)",
+            VideoLength::Minutes3 => {
+                "about 355 to 395 words (2 minutes 22 seconds to 2 minutes 38 seconds spoken)"
             }
         }
     }
@@ -207,5 +241,57 @@ mod tests {
             .and_then(|words| words.parse().ok())
             .unwrap();
         assert!(most_words * 60 / 150 <= 165, "{most_words} words");
+    }
+
+    /// The most words a target asks for: the number after " to ".
+    fn most_words(target: &str) -> u64 {
+        target
+            .split(" to ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|words| words.replace(',', "").parse().ok())
+            .unwrap()
+    }
+
+    #[test]
+    fn fifteen_seconds_is_a_length_like_the_others() {
+        assert_eq!("15s".parse::<VideoLength>(), Ok(VideoLength::Seconds15));
+        assert_eq!(VideoLength::Seconds15.duration(), Duration::from_secs(15));
+        assert_eq!(VideoLength::ALL[0], VideoLength::Seconds15);
+        assert_eq!(
+            VideoLength::Seconds15.target_length(),
+            "about 30 to 38 words (12 to 15 seconds spoken)"
+        );
+    }
+
+    #[test]
+    fn no_network_refuses_a_video_of_fifteen_seconds() {
+        let fifteen = VideoLength::Seconds15.duration();
+        // The only network with a shortest length is Instagram, for Reels.
+        assert!(fifteen >= crate::REEL_MIN_DURATION);
+        assert!(fifteen <= crate::REEL_MAX_DURATION);
+        assert!(fifteen <= crate::TIKTOK_MAX_DURATION);
+    }
+
+    #[test]
+    fn an_ads_script_leaves_two_seconds_of_its_length_to_the_end_card() {
+        assert_eq!(
+            VideoLength::Seconds15.ad_target_length(),
+            "about 26 to 32 words (10 to 13 seconds spoken)"
+        );
+        // At 150 words a minute, the most words an ad is asked for end
+        // two seconds before the length does, and it asks for fewer than
+        // any other video of that length.
+        for length in VideoLength::ALL {
+            let most = most_words(length.ad_target_length());
+            let room = (length.duration() - AD_TAIL).as_secs();
+            assert!(most * 60 <= room * 150, "{length}: {most} words");
+            assert!(most < most_words(length.target_length()), "{length}");
+        }
+        for (format, seconds) in [(VideoFormat::Short, 58), (VideoFormat::Long, 598)] {
+            let most = most_words(format.ad_target_length());
+            assert!(most * 60 <= seconds * 150, "{format}: {most} words");
+            assert!(most < most_words(format.target_length()), "{format}");
+        }
     }
 }
