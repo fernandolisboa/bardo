@@ -4,6 +4,7 @@
 - Date: 2026-11-25
 - Issue: #266, and #290 for the post on X
 - Builds on: the job queue's retry policy and the cost records of the MVP spec, ADR-0028 (never paying twice for a clip on the plan)
+- Amended by: ADR-0031 (Claude's answers are streamed: its adapter applies the same rules itself instead of `send_paid`, read after the status and before the answer, over `UreqTransport::for_streams`; Claude's own timeout and a failure it asks not to be sent again are lost answers; a refusal carries its usage only when Claude bills it)
 
 ## Context
 
@@ -44,8 +45,8 @@ Clips and takes are asynchronous (submit, then poll) and have their own handling
 - A lost answer's record cannot be told from a real charge afterwards: it has no mark of its own, Costs shows totals, and it cannot be taken back when the provider turns out not to have charged. It also counts among the recent calls later estimates are averaged from, which changes little since it was itself built from them. Marking such records would need a schema change, left for when it is needed.
 - "Handed over" is a safe upper bound, not proof of arrival: the last piece of a body given to the connection may not have been written, so a few requests that never arrived are reported as lost answers and estimated in Costs. The error never goes the other way.
 - An answered call whose JSON is valid but lacks what Bardo needs (a transcript without words, a timing without characters) fails as unexpected and, where the answer states no usage, records nothing.
-- A retry after a lost answer is a new paid request. Where the provider offers an idempotency key or streaming, using it would let a retry collect the first result instead; streaming for long text answers is tracked in #267.
+- A retry after a lost answer is a new paid request. Where the provider offers an idempotency key, using it would let a retry collect the first result instead. Streaming does not: Claude's answers are streamed since ADR-0031, which keeps an answer from being cut by a clock, and one that stops midway is still lost.
 - The look for a post on X trusts three things X does not promise in writing: that a media key ends in the media id (its examples show it), that a post shows in the account's list within seconds, and that the computer's clock is within a day of X's. When one fails, the look finds nothing: after a lost answer that is the "may be live" failure, and a second post then meets X's refusal of duplicate text, which the job reads as the first one being live. That refusal is told by its wording, which X does not document either.
 - A look X refuses (a scope taken away, a request X no longer takes) fails every retry of that job at the look, with X's reason. Reviewing the upload again starts a new one. The query was written from X's reference and has not run against X yet; the regression pass checks it with a real account.
 - A job whose processing wait ran out after a request of unknown end, checked again later, starts a new job without the mark. It needs X to say the media is not ready after having failed on a post of it, which leaves no post to find.
-- Every new paid adapter must choose `send_paid`, name its provider's error report and attach billed usage to its failures, and every new paid job must call `record_failed`.
+- Every new paid adapter must choose `send_paid` (or, when it reads its answer as a stream, apply the same rules as Claude's does), name its provider's error report and attach billed usage to its failures, and every new paid job must call `record_failed`.

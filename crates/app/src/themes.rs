@@ -460,6 +460,7 @@ fn proposal_request(brief: &Brief, niche: &Niche, avoid: &[&str]) -> TextRequest
     ));
     TextRequest {
         effort: TextEffort::Everyday,
+        answer_tokens: None,
         instructions,
         prompt,
         images: Vec::new(),

@@ -1,0 +1,29 @@
+HTTP/2 200 
+content-type: application/json
+
+{
+  "id": "msg_01ThemesFixture0000000000",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EqQBCkYIBxgCKkA0fixture"
+    },
+    {
+      "type": "text",
+      "text": "{\"themes\":[{\"title\":\"The cosmonauts the Soviet Union erased\",\"angle\":\"Retouched photos and missing names: how the space program hid its failures.\"},{\"title\":\"Why Apollo 13 almost never came home\",\"angle\":\"Minute by minute through the oxygen tank failure and the fixes improvised on the ground.\"},{\"title\":\"The forgotten first spacewalk\",\"angle\":\"Alexei Leonov nearly died outside Voskhod 2; the story the broadcasts left out.\"}]}"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 412,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 893
+  }
+}

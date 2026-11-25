@@ -23,9 +23,6 @@ pub struct HttpRequest {
     /// upload headers).
     pub headers: Vec<(Cow<'static, str>, String)>,
     pub body: Option<Vec<u8>>,
-    /// How long to wait for the whole answer, when this request needs
-    /// longer than the transport's own wait.
-    pub timeout: Option<Duration>,
 }
 
 impl HttpRequest {
@@ -35,7 +32,6 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: None,
-            timeout: None,
         }
     }
 
@@ -46,7 +42,6 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: None,
-            timeout: None,
         }
     }
 
@@ -57,7 +52,6 @@ impl HttpRequest {
             url: url.into(),
             headers: vec![("content-type".into(), "application/json".to_owned())],
             body: Some(body.into().into_bytes()),
-            timeout: None,
         }
     }
 
@@ -75,7 +69,6 @@ impl HttpRequest {
                 "application/x-www-form-urlencoded".to_owned(),
             )],
             body: Some(body.into_bytes()),
-            timeout: None,
         }
     }
 
@@ -132,7 +125,6 @@ impl HttpRequest {
                 format!("multipart/form-data; boundary={boundary}"),
             )],
             body: Some(body),
-            timeout: None,
         }
     }
 
@@ -143,19 +135,11 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: Some(body),
-            timeout: None,
         }
     }
 
     pub fn header(mut self, name: impl Into<Cow<'static, str>>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
-        self
-    }
-
-    /// Waits up to `timeout` for the whole answer instead of the
-    /// transport's own wait.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
         self
     }
 
@@ -483,6 +467,41 @@ impl UreqTransport {
         }
     }
 
+    /// For answers read as they are written (a streamed generation). The
+    /// answer may take many minutes, so no timeout bounds the request as
+    /// a whole: finding and reaching the server have `connect`, sending
+    /// the request and the first byte of the answer each have `wait`, and
+    /// the body has `whole`, a bound far past any real answer. What bounds
+    /// silence inside the body is the caller's (`idle::Watched`). HTTPS
+    /// only.
+    pub fn for_streams(connect: Duration, wait: Duration, whole: Duration) -> Self {
+        let tls = ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build();
+        let agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_resolve(Some(connect))
+            .timeout_connect(Some(connect))
+            .timeout_send_request(Some(wait))
+            .timeout_send_body(Some(wait))
+            .timeout_recv_response(Some(wait))
+            .timeout_recv_body(Some(whole))
+            // A new connection for every request, as for every paid call:
+            // a kept one that died unnoticed would take the request before
+            // failing.
+            .max_idle_connections(0)
+            .max_idle_connections_per_host(0)
+            .tls_config(tls)
+            .https_only(true)
+            .user_agent(concat!("Bardo/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .new_agent();
+        Self {
+            agent,
+            max_body_bytes: Self::MAX_BODY_BYTES,
+        }
+    }
+
     /// `for_uploads` against a local server: plain HTTP, no proxy.
     #[doc(hidden)]
     pub fn for_uploads_without_proxy(timeout: Duration) -> Self {
@@ -612,9 +631,6 @@ impl UreqTransport {
                 };
                 for (name, value) in &request.headers {
                     call = call.header(name.as_ref(), value.as_str());
-                }
-                if let Some(timeout) = request.timeout {
-                    call = call.config().timeout_global(Some(timeout)).build();
                 }
                 let bytes = request.body.as_deref().unwrap_or_default();
                 if bytes.is_empty() {

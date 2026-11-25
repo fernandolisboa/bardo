@@ -1051,6 +1051,7 @@ reject = "Descartar"
 [scenes.error]
 no_narration = "Gere ou importe a narração primeiro; as cenas são cronometradas por ela."
 no_plan = "Planeje as cenas primeiro."
+narration_too_long = "Esta narração é longa demais para planejar de uma vez: o plano pode não caber numa resposta, e uma resposta cortada é paga e perdida. Use uma narração mais curta ou divida o vídeo em mais de um."
 scene_not_found = "Essa cena não existe mais; as cenas podem ter sido planejadas de novo."
 missing_claude_key = "Salve uma chave do Claude em Configurações para planejar cenas."
 missing_gemini_key = "Salve uma chave do Gemini em Configurações para gerar imagens e clipes do Google."

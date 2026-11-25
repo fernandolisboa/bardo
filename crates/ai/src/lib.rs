@@ -3,6 +3,7 @@
 
 pub mod byteplus;
 pub mod claude;
+pub mod claude_stream;
 pub mod elevenlabs;
 pub mod gemini;
 pub mod github_releases;
@@ -10,6 +11,7 @@ pub mod google_clips;
 pub mod higgsfield;
 pub mod higgsfield_plan;
 pub mod http;
+pub mod idle;
 pub mod jev;
 pub mod key_check;
 pub mod kling;
@@ -17,6 +19,7 @@ pub mod kling_takes;
 pub mod market;
 pub mod mcp;
 pub mod retry;
+pub mod sse;
 pub mod youtube_stats;
 
 pub use byteplus::BytePlusTakes;

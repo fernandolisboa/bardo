@@ -464,6 +464,12 @@ impl LocalizationHandler {
         let key = self.key()?;
         let request = TextRequest {
             effort: TextEffort::Everyday,
+            // The adaptation is about as long as the script it adapts,
+            // which the prompt carries, at about three characters a token.
+            // A language that takes more tokens fits in the room the
+            // adapter leaves around this size. A long script needs more
+            // than the usual room.
+            answer_tokens: Some((payload.prompt.chars().count() as u64).div_ceil(3)),
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),
@@ -1433,6 +1439,11 @@ mod tests {
         assert_eq!(job.kind(), JobKind::Localization);
         let request = h.text.requests().pop().unwrap();
         assert!(matches!(request.format, TextFormat::Json { .. }));
+        // The adaptation is as long as the script: room by its length.
+        assert_eq!(
+            request.answer_tokens,
+            Some((request.prompt.chars().count() as u64).div_ceil(3))
+        );
         assert!(
             request.instructions.contains("English"),
             "{}",

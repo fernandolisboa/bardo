@@ -8,7 +8,10 @@
 //! narration) is sent with [`Backoff::send_paid`] instead (ADR-0030): it
 //! goes again only after an answer that says nothing was started, and a
 //! request that was sent and got no answer is a lost answer, not an
-//! outage, because the provider may have done and billed the work.
+//! outage, because the provider may have done and billed the work. An
+//! adapter that reads its answer as a stream (Claude's) cannot send
+//! through it and applies the same rules itself, with what this module
+//! shares for that.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -160,7 +163,7 @@ impl Backoff {
 
 /// What an answer to a paid call says about the work asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PaidAnswer {
+pub(crate) enum PaidAnswer {
     /// The provider started nothing and says to come back shortly: a rate
     /// limit (429), or its own word that it has no capacity (503) or is
     /// overloaded (529). Safe to send again.
@@ -177,7 +180,7 @@ enum PaidAnswer {
 }
 
 impl PaidAnswer {
-    fn of(status: u16, body: &[u8], own_words: OwnWords) -> Self {
+    pub(crate) fn of(status: u16, body: &[u8], own_words: OwnWords) -> Self {
         // A gateway's page, an empty body or another service's JSON is not
         // the provider speaking.
         let own_words =
@@ -209,7 +212,7 @@ pub fn unanswered(error: TransportError) -> ProviderFailure {
     }
 }
 
-fn unreadable(status: u16) -> ProviderFailure {
+pub(crate) fn unreadable(status: u16) -> ProviderFailure {
     ProviderFailure::new(
         ProviderFailureKind::AnswerLost,
         format!(
@@ -218,7 +221,7 @@ fn unreadable(status: u16) -> ProviderFailure {
     )
 }
 
-fn lost_upstream(status: u16) -> ProviderFailure {
+pub(crate) fn lost_upstream(status: u16) -> ProviderFailure {
     ProviderFailure::new(
         ProviderFailureKind::AnswerLost,
         format!(
