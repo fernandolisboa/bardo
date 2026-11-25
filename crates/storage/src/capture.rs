@@ -1728,6 +1728,7 @@ mod tests {
                  ALTER TABLE scene_cast DROP COLUMN described_only;
                  ALTER TABLE scene DROP COLUMN pending_portraits;
                  ALTER TABLE scene DROP COLUMN image_portraits;
+                 DROP TABLE product_logo; DROP TABLE product_image; DROP TABLE product;
                  ALTER TABLE job DROP COLUMN paid_call;
                  ALTER TABLE scene_clip DROP COLUMN stretch_percent;
                  ALTER TABLE channel DROP COLUMN clip_stretch_percent;

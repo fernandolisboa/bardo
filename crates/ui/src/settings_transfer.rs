@@ -736,6 +736,7 @@ fn group_name(group: SettingsGroup) -> Text {
         SettingsGroup::AppCredentials => Text::SettingsFileGroupApps,
         SettingsGroup::Preferences => Text::SettingsFileGroupPreferences,
         SettingsGroup::Personas => Text::SettingsFileGroupPersonas,
+        SettingsGroup::Products => Text::SettingsFileGroupProducts,
         SettingsGroup::Channels => Text::SettingsFileGroupChannels,
         SettingsGroup::SignIns => Text::SettingsFileGroupSignIns,
     }

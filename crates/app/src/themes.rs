@@ -19,7 +19,7 @@ use bardo_domain::{
     ApiKey, Channel, ChannelId, CostPurpose, DecisionEngineId, Decisions, EvidenceScope, Job,
     JobFailure, JobFailureKind, JobId, JobKind, Niche, NicheScores, NicheSeedError,
     PastPerformance, PerformanceEvidence, PerformanceReason, ProfileId, Progress, Provider,
-    ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore, Standing,
+    ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore, Standing, Stop,
     TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea,
     ThemeNotSuggested, ThemeRanking, ThemeRepository, ThemeStatus, UiLanguage, VideoProject,
     rank_themes,
@@ -655,6 +655,7 @@ impl ThemeHandler {
         channel: ChannelId,
         niche: &Niche,
         job: JobId,
+        stop: &Stop,
     ) -> Result<(), JobFailure> {
         let existing = self.themes.themes(channel).map_err(unexpected)?;
         if existing
@@ -679,12 +680,14 @@ impl ThemeHandler {
         let paid_call = PlannedCall::text(CostPurpose::ThemeIdeas, &request);
         let generated = {
             let _paying = self.costs.paying(job, &paid_call, Some(channel), None)?;
-            self.text.generate(&key, &request).map_err(|failure| {
-                // An answer that was lost or cut may still have been billed.
-                self.costs
-                    .record_failed(&failure, &paid_call, Some(job), Some(channel), None);
-                provider_failure("Claude", failure)
-            })
+            self.text
+                .generate_until(&key, &request, stop)
+                .map_err(|failure| {
+                    // An answer that was lost or cut may still have been billed.
+                    self.costs
+                        .record_failed(&failure, &paid_call, Some(job), Some(channel), None);
+                    provider_failure("Claude", failure)
+                })
         }?;
         self.costs.record(
             PaidCall {
@@ -848,7 +851,7 @@ impl JobHandler for ThemeHandler {
         if cx.kind() == JobKind::ThemeSuggestion {
             progress_from = 500;
             if cx.checkpoint() != Some(PROPOSED) {
-                self.propose(&payload, channel, &niche, cx.id())?;
+                self.propose(&payload, channel, &niche, cx.id(), &cx.stop())?;
                 cx.save_checkpoint(PROPOSED, Progress::from_permille(progress_from))
                     .map_err(unexpected)?;
             }
@@ -1240,6 +1243,7 @@ mod tests {
                 templates: Arc::clone(&self.db) as _,
                 scripts: Arc::clone(&self.db) as _,
                 personas: Arc::clone(&self.db) as _,
+                products: Arc::clone(&self.db) as _,
                 narrations: Arc::clone(&self.db) as _,
                 captures: Arc::clone(&self.db) as _,
                 staging: Arc::clone(&self.db) as _,
@@ -1483,6 +1487,7 @@ mod tests {
         suggest(&app, &channel);
 
         let requests = h.text.requests();
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         assert_eq!(requests.len(), 1);
         let request = &requests[0];
         assert!(matches!(request.format, TextFormat::Json { .. }));

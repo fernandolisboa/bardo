@@ -162,12 +162,12 @@ fn top_bar(nav: Navigation, cx: &App) -> AnyElement {
     let mut tabs: Vec<AnyElement> = Vec::new();
     for (ix, group) in nav.groups.iter().enumerate() {
         // A pillar's tabs together, so the tour can light them as one and
-        // a narrow window wraps them as one.
+        // a narrow window wraps them as one. No gap between them: their
+        // own padding spaces them, and the strip stays on one line.
         tabs.push(lead(
             ix == 0,
             h_flex()
                 .flex_none()
-                .gap_0p5()
                 .items_center()
                 .children(group.places.iter().map(|item| {
                     tab(item, item.place == nav.current).tour_anchor(
@@ -274,7 +274,7 @@ fn nav_tab(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> 
         .h(px(TAB_HEIGHT))
         // Snug, so every place fits the default window in both languages,
         // terminal fonts included; the strip wraps only below that.
-        .px_1p5()
+        .px_1()
         .gap_1()
         .items_center()
         .rounded(t.radius)

@@ -19,6 +19,8 @@ impl Pillar {
 pub enum Destination {
     Research,
     Themes,
+    /// The products to advertise, with their briefs and pictures.
+    Products,
     Performance,
     Projects,
     Personas,
@@ -33,9 +35,10 @@ pub enum Destination {
 }
 
 impl Destination {
-    pub const ALL: [Destination; 12] = [
+    pub const ALL: [Destination; 13] = [
         Destination::Research,
         Destination::Themes,
+        Destination::Products,
         Destination::Performance,
         Destination::Projects,
         Destination::Personas,
@@ -55,6 +58,7 @@ impl Destination {
             &[
                 Destination::Research,
                 Destination::Themes,
+                Destination::Products,
                 Destination::Performance,
             ],
         ),
@@ -96,6 +100,7 @@ impl Destination {
         match self {
             Destination::Research => "research",
             Destination::Themes => "themes",
+            Destination::Products => "products",
             Destination::Performance => "performance",
             Destination::Projects => "projects",
             Destination::Personas => "personas",
@@ -190,6 +195,7 @@ mod tests {
     fn the_pillars_hold_their_screens() {
         assert_eq!(Destination::Research.pillar(), Some(Pillar::Strategy));
         assert_eq!(Destination::Themes.pillar(), Some(Pillar::Strategy));
+        assert_eq!(Destination::Products.pillar(), Some(Pillar::Strategy));
         assert_eq!(Destination::Performance.pillar(), Some(Pillar::Strategy));
         assert_eq!(Destination::Projects.pillar(), Some(Pillar::Production));
         assert_eq!(Destination::Templates.pillar(), Some(Pillar::Production));

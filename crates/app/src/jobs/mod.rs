@@ -154,6 +154,7 @@ impl JobActionError {
             JobActionError::Busy => Text::RestoreWaitsForJobs,
             JobActionError::Superseded => Text::JobSuperseded,
             JobActionError::Restyled => Text::JobRestyled,
+            JobActionError::ScenesMovedOn => Text::JobScenesMovedOn,
             JobActionError::ScenesTaken => Text::JobScenesTaken,
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
             JobActionError::NarrationBusy => Text::JobNarrationBusy,
@@ -592,6 +593,93 @@ mod tests {
             JobState::Cancelled
         );
         assert_eq!(stored(&db, owner, id).state(), JobState::Cancelled);
+    }
+
+    #[test]
+    fn a_handler_can_tell_a_cancel_from_the_app_closing() {
+        // A cancelled job runs again only when the user asks, and a paid
+        // answer on its way is given up. One stopped because the app
+        // closes runs again by itself: its answer is not given up (the
+        // call stays noted on the job, and the process ends anyway).
+        let (db, owner) = memory_db();
+        let seen: Arc<Mutex<Vec<(bool, bool)>>> = Arc::default();
+        let note = Arc::clone(&seen);
+        let q = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                let stop = cx.stop();
+                assert!(!stop.asked() && !cx.cancelled());
+                until_stopped(cx);
+                note.lock().unwrap().push((stop.asked(), cx.cancelled()));
+                Ok(())
+            }),
+            settings(),
+        );
+        let cancelled = enqueue(&q, owner);
+        wait_for(|| q.jobs(), cancelled, |j| j.state() == JobState::Running);
+        q.cancel(cancelled).unwrap();
+        wait_for(|| q.jobs(), cancelled, |_| !q.runs_here(cancelled));
+        assert_eq!(*seen.lock().unwrap(), [(true, true)]);
+
+        let closing = enqueue(&q, owner);
+        wait_for(|| q.jobs(), closing, |j| j.state() == JobState::Running);
+        drop(q);
+        let deadline = Instant::now() + PATIENCE;
+        while seen.lock().unwrap().len() < 2 {
+            assert!(Instant::now() < deadline, "the handler never stopped");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [(true, true), (false, false)],
+            "told to stop, with nothing to give up and not by the user"
+        );
+    }
+
+    #[test]
+    fn a_run_that_lost_its_job_gives_up_what_it_waits_for() {
+        // Another runner took the job: this run's paid answer on its way
+        // is given up, as on a cancel, though the user cancelled nothing.
+        let (db, owner) = memory_db();
+        // Leases run out between ticks, as when the computer sleeps.
+        let settings = JobSettings {
+            lease: Duration::from_millis(120),
+            tick: Duration::from_millis(400),
+            ..settings()
+        };
+        let seen: Arc<Mutex<Vec<(bool, bool)>>> = Arc::default();
+        let note = Arc::clone(&seen);
+        let app = queue(
+            &db,
+            owner,
+            handlers(move |_, cx| {
+                let stop = cx.stop();
+                assert!(!stop.asked());
+                until_stopped(cx);
+                note.lock().unwrap().push((stop.asked(), cx.cancelled()));
+                Ok(())
+            }),
+            settings,
+        );
+        let id = enqueue(&app, owner);
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Running);
+
+        let other = second_runner(&db);
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let now = SystemTime::now();
+            if JobRepository::lease(&*other, id, now, now + Duration::from_secs(60)).unwrap() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the lease never ran out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        while seen.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "the run never stopped");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(*seen.lock().unwrap(), [(true, false)]);
     }
 
     #[test]
@@ -2009,6 +2097,7 @@ mod tests {
             templates: Arc::clone(db) as _,
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
+            products: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
             captures: Arc::clone(db) as _,
             staging: Arc::clone(db) as _,

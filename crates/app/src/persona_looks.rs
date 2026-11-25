@@ -23,9 +23,9 @@ use bardo_domain::{
     ApiKey, CostPurpose, ImageGenerator, ImageRequest, ImageShape, Job, JobFailure, JobFailureKind,
     JobId, JobKind, LOOK_MAX_BYTES, LookAsset, LookAssetError, LookAssetKind, LookDescriptionError,
     LookDrawing, LookImage, LookImageError, LookSource, PersonaId, PersonaLook, PersonaRepository,
-    ProfileId, Provider, RenderedPrompt, RepositoryError, SecretStore, TemplateKind, TemplateUsed,
-    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat,
-    TextGenerator, TextRequest, look_description,
+    ProfileId, Provider, RenderedPrompt, RepositoryError, SecretStore, Stop, TemplateKind,
+    TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort,
+    TextFormat, TextGenerator, TextRequest, look_description,
 };
 use bardo_media::MediaEngine;
 use serde::{Deserialize, Serialize};
@@ -242,7 +242,7 @@ impl JobHandler for PersonaLookHandler {
         let written = match cx.checkpoint() {
             Some(checkpoint) => parse::<Written>(checkpoint)?,
             None => {
-                let written = self.write(&payload, cx.id())?;
+                let written = self.write(&payload, cx.id(), &cx.stop())?;
                 cx.save_checkpoint(to_json(&written), bardo_domain::Progress::of(1, 2))
                     .map_err(unexpected)?;
                 written
@@ -294,7 +294,7 @@ impl PersonaLookHandler {
     }
 
     /// Claude's prompt for the look, or its reason for declining.
-    fn write(&self, payload: &DrawPayload, job: JobId) -> Result<Written, JobFailure> {
+    fn write(&self, payload: &DrawPayload, job: JobId, stop: &Stop) -> Result<Written, JobFailure> {
         let key = self.key(Provider::Claude)?;
         let request = TextRequest {
             effort: TextEffort::Everyday,
@@ -309,12 +309,14 @@ impl PersonaLookHandler {
         let paid_call = PlannedCall::text(CostPurpose::PersonaLook, &request);
         let generated = {
             let _paying = self.costs.paying(job, &paid_call, None, None)?;
-            self.text.generate(&key, &request).map_err(|failure| {
-                // An answer that was lost or cut may still have been billed.
-                self.costs
-                    .record_failed(&failure, &paid_call, Some(job), None, None);
-                JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
-            })
+            self.text
+                .generate_until(&key, &request, stop)
+                .map_err(|failure| {
+                    // An answer that was lost or cut may still have been billed.
+                    self.costs
+                        .record_failed(&failure, &paid_call, Some(job), None, None);
+                    JobFailure::new(failure.kind.into(), format!("Claude: {}", failure.detail))
+                })
         }?;
         self.costs.record(
             PaidCall {
@@ -776,6 +778,7 @@ mod tests {
         let job = draw(&h, &app, persona);
         assert_eq!(job.kind(), JobKind::PersonaLook);
         let request = h.text.requests().pop().unwrap();
+        assert_eq!(h.text.unstoppable(), 0, "the job hands over its stop");
         assert!(request.prompt.contains(DESCRIPTION), "{}", request.prompt);
         assert!(request.prompt.contains("Documentary Narrator"));
         assert!(request.instructions.contains("declined"));

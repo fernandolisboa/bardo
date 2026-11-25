@@ -172,6 +172,51 @@ pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
+/// Whether a PNG or WebP file says it carries transparency, read from its
+/// header: a PNG with an alpha channel or a `tRNS` chunk, a WebP with its
+/// alpha flag set. The pixels are not read, so a file that declares an
+/// alpha channel and is opaque all over still counts. A JPEG never does.
+pub fn image_declares_transparency(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.get(12..16) == Some(b"IHDR") {
+        // Color types 4 (gray + alpha) and 6 (RGBA).
+        if matches!(bytes.get(25), Some(4 | 6)) {
+            return true;
+        }
+        // Other types say it with a `tRNS` chunk before the pixels.
+        let mut at = 8;
+        loop {
+            let (Some(length), Some(kind)) = (bytes.get(at..at + 4), bytes.get(at + 4..at + 8))
+            else {
+                return false;
+            };
+            match kind {
+                b"tRNS" => return true,
+                b"IDAT" | b"IEND" => return false,
+                _ => {}
+            }
+            let length = u32::from_be_bytes([length[0], length[1], length[2], length[3]]);
+            // Length, type, data, checksum.
+            let Some(next) = usize::try_from(length)
+                .ok()
+                .and_then(|length| at.checked_add(12)?.checked_add(length))
+            else {
+                return false;
+            };
+            at = next;
+        }
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return match bytes.get(12..16) {
+            // Extended: the alpha bit of the flags.
+            Some(b"VP8X") => bytes.get(20).is_some_and(|flags| flags & 0x10 != 0),
+            // Lossless: the bit after the 14-bit width and height.
+            Some(b"VP8L") => bytes.get(24).is_some_and(|byte| byte & 0x10 != 0),
+            _ => false,
+        };
+    }
+    false
+}
+
 /// The frame shape a picture of these dimensions fits: vertical when it is
 /// taller than wide, landscape otherwise.
 pub fn shape_of(width: u32, height: u32) -> AspectRatio {
@@ -304,6 +349,76 @@ mod dimension_tests {
             image_dimensions(&riff(b"VP8X", &extended)),
             Some((1080, 1920))
         );
+    }
+
+    /// A PNG of `color_type`, with a `tRNS` chunk before its pixels when
+    /// asked.
+    fn png_of(color_type: u8, transparency_chunk: bool) -> Vec<u8> {
+        let mut bytes = png(800, 800);
+        bytes[25] = color_type;
+        // The header's checksum.
+        bytes.extend([0; 4]);
+        let mut chunk = |kind: &[u8; 4], data: &[u8]| {
+            bytes.extend((data.len() as u32).to_be_bytes());
+            bytes.extend(kind);
+            bytes.extend(data);
+            bytes.extend([0; 4]);
+        };
+        chunk(b"PLTE", &[0; 6]);
+        if transparency_chunk {
+            chunk(b"tRNS", &[0]);
+        }
+        chunk(b"IDAT", &[0; 3]);
+        chunk(b"IEND", &[]);
+        bytes
+    }
+
+    #[test]
+    fn a_png_says_it_is_transparent_by_its_alpha_channel_or_a_trns_chunk() {
+        assert!(image_declares_transparency(&png_of(6, false)), "RGBA");
+        assert!(image_declares_transparency(&png_of(4, false)), "gray+alpha");
+        assert!(!image_declares_transparency(&png_of(2, false)), "RGB");
+        assert!(!image_declares_transparency(&png_of(3, false)), "palette");
+        assert!(
+            image_declares_transparency(&png_of(3, true)),
+            "palette+tRNS"
+        );
+        assert!(image_declares_transparency(&png_of(2, true)), "RGB+tRNS");
+        // A header cut short, or a chunk whose length runs off the file.
+        assert!(!image_declares_transparency(&png_of(2, true)[..40]));
+        let mut broken = png_of(2, false);
+        broken[33..37].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(!image_declares_transparency(&broken));
+    }
+
+    #[test]
+    fn a_webp_says_it_is_transparent_by_its_alpha_flag() {
+        let riff = |chunk: &[u8], body: &[u8]| {
+            let mut bytes = b"RIFF\0\0\0\0WEBP".to_vec();
+            bytes.extend(chunk);
+            bytes.extend([0, 0, 0, 0]);
+            bytes.extend(body);
+            bytes
+        };
+        assert!(image_declares_transparency(&riff(
+            b"VP8X",
+            &[0x10, 0, 0, 0]
+        )));
+        assert!(!image_declares_transparency(&riff(
+            b"VP8X",
+            &[0x2C, 0, 0, 0]
+        )));
+        let lossless = |alpha: u32| {
+            let packed = 799 | (799 << 14) | (alpha << 28);
+            let mut body = vec![0x2F];
+            body.extend(packed.to_le_bytes());
+            riff(b"VP8L", &body)
+        };
+        assert!(image_declares_transparency(&lossless(1)));
+        assert!(!image_declares_transparency(&lossless(0)));
+        assert!(!image_declares_transparency(&riff(b"VP8 ", &[0; 10])));
+        assert!(!image_declares_transparency(&jpeg(800, 800)));
+        assert!(!image_declares_transparency(b"GIF89a"));
     }
 
     #[test]

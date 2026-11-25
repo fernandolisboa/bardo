@@ -163,6 +163,18 @@ pub enum Control {
     PersonaShare,
     /// Personas: the look, drawn or a photo of the user.
     PersonaLook,
+    /// Products: the brief, what the product is and who it is for.
+    ProductBrief,
+    /// Products: the facts the ad may state, one per line.
+    ProductFacts,
+    /// Products: whose product it is.
+    ProductOwnership,
+    /// Products: the product's images, with the rights confirmation.
+    ProductPictures,
+    /// Products: the logo for the end card.
+    ProductLogo,
+    /// Products: Save, Duplicate, Archive and Delete.
+    ProductActions,
     /// Templates: one button per kind of template.
     TemplateKinds,
     /// Templates: the instructions and the prompt.
@@ -817,6 +829,41 @@ pub const PERSONAS: Tour = {
     }
 };
 
+/// Products: the library, a product's brief and facts, whose it is,
+/// keeping the library tidy, and its pictures and logo, in the order the
+/// form shows them.
+pub const PRODUCTS: Tour = {
+    const AT: Destination = Destination::Products;
+    const PAGE: &str = "products";
+    const FORM: WhenMissing = WhenMissing::LightPart(TourAnchor::Inspector);
+    Tour {
+        id: TourId::Products,
+        version: 1,
+        place: Some(TourPlace::Screen(AT)),
+        steps: &[
+            on(AT, "library", TourAnchor::Collection).learn(PAGE, "library"),
+            on(AT, "brief", control(Control::ProductBrief))
+                .missing(FORM)
+                .learn(PAGE, "brief"),
+            on(AT, "facts", control(Control::ProductFacts))
+                .missing(FORM)
+                .learn(PAGE, "facts"),
+            on(AT, "owner", control(Control::ProductOwnership))
+                .missing(FORM)
+                .learn(PAGE, "owner"),
+            on(AT, "actions", control(Control::ProductActions))
+                .missing(FORM)
+                .learn(PAGE, "archive"),
+            on(AT, "pictures", control(Control::ProductPictures))
+                .missing(FORM)
+                .learn(PAGE, "pictures"),
+            on(AT, "logo", control(Control::ProductLogo))
+                .missing(FORM)
+                .learn(PAGE, "logo"),
+        ],
+    }
+};
+
 /// Templates: the kinds, their versions, instructions and prompt,
 /// variables, saving a version and Bardo's default.
 pub const TEMPLATES: Tour = {
@@ -1364,7 +1411,7 @@ pub const BACKUP: Tour = {
 
 impl Tour {
     /// Every tour Bardo ships.
-    pub const ALL: [&'static Tour; 28] = [
+    pub const ALL: [&'static Tour; 29] = [
         &WELCOME,
         &RESEARCH,
         &THEMES,
@@ -1376,6 +1423,7 @@ impl Tour {
         &SCENES,
         &CLIPS,
         &PERSONAS,
+        &PRODUCTS,
         &TEMPLATES,
         &EDITOR,
         &EDITOR_MORE,
@@ -1408,6 +1456,7 @@ impl Tour {
             TourId::Scenes => &SCENES,
             TourId::Clips => &CLIPS,
             TourId::Personas => &PERSONAS,
+            TourId::Products => &PRODUCTS,
             TourId::Templates => &TEMPLATES,
             TourId::Editor => &EDITOR,
             TourId::EditorMore => &EDITOR_MORE,
@@ -2447,6 +2496,7 @@ mod tests {
             (Destination::Performance, TourId::Performance),
             (Destination::Projects, TourId::Projects),
             (Destination::Personas, TourId::Personas),
+            (Destination::Products, TourId::Products),
             (Destination::Templates, TourId::Templates),
             (Destination::Channels, TourId::Channels),
             (Destination::Accounts, TourId::Accounts),

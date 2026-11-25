@@ -1,4 +1,4 @@
-# ADR-0034: A scene is not drawn without the portrait of everyone in it
+# ADR-0035: A scene is not drawn without the portrait of everyone in it
 
 - Status: Accepted
 - Date: 2026-11-25
