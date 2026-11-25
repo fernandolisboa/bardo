@@ -20,8 +20,8 @@ use bardo_domain::{
     Generation, GenerationId, Job, JobFailure, JobFailureKind, JobId, JobKind, Narration,
     NarrationRepository, Network, ProfileId, Provider, RenderedPrompt, RepositoryError,
     SecretStore, TemplateKind, TemplateUsed, TemplateValues, TemplateVariable, TemplateVersion,
-    TemplateVersionId, TextFormat, TextGenerator, TextRequest, VideoFormat, VideoProject,
-    VideoProjectId, chapter_lines, chapter_problems, chapter_title, fitting_chapters,
+    TemplateVersionId, TextEffort, TextFormat, TextGenerator, TextRequest, VideoFormat,
+    VideoProject, VideoProjectId, chapter_lines, chapter_problems, chapter_title, fitting_chapters,
     place_chapters, sentences,
 };
 use serde::{Deserialize, Serialize};
@@ -294,6 +294,7 @@ impl ChaptersHandler {
             })?;
         let key = self.key()?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

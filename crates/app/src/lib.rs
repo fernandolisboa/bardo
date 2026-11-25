@@ -873,6 +873,7 @@ impl Bardo {
             files: Arc::clone(&files),
             text: Arc::clone(&providers.text),
             images: Arc::clone(&providers.images),
+            media: Arc::clone(&providers.media),
             secrets: Arc::clone(&secrets),
             costs: cost_book.clone(),
         };

@@ -80,7 +80,9 @@ As palavras que o Bardo usa, em termos simples.
 
 **Id do asset**: o id de uma aparência na sua biblioteca de assets do ModelArk (`asset://…`), enviado ao Seedance na BytePlus no lugar da imagem da aparência: a sua semelhança verificada para uma foto sua, ou um personagem pronto ou retrato virtual para uma aparência desenhada.
 
-**Plano de cenas**: a narração dividida em cenas, cada uma com um prompt de imagem.
+**Plano de cenas**: a narração dividida em cenas como um storyboard, cada cena com um prompt de imagem, as pessoas que voltam e os lugares aos quais o vídeo volta.
+
+**Lugar**: um lugar em que mais de uma cena acontece, descrito uma vez no plano de cenas para que toda cena ali seja desenhada igual ([O mesmo lugar de cena em cena](scenes.md#same-place)).
 
 **Cena**: um trecho da narração com uma imagem e, se quiser, um clipe.
 

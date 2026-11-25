@@ -24,7 +24,7 @@ use bardo_domain::{
     JobId, JobKind, LOOK_MAX_BYTES, LookAsset, LookAssetError, LookAssetKind, LookDescriptionError,
     LookDrawing, LookImage, LookImageError, LookSource, PersonaId, PersonaLook, PersonaRepository,
     ProfileId, Provider, RenderedPrompt, RepositoryError, SecretStore, TemplateKind, TemplateUsed,
-    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextFormat,
+    TemplateValues, TemplateVariable, TemplateVersion, TemplateVersionId, TextEffort, TextFormat,
     TextGenerator, TextRequest, look_description,
 };
 use bardo_media::MediaEngine;
@@ -297,6 +297,7 @@ impl PersonaLookHandler {
     fn write(&self, payload: &DrawPayload, job: JobId) -> Result<Written, JobFailure> {
         let key = self.key(Provider::Claude)?;
         let request = TextRequest {
+            effort: TextEffort::Everyday,
             instructions: payload.instructions.clone(),
             prompt: payload.prompt.clone(),
             images: Vec::new(),

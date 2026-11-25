@@ -5,7 +5,8 @@
 //! large answer is allowed. Images come back in the shape asked for at 2K:
 //! enough for a 1080p frame with room for a slow zoom, or a persona's look
 //! that take models read in detail. Reference images (a cast member's
-//! portrait, #246) go inline after the prompt. Every image the
+//! portrait, #246; other scenes, #258) go inline after the prompt, each
+//! after its number. Every image the
 //! model draws carries Google's SynthID watermark.
 
 use std::time::Duration;
@@ -27,17 +28,29 @@ pub const IMAGE_MODEL: &str = "gemini-3.1-flash-image";
 pub const IMAGE_SIZE: &str = "2K";
 
 /// The request that draws `request.prompt` in `request.shape`, with its
-/// reference images after the prompt, in order.
+/// reference images after the prompt, in order. Each image follows its
+/// number ("Reference 1:"), the name prompts call it by, so the model
+/// does not have to count images to tell a portrait from a place.
 pub fn image_request(key: &ApiKey, request: &ImageRequest) -> HttpRequest {
     let parts: Vec<Value> = std::iter::once(json!({ "text": request.prompt }))
-        .chain(request.references.iter().map(|reference| {
-            json!({
-                "inlineData": {
-                    "mimeType": reference.format.mime(),
-                    "data": base64::engine::general_purpose::STANDARD.encode(&reference.bytes),
-                }
-            })
-        }))
+        .chain(
+            request
+                .references
+                .iter()
+                .enumerate()
+                .flat_map(|(index, reference)| {
+                    [
+                        json!({ "text": format!("Reference {}:", index + 1) }),
+                        json!({
+                            "inlineData": {
+                                "mimeType": reference.format.mime(),
+                                "data": base64::engine::general_purpose::STANDARD
+                                    .encode(&reference.bytes),
+                            }
+                        }),
+                    ]
+                }),
+        )
         .collect();
     let body = json!({
         "contents": [{ "role": "user", "parts": parts }],

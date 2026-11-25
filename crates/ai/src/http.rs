@@ -23,6 +23,9 @@ pub struct HttpRequest {
     /// upload headers).
     pub headers: Vec<(Cow<'static, str>, String)>,
     pub body: Option<Vec<u8>>,
+    /// How long to wait for the whole answer, when this request needs
+    /// longer than the transport's own wait.
+    pub timeout: Option<Duration>,
 }
 
 impl HttpRequest {
@@ -32,6 +35,7 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: None,
+            timeout: None,
         }
     }
 
@@ -42,6 +46,7 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: None,
+            timeout: None,
         }
     }
 
@@ -52,6 +57,7 @@ impl HttpRequest {
             url: url.into(),
             headers: vec![("content-type".into(), "application/json".to_owned())],
             body: Some(body.into().into_bytes()),
+            timeout: None,
         }
     }
 
@@ -69,6 +75,7 @@ impl HttpRequest {
                 "application/x-www-form-urlencoded".to_owned(),
             )],
             body: Some(body.into_bytes()),
+            timeout: None,
         }
     }
 
@@ -125,6 +132,7 @@ impl HttpRequest {
                 format!("multipart/form-data; boundary={boundary}"),
             )],
             body: Some(body),
+            timeout: None,
         }
     }
 
@@ -135,11 +143,19 @@ impl HttpRequest {
             url: url.into(),
             headers: Vec::new(),
             body: Some(body),
+            timeout: None,
         }
     }
 
     pub fn header(mut self, name: impl Into<Cow<'static, str>>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// Waits up to `timeout` for the whole answer instead of the
+    /// transport's own wait.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self
     }
 
@@ -481,6 +497,9 @@ impl UreqTransport {
                 };
                 for (name, value) in &request.headers {
                     call = call.header(name.as_ref(), value.as_str());
+                }
+                if let Some(timeout) = request.timeout {
+                    call = call.config().timeout_global(Some(timeout)).build();
                 }
                 call.send(request.body.as_deref().unwrap_or_default())
             }

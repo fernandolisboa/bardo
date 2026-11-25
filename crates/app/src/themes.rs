@@ -20,7 +20,7 @@ use bardo_domain::{
     JobFailure, JobFailureKind, JobId, JobKind, Niche, NicheScores, NicheSeedError,
     PastPerformance, PerformanceEvidence, PerformanceReason, ProfileId, Progress, Provider,
     ProviderFailure, Question, Questions, Reason, RepositoryError, SecretStore, Standing,
-    TextFormat, TextGenerator, TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea,
+    TextEffort, TextFormat, TextGenerator, TextRequest, Theme, ThemeFieldError, ThemeId, ThemeIdea,
     ThemeNotSuggested, ThemeRanking, ThemeRepository, ThemeStatus, UiLanguage, VideoProject,
     rank_themes,
 };
@@ -459,6 +459,7 @@ fn proposal_request(brief: &Brief, niche: &Niche, avoid: &[&str]) -> TextRequest
         niche.label()
     ));
     TextRequest {
+        effort: TextEffort::Everyday,
         instructions,
         prompt,
         images: Vec::new(),
