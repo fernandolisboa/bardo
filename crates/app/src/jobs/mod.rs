@@ -1006,6 +1006,162 @@ mod tests {
         assert_eq!(late.resumed(), submitted_and_at_step_2());
     }
 
+    /// A handler that notes on its handle what it will not send again
+    /// unasked (`;ended`), which a retry on request turns into `;asked`.
+    /// Its first run saves `sent;ended` at once; then, unless `failing`
+    /// (it fails for a passing reason), it waits to be told to stop and
+    /// let go (`release`) and notes one more end (`;late`). Every later run
+    /// tells in `found` what it resumed from.
+    #[derive(Default)]
+    struct Noting {
+        runs: AtomicU32,
+        failing: bool,
+        release: AtomicBool,
+        saved: AtomicBool,
+        found: Mutex<Vec<Option<String>>>,
+    }
+
+    impl JobHandler for Noting {
+        fn asked_again(&self, external_handle: Option<&str>) -> Option<String> {
+            Some(external_handle?.replace(";ended", ";asked"))
+        }
+
+        /// What the retry asked again for stays asked.
+        fn saved_after_ask(&self, asked: Option<&str>, saved: String) -> String {
+            match asked {
+                Some(asked) if asked.contains(";asked") => saved.replacen(";ended", ";asked", 1),
+                _ => saved,
+            }
+        }
+
+        fn run(&self, _payload: &str, cx: &mut JobContext) -> Result<(), JobFailure> {
+            if self.runs.fetch_add(1, Ordering::SeqCst) > 0 {
+                self.found
+                    .lock()
+                    .unwrap()
+                    .push(cx.external_handle().map(str::to_owned));
+                return Ok(());
+            }
+            cx.save_external_handle("sent;ended").unwrap();
+            if self.failing {
+                return Err(JobFailure::new(
+                    JobFailureKind::ProviderUnavailable,
+                    "HTTP 503",
+                ));
+            }
+            until_stopped(cx);
+            while !self.release.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            cx.save_external_handle("sent;ended;late").unwrap();
+            self.saved.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn noting(noting: &Arc<Noting>) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+        HashMap::from([(
+            JobKind::Countdown,
+            Arc::clone(noting) as Arc<dyn JobHandler>,
+        )])
+    }
+
+    fn found(handler: &Noting) -> Vec<Option<String>> {
+        handler.found.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn a_retry_on_request_tells_the_handler_in_the_same_save() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting::default());
+        let q = queue(&db, owner, noting(&handler), settings());
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+        q.cancel(id).unwrap();
+        handler.release.store(true, Ordering::SeqCst);
+        wait_for(|| q.jobs(), id, |_| !q.runs_here(id));
+        assert_eq!(
+            stored(&db, owner, id).external_handle(),
+            Some("sent;ended;late")
+        );
+
+        q.retry(id).unwrap();
+
+        assert_eq!(
+            stored(&db, owner, id).external_handle(),
+            Some("sent;asked;late"),
+            "saved with the retry, before any run starts"
+        );
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(found(&handler), [Some("sent;asked;late".to_owned())]);
+    }
+
+    #[test]
+    fn a_run_that_stops_after_a_retry_on_request_keeps_what_was_asked() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting::default());
+        let q = queue(&db, owner, noting(&handler), settings());
+        let id = enqueue(&q, owner);
+        wait_for(
+            || q.jobs(),
+            id,
+            |j| j.external_handle() == Some("sent;ended"),
+        );
+
+        // The user retries before the cancelled run has returned, and that
+        // run then saves again: what the retry asked for stays asked, and
+        // what the run noted after it stays noted.
+        q.cancel(id).unwrap();
+        q.retry(id).unwrap();
+        handler.release.store(true, Ordering::SeqCst);
+
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(found(&handler), [Some("sent;asked;late".to_owned())]);
+    }
+
+    #[test]
+    fn the_queue_trying_again_does_not_tell_the_handler_the_user_asked() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting {
+            failing: true,
+            ..Noting::default()
+        });
+        let q = queue(&db, owner, noting(&handler), settings());
+        let id = enqueue(&q, owner);
+
+        let done = wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+
+        assert_eq!(done.attempts(), 2, "the queue went again on its own");
+        assert_eq!(
+            found(&handler),
+            [Some("sent;ended".to_owned())],
+            "with the note as the first attempt left it"
+        );
+    }
+
+    #[test]
+    fn a_run_picked_up_after_closing_does_not_tell_the_handler_the_user_asked() {
+        let (db, owner) = memory_db();
+        let handler = Arc::new(Noting::default());
+        // The closing queue waits for the run however slow the machine is.
+        let patient = JobSettings {
+            closing_wait: PATIENCE,
+            ..settings()
+        };
+        let q = queue(&db, owner, noting(&handler), patient);
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+
+        // Closing tells the run to stop; it saves its note and returns.
+        handler.release.store(true, Ordering::SeqCst);
+        drop(q);
+        assert!(handler.saved.load(Ordering::SeqCst));
+
+        let q = queue(&db, owner, noting(&handler), settings());
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(found(&handler), [Some("sent;ended;late".to_owned())]);
+    }
+
     #[test]
     fn a_closing_queue_keeps_what_a_run_saves_before_it_returns() {
         let dir = tempfile::tempdir().unwrap();

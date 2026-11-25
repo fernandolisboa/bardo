@@ -394,6 +394,9 @@ pub enum JobFailureKind {
     AnswerLost,
     /// The provider answered in a way Bardo does not understand.
     UnexpectedAnswer,
+    /// The provider took the request and then said it could not do it.
+    /// Sending it again is a new request, so only the user asks again.
+    RequestFailed,
     /// The provider's safety rules declined the request.
     Declined,
     /// ffmpeg could not read or write a media file (a broken or missing
@@ -428,7 +431,7 @@ pub enum JobFailureKind {
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 19] = [
+    pub const ALL: [JobFailureKind; 20] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -438,6 +441,7 @@ impl JobFailureKind {
         JobFailureKind::ProviderUnavailable,
         JobFailureKind::AnswerLost,
         JobFailureKind::UnexpectedAnswer,
+        JobFailureKind::RequestFailed,
         JobFailureKind::Declined,
         JobFailureKind::Media,
         JobFailureKind::Missed,
@@ -462,6 +466,7 @@ impl JobFailureKind {
             JobFailureKind::ProviderUnavailable => "provider_unavailable",
             JobFailureKind::AnswerLost => "answer_lost",
             JobFailureKind::UnexpectedAnswer => "unexpected_answer",
+            JobFailureKind::RequestFailed => "request_failed",
             JobFailureKind::Declined => "declined",
             JobFailureKind::Media => "media",
             JobFailureKind::Missed => "missed",
@@ -486,6 +491,7 @@ impl JobFailureKind {
             | JobFailureKind::LimitReached
             | JobFailureKind::AnswerLost
             | JobFailureKind::UnexpectedAnswer
+            | JobFailureKind::RequestFailed
             | JobFailureKind::Declined
             | JobFailureKind::Media
             | JobFailureKind::Missed

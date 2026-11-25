@@ -34,6 +34,26 @@ use bardo_domain::{
 /// and stops at once when a save is refused.
 pub trait JobHandler: Send + Sync {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure>;
+
+    /// The job was queued again on request (`JobQueue::retry`, a retry by
+    /// the user), which a run cannot tell from the queue trying again
+    /// after a failure that passes or from a run picked up after the app
+    /// closed. `external_handle` is what the job saved; the answer
+    /// replaces it, and `None` keeps it. For a handler whose saved state
+    /// says what must not be sent again unless the user asks. Runs under
+    /// the queue's lock: no waiting.
+    fn asked_again(&self, _external_handle: Option<&str>) -> Option<String> {
+        None
+    }
+
+    /// A run told to stop saves `saved` onto a job already queued again
+    /// on request, whose handle `asked_again` left as `asked`: what to
+    /// keep. What the user asked again for at the retry stays asked, and
+    /// what the run learned after it does not. Runs under the queue's
+    /// lock: no waiting.
+    fn saved_after_ask(&self, _asked: Option<&str>, saved: String) -> String {
+        saved
+    }
 }
 
 /// How the queue runs jobs.
@@ -278,13 +298,25 @@ impl JobContext {
     ) -> Result<(), RepositoryError> {
         let handle = handle.into();
         self.external_handle = Some(handle.clone());
-        self.shared.save_resume(self.id, |job| {
-            if job.state() == JobState::Running {
-                job.record_external_handle(handle)
-            } else {
-                job.keep_from_stopping_run(None, Some(handle))
+        let handler = self.shared.handlers.get(&self.kind);
+        self.shared.save_resume(self.id, |job| match job.state() {
+            JobState::Running => job.record_external_handle(handle),
+            // Queued again on request while this run still stops.
+            JobState::Queued => {
+                let kept = match handler {
+                    Some(handler) => handler.saved_after_ask(job.external_handle(), handle),
+                    None => handle,
+                };
+                job.keep_from_stopping_run(None, Some(kept))
             }
+            _ => job.keep_from_stopping_run(None, Some(handle)),
         })
+    }
+
+    /// `text` with the keys the app knows masked, for what a handler keeps
+    /// in storage (a failure's detail is masked the same way).
+    pub fn redact(&self, text: &str) -> String {
+        self.shared.redactor.redact(text)
     }
 }
 
@@ -483,6 +515,20 @@ impl Shared {
                 let _ = self.repository.release(id);
                 self.changed();
             }
+        }
+    }
+
+    /// Queues a failed or cancelled job again because the user asked, and
+    /// tells its handler so in the same save (`JobHandler::asked_again`).
+    fn ask_again(&self, job: &mut Job) -> Result<(), InvalidJobTransition> {
+        job.retry()?;
+        let asked = self
+            .handlers
+            .get(&job.kind())
+            .and_then(|handler| handler.asked_again(job.external_handle()));
+        match asked {
+            Some(handle) => job.keep_from_stopping_run(None, Some(handle)),
+            None => Ok(()),
         }
     }
 
@@ -720,7 +766,9 @@ impl JobQueue {
     }
 
     pub(crate) fn retry(&self, id: JobId) -> Result<(), JobActionError> {
-        self.shared.transition(id, Job::retry).map(drop)
+        self.shared
+            .transition(id, |job| self.shared.ask_again(job))
+            .map(drop)
     }
 
     /// Queues a failed or cancelled job again, like `retry`, to start no
@@ -728,7 +776,7 @@ impl JobQueue {
     pub(crate) fn retry_at(&self, id: JobId, at: Option<SystemTime>) -> Result<(), JobActionError> {
         self.shared
             .transition(id, |job| {
-                job.retry()?;
+                self.shared.ask_again(job)?;
                 match at {
                     Some(at) => job.wait_until(at),
                     None => Ok(()),
