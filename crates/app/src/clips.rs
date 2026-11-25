@@ -175,6 +175,9 @@ enum Step {
     Saved,
     /// It failed; the others go on.
     Failed(JobFailure),
+    /// The job was told to stop before the scene was sent: nothing was
+    /// started, and what the scene had reached is saved.
+    Stopped,
 }
 
 /// The clip file's name in the project folder.
@@ -337,6 +340,7 @@ impl ClipJob<'_> {
                         answered = true;
                         failed.push((order.scene, failure));
                     }
+                    Step::Stopped => return Ok(()),
                 }
             }
             if waiting == 0 {
@@ -507,6 +511,9 @@ impl ClipJob<'_> {
     }
 
     /// Hands the scene's image over (once per submission) and submits it.
+    /// The job may be told to stop while a call is on its way (cancelled,
+    /// or the app closing): it looks again right before the call that
+    /// starts, and charges for, the clip.
     fn submit(
         &mut self,
         order: &ClipOrder,
@@ -546,6 +553,9 @@ impl ClipJob<'_> {
         let submission = format!("{}-{}-{}", self.job, order.scene, run.submission);
         if !generator.dedupes_submissions() {
             return self.submit_once(order, generator, key, &request, &submission, cx);
+        }
+        if cx.should_stop() {
+            return Ok(Step::Stopped);
         }
         match self.call(generator, key, |key| {
             generator.submit(key, &request, &submission)
@@ -615,6 +625,9 @@ impl ClipJob<'_> {
         if let Err(failure) = self.call(generator, key, |key| generator.check_submit(key, request))
         {
             return self.submit_failed(order, failure, cx);
+        }
+        if cx.should_stop() {
+            return Ok(Step::Stopped);
         }
         self.run_of(order.scene)
             .expect("staging adds the scene's run")
@@ -1187,7 +1200,7 @@ mod tests {
 
     use super::*;
     use crate::scenes::tests::{Harness, done, wait_done};
-    use crate::testing::{CLIP, SCENE_IMAGE};
+    use crate::testing::{CLIP, ClipCall, SCENE_IMAGE};
     use crate::{Text, testing::FakeClips};
 
     const PATIENCE: Duration = Duration::from_secs(10);
@@ -1904,6 +1917,184 @@ mod tests {
         let polls = h.clips.polls.lock().unwrap().clone();
         assert!(polls.iter().all(|request| request == "req-0"));
         assert!(plan_of(&app, &project).scenes()[2].pending_clip().is_some());
+    }
+
+    /// The app with `clips` as a second video provider (in Kling's place)
+    /// that starts, and charges for, a new clip every time it is sent a
+    /// submission, and a drawn project whose channel animates with it.
+    fn charged_on_every_send(
+        h: &mut Harness,
+        clips: FakeClips,
+    ) -> (Arc<FakeClips>, Bardo, VideoProject) {
+        let clips = Arc::new(FakeClips {
+            provider: Some(Provider::Kling),
+            no_idempotency: true,
+            ..clips
+        });
+        h.more_clips.push(Arc::clone(&clips) as _);
+        let mut app = h.start();
+        app.save_provider_key(Provider::Kling, "kling-test-key-0001")
+            .unwrap();
+        let (project, _) = h.drawn_project(&app);
+        let model = ClipModelRef::new(Provider::Kling, "fake/range").unwrap();
+        channel_uses(&app, &project, Some(model));
+        (clips, app, project)
+    }
+
+    /// Waits for a cancelled job's handler to return.
+    fn returned(app: &Bardo, id: JobId) {
+        let deadline = Instant::now() + PATIENCE;
+        while app.job_runs_here(id) {
+            assert!(Instant::now() < deadline, "the handler never returned");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn sends(clips: &FakeClips) -> u32 {
+        *clips.sends.lock().unwrap()
+    }
+
+    fn clips_in_costs(h: &Harness, project: &VideoProject) -> usize {
+        h.db.project_costs(project.id)
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.purpose == CostPurpose::SceneClip)
+            .count()
+    }
+
+    /// Lets the call held open go on a moment after the app starts closing.
+    fn close_with_a_call_open(app: Bardo, clips: &Arc<FakeClips>) {
+        let resumer = {
+            let clips = Arc::clone(clips);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(150));
+                clips.resume();
+            })
+        };
+        drop(app);
+        resumer.join().unwrap();
+    }
+
+    #[test]
+    fn a_job_cancelled_while_an_image_is_handed_over_sends_no_clip() {
+        let mut h = Harness::new();
+        let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::StageImage);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        app.cancel_job(id).unwrap();
+        clips.resume();
+        returned(&app, id);
+
+        assert_eq!(sends(&clips), 0, "a cancelled job still sent a clip");
+        assert_eq!(clips_in_costs(&h, &project), 0);
+
+        // Started again by hand, it sends the clip once, with the image the
+        // cancelled run handed over.
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(sends(&clips), 1);
+        assert_eq!(clips.staged.lock().unwrap().len(), 1, "handed over once");
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_job_cancelled_while_an_image_is_handed_over_sends_no_clip_with_a_submission_id_either() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.pause_at(ClipCall::StageImage);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, FakeClips::paused);
+
+        app.cancel_job(id).unwrap();
+        h.clips.resume();
+        returned(&app, id);
+        assert_eq!(sends(&h.clips), 0, "a cancelled job still sent a clip");
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(sends(&h.clips), 1);
+        assert_eq!(h.clips.staged.lock().unwrap().len(), 1, "handed over once");
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_clip_sent_as_its_job_is_cancelled_is_kept_for_the_retry() {
+        let mut h = Harness::new();
+        let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::Submit);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        // The submission is on its way: the provider starts the clip.
+        app.cancel_job(id).unwrap();
+        clips.resume();
+        returned(&app, id);
+
+        let cancelled = wait_done(&app, id);
+        assert_eq!(cancelled.state(), JobState::Cancelled);
+        let kept = cancelled.external_handle().expect("the request is kept");
+        assert!(kept.contains("req-0"), "{kept}");
+
+        // The retry asks for that clip instead of paying for another.
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(sends(&clips), 1, "the scene was sent, and paid for, twice");
+        assert_eq!(clips.submissions().len(), 1);
+        assert_eq!(*clips.lookups.lock().unwrap(), 0, "nothing to look for");
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn closing_while_an_image_is_handed_over_sends_the_clip_once_after_the_restart() {
+        let mut h = Harness::new();
+        let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::StageImage);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        close_with_a_call_open(app, &clips);
+        assert_eq!(sends(&clips), 0, "a closing app still sent a clip");
+
+        let app = h.start();
+        done(&app, id);
+        assert_eq!(sends(&clips), 1);
+        assert_eq!(clips.staged.lock().unwrap().len(), 1, "handed over once");
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_clip_sent_as_the_app_closes_is_kept_for_the_next_start() {
+        let mut h = Harness::new();
+        let (clips, app, project) = charged_on_every_send(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::Submit);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        close_with_a_call_open(app, &clips);
+
+        let app = h.start();
+        done(&app, id);
+        assert_eq!(sends(&clips), 1, "the scene was sent, and paid for, twice");
+        assert_eq!(clips.submissions().len(), 1);
+        assert_eq!(*clips.lookups.lock().unwrap(), 0, "nothing to look for");
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
     }
 
     #[test]

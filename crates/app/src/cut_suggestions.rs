@@ -1105,13 +1105,18 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         app.cancel_job(job).unwrap();
+        assert_eq!(wait_done(&app, job).state(), JobState::Cancelled);
+        // The call in flight when it stopped still ends, and is paid for:
+        // its stretch is kept too, so the retry does not score it again.
+        while app.job_runs_here(job) {
+            assert!(std::time::Instant::now() < deadline, "never stopped");
+            std::thread::sleep(Duration::from_millis(2));
+        }
         let cancelled = wait_done(&app, job);
-        assert_eq!(cancelled.state(), JobState::Cancelled);
         let kept: CutCheckpoint = serde_json::from_str(cancelled.checkpoint().unwrap()).unwrap();
         assert!(kept.chunks > 0 && kept.chunks < chunks, "{}", kept.chunks);
-        // The call in flight when it stopped still ends.
-        std::thread::sleep(Duration::from_millis(150));
         let before = h.decisions.calls().len();
+        assert_eq!(before, kept.chunks, "every stretch paid for is kept");
         assert_eq!(
             app.cut_suggestions.cut_suggestions(project.id).unwrap(),
             None

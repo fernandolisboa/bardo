@@ -793,6 +793,32 @@ impl Job {
         Ok(())
     }
 
+    /// Keeps what a run saved after it was told to stop: where the next run
+    /// resumes from and the provider's handle for work already submitted. A
+    /// handler told to stop goes on until its next check, and what it hands
+    /// to a provider meanwhile is still paid for, so the next run must find
+    /// it. By then the job may be cancelled, or queued again by hand while
+    /// that run still stops. Its progress stays as it was.
+    pub fn keep_from_stopping_run(
+        &mut self,
+        checkpoint: Option<String>,
+        external_handle: Option<String>,
+    ) -> Result<(), InvalidJobTransition> {
+        if !matches!(
+            self.state,
+            JobState::Running | JobState::Cancelled | JobState::Queued
+        ) {
+            return Err(self.invalid("keep what a stopping run saved for"));
+        }
+        if checkpoint.is_some() {
+            self.checkpoint = checkpoint;
+        }
+        if external_handle.is_some() {
+            self.external_handle = external_handle;
+        }
+        Ok(())
+    }
+
     pub fn complete(&mut self) -> Result<(), InvalidJobTransition> {
         self.expect_running("complete")?;
         self.state = JobState::Done;
@@ -844,7 +870,9 @@ impl Job {
     }
 
     /// Stops a queued or running job for good. A running handler is told to
-    /// stop by the queue; whatever it reports afterwards is rejected here.
+    /// stop by the queue; its progress and its end are rejected from then
+    /// on, and only what it saves to resume from is kept
+    /// (`keep_from_stopping_run`).
     pub fn cancel(&mut self) -> Result<(), InvalidJobTransition> {
         if !self.can_cancel() {
             return Err(self.invalid("cancel"));
@@ -1252,6 +1280,67 @@ mod tests {
         assert!(job.complete().is_err());
         assert!(job.fail_attempt(transient(), now(), &policy()).is_err());
         assert_eq!(job.state(), JobState::Cancelled);
+    }
+
+    #[test]
+    fn a_cancelled_job_keeps_what_its_stopping_run_saved() {
+        let mut job = running();
+        job.record_progress(Progress::of(1, 3), Some("1".into()))
+            .unwrap();
+        job.cancel().unwrap();
+        assert!(job.record_external_handle("request-7").is_err());
+
+        job.keep_from_stopping_run(None, Some("request-7".into()))
+            .unwrap();
+        job.keep_from_stopping_run(Some("2".into()), None).unwrap();
+
+        assert_eq!(job.state(), JobState::Cancelled);
+        assert_eq!(job.external_handle(), Some("request-7"));
+        assert_eq!(job.checkpoint(), Some("2"));
+        assert_eq!(job.progress(), Progress::of(1, 3));
+    }
+
+    #[test]
+    fn a_job_queued_again_while_its_run_stops_keeps_what_that_run_saved() {
+        let mut job = running();
+        job.cancel().unwrap();
+        job.retry().unwrap();
+
+        job.keep_from_stopping_run(Some("2".into()), Some("request-7".into()))
+            .unwrap();
+
+        assert_eq!(job.state(), JobState::Queued);
+        assert_eq!(job.attempts(), 0);
+        assert_eq!(job.external_handle(), Some("request-7"));
+        assert_eq!(job.checkpoint(), Some("2"));
+        assert!(job.is_due(now()));
+    }
+
+    #[test]
+    fn an_ended_job_keeps_nothing_more() {
+        let mut done = running();
+        done.record_external_handle("request-7").unwrap();
+        done.complete().unwrap();
+        assert_eq!(
+            done.keep_from_stopping_run(Some("2".into()), Some("request-8".into())),
+            Err(InvalidJobTransition {
+                from: JobState::Done,
+                action: "keep what a stopping run saved for"
+            })
+        );
+        assert_eq!(done.external_handle(), Some("request-7"));
+        assert_eq!(done.checkpoint(), None);
+
+        let mut failed = running();
+        failed
+            .fail_attempt(JobFailure::unexpected("boom"), now(), &policy())
+            .unwrap();
+        assert!(
+            failed
+                .keep_from_stopping_run(None, Some("request-8".into()))
+                .is_err()
+        );
+        assert_eq!(failed.external_handle(), None);
     }
 
     #[test]

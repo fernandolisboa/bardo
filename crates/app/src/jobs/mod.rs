@@ -869,6 +869,191 @@ mod tests {
         assert_eq!(polled.lock().unwrap().as_deref(), Some("provider-123"));
     }
 
+    /// A handler that takes its time to notice a stop, as one inside a
+    /// provider call does: its first run waits for the stop and for
+    /// `release`, then saves a provider handle and a checkpoint, and tells
+    /// in `kept` whether both saves were taken. A later run tells in
+    /// `resumed` what it found.
+    #[derive(Default)]
+    struct LateSaves {
+        runs: AtomicU32,
+        release: AtomicBool,
+        kept: Mutex<Option<bool>>,
+        resumed: Mutex<Option<(Option<String>, Option<String>)>>,
+    }
+
+    impl LateSaves {
+        fn handlers(self: &Arc<Self>) -> HashMap<JobKind, Arc<dyn JobHandler>> {
+            let this = Arc::clone(self);
+            handlers(move |_, cx| {
+                if this.runs.fetch_add(1, Ordering::SeqCst) > 0 {
+                    *this.resumed.lock().unwrap() = Some((
+                        cx.external_handle().map(str::to_owned),
+                        cx.checkpoint().map(str::to_owned),
+                    ));
+                    return Ok(());
+                }
+                until_stopped(cx);
+                while !this.release.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let handle = cx.save_external_handle("provider-123");
+                let checkpoint = cx.save_checkpoint("step-2", Progress::from_permille(900));
+                *this.kept.lock().unwrap() = Some(handle.is_ok() && checkpoint.is_ok());
+                Ok(())
+            })
+        }
+
+        fn kept(&self) -> bool {
+            let deadline = Instant::now() + PATIENCE;
+            loop {
+                if let Some(kept) = *self.kept.lock().unwrap() {
+                    return kept;
+                }
+                assert!(Instant::now() < deadline, "the first run never saved");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        fn resumed(&self) -> (Option<String>, Option<String>) {
+            self.resumed.lock().unwrap().clone().expect("a second run")
+        }
+    }
+
+    fn submitted_and_at_step_2() -> (Option<String>, Option<String>) {
+        (Some("provider-123".into()), Some("step-2".into()))
+    }
+
+    #[test]
+    fn a_cancelled_job_keeps_what_its_run_saves_before_it_returns() {
+        let (db, owner) = memory_db();
+        let late = Arc::new(LateSaves::default());
+        let q = queue(&db, owner, late.handlers(), settings());
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+
+        q.cancel(id).unwrap();
+        late.release.store(true, Ordering::SeqCst);
+
+        assert!(late.kept(), "the saves were refused");
+        let cancelled = wait_for(|| q.jobs(), id, |_| !q.runs_here(id));
+        assert_eq!(cancelled.state(), JobState::Cancelled);
+        assert_eq!(cancelled.progress(), Progress::ZERO, "it shows no progress");
+        let saved = stored(&db, owner, id);
+        assert_eq!(saved.state(), JobState::Cancelled);
+        assert_eq!(saved.external_handle(), Some("provider-123"));
+        assert_eq!(saved.checkpoint(), Some("step-2"));
+
+        // Retried by hand, it goes on from what the cancelled run handed
+        // over instead of handing it over (and paying) again.
+        q.retry(id).unwrap();
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(late.resumed(), submitted_and_at_step_2());
+    }
+
+    #[test]
+    fn a_job_retried_while_its_cancelled_run_stops_keeps_what_that_run_saves() {
+        let (db, owner) = memory_db();
+        let late = Arc::new(LateSaves::default());
+        let q = queue(&db, owner, late.handlers(), settings());
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+
+        q.cancel(id).unwrap();
+        q.retry(id).unwrap();
+        late.release.store(true, Ordering::SeqCst);
+
+        assert!(late.kept(), "the saves were refused");
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(late.resumed(), submitted_and_at_step_2());
+    }
+
+    #[test]
+    fn a_closing_queue_keeps_what_a_run_saves_before_it_returns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bardo.db");
+        let (db, owner) = database_with_profile(Database::open(&path).unwrap());
+        let late = Arc::new(LateSaves::default());
+        let first = queue(&db, owner, late.handlers(), settings());
+        let id = enqueue(&first, owner);
+        wait_for(|| first.jobs(), id, |j| j.state() == JobState::Running);
+
+        // The run returns a moment after the queue starts closing.
+        let releaser = {
+            let late = Arc::clone(&late);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                late.release.store(true, Ordering::SeqCst);
+            })
+        };
+        drop(first);
+        releaser.join().unwrap();
+        assert!(late.kept(), "the saves were refused");
+        drop(db);
+
+        let reopened = Arc::new(Database::open(&path).unwrap());
+        let left = stored(&reopened, owner, id);
+        assert_eq!(left.state(), JobState::Running, "closing is not cancelling");
+        assert_eq!(left.external_handle(), Some("provider-123"));
+
+        let second = queue(&reopened, owner, late.handlers(), settings());
+        wait_for(|| second.jobs(), id, |j| j.state() == JobState::Done);
+        assert_eq!(late.resumed(), submitted_and_at_step_2());
+    }
+
+    #[test]
+    fn a_run_that_outlives_its_closed_queue_is_told_its_saves_were_not_kept() {
+        let (db, owner) = memory_db();
+        let late = Arc::new(LateSaves::default());
+        let q = queue(&db, owner, late.handlers(), settings());
+        let id = enqueue(&q, owner);
+        wait_for(|| q.jobs(), id, |j| j.state() == JobState::Running);
+
+        // The queue waits for the run a little, then closes without it.
+        drop(q);
+        late.release.store(true, Ordering::SeqCst);
+
+        assert!(!late.kept(), "a save after closing reported success");
+        let left = stored(&db, owner, id);
+        assert_eq!(left.external_handle(), None);
+        assert_eq!(left.checkpoint(), None);
+    }
+
+    #[test]
+    fn a_run_whose_lease_another_runner_took_is_told_its_saves_were_not_kept() {
+        let (db, owner) = memory_db();
+        // Leases run out between ticks, as when the computer sleeps.
+        let settings = JobSettings {
+            lease: Duration::from_millis(120),
+            tick: Duration::from_millis(400),
+            ..settings()
+        };
+        let late = Arc::new(LateSaves::default());
+        let app = queue(&db, owner, late.handlers(), settings);
+        let id = enqueue(&app, owner);
+        wait_for(|| app.jobs(), id, |j| j.state() == JobState::Running);
+
+        // The other runner takes the expired lease and holds the job, as
+        // while it runs it.
+        let other = second_runner(&db);
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let now = SystemTime::now();
+            if JobRepository::lease(&*other, id, now, now + Duration::from_secs(60)).unwrap() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the lease never ran out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // This runner's next tick sees the lease gone and stops its run.
+        late.release.store(true, Ordering::SeqCst);
+
+        assert!(!late.kept(), "a save over another runner's job succeeded");
+        let theirs = JobRepository::job(&*other, id).unwrap().unwrap();
+        assert_eq!(theirs.external_handle(), None);
+        assert_eq!(theirs.checkpoint(), None);
+    }
+
     #[test]
     fn a_job_waiting_to_retry_keeps_waiting_after_a_restart() {
         let (db, owner) = memory_db();

@@ -26,6 +26,12 @@ use bardo_domain::{
 /// Runs one kind of job. Handlers run on a worker thread, read their payload
 /// and resume point from the context, and should return soon after
 /// `JobContext::should_stop` turns true.
+///
+/// A handler told to stop still gets to save what it resumes from
+/// (`save_checkpoint`, `save_external_handle`) until it returns: what it
+/// handed to a provider in the meantime is paid for, and the next run must
+/// find it. It checks `should_stop` before it starts anything that costs,
+/// and stops at once when a save is refused.
 pub trait JobHandler: Send + Sync {
     fn run(&self, payload: &str, cx: &mut JobContext) -> Result<(), JobFailure>;
 }
@@ -112,6 +118,20 @@ pub enum JobActionError {
     NotAllowed(#[from] InvalidJobTransition),
     #[error(transparent)]
     Repository(#[from] RepositoryError),
+}
+
+/// A handler's save came after its run lost the job: another runner holds
+/// it now, or the queue closed without waiting any longer for the handler.
+/// Nothing was written. The handler stops there, before it starts anything
+/// the next run would need that save to find.
+#[derive(Debug, thiserror::Error)]
+#[error("the run was stopped and its save was not kept")]
+pub struct SaveNotKept;
+
+impl From<SaveNotKept> for RepositoryError {
+    fn from(error: SaveNotKept) -> Self {
+        Self(Box::new(error))
+    }
 }
 
 /// Tells a running handler to stop, because the user cancelled the job or
@@ -207,12 +227,13 @@ impl JobContext {
     /// Shows progress in the UI. Not saved: after a restart the job shows
     /// the progress of its last checkpoint.
     pub fn report_progress(&self, progress: Progress) {
-        let _ =
-            self.shared
-                .update_running(self.id, |job| job.record_progress(progress, None), false);
+        self.shared.show_progress(self.id, progress);
     }
 
-    /// Saves where to resume from, with the progress reached there.
+    /// Saves where to resume from, with the progress reached there. Kept
+    /// for a run that was told to stop, too (the progress is then not
+    /// shown). `Err` when it was not saved: storage failed, or the run lost
+    /// the job (`SaveNotKept`).
     pub fn save_checkpoint(
         &mut self,
         checkpoint: impl Into<String>,
@@ -220,23 +241,32 @@ impl JobContext {
     ) -> Result<(), RepositoryError> {
         let checkpoint = checkpoint.into();
         self.checkpoint = Some(checkpoint.clone());
-        self.shared.update_running(
-            self.id,
-            |job| job.record_progress(progress, Some(checkpoint)),
-            true,
-        )
+        self.shared.save_resume(self.id, |job| {
+            if job.state() == JobState::Running {
+                job.record_progress(progress, Some(checkpoint))
+            } else {
+                job.keep_from_stopping_run(Some(checkpoint), None)
+            }
+        })
     }
 
     /// Saves the provider's handle for submitted work before waiting on it,
-    /// so a restart polls instead of paying for the work twice.
+    /// so a restart polls instead of paying for the work twice. Kept for a
+    /// run that was told to stop, too. `Err` when it was not saved: storage
+    /// failed, or the run lost the job (`SaveNotKept`).
     pub fn save_external_handle(
         &mut self,
         handle: impl Into<String>,
     ) -> Result<(), RepositoryError> {
         let handle = handle.into();
         self.external_handle = Some(handle.clone());
-        self.shared
-            .update_running(self.id, |job| job.record_external_handle(handle), true)
+        self.shared.save_resume(self.id, |job| {
+            if job.state() == JobState::Running {
+                job.record_external_handle(handle)
+            } else {
+                job.keep_from_stopping_run(None, Some(handle))
+            }
+        })
     }
 }
 
@@ -268,7 +298,11 @@ struct State {
     /// A runner holds the whole database (a restore, ADR-0010): only a
     /// restore job starts.
     held: bool,
+    /// The queue is closing: handlers were told to stop and may still save
+    /// what they resume from while it waits for them.
     closing: bool,
+    /// The queue closed: no worker writes to the repository from now on.
+    closed: bool,
     /// When the queue next renews, says it is up and reads storage.
     next_tick: Instant,
 }
@@ -314,30 +348,41 @@ impl Shared {
         failure
     }
 
-    /// Applies a handler report to its job. Reports for a job that is no
-    /// longer running (cancelled meanwhile) are dropped, and nothing is
-    /// written once the app is closing or the job's lease was lost.
-    fn update_running(
+    /// Shows a running job's progress, in memory only. Dropped for a job
+    /// that no longer runs here: cancelled meanwhile, taken by another
+    /// runner, or cut by the app closing.
+    fn show_progress(&self, id: JobId, progress: Progress) {
+        let mut state = self.state();
+        if state.closing || state.lost.contains(&id) {
+            return;
+        }
+        if let Some(job) = state.job_mut(id)
+            && job.record_progress(progress, None).is_ok()
+        {
+            self.changed();
+        }
+    }
+
+    /// Saves what a handler resumes from (`apply` records it on the job).
+    /// The handler's worker is still registered, so no other run of the job
+    /// has started: the save is kept even when the job was cancelled, or
+    /// queued again by hand, since the handler began, and while the queue
+    /// is closing. It is refused with `SaveNotKept`, and nothing written,
+    /// once another runner holds the job or the queue has closed.
+    fn save_resume(
         &self,
         id: JobId,
         apply: impl FnOnce(&mut Job) -> Result<(), InvalidJobTransition>,
-        persist: bool,
     ) -> Result<(), RepositoryError> {
         let mut state = self.state();
-        if state.closing || state.lost.contains(&id) {
-            return Ok(());
+        if state.closed || state.lost.contains(&id) {
+            return Err(SaveNotKept.into());
         }
-        let Some(job) = state.job_mut(id) else {
-            return Ok(());
-        };
-        if apply(job).is_err() {
-            return Ok(());
-        }
-        let saved = if persist {
-            self.repository.save(job)
-        } else {
-            Ok(())
-        };
+        let job = state.job_mut(id).ok_or(SaveNotKept)?;
+        apply(job).map_err(|_| SaveNotKept)?;
+        // The copy here keeps it even when storage refuses: the run's end
+        // (or the next save) writes it then.
+        let saved = self.repository.save(job);
         self.changed();
         saved
     }
@@ -355,8 +400,9 @@ impl Shared {
             return;
         }
         if state.closing {
-            // The job stays running in storage, and its handler is done
-            // with it: the next runner resumes it at once.
+            // The job stays running in storage, with what its handler
+            // saved last, and its handler is done with it: the next runner
+            // resumes it at once.
             let _ = self.repository.release(id);
             self.wake.notify_all();
             return;
@@ -519,6 +565,7 @@ impl JobQueue {
                 paused,
                 held,
                 closing: false,
+                closed: false,
                 next_tick: Instant::now() + settings.tick,
             }),
             wake: Condvar::new(),
@@ -668,9 +715,11 @@ impl JobQueue {
 }
 
 impl Drop for JobQueue {
-    /// Tells running handlers to stop and waits for the scheduler. Running
-    /// jobs stay running in storage, so the next start resumes them. Once
-    /// this returns, no worker writes to the repository again.
+    /// Tells running handlers to stop and waits for the scheduler, then a
+    /// little for the handlers, which may still save what they resume
+    /// from. Running jobs stay running in storage, so the next start
+    /// resumes them. Once this returns, no worker writes to the repository
+    /// again: a handler still busy is refused its saves (`SaveNotKept`).
     fn drop(&mut self) {
         {
             let mut state = self.shared.state();
@@ -713,6 +762,7 @@ impl Drop for JobQueue {
         for id in std::mem::take(&mut state.unsaved) {
             let _ = self.shared.repository.release(id);
         }
+        state.closed = true;
         drop(state);
         let _ = self.shared.repository.leave();
     }
