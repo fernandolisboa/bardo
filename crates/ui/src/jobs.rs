@@ -6,7 +6,10 @@
 use std::time::Duration;
 
 use bardo_app::bardo_domain::{Job, JobId, JobState, Progress as JobProgress};
-use bardo_app::{Bardo, Control, JobGroups, Side, TestJob, Text, TourAnchor};
+use bardo_app::{
+    Bardo, BudgetConsent, Control, JobActionError, JobGroups, Side, SpendEstimate, TestJob, Text,
+    TourAnchor,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{
@@ -21,6 +24,7 @@ use crate::appearance::look;
 use crate::guide;
 use crate::kit::{self, Tone};
 use crate::shell::tr;
+use crate::spend::budget_question;
 use crate::tour::Anchored as _;
 
 /// How often the panel checks the queue for changes. Reading the revision
@@ -32,6 +36,9 @@ pub struct JobsPanel {
     groups: JobGroups,
     revision: u64,
     error: Option<Text>,
+    /// The job whose retry waits for an answer about its cost, with the
+    /// estimate asked about.
+    asking: Option<(JobId, Box<SpendEstimate>)>,
     /// The list's scroll, so a tour brings the job it lights into view.
     scroll: ScrollHandle,
     _poll: Task<()>,
@@ -59,6 +66,7 @@ impl JobsPanel {
             groups,
             revision,
             error: None,
+            asking: None,
             scroll: ScrollHandle::new(),
             _poll: poll,
             _subscriptions: subscriptions,
@@ -76,6 +84,14 @@ impl JobsPanel {
         if revision != self.revision {
             self.groups = bardo.job_groups();
             self.revision = revision;
+            // A question on screen follows the queue: what another job
+            // drew or sent since is no longer asked about, and a job that
+            // would now go ahead (or ran) gets its button back.
+            if let Some((id, _)) = self.asking {
+                self.asking = bardo
+                    .retry_question(id)
+                    .map(|estimate| (id, Box::new(estimate)));
+            }
             cx.notify();
         }
     }
@@ -94,10 +110,25 @@ impl JobsPanel {
         cx.notify();
     }
 
-    fn retry(&mut self, id: JobId, cx: &mut Context<Self>) {
-        let result = self.bardo.read(cx).retry_job(id);
-        self.error = result.err().map(|error| error.message());
+    /// Runs the job again. One whose images or clips still to pay for
+    /// would reach a budget or pass the video's cap, or have no price,
+    /// asks on its card first; `consent` is the answer.
+    fn retry(&mut self, id: JobId, consent: BudgetConsent, cx: &mut Context<Self>) {
+        self.asking = None;
+        self.error = match self.bardo.read(cx).retry_job_with(id, consent) {
+            Ok(()) => None,
+            Err(JobActionError::OverBudget(estimate)) => {
+                self.asking = Some((id, estimate));
+                None
+            }
+            Err(error) => Some(error.message()),
+        };
         self.refresh(cx);
+        cx.notify();
+    }
+
+    fn stop_asking(&mut self, cx: &mut Context<Self>) {
+        self.asking = None;
         cx.notify();
     }
 
@@ -220,31 +251,67 @@ impl JobsPanel {
             _ => None,
         };
 
-        let action = if job.can_cancel() {
+        let cancel = job.can_cancel().then(|| {
             let button = Button::new(SharedString::from(format!("job-cancel-{id}")))
                 .xsmall()
                 .outline()
                 .label(tr(bardo, Text::CancelJob))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.cancel(id, cx)));
-            Some(self.tag_first(
+            self.tag_first(
                 &mut tagged.cancel,
                 TourAnchor::Control(Control::JobCancel),
                 button,
-            ))
-        } else if job.can_retry() {
-            let button = Button::new(SharedString::from(format!("job-retry-{id}")))
+            )
+        });
+        let retry = (cancel.is_none() && job.can_retry()).then(|| {
+            Button::new(SharedString::from(format!("job-retry-{id}")))
                 .xsmall()
                 .outline()
                 .label(tr(bardo, Text::RetryJob))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.retry(id, cx)));
-            Some(self.tag_first(
-                &mut tagged.retry,
-                TourAnchor::Control(Control::JobRetry),
-                button,
-            ))
-        } else {
-            None
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.retry(id, BudgetConsent::Ask, cx)
+                }))
+        });
+
+        // The retry's question takes the button's place until answered,
+        // and its place in the tour.
+        let question = self
+            .asking
+            .as_ref()
+            .filter(|(asked, _)| *asked == id && job.can_retry())
+            .map(|(_, estimate)| {
+                budget_question(
+                    format!("job-budget-{id}"),
+                    bardo,
+                    estimate,
+                    cx,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.retry(id, BudgetConsent::Confirmed, cx)
+                    }),
+                    cx.listener(|this, _: &ClickEvent, _, cx| this.stop_asking(cx)),
+                )
+            });
+        let (question, retry) = match (question, retry) {
+            (Some(question), _) => (
+                Some(self.tag_first(
+                    &mut tagged.retry,
+                    TourAnchor::Control(Control::JobRetry),
+                    question,
+                )),
+                None,
+            ),
+            (None, retry) => (
+                None,
+                retry.map(|button| {
+                    self.tag_first(
+                        &mut tagged.retry,
+                        TourAnchor::Control(Control::JobRetry),
+                        button,
+                    )
+                }),
+            ),
         };
+        let action = cancel.or(retry);
 
         kit::card(cx)
             .p_3()
@@ -252,6 +319,7 @@ impl JobsPanel {
             .child(header)
             .children(progress)
             .children(status)
+            .children(question)
             .children(action.map(|button| h_flex().justify_end().child(button)))
             .into_any_element()
     }

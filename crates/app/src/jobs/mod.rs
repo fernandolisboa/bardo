@@ -7,7 +7,7 @@ mod queue;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bardo_domain::{Job, JobId, JobKind, JobState};
+use bardo_domain::{Job, JobId, JobKind, JobState, RepositoryError};
 
 pub use countdown::TestJob;
 pub use queue::{JobActionError, JobContext, JobHandler, JobSettings};
@@ -33,7 +33,7 @@ use crate::scripts::ScriptHandler;
 use crate::themes::ThemeHandler;
 use crate::thumbnails::ThumbnailHandler;
 use crate::uploads::UploadHandler;
-use crate::{AppError, Bardo, Text};
+use crate::{AppError, Bardo, BudgetConsent, SpendEstimate, Text};
 
 /// The handlers of the job kinds Bardo ships, as `Bardo::open` builds them.
 pub(crate) struct BuiltInHandlers {
@@ -160,6 +160,7 @@ impl JobActionError {
             JobActionError::NarrationBusy => Text::JobNarrationBusy,
             JobActionError::ScenesBusy => Text::JobScenesBusy,
             JobActionError::AsksFirst => Text::JobAsksFirst,
+            JobActionError::OverBudget(_) => Text::JobOverBudget,
             _ => Text::JobNotUpdated,
         }
     }
@@ -254,8 +255,15 @@ impl Bardo {
     }
 
     /// Queues a failed or cancelled job again; it resumes from its last
-    /// checkpoint.
+    /// checkpoint. An image or clip job with scenes still to pay for asks
+    /// first when those would reach a budget or pass the video's cap, or
+    /// have no price (`JobActionError::OverBudget`).
     pub fn retry_job(&self, id: JobId) -> Result<(), JobActionError> {
+        self.retry_job_with(id, BudgetConsent::Ask)
+    }
+
+    /// `retry_job`, with the user's answer to what it asked.
+    pub fn retry_job_with(&self, id: JobId, consent: BudgetConsent) -> Result<(), JobActionError> {
         if let Some(restore) = self
             .jobs()
             .into_iter()
@@ -278,7 +286,45 @@ impl Bardo {
         if let Some(held) = self.retry_held(id) {
             return Err(held);
         }
+        if let Some(estimate) = self.retry_over_budget(id, consent)? {
+            return Err(JobActionError::OverBudget(Box::new(estimate)));
+        }
         self.jobs.retry(id)
+    }
+
+    /// What running `id` again would ask now, without running it: `None`
+    /// when a retry would go ahead (or the job cannot be retried). For a
+    /// question already on screen, whose figures the queue may have
+    /// overtaken.
+    pub fn retry_question(&self, id: JobId) -> Option<SpendEstimate> {
+        self.retry_over_budget(id, BudgetConsent::Ask)
+            .unwrap_or_else(|error| {
+                tracing::warn!("could not check what a retry would cost: {error}");
+                None
+            })
+    }
+
+    /// What to ask before `job` is run again: the estimate of the images
+    /// or clips it still has to pay for, when that reaches a budget,
+    /// passes the video's cap or has no price. What the job already
+    /// delivered or sent is not counted again: it is in what the video has
+    /// cost. The first start's answer does not carry over: the cap, the
+    /// budgets and the spend may all have changed since.
+    fn retry_over_budget(
+        &self,
+        id: JobId,
+        consent: BudgetConsent,
+    ) -> Result<Option<SpendEstimate>, RepositoryError> {
+        let Some(job) = self.jobs().into_iter().find(|job| {
+            job.id() == id && matches!(job.state(), JobState::Failed | JobState::Cancelled)
+        }) else {
+            return Ok(None);
+        };
+        let Some((project, calls)) = self.images_left(&job).or_else(|| self.clips_left(&job))
+        else {
+            return Ok(None);
+        };
+        Ok(self.check_video_budget(project, &calls, consent)?.err())
     }
 }
 

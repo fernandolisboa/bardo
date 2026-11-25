@@ -6,15 +6,19 @@
 //! rate table, the way each step's own estimate does, on top of what the
 //! video already cost.
 //!
-//! A video may have a spend cap: a paid job of the project that would take
-//! its spend past the cap asks first, with what the rest of the video would
-//! cost in its mode.
+//! A video has a spend cap: a paid job of the project that would take its
+//! spend past the cap asks first, with what the rest of the video would
+//! cost in its mode. A new video starts with the default cap of its format
+//! (#268), so nothing set up by the user never means nothing asked; the
+//! user sets another amount or takes the cap away. A video from before
+//! that has none until the user answers the one offer of the default.
 
 use std::time::Duration;
 
 use bardo_domain::{
     ClipModel, CostPurpose, Money, ProductionMode, Provider, RepositoryError, ScenePlanSize,
-    StretchLimit, VideoLength, VideoProject, VideoProjectId, typical_length, typical_scenes,
+    SpendCap, StretchLimit, VideoLength, VideoProject, VideoProjectId, default_spend_cap,
+    typical_length, typical_scenes,
 };
 
 use crate::costs::{BudgetConsent, CapReached, PlannedCall, SpendEstimate};
@@ -51,7 +55,13 @@ pub struct ProductionView {
     pub channel_mode: ProductionMode,
     /// What the video cost so far.
     pub spent: Money,
+    /// The cap in force; `None` without one.
     pub cap: Option<Money>,
+    /// Where the cap comes from: the default, the user, or nowhere.
+    pub cap_choice: SpendCap,
+    /// The default cap of the video's format, for the offer and for going
+    /// back to it.
+    pub default_cap: Money,
     /// One per mode, in [`ProductionMode::ALL`] order.
     pub estimates: Vec<ModeEstimate>,
 }
@@ -125,19 +135,57 @@ impl Bardo {
     }
 
     /// Sets what the video may cost before Bardo asks, from the amount the
-    /// user typed; nothing typed takes the cap away.
+    /// user typed; nothing typed takes the cap away. Either way the default
+    /// is no longer offered: the user has chosen.
     pub fn set_spend_cap(
         &self,
         project: VideoProjectId,
         typed: &str,
     ) -> Result<VideoProject, ScriptError> {
         let cap = match typed.trim() {
-            "" => None,
-            typed => Some(Money::parse(typed).map_err(|_| ScriptError::CapInvalid)?),
+            "" => SpendCap::Off,
+            typed => SpendCap::Own(Money::parse(typed).map_err(|_| ScriptError::CapInvalid)?),
         };
-        if cap.is_some_and(Money::is_zero) {
+        if cap.own().is_some_and(Money::is_zero) {
             return Err(ScriptError::CapInvalid);
         }
+        // Saving the default as the field shows it leaves the video on the
+        // default.
+        let saved = self.production_project(project)?;
+        let shown = default_spend_cap(self.video_format(&saved)?);
+        let cap = match cap {
+            SpendCap::Own(amount) if saved.spend_cap == SpendCap::Default && amount == shown => {
+                SpendCap::Default
+            }
+            cap => cap,
+        };
+        self.save_spend_cap(project, cap)
+    }
+
+    /// Gives the video the default cap of its format, which it then
+    /// follows: what a new video has, what a video from before default caps
+    /// is offered, and the way back from an amount of the user's.
+    pub fn use_default_spend_cap(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<VideoProject, ScriptError> {
+        self.save_spend_cap(project, SpendCap::Default)
+    }
+
+    /// Keeps a video from before default caps without one: the answer
+    /// "no" to the offer, after which it is not made again.
+    pub fn decline_default_spend_cap(
+        &self,
+        project: VideoProjectId,
+    ) -> Result<VideoProject, ScriptError> {
+        self.save_spend_cap(project, SpendCap::Off)
+    }
+
+    fn save_spend_cap(
+        &self,
+        project: VideoProjectId,
+        cap: SpendCap,
+    ) -> Result<VideoProject, ScriptError> {
         let mut project = self.production_project(project)?;
         self.themes.set_project_spend_cap(project.id, cap)?;
         project.spend_cap = cap;
@@ -167,12 +215,15 @@ impl Bardo {
         for mode in ProductionMode::ALL {
             estimates.push(self.mode_estimate(&work, mode, &models, channel_model.as_ref())?);
         }
+        let format = self.video_format(&project)?;
         Ok(ProductionView {
             mode: project.production(channel_mode),
             own: project.production,
             channel_mode,
             spent: self.project_spend(project.id)?,
-            cap: project.spend_cap,
+            cap: project.spend_cap.amount(format),
+            cap_choice: project.spend_cap,
+            default_cap: default_spend_cap(format),
             estimates,
         })
     }
@@ -338,7 +389,8 @@ impl Bardo {
 
     /// `check_budget` for a job of `project`, with the video's cap: a job
     /// that would take the video's spend past it asks too, with what the
-    /// rest of the video would cost.
+    /// rest of the video would cost. So does a call with no rate, cap or
+    /// no cap: what it costs is unknown, and that is said before it runs.
     pub(crate) fn check_video_budget(
         &self,
         project: VideoProjectId,
@@ -350,13 +402,12 @@ impl Bardo {
         }
         let mut estimate = self.estimate(calls)?;
         if let Some(project) = self.themes.project(project)?
-            && let Some(cap) = project.spend_cap
+            && let Some(cap) = project.spend_cap.amount(self.video_format(&project)?)
         {
             let spent = self.project_spend(project.id)?;
-            // A call with no rate could pass the cap unseen, so it asks too.
             // A clip counts from when its provider accepts it; other jobs
             // still running count once they record what they spent.
-            if spent.saturating_add(estimate.total()) > cap || estimate.is_partial() {
+            if spent.saturating_add(estimate.total()) > cap {
                 estimate.cap = Some(CapReached {
                     cap,
                     spent,
@@ -364,9 +415,10 @@ impl Bardo {
                 });
             }
         }
-        Ok(match (estimate.level(), &estimate.cap) {
-            (bardo_domain::BudgetLevel::Reached, _) | (_, Some(_)) => Err(estimate),
-            _ => Ok(()),
+        Ok(if estimate.asks() {
+            Err(estimate)
+        } else {
+            Ok(())
         })
     }
 }
@@ -658,6 +710,140 @@ mod tests {
     }
 
     #[test]
+    fn a_new_video_starts_on_the_default_cap_and_a_job_past_it_asks() {
+        let h = harness();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        let view = app.production(project.id).unwrap();
+        assert_eq!(view.cap_choice, SpendCap::Default);
+        // The harness's channel makes long videos.
+        assert_eq!(view.default_cap, bardo_domain::DEFAULT_LONG_CAP);
+        assert_eq!(view.cap, Some(view.default_cap));
+
+        // Under the default nothing asks.
+        h.answer(crate::scenes::tests::plan_answer());
+        done(
+            &app,
+            app.plan_scenes(project.id, false, BudgetConsent::Ask)
+                .unwrap(),
+        );
+        // Images at a hundred times their price pass it: the job asks,
+        // though the user never set a cap.
+        app.save_rate(
+            Provider::Gemini,
+            bardo_ai::gemini::IMAGE_MODEL,
+            bardo_domain::Meter::ImageTokens,
+            "6000",
+        )
+        .unwrap();
+        let Err(SceneError::OverBudget(estimate)) =
+            app.generate_scene_images(project.id, BudgetConsent::Ask)
+        else {
+            panic!("the images would pass the default cap");
+        };
+        assert_eq!(estimate.cap.unwrap().cap, view.default_cap);
+        assert!(estimate.unpriced.is_empty());
+
+        // Saving the default as the field shows it keeps the video on it;
+        // another amount is the user's own, and the default comes back.
+        let shown = view.default_cap.to_string();
+        assert_eq!(
+            app.set_spend_cap(project.id, &shown).unwrap().spend_cap,
+            SpendCap::Default
+        );
+        let own = app.set_spend_cap(project.id, "7.50").unwrap().spend_cap;
+        assert_eq!(own, SpendCap::Own(Money::from_cents(750)));
+        assert_eq!(
+            app.set_spend_cap(project.id, &shown).unwrap().spend_cap,
+            SpendCap::Own(view.default_cap),
+            "typed after an amount of the user's, it is one too"
+        );
+        let back = app.use_default_spend_cap(project.id).unwrap();
+        assert_eq!(back.spend_cap, SpendCap::Default);
+    }
+
+    #[test]
+    fn a_video_from_before_default_caps_has_none_until_the_offer_is_answered() {
+        use bardo_domain::ThemeRepository as _;
+
+        let h = harness();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        let other = h.narrated_project(&app);
+        for id in [project.id, other.id] {
+            h.db.set_project_spend_cap(id, SpendCap::NotOffered)
+                .unwrap();
+        }
+
+        // Offered, and without a cap meanwhile: nothing changes for the
+        // video until the user answers.
+        let view = app.production(project.id).unwrap();
+        assert_eq!(view.cap_choice, SpendCap::NotOffered);
+        assert!(view.cap_choice.is_offer_due());
+        assert_eq!(view.cap, None);
+        assert!(!view.over_cap());
+
+        let taken = app.use_default_spend_cap(project.id).unwrap();
+        assert_eq!(taken.spend_cap, SpendCap::Default);
+        let view = app.production(project.id).unwrap();
+        assert_eq!(view.cap, Some(view.default_cap));
+        assert!(!view.cap_choice.is_offer_due());
+
+        // "No" is kept, so the offer is not made again.
+        let declined = app.decline_default_spend_cap(other.id).unwrap();
+        assert_eq!(declined.spend_cap, SpendCap::Off);
+        let view = app.production(other.id).unwrap();
+        assert_eq!(view.cap, None);
+        assert!(!view.cap_choice.is_offer_due());
+    }
+
+    #[test]
+    fn a_model_without_a_rate_asks_whatever_the_cap() {
+        let h = harness();
+        let app = h.start();
+        let project = h.narrated_project(&app);
+        app.set_spend_cap(project.id, "").unwrap();
+        let nameless = PlannedCall::new(Provider::Kling, CostPurpose::SceneClip, 1)
+            .with_model("nameless-9")
+            .with_video_seconds(5);
+        let priced = crate::scenes::images_call(2);
+
+        // No cap and no budget, and it still asks: its price is unknown.
+        let estimate = app
+            .check_video_budget(
+                project.id,
+                &[priced.clone(), nameless.clone()],
+                BudgetConsent::Ask,
+            )
+            .unwrap()
+            .unwrap_err();
+        assert!(estimate.asks() && estimate.is_partial());
+        assert_eq!(estimate.cap, None);
+        assert!(estimate.over_budget().next().is_none());
+        assert_eq!(
+            estimate.unpriced,
+            [(Provider::Kling, "nameless-9".to_owned())]
+        );
+        // What has a price is still counted.
+        assert_eq!(
+            estimate.total(),
+            app.estimate(std::slice::from_ref(&priced)).unwrap().total()
+        );
+
+        assert!(
+            app.check_video_budget(project.id, &[nameless], BudgetConsent::Confirmed)
+                .unwrap()
+                .is_ok()
+        );
+        assert!(
+            app.check_video_budget(project.id, &[priced], BudgetConsent::Ask)
+                .unwrap()
+                .is_ok(),
+            "a priced call under every limit does not ask"
+        );
+    }
+
+    #[test]
     fn the_cap_stops_a_job_that_would_pass_it_and_consent_lets_it_go_on() {
         let h = harness();
         let app = h.start();
@@ -673,8 +859,7 @@ mod tests {
         // A millionth of a dollar more than spent: the plan passes it.
         let typed = spent.saturating_add(Money::from_micros(1)).to_string();
         let capped = app.set_spend_cap(project.id, &typed).unwrap();
-        assert!(capped.spend_cap.is_some());
-        let cap = capped.spend_cap.unwrap();
+        let cap = capped.spend_cap.own().expect("the user's amount");
         assert!(app.production(project.id).unwrap().over_cap());
 
         h.answer(crate::scenes::tests::plan_answer());
@@ -694,7 +879,11 @@ mod tests {
                 .unwrap(),
         );
         // Without a cap nothing asks.
-        assert_eq!(app.set_spend_cap(project.id, " ").unwrap().spend_cap, None);
+        assert_eq!(
+            app.set_spend_cap(project.id, " ").unwrap().spend_cap,
+            SpendCap::Off
+        );
+        assert_eq!(app.production(project.id).unwrap().cap, None);
         done(
             &app,
             app.generate_scene_images(project.id, BudgetConsent::Ask)

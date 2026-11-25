@@ -39,7 +39,7 @@ The X API is a provider too, with no key: each post Bardo makes on X is billed f
 
 **Rates** is the price list Bardo uses when a provider does not say what a call cost: per million tokens, per thousand characters, per second of video, per hour of audio or per post. A model name covers every model that starts with it. **Edit** changes a price, **Restore** brings Bardo's own price back, and **Add a rate** prices a model the list does not have. A changed price applies to new calls; recorded costs keep theirs. Clips on the [Higgsfield plan](api-keys.md#higgsfield-plan) are paid in credits: their rates are dollars at US$ 0.049 a credit, the Plus plan's price, so on another plan edit them to match yours.
 
-When a model ran without any price, its calls count as nothing, and the figure **Calls without a price** says which models. **Add price** opens the rate form with that model filled in.
+A generation that would call a model without a price asks before it starts and names the model, under **Price unknown** or, when a budget or the video's cap is reached as well, in that question: what it costs cannot be estimated or held against a budget or a video's cap. When a model ran without any price, its calls count as nothing, and the figure **Calls without a price** says which models. **Add price** opens the rate form with that model filled in.
 
 <a id="channels"></a>
 ## Spend by channel
