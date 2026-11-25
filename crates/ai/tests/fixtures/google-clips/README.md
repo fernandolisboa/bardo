@@ -29,7 +29,10 @@ a funded key. Re-record when Google clips misbehave with a real key:
 - `not-found.http` (an operation or interaction Google no longer keeps),
   `download-expired.http`.
 
-Synthetic, for edge cases: `veo-done-empty.http` (done, neither a video nor
-a filter reason), and `download-clip.http` and the inline clip in
-`omni-completed.http` (not a real video: just the `ftyp` box marker an MP4
-starts with).
+Synthetic, for edge cases: `submit-bad-gateway.http` (a gateway's page in
+front of the API, not Google speaking), `submit-no-handle.http` (a submission
+answered without the operation or interaction it started),
+`submit-internal.http` (500 in Google's words), `veo-done-empty.http` (done,
+neither a video nor a filter reason), and `download-clip.http` and the inline
+clip in `omni-completed.http` (not a real video: just the `ftyp` box marker an
+MP4 starts with).
