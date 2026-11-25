@@ -84,6 +84,11 @@ format = "Formato do vídeo"
 format_hint = "Short: vídeo vertical de menos de um minuto, para todas as redes. Longo: vídeo 16:9 de 8 a 10 minutos, para o YouTube. Define o tamanho do roteiro, o formato das imagens e do corte, e o preset do YouTube. Cada projeto pode escolher o outro."
 production = "Modo de produção"
 production_hint = "Como os vídeos deste canal são feitos: quais cenas viram clipes de IA e com qual modelo; o resto fica em imagens com movimento. Cada projeto pode escolher outro e mostra quanto o vídeo inteiro custa em cada modo antes de gerar qualquer coisa."
+clip_fit = "Duração dos clipes"
+clip_fit_hint = "Alguns modelos de vídeo só fazem durações fixas, como 5 ou 10 segundos. Com \"Clipe mais curto, em câmera lenta\", uma cena um pouco mais longa que uma dessas durações paga por essa duração, e o clipe toca em câmera lenta para terminar junto com a cena: uma cena de 6 segundos paga 5 segundos em vez de 10. Até quanto mais longa ela pode ser, você define logo abaixo. \"Sempre cobrir a cena\" pede o clipe mais longo e corta o resto; escolha quando seus clipes mostram ação rápida, em que a câmera lenta aparece. Modelos que fazem qualquer duração recebem, nos dois casos, a duração de que a cena precisa."
+stretch_limit = "Esticar um clipe em até"
+stretch_limit_hint = "O quanto um clipe pode tocar além da própria duração quando fica em câmera lenta para caber na cena. Um limite maior economiza mais e deixa mais lento: em 40%, o clipe toca no mínimo a cerca de 70% da velocidade; em 100%, na metade. Quanto maior o limite, mais a câmera lenta aparece, primeiro nos movimentos rápidos. Clipes já feitos mantêm o limite com que foram feitos."
+stretch_limit_choice = "{percent}% · um clipe de 10 s cobre até {seconds}"
 style = "Estilo visual"
 style_hint = "Como os vídeos deste canal são desenhados: fotografia, desenho animado, mangá, massinha e assim por diante. O Bardo acrescenta o estilo a cada imagem de cena, a cada retrato do elenco e ao fundo da miniatura, para toda imagem ser pedida com o mesmo visual. \"Pelas notas do canal\" tira o visual das notas de estética, como o Claude as lê. Cada projeto pode escolher outro; os que não escolhem seguem esta opção quando ela muda."
 transition = "Transição padrão"
@@ -243,6 +248,10 @@ synthwave = "Synthwave"
 dark_fantasy = "Fantasia sombria"
 woodblock = "Xilogravura colorida"
 chalkboard = "Quadro-negro"
+
+[clip_fit]
+stretch = "Clipe mais curto, em câmera lenta"
+cover = "Sempre cobrir a cena"
 
 [production_mode]
 economy = "Econômico"
@@ -1036,6 +1045,9 @@ model_channel = "Padrão ({model})"
 model_gone = "O modelo de vídeo desta cena não é mais oferecido. Escolha outro."
 plan = "Próximo clipe: {seconds} s · {price}"
 plan_unpriced = "Próximo clipe: {seconds} s · sem tarifa para este modelo"
+slowed_next = "Toca em câmera lenta para caber na cena"
+slowed = "Em câmera lenta"
+slowed_hint = "O próximo clipe é pedido um pouco mais curto que a cena de propósito: custa menos e toca em câmera lenta para terminar junto com a cena. Em Duração dos clipes, no canal, você muda até quanto ou desliga isso para os próximos clipes."
 motion_prompt = "Movimento"
 motion_from_image = "Igual ao prompt de imagem"
 edit_motion = "Editar movimento"
@@ -1532,6 +1544,7 @@ clip = "Clipe"
 source_image = "Imagem {provider} · {model}"
 source_clip = "Animada com {provider} · {model}"
 source_still = "Imagem parada"
+source_slowed = "Toca em câmera lenta para caber na cena: {recorded} de clipe em {played}"
 source_none = "Ainda sem imagem"
 source_footage = "Vídeo importado. A imagem toca sem o som dele: ponha som na faixa de música ou de efeitos."
 source_performed = "Clipe interpretado: a sua tomada, interpretada pela persona. A imagem toca sem o som dele; a narração na A1 é a voz dele."
@@ -3036,7 +3049,7 @@ body = "Um novo clipe espera ao lado do atual; reproduza-o antes de usar. Uma ce
 
 [tour.clips.cost]
 title = "Quanto custa um clipe"
-body = "Quanto vai durar o próximo clipe da cena e quanto ele custa pela tarifa do provedor, antes de você animar. O provedor cobra cada segundo."
+body = "Quanto vai durar o próximo clipe da cena e quanto ele custa pela tarifa do provedor, antes de você animar. O provedor cobra cada segundo. Num modelo de durações fixas, uma cena um pouco mais longa que uma delas paga esse clipe mais curto, que toca em câmera lenta para caber; o canal define até quanto, ou desliga."
 
 [tour.personas]
 name = "Tour das Personas"
@@ -3233,7 +3246,7 @@ body = "Shorts são verticais, têm menos de um minuto e servem para todas as re
 
 [tour.channels.defaults]
 title = "Modelo de vídeo, legendas e transições"
-body = "O modelo que anima as imagens das cenas do canal em clipes, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
+body = "O modelo que anima as imagens das cenas do canal em clipes, e se um clipe um pouco mais curto que a cena fica em câmera lenta para caber, e em quanto, para você pagar menos segundos. Depois, o visual das legendas nos projetos novos e a cor em que acende a palavra falada, e a transição que o editor põe num corte. Qualquer cena pode escolher outro modelo, qualquer projeto outras legendas e qualquer corte outra transição."
 
 [tour.channels.accounts]
 title = "Contas de rede"

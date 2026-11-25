@@ -76,9 +76,18 @@ pub fn timecode(time: Duration) -> String {
 /// What a stretch of the video track shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VideoSource {
-    /// A video clip in the project folder, and its length (as asked of
-    /// the model that made it, or as probed for imported footage).
-    Clip { file: String, length: Duration },
+    /// A video clip in the project folder.
+    Clip {
+        file: String,
+        /// How long it plays: as asked of the model that made it, or as
+        /// probed for imported footage; longer for a clip played slowed.
+        length: Duration,
+        /// The file's own length, when the clip plays slowed to last
+        /// `length` (a scene's stretched clip, #260). Every time on the
+        /// timeline is in the time it plays; only what reads the file
+        /// turns it into the file's.
+        stretched_from: Option<Duration>,
+    },
     /// A still image in the project folder, shown for the whole stretch.
     Still(String),
     /// Nothing to show yet: the scene has no image.
@@ -90,10 +99,14 @@ impl VideoSource {
     /// or its clip animates an image the scene no longer shows.
     pub fn of(scene: &Scene) -> VideoSource {
         match (scene.clip(), scene.image()) {
-            (Some(clip), _) if !scene.is_clip_stale() => VideoSource::Clip {
-                file: clip.file.clone(),
-                length: Duration::from_secs(clip.seconds.into()),
-            },
+            (Some(clip), _) if !scene.is_clip_stale() => {
+                let length = clip.played_over(scene.duration());
+                VideoSource::Clip {
+                    file: clip.file.clone(),
+                    length,
+                    stretched_from: (length > clip.recorded()).then(|| clip.recorded()),
+                }
+            }
             (_, Some(image)) => VideoSource::Still(image.file.clone()),
             _ => VideoSource::Missing,
         }
@@ -191,6 +204,7 @@ impl VideoItem {
             source: VideoSource::Clip {
                 file: asset.file.clone(),
                 length: asset.duration,
+                stretched_from: None,
             },
             start: Duration::ZERO,
             at: Duration::ZERO,
@@ -460,6 +474,7 @@ impl Timeline {
                         VideoSource::Clip {
                             file: footage.file.clone(),
                             length: footage.duration,
+                            stretched_from: None,
                         }
                     }
                 };
@@ -1136,6 +1151,7 @@ pub(crate) mod tests {
         let mut clip = SceneClip {
             file: "clip-a.mp4".into(),
             seconds: 5,
+            stretch: None,
             source_image: drawn.generation.id,
             generation: generation(),
         };
@@ -1155,12 +1171,123 @@ pub(crate) mod tests {
             VideoSource::Clip {
                 file: "clip-a.mp4".into(),
                 length: Duration::from_secs(5),
+                stretched_from: None,
             }
         );
         assert_eq!(
             timeline.video()[1].source,
             VideoSource::Still("scene-b.png".into())
         );
+    }
+
+    /// A scene from `start` to `end` whose clip of `seconds` animates its
+    /// image.
+    fn animated(start: u64, end: u64, seconds: u32, stretched: bool) -> SceneRecord {
+        let stretch = stretched.then(crate::StretchLimit::default);
+        let mut scene = scene(start, end);
+        let drawn = image("scene.png");
+        scene.clip = Some(SceneClip {
+            file: "clip.mp4".into(),
+            seconds,
+            stretch,
+            source_image: drawn.generation.id,
+            generation: generation(),
+        });
+        scene.image = Some(drawn);
+        scene
+    }
+
+    fn source_of(scene: SceneRecord) -> VideoSource {
+        VideoSource::of(&crate::Scene::restore(scene))
+    }
+
+    #[test]
+    fn a_stretched_clip_plays_as_long_as_its_scene() {
+        assert_eq!(
+            source_of(animated(1_000, 7_500, 5, true)),
+            VideoSource::Clip {
+                file: "clip.mp4".into(),
+                // The scene's 6.5 seconds and half a second after it, for
+                // a transition out of it to show.
+                length: ms(7_000),
+                stretched_from: Some(ms(5_000)),
+            }
+        );
+        // The handle stays within the limit too.
+        assert_eq!(
+            source_of(animated(0, 6_800, 5, true)),
+            VideoSource::Clip {
+                file: "clip.mp4".into(),
+                length: ms(7_000),
+                stretched_from: Some(ms(5_000)),
+            }
+        );
+        assert_eq!(
+            source_of(animated(0, 5_200, 5, true)),
+            VideoSource::Clip {
+                file: "clip.mp4".into(),
+                length: ms(5_700),
+                stretched_from: Some(ms(5_000)),
+            }
+        );
+    }
+
+    #[test]
+    fn a_stretch_stops_at_the_limit_the_clip_was_made_under() {
+        // The scene grew after its clip was made (a version in another
+        // language, say): the clip plays as slow as a stretch goes and
+        // holds its last frame for the rest.
+        assert_eq!(
+            source_of(animated(0, 9_000, 5, true)),
+            VideoSource::Clip {
+                file: "clip.mp4".into(),
+                length: ms(7_000),
+                stretched_from: Some(ms(5_000)),
+            }
+        );
+        let mut wider = animated(0, 9_000, 5, true);
+        wider.clip.as_mut().unwrap().stretch = Some(crate::StretchLimit::new(100));
+        assert_eq!(
+            source_of(wider),
+            VideoSource::Clip {
+                file: "clip.mp4".into(),
+                length: ms(9_500),
+                stretched_from: Some(ms(5_000)),
+            }
+        );
+    }
+
+    #[test]
+    fn a_clip_plays_at_its_own_speed_unless_it_was_made_to_stretch() {
+        let whole = VideoSource::Clip {
+            file: "clip.mp4".into(),
+            length: ms(5_000),
+            stretched_from: None,
+        };
+        // Made to cover its scene and shorter all the same: as before.
+        assert_eq!(source_of(animated(0, 6_500, 5, false)), whole);
+        // Made to stretch over a scene that is now no longer than it.
+        assert_eq!(source_of(animated(0, 4_000, 5, true)), whole);
+        assert_eq!(source_of(animated(0, 5_000, 5, true)), whole);
+    }
+
+    #[test]
+    fn a_stretched_clip_is_cut_in_the_time_it_plays() {
+        let timeline = Timeline::rough_cut(
+            &plan(vec![animated(0, 6_500, 5, true), scene(6_500, 8_000)]),
+            &narration(8_000),
+            AspectRatio::Landscape,
+        );
+        let item = &timeline.video()[0];
+        assert_eq!(item.duration, ms(6_500), "the scene's length");
+        assert!(item.has_source_time());
+        // A piece from its last second starts 5.5 seconds into what
+        // plays, past the file's own end.
+        let mut tail = item.clone();
+        tail.start = ms(5_500);
+        assert_eq!(tail.source_start(), ms(5_500));
+        tail.start = ms(9_000);
+        assert_eq!(tail.source_start(), ms(7_000) - min_length());
     }
 
     #[test]

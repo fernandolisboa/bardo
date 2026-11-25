@@ -172,6 +172,7 @@ pub mod refs {
     pub const SCENES_PLACE: GuideRef = at("scenes", "place");
     pub const CLIPS_ANIMATE: GuideRef = at("clips", "animate");
     pub const CLIPS_REVIEW: GuideRef = at("clips", "review");
+    pub const CLIPS_STRETCH: GuideRef = at("clips", "stretch");
     pub const PRODUCTS_LIBRARY: GuideRef = at("products", "library");
     pub const PRODUCTS_BRIEF: GuideRef = at("products", "brief");
     pub const PRODUCTS_FACTS: GuideRef = at("products", "facts");
@@ -197,6 +198,7 @@ pub mod refs {
     pub const CHANNELS_PRODUCTION: GuideRef = at("channels", "production");
     pub const CHANNELS_STYLE: GuideRef = at("channels", "style");
     pub const CHANNELS_DEFAULTS: GuideRef = at("channels", "defaults");
+    pub const CHANNELS_CLIP_FIT: GuideRef = at("channels", "clip-length");
     pub const ACCOUNTS_ONE: GuideRef = at("network-accounts", "accounts");
     pub const ACCOUNTS_METADATA: GuideRef = at("network-accounts", "metadata");
     pub const ACCOUNTS_PRESET: GuideRef = at("network-accounts", "preset");
@@ -231,7 +233,7 @@ pub mod refs {
     pub const PRIVACY_POLICY: GuideRef = at("privacy", "youtube");
 
     #[cfg(test)]
-    pub const ALL: [GuideRef; 103] = [
+    pub const ALL: [GuideRef; 105] = [
         RESEARCH_SEEDS,
         RESEARCH_RUN,
         RESEARCH_SCORES,
@@ -279,6 +281,7 @@ pub mod refs {
         SCENES_PLACE,
         CLIPS_ANIMATE,
         CLIPS_REVIEW,
+        CLIPS_STRETCH,
         PRODUCTS_LIBRARY,
         PRODUCTS_BRIEF,
         PRODUCTS_FACTS,
@@ -303,6 +306,7 @@ pub mod refs {
         CHANNELS_PRODUCTION,
         CHANNELS_STYLE,
         CHANNELS_DEFAULTS,
+        CHANNELS_CLIP_FIT,
         ACCOUNTS_ONE,
         ACCOUNTS_METADATA,
         ACCOUNTS_PRESET,

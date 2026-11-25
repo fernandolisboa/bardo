@@ -1726,6 +1726,9 @@ mod tests {
             conn.execute_batch(&format!(
                 "{before}
                  DROP TABLE product_logo; DROP TABLE product_image; DROP TABLE product;
+                 ALTER TABLE scene_clip DROP COLUMN stretch_percent;
+                 ALTER TABLE channel DROP COLUMN clip_stretch_percent;
+                 ALTER TABLE channel DROP COLUMN clip_fit;
                  ALTER TABLE video_project DROP COLUMN visual_style;
                  ALTER TABLE channel DROP COLUMN visual_style;
                  DROP TABLE scene_place; ALTER TABLE scene DROP COLUMN place;
