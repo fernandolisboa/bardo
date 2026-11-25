@@ -683,6 +683,14 @@ impl CostBook {
         }
     }
 
+    /// Counts a record made before its project existed on `project` from
+    /// now on. Logged when it cannot be: the job goes on.
+    pub(crate) fn move_to_project(&self, id: CostRecordId, project: VideoProjectId) {
+        if let Err(error) = self.costs.move_cost(id, project) {
+            tracing::warn!("could not move the cost record {id} to project {project}: {error}");
+        }
+    }
+
     fn channel_of(&self, project: VideoProjectId) -> Option<ChannelId> {
         match self.themes.project(project) {
             Ok(found) => found.map(|project| project.channel),

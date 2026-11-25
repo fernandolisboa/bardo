@@ -681,7 +681,6 @@ fn private_folder() -> Result<tempfile::TempDir, JobFailure> {
         .map_err(|e| JobFailure::new(JobFailureKind::Files, e.to_string()))
 }
 
-/// The failure of a job whose take changed (or went) while it ran.
 /// Why a take's job was not queued again to check on its request: another
 /// job is at work on the take (its prompt, say), or nothing can be checked.
 fn not_checked_again(error: crate::jobs::JobActionError) -> CaptureError {
@@ -691,6 +690,7 @@ fn not_checked_again(error: crate::jobs::JobActionError) -> CaptureError {
     }
 }
 
+/// The failure of a job whose take changed (or went) while it ran.
 fn take_changed() -> JobFailure {
     JobFailure::new(
         JobFailureKind::NotAllowed,
@@ -2492,9 +2492,13 @@ impl Bardo {
         };
         if let Some(kept) = self.kept_answer(&work, |job| {
             job.kind() == JobKind::TakePrompt && job.payload() == payload
-        }) && self.jobs.retry(kept).is_ok()
-        {
-            return Ok(kept);
+        }) {
+            // Not queued (another window got to it first): nothing new is
+            // paid for beside it.
+            return match self.jobs.retry(kept) {
+                Ok(()) => Ok(kept),
+                Err(_) => Err(CaptureError::TakeBusy),
+            };
         }
         let calls = step_calls(model, PerformedStep::Prompt, take.length(), (0, 0));
         if let Err(estimate) = self.check_video_budget(project, &calls, consent)? {

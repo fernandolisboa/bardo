@@ -1,6 +1,6 @@
 //! A paid answer kept on its job until it is applied.
 
-use bardo_domain::{GeneratedText, Job, Progress, TokenUsage};
+use bardo_domain::{CostRecordId, GeneratedText, Job, Progress, TokenUsage};
 use serde::{Deserialize, Serialize};
 
 use super::JobContext;
@@ -30,6 +30,17 @@ pub(crate) struct KeptAnswer {
     model: String,
     input_tokens: u64,
     output_tokens: u64,
+    /// Its record in Costs, for a job that moves the record once what
+    /// the answer makes exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cost: Option<String>,
+}
+
+impl KeptAnswer {
+    fn cost(&self) -> Option<CostRecordId> {
+        let id = self.cost.as_deref()?.parse::<uuid::Uuid>().ok()?;
+        Some(CostRecordId::from(id))
+    }
 }
 
 impl From<&GeneratedText> for KeptAnswer {
@@ -39,6 +50,7 @@ impl From<&GeneratedText> for KeptAnswer {
             model: generated.model.clone(),
             input_tokens: generated.usage.input_tokens,
             output_tokens: generated.usage.output_tokens,
+            cost: None,
         }
     }
 }
@@ -60,21 +72,23 @@ impl From<KeptAnswer> for GeneratedText {
 /// checkpoint ([`Kept`]), or a plain slot for a handler run outside the
 /// queue.
 pub(crate) trait Keeps {
-    /// The answer an earlier run kept, if one did.
-    fn kept(&self) -> Option<GeneratedText>;
-    /// Keeps `generated`, paid for and recorded, until it is applied.
-    fn keep(&mut self, generated: &GeneratedText);
+    /// The answer an earlier run kept, if one did, with its record in
+    /// Costs.
+    fn kept(&self) -> Option<(GeneratedText, Option<CostRecordId>)>;
+    /// Keeps `generated`, paid for and recorded as `cost`, until it is
+    /// applied.
+    fn keep(&mut self, generated: &GeneratedText, cost: CostRecordId);
     /// Lets the kept answer go: it was applied, or is of no use.
     fn settle(&mut self);
 }
 
 impl Keeps for JobContext {
-    fn kept(&self) -> Option<GeneratedText> {
-        Kept::answer(self)
+    fn kept(&self) -> Option<(GeneratedText, Option<CostRecordId>)> {
+        Kept::billed(self)
     }
 
-    fn keep(&mut self, generated: &GeneratedText) {
-        Kept::keep(self, generated);
+    fn keep(&mut self, generated: &GeneratedText, cost: CostRecordId) {
+        Kept::keep_billed(self, generated, cost);
     }
 
     fn settle(&mut self) {
@@ -82,13 +96,13 @@ impl Keeps for JobContext {
     }
 }
 
-impl Keeps for Option<GeneratedText> {
-    fn kept(&self) -> Option<GeneratedText> {
+impl Keeps for Option<(GeneratedText, Option<CostRecordId>)> {
+    fn kept(&self) -> Option<(GeneratedText, Option<CostRecordId>)> {
         self.clone()
     }
 
-    fn keep(&mut self, generated: &GeneratedText) {
-        *self = Some(generated.clone());
+    fn keep(&mut self, generated: &GeneratedText, cost: CostRecordId) {
+        *self = Some((generated.clone(), Some(cost)));
     }
 
     fn settle(&mut self) {
@@ -99,8 +113,17 @@ impl Keeps for Option<GeneratedText> {
 impl Kept {
     /// The answer an earlier run of the job kept, if one did.
     pub(crate) fn answer(cx: &JobContext) -> Option<GeneratedText> {
+        Self::billed(cx).map(|(answer, _)| answer)
+    }
+
+    /// The answer an earlier run of the job kept, if one did, with the
+    /// record in Costs it was kept with ([`Kept::keep_billed`]).
+    pub(crate) fn billed(cx: &JobContext) -> Option<(GeneratedText, Option<CostRecordId>)> {
         match serde_json::from_str(cx.checkpoint()?).ok()? {
-            Self::Answered(answer) => Some(answer.into()),
+            Self::Answered(answer) => {
+                let cost = answer.cost();
+                Some((answer.into(), cost))
+            }
             Self::Settled => None,
         }
     }
@@ -110,6 +133,16 @@ impl Kept {
     /// it would have kept.
     pub(crate) fn keep(cx: &mut JobContext, generated: &GeneratedText) {
         Self::Answered(generated.into()).save(cx);
+    }
+
+    /// [`Kept::keep`], with the answer's record in Costs: for a job that
+    /// moves the record once what the answer makes exists.
+    pub(crate) fn keep_billed(cx: &mut JobContext, generated: &GeneratedText, cost: CostRecordId) {
+        Self::Answered(KeptAnswer {
+            cost: Some(cost.to_string()),
+            ..generated.into()
+        })
+        .save(cx);
     }
 
     /// Lets the kept answer go: it was applied, or is of no use.
