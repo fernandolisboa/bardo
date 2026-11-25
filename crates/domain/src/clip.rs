@@ -216,10 +216,20 @@ pub trait ClipGenerator: Send + Sync {
 
     /// Whether `submit` keeps its promise above. A provider without an
     /// idempotency key cannot: the job then writes down that it sent a
-    /// request before sending it, and after a lost answer asks
-    /// `find_submitted` instead of sending it again.
+    /// request before sending it, and never sends it again by itself once
+    /// the request may have reached the provider. `submit` says so with a
+    /// failure of kind `AnswerLost`; any other failure means nothing was
+    /// started.
     fn dedupes_submissions(&self) -> bool {
         true
+    }
+
+    /// Whether `find_submitted` can look for the clip a lost answer
+    /// started. Where it cannot, such a submission ends there: it may have
+    /// started, and nobody can tell. Only asked when `dedupes_submissions`
+    /// is false.
+    fn lists_submissions(&self) -> bool {
+        false
     }
 
     /// Free checks before a submission that cannot be repeated safely
@@ -230,7 +240,7 @@ pub trait ClipGenerator: Send + Sync {
 
     /// The clip an earlier `submit` of this request started, when its
     /// answer was lost. `Ok(None)` means the provider shows none. Only
-    /// asked when `dedupes_submissions` is false.
+    /// asked when `lists_submissions` is true.
     fn find_submitted(
         &self,
         _key: &ApiKey,
@@ -278,6 +288,10 @@ impl<T: ClipGenerator + ?Sized> ClipGenerator for Arc<T> {
 
     fn dedupes_submissions(&self) -> bool {
         (**self).dedupes_submissions()
+    }
+
+    fn lists_submissions(&self) -> bool {
+        (**self).lists_submissions()
     }
 
     fn check_submit(&self, key: &ApiKey, request: &ClipRequest) -> Result<(), ProviderFailure> {

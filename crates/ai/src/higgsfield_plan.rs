@@ -17,7 +17,7 @@
 //! idempotency key, so a submission is never sent twice by the adapter:
 //! before submitting, it looks for a generation already made from the same
 //! uploaded image (the job keeps that image across attempts), and after an
-//! answer that may have been lost it reports a passing failure so the job
+//! answer that may have been lost it reports a lost answer so the job
 //! looks again instead of paying twice.
 //!
 //! **Credits.** Before starting, the free `estimate_video_cost` and
@@ -192,7 +192,7 @@ fn clip_failure(error: McpError) -> ProviderFailure {
 /// What a failed `generate_video_batch` means. Refusals (sign-in,
 /// permission, rate limit, the tool's own error) started nothing; a call
 /// never sent neither. Anything else may have started a clip, so it is
-/// `Unreachable`: the job looks for the clip instead of paying again.
+/// `AnswerLost`: the job looks for the clip instead of paying again.
 fn submit_failure(failure: CallFailure) -> ProviderFailure {
     match failure.error {
         McpError::RateLimited => ProviderFailure::new(
@@ -206,7 +206,10 @@ fn submit_failure(failure: CallFailure) -> ProviderFailure {
             ProviderFailureKind::ProviderDown,
             format!("{error}; nothing was sent"),
         ),
-        error => ProviderFailure::new(ProviderFailureKind::Unreachable, error.to_string()),
+        error => ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            format!("{error}; the clip may have started"),
+        ),
     }
 }
 
@@ -715,6 +718,11 @@ impl<T: Transport> ClipGenerator for HiggsfieldPlan<T> {
         false
     }
 
+    /// The library lists every generation, the newest first.
+    fn lists_submissions(&self) -> bool {
+        true
+    }
+
     fn check_submit(&self, key: &ApiKey, request: &ClipRequest) -> Result<(), ProviderFailure> {
         let params = submit_params(request)?;
         self.check_credits(key, &params)
@@ -749,7 +757,7 @@ impl<T: Transport> ClipGenerator for HiggsfieldPlan<T> {
         Ok(None)
     }
 
-    /// Starts the clip. A failure of kind `Unreachable` means the request
+    /// Starts the clip. A failure of kind `AnswerLost` means the request
     /// may have reached Higgsfield (the job then looks for it); any other
     /// means it did not start.
     fn submit(
@@ -769,8 +777,8 @@ impl<T: Transport> ClipGenerator for HiggsfieldPlan<T> {
             .map_err(submit_failure)?;
         let handle = parse_submitted_job(&started).ok_or_else(|| {
             ProviderFailure::new(
-                ProviderFailureKind::Unreachable,
-                "the submission's answer has no job id",
+                ProviderFailureKind::AnswerLost,
+                "the submission's answer has no job id; the clip may have started",
             )
         })?;
         Ok(ClipSubmission {

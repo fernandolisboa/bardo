@@ -178,7 +178,9 @@ struct ClipRun {
     /// For a provider that would start a second clip if sent the same
     /// submission again: when it was sent without an answer yet (Unix
     /// seconds). Written before sending, so after a lost answer or a
-    /// crash the job looks for the clip instead of paying twice.
+    /// crash the job does not pay twice: it looks for the clip where the
+    /// provider lists what it started, and ends the scene as one that may
+    /// have started where it does not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sent_at: Option<u64>,
     /// The cost record of the request, written when the provider accepted
@@ -634,6 +636,18 @@ impl ClipJob<'_> {
         key: &mut ApiKey,
         cx: &mut JobContext,
     ) -> Result<Step, JobFailure> {
+        // A submission noted as sent, with no answer and nowhere to look
+        // for it, ends here: before anything is read, checked or sent.
+        let unanswered = self
+            .run_of(order.scene)
+            .is_some_and(|run| run.sent_at.is_some());
+        if unanswered && !generator.dedupes_submissions() && !generator.lists_submissions() {
+            return self.may_have_started(
+                order,
+                "Bardo stopped while the submission was on its way",
+                cx,
+            );
+        }
         let staged = self.run_of(order.scene).and_then(|run| run.staged.clone());
         let staged = match staged {
             Some(staged) => staged,
@@ -679,8 +693,10 @@ impl ClipJob<'_> {
 
     /// Submits to a provider that would start (and charge for) a second
     /// clip if sent the same submission again. The job writes down that it
-    /// sends before sending; with that note and no answer it looks for the
-    /// clip instead, and never sends again without knowing.
+    /// sends before sending. With that note and no answer it never sends
+    /// again by itself: where the provider lists what it started it looks
+    /// for the clip, and where it does not the scene ends there, as one
+    /// that may have started.
     fn submit_once(
         &mut self,
         order: &ClipOrder,
@@ -749,10 +765,25 @@ impl ClipJob<'_> {
             generator.submit(key, request, submission)
         }) {
             Ok(submitted) => self.submitted(order, submitted, cx),
-            // It may have started: the note stays for the lookup.
-            Err(failure) if failure.kind == ProviderFailureKind::Unreachable => {
-                Ok(Step::NotSubmitted(self.failure(order, failure)))
+            // It may have started. The note stays, and the queue comes
+            // back to look for the clip.
+            Err(failure)
+                if failure.kind == ProviderFailureKind::AnswerLost
+                    && generator.lists_submissions() =>
+            {
+                let waiting = ProviderFailure::new(
+                    ProviderFailureKind::Unreachable,
+                    format!(
+                        "{}; looking for the clip before sending anything again",
+                        failure.detail
+                    ),
+                );
+                Ok(Step::NotSubmitted(self.failure(order, waiting)))
             }
+            Err(failure) if failure.kind == ProviderFailureKind::AnswerLost => {
+                self.may_have_started(order, &failure.detail, cx)
+            }
+            // Nothing was started.
             Err(failure) => {
                 self.run_of(order.scene)
                     .expect("the scene's run exists")
@@ -761,6 +792,38 @@ impl ClipJob<'_> {
                 self.submit_failed(order, failure, cx)
             }
         }
+    }
+
+    /// The submission was sent, no answer says what came of it, and the
+    /// provider offers no way to look: it may be making the clip, and
+    /// billing it. The scene ends there, as any request that ended does,
+    /// and what the clip costs goes to Costs: a spend that may have
+    /// happened counts (ADR-0030). The record's id is saved first, so a
+    /// run cut here records it once.
+    fn may_have_started(
+        &mut self,
+        order: &ClipOrder,
+        why: &str,
+        cx: &mut JobContext,
+    ) -> Result<Step, JobFailure> {
+        let run = self.run_of(order.scene).expect("the scene's run exists");
+        let cost = run
+            .cost
+            .get_or_insert_with(|| CostRecordId::new().to_string())
+            .clone();
+        let run = run.clone();
+        self.save_state(cx)?;
+        self.write_cost(order, &run, &cost)?;
+        let failure = ProviderFailure::new(
+            ProviderFailureKind::AnswerLost,
+            format!(
+                "the provider did not confirm the submission and has no way to look for it, \
+                 so the clip may have been made and charged: its cost is in Costs, and it \
+                 is not sent again unless you retry ({why})"
+            ),
+        );
+        let failure = self.failure(order, failure);
+        self.note_ended(order, failure, cx)
     }
 
     /// Keeps the provider's handle and records the clip's cost: from now
@@ -826,6 +889,11 @@ impl ClipJob<'_> {
         let (Some(_), Some(cost)) = (&run.request, &run.cost) else {
             return Ok(());
         };
+        self.write_cost(order, &run, cost)
+    }
+
+    /// Writes what the scene's clip costs under the record id `cost`.
+    fn write_cost(&self, order: &ClipOrder, run: &ClipRun, cost: &str) -> Result<(), JobFailure> {
         self.handler.costs.record_request(
             id(cost)?,
             PaidCall {
@@ -1722,6 +1790,205 @@ mod tests {
         assert_eq!(record.job, Some(job.id()));
     }
 
+    /// What Google does with one submission.
+    #[derive(Clone, Copy)]
+    enum GoogleSubmit {
+        /// Takes it, and the answer never arrives.
+        LosesTheAnswer,
+        /// Never gets it: the connection could not be made.
+        NeverGetsIt,
+        /// Answers that it is overloaded: nothing was started.
+        Overloaded,
+        /// Answers that the key is over its quota: nothing was started.
+        Throttled,
+    }
+
+    /// Google's API treating submissions as scripted, then taking them:
+    /// work that is done on the first check, and its clip. It answers both
+    /// of Google's protocols, whichever the model asked for speaks.
+    #[derive(Default, Clone)]
+    struct GoogleSubmissions {
+        script: Arc<Mutex<std::collections::VecDeque<GoogleSubmit>>>,
+        /// The submissions that reached Google: each is a clip it makes.
+        taken: Arc<Mutex<u32>>,
+    }
+
+    impl GoogleSubmissions {
+        fn scripted(script: &[GoogleSubmit]) -> Self {
+            Self {
+                script: Arc::new(Mutex::new(script.iter().copied().collect())),
+                ..Self::default()
+            }
+        }
+
+        fn taken(&self) -> u32 {
+            *self.taken.lock().unwrap()
+        }
+    }
+
+    impl bardo_ai::http::Transport for GoogleSubmissions {
+        fn send(
+            &self,
+            request: &bardo_ai::http::HttpRequest,
+        ) -> Result<bardo_ai::http::HttpResponse, bardo_ai::http::TransportError> {
+            use bardo_ai::http::{HttpResponse, TransportError};
+            use base64::Engine as _;
+            const VIDEO: &str =
+                "https://generativelanguage.googleapis.com/v1beta/files/f1:download?alt=media";
+            let (operation, interaction) = (
+                request.url.ends_with(":predictLongRunning"),
+                request.url.ends_with("/interactions"),
+            );
+            let body = if operation || interaction {
+                let script = self.script.lock().unwrap().pop_front();
+                match script {
+                    Some(GoogleSubmit::NeverGetsIt) => {
+                        return Err(TransportError::not_sent("connection refused"));
+                    }
+                    Some(GoogleSubmit::Overloaded) => {
+                        return Ok(HttpResponse::new(
+                            503,
+                            r#"{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}"#,
+                        ));
+                    }
+                    Some(GoogleSubmit::Throttled) => {
+                        return Ok(HttpResponse::new(
+                            429,
+                            r#"{"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED"}}"#,
+                        ));
+                    }
+                    Some(GoogleSubmit::LosesTheAnswer) | None => {}
+                }
+                let mut taken = self.taken.lock().unwrap();
+                *taken += 1;
+                if script.is_some() {
+                    return Err(TransportError::unanswered("timed out reading the answer"));
+                }
+                if operation {
+                    serde_json::json!({ "name": format!("models/veo/operations/op{taken}") })
+                } else {
+                    serde_json::json!({ "id": format!("v1_work{taken}"), "status": "in_progress" })
+                }
+            } else if request.url.contains("/operations/op") {
+                serde_json::json!({
+                    "name": "op",
+                    "done": true,
+                    "response": { "generateVideoResponse": {
+                        "generatedSamples": [{ "video": { "uri": VIDEO } }],
+                    } },
+                })
+            } else if request.url.contains("/interactions/v1_work") {
+                serde_json::json!({
+                    "id": "v1_work",
+                    "status": "completed",
+                    "steps": [{ "type": "model_output", "content": [{
+                        "type": "video",
+                        "mime_type": "video/mp4",
+                        "data": base64::engine::general_purpose::STANDARD.encode(CLIP),
+                    }] }],
+                })
+            } else if request.url == VIDEO {
+                return Ok(HttpResponse::new(
+                    200,
+                    String::from_utf8(CLIP.to_vec()).unwrap(),
+                ));
+            } else {
+                return Ok(HttpResponse::new(404, "{}"));
+            };
+            Ok(HttpResponse::new(200, body.to_string()))
+        }
+    }
+
+    /// The app with Google's adapter over `google`, and a drawn project
+    /// whose channel animates with Google's default model.
+    fn animating_with_google(h: &mut Harness, google: &GoogleSubmissions) -> (Bardo, VideoProject) {
+        h.more_clips.push(Arc::new(
+            bardo_ai::GoogleClips::with_transport(google.clone()).with_sleeper(Arc::new(|_| {})),
+        ));
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let model =
+            ClipModelRef::new(Provider::Gemini, bardo_ai::google_clips::DEFAULT_MODEL).unwrap();
+        channel_uses(&app, &project, Some(model));
+        (app, project)
+    }
+
+    #[test]
+    fn a_google_submission_whose_answer_is_lost_is_sent_once_and_counted() {
+        let mut h = Harness::new();
+        let google = GoogleSubmissions::scripted(&[GoogleSubmit::LosesTheAnswer]);
+        let (app, project) = animating_with_google(&mut h, &google);
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // Google may be making the clip, and nobody can ask it: the queue
+        // does not send it again, the scene says so, and Costs counts it.
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue went again by itself");
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+        assert!(failure.detail.contains("may have"), "{failure:?}");
+        assert_eq!(google.taken(), 1, "Google started a second clip");
+        assert_eq!(clips_in_costs(&h, &project), 1, "it may have been billed");
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+
+        // Retrying is the user asking for a new clip.
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(google.taken(), 2);
+        assert_eq!(clips_in_costs(&h, &project), 2, "the lost one and the new");
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+    }
+
+    #[test]
+    fn a_google_submission_that_started_nothing_waits_and_goes_again() {
+        for refusal in [GoogleSubmit::Overloaded, GoogleSubmit::NeverGetsIt] {
+            let mut h = Harness::new();
+            let google = GoogleSubmissions::scripted(&[refusal]);
+            let (app, project) = animating_with_google(&mut h, &google);
+
+            let job = done(
+                &app,
+                app.generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+                    .unwrap(),
+            );
+
+            assert_eq!(job.attempts(), 2, "the queue waited and went again");
+            assert_eq!(google.taken(), 1);
+            assert_eq!(clips_in_costs(&h, &project), 1);
+            assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_some());
+        }
+    }
+
+    #[test]
+    fn a_google_submission_refused_for_quota_stops_the_job_with_nothing_started() {
+        let mut h = Harness::new();
+        let google = GoogleSubmissions::scripted(&[GoogleSubmit::Throttled]);
+        let (app, project) = animating_with_google(&mut h, &google);
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // Google said no: nothing may have started, so nothing is counted
+        // and the scene is not marked as one whose request ended.
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::LimitReached);
+        assert_eq!(google.taken(), 0);
+        assert_eq!(clips_in_costs(&h, &project), 0);
+        assert!(plan_of(&app, &project).scenes()[0].clip_failure().is_none());
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(google.taken(), 1);
+        assert_eq!(clips_in_costs(&h, &project), 1);
+    }
+
     /// Kling's API as documented: a task that succeeded on the first
     /// check, and its clip.
     #[derive(Default, Clone)]
@@ -2418,6 +2685,96 @@ mod tests {
         assert_eq!(sends(&clips), 1);
         assert_eq!(clips.staged.lock().unwrap().len(), 2, "handed over again");
         assert_eq!(clips_in_costs(&h, &project), 1);
+    }
+
+    /// `charged_on_every_send`, with a provider that cannot list what it
+    /// started either (as Google's video API).
+    fn sent_blind(h: &mut Harness, clips: FakeClips) -> (Arc<FakeClips>, Bardo, VideoProject) {
+        charged_on_every_send(
+            h,
+            FakeClips {
+                no_lookup: true,
+                ..clips
+            },
+        )
+    }
+
+    #[test]
+    fn a_lost_answer_nobody_can_look_for_ends_the_scene_at_once() {
+        let mut h = Harness::new();
+        let (clips, app, project) = sent_blind(
+            &mut h,
+            FakeClips {
+                lost: Mutex::new(1),
+                ..FakeClips::default()
+            },
+        );
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Confirmed)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // Scene 0 may have started; the others are made as usual.
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.attempts(), 1, "the queue went again by itself");
+        let failure = job.failure().unwrap();
+        assert_eq!(failure.kind, JobFailureKind::AnswerLost);
+        assert!(
+            failure.detail.contains("1 of 3 clips") && failure.detail.contains("may have"),
+            "{failure:?}"
+        );
+        assert_eq!(sends(&clips), 3, "each scene once");
+        assert_eq!(*clips.lookups.lock().unwrap(), 0, "nowhere to look");
+        assert_eq!(
+            clips_in_costs(&h, &project),
+            3,
+            "the one that may have been made counts too"
+        );
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].clip_failure().is_some());
+        assert!(
+            plan.scenes()[1..]
+                .iter()
+                .all(|s| s.pending_clip().is_some())
+        );
+
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(sends(&clips), 4, "scene 0, asked for again");
+        assert_eq!(clips_in_costs(&h, &project), 4);
+    }
+
+    #[test]
+    fn a_run_cut_while_sending_what_nobody_can_look_for_does_not_send_it_again() {
+        let mut h = Harness {
+            closing_wait: Some(Duration::from_millis(20)),
+            ..Harness::new()
+        };
+        let (clips, app, project) = sent_blind(&mut h, FakeClips::default());
+        clips.pause_at(ClipCall::Submit);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&clips, FakeClips::paused);
+
+        // The app goes away with the submission on its way: the next start
+        // finds the note that it was sent, and no answer.
+        let closed = app.queue_probe();
+        drop(app);
+        let app = h.start();
+        let job = wait_done(&app, id);
+
+        assert_eq!(job.state(), JobState::Failed);
+        assert_eq!(job.failure().unwrap().kind, JobFailureKind::AnswerLost);
+        assert_eq!(sends(&clips), 1, "sent again without knowing");
+        assert_eq!(clips_in_costs(&h, &project), 1, "it may have been billed");
+        assert!(plan_of(&app, &project).scenes()[0].clip_failure().is_some());
+
+        // The run that lost its job ends without leaving anything.
+        clips.resume();
+        wait_for(&clips, |_| !closed.runs(id));
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert!(plan_of(&app, &project).scenes()[0].pending_clip().is_none());
     }
 
     #[test]
