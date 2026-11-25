@@ -2629,6 +2629,7 @@ account_changed = "The account was reconnected to another {network} account than
 render_changed = "The render changed after the review, so the rest of the file is not what you reviewed. Review the upload again."
 schedule_missed = "The publish time passed before the upload started, so nothing was sent. Review the upload again with a later time."
 credits = "X refused the post: your X app is out of credits or reached its spending limit. Add credits or raise the limit in the X Developer Console, then retry."
+answer_lost = "{network} did not answer after Bardo sent the post, so the post may be live. Bardo did not send it again by itself and added its price to Costs. Check the account on {network}. Retry looks for the post there first and only posts again when it is not there."
 
 [upload.block]
 not_offered = "Bardo doesn't upload to this network yet. Export the file and post it by hand."

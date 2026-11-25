@@ -1,0 +1,4 @@
+HTTP/2 200 
+content-type: application/json; charset=utf-8
+
+{"errors":[{"title":"Not Found Error","detail":"Could not find user with id: [1840000000000000001].","type":"https://api.twitter.com/2/problems/resource-not-found","resource_type":"user","parameter":"id","value":"1840000000000000001"}]}

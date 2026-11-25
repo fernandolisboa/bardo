@@ -1949,6 +1949,8 @@ pub enum Text {
     UploadRestrictedCauses,
     UploadFailureQuota,
     UploadFailureCredits,
+    /// A post that was sent and got no answer: it may be live.
+    UploadFailureAnswerLost,
     UploadFailureUploadLimit,
     UploadFailureReconnect,
     UploadFailureRejected,
@@ -4577,6 +4579,7 @@ impl Text {
             Text::UploadRestrictedCauses => "upload.restricted_causes",
             Text::UploadFailureQuota => "upload.failure.quota",
             Text::UploadFailureCredits => "upload.failure.credits",
+            Text::UploadFailureAnswerLost => "upload.failure.answer_lost",
             Text::UploadFailureUploadLimit => "upload.failure.upload_limit",
             Text::UploadFailureReconnect => "upload.failure.reconnect",
             Text::UploadFailureRejected => "upload.failure.rejected",
@@ -7148,6 +7151,7 @@ mod tests {
         texts.push(Text::UploadRestrictedCauses);
         texts.push(Text::UploadFailureQuota);
         texts.push(Text::UploadFailureCredits);
+        texts.push(Text::UploadFailureAnswerLost);
         texts.push(Text::UploadFailureUploadLimit);
         texts.push(Text::UploadFailureReconnect);
         texts.push(Text::UploadFailureRejected);
