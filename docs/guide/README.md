@@ -11,6 +11,7 @@ The guide Bardo shows on its Guide screen (F1), in two languages, also published
 | [Your first video](en-US/first-video.md) | [Seu primeiro vídeo](pt-BR/first-video.md) |
 | [Niche research](en-US/niche-research.md) | [Pesquisa de nichos](pt-BR/niche-research.md) |
 | [Themes and ranking](en-US/themes-ranking.md) | [Temas e ranqueamento](pt-BR/themes-ranking.md) |
+| [Products](en-US/products.md) | [Produtos](pt-BR/products.md) |
 | [Performance and metrics](en-US/performance-metrics.md) | [Desempenho e métricas](pt-BR/performance-metrics.md) |
 | [Projects and stages](en-US/projects.md) | [Projetos e etapas](pt-BR/projects.md) |
 | [Script](en-US/script.md) | [Roteiro](pt-BR/script.md) |

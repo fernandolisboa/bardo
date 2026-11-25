@@ -23,6 +23,7 @@ mod migrations;
 mod narration;
 mod network_account;
 mod persona;
+mod product;
 mod profile;
 mod publication;
 mod render;

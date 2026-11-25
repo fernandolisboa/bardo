@@ -29,6 +29,8 @@ As palavras que o Bardo usa, em termos simples.
 
 **Ranking de temas**: por que o motor de decisão coloca uma ideia onde ela está: encaixe com o canal, tendência e concorrência, cada um com nota e confiança, e também o desempenho passado quando o canal já tem vídeos publicados.
 
+**Produto**: algo que você anuncia: um produto digital ou físico, um serviço ou uma ideia, descrito uma vez num briefing com os fatos que você garante, até três imagens e um logo ([Produtos](products.md)).
+
 **Desempenho passado**: como foram os vídeos do próprio canal, do jeito que o ranking lê: a primeira semana de cada vídeo comparada com o normal do canal.
 
 **Primeira semana**: as views de um vídeo sete dias depois de ele ir ao ar.

@@ -229,20 +229,32 @@ impl PersonaDetails {
     /// `Name (copy)`, then `Name (copy 2)` and so on, in the user's
     /// language through `suffix`. The original is cut to fit the limit.
     pub fn copy_name(&self, suffix: &str, taken: impl Fn(&str) -> bool) -> String {
-        (1..)
-            .map(|n| {
-                let tag = if n == 1 {
-                    format!(" ({suffix})")
-                } else {
-                    format!(" ({suffix} {n})")
-                };
-                let room = Self::MAX_NAME_CHARS.saturating_sub(tag.chars().count());
-                let base: String = self.name.chars().take(room).collect();
-                format!("{}{tag}", base.trim_end())
-            })
-            .find(|name| !taken(name))
-            .expect("some numbered name is free")
+        numbered_copy(&self.name, Self::MAX_NAME_CHARS, suffix, taken)
     }
+}
+
+/// A name for a copy of `name` that `taken` does not hold: `Name (copy)`,
+/// then `Name (copy 2)` and so on, the original cut so the whole fits
+/// `max_chars`.
+pub(crate) fn numbered_copy(
+    name: &str,
+    max_chars: usize,
+    suffix: &str,
+    taken: impl Fn(&str) -> bool,
+) -> String {
+    (1..)
+        .map(|n| {
+            let tag = if n == 1 {
+                format!(" ({suffix})")
+            } else {
+                format!(" ({suffix} {n})")
+            };
+            let room = max_chars.saturating_sub(tag.chars().count());
+            let base: String = name.chars().take(room).collect();
+            format!("{}{tag}", base.trim_end())
+        })
+        .find(|name| !taken(name))
+        .expect("some numbered name is free")
 }
 
 impl From<&PersonaDetails> for PersonaDraft {

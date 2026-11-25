@@ -141,6 +141,10 @@ pub enum JobActionError {
     /// the one to retry, or the Scenes stage plans again and asks first.
     #[error("a newer scene job of the project came after this one")]
     ScenesMovedOn,
+    /// An image or clip job with a scene another job works on now: run
+    /// again before that job is over, it would pay for the scene twice.
+    #[error("another job works on the same scenes now")]
+    ScenesTaken,
     /// A performed take that never reached its provider: it is made again
     /// from the capture, where its cap, test and checks are asked again.
     #[error("make the take again from its capture")]

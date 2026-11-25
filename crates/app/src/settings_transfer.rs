@@ -25,8 +25,9 @@ use bardo_domain::{
     ApiKey, AppCredentials, Budget, CaptionHighlight, ChannelDraft, ClipFit, ClipModelRef,
     ConnectedIdentity, ConnectionStatus, DecisionEngineId, LayoutId, Meter, MetricsSyncOnStart,
     Money, MotionDefault, Network, NetworkAccount, NetworkAccountDraft, NetworkConnection, Persona,
-    ProductionMode, Provider, Rate, Resolution, Score, StretchLimit, StyleChoice, ThumbnailLook,
-    TokenSet, Transition, UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
+    Product, ProductBrief, ProductDraft, ProductKind, ProductOwnership, ProductionMode, Provider,
+    Rate, Resolution, Score, StretchLimit, StyleChoice, ThumbnailLook, TokenSet, Transition,
+    UiLanguage, UiThemePreference, VideoFormat, VoiceFlag,
 };
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -47,6 +48,8 @@ pub enum SettingsItem {
     /// Budgets and changed prices.
     Costs,
     Persona(usize),
+    /// A product's brief; its images and logo stay in backups.
+    Product(usize),
     Channel(usize),
     /// The network account's sign-in, in the channel numbered alike. It
     /// travels only with its channel.
@@ -63,16 +66,18 @@ pub enum SettingsGroup {
     AppCredentials,
     Preferences,
     Personas,
+    Products,
     Channels,
     SignIns,
 }
 
 impl SettingsGroup {
-    pub const ALL: [SettingsGroup; 6] = [
+    pub const ALL: [SettingsGroup; 7] = [
         SettingsGroup::Keys,
         SettingsGroup::AppCredentials,
         SettingsGroup::Preferences,
         SettingsGroup::Personas,
+        SettingsGroup::Products,
         SettingsGroup::Channels,
         SettingsGroup::SignIns,
     ];
@@ -85,6 +90,7 @@ impl SettingsItem {
             SettingsItem::AppCredentials(_) => SettingsGroup::AppCredentials,
             SettingsItem::Preferences | SettingsItem::Costs => SettingsGroup::Preferences,
             SettingsItem::Persona(_) => SettingsGroup::Personas,
+            SettingsItem::Product(_) => SettingsGroup::Products,
             SettingsItem::Channel(_) => SettingsGroup::Channels,
             SettingsItem::SignIn { .. } => SettingsGroup::SignIns,
         }
@@ -312,6 +318,9 @@ struct Contents {
     /// Each a persona package (`persona_package`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     personas: Vec<serde_json::Value>,
+    /// The briefs only: pictures stay in backups.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    products: Vec<ProductEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     channels: Vec<ChannelEntry>,
     /// Parts a newer Bardo wrote.
@@ -387,6 +396,74 @@ struct RateEntry {
     model: String,
     meter: String,
     price_micros: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProductEntry {
+    name: String,
+    /// Missing or unknown: the entry is listed as one this copy cannot
+    /// read, and the rest of the file still comes in.
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    audience: String,
+    #[serde(default)]
+    facts: Vec<String>,
+    #[serde(default)]
+    offer: String,
+    #[serde(default)]
+    link: String,
+    #[serde(default)]
+    call_to_action: String,
+    #[serde(default)]
+    ownership: String,
+    #[serde(default)]
+    must_say: String,
+    #[serde(default)]
+    never_say: String,
+    #[serde(default)]
+    archived: bool,
+}
+
+impl ProductEntry {
+    fn of(product: &Product) -> Self {
+        let brief = &product.brief;
+        Self {
+            name: brief.name().to_owned(),
+            kind: brief.kind().code().to_owned(),
+            description: brief.description().to_owned(),
+            audience: brief.audience().to_owned(),
+            facts: brief.facts().to_vec(),
+            offer: brief.offer().to_owned(),
+            link: brief.link().to_owned(),
+            call_to_action: brief.call_to_action().to_owned(),
+            ownership: brief.ownership().code().to_owned(),
+            must_say: brief.must_say().to_owned(),
+            never_say: brief.never_say().to_owned(),
+            archived: product.archived,
+        }
+    }
+
+    /// The brief, if this version reads it.
+    fn brief(&self) -> Option<ProductBrief> {
+        let draft = ProductDraft {
+            name: self.name.clone(),
+            kind: ProductKind::from_code(&self.kind)?,
+            description: self.description.clone(),
+            audience: self.audience.clone(),
+            // A fact never holds a line break, so one per line reads back.
+            facts: self.facts.join("\n"),
+            offer: self.offer.clone(),
+            link: self.link.clone(),
+            call_to_action: self.call_to_action.clone(),
+            ownership: ProductOwnership::from_code(&self.ownership)?,
+            must_say: self.must_say.clone(),
+            never_say: self.never_say.clone(),
+        };
+        ProductBrief::validate(draft).ok()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -761,6 +838,12 @@ impl Bardo {
                 persona.details.name().to_owned(),
             );
         }
+        for (index, product) in self.products().unwrap_or_default().iter().enumerate() {
+            push(
+                SettingsItem::Product(index),
+                product.brief.name().to_owned(),
+            );
+        }
         let channels = self.channels().unwrap_or_default();
         for (index, channel) in channels.iter().enumerate() {
             push(
@@ -893,6 +976,11 @@ impl Bardo {
                 if let Ok(value) = serde_json::from_str(&package) {
                     contents.personas.push(value);
                 }
+            }
+        }
+        for (index, product) in self.products().unwrap_or_default().iter().enumerate() {
+            if has(SettingsItem::Product(index)) {
+                contents.products.push(ProductEntry::of(product));
             }
         }
         for (index, channel) in self.channels().unwrap_or_default().iter().enumerate() {
@@ -1054,6 +1142,18 @@ impl Bardo {
                 decoded.err().map(|_| ItemProblem::NotReadable),
             );
         }
+        let products = self.products().unwrap_or_default();
+        for (index, entry) in contents.products.iter().enumerate() {
+            let here = products
+                .iter()
+                .any(|product| product.brief.same_name(&entry.name));
+            push(
+                SettingsItem::Product(index),
+                entry.name.clone(),
+                replaces(here),
+                entry.brief().is_none().then_some(ItemProblem::NotReadable),
+            );
+        }
         let channels = self.channels().unwrap_or_default();
         for (index, entry) in contents.channels.iter().enumerate() {
             let here = channels
@@ -1161,6 +1261,7 @@ impl Bardo {
                     self.bring_app_credentials(contents, network)
                 }
                 SettingsItem::Persona(index) => self.bring_persona(&contents.personas[index]),
+                SettingsItem::Product(index) => self.bring_product(&contents.products[index]),
                 _ => continue,
             };
             record(choice, result);
@@ -1355,6 +1456,31 @@ impl Bardo {
             },
         };
         self.personas.save(&persona).map_err(|_| failed)
+    }
+
+    /// A product of the same name here keeps its id, images and logo; its
+    /// brief and whether it is archived come from the file.
+    fn bring_product(&self, entry: &ProductEntry) -> Result<(), Text> {
+        let failed = Text::SettingsFileItemFailed;
+        let brief = entry.brief().ok_or(Text::SettingsFileItemNotRead)?;
+        let existing = self
+            .products
+            .list(self.profile.id)
+            .map_err(|_| failed)?
+            .into_iter()
+            .find(|product| product.brief.same_name(brief.name()));
+        let product = match existing {
+            Some(existing) => Product {
+                brief,
+                archived: entry.archived,
+                ..existing
+            },
+            None => Product {
+                archived: entry.archived,
+                ..Product::new(self.profile.id, brief)
+            },
+        };
+        self.products.save(&product).map_err(|_| failed)
     }
 
     /// Brings the channel and its accounts in, and the sign-ins of
@@ -1875,6 +2001,104 @@ mod tests {
         other.import_settings(&file, &all);
         assert_eq!(other.channels().unwrap().len(), channels);
         assert_eq!(other.personas().unwrap().len(), personas);
+    }
+
+    #[test]
+    fn a_product_brief_travels_without_its_pictures_and_replaces_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = Harness::new();
+        let app = source.start();
+        let draft = ProductDraft {
+            name: "Caderno".into(),
+            kind: ProductKind::Physical,
+            description: "Um caderno recarregável.".into(),
+            audience: "Estudantes".into(),
+            facts: "Folhas recarregáveis\nTamanho A5".into(),
+            offer: "20% até sexta".into(),
+            link: "example.com/caderno".into(),
+            call_to_action: "Garanta o seu".into(),
+            ownership: ProductOwnership::Client,
+            must_say: "Feito no Brasil".into(),
+            never_say: "barato".into(),
+        };
+        let product = app.create_product(draft.clone()).unwrap();
+        app.set_product_archived(product.id, true).unwrap();
+        let choices = app.settings_to_export();
+        let item = choices
+            .iter()
+            .find(|choice| choice.label == "Caderno")
+            .unwrap();
+        assert_eq!(item.item, SettingsItem::Product(0));
+        assert_eq!(item.item.group(), SettingsGroup::Products);
+        assert!(item.ticked);
+        let path = export(&app, &[SettingsItem::Product(0)], dir.path());
+
+        // Here a product of the same name already has a logo.
+        let target = Harness::new();
+        let mut other = target.start();
+        let here = other
+            .create_product(ProductDraft {
+                name: "caderno".into(),
+                description: "Outro.".into(),
+                ..ProductDraft::default()
+            })
+            .unwrap();
+        let mut logo = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        logo.extend(256_u32.to_be_bytes());
+        logo.extend(128_u32.to_be_bytes());
+        logo.extend([8, 6, 0, 0, 0]);
+        bardo_domain::ProductRepository::save_logo(
+            &*target.db,
+            &bardo_domain::ProductLogo {
+                product: here.id,
+                picture: bardo_domain::ProductPicture::logo(logo).unwrap(),
+                confirmed_at: at_seconds(1_792_000_000),
+            },
+        )
+        .unwrap();
+        let file = open(&other, &path);
+        let choices = other.settings_to_import(&file);
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].effect, Some(ItemEffect::Replaces));
+        assert_eq!(choices[0].problem, None);
+        other.import_settings(&file, &[SettingsItem::Product(0)]);
+
+        let products = other.products().unwrap();
+        assert_eq!(products.len(), 1);
+        let brought = &products[0];
+        assert_eq!(brought.id, here.id);
+        assert_eq!(brought.brief, ProductBrief::validate(draft).unwrap());
+        assert!(brought.archived);
+        assert!(other.product_logo(here.id).unwrap().is_some());
+        assert!(other.product_images(here.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_product_this_copy_cannot_read_is_listed_not_brought() {
+        let json = serde_json::json!({
+            "products": [
+                {"name": "Novo", "kind": "hologram", "description": "x", "ownership": "mine"},
+                {"name": "Sem descrição", "kind": "idea", "ownership": "mine"},
+                {"name": "Sem tipo", "description": "x"},
+                {"name": "Ok", "kind": "service", "description": "x", "ownership": "client"},
+            ],
+        });
+        let bytes = seal_cheaply(json.to_string().as_bytes(), &password());
+        let h = Harness::new();
+        let mut app = h.start();
+        let file = open_bytes(&bytes, &password(), PathBuf::from("x")).unwrap();
+        let choices = app.settings_to_import(&file);
+        let problems: Vec<_> = choices.iter().map(|choice| choice.problem).collect();
+        let unreadable = Some(ItemProblem::NotReadable);
+        assert_eq!(problems, [unreadable, unreadable, unreadable, None]);
+        assert!(choices[..3].iter().all(|choice| !choice.ticked));
+
+        let outcome = app.import_settings(&file, &items(&choices));
+        assert_eq!(outcome.brought.len(), 1);
+        let products = app.products().unwrap();
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].brief.name(), "Ok");
+        assert_eq!(products[0].brief.kind(), ProductKind::Service);
     }
 
     #[test]

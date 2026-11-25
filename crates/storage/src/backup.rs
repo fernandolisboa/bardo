@@ -1225,8 +1225,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use bardo_domain::{
-        Job, JobKind, JobRepository, JobState, ProfileRepository, RunnerRole, UiLanguage,
-        UserProfile,
+        Job, JobKind, JobRepository, JobState, Product, ProductBrief, ProductDraft, ProductImage,
+        ProductImageKind, ProductLogo, ProductPicture, ProductRepository, ProfileId,
+        ProfileRepository, RunnerRole, UiLanguage, UserProfile,
     };
 
     use super::*;
@@ -1279,6 +1280,58 @@ mod tests {
 
     fn go_on() -> impl FnMut(Progress) -> bool {
         |_| true
+    }
+
+    /// A product with an image and a logo (#273): they live in the
+    /// database, so every kind of backup carries them.
+    fn product_with_pictures(
+        db: &Database,
+        owner: ProfileId,
+    ) -> (Product, ProductImage, ProductLogo) {
+        let png = |width: u32, height: u32| {
+            let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+            bytes.extend(width.to_be_bytes());
+            bytes.extend(height.to_be_bytes());
+            bytes.extend([8, 6, 0, 0, 0]);
+            bytes
+        };
+        let brief = ProductBrief::validate(ProductDraft {
+            name: "Caderno".into(),
+            description: "Um caderno de folhas recarregáveis.".into(),
+            facts: "Folhas recarregáveis\nTamanho A5".into(),
+            ..ProductDraft::default()
+        })
+        .unwrap();
+        let product = Product::new(owner, brief);
+        ProductRepository::save(db, &product).unwrap();
+        let confirmed_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_795_000_000);
+        let image = ProductImage::new(
+            product.id,
+            ProductPicture::image(png(900, 1200)).unwrap(),
+            ProductImageKind::Photo,
+            confirmed_at,
+        );
+        assert!(db.add_image(&image).unwrap());
+        let logo = ProductLogo {
+            product: product.id,
+            picture: ProductPicture::logo(png(800, 200)).unwrap(),
+            confirmed_at,
+        };
+        db.save_logo(&logo).unwrap();
+        (product, image, logo)
+    }
+
+    fn assert_product_with_pictures(
+        db: &Database,
+        expected: &(Product, ProductImage, ProductLogo),
+    ) {
+        let (product, image, logo) = expected;
+        assert_eq!(
+            ProductRepository::get(db, product.id).unwrap().as_ref(),
+            Some(product)
+        );
+        assert_eq!(db.images(product.id).unwrap(), std::slice::from_ref(image));
+        assert_eq!(db.logo(product.id).unwrap().as_ref(), Some(logo));
     }
 
     const WITH_MEDIA: BackupOptions = BackupOptions {
@@ -1601,6 +1654,7 @@ mod tests {
     fn a_restore_swaps_in_the_database_and_media_at_the_next_start() {
         let (source, profile) = Install::with_profile();
         source.file("p1/clip-1.mp4", b"clip");
+        let product = product_with_pictures(&source.db, profile.id);
         let to = source.out("full.zip");
         let options = BackupOptions {
             saved_keys: vec![Provider::Claude, Provider::Gemini],
@@ -1634,6 +1688,7 @@ mod tests {
         assert!(!restore_pending(&paths));
         let db = Arc::new(Database::open(&paths.database).unwrap());
         assert_eq!(db.load_default().unwrap(), Some(profile));
+        assert_product_with_pictures(&db, &product);
         assert_eq!(
             fs::read(paths.projects.join("p1/clip-1.mp4")).unwrap(),
             b"clip"
@@ -1654,6 +1709,7 @@ mod tests {
     fn a_backup_without_media_leaves_the_project_folders_as_they_are() {
         let (source, profile) = Install::with_profile();
         source.file("p1/clip-1.mp4", b"clip");
+        let product = product_with_pictures(&source.db, profile.id);
         let to = source.out("small.zip");
         source
             .backups()
@@ -1669,6 +1725,8 @@ mod tests {
         assert!(outcome.succeeded() && !outcome.media);
         let db = Database::open(&paths.database).unwrap();
         assert_eq!(db.load_default().unwrap(), Some(profile));
+        // The product's pictures are in the database, not in the media.
+        assert_product_with_pictures(&db, &product);
         assert_eq!(
             fs::read(paths.projects.join("p9/mine.mp4")).unwrap(),
             b"mine"

@@ -15,7 +15,7 @@ tour: backup
 
 **Fazer backup…** pergunta onde salvar um arquivo `.zip` (em Documentos, se você não escolher outra pasta) e o cria como uma tarefa, com o andamento na aba e em [Tarefas](jobs.md). O Bardo continua aberto e trabalhando enquanto isso: o banco de dados é copiado num único momento consistente, mesmo que o [agente em segundo plano](background-agent.md) esteja enviando um post.
 
-O backup tem o [banco de dados](data-and-keys.md#database): seus canais, personas, modelos, projetos, roteiros, pesquisas, posts e agendamentos, custos e configurações. Marque **Incluir mídias** para levar também as [pastas dos projetos](data-and-keys.md#projects): narração, imagens, clipes, música, arquivos importados e renders. A aba mostra o tamanho delas. As prévias do editor ficam de fora, porque o editor as gera de novo quando um projeto abre, assim como o cache de amostras de voz, os logs e as [exportações](data-and-keys.md#exports), que já são arquivos seus.
+O backup tem o [banco de dados](data-and-keys.md#database): seus canais, personas, produtos com as imagens e o logo, modelos, projetos, roteiros, pesquisas, posts e agendamentos, custos e configurações. Marque **Incluir mídias** para levar também as [pastas dos projetos](data-and-keys.md#projects): narração, imagens, clipes, música, arquivos importados e renders. A aba mostra o tamanho delas. As prévias do editor ficam de fora, porque o editor as gera de novo quando um projeto abre, assim como o cache de amostras de voz, os logs e as [exportações](data-and-keys.md#exports), que já são arquivos seus.
 
 Um backup deixa de fora os dados do YouTube que o Bardo só pode guardar por 30 dias: pesquisa de nichos, ranqueamentos de temas e os números dos posts do YouTube cujo canal não está conectado. Os números do próprio canal conectado ficam ([Política de privacidade](privacy.md#kept)).
 
@@ -31,18 +31,19 @@ Eles ficam no mesmo disco dos seus dados: protegem contra um engano ou uma atual
 <a id="settings-file"></a>
 ## Arquivo de configurações
 
-Um arquivo de configurações leva suas chaves, preferências, personas e canais para outra cópia do Bardo: de uma compilada do código para a instalada, ou para um computador novo, sem os projetos e posts que um backup leva. Uma senha o protege.
+Um arquivo de configurações leva suas chaves, preferências, personas, produtos e canais para outra cópia do Bardo: de uma compilada do código para a instalada, ou para um computador novo, sem os projetos e posts que um backup leva. Uma senha o protege.
 
 **Exportar configurações…** lista o que esta cópia tem, tudo marcado menos os logins:
 
 - **Chaves de API** e **Credenciais de app**, cada uma salva pelo nome.
 - **Preferências e custos**: o idioma, o tema e o layout da interface, se o Bardo oferece tours, faz backup toda semana e procura atualizações, como os números dos posts sincronizam, a pontuação mínima das sugestões de corte, seus orçamentos e os preços que você mudou.
 - **Personas** (sem a aparência: uma aparência desenhada vai no pacote da própria persona) e **Canais**, cada canal com suas contas nas redes.
+- **Produtos**: o briefing de cada produto, sem as imagens e o logo.
 - **Logins**: o login de uma conta, que só vai junto com o canal dele. Em geral, deixe desmarcado e entre de novo na outra cópia. Algumas redes, como o X, mantêm só uma cópia conectada: a primeira que renovar o login desconecta a outra.
 
 Digite duas vezes uma senha de pelo menos 10 caracteres e selecione **Salvar arquivo…**. O Bardo não recupera uma senha esquecida: sem ela, o arquivo não abre. O arquivo é criptografado com essa senha, então guarde o arquivo e a senha separados; quem tiver os dois consegue ler suas chaves.
 
-**Importar configurações…** pede o arquivo, mostra qual Bardo o fez e quando, e pede a senha. Depois lista o que o arquivo tem, tudo marcado menos os logins, cada item marcado **Novo aqui** ou **Substitui o daqui**. O que substitui fica com os dados do arquivo e mantém o lugar: uma persona ou um canal de mesmo nome continua com seus projetos, e uma chave ou credencial de app da mesma rede é sobrescrita. Nada que você deixar desmarcado, e nada que o arquivo não tenha, muda. **Importar** traz os itens marcados e lista os que não puderam ser salvos.
+**Importar configurações…** pede o arquivo, mostra qual Bardo o fez e quando, e pede a senha. Depois lista o que o arquivo tem, tudo marcado menos os logins, cada item marcado **Novo aqui** ou **Substitui o daqui**. O que substitui fica com os dados do arquivo e mantém o lugar: uma persona ou um canal de mesmo nome continua com seus projetos, um produto de mesmo nome continua com as imagens e o logo, e uma chave ou credencial de app da mesma rede é sobrescrita. Nada que você deixar desmarcado, e nada que o arquivo não tenha, muda. **Importar** traz os itens marcados e lista os que não puderam ser salvos.
 
 Um arquivo feito por um Bardo mais novo abre se o formato dele for um que este Bardo conhece; valores ou partes que este Bardo não conhece aparecem numa lista e ficam de fora. Atualize o Bardo para importá-los. Um arquivo de formato mais novo pede que você atualize o Bardo antes ([Atualizar](install.md#update)).
 

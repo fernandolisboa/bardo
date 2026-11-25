@@ -83,6 +83,7 @@ mod persona_look;
 mod plan;
 mod post_insights;
 mod preflight;
+mod product;
 mod production;
 mod profile;
 mod provider_key;
@@ -195,7 +196,7 @@ pub use framing::{CROP_STEPS, CropPosition, CropRect, Framing, PictureSize, crop
 pub use generation::{Generation, GenerationId, TemplateUsed};
 pub use image::{
     GeneratedImage, ImageFormat, ImageGenerator, ImageRequest, ImageShape, ReferenceImage,
-    image_dimensions, shape_of,
+    image_declares_transparency, image_dimensions, shape_of,
 };
 pub use job::{
     InconsistentJob, InvalidJobTransition, Job, JobFailure, JobFailureKind, JobId, JobKind,
@@ -279,6 +280,13 @@ pub use post_insights::{
 pub use preflight::{
     BodyFraming, HALF_BODY_FACE, LookFace, MAX_FAST_FRAMES, MAX_OUT_OF_FRAME, MIN_PREFLIGHT_FACE,
     Preflight, PreflightCheck, PreflightOutcome, PreflightResult, preflight,
+};
+pub use product::{
+    MAX_PRODUCT_IMAGES, PRODUCT_IMAGE_MAX_BYTES, PRODUCT_IMAGE_MAX_RATIO, PRODUCT_IMAGE_MAX_SIDE,
+    PRODUCT_IMAGE_MIN_SIDE, PRODUCT_LOGO_MAX_RATIO, PRODUCT_LOGO_MIN_LONG_SIDE,
+    PRODUCT_LOGO_MIN_SIDE, Product, ProductBrief, ProductDraft, ProductFieldError, ProductId,
+    ProductImage, ProductImageError, ProductImageId, ProductImageKind, ProductInUse, ProductKind,
+    ProductLogo, ProductOwnership, ProductPicture, ProductRepository, split_facts,
 };
 pub use production::{
     AnimatedScenes, HOOK_LENGTH, NARRATION_CHARS_PER_SECOND, ProductionMode, TYPICAL_SCENE,

@@ -155,6 +155,7 @@ impl JobActionError {
             JobActionError::Superseded => Text::JobSuperseded,
             JobActionError::Restyled => Text::JobRestyled,
             JobActionError::ScenesMovedOn => Text::JobScenesMovedOn,
+            JobActionError::ScenesTaken => Text::JobScenesTaken,
             JobActionError::TakeFromItsPage => Text::JobTakeFromItsPage,
             JobActionError::NarrationBusy => Text::JobNarrationBusy,
             JobActionError::ScenesBusy => Text::JobScenesBusy,
@@ -267,6 +268,9 @@ impl Bardo {
         }
         if self.restyled_images(id) {
             return Err(JobActionError::Restyled);
+        }
+        if self.images_taken(id) || self.clips_taken(id) {
+            return Err(JobActionError::ScenesTaken);
         }
         if self.unsent_take_needs_asking(id) {
             return Err(JobActionError::TakeFromItsPage);
@@ -2093,6 +2097,7 @@ mod tests {
             templates: Arc::clone(db) as _,
             scripts: Arc::clone(db) as _,
             personas: Arc::clone(db) as _,
+            products: Arc::clone(db) as _,
             narrations: Arc::clone(db) as _,
             captures: Arc::clone(db) as _,
             staging: Arc::clone(db) as _,

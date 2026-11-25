@@ -15,7 +15,7 @@ tour: backup
 
 **Back up…** asks where to save a `.zip` file (Documents, unless you pick another folder) and makes it as a job, with its progress on the tab and on [Jobs](jobs.md). Bardo stays open and keeps working meanwhile: the database is copied in one consistent moment, even while the [background agent](background-agent.md) sends a post.
 
-The backup holds the [database](data-and-keys.md#database): your channels, personas, templates, projects, scripts, research, posts and schedules, costs and settings. Tick **Include media** to take the [project folders](data-and-keys.md#projects) too: the narration, images, clips, music, imported files and renders. The tab says how big they are. The editor's preview copies are left out, because the editor makes them again when a project opens, and so are the voice sample cache, the logs and the [exports](data-and-keys.md#exports), which are your own files already.
+The backup holds the [database](data-and-keys.md#database): your channels, personas, products with their images and logo, templates, projects, scripts, research, posts and schedules, costs and settings. Tick **Include media** to take the [project folders](data-and-keys.md#projects) too: the narration, images, clips, music, imported files and renders. The tab says how big they are. The editor's preview copies are left out, because the editor makes them again when a project opens, and so are the voice sample cache, the logs and the [exports](data-and-keys.md#exports), which are your own files already.
 
 A backup leaves out the YouTube data Bardo may keep only for 30 days: niche research, theme rankings, and the numbers of YouTube posts whose channel is not connected. A connected channel's own numbers stay ([Privacy policy](privacy.md#kept)).
 
@@ -31,18 +31,19 @@ They live on the same disk as your data: they protect against a mistake or a bad
 <a id="settings-file"></a>
 ## Settings file
 
-A settings file takes your keys, preferences, personas and channels to another copy of Bardo: from one built from source to the installed one, or to a new computer, without the projects and posts a backup carries. A password protects it.
+A settings file takes your keys, preferences, personas, products and channels to another copy of Bardo: from one built from source to the installed one, or to a new computer, without the projects and posts a backup carries. A password protects it.
 
 **Export settings…** lists what this copy has, all ticked but the sign-ins:
 
 - **API keys** and **App credentials**, each saved one by name.
 - **Preferences and costs**: the interface language, theme and layout, whether Bardo offers tours, backs up every week and checks for updates, how post numbers sync, the lowest score of the cut suggestions shown, your budgets and the prices you changed.
 - **Personas** (without their looks: a drawn look travels in the persona's own package) and **Channels**, each channel with its network accounts.
+- **Products**: each product's brief, without its images and logo.
 - **Sign-ins**: an account's sign-in, which goes only with its channel. Usually leave these off and sign in again in the other copy. Some networks, X among them, keep only one copy signed in: the first copy to renew its sign-in signs the other out.
 
 Type a password of at least 10 characters twice and select **Save file…**. Bardo cannot recover a forgotten password: without it the file does not open. The file is encrypted with that password, so keep the file and the password apart; anyone with both can read your keys.
 
-**Import settings…** asks for the file, shows which Bardo made it and when, and asks for its password. Then it lists what the file holds, all ticked but the sign-ins, each marked **New here** or **Replaces the one here**. What replaces takes the file's details and keeps its place: a persona or channel of the same name keeps its projects, and a key or app credential of the same network is overwritten. Nothing you leave unticked, and nothing the file does not hold, changes. **Import** brings the ticked items in and lists any that could not be saved.
+**Import settings…** asks for the file, shows which Bardo made it and when, and asks for its password. Then it lists what the file holds, all ticked but the sign-ins, each marked **New here** or **Replaces the one here**. What replaces takes the file's details and keeps its place: a persona or channel of the same name keeps its projects, a product of the same name keeps its images and logo, and a key or app credential of the same network is overwritten. Nothing you leave unticked, and nothing the file does not hold, changes. **Import** brings the ticked items in and lists any that could not be saved.
 
 A file made by a newer Bardo opens if its format is one this Bardo knows; values or parts this Bardo does not know are listed and left out. Update Bardo to import them. A file of a newer format asks you to update Bardo first ([Updating](install.md#update)).
 
