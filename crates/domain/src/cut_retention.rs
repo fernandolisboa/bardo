@@ -527,6 +527,7 @@ mod tests {
         timeline.video[0].source = crate::VideoSource::Clip {
             file: "clip.mp4".into(),
             length: ms(8_000),
+            stretched_from: None,
         };
         let timing = cut_timing(&timeline);
 
