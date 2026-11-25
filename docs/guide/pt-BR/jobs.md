@@ -32,6 +32,8 @@ Quando um provedor falha por um motivo passageiro (uma conexão que não pôde s
 
 Um pedido pago de texto, imagem, voz ou música que foi enviado e ficou sem resposta não é repetido sozinho: o provedor pode ter feito o trabalho e cobrado por ele. A tarefa para como **Com falha** e diz isso, e [Custos](costs.md#spent) conta uma estimativa do que ele pode ter custado. Veja [Um pedido pago ficou sem resposta](troubleshooting.md#answer-lost).
 
+Um pedido de clipe que o provedor aceitou e que depois terminou sem clipe (falhou, foi cancelado ou esquecido do lado dele) também não é repetido sozinho, porque enviar de novo é um pedido novo. A cena mostra a falha, a tarefa para como **Com falha** quando as outras cenas terminam, e é o **Tentar de novo** que envia a cena outra vez ([Clipes](clips.md)).
+
 **Tentar de novo**, numa tarefa com falha ou cancelada, coloca ela na fila de novo. Ela continua do último ponto que salvou, não do começo. Resolva antes o que a falha aponta: veja [Solução de problemas](troubleshooting.md).
 
 <a id="restart"></a>

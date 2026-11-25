@@ -364,6 +364,7 @@ limit_reached = "Uma cota ou limite de uso parou o provedor. As cotas do YouTube
 provider_unavailable = "Não foi possível falar com o provedor, ou ele está com problemas. Tentando de novo automaticamente."
 answer_lost = "O pedido foi enviado, mas a resposta não voltou. O provedor pode ter feito o trabalho e cobrado por ele, então o Bardo não enviou de novo sozinho e somou uma estimativa em Custos. Tente de novo quando quiser."
 unexpected_answer = "O provedor deu uma resposta que o Bardo não entende."
+request_failed = "O provedor aceitou o pedido e depois não conseguiu atendê-lo. O Bardo não o enviou de novo sozinho, porque seria um pedido novo. Tente de novo para pedir outra vez."
 declined = "O provedor recusou este pedido pelas regras de segurança dele. Mude o que foi pedido (o prompt, o canal ou o nicho) e tente de novo."
 media = "O ffmpeg não conseguiu ler ou gravar um arquivo de mídia. Confira o arquivo indicado e tente de novo."
 missed = "O horário do post agendado passou sem ele, então nada foi postado. Escolha o que fazer na etapa Publicação do projeto."
