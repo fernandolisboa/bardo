@@ -368,8 +368,9 @@ pub use text::{
     GeneratedText, Stop, TextEffort, TextFormat, TextGenerator, TextImage, TextRequest, TokenUsage,
 };
 pub use theme::{
-    Reason, Theme, ThemeFieldError, ThemeId, ThemeIdea, ThemeNotSuggested, ThemeRanking,
-    ThemeRecord, ThemeRepository, ThemeStatus, UnknownThemeStatus, VideoProject, VideoProjectId,
+    DEFAULT_LONG_CAP, DEFAULT_SHORT_CAP, Reason, SpendCap, Theme, ThemeFieldError, ThemeId,
+    ThemeIdea, ThemeNotSuggested, ThemeRanking, ThemeRecord, ThemeRepository, ThemeStatus,
+    UnknownSpendCap, UnknownThemeStatus, VideoProject, VideoProjectId, default_spend_cap,
     rank_themes,
 };
 pub use thumbnail::{

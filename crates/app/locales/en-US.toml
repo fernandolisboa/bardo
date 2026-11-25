@@ -397,6 +397,7 @@ scenes_taken = "Another job is working on these scenes now. Retry this one when 
 take_from_page = "Nothing of this take reached its provider yet. Make it again on the Capture step, which checks the video's cap, the test take and the preflight checks first."
 narration_busy = "A narration is being made for this project, and what this job makes now would be out of date at once. When the narration is ready, bring the scenes onto it on the Scenes stage first."
 scenes_busy = "Scenes, images or clips are being made for this project, or a cancelled job is still stopping. Run this again when they are done, or cancel them first."
+over_budget = "What is left of this job needs your go-ahead on its cost. Retry it from the Jobs panel, which asks."
 asks_first = "This video's scenes hold images or clips that running this again would put out of date or discard. Start it from its stage in the project instead, which shows what is at stake and asks first."
 
 [setup]
@@ -650,12 +651,18 @@ estimate_partial = "Whole video: about {total}, plus calls without a rate ({spen
 
 [projects.cap]
 label = "Cap"
-hint = "What this video may cost before Bardo asks. A paid step that would pass it asks first, with what the rest of the video costs. Empty: no cap."
+hint = "The cap is what this video may cost before Bardo asks. A new video starts with the default for its format and follows it if the format changes; type another amount, or leave it empty for no cap. A paid step that would pass it asks first, with what the rest of the video costs."
 placeholder = "No cap"
 save = "Save"
 saved = "Cap saved."
 invalid = "Type an amount above zero, like 5.00, or leave it empty for no cap."
 over = "Over the {cap} cap"
+default = "Default"
+use_default = "Use the default ({cap})"
+offer = "New videos start with a cap of {cap}: Bardo asks before a paid step takes the video past it. This video was started before that and has none."
+offer_accept = "Use {cap}"
+offer_decline = "Keep no cap"
+kept = "This video stays without a cap."
 
 [projects.error]
 not_loaded = "Could not load the video projects."
@@ -1532,6 +1539,8 @@ project_spent = "This video so far: {amount}"
 [budget]
 reached_title = "Over budget"
 reached_line = "{provider}: {spent} of the {budget} budget spent this month, and this costs about {amount}."
+unknown_title = "Price unknown"
+unknown_line = "{provider}: no rate covers {model}, so what this costs is not known. You can add one on the Costs screen."
 cap_title = "Over this video's cap"
 cap_line = "This video has cost {spent} of its {cap} cap; this step costs about {amount}, and the rest of the video about {rest}."
 question = "Generate anyway?"
@@ -2937,7 +2946,7 @@ body = "A Short is a vertical video of 45 to 60 seconds; a long video is 16:9 an
 
 [tour.projects.mode]
 title = "How it is produced, and what it costs"
-body = "The mode says which scenes become AI clips and with which model: Economy keeps stills with motion, Animated hook animates the first 10 seconds, All animated and premium animate every scene. Each choice shows what the whole video would cost before anything is generated, and the cap makes Bardo ask before a step that would pass it."
+body = "The mode says which scenes become AI clips and with which model: Economy keeps stills with motion, Animated hook animates the first 10 seconds, All animated and premium animate every scene. Each choice shows what the whole video would cost before anything is generated, and the cap makes Bardo ask before a step that would pass it: US$ 5 for a Short and US$ 20 for a long video unless you set your own."
 
 [tour.projects.stages]
 title = "Its stages"
@@ -3447,7 +3456,7 @@ body = "Cancel stops a running or queued job and keeps what it made for a retry.
 
 [tour.jobs.retry]
 title = "Retry"
-body = "A passing failure, like a connection that could not be made, is tried again by itself, up to four attempts in all. A lasting one stops the job: fix what it says, then Retry goes on from where it stopped. A paid request that was sent and got no answer is not sent again by itself, because the provider may have charged for it."
+body = "A passing failure, like a connection that could not be made, is tried again by itself, up to four attempts in all. A lasting one stops the job: fix what it says, then Retry goes on from where it stopped, and asks first when the images or clips still to pay for would pass the video's cap or a budget, or have no price. A paid request that was sent and got no answer is not sent again by itself, because the provider may have charged for it."
 
 [tour.jobs.restart]
 title = "Closing Bardo mid-job"

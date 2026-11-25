@@ -18,7 +18,7 @@ use std::time::Duration;
 use bardo_app::bardo_domain::{
     CaptureVoice, Channel, ChannelId, Generation, Job, JobKind, JobState, Narration,
     NarrationSource, Network, NetworkAccountId, PersonaId, ProductionMode, SceneFieldError,
-    ScenePlanId, ScriptFieldError, StyleChoice, TemplateKind, VideoFormat, VideoLength,
+    ScenePlanId, ScriptFieldError, SpendCap, StyleChoice, TemplateKind, VideoFormat, VideoLength,
     VideoMetadataDraft, VideoProject, VideoProjectId,
 };
 use bardo_app::{
@@ -1227,8 +1227,42 @@ impl ProjectsScreen {
             return;
         };
         let typed = self.spend_cap_input.read(cx).value().to_string();
-        self.spend_cap_note = Some(match self.bardo.read(cx).set_spend_cap(id, &typed) {
+        // The default left as the field showed it stays the default, also
+        // when the video's format (and so its default) changed since the
+        // field was filled.
+        let default_untouched = self.production.as_ref().is_some_and(|view| {
+            view.cap_choice == SpendCap::Default
+                && view.cap.map(|cap| cap.to_string()).as_deref() == Some(typed.trim())
+        });
+        let bardo = self.bardo.read(cx);
+        let saved = if default_untouched {
+            bardo.use_default_spend_cap(id)
+        } else {
+            bardo.set_spend_cap(id, &typed)
+        };
+        self.spend_cap_note = Some(match saved {
             Ok(_) => (Tone::Success, Text::SpendCapSaved),
+            Err(error) => (Tone::Danger, error.message()),
+        });
+        self.load(window, cx);
+        cx.notify();
+    }
+
+    /// Puts the video on the default cap of its format (`true`), or keeps
+    /// a video from before default caps without one.
+    fn answer_default_cap(&mut self, accept: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.project else {
+            return;
+        };
+        let bardo = self.bardo.read(cx);
+        let saved = if accept {
+            bardo.use_default_spend_cap(id)
+        } else {
+            bardo.decline_default_spend_cap(id)
+        };
+        self.spend_cap_note = Some(match saved {
+            Ok(_) if accept => (Tone::Success, Text::SpendCapSaved),
+            Ok(_) => (Tone::Success, Text::SpendCapKept),
             Err(error) => (Tone::Danger, error.message()),
         });
         self.load(window, cx);
@@ -1801,8 +1835,68 @@ impl ProjectsScreen {
     fn render_mode(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let production = self.production.as_ref()?;
         let save = cx.listener(|this, _: &ClickEvent, window, cx| this.save_spend_cap(window, cx));
+        let answer = |accept: bool| {
+            cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.answer_default_cap(accept, window, cx)
+            })
+        };
+        let (use_default, accept, decline) = (answer(true), answer(true), answer(false));
         let bardo = self.bardo.read(cx);
         let theme = cx.theme();
+        let default_cap = bardo.money(production.default_cap);
+        // Where the cap stands against the default: following it, set
+        // apart from it (with the way back), or not yet offered it.
+        let default = match production.cap_choice {
+            SpendCap::Default => Some(
+                Tag::secondary()
+                    .small()
+                    .child(tr(bardo, Text::SpendCapDefault))
+                    .into_any_element(),
+            ),
+            SpendCap::Own(_) | SpendCap::Off => Some(
+                Button::new("use-default-spend-cap")
+                    .ghost()
+                    .small()
+                    .label(SharedString::from(
+                        bardo.text_with(Text::SpendCapUseDefault, &[("cap", &default_cap)]),
+                    ))
+                    .on_click(use_default)
+                    .into_any_element(),
+            ),
+            SpendCap::NotOffered => None,
+        };
+        let offer = production.cap_choice.is_offer_due().then(|| {
+            // Its text wraps where the screen is narrow (the Jobs panel
+            // open, or a small window).
+            kit::card(cx)
+                .p_2()
+                .gap_2()
+                .max_w_full()
+                .child(div().text_xs().child(SharedString::from(
+                    bardo.text_with(Text::SpendCapOffer, &[("cap", &default_cap)]),
+                )))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("accept-default-spend-cap")
+                                .outline()
+                                .small()
+                                .label(SharedString::from(bardo.text_with(
+                                    Text::SpendCapOfferAccept,
+                                    &[("cap", &default_cap)],
+                                )))
+                                .on_click(accept),
+                        )
+                        .child(
+                            Button::new("decline-default-spend-cap")
+                                .ghost()
+                                .small()
+                                .label(tr(bardo, Text::SpendCapOfferDecline))
+                                .on_click(decline),
+                        ),
+                )
+        });
         let total = production.total(production.mode).unwrap_or_default();
         let partial = production
             .estimate(production.mode)
@@ -1835,6 +1929,7 @@ impl ProjectsScreen {
         kit::anchor(
             TourAnchor::Control(Control::ProjectMode),
             v_flex()
+                .max_w_full()
                 .gap_1()
                 .child(
                     h_flex()
@@ -1870,13 +1965,15 @@ impl ProjectsScreen {
                                 .label(tr(bardo, Text::SaveSpendCap))
                                 .on_click(save),
                         )
+                        .children(default)
                         .child(guide::info(
                             bardo,
                             "project-mode-info",
                             SharedString::from(format!(
-                                "{} {}",
+                                "{} {} {}",
                                 bardo.text(Text::ProductionModeAbout(production.mode)),
-                                bardo.text(Text::ProjectModeHint)
+                                bardo.text(Text::ProjectModeHint),
+                                bardo.text(Text::SpendCapHint)
                             )),
                             guide::refs::PROJECTS_MODE,
                         )),
@@ -1887,9 +1984,12 @@ impl ProjectsScreen {
                         .text_color(theme.muted_foreground)
                         .child(estimate),
                 )
+                .children(offer)
                 .children(over)
                 .children(note),
         )
+        // No wider than the header, so the offer's text wraps.
+        .max_w_full()
         .into_any_element()
         .into()
     }
