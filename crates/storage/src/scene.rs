@@ -522,6 +522,19 @@ impl ScenePlanRepository for Database {
         tx.commit().map_err(boxed)
     }
 
+    fn save_fitted_plan(&self, plan: &ScenePlan) -> Result<(), RepositoryError> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(boxed)?;
+        write_scene_plan(&tx, plan)?;
+        // Its items go with it (ON DELETE CASCADE).
+        tx.execute(
+            "DELETE FROM timeline WHERE project_id = ?1",
+            [plan.project.to_string()],
+        )
+        .map_err(boxed)?;
+        tx.commit().map_err(boxed)
+    }
+
     fn save_scene(&self, plan: &ScenePlan, index: usize) -> Result<(), RepositoryError> {
         let scene = plan.scene(index).map_err(boxed)?;
         let mut conn = self.conn();

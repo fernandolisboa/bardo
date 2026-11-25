@@ -243,6 +243,47 @@ pub struct ClipModel {
     pub durations: ClipDurations,
 }
 
+/// A model a provider stopped serving, and the one it offers in its place.
+/// A channel or scene saved with `id` uses `replacement` from then on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredClipModel {
+    pub id: ClipModelRef,
+    /// How people called it, e.g. "Veo 3.1 Fast 720p".
+    pub name: String,
+    /// One of the provider's `models`.
+    pub replacement: ClipModelRef,
+}
+
+/// The offered model a saved choice names today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CurrentClipModel<'a> {
+    pub model: &'a ClipModel,
+    /// The retired model that was saved, when `model` takes its place.
+    pub replaces: Option<&'a RetiredClipModel>,
+}
+
+/// What `saved` names among `models` today: itself while it is offered,
+/// else the model its provider serves in its place. `None` when neither is
+/// offered.
+pub fn current_clip_model<'a>(
+    models: &'a [ClipModel],
+    retired: &'a [RetiredClipModel],
+    saved: &ClipModelRef,
+) -> Option<CurrentClipModel<'a>> {
+    let offered = |id: &ClipModelRef| models.iter().find(|model| model.id == *id);
+    if let Some(model) = offered(saved) {
+        return Some(CurrentClipModel {
+            model,
+            replaces: None,
+        });
+    }
+    let gone = retired.iter().find(|gone| gone.id == *saved)?;
+    Some(CurrentClipModel {
+        model: offered(&gone.replacement)?,
+        replaces: Some(gone),
+    })
+}
+
 /// The first frame of a clip: the scene's image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipImage {
@@ -328,6 +369,12 @@ pub trait ClipGenerator: Send + Sync {
     /// The models it offers, the provider's default first.
     fn models(&self) -> Vec<ClipModel>;
 
+    /// The models it offered once and the provider no longer serves, each
+    /// with the offered model that takes its place.
+    fn retired(&self) -> Vec<RetiredClipModel> {
+        Vec::new()
+    }
+
     /// Hands the first frame to the provider.
     fn stage_image(&self, key: &ApiKey, image: &ClipImage) -> Result<StagedImage, ProviderFailure>;
 
@@ -398,6 +445,10 @@ impl<T: ClipGenerator + ?Sized> ClipGenerator for Arc<T> {
 
     fn models(&self) -> Vec<ClipModel> {
         (**self).models()
+    }
+
+    fn retired(&self) -> Vec<RetiredClipModel> {
+        (**self).retired()
     }
 
     fn stage_image(&self, key: &ApiKey, image: &ClipImage) -> Result<StagedImage, ProviderFailure> {
@@ -490,6 +541,45 @@ mod tests {
             seconds,
             stretch: STRETCH,
         }
+    }
+
+    #[test]
+    fn a_saved_model_names_itself_or_what_replaced_it() {
+        let model = |id: &str| ClipModelRef::new(Provider::Gemini, id).unwrap();
+        let offer = |id: &str| ClipModel {
+            id: model(id),
+            name: id.to_uppercase(),
+            durations: ClipDurations::Range { min: 3, max: 15 },
+        };
+        let retire = |id: &str, replacement: &str| RetiredClipModel {
+            id: model(id),
+            name: id.to_uppercase(),
+            replacement: model(replacement),
+        };
+        let models = [offer("new/720p"), offer("back/720p")];
+        let retired = [
+            retire("old/720p", "new/720p"),
+            // Its replacement is not offered (any more).
+            retire("older/720p", "old/720p"),
+            // Offered again: the offer wins.
+            retire("back/720p", "new/720p"),
+        ];
+        let current = |id: &str| current_clip_model(&models, &retired, &model(id));
+
+        let kept = current("new/720p").unwrap();
+        assert_eq!((kept.model, kept.replaces), (&models[0], None));
+        let replaced = current("old/720p").unwrap();
+        assert_eq!(
+            (replaced.model, replaced.replaces),
+            (&models[0], Some(&retired[0]))
+        );
+        let back = current("back/720p").unwrap();
+        assert_eq!((back.model, back.replaces), (&models[1], None));
+        assert_eq!(current("older/720p"), None);
+        assert_eq!(current("unknown/720p"), None);
+        // Another provider's model of the same name is another model.
+        let elsewhere = ClipModelRef::new(Provider::Kling, "old/720p").unwrap();
+        assert_eq!(current_clip_model(&models, &retired, &elsewhere), None);
     }
 
     #[test]

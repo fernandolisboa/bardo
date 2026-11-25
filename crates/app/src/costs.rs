@@ -1193,30 +1193,31 @@ pub(crate) mod tests {
     fn the_built_in_rates_price_google_clips_by_model_and_resolution() {
         let per_second = |model: &str| price(Provider::Gemini, model, Meter::VideoSeconds);
         let dollars = |text| Some(Money::parse(text).unwrap());
+        // $12.00 per million output tokens: 5,792 a second at 720p and
+        // 8,688 a second at 1080p.
         for (model, expected) in [
-            ("veo-3.1-generate-preview/720p", "0.40"),
-            ("veo-3.1-generate-preview/1080p", "0.40"),
-            ("veo-3.1-fast-generate-preview/720p", "0.10"),
-            ("veo-3.1-fast-generate-preview/1080p", "0.12"),
-            ("veo-3.1-lite-generate-preview/720p", "0.05"),
-            ("veo-3.1-lite-generate-preview/1080p", "0.08"),
-            ("gemini-omni-1.1-flash/720p", "0.10136"),
+            ("gemini-omni-1.2-flash/720p", "0.069504"),
+            ("gemini-omni-1.2-flash/1080p", "0.104256"),
         ] {
             assert_eq!(per_second(model), dollars(expected), "{model}");
         }
-        assert_eq!(
-            per_second("gemini-omni-1.1-flash/1080p"),
-            None,
-            "no published price"
+        let ten_seconds = RateTable::new(default_rates().to_vec()).price(
+            Provider::Gemini,
+            bardo_ai::google_clips::DEFAULT_MODEL,
+            &Metered::video_seconds(10),
         );
+        assert_eq!(ten_seconds, dollars("0.69504"), "Google says about $0.70");
+        // Veo is shut down: nothing calls it. An Omni 1.1 clip already
+        // being made when Bardo moved to 1.2 is billed at 1.1's price.
+        for gone in bardo_ai::google_clips::retired() {
+            let expected = match gone.id.model() {
+                "gemini-omni-1.1-flash/720p" => dollars("0.10136"),
+                _ => None,
+            };
+            assert_eq!(per_second(gone.id.model()), expected, "{}", gone.id);
+        }
         for model in bardo_ai::google_clips::models() {
-            let priced = per_second(model.id.model()).is_some();
-            assert_eq!(
-                priced,
-                !model.id.model().ends_with("flash/1080p"),
-                "{}",
-                model.id
-            );
+            assert!(per_second(model.id.model()).is_some(), "{}", model.id);
         }
     }
 
@@ -1679,7 +1680,11 @@ pub(crate) mod tests {
             *h.speech.failure.lock().unwrap() = Some(lost());
 
             let id = app
-                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .generate_narration(
+                    project.id,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Confirmed,
+                )
                 .unwrap();
             let job = wait_done(&app, id);
 
@@ -1731,7 +1736,11 @@ pub(crate) mod tests {
             });
 
             let id = app
-                .generate_narration(project.id, BudgetConsent::Confirmed)
+                .generate_narration(
+                    project.id,
+                    crate::PicturesConsent::Ask,
+                    BudgetConsent::Confirmed,
+                )
                 .unwrap();
             wait_done(&app, id);
 

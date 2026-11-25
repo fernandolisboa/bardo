@@ -15,7 +15,8 @@ pub enum Provider {
     Claude,
     /// Narration and the user's voices.
     ElevenLabs,
-    /// Google's Gemini API: images (Nano Banana) and video (Veo).
+    /// Google's Gemini API: images (Nano Banana) and video (Gemini Omni
+    /// Flash).
     Gemini,
     /// Video clips through the models Higgsfield aggregates, paid from
     /// the API's dollar balance.

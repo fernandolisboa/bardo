@@ -602,6 +602,14 @@ pub enum Text {
     NarrationVoiceFlagged(VoiceFlag),
     NarrationMissingKey,
     NarrationBusy,
+    NarrationScenesBusy,
+    NarrationOutdatesPictures,
+    /// Placeholders: `{images}`, `{clips}`.
+    NarrationOutdatesFit,
+    /// Placeholders: `{images}`, `{clips}`.
+    NarrationOutdatesReplan,
+    NarrationOutdatesConfirm,
+    NarrationOutdatesCancel,
     NarrationMissing,
     NarrationAudioMissing,
     NarrationCannotPlay,
@@ -864,7 +872,20 @@ pub enum Text {
     ScenesDrawing,
     ScenesStopped,
     ScenesStale,
+    /// `ScenesStale` when the scenes can be fitted to the narration.
+    ScenesStaleFit,
     ScenesStaleTag,
+    FitScenes,
+    FitScenesTitle,
+    FitScenesHint,
+    /// On a button that pays for an image or a clip, while the scenes are
+    /// out of date.
+    ScenesPaidHeld,
+    /// `ScenesPaidHeld` when the scenes cannot be fitted: only planning
+    /// again brings them back.
+    ScenesPaidHeldReplan,
+    /// `ScenesPaidHeld` on a version whose scenes wait to be placed.
+    ScenesPaidHeldVersion,
     /// Placeholder: `{n}`.
     ScenesCount,
     /// Placeholder: `{n}`.
@@ -896,6 +917,10 @@ pub enum Text {
     /// Placeholder: `{model}`.
     SceneClipModelChannel,
     SceneClipModelGone,
+    /// Placeholders: `{old}`, `{new}`.
+    SceneClipModelReplaced,
+    /// Placeholders: `{old}`, `{new}`.
+    ClipsChannelModelReplaced,
     /// Placeholders: `{seconds}`, `{price}`.
     SceneClipPlan,
     /// Placeholder: `{seconds}`.
@@ -926,6 +951,9 @@ pub enum Text {
     ScenesNothingToAnimate,
     SceneClipModelNotOffered,
     ScenesBusy,
+    ScenesNarrationBusy,
+    ScenesPlanOutOfDate,
+    ScenesOtherText,
     ScenesWouldDiscardImages,
     ScenesNothingToGenerate,
     SceneNothingToReview,
@@ -2071,6 +2099,11 @@ pub enum Text {
     /// A performed take that never reached its provider, retried from the
     /// jobs panel.
     JobTakeFromItsPage,
+    /// A scene job retried while a narration of its project is being made.
+    JobNarrationBusy,
+    /// A narration job retried while scenes of its project are being made.
+    JobScenesBusy,
+    JobAsksFirst,
     SettingsPublishingTab,
     AgentTitle,
     AgentQuestion,
@@ -3271,6 +3304,12 @@ impl Text {
             },
             Text::NarrationMissingKey => "narration.error.missing_key",
             Text::NarrationBusy => "narration.error.busy",
+            Text::NarrationScenesBusy => "narration.error.scenes_busy",
+            Text::NarrationOutdatesPictures => "narration.error.outdates_pictures",
+            Text::NarrationOutdatesFit => "narration.outdates.fit",
+            Text::NarrationOutdatesReplan => "narration.outdates.replan",
+            Text::NarrationOutdatesConfirm => "narration.outdates.confirm",
+            Text::NarrationOutdatesCancel => "narration.outdates.cancel",
             Text::NarrationMissing => "narration.error.missing",
             Text::NarrationAudioMissing => "narration.error.audio_missing",
             Text::NarrationCannotPlay => "narration.error.cannot_play",
@@ -3532,7 +3571,14 @@ impl Text {
             Text::ScenesDrawing => "scenes.drawing",
             Text::ScenesStopped => "scenes.stopped",
             Text::ScenesStale => "scenes.stale",
+            Text::ScenesStaleFit => "scenes.stale_fit",
             Text::ScenesStaleTag => "scenes.stale_tag",
+            Text::FitScenes => "scenes.fit",
+            Text::FitScenesTitle => "scenes.fit_title",
+            Text::FitScenesHint => "scenes.fit_hint",
+            Text::ScenesPaidHeld => "scenes.paid_held",
+            Text::ScenesPaidHeldReplan => "scenes.paid_held_replan",
+            Text::ScenesPaidHeldVersion => "scenes.paid_held_version",
             Text::ScenesCount => "scenes.count",
             Text::GenerateSceneImages => "scenes.generate_images",
             Text::SceneImagesHint => "scenes.images_hint",
@@ -3558,6 +3604,8 @@ impl Text {
             Text::SceneClipModel => "scenes.clip.model",
             Text::SceneClipModelChannel => "scenes.clip.model_channel",
             Text::SceneClipModelGone => "scenes.clip.model_gone",
+            Text::SceneClipModelReplaced => "scenes.clip.model_replaced",
+            Text::ClipsChannelModelReplaced => "scenes.clip.channel_model_replaced",
             Text::SceneClipPlan => "scenes.clip.plan",
             Text::SceneClipPlanUnpriced => "scenes.clip.plan_unpriced",
             Text::SceneMotionPrompt => "scenes.clip.motion_prompt",
@@ -3585,6 +3633,9 @@ impl Text {
             Text::ScenesNothingToAnimate => "scenes.error.nothing_to_animate",
             Text::SceneClipModelNotOffered => "scenes.error.clip_model_not_offered",
             Text::ScenesBusy => "scenes.error.busy",
+            Text::ScenesNarrationBusy => "scenes.error.narration_busy",
+            Text::ScenesPlanOutOfDate => "scenes.error.plan_out_of_date",
+            Text::ScenesOtherText => "scenes.error.other_text",
             Text::ScenesWouldDiscardImages => "scenes.error.would_discard_images",
             Text::ScenesNothingToGenerate => "scenes.error.nothing_to_generate",
             Text::SceneNothingToReview => "scenes.error.nothing_to_review",
@@ -4701,6 +4752,9 @@ impl Text {
             Text::JobSuperseded => "job.error.superseded",
             Text::JobRestyled => "job.error.restyled",
             Text::JobTakeFromItsPage => "job.error.take_from_page",
+            Text::JobNarrationBusy => "job.error.narration_busy",
+            Text::JobScenesBusy => "job.error.scenes_busy",
+            Text::JobAsksFirst => "job.error.asks_first",
             Text::SettingsPublishingTab => "settings.publishing_tab",
             Text::AgentTitle => "agent.title",
             Text::AgentQuestion => "agent.question",
@@ -5716,6 +5770,12 @@ mod tests {
             Text::NarrationNoPersona,
             Text::NarrationMissingKey,
             Text::NarrationBusy,
+            Text::NarrationScenesBusy,
+            Text::NarrationOutdatesPictures,
+            Text::NarrationOutdatesFit,
+            Text::NarrationOutdatesReplan,
+            Text::NarrationOutdatesConfirm,
+            Text::NarrationOutdatesCancel,
             Text::NarrationMissing,
             Text::NarrationAudioMissing,
             Text::NarrationCannotPlay,
@@ -5898,7 +5958,14 @@ mod tests {
             Text::ScenesDrawing,
             Text::ScenesStopped,
             Text::ScenesStale,
+            Text::ScenesStaleFit,
             Text::ScenesStaleTag,
+            Text::FitScenes,
+            Text::FitScenesTitle,
+            Text::FitScenesHint,
+            Text::ScenesPaidHeld,
+            Text::ScenesPaidHeldReplan,
+            Text::ScenesPaidHeldVersion,
             Text::ScenesCount,
             Text::GenerateSceneImages,
             Text::SceneImagesHint,
@@ -5924,6 +5991,8 @@ mod tests {
             Text::SceneClipModel,
             Text::SceneClipModelChannel,
             Text::SceneClipModelGone,
+            Text::SceneClipModelReplaced,
+            Text::ClipsChannelModelReplaced,
             Text::SceneClipPlan,
             Text::SceneClipPlanUnpriced,
             Text::SceneMotionPrompt,
@@ -5950,6 +6019,9 @@ mod tests {
             Text::ScenesNothingToAnimate,
             Text::SceneClipModelNotOffered,
             Text::ScenesBusy,
+            Text::ScenesNarrationBusy,
+            Text::ScenesPlanOutOfDate,
+            Text::ScenesOtherText,
             Text::ScenesWouldDiscardImages,
             Text::ScenesNothingToGenerate,
             Text::SceneNothingToReview,
@@ -7287,6 +7359,9 @@ mod tests {
             Text::JobSuperseded,
             Text::JobRestyled,
             Text::JobTakeFromItsPage,
+            Text::JobNarrationBusy,
+            Text::JobScenesBusy,
+            Text::JobAsksFirst,
             Text::SettingsPublishingTab,
             Text::AgentTitle,
             Text::AgentQuestion,
@@ -7683,6 +7758,14 @@ mod tests {
             for (text, args) in [
                 (Text::PlanScenesHint, &[("n", "3")][..]),
                 (Text::ReplanScenesConfirm, &[("n", "12")][..]),
+                (
+                    Text::NarrationOutdatesFit,
+                    &[("images", "12"), ("clips", "3")][..],
+                ),
+                (
+                    Text::NarrationOutdatesReplan,
+                    &[("images", "12"), ("clips", "3")][..],
+                ),
                 (Text::ScenesCount, &[("n", "24")][..]),
                 (Text::GenerateSceneImages, &[("n", "24")][..]),
                 (

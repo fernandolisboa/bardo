@@ -1061,7 +1061,7 @@ mod tests {
         assert!(!app.chapters(project.id).unwrap().stale);
         done(
             &app,
-            app.generate_narration(project.id, BudgetConsent::Ask)
+            app.generate_narration(project.id, crate::PicturesConsent::Ask, BudgetConsent::Ask)
                 .unwrap(),
         );
         let view = app.chapters(project.id).unwrap();

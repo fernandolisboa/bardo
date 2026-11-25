@@ -4,6 +4,6 @@ content-type: application/json; charset=UTF-8
 {
   "id": "v1_ChdHb29nbGVPbW5pQmFyZG9UZXN0MDAx",
   "status": "queued",
-  "model": "gemini-omni-1.1-flash",
+  "model": "gemini-omni-1.2-flash",
   "object": "interaction"
 }

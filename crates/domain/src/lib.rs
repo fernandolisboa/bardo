@@ -151,8 +151,8 @@ pub use chapters::{
 };
 pub use clip::{
     ClipDurations, ClipFit, ClipGenerator, ClipHandle, ClipImage, ClipLength, ClipModel,
-    ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, GeneratedClip,
-    StagedImage, StretchLimit,
+    ClipModelError, ClipModelRef, ClipRequest, ClipStatus, ClipSubmission, CurrentClipModel,
+    GeneratedClip, RetiredClipModel, StagedImage, StretchLimit, current_clip_model,
 };
 pub use connection::{
     AppCredentials, AppCredentialsFieldError, BrowserSignIn, ConnectedIdentity, ConnectionSecrets,
@@ -317,10 +317,10 @@ pub use runner::{
 pub use scene::{
     CastDraft, CastMember, CastRecord, MAX_CAST, MAX_CAST_NAME_CHARS, MAX_PLACES,
     MAX_SENTENCE_WORDS, NoPendingClip, NoPendingImage, NoScenes, NoSuchCastMember, NoSuchPlace,
-    NoSuchScene, OtherShot, Place, PlaceDraft, PlaceRecord, PlanDraft, Scene, SceneClip,
-    SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId, ScenePlanRecord,
-    ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence, scene_image_prompt,
-    sentences,
+    NoSuchScene, OtherShot, OtherText, PaidPictures, Place, PlaceDraft, PlaceRecord, PlanDraft,
+    Scene, SceneClip, SceneDraft, SceneFieldError, SceneImage, ScenePlan, ScenePlanId,
+    ScenePlanRecord, ScenePlanRepository, ScenePrompt, SceneRecord, SceneSetting, Sentence,
+    scene_image_prompt, sentences,
 };
 pub use scene_plan_size::ScenePlanSize;
 pub use schedule::{

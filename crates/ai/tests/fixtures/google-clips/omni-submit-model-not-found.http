@@ -1,0 +1,9 @@
+HTTP/2 404
+content-type: application/json; charset=UTF-8
+
+{
+  "error": {
+    "code": "model_not_found",
+    "message": "The model gemini-omni-1.2-flash was not found."
+  }
+}

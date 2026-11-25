@@ -151,7 +151,9 @@ pub use media_import::{MediaImport, MediaImportError};
 pub use music_prompts::{MusicPromptError, MusicPromptView};
 pub use music_tracks::{GeneratedTrack, MusicTrackError, MusicTrackPlayer, MusicTracksView};
 pub use narration_import::{MAX_RECORDING_BYTES, Recording};
-pub use narrations::{NarrationError, NarrationPlayer, NarrationView};
+pub use narrations::{
+    NarrationError, NarrationPlayer, NarrationView, PicturesAtStake, PicturesConsent,
+};
 pub use navigation::{Destination, Pillar, SettingsTab};
 pub use network_accounts::NetworkAccountError;
 pub use performed_takes::{
@@ -889,6 +891,7 @@ impl Bardo {
         let clip_handler = ClipHandler {
             owner: profile.id,
             plans: Arc::clone(&scene_plans),
+            narrations: Arc::clone(&narrations),
             files: Arc::clone(&files),
             generators: providers.clips.clone(),
             secrets: Arc::clone(&secrets),

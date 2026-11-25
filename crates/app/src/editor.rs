@@ -3644,6 +3644,43 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn fitting_the_scenes_starts_the_cut_over_on_the_new_times() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = opened(&h, &app);
+        // The narration is made again, longer, and the cut is edited while
+        // the scenes still hold the old times.
+        crate::scenes::tests::narrate_again(&h, &app, &project, Duration::from_secs(4));
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        assert!(editor.view().stale);
+        app.edit(&mut editor, EditAction::SetAspect(AspectRatio::Vertical))
+            .unwrap();
+        let on_old_times = spans(&editor);
+        assert!(app.timelines.saved_timeline(project.id).unwrap().is_some());
+
+        // Fitting keeps the plan and the narration the cut was saved under,
+        // so that cut would come back as it is: it goes with the old times.
+        let fitted = app.fit_scenes(project.id).unwrap();
+        assert!(app.timelines.saved_timeline(project.id).unwrap().is_none());
+        let mut editor = app.open_editor(project.id).unwrap();
+        settle(&app, &mut editor);
+        assert!(!editor.view().stale);
+        let starts: Vec<Duration> = fitted.scenes().iter().map(|scene| scene.start).collect();
+        let cut: Vec<Duration> = spans(&editor).iter().map(|(at, _)| *at).collect();
+        // Each clip starts with its scene, on the frame nearest to it.
+        let frame = Duration::from_millis(34);
+        assert_eq!(cut.len(), starts.len());
+        assert!(
+            cut.iter()
+                .zip(&starts)
+                .all(|(clip, scene)| clip.abs_diff(*scene) < frame),
+            "{cut:?} {starts:?}"
+        );
+        assert_ne!(spans(&editor), on_old_times);
+    }
+
     const REACH: Duration = Duration::from_millis(150);
 
     /// The test narration says a word every few milliseconds, closer than a
