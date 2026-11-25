@@ -1,4 +1,4 @@
-//! Research on the web (docs/spec/marketing-videos.md, ADR-0035): a model
+//! Research on the web (docs/spec/marketing-videos.md, ADR-0037): a model
 //! reads a product's page and what is public about its market, and writes
 //! notes that name the pages it read. The interface hides the provider's
 //! protocol: the app runs no browser and no scraper, and what comes back

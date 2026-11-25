@@ -1,4 +1,4 @@
-# ADR-0035: Research on the web runs at the provider, behind a port, and what it writes waits for the user
+# ADR-0037: Research on the web runs at the provider, behind a port, and what it writes waits for the user
 
 - Status: Accepted
 - Date: 2026-11-25

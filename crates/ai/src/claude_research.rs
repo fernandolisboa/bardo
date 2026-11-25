@@ -1,5 +1,5 @@
 //! Research on the web with Claude's own web search and web fetch tools
-//! (ADR-0035).
+//! (ADR-0037).
 //!
 //! Anthropic runs the tools: the request names them with their limits and
 //! Claude searches, fetches and writes within one answer. Bardo opens no

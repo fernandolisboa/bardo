@@ -1,4 +1,4 @@
-//! Product sheets (#274, docs/spec/marketing-videos.md, ADR-0035): what
+//! Product sheets (#274, docs/spec/marketing-videos.md, ADR-0037): what
 //! Bardo knows about a product beyond its brief, for the user to review.
 //!
 //! A sheet is filled in one of three ways:

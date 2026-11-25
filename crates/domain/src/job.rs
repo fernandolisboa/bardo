@@ -436,10 +436,15 @@ pub enum JobFailureKind {
     /// more is paid for them until they are fitted to the narration or
     /// planned again.
     OutOfDate,
+    /// A scene's image was not drawn because a person it shows has no
+    /// portrait to draw them from (#269): the portrait failed or its file
+    /// will not read. The user draws the portrait, or chooses to draw that
+    /// person from the description alone, then draws the scene.
+    PortraitMissing,
 }
 
 impl JobFailureKind {
-    pub const ALL: [JobFailureKind; 20] = [
+    pub const ALL: [JobFailureKind; 21] = [
         JobFailureKind::Simulated,
         JobFailureKind::Unexpected,
         JobFailureKind::MissingKey,
@@ -460,6 +465,7 @@ impl JobFailureKind {
         JobFailureKind::OffScript,
         JobFailureKind::VisionModels,
         JobFailureKind::OutOfDate,
+        JobFailureKind::PortraitMissing,
     ];
 
     /// Stable name stored in the database.
@@ -485,6 +491,7 @@ impl JobFailureKind {
             JobFailureKind::OffScript => "off_script",
             JobFailureKind::VisionModels => "vision_models",
             JobFailureKind::OutOfDate => "out_of_date",
+            JobFailureKind::PortraitMissing => "portrait_missing",
         }
     }
 
@@ -510,6 +517,7 @@ impl JobFailureKind {
             | JobFailureKind::OffScript
             | JobFailureKind::VisionModels
             | JobFailureKind::OutOfDate => false,
+            JobFailureKind::PortraitMissing => false,
         }
     }
 }

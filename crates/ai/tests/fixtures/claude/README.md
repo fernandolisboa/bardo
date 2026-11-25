@@ -43,7 +43,7 @@ Lost and failed answers (ADR-0030):
 - `messages-no-text.http`: synthetic, a finished answer with an empty
   thinking block and no text, with its usage.
 
-Research on the web (`ClaudeWebResearcher`, ADR-0035), written from the
+Research on the web (`ClaudeWebResearcher`, ADR-0037), written from the
 documented shapes of the web search and web fetch tools as of November
 2026: a `server_tool_use` block whose input streams as `input_json_delta`,
 a result block that arrives whole in its `content_block_start`, citations
