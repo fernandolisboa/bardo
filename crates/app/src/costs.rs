@@ -169,7 +169,7 @@ pub(crate) struct PlannedCall {
     /// Seconds of audio, when known before the job.
     pub(crate) audio_seconds: Option<u64>,
     /// Output tokens, when known before the job (a take model billed by
-    /// its video's tokens).
+    /// its video's tokens, a scene plan sized from its narration).
     pub(crate) output_tokens: Option<u64>,
 }
 
@@ -389,9 +389,21 @@ impl CostBook {
         channel: Option<ChannelId>,
         project: Option<VideoProjectId>,
     ) {
+        self.record_as(CostRecordId::new(), call, channel, project);
+    }
+
+    /// `record` under an id the caller keeps: recording it again (after a
+    /// crash between the call and the caller's own save) changes nothing.
+    fn record_as(
+        &self,
+        id: CostRecordId,
+        call: PaidCall<'_>,
+        channel: Option<ChannelId>,
+        project: Option<VideoProjectId>,
+    ) {
         let result = self.rates().and_then(|rates| {
             self.costs.record_cost(&CostRecord {
-                id: CostRecordId::new(),
+                id,
                 owner: self.owner,
                 provider: call.provider,
                 model: call.model.to_owned(),
@@ -422,6 +434,27 @@ impl CostBook {
     /// `record` for a call made for a video project, under its channel.
     pub(crate) fn record_for_project(&self, call: PaidCall<'_>, project: VideoProjectId) {
         self.record(call, self.channel_of(project), Some(project));
+    }
+
+    /// Records, under `id`, a request a provider accepted and bills when
+    /// it is made: work in flight counts from now on. Recording the same
+    /// id again changes nothing, and `take_back` removes it when the
+    /// provider fails the request without billing.
+    pub(crate) fn record_request(
+        &self,
+        id: CostRecordId,
+        call: PaidCall<'_>,
+        project: VideoProjectId,
+    ) {
+        self.record_as(id, call, self.channel_of(project), Some(project));
+    }
+
+    /// Takes back the record of a request its provider failed without
+    /// billing. Logged when it cannot be: the job goes on.
+    pub(crate) fn take_back(&self, id: CostRecordId) {
+        if let Err(error) = self.costs.remove_cost(id) {
+            tracing::warn!("could not take back the cost record {id}: {error}");
+        }
     }
 
     fn channel_of(&self, project: VideoProjectId) -> Option<ChannelId> {
@@ -1142,15 +1175,17 @@ pub(crate) mod tests {
             assert_eq!(record.model, bardo_ai::claude::MODEL);
             assert_eq!(record.job, Some(id));
             assert_eq!(record.channel, Some(project.channel));
-            // The prompt is known; the answer is the first guess of a plan.
+            // The prompt is known; the answer is what a plan of this
+            // narration usually takes, thought included.
             let request = asked.last().unwrap();
             let chars = request.instructions.chars().count() + request.prompt.chars().count();
+            let narration = app.narrations.narration(project.id).unwrap().unwrap();
             assert_eq!(
                 record.usage,
                 Metered {
                     input_tokens: (chars as u64).div_ceil(4),
-                    output_tokens: first_guess(CostPurpose::ScenePlan, Provider::Claude)
-                        .output_tokens,
+                    output_tokens: bardo_domain::ScenePlanSize::of(&narration)
+                        .output_tokens_usually(),
                     ..Metered::default()
                 }
             );

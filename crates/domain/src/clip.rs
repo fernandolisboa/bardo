@@ -219,9 +219,13 @@ pub enum ClipStatus {
     Running,
     /// Ready to download from `video`.
     Done { video: String },
-    /// It ended without a clip: failed, declined by moderation or
-    /// cancelled at the provider. Providers do not charge for these.
+    /// It ended without a clip, and the provider said so: failed, declined
+    /// by moderation or cancelled there. Providers do not charge for these.
     Failed(ProviderFailure),
+    /// No clip can be had from it, and the provider did not say it made
+    /// none: it no longer knows the request (results are kept for a while
+    /// only), or it stopped part-way. It may have been charged.
+    Lost(ProviderFailure),
 }
 
 /// A downloaded clip, an MP4 file.

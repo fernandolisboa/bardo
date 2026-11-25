@@ -339,12 +339,13 @@ fn a_clip_google_serves_as_a_file_is_followed_to_its_address() {
 }
 
 #[test]
-fn a_veo_operation_left_from_before_the_shutdown_ends_without_a_call() {
+fn a_veo_operation_left_from_before_the_shutdown_is_lost_without_a_call() {
     let adapter = clips(&[]);
     let status = adapter
         .status(&key(), &ClipHandle(OPERATION.into()))
         .unwrap();
-    let ClipStatus::Failed(failure) = status else {
+    // Google can no longer say whether it made, and charged, the clip.
+    let ClipStatus::Lost(failure) = status else {
         panic!("{status:?}");
     };
     assert_eq!(failure.kind, ProviderFailureKind::Unexpected);
@@ -381,6 +382,12 @@ fn work_that_ends_without_a_clip_is_a_failure_of_its_kind() {
             "cancelled",
         ),
         (
+            "omni-requires-continuation",
+            INTERACTION,
+            ProviderFailureKind::Unexpected,
+            "stopped before the clip was done",
+        ),
+        (
             "not-found",
             INTERACTION,
             ProviderFailureKind::Unexpected,
@@ -391,9 +398,20 @@ fn work_that_ends_without_a_clip_is_a_failure_of_its_kind() {
         let status = clips(&[name])
             .status(&key(), &ClipHandle(handle.into()))
             .unwrap();
-        let ClipStatus::Failed(failure) = status else {
-            panic!("{name}: {status:?}");
+        let (failure, lost) = match status {
+            ClipStatus::Failed(failure) => (failure, false),
+            ClipStatus::Lost(failure) => (failure, true),
+            other => panic!("{name}: {other:?}"),
         };
+        // Only work the provider cannot account for may have been charged.
+        assert_eq!(
+            lost,
+            matches!(
+                name,
+                "omni-cancelled" | "omni-requires-continuation" | "not-found"
+            ),
+            "{name}"
+        );
         assert_eq!(failure.kind, kind, "{name}");
         assert!(
             failure.detail.contains(detail),

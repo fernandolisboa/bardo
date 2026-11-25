@@ -25,7 +25,8 @@ key:
   clip: 5,792 video tokens a second), `omni-completed-uri.http` (the clip
   as a Files API address), `omni-completed-text.http` (a refusal as text, no
   clip), `omni-failed.http`, `omni-failed-blocked.http` (a documented
-  "generation blocked" code), `omni-cancelled.http`.
+  "generation blocked" code), `omni-cancelled.http`,
+  `omni-requires-continuation.http` (stopped part-way, with no clip).
 - Refusals, as the API errors page gives them (`error.code` in snake case
   and `error.message`; the messages are examples):
   `omni-submit-rate-limited.http` (429), `omni-submit-overloaded.http` (503),

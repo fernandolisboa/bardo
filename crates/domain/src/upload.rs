@@ -593,10 +593,18 @@ pub enum UploadErrorKind {
     RateLimited,
     /// The network refused what was sent (a title it does not take).
     Invalid,
+    /// The network refused the post as one the account already has (X's
+    /// duplicate content).
+    Duplicate,
     /// The network failed on its side (500, 502, 503, 504).
     NetworkDown,
-    /// No answer: offline, DNS, TLS, proxy or timeout.
+    /// The request never left, or it is one the network takes again
+    /// without harm: offline, DNS, TLS, proxy or timeout.
     Unreachable,
+    /// A request that cannot be made twice (X's post) was sent and no
+    /// answer came, or one that does not say what happened: the network
+    /// may have done it. Not sent again by itself (ADR-0030).
+    AnswerLost,
     /// An answer the adapter does not understand.
     Unexpected,
     /// The file could not be read, or the run could not save its state.
@@ -763,6 +771,24 @@ pub trait VideoUploader: Send + Sync {
             UploadErrorKind::NotAllowed,
             "the network publishes uploads by itself",
         ))
+    }
+
+    /// The post an earlier `publish` of the upload `id` made on `account`
+    /// at `since` or later, when its answer never came. `Ok(None)` only
+    /// when the network shows none: an answer that does not say is an
+    /// error, since the caller publishes again on `None`. The default is
+    /// for networks whose `state` tells a published upload (Instagram's
+    /// container); one that bills its posts and cannot tell that way (X)
+    /// must look for the post here.
+    fn find_post(
+        &self,
+        access_token: &SecretText,
+        account: &str,
+        id: &str,
+        since: SystemTime,
+    ) -> Result<Option<NetworkPost>, UploadError> {
+        let _ = (access_token, account, id, since);
+        Ok(None)
     }
 
     /// Sets the custom thumbnail of the uploaded video `id` to `image`, a
@@ -1208,6 +1234,8 @@ mod tests {
             UploadErrorKind::NetworkDown,
             UploadErrorKind::Unreachable,
             UploadErrorKind::Unexpected,
+            UploadErrorKind::AnswerLost,
+            UploadErrorKind::Duplicate,
             UploadErrorKind::Local,
             UploadErrorKind::Late,
             UploadErrorKind::ScheduleRefused,
@@ -1225,7 +1253,7 @@ mod tests {
                 UploadErrorKind::NetworkDown,
                 UploadErrorKind::Unreachable
             ],
-            "a spent quota is not retried in a loop"
+            "a spent quota is not retried in a loop, nor a post that may be live"
         );
     }
 }

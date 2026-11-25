@@ -56,7 +56,7 @@ The style applies to what is drawn next: the next scene plan, scene images, cast
 
 A mode whose clips need a key you have not saved says so in the menu: Kling's modes need a Kling key under [Settings › API keys](bardo:go/settings/keys). Changing the mode applies to what is animated next: on the Clips stage, **Animate scenes without a clip** (or **Animate the hook**) animates only the scenes the mode animates, clips made already stay, and any scene can still be animated by hand with any model.
 
-**Cap** is what this video may cost before Bardo asks. A paid step of the video (a script, a narration, images, clips, takes) that would take its spend past the cap asks first, with what the step costs and what the rest of the video would cost in its mode; **Generate anyway** goes on. A step whose price is not known asks too. A job still running counts toward the cap once it has finished, so starting several at once can pass it. Leave it empty for no cap.
+**Cap** is what this video may cost before Bardo asks. A paid step of the video (a script, a narration, images, clips, takes) that would take its spend past the cap asks first, with what the step costs and what the rest of the video would cost in its mode; **Generate anyway** goes on. A step whose price is not known asks too. A clip counts toward the cap as soon as its provider accepts it; anything else a running job makes counts once the job has finished, so starting several jobs at once can pass it. Leave it empty for no cap.
 
 <a id="stages"></a>
 ## The stages

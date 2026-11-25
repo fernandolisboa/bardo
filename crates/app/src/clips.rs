@@ -14,18 +14,29 @@
 //! clip from it. A new clip waits beside the current one until the user
 //! accepts it, like a new image.
 //!
+//! A clip is billed when its provider makes it, not when Bardo fetches it,
+//! so its cost is recorded when the provider accepts the request: a clip
+//! still being made counts against the video's cap and the budgets, and so
+//! does one of a run that was cancelled or whose plan was replaced. A
+//! request the provider then fails is not billed, and its record is taken
+//! back. One the provider no longer knows, or that stopped without the
+//! provider saying it made nothing, may have been billed: its record stays.
+//!
 //! Cancelling a run stops the waiting, not the provider: a request already
 //! submitted may still finish and be billed. Retrying the cancelled job
-//! picks it up.
+//! picks it up. A finished clip that cannot be downloaded keeps its
+//! request, too: retrying fetches it again and never submits the scene
+//! again on its own.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bardo_domain::{
     ApiKey, ChannelId, ClipGenerator, ClipHandle, ClipImage, ClipModel, ClipModelRef, ClipRequest,
-    ClipStatus, ClipSubmission, CostPurpose, Generation, GenerationId, ImageFormat, Job,
-    JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId,
+    ClipStatus, ClipSubmission, CostPurpose, CostRecordId, Generation, GenerationId, ImageFormat,
+    Job, JobFailure, JobFailureKind, JobId, JobKind, Metered, Money, ProductionMode, ProfileId,
     Progress, ProjectFiles, Provider, ProviderFailure, ProviderFailureKind, RepositoryError, Scene,
     SceneClip, ScenePlan, ScenePlanId, ScenePlanRepository, ScenePrompt, SecretStore, StagedImage,
     TokenUsage, VideoProject, VideoProjectId,
@@ -156,6 +167,11 @@ struct ClipRun {
     /// crash the job looks for the clip instead of paying twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sent_at: Option<u64>,
+    /// The cost record of the request, written when the provider accepted
+    /// it. Saved with the request id before recording, so recording again
+    /// after a crash counts the clip once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cost: Option<String>,
 }
 
 impl ClipRun {
@@ -166,6 +182,7 @@ impl ClipRun {
         self.request = None;
         self.quote_micros = None;
         self.sent_at = None;
+        self.cost = None;
     }
 }
 
@@ -291,6 +308,7 @@ impl ClipHandler {
 impl ClipJob<'_> {
     fn run(&mut self, orders: &[ClipOrder], cx: &mut JobContext) -> Result<(), JobFailure> {
         let total = orders.len() as u64;
+        self.record_accepted(orders, cx)?;
         let mut failed: Vec<(usize, JobFailure)> = Vec::new();
         let mut polls = 0;
         let mut hiccups = 0;
@@ -472,10 +490,25 @@ impl ClipJob<'_> {
                     Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                         Ok(Step::Hiccup(self.failure(order, failure)))
                     }
-                    Err(failure) => self.scene_failed(order, failure, cx),
+                    Err(failure) => self.not_fetched(order, failure),
                 }
             }
-            Ok(ClipStatus::Failed(failure)) => self.scene_failed(order, failure, cx),
+            Ok(ClipStatus::Failed(failure)) => {
+                // The provider says it made nothing: not billed.
+                self.take_back(order.scene);
+                self.scene_failed(order, failure, cx)
+            }
+            Ok(ClipStatus::Lost(failure)) => {
+                // No clip, and no word that none was made: its cost stays.
+                let failure = ProviderFailure::new(
+                    failure.kind,
+                    format!(
+                        "{} (it may have been charged, so its cost stays in Costs)",
+                        failure.detail
+                    ),
+                );
+                self.scene_failed(order, failure, cx)
+            }
             Err(failure) if JobFailureKind::from(failure.kind).is_transient() => {
                 Ok(Step::Hiccup(self.failure(order, failure)))
             }
@@ -657,7 +690,9 @@ impl ClipJob<'_> {
         }
     }
 
-    /// Keeps the provider's handle: from now on the job asks how it goes.
+    /// Keeps the provider's handle and records the clip's cost: from now
+    /// on the provider makes it, and bills it, whatever this job does, and
+    /// the job asks how it goes.
     fn submitted(
         &mut self,
         order: &ClipOrder,
@@ -668,8 +703,77 @@ impl ClipJob<'_> {
         run.request = Some(submitted.handle.0);
         run.quote_micros = submitted.quote.map(Money::micros);
         run.sent_at = None;
+        run.cost = Some(CostRecordId::new().to_string());
         self.save_state(cx)?;
+        self.record(order)?;
         Ok(Step::Waiting)
+    }
+
+    /// Records the cost of every request the provider accepted, each
+    /// under its own record id, which makes recording again harmless. On
+    /// resuming, that covers a run cut right after its request was saved,
+    /// and a request from before costs were recorded on acceptance: one
+    /// still being made then. A clip this job saved back then has its
+    /// record already, written when it was saved.
+    fn record_accepted(
+        &mut self,
+        orders: &[ClipOrder],
+        cx: &mut JobContext,
+    ) -> Result<(), JobFailure> {
+        let plan = self.saved_plan()?;
+        let job = self.job;
+        // Without the plan (a new one replaced it) there is no telling, and
+        // such a request stays as that version left it.
+        let saved_before = |scene: usize| {
+            plan.as_ref()
+                .is_none_or(|plan| plan.scene(scene).is_ok_and(|scene| animated_by(scene, job)))
+        };
+        let mut unnumbered = false;
+        for run in &mut self.state.scenes {
+            if run.request.is_some() && run.cost.is_none() && !saved_before(run.scene) {
+                run.cost = Some(CostRecordId::new().to_string());
+                unnumbered = true;
+            }
+        }
+        if unnumbered {
+            self.save_state(cx)?;
+        }
+        for order in orders {
+            self.record(order)?;
+        }
+        Ok(())
+    }
+
+    /// Writes the cost record of the scene's accepted request, if it has
+    /// one: what the provider quoted, else the rate table's price.
+    fn record(&mut self, order: &ClipOrder) -> Result<(), JobFailure> {
+        let Some(run) = self.run_of(order.scene).map(|run| run.clone()) else {
+            return Ok(());
+        };
+        let (Some(_), Some(cost)) = (&run.request, &run.cost) else {
+            return Ok(());
+        };
+        self.handler.costs.record_request(
+            id(cost)?,
+            PaidCall {
+                provider: order.provider.parse().map_err(unexpected)?,
+                model: &order.model,
+                purpose: CostPurpose::SceneClip,
+                usage: Metered::video_seconds(u64::from(run.seconds)),
+                job: Some(self.job),
+                reported: run.quote_micros.map(Money::from_micros),
+            },
+            self.project,
+        );
+        Ok(())
+    }
+
+    /// Takes back the cost record of the scene's request.
+    fn take_back(&mut self, scene: usize) {
+        let cost = self.run_of(scene).and_then(|run| run.cost.clone());
+        if let Some(Ok(record)) = cost.as_deref().map(id::<CostRecordId>) {
+            self.handler.costs.take_back(record);
+        }
     }
 
     /// Reads the scene as it is now (image, motion prompt, length) and
@@ -737,6 +841,7 @@ impl ClipJob<'_> {
                 request: None,
                 quote_micros: None,
                 sent_at: None,
+                cost: None,
             }),
         }
         self.save_state(cx)?;
@@ -782,6 +887,36 @@ impl ClipJob<'_> {
             run.restart();
             self.save_state(cx)?;
         }
+        self.show_failed(order, &failure)?;
+        Ok(Step::Failed(failure))
+    }
+
+    /// The clip was made, and billed, but could not be downloaded for good
+    /// (its link expired, or what came is not a video). The scene shows
+    /// the failure and keeps its request: the next attempt asks the
+    /// provider for the clip again, which may give a fresh link, and never
+    /// submits the scene again on its own. A new clip is the user's to ask
+    /// for, with Animate.
+    fn not_fetched(
+        &mut self,
+        order: &ClipOrder,
+        failure: ProviderFailure,
+    ) -> Result<Step, JobFailure> {
+        let failure = JobFailure::new(
+            failure.kind.into(),
+            format!(
+                "Scene {}: the clip was made but could not be downloaded ({}); retry to fetch \
+                 it again, since animating the scene anew pays for another clip",
+                order.scene + 1,
+                failure.detail
+            ),
+        );
+        self.show_failed(order, &failure)?;
+        Ok(Step::Failed(failure))
+    }
+
+    /// Shows on the scene that its clip failed.
+    fn show_failed(&self, order: &ClipOrder, failure: &JobFailure) -> Result<(), JobFailure> {
         if let Some(mut plan) = self.saved_plan()? {
             plan.scene_mut(order.scene, SystemTime::now())
                 .map_err(unexpected)?
@@ -791,28 +926,17 @@ impl ClipJob<'_> {
                 .save_scene(&plan, order.scene)
                 .map_err(unexpected)?;
         }
-        Ok(Step::Failed(failure))
+        Ok(())
     }
 
-    /// Records the clip's cost and saves it beside the scene's current
-    /// clip, for the user to review.
+    /// Saves the clip beside the scene's current clip, for the user to
+    /// review. Its cost was recorded when the provider accepted it.
     fn save_clip(&mut self, order: &ClipOrder, bytes: &[u8]) -> Result<(), JobFailure> {
         let provider: Provider = order.provider.parse().map_err(unexpected)?;
         let run = self
             .run_of(order.scene)
             .expect("a submitted scene has its run")
             .clone();
-        self.handler.costs.record_for_project(
-            PaidCall {
-                provider,
-                model: &order.model,
-                purpose: CostPurpose::SceneClip,
-                usage: Metered::video_seconds(u64::from(run.seconds)),
-                job: Some(self.job),
-                reported: run.quote_micros.map(Money::from_micros),
-            },
-            self.project,
-        );
         let Some(mut plan) = self.saved_plan()? else {
             return Ok(());
         };
@@ -852,7 +976,8 @@ impl ClipJob<'_> {
         if let Some(pushed) = pushed {
             crate::proxies::remove_media(self.handler.files.as_ref(), self.project, &pushed.file);
         }
-        Ok(())
+        // Once more, in case storage refused the record at acceptance.
+        self.record(order)
     }
 }
 
@@ -1052,6 +1177,22 @@ impl Bardo {
             missing,
             missing_estimate,
         })
+    }
+
+    /// The scenes of `plan` whose clip a provider is making now: accepted,
+    /// in a job still under way. Their cost is in Costs already, so what
+    /// is left to pay for the video does not count them again.
+    pub(crate) fn clips_being_made(&self, plan: &ScenePlan) -> HashSet<usize> {
+        let plan = plan.id.to_string();
+        self.jobs()
+            .iter()
+            .filter(|job| job.kind() == JobKind::SceneClips && job.state().is_active())
+            .filter(|job| clip_payload(job).is_some_and(|payload| payload.plan == plan))
+            .filter_map(|job| serde_json::from_str::<ClipsState>(job.external_handle()?).ok())
+            .flat_map(|state| state.scenes)
+            .filter(|run| run.request.is_some())
+            .map(|run| run.scene)
+            .collect()
     }
 
     /// Starts a job that animates scene `index`'s image into a clip with
@@ -2271,6 +2412,11 @@ mod tests {
         assert_eq!(cancelled.state(), JobState::Cancelled);
         let kept = cancelled.external_handle().expect("the request is kept");
         assert!(kept.contains("req-0"), "{kept}");
+        assert_eq!(
+            clips_in_costs(&h, &project),
+            1,
+            "it is being made, and billed"
+        );
 
         // The retry asks for that clip instead of paying for another.
         app.retry_job(id).unwrap();
@@ -2351,6 +2497,276 @@ mod tests {
         assert_eq!(sends(&clips), 1);
         assert_eq!(clips.staged.lock().unwrap().len(), 2, "handed over again");
         assert_eq!(clips_in_costs(&h, &project), 1);
+    }
+
+    #[test]
+    fn a_clip_is_in_costs_from_the_moment_its_provider_accepts_it() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        let before = app.production(project.id).unwrap().spent;
+        *h.clips.quote.lock().unwrap() = Some(Money::from_micros(250_000));
+        h.clips.hold(true);
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+
+        // Still being made, and already counted: Costs, and with it the
+        // video's cap and the budgets, see work in flight.
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        let spent = app.production(project.id).unwrap().spent;
+        assert_eq!(spent, before.saturating_add(Money::from_micros(250_000)));
+
+        h.clips.hold(false);
+        done(&app, id);
+        assert_eq!(clips_in_costs(&h, &project), 1, "recorded once");
+        assert_eq!(app.production(project.id).unwrap().spent, spent);
+    }
+
+    #[test]
+    fn the_clips_of_a_cancelled_run_stay_in_costs() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Confirmed)
+            .unwrap();
+        wait_for(&h.clips, |clips| {
+            clips.submissions().len() == 3 && clips.polls.lock().unwrap().len() >= 3
+        });
+
+        // The provider goes on making, and billing, the three clips.
+        app.cancel_job(id).unwrap();
+        returned(&app, id);
+        assert_eq!(clips_in_costs(&h, &project), 3);
+
+        // Picked up again, they are not counted a second time.
+        h.clips.hold(false);
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 3);
+        assert_eq!(clips_in_costs(&h, &project), 3);
+    }
+
+    #[test]
+    fn a_clip_being_made_across_a_restart_is_in_costs_once() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+        drop(app);
+        assert_eq!(clips_in_costs(&h, &project), 1);
+
+        h.clips.hold(false);
+        let app = h.start();
+        done(&app, id);
+        assert_eq!(clips_in_costs(&h, &project), 1);
+    }
+
+    #[test]
+    fn a_clip_submitted_before_costs_were_recorded_on_acceptance_is_recorded_on_resume() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 1, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+        drop(app);
+        // As an earlier version left it: the request saved, no cost yet.
+        let mut job = bardo_domain::JobRepository::job(&*h.db, id)
+            .unwrap()
+            .unwrap();
+        let mut state: ClipsState = parse(job.external_handle().unwrap()).unwrap();
+        let record = state.scenes[0].cost.take().expect("a cost record");
+        h.db.remove_cost(crate::scenes::id(&record).unwrap())
+            .unwrap();
+        job.record_external_handle(to_json(&state)).unwrap();
+        bardo_domain::JobRepository::save(&*h.db, &job).unwrap();
+        assert_eq!(clips_in_costs(&h, &project), 0);
+
+        h.clips.hold(false);
+        let app = h.start();
+        done(&app, id);
+        assert_eq!(clips_in_costs(&h, &project), 1);
+    }
+
+    #[test]
+    fn a_clip_its_provider_failed_leaves_no_cost() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.fail("launch pad");
+        h.clips.hold(true);
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| clips.polls.lock().unwrap().len() >= 3);
+        assert_eq!(clips_in_costs(&h, &project), 3, "three accepted");
+
+        h.clips.hold(false);
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        assert_eq!(
+            clips_in_costs(&h, &project),
+            2,
+            "the failed one is not billed"
+        );
+    }
+
+    #[test]
+    fn a_clip_its_provider_no_longer_knows_keeps_its_cost() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+        assert_eq!(clips_in_costs(&h, &project), 1);
+
+        // No clip, and no word that none was made: it may have been billed.
+        h.clips
+            .forgot
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        h.clips.hold(false);
+        let job = wait_done(&app, id);
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert!(
+            failure.detail.contains("may have been charged"),
+            "{}",
+            failure.detail
+        );
+        assert_eq!(clips_in_costs(&h, &project), 1);
+
+        // Asked for again, the scene is a new clip with a cost of its own.
+        h.clips
+            .forgot
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        app.retry_job(id).unwrap();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 2);
+        assert_eq!(clips_in_costs(&h, &project), 2);
+    }
+
+    #[test]
+    fn clips_saved_before_costs_were_recorded_on_acceptance_are_not_recorded_again() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        // The first scene's clip is made and cannot be fetched; the other
+        // two are saved.
+        *h.clips.gone.lock().unwrap() = 1;
+        let id = app
+            .generate_missing_clips(project.id, BudgetConsent::Ask)
+            .unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        assert_eq!(clips_in_costs(&h, &project), 3);
+        drop(app);
+        // As an earlier version left it: no request has a cost record of
+        // its own, and Costs holds the two clips that were saved.
+        let mut job = bardo_domain::JobRepository::job(&*h.db, id)
+            .unwrap()
+            .unwrap();
+        let mut state: ClipsState = parse(job.external_handle().unwrap()).unwrap();
+        assert_eq!(state.scenes.len(), 3);
+        for run in &mut state.scenes {
+            let record = run.cost.take().expect("a cost record");
+            if run.scene == 0 {
+                h.db.remove_cost(crate::scenes::id(&record).unwrap())
+                    .unwrap();
+            }
+        }
+        job.retry().unwrap();
+        job.keep_from_stopping_run(None, Some(to_json(&state)))
+            .unwrap();
+        bardo_domain::JobRepository::save(&*h.db, &job).unwrap();
+        assert_eq!(clips_in_costs(&h, &project), 2);
+
+        let app = h.start();
+        done(&app, id);
+        assert_eq!(h.clips.submissions().len(), 3, "nothing is sent again");
+        assert_eq!(
+            clips_in_costs(&h, &project),
+            3,
+            "the two saved clips keep their one record, the third gets its own"
+        );
+    }
+
+    #[test]
+    fn a_clip_being_made_is_not_counted_again_in_what_is_left_to_pay() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, plan) = h.drawn_project(&app);
+        app.set_project_production(project.id, Some(ProductionMode::ChannelModel))
+            .unwrap();
+        let left = |app: &Bardo| {
+            app.production(project.id)
+                .unwrap()
+                .estimate(ProductionMode::ChannelModel)
+                .unwrap()
+                .clips
+        };
+        assert_eq!(left(&app), plan.scenes().len());
+        h.clips.hold(true);
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        wait_for(&h.clips, |clips| !clips.polls.lock().unwrap().is_empty());
+
+        // Accepted: its cost is in what was spent, so it is out of what
+        // is left.
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        assert_eq!(left(&app), plan.scenes().len() - 1);
+        h.clips.hold(false);
+        done(&app, id);
+        assert_eq!(left(&app), plan.scenes().len() - 1);
+    }
+
+    #[test]
+    fn a_finished_clip_that_cannot_be_downloaded_is_fetched_again_not_made_again() {
+        let h = Harness::new();
+        let app = h.start();
+        let (project, _) = h.drawn_project(&app);
+        *h.clips.gone.lock().unwrap() = 2;
+
+        let id = app
+            .generate_scene_clip(project.id, 0, BudgetConsent::Ask)
+            .unwrap();
+        let job = wait_done(&app, id);
+
+        // The clip was made and is billed; the scene says it failed.
+        assert_eq!(job.state(), JobState::Failed);
+        let failure = job.failure().unwrap();
+        assert!(failure.detail.contains("was made"), "{}", failure.detail);
+        assert!(plan_of(&app, &project).scenes()[0].clip_failure().is_some());
+        assert_eq!(clips_in_costs(&h, &project), 1);
+
+        // Retrying asks for the same clip, however often the link fails.
+        app.retry_job(id).unwrap();
+        assert_eq!(wait_done(&app, id).state(), JobState::Failed);
+        app.retry_job(id).unwrap();
+        done(&app, id);
+
+        assert_eq!(
+            sends(&h.clips),
+            1,
+            "the scene was sent, and paid for, again"
+        );
+        assert_eq!(h.clips.submissions().len(), 1);
+        assert_eq!(clips_in_costs(&h, &project), 1);
+        let plan = plan_of(&app, &project);
+        assert!(plan.scenes()[0].pending_clip().is_some());
+        assert_eq!(plan.scenes()[0].clip_failure(), None);
     }
 
     #[test]

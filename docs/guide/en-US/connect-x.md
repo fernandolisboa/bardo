@@ -42,6 +42,7 @@ What Bardo's calls cost, as X priced them on 2026-10-14:
 | A post whose text has a link | US$ 0.20 |
 | Uploading the video | Not billed |
 | Reading the account when you connect or select **Check** | US$ 0.010 |
+| Looking for a post that got no answer (see "A post X did not answer") | US$ 0.001 for each post X lists, up to US$ 0.10 a look |
 
 X can change its prices; the Developer Console always shows the current ones. When the credits run out or the limit is reached, X refuses the post and Bardo says so: add credits, then **Retry**.
 
@@ -83,6 +84,18 @@ At the Publish stage, a connected X account offers **Review upload** once its pr
 - **Stop and resume.** A stopped or interrupted upload resumes after the last chunk X took. X keeps an upload for 24 hours; an upload past that, or one X dropped, goes again from the start, twice at most.
 - **Video length.** X takes videos up to 2 minutes 20 seconds from most accounts, which is the length of Bardo's X preset. Longer videos need an X account that may post them; X refuses the post otherwise and Bardo shows X's reason.
 
+<a id="post-unanswered"></a>
+## A post X did not answer
+
+Sending a post twice makes two posts, so Bardo sends it once. When the post was sent and no answer came back (the connection dropped, or the one-minute wait ran out), X may have made it all the same. Bardo then asks X for the account's own posts, from a day before the post was sent, and looks for one with this video:
+
+- **X shows the post.** The upload ends as published, with the post's link and its price in Costs, as if the answer had arrived.
+- **X shows none.** The upload fails saying the post may be live, and its price is added to Costs, since X may have billed it. Check the account on X. **Retry** looks for the post once more and only posts again when it is still not there; that second post is a new paid request.
+
+Bardo looks the same way before it posts again after an error on X's side, and when it was closed while a post waited for its answer. If X cannot be asked (offline, or X failing), nothing is posted until it can. A post that never left the computer costs nothing and is retried by itself.
+
+The look is as good as X's list: a post can take a moment to show there. If X then refuses the second post as a duplicate, Bardo takes that as the first one being live and says so the same way. X bills each post it lists in a look as a read of your own posts, replies included.
+
 <a id="schedule"></a>
 ## Scheduling a post
 
@@ -93,4 +106,4 @@ Keep Bardo open at that time and the computer on, or turn on the [background age
 <a id="costs"></a>
 ## The post on the Costs screen
 
-Each post Bardo makes is recorded on the [Costs](costs.md) screen under X, with the video and channel it was for, at the price in the rate table (US$ 0.015, or US$ 0.20 with a link). Bardo prices a post with a link when its text has an address or a domain X would link, such as `example.com`. A post X refused is not billed and not recorded. The account reads made when connecting or checking are not recorded; the Developer Console shows them.
+Each post Bardo makes is recorded on the [Costs](costs.md) screen under X, with the video and channel it was for, at the price in the rate table (US$ 0.015, or US$ 0.20 with a link). Bardo prices a post with a link when its text has an address or a domain X would link, such as `example.com`. A post X refused is not billed and not recorded. A post that was sent and got no answer is recorded, because X may have made and billed it ([A post X did not answer](#post-unanswered)). The account reads made when connecting or checking, and the reads of your own posts when Bardo looks for one, are not recorded; the Developer Console shows them.

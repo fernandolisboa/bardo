@@ -403,13 +403,15 @@ pub fn parse_omni_status(
             }
         }),
         Some("failed") => Ok(ended_with("Gemini Omni Flash", &body["error"])),
-        Some("cancelled") => Ok(ClipStatus::Failed(unexpected(
+        // Google does not say whether work stopped in these ways is
+        // charged.
+        Some("cancelled") => Ok(ClipStatus::Lost(unexpected(
             "the request was cancelled on Google",
         ))),
-        Some("incomplete" | "budget_exceeded") => Ok(ClipStatus::Failed(unexpected(
-            "Gemini Omni Flash stopped before the clip was done",
-        ))),
-        Some("requires_action") => Ok(ClipStatus::Failed(unexpected(
+        Some("incomplete" | "requires_continuation" | "budget_exceeded") => Ok(ClipStatus::Lost(
+            unexpected("Gemini Omni Flash stopped before the clip was done"),
+        )),
+        Some("requires_action") => Ok(ClipStatus::Lost(unexpected(
             "Gemini Omni Flash asked for more input",
         ))),
         Some(other) => Err(unexpected(format!("unknown interaction status {other}"))),
@@ -562,15 +564,17 @@ impl<T: Transport> ClipGenerator for GoogleClips<T> {
         let http = status_request(key, handle)
             .ok_or_else(|| unexpected(format!("{} is not a Google request", handle.0)))?;
         if !is_interaction(handle) {
-            return Ok(ClipStatus::Failed(unexpected(
+            // Nothing is left to ask: the clip may have been made, and
+            // charged, before the model went away.
+            return Ok(ClipStatus::Lost(unexpected(
                 "Google no longer serves the model that was making this clip",
             )));
         }
         let response = self.send(&http)?;
         match response.status {
             200..=299 => parse_omni_status(&response, handle),
-            // Gone for good: Google keeps work for two days.
-            404 => Ok(ClipStatus::Failed(unexpected(
+            // Gone for good: Google keeps work for a while only.
+            404 => Ok(ClipStatus::Lost(unexpected(
                 "Google does not know this request",
             ))),
             _ => Err(google_failure(&response)),

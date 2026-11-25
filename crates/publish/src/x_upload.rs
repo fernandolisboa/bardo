@@ -19,6 +19,15 @@
 //!   US$ 0.20 with a link in the text); the upload itself is not billed.
 //!   A video over the account's length limit is refused there with 403,
 //!   even after a finalize that went through.
+//! - The post is the one request that cannot be made twice. One that was
+//!   sent and got no answer may be live: Bardo does not send it again by
+//!   itself (ADR-0030). `GET /2/users/{id}/tweets` with
+//!   `tweet.fields=attachments` lists the account's own posts with their
+//!   media keys, so the post made with an upload can be found. X's
+//!   examples write a key as a kind, an underscore and the media's id
+//!   (`7_1880…`); the rule is not spelled out, so only the id is matched.
+//!   X bills each post it returns as an owned read (US$ 0.001), up to 100
+//!   an answer.
 //!
 //! Docs checked 2026-10-14:
 //! <https://docs.x.com/x-api/media/quickstart/media-upload-chunked>,
@@ -28,17 +37,20 @@
 //! <https://docs.x.com/x-api/media/get-media-upload-status>,
 //! <https://docs.x.com/x-api/posts/create-post>,
 //! <https://docs.x.com/x-api/getting-started/pricing>.
+//! Checked 2026-11-25: <https://docs.x.com/x-api/users/get-posts>,
+//! <https://docs.x.com/x-api/fundamentals/data-dictionary> (media keys),
+//! and the owned reads of the pricing page.
 
 use std::time::{Duration, SystemTime};
 
 use bardo_ai::http::{FormPart, HttpRequest, HttpResponse, Method, Transport, UreqTransport};
 use bardo_domain::{
-    Network, NetworkPost, PostLink, SecretText, UploadError, UploadErrorKind, UploadOutcome,
-    UploadRun, UploadedVideo, VideoState, VideoUpload, VideoUploader,
+    Network, NetworkPost, PostLink, Rfc3339, SecretText, UploadError, UploadErrorKind,
+    UploadOutcome, UploadRun, UploadedVideo, VideoState, VideoUpload, VideoUploader,
 };
 use serde_json::{Value, json};
 
-use crate::x::{XEndpoints, api_detail, problem_type};
+use crate::x::{XEndpoints, api_detail, is_user_id, problem_type};
 
 /// Bytes per chunk: within the 5 MB X recommends.
 pub const X_CHUNK: u64 = 4 * 1024 * 1024;
@@ -54,6 +66,19 @@ const DEFAULT_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long before its end an upload is no longer resumed: a chunk sent at
 /// the last minute could be cut off, and the post needs it still there.
 const LIFETIME_MARGIN: Duration = Duration::from_secs(10 * 60);
+
+/// How far before the time it was asked for a lost post is looked for: X
+/// goes by its own clock, and the computer's may be off by hours (a wrong
+/// time zone set by hand).
+const LOOKBACK: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The most posts X lists in one answer.
+const LISTED_POSTS: u32 = 100;
+
+/// How many answers a look reads at most. An account with more posts of
+/// its own than that since the lost one is not looked through: the look
+/// fails, and nothing is posted on a guess.
+const LISTED_PAGES: u32 = 5;
 
 /// How many uploads one call starts at most, its first one included,
 /// before it gives up on uploads X keeps dropping.
@@ -104,6 +129,12 @@ impl Session {
 /// Uploads videos to X and posts them, over HTTPS.
 pub struct XUploader<T = UreqTransport> {
     transport: T,
+    /// What the post, and a look for it, go through when not `transport`:
+    /// a new connection for every request, and a short wait. A kept
+    /// connection that died unnoticed takes the request before it fails,
+    /// which would make a post that never arrived look like one that may
+    /// be live.
+    poster: Option<T>,
     endpoints: XEndpoints,
     /// Bytes per chunk.
     chunk: u64,
@@ -114,8 +145,15 @@ impl XUploader {
     /// about half a minute).
     pub const TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+    /// How long the post, and a look for it, wait for an answer: they
+    /// carry a text, not the file.
+    pub const POST_TIMEOUT: Duration = Duration::from_secs(60);
+
     pub fn new() -> Self {
-        Self::with_transport(UreqTransport::for_uploads(Self::TIMEOUT))
+        Self {
+            poster: Some(UreqTransport::for_posts(Self::POST_TIMEOUT)),
+            ..Self::with_transport(UreqTransport::for_uploads(Self::TIMEOUT))
+        }
     }
 }
 
@@ -129,9 +167,17 @@ impl<T: Transport> XUploader<T> {
     pub fn with_transport(transport: T) -> Self {
         Self {
             transport,
+            poster: None,
             endpoints: XEndpoints::default(),
             chunk: X_CHUNK,
         }
+    }
+
+    /// The post, and a look for it, through `poster` instead of the
+    /// transport of the upload.
+    pub fn with_poster(mut self, poster: T) -> Self {
+        self.poster = Some(poster);
+        self
     }
 
     pub fn with_endpoints(mut self, endpoints: XEndpoints) -> Self {
@@ -149,18 +195,41 @@ impl<T: Transport> XUploader<T> {
         &self.transport
     }
 
-    /// An API call as the token's owner; its JSON answer.
-    fn api(&self, request: HttpRequest, token: &SecretText) -> Result<Value, UploadError> {
+    /// An API call as the token's owner; its JSON answer. A request that
+    /// was sent, or may have been, and got no answer is `AnswerLost`; one
+    /// that never left is `Unreachable`.
+    fn call(
+        &self,
+        transport: &T,
+        request: HttpRequest,
+        token: &SecretText,
+    ) -> Result<Value, UploadError> {
         let request = request.header("authorization", format!("Bearer {}", token.expose()));
-        let response = self
-            .transport
-            .send(&request)
-            .map_err(|error| UploadError::new(UploadErrorKind::Unreachable, error.0))?;
+        let response = transport.send(&request).map_err(|error| {
+            let kind = if error.never_left() {
+                UploadErrorKind::Unreachable
+            } else {
+                UploadErrorKind::AnswerLost
+            };
+            UploadError::new(kind, error.0)
+        })?;
         let body: Value = serde_json::from_str(&response.body).unwrap_or_default();
         if !(200..=299).contains(&response.status) {
             return Err(api_failure(&response, &body));
         }
         Ok(body)
+    }
+
+    /// `call` for a request X takes again without harm (every one but the
+    /// post): no answer is an outage, whether the request left or not.
+    fn api(&self, request: HttpRequest, token: &SecretText) -> Result<Value, UploadError> {
+        self.call(&self.transport, request, token)
+            .map_err(may_go_again)
+    }
+
+    /// What the post goes through.
+    fn poster(&self) -> &T {
+        self.poster.as_ref().unwrap_or(&self.transport)
     }
 
     fn media_url(&self, rest: &str) -> String {
@@ -240,7 +309,6 @@ impl<T: Transport> XUploader<T> {
             url: self.media_url(&format!("/{}/finalize", session.media_id)),
             headers: Vec::new(),
             body: None,
-            timeout: None,
         };
         match self.api(request, token) {
             Ok(_) => Ok(true),
@@ -411,7 +479,7 @@ impl<T: Transport> VideoUploader for XUploader<T> {
         }
         let request =
             HttpRequest::post_json(format!("{}/2/tweets", self.endpoints.api), post.to_string());
-        let body = match self.api(request, access_token) {
+        let body = match self.call(self.poster(), request, access_token) {
             Ok(body) => body,
             // The media id is not usable any more (or not yet): ask where
             // it stands, so an expired one goes again and one still
@@ -427,15 +495,89 @@ impl<T: Transport> VideoUploader for XUploader<T> {
             }
             Err(error) => return Err(error),
         };
+        // X took the post and its answer does not say which one it is.
         let post_id = body["data"]["id"]
             .as_str()
             .filter(|id| is_media_id(id))
-            .ok_or_else(|| unexpected("the post answer has no id"))?;
-        Ok(NetworkPost {
-            id: post_id.to_owned(),
-            link: PostLink::parse(Network::X, &format!("https://x.com/i/status/{post_id}")).ok(),
-            issue: None,
-        })
+            .ok_or_else(|| {
+                UploadError::new(UploadErrorKind::AnswerLost, "the post answer has no id")
+            })?;
+        Ok(posted(post_id))
+    }
+
+    /// The account's newest post with the uploaded video `id`, among its
+    /// own posts (no replies or reposts) from a day before `since` on.
+    fn find_post(
+        &self,
+        access_token: &SecretText,
+        account: &str,
+        id: &str,
+        since: SystemTime,
+    ) -> Result<Option<NetworkPost>, UploadError> {
+        if !is_media_id(id) {
+            return Err(unexpected("not an X media id"));
+        }
+        if !is_user_id(account) {
+            return Err(unexpected("not an X user id"));
+        }
+        let from = since
+            .checked_sub(LOOKBACK)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let mut page: Option<String> = None;
+        for _ in 0..LISTED_PAGES {
+            let mut query = form_urlencoded::Serializer::new(String::new());
+            query
+                .append_pair("max_results", &LISTED_POSTS.to_string())
+                // Replies stay in: X may keep a post that opens with a
+                // mention as one.
+                .append_pair("exclude", "retweets")
+                .append_pair("start_time", &Rfc3339(from).to_string())
+                .append_pair("tweet.fields", "attachments");
+            if let Some(token) = &page {
+                query.append_pair("pagination_token", token);
+            }
+            // With the post's short wait: it runs right after a post that
+            // got no answer, when the line may still be down.
+            let request = HttpRequest::get(format!(
+                "{}/2/users/{account}/tweets?{}",
+                self.endpoints.api,
+                query.finish()
+            ));
+            let body = self
+                .call(self.poster(), request, access_token)
+                .map_err(may_go_again)?;
+            // Only X's own list says the post is not there: any other
+            // answer (a page from something in between, a list of errors)
+            // says nothing, and "none" would let the post go again.
+            let posts = match body["data"].as_array() {
+                Some(posts) => posts.as_slice(),
+                None if body["meta"]["result_count"].as_u64() == Some(0) => &[],
+                None => return Err(unexpected("the posts answer is not a list of posts")),
+            };
+            let found = posts.iter().find(|post| {
+                post["attachments"]["media_keys"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .any(|key| is_key_of(key, id))
+            });
+            if let Some(post) = found {
+                let post_id = post["id"]
+                    .as_str()
+                    .filter(|post_id| is_media_id(post_id))
+                    .ok_or_else(|| unexpected("the post with the video has no id"))?;
+                return Ok(Some(posted(post_id)));
+            }
+            page = body["meta"]["next_token"]
+                .as_str()
+                .filter(|token| !token.is_empty())
+                .map(str::to_owned);
+            if page.is_none() {
+                return Ok(None);
+            }
+        }
+        Err(unexpected("too many posts to look for the one made"))
     }
 
     fn processing_polls(&self) -> u32 {
@@ -445,6 +587,30 @@ impl<T: Transport> VideoUploader for XUploader<T> {
     fn poll_delay(&self, _polls: u32) -> Duration {
         POLL_DELAY
     }
+}
+
+/// The failure of a request X takes again without harm: one that got no
+/// answer is an outage like one that never left.
+fn may_go_again(error: UploadError) -> UploadError {
+    match error.kind {
+        UploadErrorKind::AnswerLost => UploadError::new(UploadErrorKind::Unreachable, error.detail),
+        _ => error,
+    }
+}
+
+/// The post `id`, with its address.
+fn posted(id: &str) -> NetworkPost {
+    NetworkPost {
+        id: id.to_owned(),
+        link: PostLink::parse(Network::X, &format!("https://x.com/i/status/{id}")).ok(),
+        issue: None,
+    }
+}
+
+/// Whether a post's media key names the uploaded media `id`: X writes a
+/// key as a kind, an underscore and the media's id (`7_1880…` for a video).
+fn is_key_of(key: &str, id: &str) -> bool {
+    key.rsplit_once('_').map_or(key, |(_, media)| media) == id
 }
 
 /// A media or post id as X hands them out: 1 to 19 digits.
@@ -472,10 +638,21 @@ fn api_failure(response: &HttpResponse, body: &Value) -> UploadError {
         (403, "client-forbidden" | "client-not-enrolled") => UploadErrorKind::NotAllowed,
         (429, _) => UploadErrorKind::RateLimited,
         (500..=599, _) => UploadErrorKind::NetworkDown,
-        // Refused as sent: a duplicate post, a video over the account's
-        // length, a text X does not take, an upload already finalized.
+        // Refused as sent: a video over the account's length, a text X
+        // does not take, an upload already finalized.
         (400 | 403, _) => UploadErrorKind::Invalid,
         _ => UploadErrorKind::Unexpected,
     };
-    UploadError::new(kind, api_detail(response.status, body))
+    let detail = api_detail(response.status, body);
+    // X has no problem type for a text the account already posted: it
+    // says so in words ("... duplicate content.").
+    let kind = match kind {
+        UploadErrorKind::Invalid
+            if response.status == 403 && detail.to_ascii_lowercase().contains("duplicate") =>
+        {
+            UploadErrorKind::Duplicate
+        }
+        kind => kind,
+    };
+    UploadError::new(kind, detail)
 }

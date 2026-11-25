@@ -1053,6 +1053,7 @@ reject = "Discard"
 [scenes.error]
 no_narration = "Generate or import the narration first; scenes are timed on it."
 no_plan = "Plan the scenes first."
+narration_too_long = "This narration is too long to plan at once: its plan may not fit in one answer, and an answer that is cut is paid for and lost. Use a shorter narration or split the video into more than one."
 scene_not_found = "That scene is gone; the scenes may have been planned again."
 missing_claude_key = "Save a Claude key under Settings to plan scenes."
 missing_gemini_key = "Save a Gemini key under Settings to generate images and Google clips."
@@ -2631,6 +2632,7 @@ account_changed = "The account was reconnected to another {network} account than
 render_changed = "The render changed after the review, so the rest of the file is not what you reviewed. Review the upload again."
 schedule_missed = "The publish time passed before the upload started, so nothing was sent. Review the upload again with a later time."
 credits = "X refused the post: your X app is out of credits or reached its spending limit. Add credits or raise the limit in the X Developer Console, then retry."
+answer_lost = "{network} did not answer after Bardo sent the post, so the post may be live. Bardo did not send it again by itself and added its price to Costs. Check the account on {network}. Retry looks for the post there first and only posts again when it is not there."
 
 [upload.block]
 not_offered = "Bardo doesn't upload to this network yet. Export the file and post it by hand."
