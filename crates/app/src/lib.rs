@@ -1863,6 +1863,8 @@ pub(crate) mod testing {
         StageImage,
         /// Submitting a clip: the call that is paid for.
         Submit,
+        /// Asking how a request is going.
+        Status,
     }
 
     /// Holds the next call of one kind open until `resume`.
@@ -1900,11 +1902,19 @@ pub(crate) mod testing {
         pub(crate) requests: Mutex<Vec<FakeClipRequest>>,
         pub(crate) polls: Mutex<Vec<String>>,
         pub(crate) hold: std::sync::atomic::AtomicBool,
+        /// Requests whose prompt has one of these words are answered while
+        /// the others are held.
+        pub(crate) not_held: Mutex<Vec<String>>,
+        /// Handing an image over fails this way.
+        pub(crate) stage_failure: Mutex<Option<ProviderFailure>>,
         pub(crate) failing: Mutex<Vec<String>>,
         pub(crate) submit_failure: Mutex<Option<ProviderFailure>>,
         pub(crate) quote: Mutex<Option<Money>>,
         /// How many status checks fail on the provider's side first.
         pub(crate) status_outages: Mutex<u32>,
+        /// How many requests the provider reports as failed first, in the
+        /// words adapters use for a `failed` task: an outage's.
+        pub(crate) provider_failures: Mutex<u32>,
         /// The provider it stands for; Higgsfield when `None`.
         pub(crate) provider: Option<Provider>,
         /// The key each call was made with, in order.
@@ -1945,6 +1955,13 @@ pub(crate) mod testing {
 
         pub(crate) fn hold(&self, hold: bool) {
             self.hold.store(hold, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        /// Holds every request but the ones whose prompt has one of
+        /// `words`.
+        pub(crate) fn hold_unless(&self, words: &[&str]) {
+            *self.not_held.lock().unwrap() = words.iter().map(|word| (*word).to_owned()).collect();
+            self.hold(true);
         }
 
         /// Holds the next `call` open until `resume`.
@@ -2019,6 +2036,9 @@ pub(crate) mod testing {
         ) -> Result<StagedImage, ProviderFailure> {
             self.keys.lock().unwrap().push(key.expose().to_owned());
             self.pause.pass(ClipCall::StageImage);
+            if let Some(failure) = self.stage_failure.lock().unwrap().clone() {
+                return Err(failure);
+            }
             let mut staged = self.staged.lock().unwrap();
             staged.push(image.clone());
             Ok(StagedImage(format!("https://fake/image-{}", staged.len())))
@@ -2115,8 +2135,22 @@ pub(crate) mod testing {
             drop(outages);
             let index: usize = handle.0.trim_start_matches("req-").parse().unwrap();
             let prompt = self.requests.lock().unwrap()[index].request.prompt.clone();
-            if self.hold.load(std::sync::atomic::Ordering::SeqCst) {
+            self.pause.pass(ClipCall::Status);
+            let held = self.hold.load(std::sync::atomic::Ordering::SeqCst)
+                && !self
+                    .not_held
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|word| prompt.contains(word.as_str()));
+            if held {
                 return Ok(ClipStatus::Running);
+            }
+            if Self::take(&self.provider_failures) {
+                return Ok(ClipStatus::Failed(ProviderFailure::new(
+                    bardo_domain::ProviderFailureKind::ProviderDown,
+                    "the task failed",
+                )));
             }
             if self.forgot.load(std::sync::atomic::Ordering::SeqCst) {
                 return Ok(ClipStatus::Lost(ProviderFailure::new(

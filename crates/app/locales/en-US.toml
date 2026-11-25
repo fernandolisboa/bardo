@@ -373,6 +373,7 @@ limit_reached = "A quota or rate limit stopped the provider. YouTube quotas rese
 provider_unavailable = "Could not reach the provider, or it is having problems. Retrying automatically."
 answer_lost = "The request was sent, but no answer came back. The provider may have done the work and charged for it, so Bardo did not send it again by itself and added an estimate to Costs. Retry when you are ready."
 unexpected_answer = "The provider gave an answer Bardo does not understand."
+request_failed = "The provider took the request and then could not complete it. Bardo did not send it again by itself, since that would be a new request. Retry to ask for it again."
 declined = "The provider declined this request under its safety rules. Change what was asked (the prompt, the channel or the niche) and try again."
 media = "ffmpeg could not read or write a media file. Check the file named, then retry."
 missed = "The scheduled post's time passed without it, so nothing was posted. Choose what to do on the project's Publish stage."
